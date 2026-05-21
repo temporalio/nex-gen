@@ -6,6 +6,7 @@ use crate::api_plan::build_api_plan;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
+use crate::go;
 use crate::python;
 use crate::resources::ensure_unique_resource_names;
 use crate::spec::ApiSpec;
@@ -85,6 +86,7 @@ pub fn generate_files(
     let warnings = generation_warnings(&plan);
 
     let mut generated = match language {
+        Language::Go => go::generate(&plan),
         Language::Python => python::generate(&plan, spec.support.fragments_for_language(language)),
         Language::TypeScript => typescript::generate(&plan, support),
         language => Err(Error::UnsupportedLanguage { language }),

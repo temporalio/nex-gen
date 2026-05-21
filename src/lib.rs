@@ -5,6 +5,7 @@ pub mod descriptors;
 pub mod error;
 pub mod generator;
 pub mod language;
+pub mod go;
 pub mod python;
 pub mod resources;
 pub mod spec;
@@ -304,6 +305,7 @@ fn formatter_command(
 ) -> Result<(&'static str, Vec<String>)> {
     let output_path = output_path.to_string_lossy().into_owned();
     match language {
+        Language::Go => Ok(("gofmt", vec!["-w".to_string(), output_path])),
         Language::Python => Ok(("ruff", vec!["format".to_string(), output_path])),
         Language::TypeScript => Ok(("prettier", vec!["--write".to_string(), output_path])),
         _ => Err(error::Error::UnsupportedLanguage { language }),
@@ -514,6 +516,14 @@ fn python_example_package_name(example_id: &str) -> String {
 
 fn format_example_output(repo_root: &Path, language: Language, output_path: &Path) -> Result<()> {
     let (cwd, program, args): (PathBuf, &str, Vec<String>) = match language {
+        Language::Go => (
+            example_language_root(repo_root, language),
+            "gofmt",
+            vec![
+                "-w".to_string(),
+                output_path.to_string_lossy().into_owned(),
+            ],
+        ),
         Language::Python => (
             example_language_root(repo_root, language),
             "uv",
