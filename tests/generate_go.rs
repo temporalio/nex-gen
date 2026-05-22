@@ -185,6 +185,11 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("Street string // required"));
     assert!(rendered.contains("City string // required"));
     assert!(rendered.contains("Country string // required"));
+    // Tuple field generates a named struct with ordinal fields
+    assert!(rendered.contains("Coordinates *Coordinates"));
+    assert!(rendered.contains("type Coordinates struct"));
+    assert!(rendered.contains("First float64 // required"));
+    assert!(rendered.contains("Second float64 // required"));
 
     assert!(rendered.contains("type UserProfile struct"));
     assert!(rendered.contains("Tags []string // required"));

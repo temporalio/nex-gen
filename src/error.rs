@@ -227,6 +227,9 @@ pub enum Error {
         property: &'static str,
     },
 
+    #[error("Go code generation does not support {context}: {reason}")]
+    UnsupportedGoType { context: String, reason: String },
+
     #[error("type override `{type_name}` cannot use `{property}`")]
     UnsupportedTypeOverrideProperty {
         type_name: String,

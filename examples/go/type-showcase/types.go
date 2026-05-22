@@ -70,7 +70,12 @@ type PostalAddress struct {
 	Street      string // required
 	City        string // required
 	Country     string // required
-	Coordinates any
+	Coordinates *Coordinates
+}
+
+type Coordinates struct {
+	First  float64 // required
+	Second float64 // required
 }
 
 type DeactivateRequest struct {
