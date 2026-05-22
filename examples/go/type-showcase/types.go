@@ -17,6 +17,26 @@ const (
 	UserCapabilityDeactivate  UserCapability = 1 << 2
 )
 
+type NotificationTarget interface {
+	isNotificationTarget()
+}
+
+type NotificationTargetEmail struct {
+	Value string
+}
+
+func (NotificationTargetEmail) isNotificationTarget() {}
+
+type NotificationTargetSms struct {
+	Value string
+}
+
+func (NotificationTargetSms) isNotificationTarget() {}
+
+type NotificationTargetNone struct{}
+
+func (NotificationTargetNone) isNotificationTarget() {}
+
 type GetUserRequest struct {
 	UserId           string // required
 	ConsistencyToken string
@@ -38,11 +58,11 @@ type SetProfileRequest struct {
 }
 
 type UserProfile struct {
-	Tags               []string          // required
-	Metadata           map[string]string // required
-	Capabilities       UserCapability    // required
-	SyncState          any               // required
-	NotificationTarget any               // required
+	Tags               []string           // required
+	Metadata           map[string]string  // required
+	Capabilities       UserCapability     // required
+	SyncState          any                // required
+	NotificationTarget NotificationTarget // required
 	Address            *PostalAddress
 }
 

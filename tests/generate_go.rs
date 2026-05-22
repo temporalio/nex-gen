@@ -162,9 +162,18 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("1 << 1"));
     assert!(rendered.contains("1 << 2"));
 
-    // Variants are deferred -- resolved as `any`
-    assert!(!rendered.contains("type NotificationTarget struct"));
-    assert!(rendered.contains("NotificationTarget any"));
+    // Variants -- sealed interface pattern
+    assert!(rendered.contains("type NotificationTarget interface {"));
+    assert!(rendered.contains("isNotificationTarget()"));
+    // Case structs with payload
+    assert!(rendered.contains("type NotificationTargetEmail struct {"));
+    assert!(rendered.contains("Value string"));
+    assert!(rendered.contains("func (NotificationTargetEmail) isNotificationTarget() {}"));
+    assert!(rendered.contains("type NotificationTargetSms struct {"));
+    assert!(rendered.contains("func (NotificationTargetSms) isNotificationTarget() {}"));
+    // Payload-less case struct
+    assert!(rendered.contains("type NotificationTargetNone struct{}"));
+    assert!(rendered.contains("func (NotificationTargetNone) isNotificationTarget() {}"));
 
     // Records with required/optional fields
     assert!(rendered.contains("type GetUserRequest struct"));
@@ -181,6 +190,8 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("Tags []string // required"));
     assert!(rendered.contains("Metadata map[string]string // required"));
     assert!(rendered.contains("Capabilities UserCapability // required"));
+    // Variant interface field
+    assert!(rendered.contains("NotificationTarget NotificationTarget // required"));
     // Optional struct field keeps pointer
     assert!(rendered.contains("Address *PostalAddress"));
     assert!(!rendered.contains("Address *PostalAddress // required"));
