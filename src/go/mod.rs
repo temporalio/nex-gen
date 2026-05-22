@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use heck::ToUpperCamelCase;
@@ -80,8 +80,18 @@ pub(crate) fn generate(api_plan: &ApiPlan) -> Result<GeneratedFiles> {
         .map(|service| go_package_name(&service.endpoint))
         .unwrap_or_else(|| "api".to_string());
 
+    let mut imports = BTreeSet::new();
+
+    // Re-scan all resolved type expressions to collect import paths.
+    // Type expressions like "temporal.RetryPolicy" were produced by
+    // resolve_go_type_annotation which stripped the full module path, but
+    // we need to recover the imports from the original annotations.
+    // We do this by re-parsing annotations from the ApiPlan.
+    collect_imports_from_plan(api_plan, &mut imports);
+
     let output = render_file(
         &package_name,
+        &imports,
         enums.values().collect::<Vec<_>>().as_slice(),
         flags.values().collect::<Vec<_>>().as_slice(),
         variants.values().collect::<Vec<_>>().as_slice(),
@@ -452,8 +462,9 @@ fn resolve_planned_value_type(
             fallback,
         } => {
             if let Some(annotation) = type_name.for_language(Language::Go) {
+                let (_import_path, code_expr) = parse_go_import(annotation);
                 Ok(ResolvedGoType {
-                    type_expr: annotation.to_string(),
+                    type_expr: code_expr,
                     is_struct: false,
                 })
             } else {
@@ -467,13 +478,18 @@ fn resolve_planned_value_type(
     }
 }
 
-/// Returns the Go type name override from a [`TypeReplacementSpec`], if one was
-/// specified for the Go language.
+/// Returns the Go type code expression from a [`TypeReplacementSpec`], if one
+/// was specified for the Go language. The import path (if embedded in the
+/// annotation) is stripped and will be collected separately by
+/// [`collect_imports`].
 fn go_replacement_type_name(replacement: &TypeReplacementSpec) -> Option<String> {
     replacement
         .type_name
         .for_language(Language::Go)
-        .map(str::to_string)
+        .map(|annotation| {
+            let (_import_path, code_expr) = parse_go_import(annotation);
+            code_expr
+        })
 }
 
 /// Translates a WIT authored field type (used in `@nexus.type` directives)
@@ -801,6 +817,149 @@ fn go_ident(name: &str) -> String {
     }
 }
 
+/// Parses a Go type expression that may contain an embedded import path.
+///
+/// Returns `(import_path, code_expr)` where `import_path` is the Go import
+/// path to add to the `import` block (if any), and `code_expr` is the type
+/// expression to use in generated Go code.
+///
+/// # Syntax
+///
+/// - `"go.temporal.io/sdk/temporal.RetryPolicy"` → import `"go.temporal.io/sdk/temporal"`,
+///   code `"temporal.RetryPolicy"`
+/// - `"time.Duration"` → import `"time"`, code `"time.Duration"`
+/// - `"string"` → no import, code `"string"`
+/// - `"map[string]interface{}"` → no import, code `"map[string]interface{}"`
+fn parse_go_import(type_expr: &str) -> (Option<String>, String) {
+    // Case 1: contains '/' -- this is a full Go module path like
+    // "go.temporal.io/sdk/temporal.RetryPolicy"
+    if let Some(last_slash) = type_expr.rfind('/') {
+        // Find the next '.' after the last '/' -- that separates the import
+        // path from the type name.
+        if let Some(dot_offset) = type_expr[last_slash..].find('.') {
+            let split = last_slash + dot_offset;
+            let import_path = &type_expr[..split];
+            let pkg_name = &type_expr[last_slash + 1..split];
+            let type_name = &type_expr[split + 1..];
+            return (
+                Some(import_path.to_string()),
+                format!("{pkg_name}.{type_name}"),
+            );
+        }
+    }
+
+    // Case 2: no '/' but looks like "pkg.Type" where pkg is all lowercase
+    // (e.g. "time.Duration")
+    if let Some(dot) = type_expr.find('.') {
+        let prefix = &type_expr[..dot];
+        if !prefix.is_empty()
+            && prefix.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+            && type_expr[dot + 1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+        {
+            return (Some(prefix.to_string()), type_expr.to_string());
+        }
+    }
+
+    // Case 3: no import needed (builtins, map[K]V, interface{}, etc.)
+    (None, type_expr.to_string())
+}
+
+/// Walks the [`ApiPlan`] and collects Go import paths from any `@nexus.type`
+/// annotations that embed a module path (e.g. `go.temporal.io/sdk/temporal.RetryPolicy`).
+fn collect_imports_from_plan(api_plan: &ApiPlan, imports: &mut BTreeSet<String>) {
+    for model in api_plan.models.values() {
+        for field in &model.fields {
+            collect_imports_from_value_type(&field.kind, imports);
+        }
+    }
+    for service in &api_plan.services {
+        for operation in &service.operations {
+            collect_imports_from_message_type(&operation.input, imports);
+            if let PlannedOperationOutput::Message(output) = &operation.output {
+                collect_imports_from_message_type(output, imports);
+            }
+        }
+    }
+}
+
+/// Collects Go imports from a message type's replacement or authored type.
+fn collect_imports_from_message_type(message: &PlannedMessageType, imports: &mut BTreeSet<String>) {
+    if let Some(replacement) = &message.replacement {
+        if let Some(annotation) = replacement.type_name.for_language(Language::Go) {
+            let (import_path, _) = parse_go_import(annotation);
+            if let Some(path) = import_path {
+                imports.insert(path);
+            }
+        }
+    }
+}
+
+/// Collects Go imports from value types within a field kind.
+fn collect_imports_from_value_type(kind: &PlannedFieldKind, imports: &mut BTreeSet<String>) {
+    match kind {
+        PlannedFieldKind::Singular(value) | PlannedFieldKind::Repeated(value) => {
+            collect_imports_from_planned_value(value, imports);
+        }
+        PlannedFieldKind::Map { key, value } => {
+            collect_imports_from_planned_value(key, imports);
+            collect_imports_from_planned_value(value, imports);
+        }
+    }
+}
+
+/// Recursively collects Go imports from a planned value type.
+fn collect_imports_from_planned_value(value: &PlannedValueType, imports: &mut BTreeSet<String>) {
+    match value {
+        PlannedValueType::External { type_name, fallback } => {
+            if let Some(annotation) = type_name.for_language(Language::Go) {
+                let (import_path, _) = parse_go_import(annotation);
+                if let Some(path) = import_path {
+                    imports.insert(path);
+                }
+            } else {
+                collect_imports_from_planned_value(fallback, imports);
+            }
+        }
+        PlannedValueType::Enum(enum_type) => {
+            if let Some(replacement) = &enum_type.replacement {
+                if let Some(annotation) = replacement.type_name.for_language(Language::Go) {
+                    let (import_path, _) = parse_go_import(annotation);
+                    if let Some(path) = import_path {
+                        imports.insert(path);
+                    }
+                }
+            }
+        }
+        PlannedValueType::Message(message_type) => {
+            if let Some(replacement) = &message_type.replacement {
+                if let Some(annotation) = replacement.type_name.for_language(Language::Go) {
+                    let (import_path, _) = parse_go_import(annotation);
+                    if let Some(path) = import_path {
+                        imports.insert(path);
+                    }
+                }
+            }
+        }
+        PlannedValueType::Tuple(items) => {
+            for item in items {
+                collect_imports_from_planned_value(item, imports);
+            }
+        }
+        PlannedValueType::Result { ok, err } => {
+            if let Some(ok) = ok {
+                collect_imports_from_planned_value(ok, imports);
+            }
+            if let Some(err) = err {
+                collect_imports_from_planned_value(err, imports);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Returns `true` if `name` is a Go language keyword.
 fn is_go_keyword(name: &str) -> bool {
     matches!(
@@ -838,9 +997,10 @@ fn is_go_keyword(name: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Renders all collected types into a complete Go source file with a package
-/// declaration and the generated-code header comment.
+/// declaration, import block, and the generated-code header comment.
 fn render_file(
     package_name: &str,
+    imports: &BTreeSet<String>,
     enums: &[&RenderedEnum],
     flags: &[&RenderedFlags],
     variants: &[&RenderedVariant],
@@ -853,6 +1013,38 @@ fn render_file(
     output.push_str("package ");
     output.push_str(package_name);
     output.push('\n');
+
+    if !imports.is_empty() {
+        // Separate stdlib imports (no '.') from third-party imports (contain '.')
+        let stdlib: Vec<_> = imports
+            .iter()
+            .filter(|p| !p.contains('.'))
+            .collect();
+        let third_party: Vec<_> = imports
+            .iter()
+            .filter(|p| p.contains('.'))
+            .collect();
+
+        output.push_str("\nimport (\n");
+        for import_path in &stdlib {
+            output.push('\t');
+            output.push('"');
+            output.push_str(import_path);
+            output.push('"');
+            output.push('\n');
+        }
+        if !stdlib.is_empty() && !third_party.is_empty() {
+            output.push('\n');
+        }
+        for import_path in &third_party {
+            output.push('\t');
+            output.push('"');
+            output.push_str(import_path);
+            output.push('"');
+            output.push('\n');
+        }
+        output.push_str(")\n");
+    }
 
     for enumeration in enums {
         output.push('\n');
