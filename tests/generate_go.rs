@@ -1,0 +1,193 @@
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use nexus_api_gen::generate_to_string_with_inputs;
+
+fn project_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn descriptor_path(root: &Path) -> PathBuf {
+    root.join("examples/descriptors/temporal_api.bin")
+}
+
+fn linked_inputs_path(root: &Path) -> PathBuf {
+    root.join("examples/inputs/deps")
+}
+
+fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
+    vec![input_path(root, example_id), linked_inputs_path(root)]
+}
+
+fn go_root(root: &Path) -> PathBuf {
+    root.join("examples/go")
+}
+
+fn input_path(root: &Path, example_id: &str) -> PathBuf {
+    let flat_path = root
+        .join("examples/inputs")
+        .join(format!("{example_id}.wit"));
+    if flat_path.is_file() {
+        flat_path
+    } else {
+        root.join("examples/inputs")
+            .join(example_id)
+            .join("main.wit")
+    }
+}
+
+fn go_output_path(root: &Path, example_id: &str) -> PathBuf {
+    go_root(root).join(example_id)
+}
+
+fn go_example_ids(root: &Path) -> Vec<String> {
+    let go_root = go_root(root);
+    let mut ids = fs::read_dir(root.join("examples/inputs"))
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            let example_id = if path.is_file() {
+                path.file_stem()?.to_string_lossy().into_owned()
+            } else if path.join("main.wit").is_file() {
+                path.file_name()?.to_string_lossy().into_owned()
+            } else {
+                return None;
+            };
+            if go_root.join(&example_id).is_dir() {
+                Some(example_id)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids
+}
+
+fn read_go_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
+    fn visit(root: &Path, dir: &Path, files: &mut BTreeMap<PathBuf, String>) {
+        let mut entries = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                visit(root, &path, files);
+            } else if path.extension().and_then(|extension| extension.to_str()) == Some("go") {
+                files.insert(
+                    path.strip_prefix(root).unwrap().to_path_buf(),
+                    fs::read_to_string(&path).unwrap(),
+                );
+            }
+        }
+    }
+
+    let mut files = BTreeMap::new();
+    visit(dir, dir, &mut files);
+    files
+}
+
+fn generate_formatted_go_output(root: &Path, example_id: &str, output_path: &Path) {
+    let status = Command::new(env!("CARGO_BIN_EXE_nexus-api-gen"))
+        .args([
+            "generate",
+            "--lang",
+            "go",
+            "--input",
+            input_path(root, example_id).to_str().unwrap(),
+            "--input",
+            linked_inputs_path(root).to_str().unwrap(),
+            "--descriptors",
+            descriptor_path(root).to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+}
+
+fn unique_output_path(label: &str) -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("nexus-api-gen-{label}-{unique}"))
+}
+
+#[test]
+fn go_examples_generation_matches_checked_in_output() {
+    let root = project_root();
+    for example_id in go_example_ids(&root) {
+        let output_path = unique_output_path(&format!("go-{example_id}"));
+        generate_formatted_go_output(&root, &example_id, &output_path);
+        let rendered = read_go_output_files(&output_path);
+        let expected = read_go_output_files(&go_output_path(&root, &example_id));
+        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        fs::remove_dir_all(output_path).unwrap();
+    }
+}
+
+#[test]
+fn go_type_showcase_generates_expected_types() {
+    let root = project_root();
+    let rendered = generate_to_string_with_inputs(
+        nexus_api_gen::language::Language::Go,
+        &example_input_paths(&root, "type-showcase"),
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
+
+    // Enums
+    assert!(rendered.contains("type UserStatus int32"));
+    assert!(rendered.contains("UserStatusActive"));
+    assert!(rendered.contains("UserStatusSuspended"));
+    assert!(rendered.contains("UserStatusDeleted"));
+
+    // Flags
+    assert!(rendered.contains("type UserCapability int32"));
+    assert!(rendered.contains("UserCapabilityReadProfile"));
+    assert!(rendered.contains("1 << 0"));
+    assert!(rendered.contains("1 << 1"));
+    assert!(rendered.contains("1 << 2"));
+
+    // Variants
+    assert!(rendered.contains("type NotificationTarget struct"));
+    assert!(rendered.contains("Tag string"));
+    assert!(rendered.contains("Email *string"));
+    assert!(rendered.contains("Sms *string"));
+    assert!(rendered.contains("NotificationTargetEmail = \"email\""));
+    assert!(rendered.contains("NotificationTargetSms = \"sms\""));
+    assert!(rendered.contains("NotificationTargetNone = \"none\""));
+
+    // Records
+    assert!(rendered.contains("type GetUserRequest struct"));
+    assert!(rendered.contains("UserId string"));
+    assert!(rendered.contains("ConsistencyToken *string"));
+
+    assert!(rendered.contains("type PostalAddress struct"));
+    assert!(rendered.contains("Street string"));
+    assert!(rendered.contains("City string"));
+    assert!(rendered.contains("Country string"));
+
+    assert!(rendered.contains("type UserProfile struct"));
+    assert!(rendered.contains("Tags []string"));
+    assert!(rendered.contains("Metadata map[string]string"));
+    assert!(rendered.contains("Capabilities UserCapability"));
+    assert!(rendered.contains("NotificationTarget NotificationTarget"));
+    assert!(rendered.contains("Address *PostalAddress"));
+
+    assert!(rendered.contains("type DeactivateRequest struct"));
+    assert!(rendered.contains("Reason *string"));
+}
