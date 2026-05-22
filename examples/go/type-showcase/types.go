@@ -17,55 +17,43 @@ const (
 	UserCapabilityDeactivate  UserCapability = 1 << 2
 )
 
-type NotificationTarget struct {
-	Tag   string
-	Email *string
-	Sms   *string
-}
-
-const (
-	NotificationTargetEmail = "email"
-	NotificationTargetSms   = "sms"
-	NotificationTargetNone  = "none"
-)
-
 type GetUserRequest struct {
-	UserId           string
-	ConsistencyToken *string
+	UserId           string // required
+	ConsistencyToken string
 }
 
 type UpdateEmailRequest struct {
-	UserId string
-	Email  string
+	UserId string // required
+	Email  string // required
 }
 
 type RenameRequest struct {
-	UserId      string
-	DisplayName string
+	UserId      string // required
+	DisplayName string // required
 }
 
 type SetProfileRequest struct {
-	UserId  string
-	Profile UserProfile
+	UserId  string      // required
+	Profile UserProfile // required
 }
 
 type UserProfile struct {
-	Tags               []string
-	Metadata           map[string]string
-	Capabilities       UserCapability
-	SyncState          any
-	NotificationTarget NotificationTarget
+	Tags               []string          // required
+	Metadata           map[string]string // required
+	Capabilities       UserCapability    // required
+	SyncState          any               // required
+	NotificationTarget any               // required
 	Address            *PostalAddress
 }
 
 type PostalAddress struct {
-	Street      string
-	City        string
-	Country     string
+	Street      string // required
+	City        string // required
+	Country     string // required
 	Coordinates any
 }
 
 type DeactivateRequest struct {
-	UserId string
-	Reason *string
+	UserId string // required
+	Reason string
 }

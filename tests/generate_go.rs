@@ -162,32 +162,32 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("1 << 1"));
     assert!(rendered.contains("1 << 2"));
 
-    // Variants
-    assert!(rendered.contains("type NotificationTarget struct"));
-    assert!(rendered.contains("Tag string"));
-    assert!(rendered.contains("Email *string"));
-    assert!(rendered.contains("Sms *string"));
-    assert!(rendered.contains("NotificationTargetEmail = \"email\""));
-    assert!(rendered.contains("NotificationTargetSms = \"sms\""));
-    assert!(rendered.contains("NotificationTargetNone = \"none\""));
+    // Variants are deferred -- resolved as `any`
+    assert!(!rendered.contains("type NotificationTarget struct"));
+    assert!(rendered.contains("NotificationTarget any"));
 
-    // Records
+    // Records with required/optional fields
     assert!(rendered.contains("type GetUserRequest struct"));
-    assert!(rendered.contains("UserId string"));
-    assert!(rendered.contains("ConsistencyToken *string"));
+    assert!(rendered.contains("UserId string // required"));
+    assert!(rendered.contains("ConsistencyToken string\n"));
+    assert!(!rendered.contains("ConsistencyToken *string"));
 
     assert!(rendered.contains("type PostalAddress struct"));
-    assert!(rendered.contains("Street string"));
-    assert!(rendered.contains("City string"));
-    assert!(rendered.contains("Country string"));
+    assert!(rendered.contains("Street string // required"));
+    assert!(rendered.contains("City string // required"));
+    assert!(rendered.contains("Country string // required"));
 
     assert!(rendered.contains("type UserProfile struct"));
-    assert!(rendered.contains("Tags []string"));
-    assert!(rendered.contains("Metadata map[string]string"));
-    assert!(rendered.contains("Capabilities UserCapability"));
-    assert!(rendered.contains("NotificationTarget NotificationTarget"));
+    assert!(rendered.contains("Tags []string // required"));
+    assert!(rendered.contains("Metadata map[string]string // required"));
+    assert!(rendered.contains("Capabilities UserCapability // required"));
+    // Optional struct field keeps pointer
     assert!(rendered.contains("Address *PostalAddress"));
+    assert!(!rendered.contains("Address *PostalAddress // required"));
 
     assert!(rendered.contains("type DeactivateRequest struct"));
-    assert!(rendered.contains("Reason *string"));
+    assert!(rendered.contains("UserId string // required"));
+    // Optional scalar -- plain type, no pointer, no required comment
+    assert!(rendered.contains("Reason string\n"));
+    assert!(!rendered.contains("Reason *string"));
 }
