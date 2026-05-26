@@ -1005,7 +1005,7 @@ fn render_file(
     flags: &[&RenderedFlags],
     variants: &[&RenderedVariant],
     models: &[&RenderedModel],
-    _services: &[RenderedService<'_>],
+    services: &[RenderedService<'_>],
 ) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
@@ -1046,6 +1046,11 @@ fn render_file(
         output.push_str(")\n");
     }
 
+    for service in services {
+        output.push('\n');
+        render_service_constants(&mut output, service);
+    }
+
     for enumeration in enums {
         output.push('\n');
         render_enum(&mut output, enumeration);
@@ -1064,6 +1069,13 @@ fn render_file(
     for model in models {
         output.push('\n');
         render_model(&mut output, model);
+    }
+
+    for service in services {
+        for resource in &service.resources {
+            output.push('\n');
+            render_resource(&mut output, resource);
+        }
     }
 
     output
@@ -1214,4 +1226,150 @@ fn render_model(output: &mut String, model: &RenderedModel) {
         output.push('\n');
     }
     output.push_str("}\n");
+}
+
+/// Renders service and operation name constants.
+///
+/// ```go
+/// const ServiceName = "UserService"
+/// const Endpoint = "user-service"
+///
+/// const GetUserOp = "GetUser"
+/// const UpdateEmailOp = "UpdateEmail"
+/// ```
+fn render_service_constants(output: &mut String, service: &RenderedService<'_>) {
+    output.push_str("const ServiceName = \"");
+    output.push_str(service.name);
+    output.push_str("\"\n");
+    output.push_str("const Endpoint = \"");
+    output.push_str(&service.endpoint);
+    output.push_str("\"\n");
+
+    if !service.operations.is_empty() {
+        output.push('\n');
+        for operation in &service.operations {
+            output.push_str("const ");
+            output.push_str(&go_field_name(operation.name));
+            output.push_str("Op = \"");
+            output.push_str(operation.wire_name);
+            output.push_str("\"\n");
+        }
+    }
+}
+
+/// Renders a WIT resource as a Go struct with its constructor fields.
+///
+/// ```go
+/// type User struct {
+///     UserId string // required
+///     Email  string // required
+/// }
+/// ```
+fn render_resource(output: &mut String, resource: &PlannedResource) {
+    output.push_str("type ");
+    output.push_str(&resource.type_name);
+    output.push_str(" struct {\n");
+
+    if resource.fields.is_empty() {
+        output.push_str("}\n");
+        return;
+    }
+
+    for field in &resource.fields {
+        let field_name = go_field_name(&field.name);
+        let go_type = resolve_resource_field_kind(&field.kind, field.optional);
+        output.push('\t');
+        output.push_str(&field_name);
+        output.push(' ');
+        output.push_str(&go_type);
+        if !field.optional {
+            output.push_str(" // required");
+        }
+        output.push('\n');
+    }
+    output.push_str("}\n");
+}
+
+/// Resolves a resource field's [`PlannedFieldKind`] to a Go type expression,
+/// applying the same optionality rules as record fields: pointer for optional
+/// struct types, plain type for optional scalars/interfaces.
+fn resolve_resource_field_kind(kind: &PlannedFieldKind, optional: bool) -> String {
+    match kind {
+        PlannedFieldKind::Map { key, value } => {
+            let key_type = resolve_resource_value_type(key);
+            let value_type = resolve_resource_value_type(value);
+            format!("map[{key_type}]{value_type}")
+        }
+        PlannedFieldKind::Repeated(value) => {
+            let element_type = resolve_resource_value_type(value);
+            format!("[]{element_type}")
+        }
+        PlannedFieldKind::Singular(value) => {
+            let (base_type, is_struct) = resolve_resource_value_type_with_struct_flag(value);
+            if optional && is_struct {
+                format!("*{base_type}")
+            } else {
+                base_type
+            }
+        }
+    }
+}
+
+/// Resolves a [`PlannedValueType`] to a Go type expression for use in resource
+/// field declarations. This is a simplified version of
+/// [`resolve_planned_value_type`] that doesn't register types into collections
+/// (that's already done by [`ensure_resource_field_types`]).
+fn resolve_resource_value_type(value: &PlannedValueType) -> String {
+    resolve_resource_value_type_with_struct_flag(value).0
+}
+
+/// Like [`resolve_resource_value_type`] but also returns whether the type is a
+/// struct (for optionality/pointer decisions).
+fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (String, bool) {
+    match value {
+        PlannedValueType::Scalar(PlannedScalarType::Float) => ("float64".to_string(), false),
+        PlannedValueType::Scalar(PlannedScalarType::Int32) => ("int32".to_string(), false),
+        PlannedValueType::Scalar(PlannedScalarType::Int64) => ("int64".to_string(), false),
+        PlannedValueType::Scalar(PlannedScalarType::Bool) => ("bool".to_string(), false),
+        PlannedValueType::Scalar(PlannedScalarType::String) => ("string".to_string(), false),
+        PlannedValueType::Scalar(PlannedScalarType::Bytes) => ("[]byte".to_string(), false),
+        PlannedValueType::Enum(enum_type) => {
+            if let Some(replacement) = &enum_type.replacement
+                && let Some(type_name) = go_replacement_type_name(replacement)
+            {
+                return (type_name, false);
+            }
+            (
+                enum_type.name.clone().unwrap_or_else(|| "int32".to_string()),
+                false,
+            )
+        }
+        PlannedValueType::Flags(flags_type) => (flags_type.name.clone(), false),
+        PlannedValueType::Variant(variant_type) => (variant_type.name.clone(), false),
+        PlannedValueType::Message(message_type) => {
+            if let Some(replacement) = &message_type.replacement
+                && let Some(type_name) = go_replacement_type_name(replacement)
+            {
+                return (type_name, false);
+            }
+            if let Some(authored_type) = &message_type.authored_type {
+                return (go_authored_type_annotation(authored_type), false);
+            }
+            (message_type.model_name.clone(), true)
+        }
+        PlannedValueType::Tuple(_) => ("any".to_string(), false),
+        PlannedValueType::Result { .. } => ("any".to_string(), false),
+        PlannedValueType::External {
+            type_name,
+            fallback,
+        } => {
+            if let Some(annotation) = type_name.for_language(Language::Go) {
+                let (_import, code_expr) = parse_go_import(annotation);
+                (code_expr, false)
+            } else {
+                resolve_resource_value_type_with_struct_flag(fallback)
+            }
+        }
+        PlannedValueType::Unknown => ("any".to_string(), false),
+    }
 }

@@ -149,6 +149,15 @@ fn go_type_showcase_generates_expected_types() {
     )
     .unwrap();
 
+    // Service and operation constants
+    assert!(rendered.contains("const ServiceName = \"TypeShowcase\""));
+    assert!(rendered.contains("const Endpoint = \"type-showcase\""));
+    assert!(rendered.contains("const GetUserOp = \"GetUser\""));
+    assert!(rendered.contains("const UpdateEmailOp = \"UpdateEmail\""));
+    assert!(rendered.contains("const RenameOp = \"Rename\""));
+    assert!(rendered.contains("const SetProfileOp = \"SetProfile\""));
+    assert!(rendered.contains("const DeactivateOp = \"Deactivate\""));
+
     // Enums
     assert!(rendered.contains("type UserStatus int32"));
     assert!(rendered.contains("UserStatusActive"));
@@ -206,4 +215,10 @@ fn go_type_showcase_generates_expected_types() {
     // Optional scalar -- plain type, no pointer, no required comment
     assert!(rendered.contains("Reason string\n"));
     assert!(!rendered.contains("Reason *string"));
+
+    // Resource struct
+    assert!(rendered.contains("type User struct"));
+    assert!(rendered.contains("DisplayName string // required"));
+    assert!(rendered.contains("Status UserStatus // required"));
+    assert!(rendered.contains("Profile UserProfile // required"));
 }

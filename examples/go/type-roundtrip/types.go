@@ -7,6 +7,12 @@ import (
 	"go.temporal.io/sdk/temporal"
 )
 
+const ServiceName = "TypeRoundtripService"
+const Endpoint = "temporal-system"
+
+const RetryPolicyOperationOp = "RetryPolicyOperation"
+const ActivityOptionsOperationOp = "ActivityOptionsOperation"
+
 type ActivityOptions struct {
 	TaskQueue              string
 	RetryPolicy            temporal.RetryPolicy // required
