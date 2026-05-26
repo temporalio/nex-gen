@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/sdk/workflow"
 )
 
 const ServiceName = "TypeRoundtripService"
@@ -18,4 +19,24 @@ type ActivityOptions struct {
 	RetryPolicy            temporal.RetryPolicy // required
 	ScheduleToCloseTimeout time.Duration
 	Priority               temporal.Priority
+}
+
+func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
+	c := workflow.NewNexusClient(Endpoint, ServiceName)
+	fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, request, workflow.NexusOperationOptions{})
+	var result temporal.RetryPolicy
+	if err := fut.Get(ctx, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*ActivityOptions, error) {
+	c := workflow.NewNexusClient(Endpoint, ServiceName)
+	fut := c.ExecuteOperation(ctx, ActivityOptionsOperationOp, request, workflow.NexusOperationOptions{})
+	var result ActivityOptions
+	if err := fut.Get(ctx, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }

@@ -89,6 +89,12 @@ pub(crate) fn generate(api_plan: &ApiPlan) -> Result<GeneratedFiles> {
     // We do this by re-parsing annotations from the ApiPlan.
     collect_imports_from_plan(api_plan, &mut imports);
 
+    // Operation wrapper functions require the workflow package.
+    let has_operations = services.iter().any(|s| !s.operations.is_empty());
+    if has_operations {
+        imports.insert("go.temporal.io/sdk/workflow".to_string());
+    }
+
     let output = render_file(
         &package_name,
         &imports,
@@ -177,15 +183,22 @@ struct RenderedService<'a> {
     resources: Vec<PlannedResource>,
 }
 
-/// A resolved Nexus operation. Currently carries only the names needed for
-/// type collection; input/output mapping will be added when operation-level
-/// code generation is implemented.
+/// A resolved Nexus operation with enough information to render the operation
+/// constant and an unexported caller function.
 #[derive(Debug)]
 struct RenderedOperation<'a> {
     /// UpperCamelCase operation name (e.g. `"GetUser"`).
     name: &'a str,
     /// Wire-format operation name (e.g. `"GetUser"`).
     wire_name: &'a str,
+    /// Unexported Go function name (e.g. `"getUser"`).
+    func_name: String,
+    /// Go type for the request parameter (e.g. `"GetUserRequest"`).
+    input_type: String,
+    /// Go type for the result, or `None` for void operations.
+    /// For resource-returning operations this is the resource type name
+    /// (e.g. `"User"`).
+    output_type: Option<String>,
 }
 
 /// A WIT enum rendered as a Go `type <Name> int32` with associated constants.
@@ -301,14 +314,37 @@ fn resolve_operation<'a>(
     models: &mut IndexMap<String, RenderedModel>,
 ) -> Result<RenderedOperation<'a>> {
     resolve_message_types(&operation.input, api_plan, enums, flags, variants, models)?;
-    if let PlannedOperationOutput::Message(output) = &operation.output {
-        resolve_message_types(output, api_plan, enums, flags, variants, models)?;
-    }
+    let input_type = resolve_message_go_type(&operation.input);
+    let output_type = match &operation.output {
+        PlannedOperationOutput::Message(output) => {
+            resolve_message_types(output, api_plan, enums, flags, variants, models)?;
+            Some(resolve_message_go_type(output))
+        }
+        PlannedOperationOutput::Resource { type_name } => Some(type_name.clone()),
+        PlannedOperationOutput::None => None,
+    };
 
     Ok(RenderedOperation {
         name: operation.name.as_str(),
         wire_name: operation.wire_name.as_str(),
+        func_name: go_unexported_name(&operation.name),
+        input_type,
+        output_type,
     })
+}
+
+/// Resolves a [`PlannedMessageType`] to its Go type expression, accounting for
+/// type replacements and authored types. Used for operation input/output types.
+fn resolve_message_go_type(message: &PlannedMessageType) -> String {
+    if let Some(replacement) = &message.replacement {
+        if let Some(type_name) = go_replacement_type_name(replacement) {
+            return type_name;
+        }
+    }
+    if let Some(authored_type) = &message.authored_type {
+        return go_authored_type_annotation(authored_type);
+    }
+    message.model_name.clone()
 }
 
 /// Ensures a message type and all of its transitive field types are resolved.
@@ -800,6 +836,20 @@ fn build_tuple_struct(
     Ok(struct_name)
 }
 
+/// Converts a PascalCase name to an unexported Go identifier by lowercasing
+/// the first character (e.g. `"GetUser"` becomes `"getUser"`).
+fn go_unexported_name(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => {
+            let mut result = first.to_lowercase().to_string();
+            result.push_str(chars.as_str());
+            go_ident(&result)
+        }
+    }
+}
+
 /// Converts a WIT field name (kebab-case) to an exported Go field name
 /// (UpperCamelCase), escaping Go keywords with a trailing underscore.
 fn go_field_name(name: &str) -> String {
@@ -1075,6 +1125,13 @@ fn render_file(
         for resource in &service.resources {
             output.push('\n');
             render_resource(&mut output, resource);
+        }
+    }
+
+    for service in services {
+        for operation in &service.operations {
+            output.push('\n');
+            render_operation_function(&mut output, operation);
         }
     }
 
@@ -1371,5 +1428,69 @@ fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (St
             }
         }
         PlannedValueType::Unknown => ("any".to_string(), false),
+    }
+}
+
+/// Renders an unexported operation wrapper function that creates a Nexus
+/// client and executes the operation.
+///
+/// For operations returning a value:
+/// ```go
+/// func getUser(ctx workflow.Context, request GetUserRequest) (*User, error) {
+///     c := workflow.NewNexusClient(Endpoint, ServiceName)
+///     fut := c.ExecuteOperation(ctx, GetUserOp, request, workflow.NexusOperationOptions{})
+///     var result User
+///     if err := fut.Get(ctx, &result); err != nil {
+///         return nil, err
+///     }
+///     return &result, nil
+/// }
+/// ```
+///
+/// For void operations:
+/// ```go
+/// func deactivate(ctx workflow.Context, request DeactivateRequest) error {
+///     c := workflow.NewNexusClient(Endpoint, ServiceName)
+///     fut := c.ExecuteOperation(ctx, DeactivateOp, request, workflow.NexusOperationOptions{})
+///     return fut.Get(ctx, nil)
+/// }
+/// ```
+fn render_operation_function(output: &mut String, operation: &RenderedOperation<'_>) {
+    let op_const = format!("{}Op", go_field_name(operation.name));
+
+    if let Some(result_type) = &operation.output_type {
+        // Operation with a return value
+        output.push_str("func ");
+        output.push_str(&operation.func_name);
+        output.push_str("(ctx workflow.Context, request ");
+        output.push_str(&operation.input_type);
+        output.push_str(") (*");
+        output.push_str(result_type);
+        output.push_str(", error) {\n");
+        output.push_str("\tc := workflow.NewNexusClient(Endpoint, ServiceName)\n");
+        output.push_str("\tfut := c.ExecuteOperation(ctx, ");
+        output.push_str(&op_const);
+        output.push_str(", request, workflow.NexusOperationOptions{})\n");
+        output.push_str("\tvar result ");
+        output.push_str(result_type);
+        output.push('\n');
+        output.push_str("\tif err := fut.Get(ctx, &result); err != nil {\n");
+        output.push_str("\t\treturn nil, err\n");
+        output.push_str("\t}\n");
+        output.push_str("\treturn &result, nil\n");
+        output.push_str("}\n");
+    } else {
+        // Void operation
+        output.push_str("func ");
+        output.push_str(&operation.func_name);
+        output.push_str("(ctx workflow.Context, request ");
+        output.push_str(&operation.input_type);
+        output.push_str(") error {\n");
+        output.push_str("\tc := workflow.NewNexusClient(Endpoint, ServiceName)\n");
+        output.push_str("\tfut := c.ExecuteOperation(ctx, ");
+        output.push_str(&op_const);
+        output.push_str(", request, workflow.NexusOperationOptions{})\n");
+        output.push_str("\treturn fut.Get(ctx, nil)\n");
+        output.push_str("}\n");
     }
 }

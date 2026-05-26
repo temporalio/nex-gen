@@ -221,4 +221,13 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("DisplayName string // required"));
     assert!(rendered.contains("Status UserStatus // required"));
     assert!(rendered.contains("Profile UserProfile // required"));
+
+    // Operation wrapper functions
+    assert!(rendered.contains("func getUser(ctx workflow.Context, request GetUserRequest) (*User, error)"));
+    assert!(rendered.contains("func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error)"));
+    assert!(rendered.contains("workflow.NewNexusClient(Endpoint, ServiceName)"));
+    assert!(rendered.contains("c.ExecuteOperation(ctx, GetUserOp, request, workflow.NexusOperationOptions{})"));
+    // Void operation
+    assert!(rendered.contains("func deactivate(ctx workflow.Context, request DeactivateRequest) error"));
+    assert!(rendered.contains("return fut.Get(ctx, nil)"));
 }
