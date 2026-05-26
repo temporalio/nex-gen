@@ -222,6 +222,20 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("Status UserStatus // required"));
     assert!(rendered.contains("Profile UserProfile // required"));
 
+    // Resource methods
+    assert!(rendered
+        .contains("func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error)"));
+    assert!(rendered.contains("UpdateEmailRequest{UserId: u.UserId, Email: email}"));
+    assert!(rendered.contains(
+        "func (u *User) Rename(ctx workflow.Context, displayName string) (*User, error)"
+    ));
+    assert!(rendered.contains("RenameRequest{UserId: u.UserId, DisplayName: displayName}"));
+    // Void resource method
+    assert!(
+        rendered.contains("func (u *User) Deactivate(ctx workflow.Context, reason string) error")
+    );
+    assert!(rendered.contains("DeactivateRequest{UserId: u.UserId, Reason: reason}"));
+
     // Unexported operation wrapper functions
     assert!(rendered.contains("func getUser(ctx workflow.Context, request GetUserRequest) (*User, error)"));
     assert!(rendered.contains("func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error)"));

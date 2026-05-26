@@ -104,6 +104,18 @@ type User struct {
 	Profile     UserProfile // required
 }
 
+func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error) {
+	return updateEmail(ctx, UpdateEmailRequest{UserId: u.UserId, Email: email})
+}
+
+func (u *User) Rename(ctx workflow.Context, displayName string) (*User, error) {
+	return rename(ctx, RenameRequest{UserId: u.UserId, DisplayName: displayName})
+}
+
+func (u *User) Deactivate(ctx workflow.Context, reason string) error {
+	return deactivate(ctx, DeactivateRequest{UserId: u.UserId, Reason: reason})
+}
+
 func getUser(ctx workflow.Context, request GetUserRequest) (*User, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
 	fut := c.ExecuteOperation(ctx, GetUserOp, request, workflow.NexusOperationOptions{})

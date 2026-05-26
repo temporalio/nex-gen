@@ -6,12 +6,13 @@ use indexmap::IndexMap;
 
 use crate::api_plan::{
     ApiPlan, PlannedEnum, PlannedField, PlannedFieldKind, PlannedFlags, PlannedMessageType,
-    PlannedOperation, PlannedOperationOutput, PlannedResource, PlannedScalarType, PlannedValueType,
-    PlannedVariant,
+    PlannedOperation, PlannedOperationOutput, PlannedResource, PlannedResourceMethodBindingSpec,
+    PlannedResourceMethodResultKind, PlannedScalarType, PlannedValueType, PlannedVariant,
 };
 use crate::error::{Error, Result};
 use crate::generator::GeneratedFiles;
 use crate::language::Language;
+use crate::resources::render_request_plan;
 use crate::spec::{AuthoredFieldTypeSpec, TypeReplacementSpec};
 
 /// Header comment inserted at the top of every generated Go file.
@@ -1161,6 +1162,7 @@ fn render_file(
         for resource in &service.resources {
             output.push('\n');
             render_resource(&mut output, resource);
+            render_resource_methods(&mut output, resource, &service.operations);
         }
     }
 
@@ -1479,6 +1481,130 @@ fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (St
         }
         PlannedValueType::Unknown => ("any".to_string(), false),
     }
+}
+
+/// Renders methods on a resource struct. Each method that is bound to an
+/// operation delegates to the corresponding unexported operation function,
+/// constructing the request from the receiver's fields and the method params.
+///
+/// ```go
+/// func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error) {
+///     return updateEmail(ctx, UpdateEmailRequest{UserId: u.UserId, Email: email})
+/// }
+/// ```
+///
+/// Methods bound to `Stub` emit a panic placeholder.
+fn render_resource_methods(
+    output: &mut String,
+    resource: &PlannedResource,
+    operations: &[RenderedOperation<'_>],
+) {
+    for method in &resource.methods {
+        output.push('\n');
+        let method_name = go_field_name(&method.name);
+
+        match &method.binding {
+            PlannedResourceMethodBindingSpec::Operation {
+                operation_name,
+                request_plan,
+                ..
+            } => {
+                let operation = operations
+                    .iter()
+                    .find(|op| op.name == operation_name)
+                    .expect("bound resource operation should exist on the service");
+
+                // Method signature: func (u *Type) Method(ctx workflow.Context, params...) (return)
+                output.push_str("func (u *");
+                output.push_str(&resource.type_name);
+                output.push_str(") ");
+                output.push_str(&method_name);
+                output.push_str("(ctx workflow.Context");
+                for param in &method.params {
+                    output.push_str(", ");
+                    output.push_str(&go_unexported_name(&go_field_name(&param.name)));
+                    output.push(' ');
+                    output.push_str(&resolve_resource_field_kind(&param.kind, param.optional));
+                }
+                output.push_str(") ");
+
+                // Return type
+                let result_type = resolve_method_result_type(method);
+                if let Some(ref rtype) = result_type {
+                    output.push_str("(*");
+                    output.push_str(rtype);
+                    output.push_str(", error)");
+                } else {
+                    output.push_str("error");
+                }
+                output.push_str(" {\n");
+
+                // Body: construct request and delegate
+                let request_expr = render_request_plan(
+                    request_plan,
+                    go_field_name,
+                    |name, value| format!("{name}: {value}"),
+                    |_message_name, fields| {
+                        if fields.is_empty() {
+                            format!("{}{{}}", operation.input_type)
+                        } else {
+                            format!("{}{{{}}}", operation.input_type, fields.join(", "))
+                        }
+                    },
+                    |name| format!("u.{}", go_field_name(name)),
+                    |name| go_unexported_name(&go_field_name(name)),
+                );
+
+                output.push_str("\treturn ");
+                output.push_str(&operation.func_name);
+                output.push_str("(ctx, ");
+                output.push_str(&request_expr);
+                output.push_str(")\n");
+                output.push_str("}\n");
+            }
+            PlannedResourceMethodBindingSpec::Stub => {
+                // Stub method -- emit a panic placeholder
+                output.push_str("func (u *");
+                output.push_str(&resource.type_name);
+                output.push_str(") ");
+                output.push_str(&method_name);
+                output.push_str("(ctx workflow.Context");
+                for param in &method.params {
+                    output.push_str(", ");
+                    output.push_str(&go_unexported_name(&go_field_name(&param.name)));
+                    output.push(' ');
+                    output.push_str(&resolve_resource_field_kind(&param.kind, param.optional));
+                }
+                output.push_str(") ");
+                let result_type = resolve_method_result_type(method);
+                if let Some(ref rtype) = result_type {
+                    output.push_str("(*");
+                    output.push_str(rtype);
+                    output.push_str(", error)");
+                } else {
+                    output.push_str("error");
+                }
+                output.push_str(" {\n");
+                output.push_str("\tpanic(\"");
+                output.push_str(&resource.type_name);
+                output.push('.');
+                output.push_str(&method_name);
+                output.push_str(" is not yet implemented\")\n");
+                output.push_str("}\n");
+            }
+        }
+    }
+}
+
+/// Resolves the Go return type for a resource method from its
+/// [`PlannedResourceMethodResult`].
+fn resolve_method_result_type(
+    method: &crate::api_plan::PlannedResourceMethod,
+) -> Option<String> {
+    method.result.as_ref().map(|result| match &result.kind {
+        PlannedResourceMethodResultKind::Resource { type_name } => type_name.clone(),
+        PlannedResourceMethodResultKind::Value(kind) => resolve_resource_field_kind(kind, false),
+    })
 }
 
 /// Renders an unexported operation wrapper function that creates a Nexus
