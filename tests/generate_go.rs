@@ -222,7 +222,7 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("Status UserStatus // required"));
     assert!(rendered.contains("Profile UserProfile // required"));
 
-    // Operation wrapper functions
+    // Unexported operation wrapper functions
     assert!(rendered.contains("func getUser(ctx workflow.Context, request GetUserRequest) (*User, error)"));
     assert!(rendered.contains("func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error)"));
     assert!(rendered.contains("workflow.NewNexusClient(Endpoint, ServiceName)"));
@@ -230,4 +230,16 @@ fn go_type_showcase_generates_expected_types() {
     // Void operation
     assert!(rendered.contains("func deactivate(ctx workflow.Context, request DeactivateRequest) error"));
     assert!(rendered.contains("return fut.Get(ctx, nil)"));
+
+    // Exported convenience wrappers -- all required fields become positional args
+    assert!(rendered.contains("func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error)"));
+    assert!(rendered.contains("UpdateEmailRequest{UserId: userId, Email: email}"));
+    // Optional fields produce an options struct
+    assert!(rendered.contains("type GetUserOptions struct"));
+    assert!(rendered.contains("ConsistencyToken string"));
+    assert!(rendered.contains("func GetUser(ctx workflow.Context, userId string, opts ...GetUserOptions) (*User, error)"));
+    assert!(rendered.contains("request.ConsistencyToken = opts[0].ConsistencyToken"));
+    // Void convenience wrapper with options
+    assert!(rendered.contains("type DeactivateOptions struct"));
+    assert!(rendered.contains("func Deactivate(ctx workflow.Context, userId string, opts ...DeactivateOptions) error"));
 }

@@ -199,6 +199,26 @@ struct RenderedOperation<'a> {
     /// For resource-returning operations this is the resource type name
     /// (e.g. `"User"`).
     output_type: Option<String>,
+    /// Unpacked input parameters for the exported convenience wrapper, or
+    /// `None` when the input type is an external/replacement type that cannot
+    /// be unpacked into individual arguments.
+    unpacked_input: Option<Vec<RenderedUnpackedParam>>,
+}
+
+/// A single parameter in an unpacked convenience wrapper function signature.
+#[derive(Debug)]
+struct RenderedUnpackedParam {
+    /// Exported Go field name used when setting the request struct field
+    /// (e.g. `"UserId"`).
+    field_name: String,
+    /// Unexported Go parameter name used in the function signature
+    /// (e.g. `"userId"`).
+    param_name: String,
+    /// Go type expression (e.g. `"string"`, `"UserProfile"`).
+    go_type: String,
+    /// Whether this parameter is required (positional argument) or optional
+    /// (placed in the options struct).
+    required: bool,
 }
 
 /// A WIT enum rendered as a Go `type <Name> int32` with associated constants.
@@ -324,12 +344,28 @@ fn resolve_operation<'a>(
         PlannedOperationOutput::None => None,
     };
 
+    // Build unpacked input params from the rendered model, if the input type
+    // is a generated model (not an external/replacement type).
+    let unpacked_input = models.get(&operation.input.info.full_name).map(|model| {
+        model
+            .fields
+            .iter()
+            .map(|field| RenderedUnpackedParam {
+                field_name: field.name.clone(),
+                param_name: go_unexported_name(&field.name),
+                go_type: field.go_type.clone(),
+                required: field.required,
+            })
+            .collect()
+    });
+
     Ok(RenderedOperation {
         name: operation.name.as_str(),
         wire_name: operation.wire_name.as_str(),
         func_name: go_unexported_name(&operation.name),
         input_type,
         output_type,
+        unpacked_input,
     })
 }
 
@@ -1135,6 +1171,20 @@ fn render_file(
         }
     }
 
+    for service in services {
+        for operation in &service.operations {
+            if let Some(params) = &operation.unpacked_input {
+                let has_optional = params.iter().any(|p| !p.required);
+                if has_optional {
+                    output.push('\n');
+                    render_options_struct(&mut output, operation, params);
+                }
+                output.push('\n');
+                render_convenience_wrapper(&mut output, operation, params);
+            }
+        }
+    }
+
     output
 }
 
@@ -1493,4 +1543,138 @@ fn render_operation_function(output: &mut String, operation: &RenderedOperation<
         output.push_str("\treturn fut.Get(ctx, nil)\n");
         output.push_str("}\n");
     }
+}
+
+/// Renders an options struct for optional parameters of a convenience wrapper.
+///
+/// ```go
+/// type GetUserOptions struct {
+///     ConsistencyToken string
+/// }
+/// ```
+fn render_options_struct(
+    output: &mut String,
+    operation: &RenderedOperation<'_>,
+    params: &[RenderedUnpackedParam],
+) {
+    output.push_str("type ");
+    output.push_str(&go_field_name(operation.name));
+    output.push_str("Options struct {\n");
+    for param in params.iter().filter(|p| !p.required) {
+        output.push('\t');
+        output.push_str(&param.field_name);
+        output.push(' ');
+        output.push_str(&param.go_type);
+        output.push('\n');
+    }
+    output.push_str("}\n");
+}
+
+/// Renders an exported convenience wrapper that unpacks required fields as
+/// positional arguments and optional fields into a variadic options struct.
+///
+/// When all fields are required:
+/// ```go
+/// func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error) {
+///     return updateEmail(ctx, UpdateEmailRequest{UserId: userId, Email: email})
+/// }
+/// ```
+///
+/// When optional fields exist:
+/// ```go
+/// func GetUser(ctx workflow.Context, userId string, opts ...GetUserOptions) (*User, error) {
+///     request := GetUserRequest{UserId: userId}
+///     if len(opts) > 0 {
+///         request.ConsistencyToken = opts[0].ConsistencyToken
+///     }
+///     return getUser(ctx, request)
+/// }
+/// ```
+fn render_convenience_wrapper(
+    output: &mut String,
+    operation: &RenderedOperation<'_>,
+    params: &[RenderedUnpackedParam],
+) {
+    let exported_name = go_field_name(operation.name);
+    let has_optional = params.iter().any(|p| !p.required);
+
+    // Function signature
+    output.push_str("func ");
+    output.push_str(&exported_name);
+    output.push_str("(ctx workflow.Context");
+    for param in params.iter().filter(|p| p.required) {
+        output.push_str(", ");
+        output.push_str(&param.param_name);
+        output.push(' ');
+        output.push_str(&param.go_type);
+    }
+    if has_optional {
+        output.push_str(", opts ...");
+        output.push_str(&exported_name);
+        output.push_str("Options");
+    }
+    output.push_str(") ");
+
+    // Return type
+    if let Some(result_type) = &operation.output_type {
+        output.push_str("(*");
+        output.push_str(result_type);
+        output.push_str(", error)");
+    } else {
+        output.push_str("error");
+    }
+    output.push_str(" {\n");
+
+    // Function body
+    if has_optional {
+        // Build request incrementally
+        output.push_str("\trequest := ");
+        output.push_str(&operation.input_type);
+        output.push('{');
+        let required_params: Vec<_> = params.iter().filter(|p| p.required).collect();
+        for (i, param) in required_params.iter().enumerate() {
+            output.push_str(&param.field_name);
+            output.push_str(": ");
+            output.push_str(&param.param_name);
+            if i + 1 < required_params.len() {
+                output.push_str(", ");
+            }
+        }
+        output.push_str("}\n");
+
+        // Apply optional fields from opts
+        output.push_str("\tif len(opts) > 0 {\n");
+        for param in params.iter().filter(|p| !p.required) {
+            output.push_str("\t\trequest.");
+            output.push_str(&param.field_name);
+            output.push_str(" = opts[0].");
+            output.push_str(&param.field_name);
+            output.push('\n');
+        }
+        output.push_str("\t}\n");
+
+        // Call unexported function
+        output.push_str("\treturn ");
+        output.push_str(&operation.func_name);
+        output.push_str("(ctx, request)\n");
+    } else {
+        // All required -- inline the request construction
+        output.push_str("\treturn ");
+        output.push_str(&operation.func_name);
+        output.push_str("(ctx, ");
+        output.push_str(&operation.input_type);
+        output.push('{');
+        let required_params: Vec<_> = params.iter().filter(|p| p.required).collect();
+        for (i, param) in required_params.iter().enumerate() {
+            output.push_str(&param.field_name);
+            output.push_str(": ");
+            output.push_str(&param.param_name);
+            if i + 1 < required_params.len() {
+                output.push_str(", ");
+            }
+        }
+        output.push_str("})\n");
+    }
+
+    output.push_str("}\n");
 }

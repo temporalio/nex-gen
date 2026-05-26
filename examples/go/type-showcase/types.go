@@ -149,3 +149,39 @@ func deactivate(ctx workflow.Context, request DeactivateRequest) error {
 	fut := c.ExecuteOperation(ctx, DeactivateOp, request, workflow.NexusOperationOptions{})
 	return fut.Get(ctx, nil)
 }
+
+type GetUserOptions struct {
+	ConsistencyToken string
+}
+
+func GetUser(ctx workflow.Context, userId string, opts ...GetUserOptions) (*User, error) {
+	request := GetUserRequest{UserId: userId}
+	if len(opts) > 0 {
+		request.ConsistencyToken = opts[0].ConsistencyToken
+	}
+	return getUser(ctx, request)
+}
+
+func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error) {
+	return updateEmail(ctx, UpdateEmailRequest{UserId: userId, Email: email})
+}
+
+func Rename(ctx workflow.Context, userId string, displayName string) (*User, error) {
+	return rename(ctx, RenameRequest{UserId: userId, DisplayName: displayName})
+}
+
+func SetProfile(ctx workflow.Context, userId string, profile UserProfile) (*User, error) {
+	return setProfile(ctx, SetProfileRequest{UserId: userId, Profile: profile})
+}
+
+type DeactivateOptions struct {
+	Reason string
+}
+
+func Deactivate(ctx workflow.Context, userId string, opts ...DeactivateOptions) error {
+	request := DeactivateRequest{UserId: userId}
+	if len(opts) > 0 {
+		request.Reason = opts[0].Reason
+	}
+	return deactivate(ctx, request)
+}

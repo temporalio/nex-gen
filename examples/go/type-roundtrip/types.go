@@ -40,3 +40,19 @@ func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*A
 	}
 	return &result, nil
 }
+
+type ActivityOptionsOperationOptions struct {
+	TaskQueue              string
+	ScheduleToCloseTimeout time.Duration
+	Priority               temporal.Priority
+}
+
+func ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ...ActivityOptionsOperationOptions) (*ActivityOptions, error) {
+	request := ActivityOptions{RetryPolicy: retryPolicy}
+	if len(opts) > 0 {
+		request.TaskQueue = opts[0].TaskQueue
+		request.ScheduleToCloseTimeout = opts[0].ScheduleToCloseTimeout
+		request.Priority = opts[0].Priority
+	}
+	return activityOptionsOperation(ctx, request)
+}
