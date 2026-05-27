@@ -8,6 +8,7 @@ use crate::api_plan::{
     ApiPlan, PlannedEnum, PlannedField, PlannedFieldKind, PlannedFlags, PlannedMessageType,
     PlannedOperation, PlannedOperationOutput, PlannedResource, PlannedResourceMethodBindingSpec,
     PlannedResourceMethodResultKind, PlannedScalarType, PlannedValueType, PlannedVariant,
+    message_model_name,
 };
 use crate::error::{Error, Result};
 use crate::generator::GeneratedFiles;
@@ -104,6 +105,7 @@ pub(crate) fn generate(api_plan: &ApiPlan) -> Result<GeneratedFiles> {
         variants.values().collect::<Vec<_>>().as_slice(),
         models.values().collect::<Vec<_>>().as_slice(),
         &services,
+        api_plan,
     );
 
     let mut files = BTreeMap::new();
@@ -338,8 +340,15 @@ fn resolve_operation<'a>(
     let input_type = resolve_message_go_type(&operation.input);
     let output_type = match &operation.output {
         PlannedOperationOutput::Message(output) => {
-            resolve_message_types(output, api_plan, enums, flags, variants, models)?;
-            Some(resolve_message_go_type(output))
+            if let Some(resource_return) = &operation.output_resource_return {
+                // The operation returns a resource constructed from the proto
+                // response -- use the resource type name.
+                Some(resource_return.resource_type_name.clone())
+            } else {
+                // Normal output message -- resolve to generate the model.
+                resolve_message_types(output, api_plan, enums, flags, variants, models)?;
+                Some(resolve_message_go_type(output))
+            }
         }
         PlannedOperationOutput::Resource { type_name } => Some(type_name.clone()),
         PlannedOperationOutput::None => None,
@@ -709,10 +718,21 @@ fn ensure_rendered_model(
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
 ) -> Result<()> {
-    let planned_model = api_plan
-        .models
-        .get(&message.info.full_name)
-        .unwrap_or_else(|| panic!("planned model should exist for {}", message.info.full_name));
+    let Some(planned_model) = api_plan.models.get(&message.info.full_name) else {
+        // The planner may skip models for output types with transforms or
+        // resource returns. Generate a minimal empty struct so the type
+        // is at least defined.
+        if !models.contains_key(&message.info.full_name) {
+            models.insert(
+                message.info.full_name.clone(),
+                RenderedModel {
+                    name: message.model_name.clone(),
+                    fields: Vec::new(),
+                },
+            );
+        }
+        return Ok(());
+    };
 
     if models.contains_key(&message.info.full_name) {
         return Ok(());
@@ -918,6 +938,16 @@ fn go_ident(name: &str) -> String {
 /// - `"string"` → no import, code `"string"`
 /// - `"map[string]interface{}"` → no import, code `"map[string]interface{}"`
 fn parse_go_import(type_expr: &str) -> (Option<String>, String) {
+    // Case 0: explicit import path with ':' separator, e.g.
+    // "go.temporal.io/api/enums/v1:enums.WorkflowIdReusePolicy"
+    // This handles packages where the directory name differs from the
+    // declared Go package name (e.g. enums/v1 declares `package enums`).
+    if let Some(colon) = type_expr.find(':') {
+        let import_path = &type_expr[..colon];
+        let code_expr = &type_expr[colon + 1..];
+        return (Some(import_path.to_string()), code_expr.to_string());
+    }
+
     // Case 1: contains '/' -- this is a full Go module path like
     // "go.temporal.io/sdk/temporal.RetryPolicy"
     if let Some(last_slash) = type_expr.rfind('/') {
@@ -1093,6 +1123,7 @@ fn render_file(
     variants: &[&RenderedVariant],
     models: &[&RenderedModel],
     services: &[RenderedService<'_>],
+    api_plan: &ApiPlan,
 ) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
@@ -1162,7 +1193,7 @@ fn render_file(
         for resource in &service.resources {
             output.push('\n');
             render_resource(&mut output, resource);
-            render_resource_methods(&mut output, resource, &service.operations);
+            render_resource_methods(&mut output, resource, &service.operations, api_plan);
         }
     }
 
@@ -1498,6 +1529,7 @@ fn render_resource_methods(
     output: &mut String,
     resource: &PlannedResource,
     operations: &[RenderedOperation<'_>],
+    api_plan: &ApiPlan,
 ) {
     for method in &resource.methods {
         output.push('\n');
@@ -1544,22 +1576,40 @@ fn render_resource_methods(
                     request_plan,
                     go_field_name,
                     |name, value| format!("{name}: {value}"),
-                    |_message_name, fields| {
+                    |msg_name, fields| {
+                        // Look up the rendered model name; fall back to
+                        // deriving it from the message name.
+                        let type_name = api_plan
+                            .models
+                            .get(msg_name)
+                            .map(|m| m.name.clone())
+                            .unwrap_or_else(|| message_model_name(msg_name));
                         if fields.is_empty() {
-                            format!("{}{{}}", operation.input_type)
+                            format!("{type_name}{{}}")
                         } else {
-                            format!("{}{{{}}}", operation.input_type, fields.join(", "))
+                            format!("{type_name}{{{}}}", fields.join(", "))
                         }
                     },
                     |name| format!("u.{}", go_field_name(name)),
                     |name| go_unexported_name(&go_field_name(name)),
                 );
 
-                output.push_str("\treturn ");
-                output.push_str(&operation.func_name);
-                output.push_str("(ctx, ");
-                output.push_str(&request_expr);
-                output.push_str(")\n");
+                // If the method is void but the operation returns a value,
+                // discard the value and return only the error.
+                if result_type.is_none() && operation.output_type.is_some() {
+                    output.push_str("\t_, err := ");
+                    output.push_str(&operation.func_name);
+                    output.push_str("(ctx, ");
+                    output.push_str(&request_expr);
+                    output.push_str(")\n");
+                    output.push_str("\treturn err\n");
+                } else {
+                    output.push_str("\treturn ");
+                    output.push_str(&operation.func_name);
+                    output.push_str("(ctx, ");
+                    output.push_str(&request_expr);
+                    output.push_str(")\n");
+                }
                 output.push_str("}\n");
             }
             PlannedResourceMethodBindingSpec::Stub => {

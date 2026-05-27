@@ -87,7 +87,7 @@ interface model {
   type duration = placeholder;
 
   /// @nexus.proto "temporal.api.enums.v1.WorkflowIdReusePolicy"
-  /// @nexus.type python="temporalio.common.WorkflowIDReusePolicy" typescript="common.WorkflowIdReusePolicy" go="go.temporal.io/api/enums/v1.WorkflowIdReusePolicy"
+  /// @nexus.type python="temporalio.common.WorkflowIDReusePolicy" typescript="common.WorkflowIdReusePolicy" go="go.temporal.io/api/enums/v1:enums.WorkflowIdReusePolicy"
   enum workflow-id-reuse-policy {
     allow-duplicate,
     allow-duplicate-failed-only,
@@ -96,7 +96,7 @@ interface model {
   }
 
   /// @nexus.proto "temporal.api.enums.v1.WorkflowIdConflictPolicy"
-  /// @nexus.type python="temporalio.common.WorkflowIDConflictPolicy" typescript="common.WorkflowIdConflictPolicy" go="go.temporal.io/api/enums/v1.WorkflowIdConflictPolicy"
+  /// @nexus.type python="temporalio.common.WorkflowIDConflictPolicy" typescript="common.WorkflowIdConflictPolicy" go="go.temporal.io/api/enums/v1:enums.WorkflowIdConflictPolicy"
   enum workflow-id-conflict-policy {
     fail,
     use-existing,
