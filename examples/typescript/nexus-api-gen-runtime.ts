@@ -29,10 +29,7 @@ function registry(): Map<string, NexusFactory> {
   return globalObject[NEXUS_REGISTRY];
 }
 
-export function registerNexusResource(
-  typeId: string,
-  factory: NexusFactory,
-): void {
+export function registerNexusResource(typeId: string, factory: NexusFactory): void {
   registry().set(typeId, factory);
 }
 
@@ -122,10 +119,7 @@ function fromWire(value: unknown): unknown {
       : { tag: value.tag };
   }
   return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [
-      fromWireName(key),
-      fromWire(item),
-    ]),
+    Object.entries(value).map(([key, item]) => [fromWireName(key), fromWire(item)]),
   );
 }
 

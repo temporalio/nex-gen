@@ -158,14 +158,15 @@ markNexusResource(User, "TypeShowcase::resource::user");
 
 export const TypeShowcase = nexus.service("TypeShowcase", {
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
-  updateEmail: nexus.operation<UpdateEmailRequest, User>({
-    name: "UpdateEmail",
-  }),
+  updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
   rename: nexus.operation<RenameRequest, User>({ name: "Rename" }),
   setProfile: nexus.operation<SetProfileRequest, User>({ name: "SetProfile" }),
   deactivate: nexus.operation<DeactivateRequest, void>({ name: "Deactivate" }),
 });
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function getUser(request: GetUserRequest): Promise<User> {
   const client = workflow.createNexusServiceClient({
     service: TypeShowcase,
@@ -179,15 +180,15 @@ export async function getUser(request: GetUserRequest): Promise<User> {
   return await handle.result();
 }
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function updateEmail(request: UpdateEmailRequest): Promise<User> {
   const client = workflow.createNexusServiceClient({
     service: TypeShowcase,
     endpoint: "type-showcase",
   });
-  const requestProto = nexusValue(
-    "type-showcase.update-email-request",
-    request,
-  );
+  const requestProto = nexusValue("type-showcase.update-email-request", request);
   const handle = await client.startOperation(
     TypeShowcase.operations.updateEmail,
     requestProto,
@@ -195,6 +196,9 @@ export async function updateEmail(request: UpdateEmailRequest): Promise<User> {
   return await handle.result();
 }
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function rename(request: RenameRequest): Promise<User> {
   const client = workflow.createNexusServiceClient({
     service: TypeShowcase,
@@ -208,6 +212,9 @@ export async function rename(request: RenameRequest): Promise<User> {
   return await handle.result();
 }
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function setProfile(request: SetProfileRequest): Promise<User> {
   const client = workflow.createNexusServiceClient({
     service: TypeShowcase,
@@ -221,6 +228,9 @@ export async function setProfile(request: SetProfileRequest): Promise<User> {
   return await handle.result();
 }
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function deactivate(
   request: DeactivateRequest,
 ): Promise<workflow.NexusOperationHandle<void>> {

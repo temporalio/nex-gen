@@ -22,12 +22,7 @@ function main() {
 
 function generatorCommand() {
   if (process.env.NEXUS_API_GEN_BIN) {
-    return [
-      process.env.NEXUS_API_GEN_BIN,
-      "build-examples",
-      "--lang",
-      "typescript",
-    ];
+    return [process.env.NEXUS_API_GEN_BIN, "build-examples", "--lang", "typescript"];
   }
 
   return ["cargo", "build-examples", "--lang", "typescript"];

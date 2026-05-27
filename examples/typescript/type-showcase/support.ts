@@ -22,11 +22,7 @@ function int64ToNumber(
     return value.toNumber();
   }
   if ("low" in value && "high" in value) {
-    const longValue = value as {
-      low: number;
-      high: number;
-      unsigned?: boolean;
-    };
+    const longValue = value as { low: number; high: number; unsigned?: boolean };
     const low = longValue.low >>> 0;
     return longValue.high * 4_294_967_296 + low;
   }
@@ -40,8 +36,7 @@ function durationToMillis(
     return undefined;
   }
   return (
-    int64ToNumber(proto.seconds) * 1000 +
-    Math.floor((proto.nanos ?? 0) / 1_000_000)
+    int64ToNumber(proto.seconds) * 1000 + Math.floor((proto.nanos ?? 0) / 1_000_000)
   );
 }
 
@@ -75,9 +70,7 @@ export function workflowTypeToProto(
   return { name: workflow_function_name(workflowType) };
 }
 
-export function workflow_function_name(
-  value: string | common.Workflow,
-): string {
+export function workflow_function_name(value: string | common.Workflow): string {
   return typeof value === "string" ? value : common.extractWorkflowType(value);
 }
 
@@ -119,10 +112,8 @@ export function memoFromProto(
   proto: temporal.api.common.v1.IMemo,
 ): Record<string, unknown> {
   return (
-    common.mapFromPayloads(
-      common.defaultPayloadConverter,
-      proto.fields ?? undefined,
-    ) ?? {}
+    common.mapFromPayloads(common.defaultPayloadConverter, proto.fields ?? undefined) ??
+    {}
   );
 }
 
@@ -134,15 +125,11 @@ export function memoToProto(
   };
 }
 
-export function durationFromProto(
-  proto: google.protobuf.IDuration,
-): common.Duration {
+export function durationFromProto(proto: google.protobuf.IDuration): common.Duration {
   return durationToMillis(proto)!;
 }
 
-export function durationToProto(
-  duration: common.Duration,
-): google.protobuf.IDuration {
+export function durationToProto(duration: common.Duration): google.protobuf.IDuration {
   return common.msToTs(duration);
 }
 
@@ -152,9 +139,7 @@ function typedSearchAttributePayload(
 ): common.Payload {
   const payload = common.defaultPayloadConverter.toPayload(value);
   payload.metadata ??= {};
-  payload.metadata.type = common.u8(
-    common.TypedSearchAttributes.toMetadataType(type),
-  );
+  payload.metadata.type = common.u8(common.TypedSearchAttributes.toMetadataType(type));
   return payload;
 }
 
@@ -175,9 +160,7 @@ function isValidSearchAttributeValue(
     case common.SearchAttributeType.DATETIME:
       return value instanceof Date;
     case common.SearchAttributeType.KEYWORD_LIST:
-      return (
-        Array.isArray(value) && value.every((item) => typeof item === "string")
-      );
+      return Array.isArray(value) && value.every((item) => typeof item === "string");
     default:
       return false;
   }
@@ -198,10 +181,7 @@ function typedSearchAttributePairFromPayload(
     return undefined;
   }
   let value: unknown = common.defaultPayloadConverter.fromPayload(payload);
-  if (
-    type !== common.SearchAttributeType.KEYWORD_LIST &&
-    Array.isArray(value)
-  ) {
+  if (type !== common.SearchAttributeType.KEYWORD_LIST && Array.isArray(value)) {
     if (value.length !== 1) {
       return undefined;
     }
@@ -221,26 +201,15 @@ function typedSearchAttributePairFromPayload(
 
 export function searchAttributesFromProto(
   proto: temporal.api.common.v1.ISearchAttributes,
-): common.TypedSearchAttributes | common.SearchAttributes {
+): common.TypedSearchAttributes {
   const indexedFields = proto.indexedFields ?? {};
   const typedPairs: common.SearchAttributePair[] = [];
   for (const [name, payload] of Object.entries(indexedFields)) {
     const pair = typedSearchAttributePairFromPayload(name, payload);
     if (pair == null) {
-      const decoded =
-        common.mapFromPayloads(common.defaultPayloadConverter, indexedFields) ??
-        {};
-      return Object.fromEntries(
-        Object.entries(decoded).flatMap(([key, value]) => {
-          if (value == null) {
-            return [];
-          }
-          if (Array.isArray(value)) {
-            return value.length === 0 ? [] : [[key, value]];
-          }
-          return [[key, [value]]];
-        }),
-      ) as common.SearchAttributes;
+      throw new TypeError(
+        `search attribute ${name} cannot be decoded as a typed search attribute`,
+      );
     }
     typedPairs.push(pair);
   }
@@ -248,24 +217,16 @@ export function searchAttributesFromProto(
 }
 
 export function searchAttributesToProto(
-  searchAttributes: common.TypedSearchAttributes | common.SearchAttributes,
+  searchAttributes: common.TypedSearchAttributes,
 ): temporal.api.common.v1.ISearchAttributes {
-  if (searchAttributes instanceof common.TypedSearchAttributes) {
-    return {
-      indexedFields: Object.fromEntries(
-        searchAttributes
-          .getAll()
-          .map((pair): [string, common.Payload] => [
-            pair.key.name,
-            typedSearchAttributePayload(pair.value, pair.key.type),
-          ]),
-      ),
-    };
-  }
   return {
-    indexedFields: common.mapToPayloads(
-      common.defaultPayloadConverter,
-      searchAttributes,
+    indexedFields: Object.fromEntries(
+      searchAttributes
+        .getAll()
+        .map((pair): [string, common.Payload] => [
+          pair.key.name,
+          typedSearchAttributePayload(pair.value, pair.key.type),
+        ]),
     ),
   };
 }
@@ -289,10 +250,7 @@ const PINNED_OVERRIDE_BEHAVIOR_PINNED = 1;
 export function versioningOverrideFromProto(
   proto: temporal.api.workflow.v1.IVersioningOverride,
 ): common.VersioningOverride | undefined {
-  if (
-    proto.autoUpgrade ||
-    proto.behavior === VERSIONING_BEHAVIOR_AUTO_UPGRADE
-  ) {
+  if (proto.autoUpgrade || proto.behavior === VERSIONING_BEHAVIOR_AUTO_UPGRADE) {
     return "AUTO_UPGRADE";
   }
   const pinnedVersion = proto.pinned?.version;
@@ -304,10 +262,7 @@ export function versioningOverrideFromProto(
       },
     };
   }
-  if (
-    proto.deployment?.seriesName != null &&
-    proto.deployment.buildId != null
-  ) {
+  if (proto.deployment?.seriesName != null && proto.deployment.buildId != null) {
     return {
       pinnedTo: {
         deploymentName: proto.deployment.seriesName,

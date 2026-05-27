@@ -9,10 +9,7 @@ import {
   WorkflowService,
   signalWithStartWorkflow,
 } from "../workflow-service/index.ts";
-import {
-  executeWorkflowWithNexus,
-  withWorkflowEnvironment,
-} from "./helpers.ts";
+import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(
   new URL("./workflows/workflow-service.ts", import.meta.url),
@@ -73,10 +70,7 @@ describe("workflow-service generated output", () => {
 });
 
 if (false) {
-  async function exampleWorkflow(
-    attempts: number,
-    note: string,
-  ): Promise<void> {
+  async function exampleWorkflow(attempts: number, note: string): Promise<void> {
     void attempts;
     void note;
   }

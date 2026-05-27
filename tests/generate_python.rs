@@ -129,6 +129,8 @@ fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: 
             "run",
             "ruff",
             "format",
+            "--line-length",
+            "88",
             "--config",
             "pyproject.toml",
             output_path.to_str().unwrap(),
@@ -269,10 +271,13 @@ fn python_request_models_are_write_only() {
     ));
     assert!(rendered.contains("class SignalWithStartWorkflowRequest:"));
     assert!(rendered.contains(
-        "@dataclasses.dataclass(slots=True, kw_only=True)\nclass SignalWithStartWorkflowRequest:\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]\n    args: tuple[typing.Any, ...] | None = None\n    id: str\n    task_queue: str\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]\n    signal_args: tuple[typing.Any, ...] | None = None\n    execution_timeout: timedelta | None = None"
+        "@dataclasses.dataclass(slots=True, kw_only=True)\nclass SignalWithStartWorkflowRequest:\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]\n    args: list[typing.Any] | None = None\n    id: str\n    task_queue: str\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]\n    signal_args: list[typing.Any] | None = None\n    execution_timeout: timedelta | None = None"
     ));
     assert!(rendered.contains("temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE"));
-    assert!(rendered.contains("args: tuple[typing.Any, ...] | None = None"));
+    assert!(rendered.contains("args: list[typing.Any] | None = None"));
+    assert!(rendered.contains("signal_args: list[typing.Any] | None = None"));
+    assert!(!rendered.contains("args: tuple[typing.Any, ...] | None = None"));
+    assert!(!rendered.contains("signal_args: tuple[typing.Any, ...] | None = None"));
     assert!(!rendered.contains("(typing.TypedDict, total=False):"));
     assert!(!rendered.contains("typing.Unpack["));
     assert!(!rendered.contains("namespace: str | None = None"));
@@ -288,41 +293,55 @@ fn python_request_models_are_write_only() {
     assert!(rendered.contains("async def signal_with_start_workflow("));
     assert!(rendered.contains("@typing.overload"));
     assert!(rendered.contains("workflow: str,"));
-    assert!(rendered.contains("arg: object = ...,"));
+    assert!(rendered.contains("*positional_args: object,"));
     assert!(rendered.contains("id: str,"));
-    assert!(rendered.contains("args: tuple[typing.Any, ...] | list[typing.Any] | None = ...,"));
+    assert!(rendered.contains("args: list[typing.Any] | None = ...,"));
     assert!(rendered.contains(
-        "workflow: collections.abc.Callable[[typing.Any], collections.abc.Awaitable[object]],"
+        "workflow: collections.abc.Callable[[typing.Any, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[object]],"
     ));
-    assert!(rendered.contains("FirstWorkflowArg = typing.TypeVar(\"FirstWorkflowArg\")"));
-    assert!(rendered.contains("SecondWorkflowArg = typing.TypeVar(\"SecondWorkflowArg\")"));
+    assert!(rendered.contains("WorkflowArgs = typing_extensions.TypeVarTuple(\"WorkflowArgs\")"));
+    assert!(rendered.contains("*positional_args: typing_extensions.Unpack[WorkflowArgs],"));
+    assert!(rendered.contains("args: list[typing.Any],"));
+    assert!(!rendered.contains("tuple[FirstWorkflowArg"));
     assert!(rendered.contains(
-        "RemainingWorkflowArgs = typing_extensions.TypeVarTuple(\"RemainingWorkflowArgs\")"
+        "signal: collections.abc.Callable[[typing.Any, SignalArg], None | collections.abc.Awaitable[None]],"
     ));
-    assert!(rendered.contains("arg: FirstWorkflowArg,"));
-    assert!(rendered.contains("args: tuple[FirstWorkflowArg],"));
+    assert!(rendered.contains("SignalArg = typing.TypeVar(\"SignalArg\")"));
+    assert!(rendered.contains("signal_args: SignalArg,"));
+    assert!(rendered.contains("signal_args: list[typing.Any],"));
     assert!(rendered.contains(
-        "args: tuple[FirstWorkflowArg, SecondWorkflowArg, typing_extensions.Unpack[RemainingWorkflowArgs]],"
-    ));
-    assert!(rendered.contains(
-        "signal: collections.abc.Callable[[typing.Any, SignalArg1], None | collections.abc.Awaitable[None]],"
-    ));
-    assert!(rendered.contains("signal_args: tuple[SignalArg1],"));
-    assert!(rendered.contains(
-        "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],\n    arg: object = _nexus_arg_unset,\n    *,\n    args: object | tuple[object, ...] | list[typing.Any] | None = None,\n    id: str,\n    task_queue: str,\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],\n    signal_args: object | tuple[object, ...] | list[typing.Any] | None = None,"
+        "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],\n    *positional_args: object,\n    args: list[typing.Any] | None = None,\n    id: str,\n    task_queue: str,\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],\n    signal_args: object | list[typing.Any] | None = None,"
     ));
     assert!(rendered.contains(
         "signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],"
     ));
-    assert!(
-        rendered.contains("args: object | tuple[object, ...] | list[typing.Any] | None = None,")
+    assert!(rendered.contains("args: list[typing.Any] | None = None,"));
+    assert_eq!(
+        rendered
+            .matches("Signal a workflow, starting it first if needed.")
+            .count(),
+        1
     );
     assert!(rendered.contains(
-        "id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE,"
+        "\"\"\"Signal a workflow, starting it first if needed.\n\n    Args:\n        workflow: Workflow type name or callable identifying the workflow to start.\n        positional_args: Positional arguments for workflow. Cannot be set if args is\n            set.\n        args: List-form arguments for workflow. Cannot be set if positional_args are\n            set. For typed workflow callables, list contents are not statically\n            typechecked; pass workflow arguments positionally for precise typechecking.\n        id: Unique identifier for the workflow execution.\n        task_queue: Task queue to run the workflow on.\n        signal: Signal name or callable to send with the start request.\n        signal_args: Argument value, or list of argument values, for signal. For typed\n            single-argument signals, scalar signal_args values are statically\n            typechecked. List-form signal_args values are not precisely typechecked."
     ));
     assert!(rendered.contains(
-        "id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy = temporalio.common.WorkflowIDConflictPolicy.FAIL,"
+        "cron_schedule: Cron schedule for recurring workflow executions. See\n            https://docs.temporal.io/cron-job."
     ));
+    assert!(rendered.contains(
+        "static_summary: Single-line fixed summary for the workflow execution that may\n            appear in UI and CLI. This can be in single-line Temporal Markdown format."
+    ));
+    assert!(rendered.contains(
+        "\n\n    Returns:\n        A workflow handle to the started workflow.\n    \"\"\""
+    ));
+    assert!(rendered.contains(
+        "id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (\n        temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE\n    ),"
+    ));
+    assert!(
+        rendered.contains(
+            "id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = None,"
+        )
+    );
     assert!(rendered.contains("static_summary: str | None = None,"));
     assert!(rendered.contains("static_details: str | None = None,"));
     assert!(!rendered.contains("identity: str | None"));
@@ -330,15 +349,19 @@ fn python_request_models_are_write_only() {
     assert!(!rendered.contains("user_metadata_static_details:"));
     assert!(rendered.contains("request = SignalWithStartWorkflowRequest("));
     assert!(rendered.contains("workflow=workflow,"));
-    assert!(rendered.contains("def _nexus_normalize_function_args("));
-    assert!(rendered.contains("_nexus_arg_unset = object()"));
-    assert!(rendered.contains("if arg is not _nexus_arg_unset and args is not None:"));
-    assert!(rendered.contains("raise TypeError(\"cannot specify both arg and args\")"));
-    assert!(rendered.contains("if arg is not _nexus_arg_unset"));
-    assert!(rendered.contains("else _nexus_normalize_function_args(args)"));
+    assert!(!rendered.contains("def _nexus_is_function_args_list("));
+    assert!(!rendered.contains("def _nexus_normalize_function_args("));
+    assert!(!rendered.contains("_nexus_arg_unset = object()"));
+    assert!(rendered.contains("if positional_args and args is not None:"));
     assert!(
-        rendered.contains("normalized_signal_args = _nexus_normalize_function_args(signal_args)")
+        rendered.contains("raise TypeError(\"cannot specify both positional arguments and args\")")
     );
+    assert!(rendered.contains("normalized_args: list[typing.Any] | None = ("));
+    assert!(rendered.contains("list(positional_args)"));
+    assert!(rendered.contains("else args"));
+    assert!(rendered.contains(
+        "normalized_signal_args: list[typing.Any] | None\n    if signal_args is None:\n        normalized_signal_args = None\n    elif isinstance(signal_args, list):\n        normalized_signal_args = typing.cast(list[typing.Any], signal_args)\n    else:\n        normalized_signal_args = [signal_args]"
+    ));
     assert!(rendered.contains("user_metadata = ("));
     assert!(rendered.contains("if static_summary is None and static_details is None"));
     assert!(rendered.contains("static_summary=static_summary,"));

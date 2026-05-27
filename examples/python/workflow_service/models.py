@@ -6,8 +6,8 @@ from __future__ import annotations
 import collections.abc
 import dataclasses
 import typing
-from datetime import timedelta
 import temporalio.common
+from datetime import timedelta
 import temporalio.api.sdk.v1.user_metadata_pb2
 import temporalio.api.workflowservice.v1.request_response_pb2
 
@@ -33,11 +33,11 @@ from ._support import (
 @dataclasses.dataclass(slots=True, kw_only=True)
 class SignalWithStartWorkflowRequest:
     workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]
-    args: tuple[typing.Any, ...] | None = None
+    args: list[typing.Any] | None = None
     id: str
     task_queue: str
     signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]
-    signal_args: tuple[typing.Any, ...] | None = None
+    signal_args: list[typing.Any] | None = None
     execution_timeout: timedelta | None = None
     run_timeout: timedelta | None = None
     task_timeout: timedelta | None = None
@@ -45,17 +45,11 @@ class SignalWithStartWorkflowRequest:
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (
         temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
     )
-    id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy = (
-        temporalio.common.WorkflowIDConflictPolicy.FAIL
-    )
+    id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = None
     retry_policy: temporalio.common.RetryPolicy | None = None
     cron_schedule: str | None = None
     memo: collections.abc.Mapping[str, typing.Any] | None = None
-    search_attributes: (
-        temporalio.common.TypedSearchAttributes
-        | temporalio.common.SearchAttributes
-        | None
-    ) = None
+    search_attributes: temporalio.common.TypedSearchAttributes | None = None
     priority: temporalio.common.Priority | None = None
     versioning_override: temporalio.common.VersioningOverride | None = None
     start_delay: timedelta | None = None
@@ -86,9 +80,10 @@ class SignalWithStartWorkflowRequest:
         message.workflow_id_reuse_policy = workflow_id_reuse_policy_to_proto(
             self.id_reuse_policy
         )
-        message.workflow_id_conflict_policy = workflow_id_conflict_policy_to_proto(
-            self.id_conflict_policy
-        )
+        if self.id_conflict_policy is not None:
+            message.workflow_id_conflict_policy = workflow_id_conflict_policy_to_proto(
+                self.id_conflict_policy
+            )
         if self.retry_policy is not None:
             message.retry_policy.CopyFrom(retry_policy_to_proto(self.retry_policy))
         if self.cron_schedule is not None:

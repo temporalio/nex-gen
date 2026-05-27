@@ -45,33 +45,6 @@ function requiredField<T>(
   return value;
 }
 
-type _RequestWithFunctionField<
-  Fn extends (...args: any[]) => any,
-  Base,
-  Field extends string,
-  ArgsField extends string,
-> =
-  | (Base & { [K in Field]: string } & {
-      [K in ArgsField]?: ReadonlyArray<unknown>;
-    })
-  | (Base & { [K in Field]: Fn } & (Parameters<Fn> extends [any, ...any[]]
-        ? { [K in ArgsField]: Parameters<Fn> | Readonly<Parameters<Fn>> }
-        : { [K in ArgsField]?: Parameters<Fn> | Readonly<Parameters<Fn>> }));
-
-type _RequestWithArgumentsField<
-  Value,
-  Args extends any[],
-  Base,
-  Field extends string,
-  ArgsField extends string,
-> =
-  | (Base & { [K in Field]: string } & {
-      [K in ArgsField]?: ReadonlyArray<unknown>;
-    })
-  | (Base & { [K in Field]: Value } & (Args extends [any, ...any[]]
-        ? { [K in ArgsField]: Args | Readonly<Args> }
-        : { [K in ArgsField]?: Args | Readonly<Args> }));
-
 function _RequestArgsToPayloads(
   args: ReadonlyArray<unknown> | undefined,
 ): temporal.api.common.v1.IPayloads | undefined {
@@ -82,54 +55,164 @@ function _RequestArgsToPayloads(
   return payloads == null ? undefined : { payloads };
 }
 
-type SignalWithStartWorkflowRequestBase = {
-  id: string;
-  taskQueue: string;
-  executionTimeout?: common.Duration;
-  runTimeout?: common.Duration;
-  taskTimeout?: common.Duration;
-  requestId?: string;
-  idReusePolicy?: common.WorkflowIdReusePolicy;
-  idConflictPolicy?: common.WorkflowIdConflictPolicy;
-  retryPolicy?: common.RetryPolicy;
-  cronSchedule?: string;
-  memo?: Record<string, unknown>;
-  searchAttributes?: common.TypedSearchAttributes | common.SearchAttributes;
-  priority?: common.Priority;
-  versioningOverride?: common.VersioningOverride;
-  startDelay?: common.Duration;
-  userMetadata?: UserMetadata;
-};
-
 export type SignalWithStartWorkflowRequest<
   WorkflowFn extends (...args: any[]) => Promise<any> = (
     ...args: any[]
   ) => Promise<any>,
-  SignalValue extends workflow.SignalDefinition<any[]> =
-    workflow.SignalDefinition<any[]>,
-> = _RequestWithArgumentsField<
-  SignalValue,
-  SignalValue extends workflow.SignalDefinition<infer Args, any> ? Args : never,
-  _RequestWithFunctionField<
-    WorkflowFn,
-    SignalWithStartWorkflowRequestBase,
-    "workflow",
-    "args"
+  SignalValue extends workflow.SignalDefinition<any[]> = workflow.SignalDefinition<
+    any[]
   >,
-  "signal",
-  "signalArgs"
->;
+  SignalArgs extends any[] = SignalValue extends workflow.SignalDefinition<
+    infer Args,
+    any
+  >
+    ? Args
+    : never,
+> = {
+  /**
+   * Unique identifier for the workflow execution.
+   */
+  id: string;
+  /**
+   * Task queue to run the workflow on.
+   */
+  taskQueue: string;
+  /**
+   * Total workflow execution timeout, including retries and continue-as-new.
+   */
+  executionTimeout?: common.Duration;
+  /**
+   * Timeout of a single workflow run.
+   */
+  runTimeout?: common.Duration;
+  /**
+   * Timeout of a single workflow task.
+   */
+  taskTimeout?: common.Duration;
+  /**
+   * Request ID used to deduplicate workflow start requests.
+   */
+  requestId?: string;
+  /**
+   * Behavior when a closed workflow with the same ID exists. Default is
+   * allow-duplicate.
+   */
+  idReusePolicy?: common.WorkflowIdReusePolicy;
+  /**
+   * Behavior when a workflow is currently running with the same ID. Set to use-existing
+   * for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is
+   * terminate-if-running.
+   */
+  idConflictPolicy?: common.WorkflowIdConflictPolicy;
+  /**
+   * Retry policy for the workflow.
+   */
+  retryPolicy?: common.RetryPolicy;
+  /**
+   * Cron schedule for recurring workflow executions. See
+   * https://docs.temporal.io/cron-job.
+   */
+  cronSchedule?: string;
+  /**
+   * Memo for the workflow.
+   */
+  memo?: Record<string, unknown>;
+  /**
+   * Typed search attributes for the workflow.
+   */
+  searchAttributes?: common.TypedSearchAttributes;
+  /**
+   * Priority of the workflow execution.
+   */
+  priority?: common.Priority;
+  /**
+   * Override for workflow versioning behavior.
+   */
+  versioningOverride?: common.VersioningOverride;
+  /**
+   * Amount of time to wait before starting the workflow. This does not work with
+   * cron-schedule.
+   */
+  startDelay?: common.Duration;
+  userMetadata?: UserMetadata;
+} & (
+  | {
+      /**
+       * Workflow type name or callable identifying the workflow to start.
+       */
+      workflow: string;
+      /**
+       * Arguments for workflow.
+       */
+      args?: ReadonlyArray<unknown>;
+    }
+  | ({
+      /**
+       * Workflow type name or callable identifying the workflow to start.
+       */
+      workflow: WorkflowFn;
+    } & (Parameters<WorkflowFn> extends [any, ...any[]]
+      ? {
+          /**
+           * Arguments for workflow.
+           */
+          args: Parameters<WorkflowFn> | Readonly<Parameters<WorkflowFn>>;
+        }
+      : {
+          /**
+           * Arguments for workflow.
+           */
+          args?: Parameters<WorkflowFn> | Readonly<Parameters<WorkflowFn>>;
+        }))
+) &
+  (
+    | {
+        /**
+         * Signal name or callable to send with the start request.
+         */
+        signal: string;
+        /**
+         * Arguments for signal.
+         */
+        signalArgs?: ReadonlyArray<unknown>;
+      }
+    | ({
+        /**
+         * Signal name or callable to send with the start request.
+         */
+        signal: SignalValue;
+      } & (SignalArgs extends [any, ...any[]]
+        ? {
+            /**
+             * Arguments for signal.
+             */
+            signalArgs: SignalArgs | Readonly<SignalArgs>;
+          }
+        : {
+            /**
+             * Arguments for signal.
+             */
+            signalArgs?: SignalArgs | Readonly<SignalArgs>;
+          }))
+  );
 
 export const SignalWithStartWorkflowRequest = {
   toProto<
     WorkflowFn extends (...args: any[]) => Promise<any> = (
       ...args: any[]
     ) => Promise<any>,
-    SignalValue extends workflow.SignalDefinition<any[]> =
-      workflow.SignalDefinition<any[]>,
+    SignalValue extends workflow.SignalDefinition<any[]> = workflow.SignalDefinition<
+      any[]
+    >,
+    SignalArgs extends any[] = SignalValue extends workflow.SignalDefinition<
+      infer Args,
+      any
+    >
+      ? Args
+      : never,
   >(
     model:
-      | SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>
+      | SignalWithStartWorkflowRequest<WorkflowFn, SignalValue, SignalArgs>
       | null
       | undefined,
   ):
@@ -140,26 +223,14 @@ export const SignalWithStartWorkflowRequest = {
     }
     return {
       workflowType: workflowTypeToProto(
-        requiredField(
-          model.workflow,
-          "SignalWithStartWorkflowRequest",
-          "workflow",
-        ),
+        requiredField(model.workflow, "SignalWithStartWorkflowRequest", "workflow"),
       ),
       input: _RequestArgsToPayloads(model.args),
-      workflowId: requiredField(
-        model.id,
-        "SignalWithStartWorkflowRequest",
-        "id",
-      ),
+      workflowId: requiredField(model.id, "SignalWithStartWorkflowRequest", "id"),
       taskQueue: taskQueueToProto(
-        requiredField(
-          model.taskQueue,
-          "SignalWithStartWorkflowRequest",
-          "taskQueue",
-        ),
+        requiredField(model.taskQueue, "SignalWithStartWorkflowRequest", "taskQueue"),
       ),
-      signalName: ((value) => (typeof value === "string" ? value : value.name))(
+      signalName: signal_function_to_proto(
         requiredField(model.signal, "SignalWithStartWorkflowRequest", "signal"),
       ),
       signalInput: _RequestArgsToPayloads(model.signalArgs),
@@ -168,44 +239,34 @@ export const SignalWithStartWorkflowRequest = {
           ? undefined
           : durationToProto(model.executionTimeout),
       workflowRunTimeout:
-        model.runTimeout == null
-          ? undefined
-          : durationToProto(model.runTimeout),
+        model.runTimeout == null ? undefined : durationToProto(model.runTimeout),
       workflowTaskTimeout:
-        model.taskTimeout == null
-          ? undefined
-          : durationToProto(model.taskTimeout),
+        model.taskTimeout == null ? undefined : durationToProto(model.taskTimeout),
       requestId: model.requestId,
       workflowIdReusePolicy: workflowIdReusePolicyToProto(
         model.idReusePolicy == null
           ? common.WorkflowIdReusePolicy.ALLOW_DUPLICATE
           : model.idReusePolicy,
       ),
-      workflowIdConflictPolicy: workflowIdConflictPolicyToProto(
+      workflowIdConflictPolicy:
         model.idConflictPolicy == null
-          ? common.WorkflowIdConflictPolicy.FAIL
-          : model.idConflictPolicy,
-      ),
-      retryPolicy:
-        model.retryPolicy == null
           ? undefined
-          : retryPolicyToProto(model.retryPolicy),
+          : workflowIdConflictPolicyToProto(model.idConflictPolicy),
+      retryPolicy:
+        model.retryPolicy == null ? undefined : retryPolicyToProto(model.retryPolicy),
       cronSchedule: model.cronSchedule,
       memo: model.memo == null ? undefined : memoToProto(model.memo),
       searchAttributes:
         model.searchAttributes == null
           ? undefined
           : searchAttributesToProto(model.searchAttributes),
-      priority:
-        model.priority == null ? undefined : priorityToProto(model.priority),
+      priority: model.priority == null ? undefined : priorityToProto(model.priority),
       versioningOverride:
         model.versioningOverride == null
           ? undefined
           : versioningOverrideToProto(model.versioningOverride),
       workflowStartDelay:
-        model.startDelay == null
-          ? undefined
-          : durationToProto(model.startDelay),
+        model.startDelay == null ? undefined : durationToProto(model.startDelay),
       userMetadata:
         model.userMetadata == null
           ? undefined
@@ -216,7 +277,16 @@ export const SignalWithStartWorkflowRequest = {
 };
 
 export interface UserMetadata {
+  /**
+   * Single-line fixed summary for the workflow execution that may appear in UI and CLI.
+   * This can be in single-line Temporal Markdown format.
+   */
   staticSummary?: common.Payload;
+  /**
+   * General fixed details for the workflow execution that may appear in UI and CLI.
+   * This can be in Temporal Markdown format and can span multiple lines. This value is
+   * fixed on the workflow execution and cannot be updated.
+   */
   staticDetails?: common.Payload;
 }
 
@@ -243,13 +313,9 @@ export const UserMetadata = {
     }
     return {
       summary:
-        model.staticSummary == null
-          ? undefined
-          : payloadToProto(model.staticSummary),
+        model.staticSummary == null ? undefined : payloadToProto(model.staticSummary),
       details:
-        model.staticDetails == null
-          ? undefined
-          : payloadToProto(model.staticDetails),
+        model.staticDetails == null ? undefined : payloadToProto(model.staticDetails),
     };
   },
 };
@@ -261,12 +327,19 @@ export const WorkflowService = nexus.service("WorkflowService", {
   >({ name: "SignalWithStartWorkflowExecution" }),
 });
 
+/**
+ * Signal a workflow, starting it first if needed.
+ *
+ * @param request - Request for the operation.
+ * @returns A workflow handle to the started workflow.
+ */
 export async function signalWithStartWorkflow<
   WorkflowFn extends (...args: any[]) => Promise<any> = (
     ...args: any[]
   ) => Promise<any>,
-  SignalValue extends workflow.SignalDefinition<any[]> =
-    workflow.SignalDefinition<any[]>,
+  SignalValue extends workflow.SignalDefinition<any[]> = workflow.SignalDefinition<
+    any[]
+  >,
 >(
   request: SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>,
 ): Promise<workflow.ExternalWorkflowHandle> {
@@ -280,8 +353,5 @@ export async function signalWithStartWorkflow<
     requestProto,
   );
   const result = await handle.result();
-  return workflow.getExternalWorkflowHandle(
-    request.id,
-    result.runId ?? undefined,
-  );
+  return workflow.getExternalWorkflowHandle(request.id, result.runId ?? undefined);
 }

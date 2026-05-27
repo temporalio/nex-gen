@@ -306,8 +306,24 @@ fn formatter_command(
     let output_path = output_path.to_string_lossy().into_owned();
     match language {
         Language::Go => Ok(("gofmt", vec!["-w".to_string(), output_path])),
-        Language::Python => Ok(("ruff", vec!["format".to_string(), output_path])),
-        Language::TypeScript => Ok(("prettier", vec!["--write".to_string(), output_path])),
+        Language::Python => Ok((
+            "ruff",
+            vec![
+                "format".to_string(),
+                "--line-length".to_string(),
+                "88".to_string(),
+                output_path,
+            ],
+        )),
+        Language::TypeScript => Ok((
+            "prettier",
+            vec![
+                "--write".to_string(),
+                "--print-width".to_string(),
+                "88".to_string(),
+                output_path,
+            ],
+        )),
         _ => Err(error::Error::UnsupportedLanguage { language }),
     }
 }
@@ -531,6 +547,8 @@ fn format_example_output(repo_root: &Path, language: Language, output_path: &Pat
                 "run".to_string(),
                 "ruff".to_string(),
                 "format".to_string(),
+                "--line-length".to_string(),
+                "88".to_string(),
                 "--config".to_string(),
                 "pyproject.toml".to_string(),
                 output_path.to_string_lossy().into_owned(),
@@ -544,6 +562,8 @@ fn format_example_output(repo_root: &Path, language: Language, output_path: &Pat
                 "--".to_string(),
                 "prettier".to_string(),
                 "--write".to_string(),
+                "--print-width".to_string(),
+                "88".to_string(),
                 output_path.to_string_lossy().into_owned(),
             ],
         ),
@@ -589,10 +609,10 @@ mod tests {
     fn chooses_python_formatter_command() {
         let (program, args) = formatter_command(Language::Python, Path::new("output")).unwrap();
         assert_eq!(program, "ruff");
-        assert_eq!(args, vec!["format", "output"]);
+        assert_eq!(args, vec!["format", "--line-length", "88", "output"]);
         assert_eq!(
             format_formatter_command(program, &args),
-            "ruff format output"
+            "ruff format --line-length 88 output"
         );
     }
 
@@ -600,10 +620,10 @@ mod tests {
     fn chooses_typescript_formatter_command() {
         let (program, args) = formatter_command(Language::TypeScript, Path::new("output")).unwrap();
         assert_eq!(program, "prettier");
-        assert_eq!(args, vec!["--write", "output"]);
+        assert_eq!(args, vec!["--write", "--print-width", "88", "output"]);
         assert_eq!(
             format_formatter_command(program, &args),
-            "prettier --write output"
+            "prettier --write --print-width 88 output"
         );
     }
 }

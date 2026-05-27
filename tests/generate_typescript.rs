@@ -137,6 +137,8 @@ fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_pa
             "--",
             "prettier",
             "--write",
+            "--print-width",
+            "88",
             output_path.to_str().unwrap(),
         ])
         .status()
@@ -196,9 +198,9 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     )
     .unwrap();
 
-    assert!(rendered.contains("type _RequestWithFunctionField<"));
-    assert!(rendered.contains("type _RequestWithArgumentsField<"));
-    assert!(rendered.contains("type SignalWithStartWorkflowRequestBase = {"));
+    assert!(!rendered.contains("type _RequestWithFunctionField<"));
+    assert!(!rendered.contains("type _RequestWithArgumentsField<"));
+    assert!(!rendered.contains("type SignalWithStartWorkflowRequestBase = {"));
     assert!(rendered.contains("export type SignalWithStartWorkflowRequest<"));
     assert!(rendered.contains(
         "WorkflowFn extends (...args: any[]) => Promise<any> = (...args: any[]) => Promise<any>,"
@@ -206,18 +208,26 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains(
         "SignalValue extends workflow.SignalDefinition<any[]> = workflow.SignalDefinition<any[]>"
     ));
-    assert!(rendered.contains("> = _RequestWithArgumentsField<"));
+    assert!(rendered.contains("> = {\n  /**\n   * Unique identifier for the workflow execution."));
     assert!(
         rendered.contains(
             "SignalValue extends workflow.SignalDefinition<infer Args, any> ? Args : never"
         )
     );
-    assert!(rendered.contains(
-        "_RequestWithFunctionField<WorkflowFn, SignalWithStartWorkflowRequestBase, \"workflow\", \"args\">"
-    ));
-    assert!(rendered.contains(
-        "type SignalWithStartWorkflowRequestBase = {\n  id: string;\n  taskQueue: string;\n  executionTimeout?: common.Duration;\n  runTimeout?: common.Duration;\n  taskTimeout?: common.Duration;\n  requestId?: string;\n  idReusePolicy?: common.WorkflowIdReusePolicy;\n  idConflictPolicy?: common.WorkflowIdConflictPolicy;"
-    ));
+    assert!(rendered.contains("SignalArgs extends any[] = SignalValue extends"));
+    assert!(rendered.contains("signalArgs: SignalArgs | Readonly<SignalArgs>;"));
+    assert!(rendered.contains("signalArgs?: SignalArgs | Readonly<SignalArgs>;"));
+    assert!(rendered.contains("Workflow type name or callable identifying the workflow to start."));
+    assert!(rendered.contains("workflow: string;"));
+    assert!(rendered.contains("Arguments for workflow."));
+    assert!(rendered.contains("args?: ReadonlyArray<unknown>;"));
+    assert!(rendered.contains("Arguments for signal."));
+    assert!(rendered.contains("signalArgs?: ReadonlyArray<unknown>;"));
+    assert!(
+        rendered.contains("* Unique identifier for the workflow execution.\n   */\n  id: string;")
+    );
+    assert!(!rendered.contains("@property workflow"));
+    assert!(rendered.contains("* @returns A workflow handle to the started workflow."));
     assert!(rendered.contains("id: string;"));
     assert!(rendered.contains("taskQueue: string;"));
     assert!(rendered.contains("runTimeout?: common.Duration;"));
@@ -225,13 +235,11 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains("idConflictPolicy?: common.WorkflowIdConflictPolicy;"));
     assert!(!rendered.contains("identity?: string;"));
     assert!(rendered.contains("memo?: Record<string, unknown>;"));
-    assert!(
-        rendered
-            .contains("searchAttributes?: common.TypedSearchAttributes | common.SearchAttributes;")
-    );
+    assert!(rendered.contains("searchAttributes?: common.TypedSearchAttributes;"));
+    assert!(!rendered.contains("common.TypedSearchAttributes | common.SearchAttributes"));
     assert!(rendered.contains("versioningOverride?: common.VersioningOverride;"));
     assert!(rendered.contains("priority?: common.Priority;"));
-    assert!(!rendered.contains("signal: string;"));
+    assert!(rendered.contains("signal: string;"));
     assert!(rendered.contains("### support.ts"));
     assert!(rendered.contains("### index.ts"));
     assert!(rendered.contains("export * from './support.ts';"));
@@ -267,10 +275,8 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(input_index < workflow_id_index);
     assert!(workflow_id_index < task_queue_index);
     assert!(task_queue_index < signal_name_index);
-    assert!(
-        rendered
-            .contains("signalName: ((value) => typeof value === 'string' ? value : (value.name))(")
-    );
+    assert!(rendered.contains("signalName: signal_function_to_proto("));
+    assert!(!rendered.contains("signalName: ((value) =>"));
     assert!(rendered.contains("workflowType: workflowTypeToProto("));
     assert!(rendered.contains("taskQueue: taskQueueToProto("));
     assert!(rendered.contains(
@@ -279,9 +285,10 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains("common.WorkflowIdReusePolicy.ALLOW_DUPLICATE"));
     assert!(rendered.contains("workflowIdReusePolicy: workflowIdReusePolicyToProto("));
     assert!(!rendered.contains("workflowIdReusePolicyToProto(0"));
-    assert!(rendered.contains("common.WorkflowIdConflictPolicy.FAIL"));
-    assert!(rendered.contains("workflowIdConflictPolicy: workflowIdConflictPolicyToProto("));
+    assert!(rendered.contains("workflowIdConflictPolicy:"));
     assert!(!rendered.contains("workflowIdConflictPolicyToProto(0"));
+    assert!(rendered.contains("model.idConflictPolicy == null"));
+    assert!(rendered.contains("workflowIdConflictPolicyToProto(model.idConflictPolicy)"));
     assert!(rendered.contains("memo: model.memo == null ? undefined : memoToProto(model.memo),"));
     assert!(rendered.contains(
         "searchAttributes: model.searchAttributes == null ? undefined : searchAttributesToProto(model.searchAttributes),"

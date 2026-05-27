@@ -13,7 +13,7 @@ use crate::resources::{
     ResolvedResourceReturnSpec, ResolvedResourceSpec, resolve_service_resources,
 };
 use crate::spec::{
-    ApiSpec, AuthoredFieldTypeSpec, FunctionFieldSpec, GeneratedModelSpec,
+    ApiSpec, AuthoredFieldTypeSpec, FunctionFieldSpec, GeneratedModelSpec, LanguageStringSpec,
     OperationOutputTransformSpec, OperationSpec, ResourceFieldSpec, ServiceSpec,
     TypeReplacementSpec, WitEnumSpec, WitFlagsSpec, WitRecordSpec, WitVariantSpec,
     WithArgumentsFieldSpec,
@@ -40,6 +40,8 @@ pub(crate) struct PlannedService {
 pub(crate) struct PlannedOperation {
     pub(crate) name: String,
     pub(crate) wire_name: String,
+    pub(crate) doc: LanguageStringSpec,
+    pub(crate) return_doc: LanguageStringSpec,
     pub(crate) input: PlannedMessageType,
     pub(crate) output: PlannedOperationOutput,
     pub(crate) output_transform: Option<OperationOutputTransformSpec>,
@@ -224,6 +226,7 @@ pub(crate) struct PlannedField {
     pub(crate) owner_name: String,
     pub(crate) proto_name: String,
     pub(crate) authored_name: String,
+    pub(crate) doc: Option<LanguageStringSpec>,
     pub(crate) annotation_override: Option<crate::spec::LanguageStringSpec>,
     pub(crate) default_value: Option<PlannedFieldDefault>,
     pub(crate) required: bool,
@@ -554,6 +557,8 @@ fn plan_operation(
     Ok(PlannedOperation {
         name: operation.name.clone(),
         wire_name: operation.wire_name.clone(),
+        doc: operation.doc.clone(),
+        return_doc: operation.return_doc.clone(),
         input,
         output,
         output_transform: operation.output_transform().cloned(),
@@ -1091,6 +1096,9 @@ fn plan_field(
             .and_then(|generated_model| generated_model.field_name_override(&proto_name))
             .unwrap_or(&proto_name)
             .to_string(),
+        doc: generated_model
+            .and_then(|generated_model| generated_model.field_doc(&proto_name))
+            .cloned(),
         annotation_override: generated_model
             .and_then(|generated_model| generated_model.field_annotation(&proto_name))
             .cloned(),
@@ -1140,6 +1148,7 @@ fn plan_wit_field(
             .field_name_override(field_name)
             .unwrap_or(field_name)
             .to_string(),
+        doc: record.generated_model.field_doc(field_name).cloned(),
         annotation_override: record.generated_model.field_annotation(field_name).cloned(),
         default_value: record
             .generated_model

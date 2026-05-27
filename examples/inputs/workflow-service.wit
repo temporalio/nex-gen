@@ -23,36 +23,53 @@ interface workflow-service {
     workflow-id-reuse-policy,
   };
 
+  /// @nexus.doc "Request fields for signaling a workflow, starting it first if needed."
   /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
   record signal-with-start-workflow-request {
+    /// @nexus.doc "Workflow type name or callable identifying the workflow to start."
     /// @nexus.proto-field "workflow_type"
     workflow: workflow-function,
+    /// @nexus.doc "Unique identifier for the workflow execution."
     /// @nexus.proto-field "workflow_id"
     id: string,
+    /// @nexus.doc "Task queue to run the workflow on."
     task-queue: task-queue,
+    /// @nexus.doc "Signal name or callable to send with the start request."
     /// @nexus.proto-field "signal_name"
     signal: signal-function,
+    /// @nexus.doc "Total workflow execution timeout, including retries and continue-as-new."
     /// @nexus.proto-field "workflow_execution_timeout"
     execution-timeout: option<duration>,
+    /// @nexus.doc "Timeout of a single workflow run."
     /// @nexus.proto-field "workflow_run_timeout"
     run-timeout: option<duration>,
+    /// @nexus.doc "Timeout of a single workflow task."
     /// @nexus.proto-field "workflow_task_timeout"
     task-timeout: option<duration>,
     /// @nexus.omit
     identity: placeholder,
+    /// @nexus.doc "Request ID used to deduplicate workflow start requests."
     request-id: option<string>,
+    /// @nexus.doc "Behavior when a closed workflow with the same ID exists. Default is allow-duplicate."
     /// @nexus.proto-field "workflow_id_reuse_policy"
     /// @nexus.default "allow-duplicate"
     id-reuse-policy: workflow-id-reuse-policy,
+    /// @nexus.doc "Behavior when a workflow is currently running with the same ID. Set to use-existing for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is terminate-if-running."
     /// @nexus.proto-field "workflow_id_conflict_policy"
-    /// @nexus.default "fail"
-    id-conflict-policy: workflow-id-conflict-policy,
+    id-conflict-policy: option<workflow-id-conflict-policy>,
+    /// @nexus.doc "Retry policy for the workflow."
     retry-policy: option<retry-policy>,
+    /// @nexus.doc "Cron schedule for recurring workflow executions. See https://docs.temporal.io/cron-job."
     cron-schedule: option<string>,
+    /// @nexus.doc "Memo for the workflow."
     memo: option<memo>,
+    /// @nexus.doc "Typed search attributes for the workflow."
     search-attributes: option<search-attributes>,
+    /// @nexus.doc "Priority of the workflow execution."
     priority: option<priority>,
+    /// @nexus.doc "Override for workflow versioning behavior."
     versioning-override: option<versioning-override>,
+    /// @nexus.doc "Amount of time to wait before starting the workflow. This does not work with cron-schedule."
     /// @nexus.proto-field "workflow_start_delay"
     start-delay: option<duration>,
     user-metadata: option<user-metadata>,
@@ -76,6 +93,9 @@ interface workflow-service {
     signal-link: placeholder,
   }
 
+  /// @nexus.doc
+  ///   "Signal a workflow, starting it first if needed."
+  ///   returns="A workflow handle to the started workflow."
   /// @nexus.output-transform
   ///   python-type="workflow.ExternalWorkflowHandle[typing.Any]"
   ///   python="workflow.get_external_workflow_handle(request.id, run_id=result.run_id)"

@@ -205,26 +205,15 @@ function typedSearchAttributePairFromPayload(
 
 export function searchAttributesFromProto(
   proto: temporal.api.common.v1.ISearchAttributes,
-): common.TypedSearchAttributes | common.SearchAttributes {
+): common.TypedSearchAttributes {
   const indexedFields = proto.indexedFields ?? {};
   const typedPairs: common.SearchAttributePair[] = [];
   for (const [name, payload] of Object.entries(indexedFields)) {
     const pair = typedSearchAttributePairFromPayload(name, payload);
     if (pair == null) {
-      const decoded =
-        common.mapFromPayloads(common.defaultPayloadConverter, indexedFields) ??
-        {};
-      return Object.fromEntries(
-        Object.entries(decoded).flatMap(([key, value]) => {
-          if (value == null) {
-            return [];
-          }
-          if (Array.isArray(value)) {
-            return value.length === 0 ? [] : [[key, value]];
-          }
-          return [[key, [value]]];
-        }),
-      ) as common.SearchAttributes;
+      throw new TypeError(
+        `search attribute ${name} cannot be decoded as a typed search attribute`,
+      );
     }
     typedPairs.push(pair);
   }
@@ -232,24 +221,14 @@ export function searchAttributesFromProto(
 }
 
 export function searchAttributesToProto(
-  searchAttributes: common.TypedSearchAttributes | common.SearchAttributes,
+  searchAttributes: common.TypedSearchAttributes,
 ): temporal.api.common.v1.ISearchAttributes {
-  if (searchAttributes instanceof common.TypedSearchAttributes) {
-    return {
-      indexedFields: Object.fromEntries(
-        searchAttributes
-          .getAll()
-          .map((pair): [string, common.Payload] => [
-            pair.key.name,
-            typedSearchAttributePayload(pair.value, pair.key.type),
-          ]),
-      ),
-    };
-  }
   return {
-    indexedFields: common.mapToPayloads(
-      common.defaultPayloadConverter,
-      searchAttributes,
+    indexedFields: Object.fromEntries(
+      searchAttributes.getAll().map((pair): [string, common.Payload] => [
+        pair.key.name,
+        typedSearchAttributePayload(pair.value, pair.key.type),
+      ]),
     ),
   };
 }

@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import temporalio.common
+from datetime import timedelta
 from temporalio import workflow
 import temporalio.api.activity.v1.message_pb2
 

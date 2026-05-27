@@ -4,10 +4,7 @@ import * as common from "@temporalio/common";
 import * as nexus from "nexus-rpc";
 import type { google, temporal } from "@temporalio/proto";
 import * as workflow from "@temporalio/workflow";
-import {
-  markNexusResource,
-  registerNexusResource,
-} from "../nexus-api-gen-runtime.ts";
+import { markNexusResource, registerNexusResource } from "../nexus-api-gen-runtime.ts";
 
 import {
   retryPolicyFromProto,
@@ -49,33 +46,6 @@ function requiredField<T>(
   return value;
 }
 
-type _RequestWithFunctionField<
-  Fn extends (...args: any[]) => any,
-  Base,
-  Field extends string,
-  ArgsField extends string,
-> =
-  | (Base & { [K in Field]: string } & {
-      [K in ArgsField]?: ReadonlyArray<unknown>;
-    })
-  | (Base & { [K in Field]: Fn } & (Parameters<Fn> extends [any, ...any[]]
-        ? { [K in ArgsField]: Parameters<Fn> | Readonly<Parameters<Fn>> }
-        : { [K in ArgsField]?: Parameters<Fn> | Readonly<Parameters<Fn>> }));
-
-type _RequestWithArgumentsField<
-  Value,
-  Args extends any[],
-  Base,
-  Field extends string,
-  ArgsField extends string,
-> =
-  | (Base & { [K in Field]: string } & {
-      [K in ArgsField]?: ReadonlyArray<unknown>;
-    })
-  | (Base & { [K in Field]: Value } & (Args extends [any, ...any[]]
-        ? { [K in ArgsField]: Args | Readonly<Args> }
-        : { [K in ArgsField]?: Args | Readonly<Args> }));
-
 function _RequestArgsToPayloads(
   args: ReadonlyArray<unknown> | undefined,
 ): temporal.api.common.v1.IPayloads | undefined {
@@ -86,22 +56,38 @@ function _RequestArgsToPayloads(
   return payloads == null ? undefined : { payloads };
 }
 
-type StartWorkflowRequestBase = {
-  workflowId: string;
-  taskQueue: string;
-  workflowStartDelay?: common.Duration;
-};
-
 export type StartWorkflowRequest<
   WorkflowFn extends (...args: any[]) => Promise<any> = (
     ...args: any[]
   ) => Promise<any>,
-> = _RequestWithFunctionField<
-  WorkflowFn,
-  StartWorkflowRequestBase,
-  "workflow",
-  "args"
->;
+> = {
+  workflowId: string;
+  taskQueue: string;
+  workflowStartDelay?: common.Duration;
+} & (
+  | {
+      workflow: string;
+      /**
+       * Arguments for workflow.
+       */
+      args?: ReadonlyArray<unknown>;
+    }
+  | ({
+      workflow: WorkflowFn;
+    } & (Parameters<WorkflowFn> extends [any, ...any[]]
+      ? {
+          /**
+           * Arguments for workflow.
+           */
+          args: Parameters<WorkflowFn> | Readonly<Parameters<WorkflowFn>>;
+        }
+      : {
+          /**
+           * Arguments for workflow.
+           */
+          args?: Parameters<WorkflowFn> | Readonly<Parameters<WorkflowFn>>;
+        }))
+);
 
 export const StartWorkflowRequest = {
   toProto<
@@ -110,9 +96,7 @@ export const StartWorkflowRequest = {
     ) => Promise<any>,
   >(
     model: StartWorkflowRequest<WorkflowFn> | null | undefined,
-  ):
-    | temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest
-    | undefined {
+  ): temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest | undefined {
     if (model == null) {
       return undefined;
     }
@@ -121,11 +105,7 @@ export const StartWorkflowRequest = {
         requiredField(model.workflow, "StartWorkflowRequest", "workflow"),
       ),
       input: _RequestArgsToPayloads(model.args),
-      workflowId: requiredField(
-        model.workflowId,
-        "StartWorkflowRequest",
-        "workflowId",
-      ),
+      workflowId: requiredField(model.workflowId, "StartWorkflowRequest", "workflowId"),
       taskQueue: taskQueueToProto(
         requiredField(model.taskQueue, "StartWorkflowRequest", "taskQueue"),
       ),
@@ -196,11 +176,7 @@ export const WorkflowExecution = {
       return undefined;
     }
     return {
-      workflowId: requiredField(
-        model.workflowId,
-        "WorkflowExecution",
-        "workflowId",
-      ),
+      workflowId: requiredField(model.workflowId, "WorkflowExecution", "workflowId"),
       runId: model.runId,
     };
   },
@@ -282,10 +258,7 @@ registerNexusResource(
     );
   },
 );
-markNexusResource(
-  StartedWorkflow,
-  "WorkflowService::resource::started-workflow",
-);
+markNexusResource(StartedWorkflow, "WorkflowService::resource::started-workflow");
 
 export const WorkflowService = nexus.service("WorkflowService", {
   startWorkflow: nexus.operation<
@@ -302,6 +275,9 @@ export const WorkflowService = nexus.service("WorkflowService", {
   >({ name: "CancelWorkflow" }),
 });
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function startWorkflow<
   WorkflowFn extends (...args: any[]) => Promise<any> = (
     ...args: any[]
@@ -324,6 +300,9 @@ export async function startWorkflow<
   );
 }
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function restartWorkflow<
   WorkflowFn extends (...args: any[]) => Promise<any> = (
     ...args: any[]
@@ -346,6 +325,9 @@ export async function restartWorkflow<
   );
 }
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function cancelWorkflow(
   request: CancelWorkflowRequest,
 ): Promise<

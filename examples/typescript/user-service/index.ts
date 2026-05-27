@@ -81,11 +81,12 @@ markNexusResource(User, "UserService::resource::user");
 
 export const UserService = nexus.service("UserService", {
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
-  updateEmail: nexus.operation<UpdateEmailRequest, User>({
-    name: "UpdateEmail",
-  }),
+  updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
 });
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function getUser(request: GetUserRequest): Promise<User> {
   const client = workflow.createNexusServiceClient({
     service: UserService,
@@ -99,6 +100,9 @@ export async function getUser(request: GetUserRequest): Promise<User> {
   return await handle.result();
 }
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function updateEmail(request: UpdateEmailRequest): Promise<User> {
   const client = workflow.createNexusServiceClient({
     service: UserService,

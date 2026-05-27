@@ -19,22 +19,7 @@ from ..models import (
 )
 
 
-def _nexus_normalize_function_args(
-    value: object | tuple[object, ...] | list[typing.Any] | None,
-) -> tuple[object, ...] | None:
-    if value is None:
-        return None
-    if isinstance(value, (tuple, list)):
-        return tuple(typing.cast(collections.abc.Iterable[object], value))
-    return (value,)
-
-
-_nexus_arg_unset = object()
-
-
-FirstWorkflowArg = typing.TypeVar("FirstWorkflowArg")
-SecondWorkflowArg = typing.TypeVar("SecondWorkflowArg")
-RemainingWorkflowArgs = typing_extensions.TypeVarTuple("RemainingWorkflowArgs")
+WorkflowArgs = typing_extensions.TypeVarTuple("WorkflowArgs")
 
 
 @dataclasses.dataclass
@@ -129,19 +114,8 @@ async def _restart_workflow(
 @typing.overload
 async def restart_workflow(
     workflow: str,
-    arg: object = ...,
-    *,
-    args: tuple[typing.Any, ...] | list[typing.Any] | None = ...,
-    workflow_id: str,
-    task_queue: str,
-    workflow_start_delay: timedelta | None = ...,
-) -> StartedWorkflow: ...
-
-
-@typing.overload
-async def restart_workflow(
-    workflow: collections.abc.Callable[[typing.Any], collections.abc.Awaitable[object]],
-    *,
+    *positional_args: object,
+    args: list[typing.Any] | None = ...,
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: timedelta | None = ...,
@@ -151,46 +125,21 @@ async def restart_workflow(
 @typing.overload
 async def restart_workflow(
     workflow: collections.abc.Callable[
-        [typing.Any, FirstWorkflowArg], collections.abc.Awaitable[object]
-    ],
-    arg: FirstWorkflowArg,
-    *,
-    workflow_id: str,
-    task_queue: str,
-    workflow_start_delay: timedelta | None = ...,
-) -> StartedWorkflow: ...
-
-
-@typing.overload
-async def restart_workflow(
-    workflow: collections.abc.Callable[
-        [typing.Any, FirstWorkflowArg], collections.abc.Awaitable[object]
-    ],
-    *,
-    args: tuple[FirstWorkflowArg],
-    workflow_id: str,
-    task_queue: str,
-    workflow_start_delay: timedelta | None = ...,
-) -> StartedWorkflow: ...
-
-
-@typing.overload
-async def restart_workflow(
-    workflow: collections.abc.Callable[
-        [
-            typing.Any,
-            FirstWorkflowArg,
-            SecondWorkflowArg,
-            typing_extensions.Unpack[RemainingWorkflowArgs],
-        ],
+        [typing.Any, typing_extensions.Unpack[WorkflowArgs]],
         collections.abc.Awaitable[object],
     ],
+    *positional_args: typing_extensions.Unpack[WorkflowArgs],
+    workflow_id: str,
+    task_queue: str,
+    workflow_start_delay: timedelta | None = ...,
+) -> StartedWorkflow: ...
+
+
+@typing.overload
+async def restart_workflow(
+    workflow: collections.abc.Callable[..., collections.abc.Awaitable[object]],
     *,
-    args: tuple[
-        FirstWorkflowArg,
-        SecondWorkflowArg,
-        typing_extensions.Unpack[RemainingWorkflowArgs],
-    ],
+    args: list[typing.Any],
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: timedelta | None = ...,
@@ -199,17 +148,24 @@ async def restart_workflow(
 
 async def restart_workflow(
     workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],
-    arg: object = _nexus_arg_unset,
-    *,
-    args: object | tuple[object, ...] | list[typing.Any] | None = None,
+    *positional_args: object,
+    args: list[typing.Any] | None = None,
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: timedelta | None = None,
 ) -> StartedWorkflow:
-    if arg is not _nexus_arg_unset and args is not None:
-        raise TypeError("cannot specify both arg and args")
-    normalized_args = (
-        (arg,) if arg is not _nexus_arg_unset else _nexus_normalize_function_args(args)
+    """
+    Args:
+        positional_args: Positional arguments for workflow. Cannot be set if args is
+            set.
+        args: List-form arguments for workflow. Cannot be set if positional_args are
+            set. For typed workflow callables, list contents are not statically
+            typechecked; pass workflow arguments positionally for precise typechecking.
+    """
+    if positional_args and args is not None:
+        raise TypeError("cannot specify both positional arguments and args")
+    normalized_args: list[typing.Any] | None = (
+        list(positional_args) if positional_args else args
     )
     request = StartWorkflowRequest(
         workflow=workflow,

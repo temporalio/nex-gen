@@ -424,6 +424,8 @@ pub struct SupportFragmentSpec {
 pub struct OperationSpec {
     pub name: String,
     pub wire_name: String,
+    pub doc: LanguageStringSpec,
+    pub return_doc: LanguageStringSpec,
     pub input_proto: String,
     pub output_proto: String,
     pub input_record: Option<String>,
@@ -1145,6 +1147,7 @@ pub struct TypeReplacementSpec {
 pub struct GeneratedModelSpec {
     pub declared_fields: Vec<String>,
     pub field_names: BTreeMap<String, String>,
+    pub field_docs: BTreeMap<String, LanguageStringSpec>,
     pub field_annotations: BTreeMap<String, LanguageStringSpec>,
     pub field_flattened_annotations: BTreeMap<String, LanguageStringSpec>,
     pub field_wit_types: BTreeMap<String, AuthoredFieldTypeSpec>,
@@ -1158,6 +1161,7 @@ impl GeneratedModelSpec {
     pub fn is_empty(&self) -> bool {
         self.declared_fields.is_empty()
             && self.field_names.is_empty()
+            && self.field_docs.is_empty()
             && self.field_annotations.is_empty()
             && self.field_flattened_annotations.is_empty()
             && self.field_wit_types.is_empty()
@@ -1169,6 +1173,10 @@ impl GeneratedModelSpec {
 
     pub fn field_name_override(&self, field_name: &str) -> Option<&str> {
         self.field_names.get(field_name).map(String::as_str)
+    }
+
+    pub fn field_doc(&self, field_name: &str) -> Option<&LanguageStringSpec> {
+        self.field_docs.get(field_name)
     }
 
     pub fn field_annotation(&self, field_name: &str) -> Option<&LanguageStringSpec> {
@@ -1628,6 +1636,7 @@ fn build_generated_model_from_record(
     let mut authored_proto_fields = BTreeSet::new();
     let mut declared_fields = Vec::new();
     let mut field_names = BTreeMap::new();
+    let mut field_docs = BTreeMap::new();
     let mut field_annotations = BTreeMap::new();
     let mut field_flattened_annotations = BTreeMap::new();
     let mut field_wit_types = BTreeMap::new();
@@ -1731,6 +1740,12 @@ fn build_generated_model_from_record(
         declared_fields.push(proto_field_name.clone());
 
         field_names.insert(proto_field_name.clone(), field.name.clone());
+        if let Some(doc_directive) = directive(&directives, "doc", path, &field_context)? {
+            let doc = directive_language_string(doc_directive);
+            if !doc.is_empty() {
+                field_docs.insert(proto_field_name.clone(), doc);
+            }
+        }
         let field_wit_type =
             resolve_authored_field_type_spec(resolve, &field.ty, path, &field_context)?;
         let field_default =
@@ -1816,6 +1831,7 @@ fn build_generated_model_from_record(
         GeneratedModelSpec {
             declared_fields,
             field_names,
+            field_docs,
             field_annotations,
             field_flattened_annotations,
             field_wit_types,
@@ -2944,6 +2960,12 @@ fn build_operation(
     Ok(OperationSpec {
         name: operation_name,
         wire_name: wire_operation_name,
+        doc: directive(&directives, "doc", path, &context)?
+            .map(directive_language_string)
+            .unwrap_or_default(),
+        return_doc: directive(&directives, "doc", path, &context)?
+            .map(directive_returns_language_string)
+            .unwrap_or_default(),
         input_proto: input_proto.unwrap_or_default(),
         output_proto: output_proto.unwrap_or_default(),
         input_record,
@@ -3102,6 +3124,12 @@ fn directive_prefixed_language_string(directive: &Directive, suffix: &str) -> La
             spec.by_language.insert(language, value.to_string());
         }
     }
+    spec
+}
+
+fn directive_returns_language_string(directive: &Directive) -> LanguageStringSpec {
+    let mut spec = directive_prefixed_language_string(directive, "returns");
+    spec.default = directive.value("returns").map(ToOwned::to_owned);
     spec
 }
 
@@ -3719,6 +3747,81 @@ interface workflow-service {
                 .unwrap()
                 .field_source("namespace"),
             Some("workflowNamespace()")
+        );
+    }
+
+    #[test]
+    fn parses_language_specific_api_docs() {
+        let wit = r#"
+package temporal:nexus@1.0.0;
+
+world system {
+  export workflow-service;
+}
+
+interface workflow-service {
+  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
+  record request {
+    /// @nexus.doc "Default field doc" python="Python field doc" typescript="TypeScript field doc"
+    id: string,
+  }
+
+  /// @nexus.doc
+  ///   "Default operation doc"
+  ///   python="Python operation doc"
+  ///   typescript="TypeScript operation doc"
+  ///   returns="Default return doc"
+  ///   python-returns="Python return doc"
+  ///   typescript-returns="TypeScript return doc"
+  request-op: func(request: request) -> request;
+}
+"#;
+
+        let python = parse(Language::Python, wit);
+        let typescript = parse(Language::TypeScript, wit);
+        assert_eq!(
+            python.services[0]
+                .operation("RequestOp")
+                .unwrap()
+                .doc
+                .for_language(Language::Python),
+            Some("Python operation doc")
+        );
+        assert_eq!(
+            python.services[0]
+                .operation("RequestOp")
+                .unwrap()
+                .return_doc
+                .for_language(Language::Python),
+            Some("Python return doc")
+        );
+        assert_eq!(
+            typescript.services[0]
+                .operation("RequestOp")
+                .unwrap()
+                .doc
+                .for_language(Language::TypeScript),
+            Some("TypeScript operation doc")
+        );
+        assert_eq!(
+            typescript.services[0]
+                .operation("RequestOp")
+                .unwrap()
+                .return_doc
+                .for_language(Language::TypeScript),
+            Some("TypeScript return doc")
+        );
+        assert_eq!(
+            python
+                .type_override(
+                    "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
+                )
+                .unwrap()
+                .generated_model()
+                .unwrap()
+                .field_doc("id")
+                .and_then(|doc| doc.for_language(Language::Python)),
+            Some("Python field doc")
         );
     }
 

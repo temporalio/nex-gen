@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import dataclasses
-from datetime import timedelta
 import temporalio.common
+from datetime import timedelta
 import temporalio.api.activity.v1.message_pb2
 
 from ._support import (

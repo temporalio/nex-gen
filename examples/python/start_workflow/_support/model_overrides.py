@@ -158,8 +158,7 @@ def workflow_id_conflict_policy_to_proto(
 
 
 def search_attributes_to_proto(
-    search_attributes: temporalio.common.TypedSearchAttributes
-    | temporalio.common.SearchAttributes,
+    search_attributes: temporalio.common.TypedSearchAttributes,
 ) -> common_pb2.SearchAttributes:
     proto = common_pb2.SearchAttributes()
     temporalio.converter.encode_search_attributes(search_attributes, proto)

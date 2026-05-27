@@ -19,6 +19,7 @@ asyncio_mode = "auto"
 pythonpath = ["."]
 
 [tool.ruff]
+line-length = 88
 target-version = "py310"
 
 [tool.basedpyright]

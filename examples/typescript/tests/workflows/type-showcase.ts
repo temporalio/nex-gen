@@ -19,8 +19,7 @@ export async function typeShowcaseCaller(): Promise<{
     deactivated: true,
     displayName: renamedUser.displayName,
     email: updatedUser.email,
-    hasReadProfile:
-      (user.profile.capabilities & UserCapability.ReadProfile) !== 0,
+    hasReadProfile: (user.profile.capabilities & UserCapability.ReadProfile) !== 0,
     notificationTag: user.profile.notificationTarget.tag,
     userId: user.userId,
   };

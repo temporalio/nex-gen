@@ -71,7 +71,7 @@ interface model {
   type memo = placeholder;
 
   /// @nexus.proto "temporal.api.common.v1.SearchAttributes"
-  /// @nexus.type python="temporalio.common.TypedSearchAttributes | temporalio.common.SearchAttributes" typescript="common.TypedSearchAttributes | common.SearchAttributes" go="go.temporal.io/sdk/temporal.SearchAttributes"
+  /// @nexus.type python="temporalio.common.TypedSearchAttributes" typescript="common.TypedSearchAttributes"
   type search-attributes = placeholder;
 
   /// @nexus.proto "temporal.api.common.v1.Priority"
@@ -106,9 +106,11 @@ interface model {
   /// @nexus.proto "temporal.api.sdk.v1.UserMetadata"
   /// @nexus.flatten-in-api
   record user-metadata {
+    /// @nexus.doc "Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format."
     /// @nexus.proto-field "summary"
     /// @nexus.flattened-type python="str"
     static-summary: option<payload>,
+    /// @nexus.doc "General fixed details for the workflow execution that may appear in UI and CLI. This can be in Temporal Markdown format and can span multiple lines. This value is fixed on the workflow execution and cannot be updated."
     /// @nexus.proto-field "details"
     /// @nexus.flattened-type python="str"
     static-details: option<payload>,

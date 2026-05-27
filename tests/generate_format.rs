@@ -34,7 +34,7 @@ mod tests {
     fn write_formatter_script(dir: &Path, name: &str, marker: &str) -> PathBuf {
         let script_path = dir.join(name);
         let script = format!(
-            "#!/bin/sh\ntarget=\"$2\"\nif [ -d \"$target\" ]; then\n  if [ -f \"$target/__init__.py\" ]; then\n    target=\"$target/__init__.py\"\n  else\n    target=\"$target/index.ts\"\n  fi\nfi\nprintf '\\n{marker}\\n' >> \"$target\"\n"
+            "#!/bin/sh\nfor arg do target=\"$arg\"; done\nif [ -d \"$target\" ]; then\n  if [ -f \"$target/__init__.py\" ]; then\n    target=\"$target/__init__.py\"\n  else\n    target=\"$target/index.ts\"\n  fi\nfi\nprintf '\\n{marker}\\n' >> \"$target\"\n"
         );
         fs::write(&script_path, script).unwrap();
         let mut permissions = fs::metadata(&script_path).unwrap().permissions();

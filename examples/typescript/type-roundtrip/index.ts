@@ -61,9 +61,7 @@ export const ActivityOptions = {
     }
     return {
       taskQueue:
-        proto.taskQueue == null
-          ? undefined
-          : taskQueueFromProto(proto.taskQueue),
+        proto.taskQueue == null ? undefined : taskQueueFromProto(proto.taskQueue),
       retryPolicy: requiredField(
         retryPolicyFromProto(
           requiredField(proto.retryPolicy, "ActivityOptions", "retryPolicy"),
@@ -75,8 +73,7 @@ export const ActivityOptions = {
         proto.scheduleToCloseTimeout == null
           ? undefined
           : durationFromProto(proto.scheduleToCloseTimeout),
-      priority:
-        proto.priority == null ? undefined : priorityFromProto(proto.priority),
+      priority: proto.priority == null ? undefined : priorityFromProto(proto.priority),
     };
   },
 
@@ -96,8 +93,7 @@ export const ActivityOptions = {
         model.scheduleToCloseTimeout == null
           ? undefined
           : durationToProto(model.scheduleToCloseTimeout),
-      priority:
-        model.priority == null ? undefined : priorityToProto(model.priority),
+      priority: model.priority == null ? undefined : priorityToProto(model.priority),
     };
   },
 };
@@ -113,6 +109,9 @@ export const TypeRoundtripService = nexus.service("TypeRoundtripService", {
   >({ name: "ActivityOptionsOperation" }),
 });
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function retryPolicyOperation(
   request: common.RetryPolicy,
 ): Promise<workflow.NexusOperationHandle<temporal.api.common.v1.IRetryPolicy>> {
@@ -126,11 +125,12 @@ export async function retryPolicyOperation(
   );
 }
 
+/**
+ * @param request - Request for the operation.
+ */
 export async function activityOptionsOperation(
   request: ActivityOptions,
-): Promise<
-  workflow.NexusOperationHandle<temporal.api.activity.v1.IActivityOptions>
-> {
+): Promise<workflow.NexusOperationHandle<temporal.api.activity.v1.IActivityOptions>> {
   const client = workflow.createNexusServiceClient({
     service: TypeRoundtripService,
     endpoint: "temporal-system",
