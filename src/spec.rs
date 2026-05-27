@@ -2694,7 +2694,7 @@ fn validate_function_signature(
         });
     }
 
-    Ok(function.params[0].0.clone())
+    Ok(function.params[0].name.clone())
 }
 
 fn build_service(
@@ -2789,8 +2789,15 @@ fn build_resource(
         Some(constructor) => constructor
             .params
             .iter()
-            .map(|(name, ty)| {
-                build_resource_field(resolve, name, ty, path, &context, "constructor")
+            .map(|param| {
+                build_resource_field(
+                    resolve,
+                    &param.name,
+                    &param.ty,
+                    path,
+                    &context,
+                    "constructor",
+                )
             })
             .collect::<Result<Vec<_>>>()?,
         None => Vec::new(),
@@ -2849,8 +2856,10 @@ fn build_resource_method(
     let params = function
         .params
         .iter()
-        .skip_while(|(name, _)| name == "self")
-        .map(|(name, ty)| build_resource_field(resolve, name, ty, path, &context, "parameter"))
+        .skip_while(|param| param.name == "self")
+        .map(|param| {
+            build_resource_field(resolve, &param.name, &param.ty, path, &context, "parameter")
+        })
         .collect::<Result<Vec<_>>>()?;
     let result = function
         .result
@@ -2907,12 +2916,14 @@ fn build_operation(
     let wire_operation_name =
         build_wire_operation_name(&directives, path, &context, &operation_name)?;
 
-    let [(parameter_name, input_type)] = function.params.as_slice() else {
+    let [parameter] = function.params.as_slice() else {
         return Err(Error::InvalidWit {
             path: path.to_path_buf(),
             reason: format!("{context} must declare exactly one input parameter"),
         });
     };
+    let parameter_name = &parameter.name;
+    let input_type = &parameter.ty;
     let input_proto = find_proto_name_for_type(resolve, input_type, path, &context)?;
     let input_record = find_wit_record_name_for_type(resolve, input_type);
     if input_proto.is_none() && input_record.is_none() {
