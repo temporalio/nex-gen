@@ -28,9 +28,7 @@ export async function typeRoundtripCaller(): Promise<{
       fairnessWeight: 2.5,
     },
   });
-  const activityRoundTrip = ActivityOptions.fromProto(
-    await activityHandle.result(),
-  );
+  const activityRoundTrip = ActivityOptions.fromProto(await activityHandle.result());
 
   return {
     priorityKey: activityRoundTrip?.priority?.priorityKey,

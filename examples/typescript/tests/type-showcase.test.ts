@@ -14,10 +14,7 @@ import {
   TypeShowcase,
 } from "../type-showcase/index.ts";
 import type { SetProfileRequest } from "../type-showcase/index.ts";
-import {
-  executeWorkflowWithNexus,
-  withWorkflowEnvironment,
-} from "./helpers.ts";
+import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const wireFixtureDir = fileURLToPath(
   new URL("../../wire/type-showcase/", import.meta.url),
@@ -66,13 +63,10 @@ function writePayloads(
 
 function readPayloads(path: string): common.Payload[] {
   const bytes = Buffer.from(readFileSync(path, "utf8").trim(), "base64");
-  return temporal.api.common.v1.Payloads.decode(bytes)
-    .payloads as common.Payload[];
+  return temporal.api.common.v1.Payloads.decode(bytes).payloads as common.Payload[];
 }
 
-function encodeRequest(
-  request: SetProfileRequest,
-): temporal.api.common.v1.IPayload[] {
+function encodeRequest(request: SetProfileRequest): temporal.api.common.v1.IPayload[] {
   return (
     common.toPayloads(
       payloadConverter,
@@ -81,14 +75,8 @@ function encodeRequest(
   );
 }
 
-function decodeRequest(
-  payloads: temporal.api.common.v1.IPayload[],
-): SetProfileRequest {
-  return common.fromPayloadsAtIndex<SetProfileRequest>(
-    payloadConverter,
-    0,
-    payloads,
-  );
+function decodeRequest(payloads: temporal.api.common.v1.IPayload[]): SetProfileRequest {
+  return common.fromPayloadsAtIndex<SetProfileRequest>(payloadConverter, 0, payloads);
 }
 
 function payloadJson(
@@ -96,9 +84,7 @@ function payloadJson(
 ): Record<string, unknown> {
   expect(payloads).toHaveLength(1);
   const payload = payloads[0];
-  expect(Buffer.from(payload.metadata?.encoding ?? []).toString()).toBe(
-    "json/nexus",
-  );
+  expect(Buffer.from(payload.metadata?.encoding ?? []).toString()).toBe("json/nexus");
   expect(Buffer.from(payload.metadata?.nexusType ?? []).toString()).toBe(
     "type-showcase.set-profile-request",
   );
@@ -208,9 +194,7 @@ describe("type-showcase generated output", () => {
     writePayloads(typescriptWireFixture, typescriptPayloads);
 
     expect(payloadJson(typescriptPayloads)["user-id"]).toBe("user-123");
-    expect(decodeRequest(readPayloads(typescriptWireFixture))).toEqual(
-      expected,
-    );
+    expect(decodeRequest(readPayloads(typescriptWireFixture))).toEqual(expected);
     expect(decodeRequest(readPayloads(pythonWireFixture))).toEqual(expected);
   });
 });

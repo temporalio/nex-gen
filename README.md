@@ -54,6 +54,12 @@ cargo build-examples user-service
 cargo build-examples --lang typescript user-service
 ```
 
+Run the same validations as the CI pipeline:
+
+```bash
+./scripts/validate.sh
+```
+
 Write the prepared WIT workspace the loader actually parses:
 
 ```bash

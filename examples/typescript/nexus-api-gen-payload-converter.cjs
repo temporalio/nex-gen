@@ -48,9 +48,7 @@ function toWireName(name) {
 }
 
 function fromWireName(name) {
-  return name.replace(/-([a-z])/g, (_match, character) =>
-    character.toUpperCase(),
-  );
+  return name.replace(/-([a-z])/g, (_match, character) => character.toUpperCase());
 }
 
 function isTagged(value) {
@@ -93,10 +91,7 @@ function fromWire(value) {
       : { tag: value.tag };
   }
   return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [
-      fromWireName(key),
-      fromWire(item),
-    ]),
+    Object.entries(value).map(([key, item]) => [fromWireName(key), fromWire(item)]),
   );
 }
 

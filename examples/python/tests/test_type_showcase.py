@@ -79,7 +79,8 @@ def user_resource(
 def write_payloads(path: Path, payloads: Payloads) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     _ = path.write_text(
-        base64.b64encode(payloads.SerializeToString(deterministic=True)).decode() + "\n",
+        base64.b64encode(payloads.SerializeToString(deterministic=True)).decode()
+        + "\n",
         encoding="utf-8",
     )
 

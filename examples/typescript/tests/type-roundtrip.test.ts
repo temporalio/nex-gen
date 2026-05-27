@@ -9,10 +9,7 @@ import {
   TypeRoundtripService,
   retryPolicyFromProto,
 } from "../type-roundtrip/index.ts";
-import {
-  executeWorkflowWithNexus,
-  withWorkflowEnvironment,
-} from "./helpers.ts";
+import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(
   new URL("./workflows/type-roundtrip.ts", import.meta.url),
