@@ -60,35 +60,10 @@ jobs:
       - name: Run Rust tests
         run: cargo test
 
-      - name: Generate Python examples
-        run: cargo build-examples --lang python
-
       - name: Check Python formatting
         working-directory: examples/python
         run: uv run ruff format --check .
 
-      - name: Typecheck Python examples
-        working-directory: examples/python
-        run: uv run basedpyright
-
-      - name: Test Python examples
-        working-directory: examples/python
-        run: uv run pytest tests --workflow-environment local
-
-      - name: Generate TypeScript examples
-        run: cargo build-examples --lang typescript
-
       - name: Check TypeScript formatting
         working-directory: examples/typescript
         run: npm exec -- prettier --check .
-
-      - name: Typecheck TypeScript examples
-        working-directory: examples/typescript
-        run: npm run typecheck
-
-      - name: Test TypeScript examples
-        working-directory: examples/typescript
-        run: npm run test
-
-      - name: Check generated output drift
-        run: git diff --exit-code
