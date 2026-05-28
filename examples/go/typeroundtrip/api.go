@@ -14,12 +14,16 @@ const Endpoint = "temporal-system-endpoint"
 const RetryPolicyOperationOp = "RetryPolicyOperation"
 const ActivityOptionsOperationOp = "ActivityOptionsOperation"
 
+// --- Datatypes ---
+
 type ActivityOptions struct {
 	TaskQueue              string
 	RetryPolicy            temporal.RetryPolicy // required
 	ScheduleToCloseTimeout time.Duration
 	Priority               temporal.Priority
 }
+
+// --- Operations (internal) ---
 
 func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
@@ -40,6 +44,8 @@ func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*A
 	}
 	return &result, nil
 }
+
+// --- Operations (public API) ---
 
 type ActivityOptionsOperationOptions struct {
 	TaskQueue              string

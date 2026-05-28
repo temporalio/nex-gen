@@ -11,6 +11,8 @@ const Endpoint = "user-service-endpoint"
 const GetUserOp = "GetUser"
 const UpdateEmailOp = "UpdateEmail"
 
+// --- Datatypes ---
+
 type GetUserRequest struct {
 	UserId string // required
 }
@@ -20,6 +22,8 @@ type UpdateEmailRequest struct {
 	Email  string // required
 }
 
+// --- Resources ---
+
 type User struct {
 	UserId string // required
 	Email  string // required
@@ -28,6 +32,8 @@ type User struct {
 func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error) {
 	return updateEmail(ctx, UpdateEmailRequest{UserId: u.UserId, Email: email})
 }
+
+// --- Operations (internal) ---
 
 func getUser(ctx workflow.Context, request GetUserRequest) (*User, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
@@ -48,6 +54,8 @@ func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error
 	}
 	return &result, nil
 }
+
+// --- Operations (public API) ---
 
 func GetUser(ctx workflow.Context, userId string) (*User, error) {
 	return getUser(ctx, GetUserRequest{UserId: userId})

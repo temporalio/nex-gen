@@ -14,6 +14,8 @@ const RenameOp = "Rename"
 const SetProfileOp = "SetProfile"
 const DeactivateOp = "Deactivate"
 
+// --- Datatypes ---
+
 type UserStatus int32
 
 const (
@@ -96,6 +98,8 @@ type DeactivateRequest struct {
 	Reason string
 }
 
+// --- Resources ---
+
 type User struct {
 	UserId      string      // required
 	Email       string      // required
@@ -115,6 +119,8 @@ func (u *User) Rename(ctx workflow.Context, displayName string) (*User, error) {
 func (u *User) Deactivate(ctx workflow.Context, reason string) error {
 	return deactivate(ctx, DeactivateRequest{UserId: u.UserId, Reason: reason})
 }
+
+// --- Operations (internal) ---
 
 func getUser(ctx workflow.Context, request GetUserRequest) (*User, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
@@ -161,6 +167,8 @@ func deactivate(ctx workflow.Context, request DeactivateRequest) error {
 	fut := c.ExecuteOperation(ctx, DeactivateOp, request, workflow.NexusOperationOptions{})
 	return fut.Get(ctx, nil)
 }
+
+// --- Operations (public API) ---
 
 type GetUserOptions struct {
 	ConsistencyToken string

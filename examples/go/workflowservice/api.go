@@ -15,6 +15,8 @@ const Endpoint = "temporal-system-endpoint"
 
 const SignalWithStartWorkflowOp = "SignalWithStartWorkflowExecution"
 
+// --- Datatypes ---
+
 type SignalWithStartWorkflowRequest struct {
 	Workflow           string // required
 	Args               []any
@@ -46,6 +48,8 @@ type UserMetadata struct {
 type SignalWithStartWorkflowResponse struct {
 }
 
+// --- Operations (internal) ---
+
 func signalWithStartWorkflow(ctx workflow.Context, request SignalWithStartWorkflowRequest) (*SignalWithStartWorkflowResponse, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
 	fut := c.ExecuteOperation(ctx, SignalWithStartWorkflowOp, request, workflow.NexusOperationOptions{})
@@ -55,6 +59,8 @@ func signalWithStartWorkflow(ctx workflow.Context, request SignalWithStartWorkfl
 	}
 	return &result, nil
 }
+
+// --- Operations (public API) ---
 
 type SignalWithStartWorkflowOptions struct {
 	Args               []any

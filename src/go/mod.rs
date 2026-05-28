@@ -109,7 +109,7 @@ pub(crate) fn generate(api_plan: &ApiPlan) -> Result<GeneratedFiles> {
     );
 
     let mut files = BTreeMap::new();
-    files.insert(PathBuf::from("types.go"), output);
+    files.insert(PathBuf::from("api.go"), output);
     Ok(GeneratedFiles::directory(files))
 }
 
@@ -1164,56 +1164,81 @@ fn render_file(
         output.push_str(")\n");
     }
 
-    for service in services {
+    // --- Service constants ---
+    let has_services = !services.is_empty();
+    if has_services {
         output.push('\n');
-        render_service_constants(&mut output, service);
-    }
-
-    for enumeration in enums {
-        output.push('\n');
-        render_enum(&mut output, enumeration);
-    }
-
-    for flag_set in flags {
-        output.push('\n');
-        render_flags(&mut output, flag_set);
-    }
-
-    for variant in variants {
-        output.push('\n');
-        render_variant(&mut output, variant);
-    }
-
-    for model in models {
-        output.push('\n');
-        render_model(&mut output, model);
-    }
-
-    for service in services {
-        for resource in &service.resources {
-            output.push('\n');
-            render_resource(&mut output, resource);
-            render_resource_methods(&mut output, resource, &service.operations, api_plan);
+        for service in services {
+            render_service_constants(&mut output, service);
         }
     }
 
-    for service in services {
-        for operation in &service.operations {
+    // --- Datatypes ---
+    let has_datatypes =
+        !enums.is_empty() || !flags.is_empty() || !variants.is_empty() || !models.is_empty();
+    if has_datatypes {
+        output.push_str("\n// --- Datatypes ---\n");
+        for enumeration in enums {
             output.push('\n');
-            render_operation_function(&mut output, operation);
+            render_enum(&mut output, enumeration);
+        }
+        for flag_set in flags {
+            output.push('\n');
+            render_flags(&mut output, flag_set);
+        }
+        for variant in variants {
+            output.push('\n');
+            render_variant(&mut output, variant);
+        }
+        for model in models {
+            output.push('\n');
+            render_model(&mut output, model);
         }
     }
 
-    for service in services {
-        for operation in &service.operations {
-            if let Some(params) = &operation.unpacked_input {
-                let has_optional = params.iter().any(|p| !p.required);
-                if has_optional {
-                    output.push('\n');
-                    render_options_struct(&mut output, operation, params);
-                }
+    // --- Resources ---
+    let has_resources = services.iter().any(|s| !s.resources.is_empty());
+    if has_resources {
+        output.push_str("\n// --- Resources ---\n");
+        for service in services {
+            for resource in &service.resources {
                 output.push('\n');
-                render_convenience_wrapper(&mut output, operation, params);
+                render_resource(&mut output, resource);
+                render_resource_methods(&mut output, resource, &service.operations, api_plan);
+            }
+        }
+    }
+
+    // --- Operations (internal) ---
+    let has_operations = services.iter().any(|s| !s.operations.is_empty());
+    if has_operations {
+        output.push_str("\n// --- Operations (internal) ---\n");
+        for service in services {
+            for operation in &service.operations {
+                output.push('\n');
+                render_operation_function(&mut output, operation);
+            }
+        }
+    }
+
+    // --- Operations (public API) ---
+    let has_convenience_wrappers = services
+        .iter()
+        .flat_map(|s| &s.operations)
+        .any(|op| op.unpacked_input.is_some());
+    if has_convenience_wrappers {
+        output.push_str("\n// --- Operations (public API) ---\n");
+        for service in services {
+            for operation in &service.operations {
+                if let Some(params) = &operation.unpacked_input {
+                    let has_optional = params.iter().any(|p| !p.required);
+                    if has_optional {
+                        output.push('\n');
+                        render_options_struct(&mut output, operation, params);
+                    }
+                    output.push('\n');
+                    render_convenience_wrapper(&mut output, operation, params);
+                }
             }
         }
     }

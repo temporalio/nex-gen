@@ -14,6 +14,8 @@ const StartWorkflowOp = "StartWorkflow"
 const RestartWorkflowOp = "RestartWorkflow"
 const CancelWorkflowOp = "CancelWorkflow"
 
+// --- Datatypes ---
+
 type StartWorkflowRequest struct {
 	Workflow           string // required
 	Args               []any
@@ -35,6 +37,8 @@ type WorkflowExecution struct {
 type CancelWorkflowResponse struct {
 }
 
+// --- Resources ---
+
 type StartedWorkflow struct {
 	Namespace  string // required
 	WorkflowId string // required
@@ -53,6 +57,8 @@ func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string,
 func (u *StartedWorkflow) GetResult(ctx workflow.Context) (*[]any, error) {
 	panic("StartedWorkflow.GetResult is not yet implemented")
 }
+
+// --- Operations (internal) ---
 
 func startWorkflow(ctx workflow.Context, request StartWorkflowRequest) (*StartedWorkflow, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
@@ -83,6 +89,8 @@ func cancelWorkflow(ctx workflow.Context, request CancelWorkflowRequest) (*Cance
 	}
 	return &result, nil
 }
+
+// --- Operations (public API) ---
 
 type StartWorkflowOptions struct {
 	Args               []any
