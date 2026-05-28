@@ -4,11 +4,8 @@ import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import * as nexus from "nexus-rpc";
 
-import {
-  ActivityOptions,
-  TypeRoundtripService,
-  retryPolicyFromProto,
-} from "../type-roundtrip/index.ts";
+import { TypeRoundtripService } from "../type-roundtrip/index.ts";
+import type { ActivityOptions } from "../type-roundtrip/index.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(
@@ -26,10 +23,8 @@ describe("type-roundtrip generated output", () => {
     );
   });
 
-  test("round-trips activity options", () => {
-    const retryPolicy = retryPolicyFromProto(
-      common.compileRetryPolicy({ maximumAttempts: 3 }),
-    );
+  test("exposes activity options as a public type", () => {
+    const retryPolicy: common.RetryPolicy = { maximumAttempts: 3 };
     const activityOptions: ActivityOptions = {
       taskQueue: "demo-task-queue",
       retryPolicy,
@@ -40,15 +35,9 @@ describe("type-roundtrip generated output", () => {
       },
     };
 
-    const proto = ActivityOptions.toProto(activityOptions);
-    expect(proto?.taskQueue?.name).toBe("demo-task-queue");
-    expect(proto?.retryPolicy?.maximumAttempts).toBe(3);
-
-    const roundTripped = ActivityOptions.fromProto(proto);
-    expect(roundTripped?.taskQueue).toBe("demo-task-queue");
-    expect(roundTripped?.retryPolicy.maximumAttempts).toBe(3);
-    expect(roundTripped?.scheduleToCloseTimeout).toBe(60_000);
-    expect(roundTripped?.priority?.priorityKey).toBe(1);
+    expect(activityOptions.taskQueue).toBe("demo-task-queue");
+    expect(activityOptions.retryPolicy.maximumAttempts).toBe(3);
+    expect(activityOptions.priority?.priorityKey).toBe(1);
   });
 
   test("round-trips proto-backed types through a real Nexus client", async () => {
@@ -68,7 +57,7 @@ describe("type-roundtrip generated output", () => {
       const result = await executeWorkflowWithNexus<{
         priorityKey: number | undefined;
         retryMaximumAttempts: number | undefined;
-        scheduleToCloseTimeout: common.Duration | undefined;
+        scheduleToCloseTimeout: number | undefined;
         taskQueue: string | undefined;
       }>(env, {
         endpoint: "temporal-system",

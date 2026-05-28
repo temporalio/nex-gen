@@ -55,16 +55,16 @@ export function workflowTypeFromProto(
 export function workflowTypeToProto(
   workflowType: string | common.Workflow,
 ): temporal.api.common.v1.IWorkflowType {
-  return { name: workflow_function_name(workflowType) };
+  return { name: workflowFunctionName(workflowType) };
 }
 
-export function workflow_function_name(
+export function workflowFunctionName(
   value: string | common.Workflow,
 ): string {
   return typeof value === "string" ? value : common.extractWorkflowType(value);
 }
 
-export function signal_function_to_proto(
+export function signalFunctionToProto(
   value: string | workflow.SignalDefinition<any[]>,
 ): string {
   return typeof value === "string" ? value : value.name;

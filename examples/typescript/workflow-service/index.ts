@@ -10,8 +10,8 @@ import {
   retryPolicyToProto,
   workflowTypeFromProto,
   workflowTypeToProto,
-  workflow_function_name,
-  signal_function_to_proto,
+  workflowFunctionName,
+  signalFunctionToProto,
   taskQueueFromProto,
   taskQueueToProto,
   workflowNamespace,
@@ -32,7 +32,6 @@ import {
   workflowIdConflictPolicyFromProto,
   workflowIdConflictPolicyToProto,
 } from "./support.ts";
-export * from "./support.ts";
 
 function requiredField<T>(
   value: T | null | undefined,
@@ -45,7 +44,7 @@ function requiredField<T>(
   return value;
 }
 
-function _RequestArgsToPayloads(
+function requestArgsToPayloads(
   args: ReadonlyArray<unknown> | undefined,
 ): temporal.api.common.v1.IPayloads | undefined {
   if (args == null) {
@@ -196,7 +195,7 @@ export type SignalWithStartWorkflowRequest<
           }))
   );
 
-export const SignalWithStartWorkflowRequest = {
+const SignalWithStartWorkflowRequest = {
   toProto<
     WorkflowFn extends (...args: any[]) => Promise<any> = (
       ...args: any[]
@@ -225,15 +224,15 @@ export const SignalWithStartWorkflowRequest = {
       workflowType: workflowTypeToProto(
         requiredField(model.workflow, "SignalWithStartWorkflowRequest", "workflow"),
       ),
-      input: _RequestArgsToPayloads(model.args),
+      input: requestArgsToPayloads(model.args),
       workflowId: requiredField(model.id, "SignalWithStartWorkflowRequest", "id"),
       taskQueue: taskQueueToProto(
         requiredField(model.taskQueue, "SignalWithStartWorkflowRequest", "taskQueue"),
       ),
-      signalName: signal_function_to_proto(
+      signalName: signalFunctionToProto(
         requiredField(model.signal, "SignalWithStartWorkflowRequest", "signal"),
       ),
-      signalInput: _RequestArgsToPayloads(model.signalArgs),
+      signalInput: requestArgsToPayloads(model.signalArgs),
       workflowExecutionTimeout:
         model.executionTimeout == null
           ? undefined
@@ -290,7 +289,7 @@ export interface UserMetadata {
   staticDetails?: common.Payload;
 }
 
-export const UserMetadata = {
+const UserMetadata = {
   fromProto(
     proto: temporal.api.sdk.v1.IUserMetadata | null | undefined,
   ): UserMetadata | undefined {

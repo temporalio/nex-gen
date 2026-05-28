@@ -1728,7 +1728,7 @@ fn optional_function_args_to_proto_expr(
     _resolved_type: &ResolvedFieldType,
     field_name: &str,
 ) -> String {
-    format!("_RequestArgsToPayloads(model.{field_name})")
+    format!("requestArgsToPayloads(model.{field_name})")
 }
 
 fn enum_from_proto_expr(resolved_type: &ResolvedFieldType, expr: &str) -> String {
@@ -1943,7 +1943,6 @@ fn render_module(
             output.push_str(&support_exports.type_names.join(", "));
             output.push_str(" } from './support.ts';\n");
         }
-        output.push_str("export * from './support.ts';\n");
     }
 
     output.push_str("\n");
@@ -2125,7 +2124,7 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
 }
 
 fn render_function_runtime_helpers(output: &mut String) {
-    output.push_str("function _RequestArgsToPayloads(\n");
+    output.push_str("function requestArgsToPayloads(\n");
     output.push_str("  args: ReadonlyArray<unknown> | undefined,\n");
     output.push_str("): temporal.api.common.v1.IPayloads | undefined {\n");
     output.push_str("  if (args == null) {\n");
@@ -2475,20 +2474,26 @@ fn render_typescript_type_property(
 
 fn render_model(output: &mut String, model: &RenderedModel) {
     if model.functions.is_empty() && model.with_arguments.is_empty() {
-        output.push_str("export interface ");
-        output.push_str(&model.name);
-        output.push_str(" {\n");
-        for field in &model.fields {
-            render_typescript_type_property(
-                output,
-                "  ",
-                &field.name,
-                field.optional,
-                &field.annotation,
-                typescript_model_field_doc(model, field).as_deref(),
-            );
+        if model.fields.is_empty() {
+            output.push_str("export type ");
+            output.push_str(&model.name);
+            output.push_str(" = Record<string, never>;\n\n");
+        } else {
+            output.push_str("export interface ");
+            output.push_str(&model.name);
+            output.push_str(" {\n");
+            for field in &model.fields {
+                render_typescript_type_property(
+                    output,
+                    "  ",
+                    &field.name,
+                    field.optional,
+                    &field.annotation,
+                    typescript_model_field_doc(model, field).as_deref(),
+                );
+            }
+            output.push_str("}\n\n");
         }
-        output.push_str("}\n\n");
     } else {
         let function_fields = model
             .functions
@@ -2536,7 +2541,7 @@ fn render_model(output: &mut String, model: &RenderedModel) {
         render_function_model_invocations(output, model);
         output.push_str(";\n\n");
     }
-    output.push_str("export const ");
+    output.push_str("const ");
     output.push_str(&model.name);
     output.push_str(" = {\n");
     let mut wrote_method = false;
@@ -3409,8 +3414,14 @@ mod tests {
 
         assert!(output.contains("### support.ts"));
         assert!(output.contains("### index.ts"));
-        assert!(output.contains("export * from './support.ts';"));
+        let index_output = output
+            .split("### index.ts")
+            .nth(1)
+            .expect("rendered output should include index.ts");
+        assert!(!index_output.contains("export * from './support.ts';"));
         assert!(output.contains("export function retryPolicyFromProto("));
+        assert!(!index_output.contains("export const SignalWithStartWorkflowRequest = {"));
+        assert!(index_output.contains("const SignalWithStartWorkflowRequest = {"));
         assert!(!output.contains("type _RequestWithFunctionField<"));
         assert!(!output.contains("type _RequestWithArgumentsField<"));
         assert!(!output.contains("type SignalWithStartWorkflowRequestBase = {"));
@@ -3457,10 +3468,11 @@ mod tests {
         assert!(!output.contains("namespace?: string;"));
         assert!(output.contains("namespace: workflowNamespace(),"));
         assert!(output.contains("workflowType: workflowTypeToProto("));
-        assert!(output.contains("workflow_function_name("));
-        assert!(output.contains("input: _RequestArgsToPayloads(model.args),"));
-        assert!(output.contains("signalInput: _RequestArgsToPayloads(model.signalArgs),"));
-        assert!(output.contains("signalName: signal_function_to_proto("));
+        assert!(output.contains("workflowFunctionName("));
+        assert!(output.contains("input: requestArgsToPayloads(model.args),"));
+        assert!(output.contains("signalInput: requestArgsToPayloads(model.signalArgs),"));
+        assert!(!output.contains("_RequestArgsToPayloads"));
+        assert!(output.contains("signalName: signalFunctionToProto("));
         assert!(!output.contains("signalName: ((value) =>"));
         assert!(output.contains("workflowType: workflowTypeToProto("));
         assert!(output.contains("taskQueue: taskQueueToProto("));

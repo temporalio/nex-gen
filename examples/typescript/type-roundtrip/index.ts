@@ -10,8 +10,8 @@ import {
   retryPolicyToProto,
   workflowTypeFromProto,
   workflowTypeToProto,
-  workflow_function_name,
-  signal_function_to_proto,
+  workflowFunctionName,
+  signalFunctionToProto,
   taskQueueFromProto,
   taskQueueToProto,
   workflowNamespace,
@@ -32,7 +32,6 @@ import {
   workflowIdConflictPolicyFromProto,
   workflowIdConflictPolicyToProto,
 } from "./support.ts";
-export * from "./support.ts";
 
 function requiredField<T>(
   value: T | null | undefined,
@@ -52,7 +51,7 @@ export interface ActivityOptions {
   priority?: common.Priority;
 }
 
-export const ActivityOptions = {
+const ActivityOptions = {
   fromProto(
     proto: temporal.api.activity.v1.IActivityOptions | null | undefined,
   ): ActivityOptions | undefined {

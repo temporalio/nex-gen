@@ -15,8 +15,8 @@ import {
   retryPolicyToProto,
   workflowTypeFromProto,
   workflowTypeToProto,
-  workflow_function_name,
-  signal_function_to_proto,
+  workflowFunctionName,
+  signalFunctionToProto,
   taskQueueFromProto,
   taskQueueToProto,
   workflowNamespace,
@@ -37,7 +37,6 @@ import {
   workflowIdConflictPolicyFromProto,
   workflowIdConflictPolicyToProto,
 } from "./support.ts";
-export * from "./support.ts";
 
 function requiredField<T>(
   value: T | null | undefined,
@@ -54,14 +53,14 @@ export interface GetUserRequest {
   userId: string;
 }
 
-export const GetUserRequest = {};
+const GetUserRequest = {};
 
 export interface UpdateEmailRequest {
   userId: string;
   email: string;
 }
 
-export const UpdateEmailRequest = {};
+const UpdateEmailRequest = {};
 
 export class User {
   public constructor(

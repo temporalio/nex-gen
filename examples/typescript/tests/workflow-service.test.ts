@@ -4,11 +4,8 @@ import type { temporal } from "@temporalio/proto";
 import * as workflow from "@temporalio/workflow";
 import * as nexus from "nexus-rpc";
 
-import {
-  SignalWithStartWorkflowRequest,
-  WorkflowService,
-  signalWithStartWorkflow,
-} from "../workflow-service/index.ts";
+import { WorkflowService, signalWithStartWorkflow } from "../workflow-service/index.ts";
+import type { SignalWithStartWorkflowRequest } from "../workflow-service/index.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(

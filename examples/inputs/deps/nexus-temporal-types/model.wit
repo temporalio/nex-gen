@@ -43,7 +43,8 @@ interface model {
   /// @nexus.function
   ///   signature="signal-call"
   ///   args-field="signal-input"
-  ///   converter="signal_function_to_proto"
+  ///   python-converter="signal_function_to_proto"
+  ///   typescript-converter="signalFunctionToProto"
   /// @nexus.add-rpc-compatible-with "string"
   /// @nexus.typescript-with-arguments
   ///   signature="signal-call"

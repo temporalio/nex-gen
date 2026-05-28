@@ -15,8 +15,8 @@ import {
   retryPolicyToProto,
   workflowTypeFromProto,
   workflowTypeToProto,
-  workflow_function_name,
-  signal_function_to_proto,
+  workflowFunctionName,
+  signalFunctionToProto,
   taskQueueFromProto,
   taskQueueToProto,
   workflowNamespace,
@@ -37,7 +37,6 @@ import {
   workflowIdConflictPolicyFromProto,
   workflowIdConflictPolicyToProto,
 } from "./support.ts";
-export * from "./support.ts";
 
 function requiredField<T>(
   value: T | null | undefined,
@@ -72,28 +71,28 @@ export interface GetUserRequest {
   consistencyToken?: string;
 }
 
-export const GetUserRequest = {};
+const GetUserRequest = {};
 
 export interface UpdateEmailRequest {
   userId: string;
   email: string;
 }
 
-export const UpdateEmailRequest = {};
+const UpdateEmailRequest = {};
 
 export interface RenameRequest {
   userId: string;
   displayName: string;
 }
 
-export const RenameRequest = {};
+const RenameRequest = {};
 
 export interface SetProfileRequest {
   userId: string;
   profile: UserProfile;
 }
 
-export const SetProfileRequest = {};
+const SetProfileRequest = {};
 
 export interface UserProfile {
   tags?: string[];
@@ -104,7 +103,7 @@ export interface UserProfile {
   address?: PostalAddress;
 }
 
-export const UserProfile = {};
+const UserProfile = {};
 
 export interface PostalAddress {
   street: string;
@@ -113,14 +112,14 @@ export interface PostalAddress {
   coordinates?: [number, number];
 }
 
-export const PostalAddress = {};
+const PostalAddress = {};
 
 export interface DeactivateRequest {
   userId: string;
   reason?: string;
 }
 
-export const DeactivateRequest = {};
+const DeactivateRequest = {};
 
 export class User {
   public constructor(

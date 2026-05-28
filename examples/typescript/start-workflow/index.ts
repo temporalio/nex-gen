@@ -11,8 +11,8 @@ import {
   retryPolicyToProto,
   workflowTypeFromProto,
   workflowTypeToProto,
-  workflow_function_name,
-  signal_function_to_proto,
+  workflowFunctionName,
+  signalFunctionToProto,
   taskQueueFromProto,
   taskQueueToProto,
   workflowNamespace,
@@ -33,7 +33,6 @@ import {
   workflowIdConflictPolicyFromProto,
   workflowIdConflictPolicyToProto,
 } from "./support.ts";
-export * from "./support.ts";
 
 function requiredField<T>(
   value: T | null | undefined,
@@ -46,7 +45,7 @@ function requiredField<T>(
   return value;
 }
 
-function _RequestArgsToPayloads(
+function requestArgsToPayloads(
   args: ReadonlyArray<unknown> | undefined,
 ): temporal.api.common.v1.IPayloads | undefined {
   if (args == null) {
@@ -89,7 +88,7 @@ export type StartWorkflowRequest<
         }))
 );
 
-export const StartWorkflowRequest = {
+const StartWorkflowRequest = {
   toProto<
     WorkflowFn extends (...args: any[]) => Promise<any> = (
       ...args: any[]
@@ -104,7 +103,7 @@ export const StartWorkflowRequest = {
       workflowType: workflowTypeToProto(
         requiredField(model.workflow, "StartWorkflowRequest", "workflow"),
       ),
-      input: _RequestArgsToPayloads(model.args),
+      input: requestArgsToPayloads(model.args),
       workflowId: requiredField(model.workflowId, "StartWorkflowRequest", "workflowId"),
       taskQueue: taskQueueToProto(
         requiredField(model.taskQueue, "StartWorkflowRequest", "taskQueue"),
@@ -123,7 +122,7 @@ export interface CancelWorkflowRequest {
   reason?: string;
 }
 
-export const CancelWorkflowRequest = {
+const CancelWorkflowRequest = {
   toProto(
     model: CancelWorkflowRequest | null | undefined,
   ):
@@ -152,7 +151,7 @@ export interface WorkflowExecution {
   runId?: string;
 }
 
-export const WorkflowExecution = {
+const WorkflowExecution = {
   fromProto(
     proto: temporal.api.common.v1.IWorkflowExecution | null | undefined,
   ): WorkflowExecution | undefined {
@@ -182,9 +181,9 @@ export const WorkflowExecution = {
   },
 };
 
-export interface CancelWorkflowResponse {}
+export type CancelWorkflowResponse = Record<string, never>;
 
-export const CancelWorkflowResponse = {
+const CancelWorkflowResponse = {
   fromProto(
     proto:
       | temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse

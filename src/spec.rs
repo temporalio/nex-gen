@@ -1682,7 +1682,7 @@ fn build_generated_model_from_record(
             && function_directive.is_none()
             && typescript_with_arguments_directive.is_none()
         {
-            find_flattened_function_type_spec(resolve, &field.ty, path)?
+            find_flattened_function_type_spec(resolve, &field.ty, path, language)?
         } else {
             None
         };
@@ -1780,7 +1780,7 @@ fn build_generated_model_from_record(
             );
         }
 
-        if let Some(function) = build_function_field(&directives, path, &field_context)? {
+        if let Some(function) = build_function_field(&directives, path, &field_context, language)? {
             functions.insert(proto_field_name.clone(), function);
         }
 
@@ -2276,6 +2276,7 @@ fn build_function_field(
     directives: &[Directive],
     path: &Path,
     context: &str,
+    language: Language,
 ) -> Result<Option<FunctionFieldSpec>> {
     let Some(directive) = directive(directives, "function", path, context)? else {
         return Ok(None);
@@ -2311,7 +2312,7 @@ fn build_function_field(
         primary,
         result: FunctionResultSpec::Annotation(result),
         args_field: args_field.to_snake_case(),
-        converter: directive.value("converter").map(str::to_string),
+        converter: directive_converter(directive, language),
     }))
 }
 
@@ -2321,6 +2322,7 @@ fn build_function_field_for_type_alias(
     directives: &[Directive],
     path: &Path,
     context: &str,
+    language: Language,
 ) -> Result<Option<(String, FunctionFieldSpec)>> {
     let Some(function_directive) = directive(directives, "function", path, context)? else {
         return Ok(None);
@@ -2338,7 +2340,7 @@ fn build_function_field_for_type_alias(
         })?
         .unwrap_or(false);
 
-    let converter = function_directive.value("converter").map(str::to_string);
+    let converter = directive_converter(function_directive, language);
 
     if let Some(signature_name) = function_directive.value("signature") {
         if function_directive.value("args-name").is_some()
@@ -2519,6 +2521,7 @@ fn find_flattened_function_type_spec(
     resolve: &Resolve,
     ty: &Type,
     path: &Path,
+    language: Language,
 ) -> Result<Option<FlattenedFunctionTypeSpec>> {
     let mut current = ty;
     loop {
@@ -2535,6 +2538,7 @@ fn find_flattened_function_type_spec(
                     &directives,
                     path,
                     &context,
+                    language,
                 )?;
                 let with_arguments = build_with_arguments_field_for_type_alias(
                     resolve,
@@ -3150,6 +3154,12 @@ fn directive_result_language_string(directive: &Directive) -> LanguageStringSpec
     spec
 }
 
+fn directive_converter(directive: &Directive, language: Language) -> Option<String> {
+    let mut spec = directive_prefixed_language_string(directive, "converter");
+    spec.default = directive.value("converter").map(ToOwned::to_owned);
+    spec.for_language(language).map(ToOwned::to_owned)
+}
+
 fn directive_value(
     directives: &[Directive],
     name: &str,
@@ -3652,6 +3662,10 @@ interface workflow-service {
         assert_eq!(model.function("workflow_type").unwrap().converter, None);
         assert_eq!(model.function("workflow_type").unwrap().args_field, "input");
         assert_eq!(
+            model.function("signal_name").unwrap().converter.as_deref(),
+            Some("signal_function_to_proto")
+        );
+        assert_eq!(
             model.field_source("namespace"),
             Some("workflow_namespace()")
         );
@@ -3678,6 +3692,14 @@ interface workflow-service {
                 .unwrap()
                 .converter,
             None
+        );
+        assert_eq!(
+            typescript_model
+                .function("signal_name")
+                .unwrap()
+                .converter
+                .as_deref(),
+            Some("signalFunctionToProto")
         );
     }
 
