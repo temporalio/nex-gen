@@ -8,8 +8,8 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const ServiceName = "TypeRoundtripService"
-const Endpoint = "temporal-system"
+const ServiceName = "temporal-system"
+const Endpoint = "temporal-system-endpoint"
 
 const RetryPolicyOperationOp = "RetryPolicyOperation"
 const ActivityOptionsOperationOp = "ActivityOptionsOperation"

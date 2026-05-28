@@ -1379,11 +1379,11 @@ fn render_model(output: &mut String, model: &RenderedModel) {
 /// ```
 fn render_service_constants(output: &mut String, service: &RenderedService<'_>) {
     output.push_str("const ServiceName = \"");
-    output.push_str(service.name);
+    output.push_str(&service.endpoint);
     output.push_str("\"\n");
     output.push_str("const Endpoint = \"");
     output.push_str(&service.endpoint);
-    output.push_str("\"\n");
+    output.push_str("-endpoint\"\n");
 
     if !service.operations.is_empty() {
         output.push('\n');

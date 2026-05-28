@@ -79,6 +79,13 @@ fn read_go_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
             if path.is_dir() {
                 visit(root, &path, files);
             } else if path.extension().and_then(|extension| extension.to_str()) == Some("go") {
+                if path
+                    .file_name()
+                    .and_then(|file_name| file_name.to_str())
+                    .is_some_and(|file_name| file_name.ends_with("_test.go"))
+                {
+                    continue;
+                }
                 files.insert(
                     path.strip_prefix(root).unwrap().to_path_buf(),
                     fs::read_to_string(&path).unwrap(),
@@ -150,8 +157,8 @@ fn go_type_showcase_generates_expected_types() {
     .unwrap();
 
     // Service and operation constants
-    assert!(rendered.contains("const ServiceName = \"TypeShowcase\""));
-    assert!(rendered.contains("const Endpoint = \"type-showcase\""));
+    assert!(rendered.contains("const ServiceName = \"type-showcase\""));
+    assert!(rendered.contains("const Endpoint = \"type-showcase-endpoint\""));
     assert!(rendered.contains("const GetUserOp = \"GetUser\""));
     assert!(rendered.contains("const UpdateEmailOp = \"UpdateEmail\""));
     assert!(rendered.contains("const RenameOp = \"Rename\""));
