@@ -202,11 +202,11 @@ impl ExistingFunction {
             &function.name.to_upper_camel_case(),
         )?;
         let (parameter_name, input_type_name, input_proto) =
-            if let Some((parameter_name, input_type)) = function.params.first() {
+            if let Some(parameter) = function.params.first() {
                 (
-                    Some(parameter_name.clone()),
-                    wit_type_name(resolve, input_type),
-                    find_proto_name_for_type(resolve, input_type, path, context)?,
+                    Some(parameter.name.clone()),
+                    wit_type_name(resolve, &parameter.ty),
+                    find_proto_name_for_type(resolve, &parameter.ty, path, context)?,
                 )
             } else {
                 (None, None, None)
