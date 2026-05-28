@@ -16,7 +16,7 @@ const CancelWorkflowOp = "CancelWorkflow"
 
 type StartWorkflowRequest struct {
 	Workflow           string // required
-	Args               []interface{}
+	Args               []any
 	WorkflowId         string // required
 	TaskQueue          string // required
 	WorkflowStartDelay time.Duration
@@ -50,7 +50,7 @@ func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string,
 	return restartWorkflow(ctx, StartWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflow, TaskQueue: taskQueue})
 }
 
-func (u *StartedWorkflow) GetResult(ctx workflow.Context) (*[]interface{}, error) {
+func (u *StartedWorkflow) GetResult(ctx workflow.Context) (*[]any, error) {
 	panic("StartedWorkflow.GetResult is not yet implemented")
 }
 
@@ -85,7 +85,7 @@ func cancelWorkflow(ctx workflow.Context, request CancelWorkflowRequest) (*Cance
 }
 
 type StartWorkflowOptions struct {
-	Args               []interface{}
+	Args               []any
 	WorkflowStartDelay time.Duration
 }
 
@@ -99,7 +99,7 @@ func StartWorkflow(ctx workflow.Context, workflow string, workflowId string, tas
 }
 
 type RestartWorkflowOptions struct {
-	Args               []interface{}
+	Args               []any
 	WorkflowStartDelay time.Duration
 }
 

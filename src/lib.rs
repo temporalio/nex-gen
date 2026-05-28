@@ -511,16 +511,12 @@ fn example_linked_input_paths(repo_root: &Path) -> Vec<PathBuf> {
 }
 
 fn example_output_path(repo_root: &Path, language: Language, example_id: &str) -> PathBuf {
-    match language {
-        Language::Python => example_language_root(repo_root, language)
-            .join(example_directory_name(language, example_id)),
-        Language::TypeScript => example_language_root(repo_root, language).join(example_id),
-        _ => example_language_root(repo_root, language).join(example_id),
-    }
+    example_language_root(repo_root, language).join(example_directory_name(language, example_id))
 }
 
 fn example_directory_name(language: Language, example_id: &str) -> String {
     match language {
+        Language::Go => go::go_package_name(example_id),
         Language::Python => python_example_package_name(example_id),
         _ => example_id.to_string(),
     }

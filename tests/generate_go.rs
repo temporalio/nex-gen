@@ -39,8 +39,16 @@ fn input_path(root: &Path, example_id: &str) -> PathBuf {
     }
 }
 
+fn go_package_name(example_id: &str) -> String {
+    example_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect::<String>()
+        .to_lowercase()
+}
+
 fn go_output_path(root: &Path, example_id: &str) -> PathBuf {
-    go_root(root).join(example_id)
+    go_root(root).join(go_package_name(example_id))
 }
 
 fn go_example_ids(root: &Path) -> Vec<String> {
@@ -57,7 +65,7 @@ fn go_example_ids(root: &Path) -> Vec<String> {
             } else {
                 return None;
             };
-            if go_root.join(&example_id).is_dir() {
+            if go_root.join(go_package_name(&example_id)).is_dir() {
                 Some(example_id)
             } else {
                 None

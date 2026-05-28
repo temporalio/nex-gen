@@ -8,20 +8,20 @@ interface model {
   type placeholder = string;
 
   /// @nexus.proto "temporal.api.common.v1.Payload"
-  /// @nexus.type python="typing.Any" typescript="common.Payload" go="interface{}"
+  /// @nexus.type python="typing.Any" typescript="common.Payload" go="any"
   type payload = placeholder;
 
   /// @nexus.proto "temporal.api.common.v1.Payloads"
   type payloads = list<payload>;
 
   /// Callable result annotation for workflow functions.
-  /// @nexus.type python="collections.abc.Awaitable[object]" typescript="Promise<any>" go="interface{}"
+  /// @nexus.type python="collections.abc.Awaitable[object]" typescript="Promise<any>" go="any"
   type workflow-result = placeholder;
 
   workflow-call: async func(args: payloads) -> workflow-result;
 
   /// Callable result annotation for signal functions.
-  /// @nexus.type python="None | collections.abc.Awaitable[None]" typescript="void" go="interface{}"
+  /// @nexus.type python="None | collections.abc.Awaitable[None]" typescript="void" go="any"
   type signal-result = placeholder;
 
   signal-call: func(signal-args: payloads) -> signal-result;
@@ -67,7 +67,7 @@ interface model {
   type task-queue = placeholder;
 
   /// @nexus.proto "temporal.api.common.v1.Memo"
-  /// @nexus.type python="collections.abc.Mapping[str, typing.Any]" typescript="Record<string, unknown>" go="map[string]interface{}"
+  /// @nexus.type python="collections.abc.Mapping[str, typing.Any]" typescript="Record<string, unknown>" go="map[string]any"
   type memo = placeholder;
 
   /// @nexus.proto "temporal.api.common.v1.SearchAttributes"

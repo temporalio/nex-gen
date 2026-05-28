@@ -17,11 +17,11 @@ const SignalWithStartWorkflowOp = "SignalWithStartWorkflowExecution"
 
 type SignalWithStartWorkflowRequest struct {
 	Workflow           string // required
-	Args               []interface{}
+	Args               []any
 	Id                 string // required
 	TaskQueue          string // required
 	Signal             string // required
-	SignalArgs         []interface{}
+	SignalArgs         []any
 	ExecutionTimeout   time.Duration
 	RunTimeout         time.Duration
 	TaskTimeout        time.Duration
@@ -30,7 +30,7 @@ type SignalWithStartWorkflowRequest struct {
 	IdConflictPolicy   enums.WorkflowIdConflictPolicy
 	RetryPolicy        temporal.RetryPolicy
 	CronSchedule       string
-	Memo               map[string]interface{}
+	Memo               map[string]any
 	SearchAttributes   string
 	Priority           temporal.Priority
 	VersioningOverride client.VersioningOverride
@@ -39,8 +39,8 @@ type SignalWithStartWorkflowRequest struct {
 }
 
 type UserMetadata struct {
-	StaticSummary interface{}
-	StaticDetails interface{}
+	StaticSummary any
+	StaticDetails any
 }
 
 type SignalWithStartWorkflowResponse struct {
@@ -57,8 +57,8 @@ func signalWithStartWorkflow(ctx workflow.Context, request SignalWithStartWorkfl
 }
 
 type SignalWithStartWorkflowOptions struct {
-	Args               []interface{}
-	SignalArgs         []interface{}
+	Args               []any
+	SignalArgs         []any
 	ExecutionTimeout   time.Duration
 	RunTimeout         time.Duration
 	TaskTimeout        time.Duration
@@ -67,7 +67,7 @@ type SignalWithStartWorkflowOptions struct {
 	IdConflictPolicy   enums.WorkflowIdConflictPolicy
 	RetryPolicy        temporal.RetryPolicy
 	CronSchedule       string
-	Memo               map[string]interface{}
+	Memo               map[string]any
 	SearchAttributes   string
 	Priority           temporal.Priority
 	VersioningOverride client.VersioningOverride

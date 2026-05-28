@@ -159,7 +159,7 @@ fn ensure_resource_field_type(
 /// Derives a valid Go package name from a Nexus endpoint string by stripping
 /// non-alphanumeric characters and lowercasing (e.g. `"type-showcase"` becomes
 /// `"typeshowcase"`).
-fn go_package_name(endpoint: &str) -> String {
+pub(crate) fn go_package_name(endpoint: &str) -> String {
     endpoint
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
@@ -936,7 +936,7 @@ fn go_ident(name: &str) -> String {
 ///   code `"temporal.RetryPolicy"`
 /// - `"time.Duration"` → import `"time"`, code `"time.Duration"`
 /// - `"string"` → no import, code `"string"`
-/// - `"map[string]interface{}"` → no import, code `"map[string]interface{}"`
+/// - `"map[string]any"` → no import, code `"map[string]any"`
 fn parse_go_import(type_expr: &str) -> (Option<String>, String) {
     // Case 0: explicit import path with ':' separator, e.g.
     // "go.temporal.io/api/enums/v1:enums.WorkflowIdReusePolicy"
@@ -980,7 +980,7 @@ fn parse_go_import(type_expr: &str) -> (Option<String>, String) {
         }
     }
 
-    // Case 3: no import needed (builtins, map[K]V, interface{}, etc.)
+    // Case 3: no import needed (builtins, map[K]V, any, etc.)
     (None, type_expr.to_string())
 }
 
