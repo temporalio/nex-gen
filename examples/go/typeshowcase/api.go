@@ -76,9 +76,14 @@ type UserProfile struct {
 	Tags               []string           // required
 	Metadata           map[string]string  // required
 	Capabilities       UserCapability     // required
-	SyncState          any                // required
+	SyncState          SyncState          // required
 	NotificationTarget NotificationTarget // required
 	Address            *PostalAddress
+}
+
+type SyncState struct {
+	Result string // required
+	Error  string // required
 }
 
 type PostalAddress struct {

@@ -219,6 +219,11 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("Tags []string // required"));
     assert!(rendered.contains("Metadata map[string]string // required"));
     assert!(rendered.contains("Capabilities UserCapability // required"));
+    // Result field generates a named struct
+    assert!(rendered.contains("SyncState SyncState // required"));
+    assert!(rendered.contains("type SyncState struct"));
+    assert!(rendered.contains("Result string // required"));
+    assert!(rendered.contains("Error string // required"));
     // Variant interface field
     assert!(rendered.contains("NotificationTarget NotificationTarget // required"));
     // Optional struct field keeps pointer

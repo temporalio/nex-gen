@@ -532,13 +532,12 @@ fn resolve_planned_value_type(
                 "tuples are only supported as direct record fields, not inside lists, maps, or other containers"
                     .to_string(),
         }),
-        PlannedValueType::Result { .. } => {
-            // Result deferred -- use any as placeholder
-            Ok(ResolvedGoType {
-                type_expr: "any".to_string(),
-                is_struct: false,
-            })
-        }
+        PlannedValueType::Result { .. } => Err(Error::UnsupportedGoType {
+            context: "result type in this position".to_string(),
+            reason:
+                "results are only supported as direct record fields, not inside lists, maps, or other containers"
+                    .to_string(),
+        }),
         PlannedValueType::External {
             type_name,
             fallback,
@@ -809,6 +808,23 @@ fn build_field(
                 struct_name
             }
         }
+        PlannedFieldKind::Singular(PlannedValueType::Result { ok, err }) => {
+            let struct_name = build_result_struct(
+                &field_name,
+                ok.as_deref(),
+                err.as_deref(),
+                api_plan,
+                enums,
+                flags,
+                variants,
+                models,
+            )?;
+            if !field.required {
+                format!("*{struct_name}")
+            } else {
+                struct_name
+            }
+        }
         PlannedFieldKind::Singular(value) => {
             let resolved =
                 resolve_planned_value_type(value, api_plan, enums, flags, variants, models)?;
@@ -877,6 +893,75 @@ fn build_tuple_struct(
                 context: format!("tuple struct `{struct_name}`"),
                 reason: format!(
                     "a tuple struct named `{struct_name}` already exists with different element types"
+                ),
+            });
+        }
+    } else {
+        models.insert(
+            struct_name.clone(),
+            RenderedModel {
+                name: struct_name.clone(),
+                fields,
+            },
+        );
+    }
+
+    Ok(struct_name)
+}
+
+/// Generates a named Go struct for a WIT `result<ok, err>` type. The struct
+/// name is derived from the parent field name. The `Result` field holds the
+/// ok value and the `Error` field holds the error value. When no error type
+/// is specified in the WIT, the Go built-in `error` interface is used.
+///
+/// Returns an error if a struct with the same name but different fields
+/// already exists.
+fn build_result_struct(
+    field_name: &str,
+    ok: Option<&PlannedValueType>,
+    err: Option<&PlannedValueType>,
+    api_plan: &ApiPlan,
+    enums: &mut IndexMap<String, RenderedEnum>,
+    flags: &mut IndexMap<String, RenderedFlags>,
+    variants: &mut IndexMap<String, RenderedVariant>,
+    models: &mut IndexMap<String, RenderedModel>,
+) -> Result<String> {
+    let struct_name = field_name.to_string();
+
+    let mut fields = Vec::new();
+
+    if let Some(ok_type) = ok {
+        let resolved =
+            resolve_planned_value_type(ok_type, api_plan, enums, flags, variants, models)?;
+        fields.push(RenderedField {
+            name: "Result".to_string(),
+            go_type: resolved.type_expr,
+            required: true,
+        });
+    }
+
+    let error_type = if let Some(err_type) = err {
+        resolve_planned_value_type(err_type, api_plan, enums, flags, variants, models)?
+            .type_expr
+    } else {
+        "error".to_string()
+    };
+    fields.push(RenderedField {
+        name: "Error".to_string(),
+        go_type: error_type,
+        required: true,
+    });
+
+    // Check for conflicts: same name but different field types.
+    if let Some(existing) = models.get(&struct_name) {
+        let existing_types: Vec<&str> =
+            existing.fields.iter().map(|f| f.go_type.as_str()).collect();
+        let new_types: Vec<&str> = fields.iter().map(|f| f.go_type.as_str()).collect();
+        if existing_types != new_types {
+            return Err(Error::UnsupportedGoType {
+                context: format!("result struct `{struct_name}`"),
+                reason: format!(
+                    "a result struct named `{struct_name}` already exists with different element types"
                 ),
             });
         }
