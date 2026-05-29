@@ -492,6 +492,7 @@ async def test_signal_with_start_rejects_positional_args_and_args() -> None:
 
 
 if typing.TYPE_CHECKING:
+
     async def _typecheck_signal_with_start_return_types() -> None:
         positional_handle = await workflow_service.signal_with_start_workflow(
             SingleArgWorkflow.run,
