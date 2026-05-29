@@ -22,6 +22,8 @@ export async function workflowServiceCaller(): Promise<{
     signalArgs: [7, "hello"],
     cronSchedule: "",
     runTimeout: "5 minutes",
+    staticSummary: "Workflow summary",
+    staticDetails: "Workflow details",
   });
   return {
     runId: handle.runId,

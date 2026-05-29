@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
-use heck::{ToLowerCamelCase, ToShoutySnakeCase, ToUpperCamelCase};
+use heck::{ToKebabCase, ToLowerCamelCase, ToShoutySnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 use prost_types::FieldDescriptorProto;
 
@@ -320,6 +321,18 @@ fn function_constraint(result_annotation: &str) -> String {
     format!("(...args: any[]) => {result_annotation}")
 }
 
+fn invocation_model_replace_type_name(model_name: &str) -> String {
+    format!("Replace{model_name}")
+}
+
+fn model_to_proto_function_name(model_name: &str) -> String {
+    format!("{}ToProto", model_name.to_lower_camel_case())
+}
+
+fn model_from_proto_function_name(model_name: &str) -> String {
+    format!("{}FromProto", model_name.to_lower_camel_case())
+}
+
 fn generic_model_annotation(model_name: &str, type_parameters: &[RenderedTypeParameter]) -> String {
     if type_parameters.is_empty() {
         model_name.to_string()
@@ -421,7 +434,19 @@ struct RenderedField {
     optional: bool,
     from_proto_expr: String,
     to_proto_expr: String,
+    flattened_fields: Vec<RenderedFlattenedField>,
     requirements: TypeScriptRequirements,
+}
+
+#[derive(Debug)]
+struct RenderedFlattenedField {
+    name: String,
+    proto_name: String,
+    annotation: String,
+    doc: Option<String>,
+    optional: bool,
+    from_proto_expr: String,
+    to_proto_expr: String,
 }
 
 #[derive(Debug)]
@@ -504,7 +529,10 @@ impl MessageValueConversion {
     fn from_proto_expr(&self, proto_expr: &str) -> String {
         match &self.kind {
             MessageValueConversionKind::GeneratedModel { model_name } => {
-                format!("{model_name}.fromProto({proto_expr})")
+                format!(
+                    "{}({proto_expr})",
+                    model_from_proto_function_name(model_name)
+                )
             }
             MessageValueConversionKind::NativeModel => proto_expr.to_string(),
             MessageValueConversionKind::Override { from_proto, .. } => {
@@ -516,7 +544,10 @@ impl MessageValueConversion {
     fn to_proto_expr(&self, value_expr: &str) -> String {
         match &self.kind {
             MessageValueConversionKind::GeneratedModel { model_name } => {
-                format!("{model_name}.toProto({value_expr}) ?? {{}}")
+                format!(
+                    "{}({value_expr}) ?? {{}}",
+                    model_to_proto_function_name(model_name)
+                )
             }
             MessageValueConversionKind::NativeModel => value_expr.to_string(),
             MessageValueConversionKind::Override { to_proto, .. } => {
@@ -738,6 +769,9 @@ fn resolve_message_value_conversion(
     }
 
     ensure_rendered_model(message, api_plan, enums, flags, variants, models);
+    let rendered_model = models
+        .get(&message.info.full_name)
+        .expect("planned model should be rendered");
     let kind = if message.source == PlannedMessageSource::Wit {
         MessageValueConversionKind::NativeModel
     } else {
@@ -746,11 +780,7 @@ fn resolve_message_value_conversion(
         }
     };
     MessageValueConversion {
-        annotation: models
-            .get(&message.info.full_name)
-            .expect("planned model should be rendered")
-            .name
-            .clone(),
+        annotation: rendered_model.name.clone(),
         kind,
     }
 }
@@ -980,6 +1010,7 @@ fn build_field(
             optional: true,
             from_proto_expr: map_value_from_proto_expr(&value_type, &proto_field_name),
             to_proto_expr: map_value_to_proto_expr(&value_type, &generated_field_name),
+            flattened_fields: Vec::new(),
             requirements: value_type.requirements,
         };
     }
@@ -996,6 +1027,25 @@ fn build_field(
         PlannedFieldKind::Map { .. } => unreachable!("handled above"),
     };
     let owner_name = field.owner_name.clone();
+
+    if !repeated
+        && field.function.is_none()
+        && !field.function_args
+        && field.with_arguments.is_none()
+        && !field.with_arguments_args
+        && let Some(flattened) = build_flattened_message_field(
+            field,
+            &generated_field_name,
+            &proto_field_name,
+            api_plan,
+            enums,
+            flags,
+            variants,
+            models,
+        )
+    {
+        return flattened;
+    }
 
     if let Some(with_arguments) = &field.with_arguments {
         let function_converter = field
@@ -1039,6 +1089,7 @@ fn build_field(
                 ),
             },
             requirements: resolved_type.requirements,
+            flattened_fields: Vec::new(),
         };
     }
 
@@ -1068,6 +1119,7 @@ fn build_field(
                 optional_function_to_proto_expr(&generated_field_name, converter)
             },
             requirements: resolved_type.requirements,
+            flattened_fields: Vec::new(),
         };
     }
 
@@ -1083,6 +1135,7 @@ fn build_field(
                 &resolved_type,
                 &generated_field_name,
             ),
+            flattened_fields: Vec::new(),
             requirements: resolved_type.requirements,
         };
     }
@@ -1099,6 +1152,7 @@ fn build_field(
             optional: true,
             from_proto_expr: repeated_from_proto_expr(&resolved_type, &proto_field_name),
             to_proto_expr: repeated_to_proto_expr(&resolved_type, &generated_field_name),
+            flattened_fields: Vec::new(),
             requirements: resolved_type.requirements,
         };
     }
@@ -1120,6 +1174,7 @@ fn build_field(
                 &generated_field_name,
                 &default_value.enum_case,
             ),
+            flattened_fields: Vec::new(),
             requirements: resolved_type.requirements,
         };
     }
@@ -1143,6 +1198,7 @@ fn build_field(
                 &owner_name,
                 &generated_field_name,
             ),
+            flattened_fields: Vec::new(),
             requirements: resolved_type.requirements,
         };
     }
@@ -1155,8 +1211,113 @@ fn build_field(
         optional: true,
         from_proto_expr: optional_from_proto_expr(&resolved_type, &proto_field_name),
         to_proto_expr: optional_to_proto_expr(&resolved_type, &generated_field_name),
+        flattened_fields: Vec::new(),
         requirements: resolved_type.requirements,
     }
+}
+
+fn build_flattened_message_field(
+    field: &PlannedField,
+    generated_field_name: &str,
+    proto_field_name: &str,
+    api_plan: &ApiPlan,
+    enums: &mut IndexMap<String, RenderedEnum>,
+    flags: &mut IndexMap<String, RenderedFlags>,
+    variants: &mut IndexMap<String, RenderedVariant>,
+    models: &mut IndexMap<String, RenderedModel>,
+) -> Option<RenderedField> {
+    let PlannedFieldKind::Singular(PlannedValueType::Message(message_type)) = &field.kind else {
+        return None;
+    };
+    let nested_planned_model = api_plan.models.get(&message_type.info.full_name)?;
+    if !nested_planned_model.flatten_in_api {
+        return None;
+    }
+
+    let nested_fields = nested_planned_model.fields.clone();
+    let nested_generated_model = nested_planned_model.generated_model.clone();
+    let nested_model_name = nested_planned_model.name.clone();
+    let mut flattened_fields = Vec::new();
+    let mut requirements = TypeScriptRequirements::default();
+
+    for nested_planned_field in nested_fields {
+        let nested_rendered_field = build_field(
+            &nested_planned_field,
+            api_plan,
+            enums,
+            flags,
+            variants,
+            models,
+        );
+        let annotation = nested_generated_model
+            .field_flattened_annotation(&nested_planned_field.proto_name)
+            .and_then(|annotation| annotation.for_language(Language::TypeScript))
+            .map(str::to_string)
+            .unwrap_or_else(|| nested_rendered_field.annotation.clone());
+        let to_proto_expr = flattened_field_to_proto_expr(&nested_rendered_field, &annotation);
+        requirements.merge(&nested_rendered_field.requirements);
+        flattened_fields.push(RenderedFlattenedField {
+            name: nested_rendered_field.name,
+            proto_name: nested_rendered_field.proto_name,
+            annotation,
+            doc: nested_rendered_field.doc,
+            optional: nested_rendered_field.optional,
+            from_proto_expr: format!(
+                "proto.{proto_field_name} == null ? undefined : {}",
+                nested_rendered_field
+                    .from_proto_expr
+                    .replace("proto.", &format!("proto.{proto_field_name}."))
+            ),
+            to_proto_expr,
+        });
+    }
+
+    let doc = field
+        .doc
+        .as_ref()
+        .and_then(|doc| doc.for_language(Language::TypeScript))
+        .map(str::to_string);
+    Some(RenderedField {
+        name: generated_field_name.to_string(),
+        proto_name: proto_field_name.to_string(),
+        annotation: nested_model_name,
+        doc,
+        optional: !field.required,
+        from_proto_expr: String::new(),
+        to_proto_expr: flattened_message_to_proto_expr(field.required, &flattened_fields),
+        flattened_fields,
+        requirements,
+    })
+}
+
+fn flattened_field_to_proto_expr(field: &RenderedField, annotation: &str) -> String {
+    if field.annotation == "common.Payload" && annotation != field.annotation {
+        let value_expr = format!("model.{}", field.name);
+        if field.optional {
+            return format!(
+                "{value_expr} == null ? undefined : configuredPayloadConverter().toPayload({value_expr})"
+            );
+        }
+        return format!("configuredPayloadConverter().toPayload({value_expr})");
+    }
+    field.to_proto_expr.clone()
+}
+
+fn flattened_message_to_proto_expr(required: bool, fields: &[RenderedFlattenedField]) -> String {
+    let proto_fields = fields
+        .iter()
+        .map(|field| format!("{}: {}", field.proto_name, field.to_proto_expr))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if required || fields.iter().any(|field| !field.optional) {
+        return format!("{{ {proto_fields} }}");
+    }
+    let all_empty = fields
+        .iter()
+        .map(|field| format!("model.{} == null", field.name))
+        .collect::<Vec<_>>()
+        .join(" && ");
+    format!("{all_empty} ? undefined : {{ {proto_fields} }}")
 }
 
 fn build_sourced_field(
@@ -1706,7 +1867,10 @@ fn function_value_to_proto_expr(resolved_type: &ResolvedFieldType, name_expr: &s
             .kind
         {
             MessageValueConversionKind::GeneratedModel { model_name } => {
-                format!("{model_name}.toProto({{ name: {name_expr} }}) ?? {{}}")
+                format!(
+                    "{}({{ name: {name_expr} }}) ?? {{}}",
+                    model_to_proto_function_name(model_name)
+                )
             }
             MessageValueConversionKind::NativeModel => name_expr.to_string(),
             MessageValueConversionKind::Override { to_proto, .. } => {
@@ -1823,23 +1987,59 @@ fn render_module_files(
 ) -> GeneratedFiles {
     let support_source = support_source.filter(|source| !source.trim().is_empty());
     let support_exports = support_source.map(support_exports);
-    let mut files = BTreeMap::new();
+    let mut files = BTreeMap::<PathBuf, String>::new();
     files.insert(
         "index.ts".into(),
-        render_module(
-            enums,
-            flags,
-            variants,
-            models,
-            services,
-            requirements,
-            support_exports.as_ref(),
-        ),
+        render_index_module(enums, flags, variants, models, services),
     );
+    files.insert(
+        "models.ts".into(),
+        render_models_module(enums, flags, variants, models, support_exports.as_ref()),
+    );
+    files.insert(
+        "service.ts".into(),
+        render_service_module(enums, flags, variants, models, services, requirements),
+    );
+    if services.iter().any(|service| !service.resources.is_empty()) {
+        files.insert(
+            "resources.ts".into(),
+            render_resources_module(
+                enums,
+                flags,
+                variants,
+                models,
+                services,
+                requirements,
+                support_exports.as_ref(),
+            ),
+        );
+    }
+    for service in services {
+        for operation in &service.operations {
+            files.insert(
+                format!("operations/{}.ts", operation_file_name(operation)).into(),
+                render_operation_module(
+                    enums,
+                    flags,
+                    variants,
+                    models,
+                    services,
+                    service,
+                    operation,
+                    requirements,
+                    support_exports.as_ref(),
+                ),
+            );
+        }
+    }
     if let Some(support_source) = support_source {
         files.insert("support.ts".into(), render_support_module(support_source));
     }
     GeneratedFiles::directory(files)
+}
+
+fn operation_file_name(operation: &RenderedOperation<'_>) -> String {
+    operation.attr_name.to_kebab_case()
 }
 
 fn support_exports(source: &str) -> SupportExports {
@@ -1874,78 +2074,404 @@ fn export_name<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
     (end > 0).then_some(&remainder[..end])
 }
 
-fn render_typescript_imports(output: &mut String, requirements: &TypeScriptRequirements) {
-    output.push_str("import * as common from '@temporalio/common';\n");
-    output.push_str("import * as nexus from 'nexus-rpc';\n");
-    if requirements.long {
+fn render_typescript_imports(output: &mut String, source: &str) {
+    if source.contains("common.") {
+        output.push_str("import * as common from '@temporalio/common';\n");
+    }
+    if source.contains("nexus.") {
+        output.push_str("import * as nexus from 'nexus-rpc';\n");
+    }
+    if contains_identifier(source, "Long") {
         output.push_str("import type Long from 'long';\n");
     }
-    output.push_str("import type { google, temporal } from '@temporalio/proto';\n");
-    output.push_str("import * as workflow from '@temporalio/workflow';\n");
+    let mut proto_imports = Vec::new();
+    if source.contains("google.") {
+        proto_imports.push("google");
+    }
+    if source.contains("temporal.") {
+        proto_imports.push("temporal");
+    }
+    if !proto_imports.is_empty() {
+        output.push_str("import type { ");
+        output.push_str(&proto_imports.join(", "));
+        output.push_str(" } from '@temporalio/proto';\n");
+    }
+    if source.contains("workflow.") {
+        output.push_str("import * as workflow from '@temporalio/workflow';\n");
+    }
 }
 
-fn render_support_module(support_source: &str) -> String {
+fn contains_identifier(source: &str, identifier: &str) -> bool {
+    source.match_indices(identifier).any(|(index, _)| {
+        let before = source[..index].chars().next_back();
+        let after = source[index + identifier.len()..].chars().next();
+        !before.is_some_and(is_typescript_identifier_char)
+            && !after.is_some_and(is_typescript_identifier_char)
+    })
+}
+
+fn is_typescript_identifier_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_' || ch == '$'
+}
+
+fn used_import_names(source: &str, names: &[String]) -> Vec<String> {
+    names
+        .iter()
+        .filter(|name| contains_identifier(source, name))
+        .cloned()
+        .collect()
+}
+
+fn render_generated_module(imports: String, body: String) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
     output.push_str("\n\n");
-    render_typescript_imports(&mut output, &TypeScriptRequirements { long: true });
-    output.push('\n');
-    output.push_str(support_source);
-    if !support_source.ends_with('\n') {
+    if !imports.is_empty() {
+        output.push_str(&imports);
+        output.push('\n');
+    }
+    output.push_str(&body);
+    if !body.ends_with('\n') {
         output.push('\n');
     }
     output
 }
 
-fn render_module(
+fn render_support_module(support_source: &str) -> String {
+    let mut imports = String::new();
+    render_typescript_imports(&mut imports, support_source);
+    render_generated_module(imports, support_source.to_string())
+}
+
+fn render_index_module(
     enums: &[&RenderedEnum],
     flags: &[&RenderedFlags],
     variants: &[&RenderedVariant],
     models: &[&RenderedModel],
     services: &[RenderedService<'_>],
-    requirements: &TypeScriptRequirements,
-    support_exports: Option<&SupportExports>,
 ) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
     output.push_str("\n\n");
-    render_typescript_imports(&mut output, requirements);
-    let uses_nexus_value = services.iter().any(|service| {
-        service
-            .operations
+    for service in services {
+        output.push_str("export { ");
+        output.push_str(service.name);
+        output.push_str(" } from './service.ts';\n");
+    }
+    for service in services {
+        for operation in &service.operations {
+            output.push_str("export { ");
+            output.push_str(&operation.attr_name);
+            output.push_str(" } from './operations/");
+            output.push_str(&operation_file_name(operation));
+            output.push_str(".ts';\n");
+        }
+    }
+
+    let value_model_names = enums
+        .iter()
+        .map(|enumeration| enumeration.name.as_str())
+        .chain(flags.iter().map(|flags| flags.name.as_str()))
+        .collect::<Vec<_>>();
+    if !value_model_names.is_empty() {
+        output.push_str("export { ");
+        output.push_str(&value_model_names.join(", "));
+        output.push_str(" } from './models.ts';\n");
+    }
+
+    let type_model_names = variants
+        .iter()
+        .map(|variant| variant.name.as_str())
+        .chain(models.iter().map(|model| model.name.as_str()))
+        .collect::<Vec<_>>();
+    if !type_model_names.is_empty() {
+        output.push_str("export type { ");
+        output.push_str(&type_model_names.join(", "));
+        output.push_str(" } from './models.ts';\n");
+    }
+
+    let resource_names = services
+        .iter()
+        .flat_map(|service| {
+            service
+                .resources
+                .iter()
+                .map(|resource| resource.type_name.as_str())
+        })
+        .collect::<Vec<_>>();
+    if !resource_names.is_empty() {
+        output.push_str("export { ");
+        output.push_str(&resource_names.join(", "));
+        output.push_str(" } from './resources.ts';\n");
+    }
+    output
+}
+
+fn render_models_module(
+    enums: &[&RenderedEnum],
+    flags: &[&RenderedFlags],
+    variants: &[&RenderedVariant],
+    models: &[&RenderedModel],
+    support_exports: Option<&SupportExports>,
+) -> String {
+    let mut body = String::new();
+    render_required_field(&mut body, true);
+
+    let uses_invocation_models = models
+        .iter()
+        .any(|model| !model.functions.is_empty() || !model.with_arguments.is_empty());
+    let uses_configured_payload_converter = uses_invocation_models
+        || models
             .iter()
-            .any(|operation| operation.input_nexus_type_id.is_some())
-    });
-    let uses_nexus_resource = services.iter().any(|service| !service.resources.is_empty());
-    if uses_nexus_value || uses_nexus_resource {
-        output.push_str("import { ");
-        let mut imports = Vec::new();
-        if uses_nexus_value {
-            imports.push("nexusValue");
-        }
-        if uses_nexus_resource {
-            imports.push("markNexusResource");
-            imports.push("registerNexusResource");
-        }
-        output.push_str(&imports.join(", "));
-        output.push_str(" } from '../nexus-api-gen-runtime.ts';\n");
+            .any(|model| model_uses_configured_payload_converter(model));
+    if uses_configured_payload_converter {
+        body.push('\n');
+        render_configured_payload_converter(&mut body);
     }
+    if uses_invocation_models {
+        body.push('\n');
+        render_function_runtime_helpers(&mut body);
+    }
+    if !enums.is_empty() {
+        body.push('\n');
+        for enumeration in enums {
+            render_enum(&mut body, enumeration);
+            body.push('\n');
+        }
+    }
+    if !flags.is_empty() {
+        body.push('\n');
+        for flag_set in flags {
+            render_flags(&mut body, flag_set);
+            body.push('\n');
+        }
+    }
+    if !variants.is_empty() {
+        body.push('\n');
+        for variant in variants {
+            render_variant(&mut body, variant);
+            body.push('\n');
+        }
+    }
+    if !models.is_empty() {
+        body.push('\n');
+        for model in models {
+            render_model(&mut body, model);
+            body.push('\n');
+        }
+    }
+    let mut imports = String::new();
+    render_typescript_imports(&mut imports, &body);
+    render_support_imports(&mut imports, support_exports, "./support.ts", &body);
+    render_generated_module(imports, body)
+}
 
+fn render_service_module(
+    enums: &[&RenderedEnum],
+    flags: &[&RenderedFlags],
+    variants: &[&RenderedVariant],
+    models: &[&RenderedModel],
+    services: &[RenderedService<'_>],
+    _requirements: &TypeScriptRequirements,
+) -> String {
+    let mut body = String::new();
+    for service in services {
+        render_service_definition(&mut body, service);
+        body.push('\n');
+    }
+    let mut imports = String::new();
+    render_typescript_imports(&mut imports, &body);
+    render_type_imports(
+        &mut imports,
+        "./models.ts",
+        &used_import_names(&body, &model_type_names(enums, flags, variants, models)),
+    );
+    render_type_imports(
+        &mut imports,
+        "./resources.ts",
+        &used_import_names(&body, &resource_type_names(services)),
+    );
+    render_generated_module(imports, body)
+}
+
+fn render_resources_module(
+    enums: &[&RenderedEnum],
+    flags: &[&RenderedFlags],
+    variants: &[&RenderedVariant],
+    models: &[&RenderedModel],
+    services: &[RenderedService<'_>],
+    _requirements: &TypeScriptRequirements,
+    support_exports: Option<&SupportExports>,
+) -> String {
+    let mut body = String::new();
+    for service in services {
+        for resource in &service.resources {
+            render_resource(&mut body, resource, service);
+            body.push('\n');
+        }
+    }
+    render_nexus_type_registrations(&mut body, services);
+    let mut imports = String::new();
+    render_typescript_imports(&mut imports, &body);
+    render_value_imports(
+        &mut imports,
+        "../nexus-api-gen-runtime.ts",
+        &used_import_names(
+            &body,
+            &[
+                "markNexusResource".to_string(),
+                "registerNexusResource".to_string(),
+            ],
+        ),
+    );
+    render_type_imports(
+        &mut imports,
+        "./models.ts",
+        &used_import_names(&body, &model_type_names(enums, flags, variants, models)),
+    );
+    render_support_imports(&mut imports, support_exports, "./support.ts", &body);
+    for service in services {
+        for operation in &service.operations {
+            if contains_identifier(&body, &operation.attr_name) {
+                render_value_imports(
+                    &mut imports,
+                    &format!("./operations/{}.ts", operation_file_name(operation)),
+                    std::slice::from_ref(&operation.attr_name),
+                );
+            }
+        }
+    }
+    render_generated_module(imports, body)
+}
+
+fn render_operation_module(
+    enums: &[&RenderedEnum],
+    flags: &[&RenderedFlags],
+    variants: &[&RenderedVariant],
+    models: &[&RenderedModel],
+    services: &[RenderedService<'_>],
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    _requirements: &TypeScriptRequirements,
+    support_exports: Option<&SupportExports>,
+) -> String {
+    let mut body = String::new();
+    render_operation_function(&mut body, service, operation);
+    let mut imports = String::new();
+    render_typescript_imports(&mut imports, &body);
+    render_value_imports(&mut imports, "../service.ts", &[service.name.to_string()]);
+    let mut model_values = model_to_proto_function_names(models);
+    model_values.push("requiredField".to_string());
+    model_values.sort();
+    model_values.dedup();
+    render_value_imports(
+        &mut imports,
+        "../models.ts",
+        &used_import_names(&body, &model_values),
+    );
+    render_type_imports(
+        &mut imports,
+        "../models.ts",
+        &used_import_names(&body, &model_type_names(enums, flags, variants, models)),
+    );
+    render_support_imports(&mut imports, support_exports, "../support.ts", &body);
+    let resources = resource_type_names(services);
+    render_value_imports(
+        &mut imports,
+        "../resources.ts",
+        &used_import_names(&body, &resources),
+    );
+    if operation.input_nexus_type_id.is_some() {
+        render_value_imports(
+            &mut imports,
+            "../../nexus-api-gen-runtime.ts",
+            &["nexusValue".to_string()],
+        );
+    }
+    render_generated_module(imports, body)
+}
+
+fn render_support_imports(
+    output: &mut String,
+    support_exports: Option<&SupportExports>,
+    path: &str,
+    source: &str,
+) {
     if let Some(support_exports) = support_exports {
-        if !support_exports.value_names.is_empty() {
-            output.push('\n');
-            output.push_str("import { ");
-            output.push_str(&support_exports.value_names.join(", "));
-            output.push_str(" } from './support.ts';\n");
-        }
-        if !support_exports.type_names.is_empty() {
-            output.push_str("import type { ");
-            output.push_str(&support_exports.type_names.join(", "));
-            output.push_str(" } from './support.ts';\n");
-        }
+        render_value_imports(
+            output,
+            path,
+            &used_import_names(source, &support_exports.value_names),
+        );
+        render_type_imports(
+            output,
+            path,
+            &used_import_names(source, &support_exports.type_names),
+        );
     }
+}
 
-    output.push_str("\n");
+fn render_value_imports(output: &mut String, path: &str, names: &[String]) {
+    if names.is_empty() {
+        return;
+    }
+    output.push_str("import { ");
+    output.push_str(&names.join(", "));
+    output.push_str(" } from '");
+    output.push_str(path);
+    output.push_str("';\n");
+}
+
+fn render_type_imports(output: &mut String, path: &str, names: &[String]) {
+    if names.is_empty() {
+        return;
+    }
+    output.push_str("import type { ");
+    output.push_str(&names.join(", "));
+    output.push_str(" } from '");
+    output.push_str(path);
+    output.push_str("';\n");
+}
+
+fn model_type_names(
+    enums: &[&RenderedEnum],
+    flags: &[&RenderedFlags],
+    variants: &[&RenderedVariant],
+    models: &[&RenderedModel],
+) -> Vec<String> {
+    enums
+        .iter()
+        .map(|enumeration| enumeration.name.clone())
+        .chain(flags.iter().map(|flags| flags.name.clone()))
+        .chain(variants.iter().map(|variant| variant.name.clone()))
+        .chain(models.iter().map(|model| model.name.clone()))
+        .collect()
+}
+
+fn resource_type_names(services: &[RenderedService<'_>]) -> Vec<String> {
+    services
+        .iter()
+        .flat_map(|service| {
+            service
+                .resources
+                .iter()
+                .map(|resource| resource.type_name.clone())
+        })
+        .collect()
+}
+
+fn model_to_proto_function_names(models: &[&RenderedModel]) -> Vec<String> {
+    models
+        .iter()
+        .filter(|model| model.capabilities.to_proto)
+        .map(|model| model_to_proto_function_name(&model.name))
+        .collect()
+}
+
+fn render_required_field(output: &mut String, exported: bool) {
+    if exported {
+        output.push_str("export ");
+    }
     output.push_str("function requiredField<T>(\n");
     output.push_str("  value: T | null | undefined,\n");
     output.push_str("  owner: string,\n");
@@ -1956,73 +2482,6 @@ fn render_module(
     output.push_str("  }\n");
     output.push_str("  return value;\n");
     output.push_str("}\n");
-
-    let uses_invocation_models = models
-        .iter()
-        .any(|model| !model.functions.is_empty() || !model.with_arguments.is_empty());
-    if uses_invocation_models {
-        output.push('\n');
-        render_function_runtime_helpers(&mut output);
-    }
-    if !enums.is_empty() {
-        output.push('\n');
-        for enumeration in enums {
-            render_enum(&mut output, enumeration);
-            output.push('\n');
-        }
-    }
-
-    if !flags.is_empty() {
-        output.push('\n');
-        for flag_set in flags {
-            render_flags(&mut output, flag_set);
-            output.push('\n');
-        }
-    }
-
-    if !variants.is_empty() {
-        output.push('\n');
-        for variant in variants {
-            render_variant(&mut output, variant);
-            output.push('\n');
-        }
-    }
-
-    if !models.is_empty() {
-        output.push('\n');
-        for model in models {
-            render_model(&mut output, model);
-            output.push('\n');
-        }
-    }
-
-    let resources = services
-        .iter()
-        .flat_map(|service| {
-            service
-                .resources
-                .iter()
-                .map(move |resource| (resource, service))
-        })
-        .collect::<Vec<_>>();
-    if !resources.is_empty() {
-        output.push('\n');
-        for (resource, service) in resources {
-            render_resource(&mut output, resource, service);
-            output.push('\n');
-        }
-    }
-
-    render_nexus_type_registrations(&mut output, services);
-
-    for (index, service) in services.iter().enumerate() {
-        if index > 0 || !services.is_empty() {
-            output.push('\n');
-        }
-        render_service(&mut output, service);
-    }
-
-    output
 }
 
 fn render_nexus_type_registrations(output: &mut String, services: &[RenderedService<'_>]) {
@@ -2130,10 +2589,40 @@ fn render_function_runtime_helpers(output: &mut String) {
     output.push_str("  if (args == null) {\n");
     output.push_str("    return undefined;\n");
     output.push_str("  }\n");
-    output.push_str(
-        "  const payloads = common.toPayloads(common.defaultPayloadConverter, ...args);\n",
-    );
+    output
+        .push_str("  const payloads = common.toPayloads(configuredPayloadConverter(), ...args);\n");
     output.push_str("  return payloads == null ? undefined : { payloads };\n");
+    output.push_str("}\n");
+}
+
+fn model_uses_configured_payload_converter(model: &RenderedModel) -> bool {
+    model.fields.iter().any(|field| {
+        field.to_proto_expr.contains("configuredPayloadConverter()")
+            || field
+                .flattened_fields
+                .iter()
+                .any(|field| field.to_proto_expr.contains("configuredPayloadConverter()"))
+    }) || model
+        .sourced_fields
+        .iter()
+        .any(|field| field.to_proto_expr.contains("configuredPayloadConverter()"))
+}
+
+fn render_configured_payload_converter(output: &mut String) {
+    output.push_str("function configuredPayloadConverter(): common.PayloadConverter {\n");
+    output.push_str("  const activator = (\n");
+    output.push_str("    globalThis as typeof globalThis & {\n");
+    output.push_str("      __TEMPORAL_ACTIVATOR__?: {\n");
+    output.push_str("        payloadConverter?: common.PayloadConverter;\n");
+    output.push_str("      };\n");
+    output.push_str("    }\n");
+    output.push_str("  ).__TEMPORAL_ACTIVATOR__;\n");
+    output.push_str("  if (activator?.payloadConverter == null) {\n");
+    output.push_str(
+        "    throw new Error('payload converter is unavailable outside workflow context');\n",
+    );
+    output.push_str("  }\n");
+    output.push_str("  return activator.payloadConverter;\n");
     output.push_str("}\n");
 }
 
@@ -2196,10 +2685,145 @@ fn render_function_model_invocations(output: &mut String, model: &RenderedModel)
             .then_with(|| left.field_name().cmp(right.field_name()))
     });
 
-    for invocation in invocations {
-        output.push_str(" &\n");
+    for (index, invocation) in invocations.into_iter().enumerate() {
+        if index > 0 {
+            output.push_str(" &\n");
+        }
         render_invocation_union(output, model, invocation);
     }
+}
+
+fn render_invocation_model_replace_helper(output: &mut String, model: &RenderedModel) {
+    let field_names = invocation_model_replaced_field_names(model);
+    if field_names.is_empty() {
+        return;
+    }
+    output.push_str("export type ");
+    output.push_str(&invocation_model_replace_type_name(&model.name));
+    output.push_str("<Base, New> = Omit<Base, ");
+    output.push_str(
+        &field_names
+            .iter()
+            .map(|field_name| typescript_string_literal(field_name))
+            .collect::<Vec<_>>()
+            .join(" | "),
+    );
+    output.push_str("> & New;\n\n");
+}
+
+fn invocation_model_replaced_field_names(model: &RenderedModel) -> Vec<String> {
+    let mut names = model
+        .functions
+        .iter()
+        .flat_map(|function| {
+            [
+                function.callable_field_name.clone(),
+                function.args_field_name.clone(),
+            ]
+        })
+        .chain(model.with_arguments.iter().flat_map(|with_arguments| {
+            [
+                with_arguments.value_field_name.clone(),
+                with_arguments.args_field_name.clone(),
+            ]
+        }))
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn render_invocation_model_base_type(output: &mut String, model: &RenderedModel) {
+    output.push_str("{\n");
+    for field in &model.fields {
+        render_invocation_model_base_property(output, model, field);
+    }
+    output.push('}');
+}
+
+fn render_invocation_model_base_property(
+    output: &mut String,
+    model: &RenderedModel,
+    field: &RenderedField,
+) {
+    if !field.flattened_fields.is_empty() {
+        render_flattened_type_properties(output, "  ", &field.flattened_fields);
+        return;
+    }
+    if let Some(function) = model
+        .functions
+        .iter()
+        .find(|function| function.callable_field_name == field.name)
+    {
+        render_typescript_type_property(
+            output,
+            "  ",
+            &field.name,
+            field.optional,
+            &format!("string | {}", function.type_parameter_name),
+            typescript_model_field_doc(model, field).as_deref(),
+        );
+        return;
+    }
+    if let Some(function) = model
+        .functions
+        .iter()
+        .find(|function| function.args_field_name == field.name)
+    {
+        render_typescript_type_property(
+            output,
+            "  ",
+            &field.name,
+            field.optional,
+            &format!(
+                "ReadonlyArray<unknown> | Readonly<Parameters<{}>>",
+                function.type_parameter_name
+            ),
+            typescript_model_field_doc(model, field).as_deref(),
+        );
+        return;
+    }
+    if let Some(with_arguments) = model
+        .with_arguments
+        .iter()
+        .find(|with_arguments| with_arguments.value_field_name == field.name)
+    {
+        render_typescript_type_property(
+            output,
+            "  ",
+            &field.name,
+            field.optional,
+            &with_arguments.type_parameter_name,
+            typescript_model_field_doc(model, field).as_deref(),
+        );
+        return;
+    }
+    if let Some(with_arguments) = model
+        .with_arguments
+        .iter()
+        .find(|with_arguments| with_arguments.args_field_name == field.name)
+    {
+        render_typescript_type_property(
+            output,
+            "  ",
+            &field.name,
+            field.optional,
+            &format!(
+                "ReadonlyArray<unknown> | Readonly<{}>",
+                with_arguments.args_type_parameter_name
+            ),
+            typescript_model_field_doc(model, field).as_deref(),
+        );
+        return;
+    }
+    render_typescript_type_property(
+        output,
+        "  ",
+        &field.name,
+        field.optional,
+        &field.annotation,
+        typescript_model_field_doc(model, field).as_deref(),
+    );
 }
 
 fn render_invocation_union(
@@ -2472,6 +3096,132 @@ fn render_typescript_type_property(
     output.push_str(";\n");
 }
 
+fn render_flattened_type_properties(
+    output: &mut String,
+    indent: &str,
+    fields: &[RenderedFlattenedField],
+) {
+    for field in fields {
+        render_typescript_type_property(
+            output,
+            indent,
+            &field.name,
+            field.optional,
+            &field.annotation,
+            field.doc.as_deref(),
+        );
+    }
+}
+
+fn render_model_to_proto_function(output: &mut String, model: &RenderedModel, function_name: &str) {
+    if model.type_parameters.is_empty() {
+        output.push_str("export function ");
+        output.push_str(function_name);
+        output.push_str("(\n");
+        output.push_str("  model: ");
+        output.push_str(&model.name);
+        output.push_str(" | null | undefined,\n");
+    } else {
+        render_named_generic_function_start(
+            output,
+            &format!("export function {function_name}"),
+            &model.type_parameters,
+            0,
+        );
+        output.push_str("  model: ");
+        output.push_str(&generic_model_annotation(
+            &model.name,
+            &model.type_parameters,
+        ));
+        output.push_str(" | null | undefined,\n");
+    }
+    output.push_str("): ");
+    output.push_str(&model.proto_ref);
+    output.push_str(" | undefined {\n");
+    output.push_str("  if (model == null) {\n");
+    output.push_str("    return undefined;\n");
+    output.push_str("  }\n");
+    if model.fields.is_empty() && model.sourced_fields.is_empty() {
+        output.push_str("  return {};\n");
+    } else {
+        output.push_str("  return {\n");
+        for field in &model.fields {
+            output.push_str("    ");
+            output.push_str(&field.proto_name);
+            output.push_str(": ");
+            output.push_str(&field.to_proto_expr);
+            output.push_str(",\n");
+        }
+        for field in &model.sourced_fields {
+            output.push_str("    ");
+            output.push_str(&field.name);
+            output.push_str(": ");
+            output.push_str(&field.to_proto_expr);
+            output.push_str(",\n");
+        }
+        output.push_str("  };\n");
+    }
+    output.push_str("}\n");
+}
+
+fn render_model_from_proto_function(
+    output: &mut String,
+    model: &RenderedModel,
+    function_name: &str,
+) {
+    if model.type_parameters.is_empty() {
+        output.push_str("export function ");
+        output.push_str(function_name);
+        output.push_str("(\n");
+        output.push_str("  proto: ");
+        output.push_str(&model.proto_ref);
+        output.push_str(" | null | undefined,\n");
+    } else {
+        render_named_generic_function_start(
+            output,
+            &format!("export function {function_name}"),
+            &model.type_parameters,
+            0,
+        );
+        output.push_str("  proto: ");
+        output.push_str(&model.proto_ref);
+        output.push_str(" | null | undefined,\n");
+    }
+    output.push_str("): ");
+    output.push_str(&generic_model_annotation(
+        &model.name,
+        &model.type_parameters,
+    ));
+    output.push_str(" | undefined {\n");
+    output.push_str("  if (proto == null) {\n");
+    output.push_str("    return undefined;\n");
+    output.push_str("  }\n");
+    if model.fields.is_empty() {
+        output.push_str("  return {};\n");
+    } else {
+        output.push_str("  return {\n");
+        for field in &model.fields {
+            if field.flattened_fields.is_empty() {
+                output.push_str("    ");
+                output.push_str(&field.name);
+                output.push_str(": ");
+                output.push_str(&field.from_proto_expr);
+                output.push_str(",\n");
+            } else {
+                for flattened_field in &field.flattened_fields {
+                    output.push_str("    ");
+                    output.push_str(&flattened_field.name);
+                    output.push_str(": ");
+                    output.push_str(&flattened_field.from_proto_expr);
+                    output.push_str(",\n");
+                }
+            }
+        }
+        output.push_str("  };\n");
+    }
+    output.push_str("}\n");
+}
+
 fn render_model(output: &mut String, model: &RenderedModel) {
     if model.functions.is_empty() && model.with_arguments.is_empty() {
         if model.fields.is_empty() {
@@ -2483,146 +3233,52 @@ fn render_model(output: &mut String, model: &RenderedModel) {
             output.push_str(&model.name);
             output.push_str(" {\n");
             for field in &model.fields {
-                render_typescript_type_property(
-                    output,
-                    "  ",
-                    &field.name,
-                    field.optional,
-                    &field.annotation,
-                    typescript_model_field_doc(model, field).as_deref(),
-                );
+                if field.flattened_fields.is_empty() {
+                    render_typescript_type_property(
+                        output,
+                        "  ",
+                        &field.name,
+                        field.optional,
+                        &field.annotation,
+                        typescript_model_field_doc(model, field).as_deref(),
+                    );
+                } else {
+                    render_flattened_type_properties(output, "  ", &field.flattened_fields);
+                }
             }
             output.push_str("}\n\n");
         }
     } else {
-        let function_fields = model
-            .functions
-            .iter()
-            .map(|function| function.callable_field_name.as_str())
-            .chain(
-                model
-                    .with_arguments
-                    .iter()
-                    .map(|with_arguments| with_arguments.value_field_name.as_str()),
-            )
-            .collect::<Vec<_>>();
-        let args_fields = model
-            .functions
-            .iter()
-            .map(|function| function.args_field_name.as_str())
-            .chain(
-                model
-                    .with_arguments
-                    .iter()
-                    .map(|with_arguments| with_arguments.args_field_name.as_str()),
-            )
-            .collect::<Vec<_>>();
+        render_invocation_model_replace_helper(output, model);
         output.push_str("export type ");
         output.push_str(&model.name);
         output.push_str(&render_type_parameter_list(&model.type_parameters));
         output.push_str(" = ");
-        output.push_str("{\n");
-        for field in &model.fields {
-            if function_fields.contains(&field.name.as_str())
-                || args_fields.contains(&field.name.as_str())
-            {
-                continue;
-            }
-            render_typescript_type_property(
-                output,
-                "  ",
-                &field.name,
-                field.optional,
-                &field.annotation,
-                typescript_model_field_doc(model, field).as_deref(),
-            );
-        }
-        output.push('}');
+        output.push_str(&invocation_model_replace_type_name(&model.name));
+        output.push('<');
+        render_invocation_model_base_type(output, model);
+        output.push_str(", ");
         render_function_model_invocations(output, model);
-        output.push_str(";\n\n");
+        output.push_str(">;\n\n");
     }
-    output.push_str("const ");
-    output.push_str(&model.name);
-    output.push_str(" = {\n");
-    let mut wrote_method = false;
+    let mut wrote_conversion = false;
     if model.capabilities.from_proto {
-        output.push_str("  fromProto(\n");
-        output.push_str("    proto: ");
-        output.push_str(&model.proto_ref);
-        output.push_str(" | null | undefined,\n");
-        output.push_str("  ): ");
-        output.push_str(&model.name);
-        output.push_str(" | undefined {\n");
-        output.push_str("    if (proto == null) {\n");
-        output.push_str("      return undefined;\n");
-        output.push_str("    }\n");
-        if model.fields.is_empty() {
-            output.push_str("    return {};\n");
-        } else {
-            output.push_str("    return {\n");
-            for field in &model.fields {
-                output.push_str("      ");
-                output.push_str(&field.name);
-                output.push_str(": ");
-                output.push_str(&field.from_proto_expr);
-                output.push_str(",\n");
-            }
-            output.push_str("    };\n");
-        }
-        output.push_str("  }");
-        wrote_method = true;
+        render_model_from_proto_function(
+            output,
+            model,
+            &model_from_proto_function_name(&model.name),
+        );
+        wrote_conversion = true;
     }
     if model.capabilities.to_proto {
-        if wrote_method {
-            output.push_str(",\n\n");
+        if wrote_conversion {
+            output.push('\n');
         }
-        if model.type_parameters.is_empty() {
-            output.push_str("  toProto(\n");
-            output.push_str("    model: ");
-            output.push_str(&model.name);
-            output.push_str(" | null | undefined,\n");
-        } else {
-            render_named_generic_function_start(output, "  toProto", &model.type_parameters, 4);
-            output.push_str("    model: ");
-            output.push_str(&generic_model_annotation(
-                &model.name,
-                &model.type_parameters,
-            ));
-            output.push_str(" | null | undefined,\n");
-        }
-        output.push_str("  ): ");
-        output.push_str(&model.proto_ref);
-        output.push_str(" | undefined {\n");
-        output.push_str("    if (model == null) {\n");
-        output.push_str("      return undefined;\n");
-        output.push_str("    }\n");
-        if model.fields.is_empty() && model.sourced_fields.is_empty() {
-            output.push_str("    return {};\n");
-        } else {
-            output.push_str("    return {\n");
-            for field in &model.fields {
-                output.push_str("      ");
-                output.push_str(&field.proto_name);
-                output.push_str(": ");
-                output.push_str(&field.to_proto_expr);
-                output.push_str(",\n");
-            }
-            for field in &model.sourced_fields {
-                output.push_str("      ");
-                output.push_str(&field.name);
-                output.push_str(": ");
-                output.push_str(&field.to_proto_expr);
-                output.push_str(",\n");
-            }
-            output.push_str("    };\n");
-        }
-        output.push_str("  }");
+        render_model_to_proto_function(output, model, &model_to_proto_function_name(&model.name));
     }
-    output.push('\n');
-    output.push_str("};\n");
 }
 
-fn render_service(output: &mut String, service: &RenderedService<'_>) {
+fn render_service_definition(output: &mut String, service: &RenderedService<'_>) {
     output.push_str("export const ");
     output.push_str(service.name);
     output.push_str(" = nexus.service('");
@@ -2643,15 +3299,6 @@ fn render_service(output: &mut String, service: &RenderedService<'_>) {
         output.push_str(" }),\n");
     }
     output.push_str("});\n\n");
-
-    if service.operations.is_empty() {
-        return;
-    }
-
-    for operation in &service.operations {
-        output.push('\n');
-        render_operation_function(output, service, operation);
-    }
 }
 
 fn typescript_resource_type_id(
@@ -3421,20 +4068,21 @@ mod tests {
         assert!(!index_output.contains("export * from './support.ts';"));
         assert!(output.contains("export function retryPolicyFromProto("));
         assert!(!index_output.contains("export const SignalWithStartWorkflowRequest = {"));
-        assert!(index_output.contains("const SignalWithStartWorkflowRequest = {"));
+        assert!(!index_output.contains("const UserMetadata = {"));
+        assert!(index_output.contains("function userMetadataFromProto("));
+        assert!(index_output.contains("function signalWithStartWorkflowRequestToProto<"));
         assert!(!output.contains("type _RequestWithFunctionField<"));
         assert!(!output.contains("type _RequestWithArgumentsField<"));
         assert!(!output.contains("type SignalWithStartWorkflowRequestBase = {"));
         assert!(output.contains("export type SignalWithStartWorkflowRequest<"));
+        assert!(output.contains("export type ReplaceSignalWithStartWorkflowRequest<Base, New>"));
         assert!(output.contains(
             "WorkflowFn extends (...args: any[]) => Promise<any> = (...args: any[]) => Promise<any>,"
         ));
         assert!(output.contains(
             "SignalValue extends workflow.SignalDefinition<any[]> = workflow.SignalDefinition<any[]>"
         ));
-        assert!(
-            output.contains("> = {\n  /**\n   * Unique identifier for the workflow execution.")
-        );
+        assert!(output.contains("> = ReplaceSignalWithStartWorkflowRequest<"));
         assert!(output.contains(
             "SignalValue extends workflow.SignalDefinition<infer Args, any> ? Args : never"
         ));
@@ -3465,6 +4113,9 @@ mod tests {
         assert!(output.contains("versioningOverride?: common.VersioningOverride;"));
         assert!(output.contains("priority?: common.Priority;"));
         assert!(output.contains("signal: string;"));
+        assert!(output.contains("staticSummary?: string;"));
+        assert!(output.contains("staticDetails?: string;"));
+        assert!(!output.contains("userMetadata?: UserMetadata;"));
         assert!(!output.contains("namespace?: string;"));
         assert!(output.contains("namespace: workflowNamespace(),"));
         assert!(output.contains("workflowType: workflowTypeToProto("));
@@ -3486,6 +4137,13 @@ mod tests {
         assert!(output.contains(
             "priority: model.priority == null ? undefined : priorityToProto(model.priority),"
         ));
+        assert!(output.contains("model.staticSummary == null && model.staticDetails == null"));
+        assert!(output.contains("summary: model.staticSummary == null"));
+        assert!(output.contains("configuredPayloadConverter().toPayload(model.staticSummary)"));
+        assert!(output.contains("common.toPayloads(configuredPayloadConverter(), ...args)"));
+        assert!(!output.contains("common.defaultPayloadConverter"));
+        assert!(!output.contains("payloadToProto(payload: unknown"));
+        assert!(!output.contains("function isPayload("));
         assert!(output.contains(
             "versioningOverride: model.versioningOverride == null ? undefined : versioningOverrideToProto(model.versioningOverride),"
         ));

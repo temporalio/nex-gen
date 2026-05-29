@@ -419,7 +419,9 @@ async def signal_with_start_workflow(
         signal: Signal name or callable to send with the start request.
         signal_args: Argument value, or list of argument values, for signal. For typed
             single-argument signals, scalar signal_args values are statically
-            typechecked. List-form signal_args values are not precisely typechecked.
+            typechecked. List-form signal_args values are not precisely typechecked. To
+            pass a single signal argument that is itself a list, wrap it in another
+            list; otherwise the list is interpreted as multiple signal arguments.
         execution_timeout: Total workflow execution timeout, including retries and
             continue-as-new.
         run_timeout: Timeout of a single workflow run.

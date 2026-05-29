@@ -203,13 +203,14 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(!rendered.contains("type _RequestWithArgumentsField<"));
     assert!(!rendered.contains("type SignalWithStartWorkflowRequestBase = {"));
     assert!(rendered.contains("export type SignalWithStartWorkflowRequest<"));
+    assert!(rendered.contains("export type ReplaceSignalWithStartWorkflowRequest<Base, New>"));
     assert!(rendered.contains(
         "WorkflowFn extends (...args: any[]) => Promise<any> = (...args: any[]) => Promise<any>,"
     ));
     assert!(rendered.contains(
         "SignalValue extends workflow.SignalDefinition<any[]> = workflow.SignalDefinition<any[]>"
     ));
-    assert!(rendered.contains("> = {\n  /**\n   * Unique identifier for the workflow execution."));
+    assert!(rendered.contains("> = ReplaceSignalWithStartWorkflowRequest<"));
     assert!(
         rendered.contains(
             "SignalValue extends workflow.SignalDefinition<infer Args, any> ? Args : never"
@@ -224,9 +225,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains("args?: ReadonlyArray<unknown>;"));
     assert!(rendered.contains("Arguments for signal."));
     assert!(rendered.contains("signalArgs?: ReadonlyArray<unknown>;"));
-    assert!(
-        rendered.contains("* Unique identifier for the workflow execution.\n   */\n  id: string;")
-    );
+    assert!(rendered.contains("* Unique identifier for the workflow execution."));
     assert!(!rendered.contains("@property workflow"));
     assert!(rendered.contains("* @returns A workflow handle to the started workflow."));
     assert!(rendered.contains("id: string;"));
@@ -241,6 +240,9 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains("versioningOverride?: common.VersioningOverride;"));
     assert!(rendered.contains("priority?: common.Priority;"));
     assert!(rendered.contains("signal: string;"));
+    assert!(rendered.contains("staticSummary?: string;"));
+    assert!(rendered.contains("staticDetails?: string;"));
+    assert!(!rendered.contains("userMetadata?: UserMetadata;"));
     assert!(rendered.contains("### support.ts"));
     assert!(rendered.contains("### index.ts"));
     let index_rendered = rendered
@@ -250,14 +252,16 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(!index_rendered.contains("export * from './support.ts';"));
     assert!(rendered.contains("export function retryPolicyFromProto("));
     assert!(!index_rendered.contains("export const SignalWithStartWorkflowRequest = {"));
-    assert!(index_rendered.contains("const SignalWithStartWorkflowRequest = {"));
+    assert!(!index_rendered.contains("const UserMetadata = {"));
+    assert!(index_rendered.contains("function userMetadataFromProto("));
+    assert!(index_rendered.contains("function signalWithStartWorkflowRequestToProto<"));
     assert!(rendered.contains("workflowType: workflowTypeToProto("));
     assert!(rendered.contains("workflowFunctionName("));
     assert!(rendered.contains("input: requestArgsToPayloads(model.args),"));
     assert!(rendered.contains("signalInput: requestArgsToPayloads(model.signalArgs),"));
     assert!(!rendered.contains("_RequestArgsToPayloads"));
     let signal_request_to_proto = rendered
-        .split("const SignalWithStartWorkflowRequest = {")
+        .split("function signalWithStartWorkflowRequestToProto<")
         .nth(1)
         .and_then(|body| {
             body.split("export async function signalWithStartWorkflow")
@@ -304,6 +308,13 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains(
         "priority: model.priority == null ? undefined : priorityToProto(model.priority),"
     ));
+    assert!(rendered.contains("model.staticSummary == null && model.staticDetails == null"));
+    assert!(rendered.contains("summary: model.staticSummary == null"));
+    assert!(rendered.contains("configuredPayloadConverter().toPayload(model.staticSummary)"));
+    assert!(rendered.contains("common.toPayloads(configuredPayloadConverter(), ...args)"));
+    assert!(!rendered.contains("common.defaultPayloadConverter"));
+    assert!(!rendered.contains("payloadToProto(payload: unknown"));
+    assert!(!rendered.contains("function isPayload("));
     assert!(rendered.contains(
         "versioningOverride: model.versioningOverride == null ? undefined : versioningOverrideToProto(model.versioningOverride),"
     ));

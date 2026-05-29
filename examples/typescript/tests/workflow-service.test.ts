@@ -12,6 +12,18 @@ const workflowsPath = fileURLToPath(
   new URL("./workflows/workflow-service.ts", import.meta.url),
 );
 
+function payloadJson(
+  payload: temporal.api.common.v1.IPayload | null | undefined,
+): unknown {
+  expect(payload).toBeDefined();
+  const data = payload?.data;
+  const bytes =
+    data instanceof Uint8Array
+      ? data
+      : Uint8Array.from(Object.values(data as unknown as Record<string, number>));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
 describe("workflow-service generated output", () => {
   test("exposes workflow service metadata", () => {
     expect(WorkflowService.name).toBe("WorkflowService");
@@ -62,6 +74,8 @@ describe("workflow-service generated output", () => {
       expect(request?.input?.payloads).toHaveLength(2);
       expect(request?.signalInput?.payloads).toHaveLength(2);
       expect(request?.workflowRunTimeout?.seconds).toMatchObject({ low: 300 });
+      expect(payloadJson(request?.userMetadata?.summary)).toBe("Workflow summary");
+      expect(payloadJson(request?.userMetadata?.details)).toBe("Workflow details");
     });
   });
 });
@@ -89,7 +103,12 @@ if (false) {
     signal: wakeUpSignal,
     signalArgs: [7, "hello"],
     cronSchedule,
+    staticSummary: "Workflow summary",
+    staticDetails: "Workflow details",
   };
+
+  // @ts-expect-error flattened user metadata fields should be strings
+  request.staticSummary = 7;
 
   // @ts-expect-error sourced fields are not part of the generated request surface
   request.namespace;
