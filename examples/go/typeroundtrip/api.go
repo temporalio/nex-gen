@@ -47,6 +47,10 @@ func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*A
 
 // --- Operations (public API) ---
 
+func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
+	return retryPolicyOperation(ctx, request)
+}
+
 type ActivityOptionsOperationOptions struct {
 	TaskQueue              string
 	ScheduleToCloseTimeout time.Duration

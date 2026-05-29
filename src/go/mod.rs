@@ -1307,11 +1307,7 @@ fn render_file(
     }
 
     // --- Operations (public API) ---
-    let has_convenience_wrappers = services
-        .iter()
-        .flat_map(|s| &s.operations)
-        .any(|op| op.unpacked_input.is_some());
-    if has_convenience_wrappers {
+    if has_operations {
         output.push_str("\n// --- Operations (public API) ---\n");
         for service in services {
             for operation in &service.operations {
@@ -1323,6 +1319,10 @@ fn render_file(
                     }
                     output.push('\n');
                     render_convenience_wrapper(&mut output, operation, params);
+                } else {
+                    // External input type — generate a simple forwarding wrapper
+                    output.push('\n');
+                    render_forwarding_wrapper(&mut output, operation);
                 }
             }
         }
@@ -1962,5 +1962,38 @@ fn render_convenience_wrapper(
         output.push_str("})\n");
     }
 
+    output.push_str("}\n");
+}
+
+/// Renders an exported forwarding wrapper for operations whose input type is
+/// an external/replacement type (no model to unpack). The wrapper simply
+/// forwards to the unexported operation function.
+///
+/// ```go
+/// func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
+///     return retryPolicyOperation(ctx, request)
+/// }
+/// ```
+fn render_forwarding_wrapper(output: &mut String, operation: &RenderedOperation<'_>) {
+    let exported_name = go_field_name(operation.name);
+
+    output.push_str("func ");
+    output.push_str(&exported_name);
+    output.push_str("(ctx workflow.Context, request ");
+    output.push_str(&operation.input_type);
+    output.push_str(") ");
+
+    if let Some(result_type) = &operation.output_type {
+        output.push_str("(*");
+        output.push_str(result_type);
+        output.push_str(", error)");
+    } else {
+        output.push_str("error");
+    }
+
+    output.push_str(" {\n");
+    output.push_str("\treturn ");
+    output.push_str(&operation.func_name);
+    output.push_str("(ctx, request)\n");
     output.push_str("}\n");
 }
