@@ -21,7 +21,7 @@ from ._support import (
 
 @dataclasses.dataclass(slots=True, kw_only=True)
 class StartWorkflowRequest:
-    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]
+    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]]
     args: list[typing.Any] | None = None
     workflow_id: str
     task_queue: str

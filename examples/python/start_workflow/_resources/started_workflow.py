@@ -44,7 +44,7 @@ class StartedWorkflow:
     async def restart_workflow(
         self,
         workflow: str
-        | collections.abc.Callable[..., collections.abc.Awaitable[object]],
+        | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],
         task_queue: str,
     ) -> StartedWorkflow:
         request = StartWorkflowRequest(
@@ -126,7 +126,7 @@ async def restart_workflow(
 async def restart_workflow(
     workflow: collections.abc.Callable[
         [typing.Any, typing_extensions.Unpack[WorkflowArgs]],
-        collections.abc.Awaitable[object],
+        collections.abc.Awaitable[typing.Any],
     ],
     *positional_args: typing_extensions.Unpack[WorkflowArgs],
     workflow_id: str,
@@ -137,7 +137,7 @@ async def restart_workflow(
 
 @typing.overload
 async def restart_workflow(
-    workflow: collections.abc.Callable[..., collections.abc.Awaitable[object]],
+    workflow: collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],
     *,
     args: list[typing.Any],
     workflow_id: str,
@@ -147,7 +147,8 @@ async def restart_workflow(
 
 
 async def restart_workflow(
-    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],
+    workflow: str
+    | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],
     *positional_args: object,
     args: list[typing.Any] | None = None,
     workflow_id: str,

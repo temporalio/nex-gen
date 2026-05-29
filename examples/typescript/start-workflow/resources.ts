@@ -21,7 +21,7 @@ export class StartedWorkflow {
   }
 
   public async restartWorkflow(
-    workflow: string | common.Workflow,
+    workflow: string | ((...args: any[]) => Promise<any>),
     taskQueue: string,
   ): Promise<StartedWorkflow> {
     if (typeof workflow === "string") {

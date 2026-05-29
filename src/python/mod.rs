@@ -148,6 +148,8 @@ struct RenderedOperation<'a> {
     input_annotation: String,
     input_to_proto_expr: String,
     output_annotation: String,
+    overload_output_annotation: String,
+    output_type_parameters: BTreeSet<String>,
     output_type_expr: String,
     output_transform_expr: Option<String>,
     output_resource_return: Option<PlannedOperationResourceReturn>,
@@ -283,6 +285,8 @@ struct RenderedFunctionField {
     args: RenderedFunctionArgs,
     primary: bool,
     result_annotation: String,
+    erased_result_annotation: String,
+    result_type_parameter: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -548,7 +552,7 @@ fn resolve_operation<'a>(
         ),
         PlannedOperationOutput::None => ("None".to_string(), None, "None".to_string()),
     };
-    let output_annotation = output_transform
+    let overload_output_annotation = output_transform
         .and_then(|transform| {
             transform
                 .type_name
@@ -561,6 +565,26 @@ fn resolve_operation<'a>(
                 .map(|resource| resource.resource_type_name.clone())
         })
         .unwrap_or(output_annotation_default);
+    let unpacked_input = if matches!(
+        input_conversion.kind,
+        MessageValueConversionKind::GeneratedModel { .. } | MessageValueConversionKind::NativeModel
+    ) {
+        Some(build_unpacked_input(
+            &operation.input.info.full_name,
+            models,
+            api_plan,
+        )?)
+    } else {
+        None
+    };
+    let output_type_parameters = unpacked_input
+        .iter()
+        .flat_map(|unpacked_input| &unpacked_input.functions)
+        .filter_map(|function| function.result_type_parameter.clone())
+        .filter(|name| python_annotation_uses_identifier(&overload_output_annotation, name))
+        .collect::<BTreeSet<_>>();
+    let output_annotation =
+        erase_python_type_parameters(&overload_output_annotation, &output_type_parameters);
     let output_type_expr = if output_transform.is_some() || output_resource_return.is_some() {
         output_ref.clone()
     } else {
@@ -585,6 +609,8 @@ fn resolve_operation<'a>(
         input_annotation: input_conversion.annotation.clone(),
         input_to_proto_expr: input_conversion.to_proto_expr("request"),
         output_annotation,
+        overload_output_annotation,
+        output_type_parameters,
         output_type_expr,
         output_transform_expr: output_transform.and_then(|transform| {
             transform
@@ -595,19 +621,7 @@ fn resolve_operation<'a>(
         output_resource_return,
         output_direct_result: operation.output_direct_result,
         output_none: matches!(operation.output, PlannedOperationOutput::None),
-        unpacked_input: if matches!(
-            input_conversion.kind,
-            MessageValueConversionKind::GeneratedModel { .. }
-                | MessageValueConversionKind::NativeModel
-        ) {
-            Some(build_unpacked_input(
-                &operation.input.info.full_name,
-                models,
-                api_plan,
-            )?)
-        } else {
-            None
-        },
+        unpacked_input,
     })
 }
 
@@ -728,24 +742,37 @@ fn build_unpacked_input(
             .generated_model
             .functions
             .iter()
-            .map(|(field_name, function)| RenderedFunctionField {
-                callable_field_name: planned_model
-                    .generated_model
-                    .field_name_override(field_name)
-                    .map(python_field_name)
-                    .unwrap_or_else(|| python_field_name(field_name)),
-                args_field_name: planned_model
-                    .generated_model
-                    .field_name_override(&function.args_field)
-                    .map(python_field_name)
-                    .unwrap_or_else(|| python_field_name(&function.args_field)),
-                args: if function.primary {
-                    RenderedFunctionArgs::Unbounded
-                } else {
-                    RenderedFunctionArgs::Bounded
-                },
-                primary: function.primary,
-                result_annotation: python_function_result_annotation(&function.result),
+            .map(|(field_name, function)| {
+                let result_annotation = python_function_result_annotation(&function.result);
+                let result_type_parameters = function
+                    .result_type_parameter
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<_>>();
+                RenderedFunctionField {
+                    callable_field_name: planned_model
+                        .generated_model
+                        .field_name_override(field_name)
+                        .map(python_field_name)
+                        .unwrap_or_else(|| python_field_name(field_name)),
+                    args_field_name: planned_model
+                        .generated_model
+                        .field_name_override(&function.args_field)
+                        .map(python_field_name)
+                        .unwrap_or_else(|| python_field_name(&function.args_field)),
+                    args: if function.primary {
+                        RenderedFunctionArgs::Unbounded
+                    } else {
+                        RenderedFunctionArgs::Bounded
+                    },
+                    primary: function.primary,
+                    erased_result_annotation: erase_python_type_parameters(
+                        &result_annotation,
+                        &result_type_parameters,
+                    ),
+                    result_annotation,
+                    result_type_parameter: function.result_type_parameter.clone(),
+                }
             })
             .collect(),
     })
@@ -1247,10 +1274,15 @@ fn python_field_annotation(
     }
 
     if let PlannedFieldRole::Function(function) = &field.role {
-        return format!(
-            "str | collections.abc.Callable[..., {}]",
-            python_function_result_annotation(&function.result)
+        let result_annotation = erase_python_type_parameters(
+            &python_function_result_annotation(&function.result),
+            &function
+                .result_type_parameter
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
         );
+        return format!("str | collections.abc.Callable[..., {}]", result_annotation);
     }
 
     if is_optional {
@@ -2579,8 +2611,17 @@ fn render_resource_module_file(
         .filter_map(|bound_operation| bound_operation.operation.unpacked_input.as_ref())
         .flat_map(|unpacked_input| unpacked_input.functions.iter().cloned())
         .collect::<Vec<_>>();
+    let output_type_parameters = bound_operations
+        .iter()
+        .flat_map(|bound_operation| bound_operation.operation.output_type_parameters.iter())
+        .cloned()
+        .collect::<BTreeSet<_>>();
     if !function_fields.is_empty() {
-        render_function_type_parameter_definitions(&mut body, &function_fields);
+        render_function_type_parameter_definitions(
+            &mut body,
+            &function_fields,
+            &output_type_parameters,
+        );
         body.push_str("\n\n");
     }
     render_resource(&mut body, resource, bound_operations);
@@ -2738,7 +2779,11 @@ fn render_operation_module(
     if let Some(unpacked_input) = &operation.unpacked_input
         && !unpacked_input.functions.is_empty()
     {
-        render_function_type_parameter_definitions(&mut body, &unpacked_input.functions);
+        render_function_type_parameter_definitions(
+            &mut body,
+            &unpacked_input.functions,
+            &operation.output_type_parameters,
+        );
         body.push_str("\n\n");
     }
     render_operation_functions(&mut body, service, operation);
@@ -2774,10 +2819,13 @@ fn render_operations_package_init() -> String {
     output
 }
 
-fn function_type_parameters(functions: &[RenderedFunctionField]) -> Vec<PythonTypeParameter> {
+fn function_type_parameters(
+    functions: &[RenderedFunctionField],
+    output_type_parameters: &BTreeSet<String>,
+) -> Vec<PythonTypeParameter> {
     let mut parameters = BTreeSet::new();
     for function in functions {
-        for case in function_overload_cases(function) {
+        for case in function_overload_cases(function, output_type_parameters) {
             parameters.extend(case.type_parameters);
         }
     }
@@ -2787,8 +2835,9 @@ fn function_type_parameters(functions: &[RenderedFunctionField]) -> Vec<PythonTy
 fn render_function_type_parameter_definitions(
     output: &mut String,
     functions: &[RenderedFunctionField],
+    output_type_parameters: &BTreeSet<String>,
 ) {
-    let parameters = function_type_parameters(functions);
+    let parameters = function_type_parameters(functions, output_type_parameters);
     if parameters.is_empty() {
         return;
     }
@@ -3428,6 +3477,7 @@ struct RenderedFunctionOverloadCase {
     positional_args: Option<RenderedFunctionOverloadPositionalArgs>,
     args_annotation: Option<String>,
     args_optional: bool,
+    result_type_parameter: Option<String>,
     type_parameters: Vec<PythonTypeParameter>,
 }
 
@@ -3448,7 +3498,10 @@ fn render_function_unpacked_overloads(
     operation: &RenderedOperation<'_>,
     unpacked_input: &RenderedUnpackedInput,
 ) {
-    let overload_combinations = collect_function_overload_combinations(&unpacked_input.functions);
+    let overload_combinations = collect_function_overload_combinations(
+        &unpacked_input.functions,
+        &operation.output_type_parameters,
+    );
 
     for (index, overload_cases) in overload_combinations.iter().enumerate() {
         render_function_unpacked_overload(output, operation, unpacked_input, overload_cases);
@@ -3460,10 +3513,11 @@ fn render_function_unpacked_overloads(
 
 fn collect_function_overload_combinations(
     functions: &[RenderedFunctionField],
+    output_type_parameters: &BTreeSet<String>,
 ) -> Vec<Vec<RenderedFunctionOverloadCase>> {
     let per_function_cases = functions
         .iter()
-        .map(function_overload_cases)
+        .map(|function| function_overload_cases(function, output_type_parameters))
         .collect::<Vec<_>>();
     let mut combinations = Vec::new();
     let mut current = Vec::new();
@@ -3499,7 +3553,19 @@ fn collect_function_overload_combinations_recursive(
     }
 }
 
-fn function_overload_cases(function: &RenderedFunctionField) -> Vec<RenderedFunctionOverloadCase> {
+fn function_overload_cases(
+    function: &RenderedFunctionField,
+    output_type_parameters: &BTreeSet<String>,
+) -> Vec<RenderedFunctionOverloadCase> {
+    let result_type_parameter = function
+        .result_type_parameter
+        .clone()
+        .filter(|name| output_type_parameters.contains(name));
+    let result_annotation = if result_type_parameter.is_some() {
+        &function.result_annotation
+    } else {
+        &function.erased_result_annotation
+    };
     let mut cases = vec![RenderedFunctionOverloadCase {
         callable_field_name: function.callable_field_name.clone(),
         args_field_name: function.args_field_name.clone(),
@@ -3512,6 +3578,7 @@ fn function_overload_cases(function: &RenderedFunctionField) -> Vec<RenderedFunc
             }),
         args_annotation: Some("list[typing.Any] | None".to_string()),
         args_optional: true,
+        result_type_parameter: None,
         type_parameters: Vec::new(),
     }];
 
@@ -3519,12 +3586,17 @@ fn function_overload_cases(function: &RenderedFunctionField) -> Vec<RenderedFunc
         RenderedFunctionArgs::Unbounded => {
             let prefix = function_overload_parameter_prefix(function);
             let function_args = format!("{prefix}Args");
+            let mut type_parameters = Vec::new();
+            if let Some(result_type_parameter) = &result_type_parameter {
+                type_parameters.push(PythonTypeParameter::TypeVar(result_type_parameter.clone()));
+            }
+            type_parameters.push(PythonTypeParameter::TypeVarTuple(function_args.clone()));
             cases.push(RenderedFunctionOverloadCase {
                 callable_field_name: function.callable_field_name.clone(),
                 args_field_name: function.args_field_name.clone(),
                 callable_annotation: format!(
                     "collections.abc.Callable[[typing.Any, typing_extensions.Unpack[{function_args}]], {}]",
-                    function.result_annotation
+                    result_annotation
                 ),
                 positional_args: Some(RenderedFunctionOverloadPositionalArgs {
                     name: "positional_args".to_string(),
@@ -3532,59 +3604,81 @@ fn function_overload_cases(function: &RenderedFunctionField) -> Vec<RenderedFunc
                 }),
                 args_annotation: None,
                 args_optional: false,
-                type_parameters: vec![PythonTypeParameter::TypeVarTuple(function_args)],
+                result_type_parameter: result_type_parameter.clone(),
+                type_parameters,
             });
+            let type_parameters = result_type_parameter
+                .iter()
+                .map(|name| PythonTypeParameter::TypeVar(name.clone()))
+                .collect();
             cases.push(RenderedFunctionOverloadCase {
                 callable_field_name: function.callable_field_name.clone(),
                 args_field_name: function.args_field_name.clone(),
                 callable_annotation: format!(
                     "collections.abc.Callable[..., {}]",
-                    function.result_annotation
+                    result_annotation
                 ),
                 positional_args: None,
                 args_annotation: Some("list[typing.Any]".to_string()),
                 args_optional: false,
-                type_parameters: Vec::new(),
+                result_type_parameter: result_type_parameter.clone(),
+                type_parameters,
             });
         }
         RenderedFunctionArgs::Bounded => {
             let prefix = function_overload_parameter_prefix(function);
             let first_arg = format!("{prefix}Arg");
+            let type_parameters = result_type_parameter
+                .iter()
+                .map(|name| PythonTypeParameter::TypeVar(name.clone()))
+                .collect();
             cases.push(RenderedFunctionOverloadCase {
                 callable_field_name: function.callable_field_name.clone(),
                 args_field_name: function.args_field_name.clone(),
                 callable_annotation: format!(
                     "collections.abc.Callable[[typing.Any], {}]",
-                    function.result_annotation
+                    result_annotation
                 ),
                 positional_args: None,
                 args_annotation: None,
                 args_optional: false,
-                type_parameters: Vec::new(),
+                result_type_parameter: result_type_parameter.clone(),
+                type_parameters,
             });
+            let mut type_parameters = Vec::new();
+            if let Some(result_type_parameter) = &result_type_parameter {
+                type_parameters.push(PythonTypeParameter::TypeVar(result_type_parameter.clone()));
+            }
+            type_parameters.push(PythonTypeParameter::TypeVar(first_arg.clone()));
             cases.push(RenderedFunctionOverloadCase {
                 callable_field_name: function.callable_field_name.clone(),
                 args_field_name: function.args_field_name.clone(),
                 callable_annotation: format!(
                     "collections.abc.Callable[[typing.Any, {first_arg}], {}]",
-                    function.result_annotation
+                    result_annotation
                 ),
                 positional_args: None,
                 args_annotation: Some(first_arg.clone()),
                 args_optional: false,
-                type_parameters: vec![PythonTypeParameter::TypeVar(first_arg)],
+                result_type_parameter: result_type_parameter.clone(),
+                type_parameters,
             });
+            let type_parameters = result_type_parameter
+                .iter()
+                .map(|name| PythonTypeParameter::TypeVar(name.clone()))
+                .collect();
             cases.push(RenderedFunctionOverloadCase {
                 callable_field_name: function.callable_field_name.clone(),
                 args_field_name: function.args_field_name.clone(),
                 callable_annotation: format!(
                     "collections.abc.Callable[..., {}]",
-                    function.result_annotation
+                    result_annotation
                 ),
                 positional_args: None,
                 args_annotation: Some("list[typing.Any]".to_string()),
                 args_optional: false,
-                type_parameters: Vec::new(),
+                result_type_parameter: result_type_parameter.clone(),
+                type_parameters,
             });
         }
     }
@@ -3711,8 +3805,77 @@ fn render_function_unpacked_overload(
     }
 
     output.push_str(") -> ");
-    output.push_str(&operation.output_annotation);
+    output.push_str(&function_unpacked_overload_return_annotation(
+        operation,
+        primary_case,
+    ));
     output.push_str(": ...\n");
+}
+
+fn function_unpacked_overload_return_annotation(
+    operation: &RenderedOperation<'_>,
+    primary_case: Option<&RenderedFunctionOverloadCase>,
+) -> String {
+    let active_type_parameters = primary_case
+        .and_then(|function_case| function_case.result_type_parameter.as_ref())
+        .into_iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    erase_inactive_python_type_parameters(
+        &operation.overload_output_annotation,
+        &operation.output_type_parameters,
+        &active_type_parameters,
+    )
+}
+
+fn erase_inactive_python_type_parameters(
+    annotation: &str,
+    type_parameters: &BTreeSet<String>,
+    active_type_parameters: &BTreeSet<String>,
+) -> String {
+    let inactive_type_parameters = type_parameters
+        .difference(active_type_parameters)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    erase_python_type_parameters(annotation, &inactive_type_parameters)
+}
+
+fn erase_python_type_parameters(annotation: &str, type_parameters: &BTreeSet<String>) -> String {
+    type_parameters
+        .iter()
+        .fold(annotation.to_string(), |current, name| {
+            replace_python_identifier(&current, name, "typing.Any")
+        })
+}
+
+fn python_annotation_uses_identifier(annotation: &str, identifier: &str) -> bool {
+    annotation != replace_python_identifier(annotation, identifier, "typing.Any")
+}
+
+fn replace_python_identifier(source: &str, identifier: &str, replacement: &str) -> String {
+    if identifier.is_empty() {
+        return source.to_string();
+    }
+
+    let mut output = String::with_capacity(source.len());
+    let mut index = 0;
+    while let Some(relative_match_start) = source[index..].find(identifier) {
+        let match_start = index + relative_match_start;
+        let match_end = match_start + identifier.len();
+        let before = source[..match_start].chars().next_back();
+        let after = source[match_end..].chars().next();
+        if before.is_some_and(|character| is_python_identifier_char(character) || character == '.')
+            || after.is_some_and(is_python_identifier_char)
+        {
+            output.push_str(&source[index..match_end]);
+        } else {
+            output.push_str(&source[index..match_start]);
+            output.push_str(replacement);
+        }
+        index = match_end;
+    }
+    output.push_str(&source[index..]);
+    output
 }
 
 fn render_operation_functions(
@@ -4125,7 +4288,7 @@ fn render_function_unpacked_implementation(
         output.push_str("    ");
         output.push_str(&function.callable_field_name);
         output.push_str(": str | collections.abc.Callable[..., ");
-        output.push_str(&function.result_annotation);
+        output.push_str(&function.erased_result_annotation);
         output.push_str("],\n");
         output.push_str("    *positional_args: object,\n");
     }
@@ -4148,7 +4311,7 @@ fn render_function_unpacked_implementation(
             .find(|function| function.callable_field_name == field.attr_name)
         {
             output.push_str("str | collections.abc.Callable[..., ");
-            output.push_str(&function.result_annotation);
+            output.push_str(&function.erased_result_annotation);
             output.push(']');
         } else if unpacked_input
             .functions
@@ -4674,7 +4837,7 @@ class Example(enum.Enum):
         assert!(output.contains("retry_policy_to_proto,"));
         assert!(output.contains("def retry_policy_from_proto("));
         assert!(output.contains(
-            "workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]"
+            "workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]]"
         ));
         assert!(output.contains("id: str"));
         assert!(output.contains("task_queue: str"));
@@ -4730,9 +4893,13 @@ class Example(enum.Enum):
         assert!(output.contains("*positional_args: object,"));
         assert!(output.contains("args: list[typing.Any] | None = ...,"));
         assert!(output.contains(
-            "workflow: collections.abc.Callable[[typing.Any, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[object]],"
+            "workflow: collections.abc.Callable[[typing.Any, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[WorkflowResult]],"
         ));
         assert!(output.contains("WorkflowArgs = typing_extensions.TypeVarTuple(\"WorkflowArgs\")"));
+        assert!(output.contains("WorkflowResult = typing.TypeVar(\"WorkflowResult\")"));
+        assert!(
+            output.contains(") -> temporalio.workflow.ExternalWorkflowHandle[WorkflowResult]:")
+        );
         assert!(output.contains("async def signal_with_start_workflow("));
         assert!(output.contains("*positional_args: typing_extensions.Unpack[WorkflowArgs],"));
         assert!(output.contains("args: list[typing.Any],"));
@@ -4745,7 +4912,7 @@ class Example(enum.Enum):
         assert!(output.contains("signal_args: list[typing.Any],"));
         assert!(output.contains("async def signal_with_start_workflow("));
         assert!(output.contains(
-            "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],\n    *positional_args: object,\n    args: list[typing.Any] | None = None,"
+            "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],\n    *positional_args: object,\n    args: list[typing.Any] | None = None,"
         ));
         assert!(output.contains(
             "signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],"

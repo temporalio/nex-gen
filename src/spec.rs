@@ -1689,6 +1689,7 @@ pub struct FunctionFieldSpec {
     pub result: FunctionResultSpec,
     pub args_field: String,
     pub converter: Option<String>,
+    pub result_type_parameter: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2335,6 +2336,24 @@ fn resolve_authored_field_type_spec(
                             target: Box::new(target),
                             type_name: directive_language_string(type_directive),
                         })
+                    } else if let Some(function_directive) =
+                        directive(&directives, "function", path, &type_context)?
+                    {
+                        if let Some(type_name) = function_alias_type_name(
+                            resolve,
+                            type_def,
+                            function_directive,
+                            path,
+                            &type_context,
+                        )? {
+                            Ok(AuthoredFieldTypeSpec::Alias {
+                                name: wit_type_full_name(resolve, *id),
+                                target: Box::new(target),
+                                type_name,
+                            })
+                        } else {
+                            Ok(target)
+                        }
                     } else {
                         Ok(target)
                     }
@@ -2683,6 +2702,7 @@ fn build_function_field(
         result: FunctionResultSpec::Annotation(result),
         args_field: args_field.to_snake_case(),
         converter: directive_converter(directive, language),
+        result_type_parameter: directive_result_type_parameter(directive),
     }))
 }
 
@@ -2737,6 +2757,7 @@ fn build_function_field_for_type_alias(
                     .unwrap_or(&args_name)
                     .to_snake_case(),
                 converter,
+                result_type_parameter: directive_result_type_parameter(function_directive),
             },
         )));
     }
@@ -2762,6 +2783,7 @@ fn build_function_field_for_type_alias(
             result: FunctionResultSpec::Annotation(result),
             args_field: args_name.to_snake_case(),
             converter,
+            result_type_parameter: directive_result_type_parameter(function_directive),
         },
     )))
 }
@@ -2968,6 +2990,89 @@ fn find_flattened_function_type_spec(
             }
             _ => return Ok(None),
         }
+    }
+}
+
+fn function_alias_type_name(
+    resolve: &Resolve,
+    type_def: &TypeDef,
+    function_directive: &Directive,
+    path: &Path,
+    context: &str,
+) -> Result<Option<LanguageStringSpec>> {
+    let result = if let Some(signature_name) = function_directive.value("signature") {
+        let (_, result) =
+            resolve_function_signature(resolve, type_def, signature_name, path, context)?;
+        result
+    } else {
+        let result = directive_result_language_string(function_directive);
+        if result.is_empty() {
+            return Ok(None);
+        }
+        AuthoredFieldTypeSpec::Alias {
+            name: String::new(),
+            target: Box::new(AuthoredFieldTypeSpec::String),
+            type_name: result,
+        }
+    };
+    let mut result_type = authored_type_language_string(&result);
+    if result_type.is_empty() {
+        return Ok(None);
+    }
+    if let Some(type_parameter) = directive_result_type_parameter(function_directive) {
+        replace_type_parameter_for_language(
+            &mut result_type,
+            Language::Python,
+            &type_parameter,
+            "typing.Any",
+        );
+        replace_type_parameter_for_language(
+            &mut result_type,
+            Language::TypeScript,
+            &type_parameter,
+            "any",
+        );
+    }
+
+    let mut type_name = LanguageStringSpec::default();
+    if let Some(result_type) = result_type.for_language(Language::Python) {
+        type_name.by_language.insert(
+            Language::Python,
+            format!("str | collections.abc.Callable[..., {result_type}]"),
+        );
+    }
+    if let Some(result_type) = result_type.for_language(Language::TypeScript) {
+        type_name.by_language.insert(
+            Language::TypeScript,
+            format!("string | ((...args: any[]) => {result_type})"),
+        );
+    }
+    Ok((!type_name.is_empty()).then_some(type_name))
+}
+
+fn authored_type_language_string(wit_type: &AuthoredFieldTypeSpec) -> LanguageStringSpec {
+    match wit_type {
+        AuthoredFieldTypeSpec::Alias {
+            type_name, target, ..
+        } => {
+            if type_name.is_empty() {
+                authored_type_language_string(target)
+            } else {
+                type_name.clone()
+            }
+        }
+        _ => LanguageStringSpec::default(),
+    }
+}
+
+fn replace_type_parameter_for_language(
+    spec: &mut LanguageStringSpec,
+    language: Language,
+    type_parameter: &str,
+    replacement: &str,
+) {
+    if let Some(value) = spec.by_language.get_mut(&language) {
+        *value = value.replace(type_parameter, replacement);
     }
 }
 
@@ -3530,6 +3635,12 @@ fn directive_converter(directive: &Directive, language: Language) -> Option<Stri
     spec.for_language(language).map(ToOwned::to_owned)
 }
 
+fn directive_result_type_parameter(directive: &Directive) -> Option<String> {
+    directive
+        .value("result-type-parameter")
+        .map(ToOwned::to_owned)
+}
+
 fn directive_value(
     directives: &[Directive],
     name: &str,
@@ -3959,7 +4070,7 @@ interface workflow-service {
   }
 
   /// @nexus.output-transform
-  ///   python-type="temporalio.workflow.ExternalWorkflowHandle[typing.Any]"
+  ///   python-type="temporalio.workflow.ExternalWorkflowHandle[WorkflowResult]"
   ///   python="temporalio.workflow.get_external_workflow_handle(request.workflow_id, run_id=result.run_id)"
   ///   typescript-type="workflow.ExternalWorkflowHandle"
   ///   typescript="workflow.getExternalWorkflowHandle(request.workflowId, result.runId ?? undefined)"
@@ -4047,6 +4158,14 @@ interface workflow-service {
         assert!(model.function("workflow_type").unwrap().primary);
         assert_eq!(model.function("workflow_type").unwrap().converter, None);
         assert_eq!(model.function("workflow_type").unwrap().args_field, "input");
+        assert_eq!(
+            model
+                .function("workflow_type")
+                .unwrap()
+                .result_type_parameter
+                .as_deref(),
+            Some("WorkflowResult")
+        );
         assert_eq!(
             model.function("signal_name").unwrap().converter.as_deref(),
             Some("signal_function_to_proto")

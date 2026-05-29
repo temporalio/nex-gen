@@ -32,7 +32,7 @@ from ._support import (
 
 @dataclasses.dataclass(slots=True, kw_only=True)
 class SignalWithStartWorkflowRequest:
-    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]
+    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]]
     args: list[typing.Any] | None = None
     id: str
     task_queue: str

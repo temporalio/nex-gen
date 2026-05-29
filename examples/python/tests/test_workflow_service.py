@@ -492,6 +492,44 @@ async def test_signal_with_start_rejects_positional_args_and_args() -> None:
 
 
 if typing.TYPE_CHECKING:
+    async def _typecheck_signal_with_start_return_types() -> None:
+        positional_handle = await workflow_service.signal_with_start_workflow(
+            SingleArgWorkflow.run,
+            "positional",
+            id="typed-return-positional-workflow-input",
+            task_queue=TASK_QUEUE,
+            request_id=REQUEST_ID,
+            signal="wake_up",
+            cron_schedule=CRON_SCHEDULE,
+        )
+        _ = assert_type(positional_handle, workflow.ExternalWorkflowHandle[str])
+
+        list_args_handle = await workflow_service.signal_with_start_workflow(
+            workflow=ExampleWorkflow.run,
+            args=[7, "nexus"],
+            id="typed-return-list-workflow-input",
+            task_queue=TASK_QUEUE,
+            request_id=REQUEST_ID,
+            signal="wake_up",
+            cron_schedule=CRON_SCHEDULE,
+        )
+        _ = assert_type(list_args_handle, workflow.ExternalWorkflowHandle[str])
+
+        string_workflow_handle = await workflow_service.signal_with_start_workflow(
+            workflow="ExampleWorkflow",
+            id="string-workflow-return",
+            task_queue=TASK_QUEUE,
+            request_id=REQUEST_ID,
+            signal="wake_up",
+            cron_schedule=CRON_SCHEDULE,
+        )
+        _ = assert_type(
+            string_workflow_handle,
+            workflow.ExternalWorkflowHandle[typing.Any],
+        )
+
+    _ = _typecheck_signal_with_start_return_types
+
     _ = workflow_service.signal_with_start_workflow(
         SingleArgWorkflow.run,
         "positional",
