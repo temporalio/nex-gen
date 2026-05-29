@@ -1,3 +1,8 @@
+import * as common from "@temporalio/common";
+import type { google, temporal } from "@temporalio/proto";
+import * as workflow from "@temporalio/workflow";
+import type Long from "long";
+
 function int64ToNumber(value: Long | number | string | object | null | undefined): number {
   if (value == null) {
     return 0;

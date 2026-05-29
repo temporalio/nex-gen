@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import dataclasses
-from temporalio import workflow
 import nexus_api_gen_runtime
+import temporalio.workflow
 
 from ..models import (
     DeactivateRequest,
@@ -59,7 +59,7 @@ class User:
 async def _update_email(
     request: UpdateEmailRequest,
 ) -> User:
-    nexus_client = workflow.create_nexus_client(
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="TypeShowcase",
         endpoint="type-showcase",
     )
@@ -86,7 +86,7 @@ async def update_email(
 async def _rename(
     request: RenameRequest,
 ) -> User:
-    nexus_client = workflow.create_nexus_client(
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="TypeShowcase",
         endpoint="type-showcase",
     )
@@ -112,8 +112,8 @@ async def rename(
 
 async def _deactivate(
     request: DeactivateRequest,
-) -> workflow.NexusOperationHandle[None,]:
-    nexus_client = workflow.create_nexus_client(
+) -> temporalio.workflow.NexusOperationHandle[None,]:
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="TypeShowcase",
         endpoint="type-showcase",
     )
@@ -127,7 +127,7 @@ async def deactivate(
     *,
     user_id: str,
     reason: str | None = None,
-) -> workflow.NexusOperationHandle[None,]:
+) -> temporalio.workflow.NexusOperationHandle[None,]:
     request = DeactivateRequest(
         user_id=user_id,
         reason=reason,

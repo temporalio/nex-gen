@@ -6,7 +6,7 @@ from __future__ import annotations
 import collections.abc
 import dataclasses
 import typing
-from datetime import timedelta
+import datetime
 import temporalio.api.common.v1.message_pb2
 import temporalio.api.workflowservice.v1.request_response_pb2
 
@@ -25,7 +25,7 @@ class StartWorkflowRequest:
     args: list[typing.Any] | None = None
     workflow_id: str
     task_queue: str
-    workflow_start_delay: timedelta | None = None
+    workflow_start_delay: datetime.timedelta | None = None
 
     def to_proto(
         self,

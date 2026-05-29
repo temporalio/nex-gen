@@ -3,20 +3,20 @@
 
 from __future__ import annotations
 
+import datetime
 import temporalio.common
-from datetime import timedelta
-from temporalio import workflow
 import temporalio.api.activity.v1.message_pb2
+import temporalio.workflow
 
 from ..models import ActivityOptions
 
 
 async def _activity_options_operation(
     request: ActivityOptions,
-) -> workflow.NexusOperationHandle[
+) -> temporalio.workflow.NexusOperationHandle[
     temporalio.api.activity.v1.message_pb2.ActivityOptions,
 ]:
-    nexus_client = workflow.create_nexus_client(
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="TypeRoundtripService",
         endpoint="temporal-system",
     )
@@ -31,9 +31,9 @@ async def activity_options_operation(
     *,
     task_queue: str | None = None,
     retry_policy: temporalio.common.RetryPolicy,
-    schedule_to_close_timeout: timedelta | None = None,
+    schedule_to_close_timeout: datetime.timedelta | None = None,
     priority: temporalio.common.Priority | None = None,
-) -> workflow.NexusOperationHandle[
+) -> temporalio.workflow.NexusOperationHandle[
     temporalio.api.activity.v1.message_pb2.ActivityOptions,
 ]:
     request = ActivityOptions(

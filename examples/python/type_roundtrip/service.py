@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
-
 import temporalio.api.activity.v1.message_pb2
 import temporalio.api.common.v1.message_pb2
 

@@ -4,16 +4,18 @@
 from __future__ import annotations
 
 import temporalio.common
-from temporalio import workflow
 import temporalio.api.common.v1.message_pb2
+import temporalio.workflow
 
 from .._support import retry_policy_to_proto
 
 
 async def retry_policy_operation(
     request: temporalio.common.RetryPolicy,
-) -> workflow.NexusOperationHandle[temporalio.api.common.v1.message_pb2.RetryPolicy,]:
-    nexus_client = workflow.create_nexus_client(
+) -> temporalio.workflow.NexusOperationHandle[
+    temporalio.api.common.v1.message_pb2.RetryPolicy,
+]:
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="TypeRoundtripService",
         endpoint="temporal-system",
     )

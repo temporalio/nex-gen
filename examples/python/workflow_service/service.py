@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
-
 import temporalio.api.workflowservice.v1.request_response_pb2
 
 

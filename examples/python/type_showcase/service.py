@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
-
 from .models import (
     DeactivateRequest,
     GetUserRequest,

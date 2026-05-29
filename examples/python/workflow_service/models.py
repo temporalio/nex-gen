@@ -6,8 +6,8 @@ from __future__ import annotations
 import collections.abc
 import dataclasses
 import typing
+import datetime
 import temporalio.common
-from datetime import timedelta
 import temporalio.api.sdk.v1.user_metadata_pb2
 import temporalio.api.workflowservice.v1.request_response_pb2
 
@@ -38,9 +38,9 @@ class SignalWithStartWorkflowRequest:
     task_queue: str
     signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]
     signal_args: list[typing.Any] | None = None
-    execution_timeout: timedelta | None = None
-    run_timeout: timedelta | None = None
-    task_timeout: timedelta | None = None
+    execution_timeout: datetime.timedelta | None = None
+    run_timeout: datetime.timedelta | None = None
+    task_timeout: datetime.timedelta | None = None
     request_id: str | None = None
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (
         temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
@@ -52,7 +52,7 @@ class SignalWithStartWorkflowRequest:
     search_attributes: temporalio.common.TypedSearchAttributes | None = None
     priority: temporalio.common.Priority | None = None
     versioning_override: temporalio.common.VersioningOverride | None = None
-    start_delay: timedelta | None = None
+    start_delay: datetime.timedelta | None = None
     user_metadata: UserMetadata | None = None
 
     def to_proto(

@@ -24,7 +24,7 @@ interface workflow-service {
   };
 
   /// @nexus.doc "Request fields for signaling a workflow, starting it first if needed."
-  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
+  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest" typescript-package="@temporalio/proto"
   record signal-with-start-workflow-request {
     /// @nexus.doc "Workflow type name or callable identifying the workflow to start."
     /// @nexus.proto-field "workflow_type"
@@ -85,7 +85,7 @@ interface workflow-service {
     time-skipping-config: placeholder,
   }
 
-  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionResponse"
+  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionResponse" typescript-package="@temporalio/proto"
   record signal-with-start-workflow-response {
     run-id: option<string>,
     started: option<bool>,
@@ -97,10 +97,11 @@ interface workflow-service {
   ///   "Signal a workflow, starting it first if needed."
   ///   returns="A workflow handle to the started workflow."
   /// @nexus.output-transform
-  ///   python-type="workflow.ExternalWorkflowHandle[typing.Any]"
-  ///   python="workflow.get_external_workflow_handle(request.id, run_id=result.run_id)"
+  ///   python-type="temporalio.workflow.ExternalWorkflowHandle[typing.Any]"
+  ///   python="temporalio.workflow.get_external_workflow_handle(request.id, run_id=result.run_id)"
   ///   typescript-type="workflow.ExternalWorkflowHandle"
   ///   typescript="workflow.getExternalWorkflowHandle(request.id, result.runId ?? undefined)"
+  ///   typescript-package="@temporalio/workflow"
   /// @nexus.operation name="SignalWithStartWorkflowExecution"
   signal-with-start-workflow: func(
     request: signal-with-start-workflow-request,

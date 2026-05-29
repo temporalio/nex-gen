@@ -6,9 +6,9 @@ from __future__ import annotations
 import collections.abc
 import typing
 import typing_extensions
-from datetime import timedelta
-from temporalio import workflow
+import datetime
 import temporalio.api.workflowservice.v1.request_response_pb2
+import temporalio.workflow
 
 from ..models import StartWorkflowRequest
 from .._resources import StartedWorkflow
@@ -21,7 +21,7 @@ async def _start_workflow(
     request: StartWorkflowRequest,
 ) -> StartedWorkflow:
     request_proto = request.to_proto()
-    nexus_client = workflow.create_nexus_client(
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="WorkflowService",
         endpoint="temporal-system",
     )
@@ -45,7 +45,7 @@ async def start_workflow(
     args: list[typing.Any] | None = ...,
     workflow_id: str,
     task_queue: str,
-    workflow_start_delay: timedelta | None = ...,
+    workflow_start_delay: datetime.timedelta | None = ...,
 ) -> StartedWorkflow: ...
 
 
@@ -58,7 +58,7 @@ async def start_workflow(
     *positional_args: typing_extensions.Unpack[WorkflowArgs],
     workflow_id: str,
     task_queue: str,
-    workflow_start_delay: timedelta | None = ...,
+    workflow_start_delay: datetime.timedelta | None = ...,
 ) -> StartedWorkflow: ...
 
 
@@ -69,7 +69,7 @@ async def start_workflow(
     args: list[typing.Any],
     workflow_id: str,
     task_queue: str,
-    workflow_start_delay: timedelta | None = ...,
+    workflow_start_delay: datetime.timedelta | None = ...,
 ) -> StartedWorkflow: ...
 
 
@@ -79,7 +79,7 @@ async def start_workflow(
     args: list[typing.Any] | None = None,
     workflow_id: str,
     task_queue: str,
-    workflow_start_delay: timedelta | None = None,
+    workflow_start_delay: datetime.timedelta | None = None,
 ) -> StartedWorkflow:
     """
     Args:

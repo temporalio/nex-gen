@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import dataclasses
-from temporalio import workflow
 import nexus_api_gen_runtime
+import temporalio.workflow
 
 from ..models import UpdateEmailRequest
 
@@ -29,7 +29,7 @@ class User:
 async def _update_email(
     request: UpdateEmailRequest,
 ) -> User:
-    nexus_client = workflow.create_nexus_client(
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="UserService",
         endpoint="user-service",
     )

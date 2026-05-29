@@ -2,7 +2,6 @@
 
 import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
-import * as workflow from "@temporalio/workflow";
 import {
   workflowTypeToProto,
   taskQueueToProto,

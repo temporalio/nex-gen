@@ -7,10 +7,10 @@ import collections.abc
 import dataclasses
 import typing
 import typing_extensions
-from datetime import timedelta
-from temporalio import workflow
+import datetime
 import nexus_api_gen_runtime
 import temporalio.api.workflowservice.v1.request_response_pb2
+import temporalio.workflow
 
 from ..models import (
     CancelWorkflowRequest,
@@ -62,10 +62,10 @@ class StartedWorkflow:
 
 async def _cancel_workflow(
     request: CancelWorkflowRequest,
-) -> workflow.NexusOperationHandle[
+) -> temporalio.workflow.NexusOperationHandle[
     temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
 ]:
-    nexus_client = workflow.create_nexus_client(
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="WorkflowService",
         endpoint="temporal-system",
     )
@@ -80,7 +80,7 @@ async def cancel_workflow(
     *,
     workflow_execution: WorkflowExecution,
     reason: str | None = None,
-) -> workflow.NexusOperationHandle[
+) -> temporalio.workflow.NexusOperationHandle[
     temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
 ]:
     request = CancelWorkflowRequest(
@@ -94,7 +94,7 @@ async def _restart_workflow(
     request: StartWorkflowRequest,
 ) -> StartedWorkflow:
     request_proto = request.to_proto()
-    nexus_client = workflow.create_nexus_client(
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="WorkflowService",
         endpoint="temporal-system",
     )
@@ -118,7 +118,7 @@ async def restart_workflow(
     args: list[typing.Any] | None = ...,
     workflow_id: str,
     task_queue: str,
-    workflow_start_delay: timedelta | None = ...,
+    workflow_start_delay: datetime.timedelta | None = ...,
 ) -> StartedWorkflow: ...
 
 
@@ -131,7 +131,7 @@ async def restart_workflow(
     *positional_args: typing_extensions.Unpack[WorkflowArgs],
     workflow_id: str,
     task_queue: str,
-    workflow_start_delay: timedelta | None = ...,
+    workflow_start_delay: datetime.timedelta | None = ...,
 ) -> StartedWorkflow: ...
 
 
@@ -142,7 +142,7 @@ async def restart_workflow(
     args: list[typing.Any],
     workflow_id: str,
     task_queue: str,
-    workflow_start_delay: timedelta | None = ...,
+    workflow_start_delay: datetime.timedelta | None = ...,
 ) -> StartedWorkflow: ...
 
 
@@ -152,7 +152,7 @@ async def restart_workflow(
     args: list[typing.Any] | None = None,
     workflow_id: str,
     task_queue: str,
-    workflow_start_delay: timedelta | None = None,
+    workflow_start_delay: datetime.timedelta | None = None,
 ) -> StartedWorkflow:
     """
     Args:

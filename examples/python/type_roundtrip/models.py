@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import temporalio.common
-from datetime import timedelta
 import temporalio.api.activity.v1.message_pb2
 
 from ._support import (
@@ -24,7 +24,7 @@ from ._support import (
 class ActivityOptions:
     task_queue: str | None = None
     retry_policy: temporalio.common.RetryPolicy
-    schedule_to_close_timeout: timedelta | None = None
+    schedule_to_close_timeout: datetime.timedelta | None = None
     priority: temporalio.common.Priority | None = None
 
     @classmethod

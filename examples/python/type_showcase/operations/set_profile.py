@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from temporalio import workflow
+import temporalio.workflow
 
 from ..models import (
     SetProfileRequest,
@@ -15,7 +15,7 @@ from .._resources import User
 async def _set_profile(
     request: SetProfileRequest,
 ) -> User:
-    nexus_client = workflow.create_nexus_client(
+    nexus_client = temporalio.workflow.create_nexus_client(
         service="TypeShowcase",
         endpoint="type-showcase",
     )

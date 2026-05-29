@@ -271,7 +271,7 @@ fn python_request_models_are_write_only() {
     ));
     assert!(rendered.contains("class SignalWithStartWorkflowRequest:"));
     assert!(rendered.contains(
-        "@dataclasses.dataclass(slots=True, kw_only=True)\nclass SignalWithStartWorkflowRequest:\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]\n    args: list[typing.Any] | None = None\n    id: str\n    task_queue: str\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]\n    signal_args: list[typing.Any] | None = None\n    execution_timeout: timedelta | None = None"
+        "@dataclasses.dataclass(slots=True, kw_only=True)\nclass SignalWithStartWorkflowRequest:\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]\n    args: list[typing.Any] | None = None\n    id: str\n    task_queue: str\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]\n    signal_args: list[typing.Any] | None = None\n    execution_timeout: datetime.timedelta | None = None"
     ));
     assert!(rendered.contains("temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE"));
     assert!(rendered.contains("args: list[typing.Any] | None = None"));
@@ -284,12 +284,11 @@ fn python_request_models_are_write_only() {
     assert!(!rendered.contains("namespace: str | None"));
     assert!(rendered.contains("message.namespace = workflow_namespace()"));
     assert!(rendered.contains("result = await handle"));
-    assert!(rendered.contains(
-        "return workflow.get_external_workflow_handle(request.id, run_id=result.run_id)"
-    ));
+    assert!(rendered.contains("return temporalio.workflow.get_external_workflow_handle("));
+    assert!(rendered.contains("run_id=result.run_id"));
     assert!(rendered.contains("async def _signal_with_start_workflow("));
     assert!(rendered.contains("request: SignalWithStartWorkflowRequest"));
-    assert!(rendered.contains(") -> workflow.ExternalWorkflowHandle[typing.Any]:"));
+    assert!(rendered.contains(") -> temporalio.workflow.ExternalWorkflowHandle[typing.Any]:"));
     assert!(rendered.contains("async def signal_with_start_workflow("));
     assert!(rendered.contains("@typing.overload"));
     assert!(rendered.contains("workflow: str,"));

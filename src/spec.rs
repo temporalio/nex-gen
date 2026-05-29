@@ -33,12 +33,30 @@ fn split_input_paths(input_paths: &[PathBuf]) -> Result<(&PathBuf, &[PathBuf])> 
 pub struct ApiSpec {
     pub version: String,
     pub support: SupportSpec,
+    pub language_imports: BTreeMap<Language, Vec<LanguageImportSpec>>,
     pub services: Vec<ServiceSpec>,
     pub types: BTreeMap<String, TypeOverrideSpec>,
     pub records: BTreeMap<String, WitRecordSpec>,
     pub enums: BTreeMap<String, WitEnumSpec>,
     pub flags: BTreeMap<String, WitFlagsSpec>,
     pub variants: BTreeMap<String, WitVariantSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LanguageImportSpec {
+    pub language: Language,
+    pub reference: String,
+    pub module: String,
+    pub name: Option<String>,
+    pub type_only: bool,
+    pub import_style: LanguageImportStyle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LanguageImportStyle {
+    Module,
+    Namespace,
+    Named,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +142,7 @@ impl ApiSpec {
         let world_id = select_world(resolve, package_id, &path)?;
         let world = &resolve.worlds[world_id];
         let support = collect_support_spec(resolve, package_id, package_origins)?;
+        let language_imports = collect_language_imports(resolve, package_origins, &path)?;
 
         let mut types = BTreeMap::new();
         let mut records = BTreeMap::new();
@@ -164,6 +183,7 @@ impl ApiSpec {
                 .map(ToString::to_string)
                 .unwrap_or_else(|| "0.0.0".to_string()),
             support,
+            language_imports,
             services,
             types,
             records,
@@ -171,6 +191,13 @@ impl ApiSpec {
             flags,
             variants,
         })
+    }
+
+    pub fn imports_for_language(&self, language: Language) -> &[LanguageImportSpec] {
+        self.language_imports
+            .get(&language)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 }
 
@@ -665,6 +692,349 @@ fn resolve_support_path(base_dir: &Path, support_path: &str) -> PathBuf {
     } else {
         base_dir.join(support_path)
     }
+}
+
+fn collect_language_imports(
+    resolve: &Resolve,
+    package_origins: &PackageOrigins,
+    fallback_path: &Path,
+) -> Result<BTreeMap<Language, Vec<LanguageImportSpec>>> {
+    let mut imports = BTreeSet::new();
+    for (package_id, package) in resolve.packages.iter() {
+        let origin_path = package_origins
+            .get(&package_id)
+            .map(PathBuf::as_path)
+            .unwrap_or(fallback_path);
+        let package_name = if let Some(version) = &package.name.version {
+            format!(
+                "{}:{}@{}",
+                package.name.namespace, package.name.name, version
+            )
+        } else {
+            format!("{}:{}", package.name.namespace, package.name.name)
+        };
+
+        collect_language_imports_from_docs(
+            package.docs.contents.as_deref(),
+            origin_path,
+            &format!("package `{package_name}`"),
+            &mut imports,
+        )?;
+
+        for (world_name, world_id) in &package.worlds {
+            let world = &resolve.worlds[*world_id];
+            collect_language_imports_from_docs(
+                world.docs.contents.as_deref(),
+                origin_path,
+                &format!("package `{package_name}` world `{world_name}`"),
+                &mut imports,
+            )?;
+        }
+
+        for (interface_name, interface_id) in &package.interfaces {
+            let interface = &resolve.interfaces[*interface_id];
+            collect_language_imports_from_docs(
+                interface.docs.contents.as_deref(),
+                origin_path,
+                &format!("interface `{interface_name}`"),
+                &mut imports,
+            )?;
+
+            for type_id in interface.types.values() {
+                let type_def = &resolve.types[*type_id];
+                let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
+                let type_context = format!("type `{interface_name}.{type_name}`");
+                collect_language_imports_from_docs(
+                    type_def.docs.contents.as_deref(),
+                    origin_path,
+                    &type_context,
+                    &mut imports,
+                )?;
+                collect_language_imports_from_type_def(
+                    type_def,
+                    origin_path,
+                    &type_context,
+                    &mut imports,
+                )?;
+            }
+
+            for function in interface.functions.values() {
+                collect_language_imports_from_docs(
+                    function.docs.contents.as_deref(),
+                    origin_path,
+                    &format!("interface `{interface_name}` function `{}`", function.name),
+                    &mut imports,
+                )?;
+            }
+        }
+    }
+
+    let mut imports_by_language = BTreeMap::<Language, Vec<LanguageImportSpec>>::new();
+    for import in imports {
+        imports_by_language
+            .entry(import.language)
+            .or_default()
+            .push(import);
+    }
+    Ok(imports_by_language)
+}
+
+fn collect_language_imports_from_type_def(
+    type_def: &TypeDef,
+    origin_path: &Path,
+    context: &str,
+    imports: &mut BTreeSet<LanguageImportSpec>,
+) -> Result<()> {
+    match &type_def.kind {
+        TypeDefKind::Record(record) => {
+            for field in &record.fields {
+                collect_language_imports_from_docs(
+                    field.docs.contents.as_deref(),
+                    origin_path,
+                    &format!("{context} field `{}`", field.name),
+                    imports,
+                )?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn collect_language_imports_from_docs(
+    docs: Option<&str>,
+    path: &Path,
+    context: &str,
+    imports: &mut BTreeSet<LanguageImportSpec>,
+) -> Result<()> {
+    for directive in parse_directives(docs, path, context)? {
+        collect_typescript_imports_from_directive(&directive, path, context, imports)?;
+        collect_python_imports_from_directive(&directive, imports)?;
+    }
+    Ok(())
+}
+
+fn collect_typescript_imports_from_directive(
+    directive: &Directive,
+    path: &Path,
+    context: &str,
+    imports: &mut BTreeSet<LanguageImportSpec>,
+) -> Result<()> {
+    let Some(package) = directive.value("typescript-package") else {
+        return Ok(());
+    };
+
+    let expressions = typescript_import_expressions(directive);
+    if expressions.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: format!("@nexus.{}", directive.name),
+            reason: "`typescript-package` requires a TypeScript type expression".to_string(),
+        });
+    }
+
+    let mut namespaces = BTreeSet::new();
+    for expression in expressions {
+        namespaces.extend(typescript_qualified_namespaces(expression));
+    }
+
+    match namespaces.len() {
+        0 => Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: format!("@nexus.{}", directive.name),
+            reason: "`typescript-package` requires a TypeScript type expression with a qualified namespace".to_string(),
+        }),
+        1 => {
+            let namespace = namespaces.into_iter().next().expect("namespace count checked");
+            imports.insert(LanguageImportSpec {
+                language: Language::TypeScript,
+                reference: namespace.clone(),
+                module: package.to_string(),
+                name: Some(namespace),
+                type_only: true,
+                import_style: if directive.name == "proto" {
+                    LanguageImportStyle::Named
+                } else {
+                    LanguageImportStyle::Namespace
+                },
+            });
+            Ok(())
+        }
+        _ => Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: format!("@nexus.{}", directive.name),
+            reason: "multiple TypeScript namespaces in one annotated import are not supported"
+                .to_string(),
+        }),
+    }
+}
+
+fn collect_python_imports_from_directive(
+    directive: &Directive,
+    imports: &mut BTreeSet<LanguageImportSpec>,
+) -> Result<()> {
+    for expression in python_import_expressions(directive) {
+        for module_path in python_qualified_module_paths(expression) {
+            imports.insert(LanguageImportSpec {
+                language: Language::Python,
+                reference: module_path.clone(),
+                module: module_path,
+                name: None,
+                type_only: false,
+                import_style: LanguageImportStyle::Module,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn typescript_import_expressions(directive: &Directive) -> Vec<&str> {
+    match directive.name.as_str() {
+        "proto" => directive.value("value").into_iter().collect(),
+        "type" | "flattened-type" => directive
+            .value("typescript")
+            .or_else(|| directive.value("value"))
+            .into_iter()
+            .collect(),
+        "function" => directive
+            .value("typescript-result")
+            .or_else(|| directive.value("result"))
+            .into_iter()
+            .collect(),
+        "typescript-with-arguments" => ["value-type", "args-type"]
+            .into_iter()
+            .filter_map(|key| directive.value(key))
+            .collect(),
+        "output-transform" => directive.value("typescript-type").into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn python_import_expressions(directive: &Directive) -> Vec<&str> {
+    match directive.name.as_str() {
+        "type" | "flattened-type" => directive
+            .value("python")
+            .or_else(|| directive.value("value"))
+            .into_iter()
+            .collect(),
+        "function" => directive
+            .value("python-result")
+            .or_else(|| directive.value("result"))
+            .into_iter()
+            .collect(),
+        "output-transform" => directive.value("python-type").into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn python_qualified_module_paths(expression: &str) -> BTreeSet<String> {
+    let chars = expression.char_indices().collect::<Vec<_>>();
+    let mut module_paths = BTreeSet::new();
+    let mut index = 0;
+    while index < chars.len() {
+        let (start_byte, ch) = chars[index];
+        if !is_python_identifier_start(ch) {
+            index += 1;
+            continue;
+        }
+
+        let before = expression[..start_byte].chars().next_back();
+        if before.is_some_and(|before| is_python_identifier_char(before) || before == '.') {
+            index += 1;
+            continue;
+        }
+
+        let mut end = index + 1;
+        while end < chars.len() {
+            let ch = chars[end].1;
+            if is_python_identifier_char(ch) || ch == '.' {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+        let end_byte = chars
+            .get(end)
+            .map(|(byte, _)| *byte)
+            .unwrap_or(expression.len());
+        let qualified_name = expression[start_byte..end_byte].trim_end_matches('.');
+        if let Some(module_path) = python_module_path_for_qualified_name(qualified_name) {
+            module_paths.insert(module_path.to_string());
+        }
+        index = end;
+    }
+    module_paths
+}
+
+fn python_module_path_for_qualified_name(qualified_name: &str) -> Option<&str> {
+    let (module_path, _) = qualified_name.rsplit_once('.')?;
+    if is_builtin_python_import(module_path) {
+        return None;
+    }
+    Some(module_path)
+}
+
+fn is_builtin_python_import(module_path: &str) -> bool {
+    matches!(
+        module_path,
+        "collections.abc" | "typing" | "typing_extensions"
+    )
+}
+
+fn is_python_identifier_start(ch: char) -> bool {
+    ch.is_ascii_alphabetic() || ch == '_'
+}
+
+fn is_python_identifier_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
+}
+
+fn typescript_qualified_namespaces(expression: &str) -> BTreeSet<String> {
+    let chars = expression.char_indices().collect::<Vec<_>>();
+    let mut namespaces = BTreeSet::new();
+    let mut index = 0;
+    while index < chars.len() {
+        let (start_byte, ch) = chars[index];
+        if !is_typescript_identifier_start(ch) {
+            index += 1;
+            continue;
+        }
+
+        let before = expression[..start_byte].chars().next_back();
+        if before.is_some_and(|before| is_typescript_identifier_char(before) || before == '.') {
+            index += 1;
+            continue;
+        }
+
+        let mut end = index + 1;
+        while end < chars.len() && is_typescript_identifier_char(chars[end].1) {
+            end += 1;
+        }
+        let end_byte = chars
+            .get(end)
+            .map(|(byte, _)| *byte)
+            .unwrap_or(expression.len());
+        let mut after = end;
+        while after < chars.len() && chars[after].1.is_whitespace() {
+            after += 1;
+        }
+        if after < chars.len() && chars[after].1 == '.' {
+            namespaces.insert(expression[start_byte..end_byte].to_string());
+        }
+        index = end;
+    }
+    namespaces
+}
+
+fn is_typescript_identifier_start(ch: char) -> bool {
+    ch.is_ascii_alphabetic() || ch == '_' || ch == '$'
+}
+
+fn is_typescript_identifier_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_' || ch == '$'
 }
 
 struct PreparedWitWorkspace {
@@ -3364,6 +3734,7 @@ fn parse_bool(value: &str) -> std::result::Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -3588,10 +3959,11 @@ interface workflow-service {
   }
 
   /// @nexus.output-transform
-  ///   python-type="workflow.ExternalWorkflowHandle[typing.Any]"
-  ///   python="workflow.get_external_workflow_handle(request.workflow_id, run_id=result.run_id)"
+  ///   python-type="temporalio.workflow.ExternalWorkflowHandle[typing.Any]"
+  ///   python="temporalio.workflow.get_external_workflow_handle(request.workflow_id, run_id=result.run_id)"
   ///   typescript-type="workflow.ExternalWorkflowHandle"
   ///   typescript="workflow.getExternalWorkflowHandle(request.workflowId, result.runId ?? undefined)"
+  ///   typescript-package="@temporalio/workflow"
   signal-with-start-workflow-execution: func(
     request: signal-with-start-workflow-request
   ) -> signal-with-start-workflow-response;
@@ -3600,6 +3972,20 @@ interface workflow-service {
 
         let python = parse(Language::Python, wit);
         let typescript = parse(Language::TypeScript, wit);
+        assert!(
+            python
+                .imports_for_language(Language::Python)
+                .iter()
+                .any(|import| import.reference == "temporalio.workflow"
+                    && import.module == "temporalio.workflow")
+        );
+        assert!(
+            python
+                .imports_for_language(Language::TypeScript)
+                .iter()
+                .any(|import| import.reference == "workflow"
+                    && import.module == "@temporalio/workflow")
+        );
 
         let python_support = python.support.fragments_for_language(Language::Python);
         let typescript_support = typescript
@@ -4397,6 +4783,24 @@ interface example {
             Some("temporalio.common.RetryPolicy")
         );
         assert_eq!(directive.value("typescript"), Some("common.RetryPolicy"));
+    }
+
+    #[test]
+    fn infers_python_imports_from_qualified_type_paths() {
+        assert_eq!(
+            super::python_qualified_module_paths(
+                "temporalio.common.RetryPolicy | datetime.timedelta | typing.Any",
+            ),
+            ["datetime".to_string(), "temporalio.common".to_string()]
+                .into_iter()
+                .collect()
+        );
+        assert_eq!(
+            super::python_qualified_module_paths(
+                "str | collections.abc.Callable[..., collections.abc.Awaitable[object]]",
+            ),
+            BTreeSet::new()
+        );
     }
 
     #[test]
