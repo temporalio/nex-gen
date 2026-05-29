@@ -3778,7 +3778,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("nexus-api-gen-{label}-{unique}"))
+        std::env::temp_dir().join(format!("nex-gen-{label}-{unique}"))
     }
 
     #[test]

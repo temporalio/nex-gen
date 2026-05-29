@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import cast
 import uuid
 
-import nexus_api_gen_runtime
+import nex_gen_runtime
 from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
 from nexusrpc import Operation
 from temporalio.api.common.v1 import Payloads
@@ -92,13 +92,13 @@ def read_payloads(path: Path) -> Payloads:
 
 
 async def encode_request(request: type_showcase.models.SetProfileRequest) -> Payloads:
-    return await nexus_api_gen_runtime.nexus_data_converter.encode_wrapper([request])
+    return await nex_gen_runtime.nexus_data_converter.encode_wrapper([request])
 
 
 async def decode_request(payloads: Payloads) -> type_showcase.models.SetProfileRequest:
     values = cast(
         list[object],
-        await nexus_api_gen_runtime.nexus_data_converter.decode_wrapper(
+        await nex_gen_runtime.nexus_data_converter.decode_wrapper(
             payloads,
             [type_showcase.models.SetProfileRequest],
         ),

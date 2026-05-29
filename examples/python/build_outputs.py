@@ -17,7 +17,7 @@ def main() -> None:
 
 
 def generator_command() -> list[str]:
-    if configured_binary := os.environ.get("NEXUS_API_GEN_BIN"):
+    if configured_binary := os.environ.get("NEX_GEN_BIN"):
         return [configured_binary, "build-examples"]
 
     return ["cargo", "build-examples"]

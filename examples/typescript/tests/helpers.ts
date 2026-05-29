@@ -8,7 +8,7 @@ import type * as nexus from "nexus-rpc";
 
 export const nexusDataConverter: DataConverter = {
   payloadConverterPath: fileURLToPath(
-    new URL("../nexus-api-gen-payload-converter.cjs", import.meta.url),
+    new URL("../nex-gen-payload-converter.cjs", import.meta.url),
   ),
 };
 

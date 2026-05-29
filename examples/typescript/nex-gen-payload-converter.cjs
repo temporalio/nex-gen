@@ -1,92 +1,64 @@
-import {
+const {
   BinaryPayloadConverter,
   CompositePayloadConverter,
   JsonPayloadConverter,
   UndefinedPayloadConverter,
   str,
   u8,
-} from "@temporalio/common";
-import type { Payload, PayloadConverterWithEncoding } from "@temporalio/common";
+} = require("@temporalio/common");
 
-export const NEXUS_ENCODING = "json/nexus";
+const NEXUS_ENCODING = "json/nexus";
 const NEXUS_TYPE_METADATA_KEY = "nexusType";
-const NEXUS_REGISTRY = Symbol.for("nexus-api-gen.registry");
-const NEXUS_TYPE_ID = Symbol.for("nexus-api-gen.type-id");
-const NEXUS_VALUE = Symbol.for("nexus-api-gen.value");
+const NEXUS_REGISTRY = Symbol.for("nex-gen.registry");
+const NEXUS_TYPE_ID = Symbol.for("nex-gen.type-id");
+const NEXUS_VALUE = Symbol.for("nex-gen.value");
 
-type NexusFactory = (value: Record<string, unknown>) => unknown;
-
-interface NexusWrappedValue {
-  [NEXUS_TYPE_ID]: string;
-  [NEXUS_VALUE]: unknown;
+function registry() {
+  globalThis[NEXUS_REGISTRY] ??= new Map();
+  return globalThis[NEXUS_REGISTRY];
 }
 
-function registry(): Map<string, NexusFactory> {
-  const globalObject = globalThis as typeof globalThis & {
-    [NEXUS_REGISTRY]?: Map<string, NexusFactory>;
-  };
-  globalObject[NEXUS_REGISTRY] ??= new Map();
-  return globalObject[NEXUS_REGISTRY];
-}
-
-export function registerNexusResource(typeId: string, factory: NexusFactory): void {
-  registry().set(typeId, factory);
-}
-
-export function markNexusResource(constructor: Function, typeId: string): void {
-  Object.defineProperty(constructor, NEXUS_TYPE_ID, { value: typeId });
-}
-
-export function nexusValue<T>(typeId: string, value: T): T {
+function nexusValue(typeId, value) {
   return {
     [NEXUS_TYPE_ID]: typeId,
     [NEXUS_VALUE]: value,
-  } as unknown as T;
+  };
 }
 
-function isObject(value: unknown): value is Record<PropertyKey, unknown> {
+function isObject(value) {
   return typeof value === "object" && value !== null;
 }
 
-function wrappedValue(value: unknown): NexusWrappedValue | undefined {
+function wrappedValue(value) {
   if (!isObject(value)) {
     return undefined;
   }
   if (typeof value[NEXUS_TYPE_ID] === "string" && NEXUS_VALUE in value) {
-    return value as unknown as NexusWrappedValue;
+    return value;
   }
-  const constructor = value.constructor as
-    | (Function & { [NEXUS_TYPE_ID]?: string })
-    | undefined;
-  const typeId = constructor?.[NEXUS_TYPE_ID];
+  const typeId = value.constructor?.[NEXUS_TYPE_ID];
   if (typeId != null) {
-    return nexusValue(typeId, value) as unknown as NexusWrappedValue;
+    return nexusValue(typeId, value);
   }
   return undefined;
 }
 
-function toWireName(name: string): string {
+function toWireName(name) {
   return name.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
 }
 
-function fromWireName(name: string): string {
-  return name.replace(/-([a-z])/g, (_match, character: string) =>
-    character.toUpperCase(),
-  );
+function fromWireName(name) {
+  return name.replace(/-([a-z])/g, (_match, character) => character.toUpperCase());
 }
 
-function isTagged(value: object): value is {
-  tag: string;
-  value?: unknown;
-} {
-  const tagged = value as { tag?: unknown };
+function isTagged(value) {
   return (
-    typeof tagged.tag === "string" &&
+    typeof value.tag === "string" &&
     Object.keys(value).every((key) => key === "tag" || key === "value")
   );
 }
 
-function toWire(value: unknown): unknown {
+function toWire(value) {
   if (value == null || typeof value !== "object") {
     return value;
   }
@@ -106,7 +78,7 @@ function toWire(value: unknown): unknown {
   );
 }
 
-function fromWire(value: unknown): unknown {
+function fromWire(value) {
   if (value == null || typeof value !== "object") {
     return value;
   }
@@ -123,10 +95,10 @@ function fromWire(value: unknown): unknown {
   );
 }
 
-export class NexusPayloadConverter implements PayloadConverterWithEncoding {
-  public readonly encodingType = NEXUS_ENCODING;
+class NexusPayloadConverter {
+  encodingType = NEXUS_ENCODING;
 
-  public toPayload(value: unknown): Payload | undefined {
+  toPayload(value) {
     const wrapped = wrappedValue(value);
     if (wrapped == null) {
       return undefined;
@@ -140,7 +112,7 @@ export class NexusPayloadConverter implements PayloadConverterWithEncoding {
     };
   }
 
-  public fromPayload<T>(payload: Payload): T {
+  fromPayload(payload) {
     const typeMetadata = payload.metadata?.[NEXUS_TYPE_METADATA_KEY];
     if (typeMetadata == null) {
       throw new Error("json/nexus payload is missing nexusType metadata");
@@ -152,17 +124,22 @@ export class NexusPayloadConverter implements PayloadConverterWithEncoding {
     const value = fromWire(JSON.parse(str(payload.data)));
     const factory = registry().get(typeId);
     if (factory != null) {
-      return factory(value as Record<string, unknown>) as T;
+      return factory(value);
     }
-    return value as T;
+    return value;
   }
 }
 
-export const nexusPayloadConverter = new NexusPayloadConverter();
+const nexusPayloadConverter = new NexusPayloadConverter();
 
-export const payloadConverter = new CompositePayloadConverter(
+const payloadConverter = new CompositePayloadConverter(
   new UndefinedPayloadConverter(),
   new BinaryPayloadConverter(),
   nexusPayloadConverter,
   new JsonPayloadConverter(),
 );
+
+module.exports = {
+  nexusPayloadConverter,
+  payloadConverter,
+};

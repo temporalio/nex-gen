@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nexus_api_gen::generate_to_string_with_inputs;
+use nex_gen::generate_to_string_with_inputs;
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const START_WORKFLOW_EXAMPLE_ID: &str = "start-workflow";
@@ -113,7 +113,7 @@ fn read_typescript_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
 fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_path: &Path) {
     ensure_typescript_dependencies(root);
 
-    let status = Command::new(env!("CARGO_BIN_EXE_nexus-api-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
             "--lang",
@@ -152,7 +152,7 @@ fn unique_output_path(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nexus-api-gen-{label}-{unique}"))
+    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}"))
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn typescript_example_suite_typechecks_and_tests() {
 fn typescript_renders_required_fields_and_custom_message_types() {
     let root = project_root();
     let rendered = generate_to_string_with_inputs(
-        nexus_api_gen::language::Language::TypeScript,
+        nex_gen::language::Language::TypeScript,
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
         &[descriptor_path(&root)],
     )
@@ -348,7 +348,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(!rendered.contains("from './model_overrides.ts'"));
 
     let start_workflow_rendered = generate_to_string_with_inputs(
-        nexus_api_gen::language::Language::TypeScript,
+        nex_gen::language::Language::TypeScript,
         &example_input_paths(&root, START_WORKFLOW_EXAMPLE_ID),
         &[descriptor_path(&root)],
     )
@@ -360,7 +360,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(!start_workflow_rendered.contains("export interface CancelWorkflowResponse {}"));
 
     let type_roundtrip_rendered = generate_to_string_with_inputs(
-        nexus_api_gen::language::Language::TypeScript,
+        nex_gen::language::Language::TypeScript,
         &example_input_paths(&root, TYPE_ROUNDTRIP_EXAMPLE_ID),
         &[descriptor_path(&root)],
     )

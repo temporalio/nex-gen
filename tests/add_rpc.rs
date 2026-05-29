@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nexus_api_gen::add_rpc_to_string;
-use nexus_api_gen::language::Language;
-use nexus_api_gen::spec::ApiSpec;
+use nex_gen::add_rpc_to_string;
+use nex_gen::language::Language;
+use nex_gen::spec::ApiSpec;
 
 const PRIMARY_EXAMPLE_PATH: &str = "examples/inputs/workflow-service.wit";
 
@@ -34,7 +34,7 @@ fn unique_temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nexus-api-gen-{name}-{unique}"))
+    std::env::temp_dir().join(format!("nex-gen-{name}-{unique}"))
 }
 
 fn write_temp_wit(name: &str, contents: &str) -> PathBuf {
@@ -59,7 +59,7 @@ fn parse(language: Language, wit: &str, path: &str) -> ApiSpec {
 #[test]
 fn cli_add_rpc_generates_standalone_wit_for_signal_with_start() {
     let root = project_root();
-    let output = Command::new(env!("CARGO_BIN_EXE_nexus-api-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "add-rpc",
             "--descriptors",

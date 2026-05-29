@@ -27,19 +27,19 @@ JsonValue: TypeAlias = (
 
 
 def _type_registry() -> dict[str, type[object]]:
-    registry_obj = getattr(builtins, "_nexus_api_gen_type_registry", None)
+    registry_obj = getattr(builtins, "_nex_gen_type_registry", None)
     if not isinstance(registry_obj, dict):
         registry: dict[str, type[object]] = {}
-        setattr(builtins, "_nexus_api_gen_type_registry", registry)
+        setattr(builtins, "_nex_gen_type_registry", registry)
         return registry
     return typing.cast(dict[str, type[object]], registry_obj)
 
 
 def _class_registry() -> dict[type[object], str]:
-    registry_obj = getattr(builtins, "_nexus_api_gen_class_registry", None)
+    registry_obj = getattr(builtins, "_nex_gen_class_registry", None)
     if not isinstance(registry_obj, dict):
         registry: dict[type[object], str] = {}
-        setattr(builtins, "_nexus_api_gen_class_registry", registry)
+        setattr(builtins, "_nex_gen_class_registry", registry)
         return registry
     return typing.cast(dict[type[object], str], registry_obj)
 
@@ -262,7 +262,7 @@ class NexusPayloadConverter(EncodingPayloadConverter):
             target = _type_registry()[type_id_text]
         except KeyError as err:
             raise RuntimeError(
-                f"unknown nexus-api-gen type {type_id_text!r}; import the generated module before decoding"
+                f"unknown nex-gen type {type_id_text!r}; import the generated module before decoding"
             ) from err
         return _from_json(typing.cast(JsonValue, json.loads(payload.data)), target)
 
