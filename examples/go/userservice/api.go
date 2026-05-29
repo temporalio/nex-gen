@@ -5,8 +5,8 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const ServiceName = "user-service"
-const Endpoint = "user-service-endpoint"
+const ServiceName = "UserService"
+const Endpoint = "user-service"
 
 const GetUserOp = "GetUser"
 const UpdateEmailOp = "UpdateEmail"

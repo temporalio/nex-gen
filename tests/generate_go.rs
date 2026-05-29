@@ -165,8 +165,8 @@ fn go_type_showcase_generates_expected_types() {
     .unwrap();
 
     // Service and operation constants
-    assert!(rendered.contains("const ServiceName = \"type-showcase\""));
-    assert!(rendered.contains("const Endpoint = \"type-showcase-endpoint\""));
+    assert!(rendered.contains("const ServiceName = \"TypeShowcase\""));
+    assert!(rendered.contains("const Endpoint = \"type-showcase\""));
     assert!(rendered.contains("const GetUserOp = \"GetUser\""));
     assert!(rendered.contains("const UpdateEmailOp = \"UpdateEmail\""));
     assert!(rendered.contains("const RenameOp = \"Rename\""));
