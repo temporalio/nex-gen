@@ -219,7 +219,10 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains("SignalArgs extends any[] = SignalValue extends"));
     assert!(rendered.contains("signalArgs: SignalArgs | Readonly<SignalArgs>;"));
     assert!(rendered.contains("signalArgs?: SignalArgs | Readonly<SignalArgs>;"));
-    assert!(rendered.contains("Workflow type name or callable identifying the workflow to start."));
+    assert!(
+        rendered
+            .contains("Workflow type name or workflow function identifying the workflow to start.")
+    );
     assert!(rendered.contains("workflow: string;"));
     assert!(rendered.contains("Arguments for workflow."));
     assert!(rendered.contains("args?: ReadonlyArray<unknown>;"));

@@ -4470,9 +4470,9 @@ mod tests {
         assert!(output.contains("SignalArgs extends any[] = SignalValue extends"));
         assert!(output.contains("signalArgs: SignalArgs | Readonly<SignalArgs>;"));
         assert!(output.contains("signalArgs?: SignalArgs | Readonly<SignalArgs>;"));
-        assert!(
-            output.contains("Workflow type name or callable identifying the workflow to start.")
-        );
+        assert!(output.contains(
+            "Workflow type name or workflow function identifying the workflow to start."
+        ));
         assert!(output.contains("workflow: string;"));
         assert!(output.contains("Arguments for workflow."));
         assert!(output.contains("args?: ReadonlyArray<unknown>;"));

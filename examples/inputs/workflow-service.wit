@@ -26,7 +26,10 @@ interface workflow-service {
   /// @nexus.doc "Request fields for signaling a workflow, starting it first if needed."
   /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest" typescript-package="@temporalio/proto"
   record signal-with-start-workflow-request {
-    /// @nexus.doc "Workflow type name or callable identifying the workflow to start."
+    /// @nexus.doc
+    ///   "Workflow type name or callable identifying the workflow to start."
+    ///   python="Workflow type name or callable identifying the workflow to start."
+    ///   typescript="Workflow type name or workflow function identifying the workflow to start."
     /// @nexus.proto-field "workflow_type"
     workflow: workflow-function,
     /// @nexus.doc "Unique identifier for the workflow execution."
@@ -34,7 +37,10 @@ interface workflow-service {
     id: string,
     /// @nexus.doc "Task queue to run the workflow on."
     task-queue: task-queue,
-    /// @nexus.doc "Signal name or callable to send with the start request."
+    /// @nexus.doc
+    ///   "Signal name or callable to send with the start request."
+    ///   python="Signal name or callable to send with the start request."
+    ///   typescript="Signal name or signal definition to send with the start request."
     /// @nexus.proto-field "signal_name"
     signal: signal-function,
     /// @nexus.doc "Total workflow execution timeout, including retries and continue-as-new."
