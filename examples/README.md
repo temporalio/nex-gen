@@ -1,7 +1,14 @@
 # Examples
 
 Each example starts from an authored WIT file in `inputs/`. Generated output is
-checked in for Python and TypeScript, with one test file per language example.
+checked in for Python and TypeScript, with focused tests for the examples that
+exercise runtime or typechecking behavior.
+
+## `function-execution`
+
+- WIT: [`inputs/function-execution.wit`](inputs/function-execution.wit)
+- Python: [`python/function_execution/`](python/function_execution/)
+- TypeScript: [`typescript/function-execution/`](typescript/function-execution/)
 
 ## `user-service`
 

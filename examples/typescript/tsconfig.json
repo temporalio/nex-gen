@@ -10,6 +10,7 @@
     "verbatimModuleSyntax": true
   },
   "include": [
+    "function-execution/**/*.ts",
     "start-workflow/**/*.ts",
     "user-service/**/*.ts",
     "type-showcase/**/*.ts",

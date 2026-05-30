@@ -95,7 +95,7 @@ export type SignalWithStartWorkflowRequest<
     /**
      * Signal name or callable to send with the start request.
      */
-    signal: SignalValue;
+    signal: string | SignalValue;
     /**
      * Arguments for signal.
      */

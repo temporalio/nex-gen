@@ -11,7 +11,8 @@ interface model {
   /// @nexus.type python="typing.Any" typescript="common.Payload" typescript-package="@temporalio/common"
   type payload = placeholder;
 
-  /// @nexus.proto "temporal.api.common.v1.Payloads" typescript-package="@temporalio/proto"
+  /// @nexus.proto "temporal.api.common.v1.Payloads"
+  ///   typescript-package="@temporalio/proto"
   type payloads = list<payload>;
 
   /// Callable result annotation for workflow functions.
@@ -20,19 +21,28 @@ interface model {
   ///   typescript="Promise<any>"
   type workflow-result = placeholder;
 
-  workflow-call: async func(args: payloads) -> workflow-result;
+  /// Receiver/context argument for workflow callable method forms.
+  /// @nexus.type python="typing.Any" typescript="any"
+  type callable-prefix = placeholder;
+
+  /// @nexus.function-args
+  ///   varargs=true
+  ///   param="args"
+  ///   typescript-drop-prefix=true
+  workflow-call: async func(callable-prefix: callable-prefix, args: payloads) -> workflow-result;
 
   /// Callable result annotation for signal functions.
   /// @nexus.type python="None | collections.abc.Awaitable[None]" typescript="void"
   type signal-result = placeholder;
 
-  signal-call: func(signal-args: payloads) -> signal-result;
+  /// @nexus.function-args
+  ///   varargs=true
+  ///   param="signal-args"
+  ///   typescript-drop-prefix=true
+  signal-call: func(callable-prefix: callable-prefix, signal-args: payloads) -> signal-result;
 
   /// @nexus.proto "temporal.api.common.v1.WorkflowType" typescript-package="@temporalio/proto"
-  /// @nexus.type
-  ///   python="str | collections.abc.Callable[..., collections.abc.Awaitable[object]]"
-  ///   typescript="string | common.Workflow"
-  ///   typescript-package="@temporalio/common"
+  /// @nexus.type python="str" typescript="string"
   type workflow-type = placeholder;
 
   /// @nexus.function
@@ -40,25 +50,24 @@ interface model {
   ///   signature="workflow-call"
   ///   args-field="input"
   ///   result-type-parameter="WorkflowResult"
+  ///   alternate-type="workflow-type"
   /// @nexus.add-rpc-compatible-with "workflow-type"
   type workflow-function = placeholder;
 
   /// @nexus.function
   ///   signature="signal-call"
   ///   args-field="signal-input"
+  ///   alternate-type="string"
   ///   python-converter="signal_function_to_proto"
   ///   typescript-converter="signalFunctionToProto"
   /// @nexus.add-rpc-compatible-with "string"
   /// @nexus.typescript-with-arguments
   ///   signature="signal-call"
   ///   args-field="signal-input"
+  ///   alternate-type="string"
   ///   value-type="workflow.SignalDefinition<any[]>"
   ///   args-type="Value extends workflow.SignalDefinition<infer Args, any> ? Args : never"
   ///   name-expr="value.name"
-  ///   typescript-package="@temporalio/workflow"
-  /// @nexus.type
-  ///   python="str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]"
-  ///   typescript="string | workflow.SignalDefinition<any[]>"
   ///   typescript-package="@temporalio/workflow"
   type signal-function = placeholder;
 

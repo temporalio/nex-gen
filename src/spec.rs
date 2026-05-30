@@ -172,7 +172,7 @@ impl ApiSpec {
                 continue;
             };
             let interface = &resolve.interfaces[*id];
-            services.push(build_service(resolve, key, interface, &path)?);
+            services.push(build_service(resolve, key, interface, &path, language)?);
         }
 
         Ok(Self {
@@ -344,17 +344,19 @@ pub fn load_linked_wit_metadata_from_inputs(input_paths: &[PathBuf]) -> Result<L
                     let Some(signature_name) = directive.value("signature") else {
                         continue;
                     };
-                    let covered_field = directive
-                        .value("args-field")
-                        .map(str::to_string)
-                        .unwrap_or(resolve_function_signature_args_name(
+                    let covered_field = if let Some(args_field) = directive.value("args-field") {
+                        args_field.to_string()
+                    } else {
+                        resolve_function_signature_args(
                             &resolve,
                             type_def,
                             signature_name,
                             &origin_path,
                             &context,
-                        )?)
-                        .replace('-', "_");
+                        )?
+                        .0
+                    }
+                    .replace('-', "_");
                     type_covered_fields
                         .entry(type_name.to_string())
                         .or_default()
@@ -499,6 +501,7 @@ pub struct ResourceFieldSpec {
     pub name: String,
     pub optional: bool,
     pub field_type: AuthoredFieldTypeSpec,
+    pub function: Option<FunctionFieldSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1574,9 +1577,12 @@ impl GeneratedModelSpec {
     }
 
     pub fn function_for_args_field(&self, field_name: &str) -> Option<&FunctionFieldSpec> {
-        self.functions
-            .values()
-            .find(|function| function.args_field == field_name)
+        self.functions.values().find(|function| {
+            function
+                .arg_fields
+                .iter()
+                .any(|arg_field| arg_field == field_name)
+        })
     }
 
     pub fn with_arguments(&self, field_name: &str) -> Option<&WithArgumentsFieldSpec> {
@@ -1688,8 +1694,26 @@ pub struct FunctionFieldSpec {
     pub primary: bool,
     pub result: FunctionResultSpec,
     pub args_field: String,
+    pub arg_fields: Vec<String>,
+    pub args: FunctionArgsSpec,
+    pub alternate_type: Option<AuthoredFieldTypeSpec>,
     pub converter: Option<String>,
     pub result_type_parameter: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionArgsSpec {
+    Varargs {
+        prefix: Vec<FunctionArgSpec>,
+        typescript_drop_prefix: bool,
+    },
+    Fixed(Vec<FunctionArgSpec>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionArgSpec {
+    pub name: String,
+    pub field_type: AuthoredFieldTypeSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1704,14 +1728,41 @@ pub struct WithArgumentsFieldSpec {
     pub value_type: String,
     pub args_type: String,
     pub name_expr: String,
+    pub alternate_type: Option<AuthoredFieldTypeSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FlattenedFunctionTypeSpec {
-    args_name: String,
-    args_field: String,
+    arg_fields: Vec<FlattenedFunctionArgSpec>,
     function: Option<FunctionFieldSpec>,
     with_arguments: Option<WithArgumentsFieldSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FlattenedFunctionArgSpec {
+    args_name: String,
+    field_name: String,
+    field_type: AuthoredFieldTypeSpec,
+    required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedFunctionSignature {
+    args: ResolvedFunctionSignatureArgs,
+    result: AuthoredFieldTypeSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedFunctionSignatureArgs {
+    name: String,
+    wit_type: AuthoredFieldTypeSpec,
+    function_args: FunctionArgsSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionVarargsSpec {
+    param: String,
+    typescript_drop_prefix: bool,
 }
 
 fn collect_interface_types(
@@ -1904,8 +1955,14 @@ fn build_wit_record_spec(
 
     let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
     let context = format!("type `{interface_name}.{type_name}`");
-    let (required_fields, _omitted_fields, generated_model) =
-        build_generated_model_from_record(resolve, record, path, &context, language)?;
+    let (required_fields, _omitted_fields, generated_model) = build_generated_model_from_record(
+        resolve,
+        type_def.owner,
+        record,
+        path,
+        &context,
+        language,
+    )?;
 
     Ok(Some(WitRecordSpec {
         name: type_name.to_upper_camel_case(),
@@ -1971,9 +2028,14 @@ fn build_type_override(
     }
 
     let (required_fields, omitted_fields, generated_model) = match &type_def.kind {
-        TypeDefKind::Record(record) => {
-            build_generated_model_from_record(resolve, record, path, &context, language)?
-        }
+        TypeDefKind::Record(record) => build_generated_model_from_record(
+            resolve,
+            type_def.owner,
+            record,
+            path,
+            &context,
+            language,
+        )?,
         _ => (
             BTreeSet::new(),
             BTreeSet::new(),
@@ -1997,6 +2059,7 @@ fn build_type_override(
 
 fn build_generated_model_from_record(
     resolve: &Resolve,
+    owner: TypeOwner,
     record: &wit_parser::Record,
     path: &Path,
     context: &str,
@@ -2151,12 +2214,14 @@ fn build_generated_model_from_record(
             );
         }
 
-        if let Some(function) = build_function_field(&directives, path, &field_context, language)? {
+        if let Some(function) =
+            build_function_field(resolve, owner, &directives, path, &field_context, language)?
+        {
             functions.insert(proto_field_name.clone(), function);
         }
 
         if let Some(with_arguments_field) =
-            build_with_arguments_field(&directives, path, &field_context)?
+            build_with_arguments_field(resolve, owner, &directives, path, &field_context)?
         {
             with_arguments.insert(proto_field_name.clone(), with_arguments_field);
         }
@@ -2173,20 +2238,23 @@ fn build_generated_model_from_record(
         }
 
         if let Some(flattened_function_type) = flattened_function_type {
-            let args_proto_field_name = flattened_function_type.args_field.clone();
-            if !authored_proto_fields.insert(args_proto_field_name.clone()) {
-                return Err(Error::InvalidWit {
-                    path: path.to_path_buf(),
-                    reason: format!(
-                        "{field_context} maps to duplicate proto field `{args_proto_field_name}`"
-                    ),
-                });
+            for arg_field in flattened_function_type.arg_fields {
+                if !authored_proto_fields.insert(arg_field.field_name.clone()) {
+                    return Err(Error::InvalidWit {
+                        path: path.to_path_buf(),
+                        reason: format!(
+                            "{field_context} maps to duplicate proto field `{}`",
+                            arg_field.field_name
+                        ),
+                    });
+                }
+                declared_fields.push(arg_field.field_name.clone());
+                field_names.insert(arg_field.field_name.clone(), arg_field.args_name);
+                if arg_field.required {
+                    required_fields.insert(arg_field.field_name.clone());
+                }
+                field_wit_types.insert(arg_field.field_name, arg_field.field_type);
             }
-            declared_fields.push(args_proto_field_name.clone());
-            field_names.insert(
-                args_proto_field_name.clone(),
-                flattened_function_type.args_name.clone(),
-            );
             if let Some(function) = flattened_function_type.function {
                 functions.insert(proto_field_name.clone(), function);
             }
@@ -2662,6 +2730,8 @@ fn is_valid_support_helper_name(name: &str) -> bool {
 }
 
 fn build_function_field(
+    resolve: &Resolve,
+    owner: TypeOwner,
     directives: &[Directive],
     path: &Path,
     context: &str,
@@ -2701,6 +2771,12 @@ fn build_function_field(
         primary,
         result: FunctionResultSpec::Annotation(result),
         args_field: args_field.to_snake_case(),
+        arg_fields: vec![args_field.to_snake_case()],
+        args: FunctionArgsSpec::Varargs {
+            prefix: Vec::new(),
+            typescript_drop_prefix: false,
+        },
+        alternate_type: function_alternate_type(resolve, owner, directive, path, context)?,
         converter: directive_converter(directive, language),
         result_type_parameter: directive_result_type_parameter(directive),
     }))
@@ -2713,7 +2789,7 @@ fn build_function_field_for_type_alias(
     path: &Path,
     context: &str,
     language: Language,
-) -> Result<Option<(String, FunctionFieldSpec)>> {
+) -> Result<Option<(String, AuthoredFieldTypeSpec, FunctionFieldSpec)>> {
     let Some(function_directive) = directive(directives, "function", path, context)? else {
         return Ok(None);
     };
@@ -2745,17 +2821,32 @@ fn build_function_field_for_type_alias(
             });
         }
 
-        let (args_name, result) =
+        let signature =
             resolve_function_signature(resolve, type_def, signature_name, path, context)?;
+        let args_name = signature.args.name;
+        let args_type = signature.args.wit_type;
+        let function_args = signature.args.function_args;
+        let args_field = function_directive
+            .value("args-field")
+            .unwrap_or(&args_name)
+            .to_snake_case();
+        let arg_fields = function_arg_fields(&function_args, &args_field);
         return Ok(Some((
             args_name.clone(),
+            args_type,
             FunctionFieldSpec {
                 primary,
-                result: FunctionResultSpec::Wit(result),
-                args_field: function_directive
-                    .value("args-field")
-                    .unwrap_or(&args_name)
-                    .to_snake_case(),
+                result: FunctionResultSpec::Wit(signature.result),
+                args_field,
+                arg_fields,
+                args: function_args,
+                alternate_type: function_alternate_type(
+                    resolve,
+                    type_def.owner,
+                    function_directive,
+                    path,
+                    context,
+                )?,
                 converter,
                 result_type_parameter: directive_result_type_parameter(function_directive),
             },
@@ -2767,28 +2858,39 @@ fn build_function_field_for_type_alias(
         return Ok(None);
     }
 
-    let Some(args_name) = function_directive.value("args-name") else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.function".to_string(),
-            reason: "missing required `args-name`".to_string(),
-        });
-    };
+    Err(Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.function".to_string(),
+        reason: "type-level function annotations must use `signature`".to_string(),
+    })
+}
 
-    Ok(Some((
-        args_name.to_string(),
-        FunctionFieldSpec {
-            primary,
-            result: FunctionResultSpec::Annotation(result),
-            args_field: args_name.to_snake_case(),
-            converter,
-            result_type_parameter: directive_result_type_parameter(function_directive),
-        },
-    )))
+fn function_alternate_type(
+    resolve: &Resolve,
+    owner: TypeOwner,
+    directive: &Directive,
+    path: &Path,
+    context: &str,
+) -> Result<Option<AuthoredFieldTypeSpec>> {
+    directive
+        .value("alternate-type")
+        .map(|type_name| {
+            resolve_named_wit_type(resolve, owner, type_name, path, context, "@nexus.function")
+        })
+        .transpose()
+}
+
+fn function_arg_fields(function_args: &FunctionArgsSpec, args_field: &str) -> Vec<String> {
+    match function_args {
+        FunctionArgsSpec::Varargs { .. } => vec![args_field.to_string()],
+        FunctionArgsSpec::Fixed(args) => args.iter().map(|arg| arg.name.to_snake_case()).collect(),
+    }
 }
 
 fn build_with_arguments_field(
+    resolve: &Resolve,
+    owner: TypeOwner,
     directives: &[Directive],
     path: &Path,
     context: &str,
@@ -2835,6 +2937,7 @@ fn build_with_arguments_field(
         value_type: value_type.to_string(),
         args_type: args_type.to_string(),
         name_expr: name_expr.to_string(),
+        alternate_type: with_arguments_alternate_type(resolve, owner, directive, path, context)?,
     }))
 }
 
@@ -2844,12 +2947,12 @@ fn build_with_arguments_field_for_type_alias(
     directives: &[Directive],
     path: &Path,
     context: &str,
-) -> Result<Option<(String, WithArgumentsFieldSpec)>> {
+) -> Result<Option<(String, AuthoredFieldTypeSpec, WithArgumentsFieldSpec)>> {
     let Some(directive) = directive(directives, "typescript-with-arguments", path, context)? else {
         return Ok(None);
     };
 
-    let args_name = if let Some(signature_name) = directive.value("signature") {
+    let (args_name, args_wit_type) = if let Some(signature_name) = directive.value("signature") {
         if directive.value("args-name").is_some() {
             return Err(Error::InvalidWitDirective {
                 path: path.to_path_buf(),
@@ -2858,9 +2961,16 @@ fn build_with_arguments_field_for_type_alias(
                 reason: "signature cannot be combined with args-name".to_string(),
             });
         }
-        resolve_function_signature_args_name(resolve, type_def, signature_name, path, context)?
-    } else if let Some(args_name) = directive.value("args-name") {
-        args_name.to_string()
+        let (args_name, args_type) =
+            resolve_function_signature_args(resolve, type_def, signature_name, path, context)?;
+        (args_name, args_type)
+    } else if directive.value("args-name").is_some() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.typescript-with-arguments".to_string(),
+            reason: "type-level with-arguments annotations must use `signature`".to_string(),
+        });
     } else {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
@@ -2897,6 +3007,7 @@ fn build_with_arguments_field_for_type_alias(
 
     Ok(Some((
         args_name.clone(),
+        args_wit_type,
         WithArgumentsFieldSpec {
             args_field: directive
                 .value("args-field")
@@ -2905,8 +3016,61 @@ fn build_with_arguments_field_for_type_alias(
             value_type: value_type.to_string(),
             args_type: args_type.to_string(),
             name_expr: name_expr.to_string(),
+            alternate_type: with_arguments_alternate_type(
+                resolve,
+                type_def.owner,
+                directive,
+                path,
+                context,
+            )?,
         },
     )))
+}
+
+fn with_arguments_alternate_type(
+    resolve: &Resolve,
+    owner: TypeOwner,
+    directive: &Directive,
+    path: &Path,
+    context: &str,
+) -> Result<Option<AuthoredFieldTypeSpec>> {
+    directive
+        .value("alternate-type")
+        .map(|type_name| {
+            resolve_named_wit_type(
+                resolve,
+                owner,
+                type_name,
+                path,
+                context,
+                "@nexus.typescript-with-arguments",
+            )
+        })
+        .transpose()
+}
+
+fn flattened_function_arg_fields(
+    function: &FunctionFieldSpec,
+    args_name: &str,
+    args_type: &AuthoredFieldTypeSpec,
+) -> Vec<FlattenedFunctionArgSpec> {
+    match &function.args {
+        FunctionArgsSpec::Varargs { .. } => vec![FlattenedFunctionArgSpec {
+            args_name: args_name.to_string(),
+            field_name: function.args_field.clone(),
+            field_type: args_type.clone(),
+            required: false,
+        }],
+        FunctionArgsSpec::Fixed(args) => args
+            .iter()
+            .map(|arg| FlattenedFunctionArgSpec {
+                args_name: arg.name.clone(),
+                field_name: arg.name.to_snake_case(),
+                field_type: arg.field_type.clone(),
+                required: true,
+            })
+            .collect(),
+    }
 }
 
 fn find_flattened_function_type_spec(
@@ -2940,10 +3104,14 @@ fn find_flattened_function_type_spec(
                     &context,
                 )?;
                 if function.is_some() || with_arguments.is_some() {
-                    let (args_name, args_field) = match (&function, &with_arguments) {
+                    let arg_fields = match (&function, &with_arguments) {
                         (
-                            Some((function_args_name, function)),
-                            Some((with_arguments_args_name, with_arguments)),
+                            Some((function_args_name, function_args_type, function)),
+                            Some((
+                                with_arguments_args_name,
+                                with_arguments_args_type,
+                                with_arguments,
+                            )),
                         ) => {
                             if function_args_name != with_arguments_args_name {
                                 return Err(Error::InvalidWitDirective {
@@ -2966,21 +3134,41 @@ fn find_flattened_function_type_spec(
                                     ),
                                 });
                             }
-                            (function_args_name.clone(), function.args_field.clone())
+                            if function_args_type != with_arguments_args_type {
+                                return Err(Error::InvalidWitDirective {
+                                    path: path.to_path_buf(),
+                                    context,
+                                    directive: "@nexus.typescript-with-arguments".to_string(),
+                                    reason: format!(
+                                        "args type `{}` does not match function args type `{}`",
+                                        with_arguments_args_type.to_wit_string(),
+                                        function_args_type.to_wit_string()
+                                    ),
+                                });
+                            }
+                            flattened_function_arg_fields(
+                                function,
+                                function_args_name,
+                                function_args_type,
+                            )
                         }
-                        (Some((args_name, function)), None) => {
-                            (args_name.clone(), function.args_field.clone())
+                        (Some((args_name, args_type, function)), None) => {
+                            flattened_function_arg_fields(function, args_name, args_type)
                         }
-                        (None, Some((args_name, with_arguments))) => {
-                            (args_name.clone(), with_arguments.args_field.clone())
+                        (None, Some((args_name, args_type, with_arguments))) => {
+                            vec![FlattenedFunctionArgSpec {
+                                args_name: args_name.clone(),
+                                field_name: with_arguments.args_field.clone(),
+                                field_type: args_type.clone(),
+                                required: false,
+                            }]
                         }
                         (None, None) => unreachable!("checked for a present flattened function"),
                     };
                     return Ok(Some(FlattenedFunctionTypeSpec {
-                        args_name,
-                        args_field,
-                        function: function.map(|(_, function)| function),
-                        with_arguments: with_arguments.map(|(_, with_arguments)| with_arguments),
+                        arg_fields,
+                        function: function.map(|(_, _, function)| function),
+                        with_arguments: with_arguments.map(|(_, _, with_arguments)| with_arguments),
                     }));
                 }
                 match &type_def.kind {
@@ -3001,9 +3189,7 @@ fn function_alias_type_name(
     context: &str,
 ) -> Result<Option<LanguageStringSpec>> {
     let result = if let Some(signature_name) = function_directive.value("signature") {
-        let (_, result) =
-            resolve_function_signature(resolve, type_def, signature_name, path, context)?;
-        result
+        resolve_function_signature(resolve, type_def, signature_name, path, context)?.result
     } else {
         let result = directive_result_language_string(function_directive);
         if result.is_empty() {
@@ -3082,7 +3268,7 @@ fn resolve_function_signature(
     signature_name: &str,
     path: &Path,
     context: &str,
-) -> Result<(String, AuthoredFieldTypeSpec)> {
+) -> Result<ResolvedFunctionSignature> {
     let TypeOwner::Interface(interface_id) = type_def.owner else {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
@@ -3100,7 +3286,13 @@ fn resolve_function_signature(
             reason: format!("unknown signature `{signature_name}`"),
         });
     };
-    let args_name = validate_function_signature(function, path, context, signature_name)?;
+    let args = resolve_function_signature_args_for_function(
+        resolve,
+        function,
+        path,
+        context,
+        signature_name,
+    )?;
     let function_context = format!("{context} signature `{signature_name}`");
     let Some(result_type) = &function.result else {
         return Err(Error::InvalidWitDirective {
@@ -3111,19 +3303,63 @@ fn resolve_function_signature(
         });
     };
 
-    Ok((
-        args_name,
-        resolve_authored_field_type_spec(resolve, result_type, path, &function_context)?,
-    ))
+    Ok(ResolvedFunctionSignature {
+        args,
+        result: resolve_authored_field_type_spec(resolve, result_type, path, &function_context)?,
+    })
 }
 
-fn resolve_function_signature_args_name(
+fn resolve_named_wit_type(
+    resolve: &Resolve,
+    owner: TypeOwner,
+    type_name: &str,
+    path: &Path,
+    context: &str,
+    directive_name: &str,
+) -> Result<AuthoredFieldTypeSpec> {
+    if let Some(primitive) = primitive_wit_type(type_name) {
+        return Ok(primitive);
+    }
+    let TypeOwner::Interface(interface_id) = owner else {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: directive_name.to_string(),
+            reason: "`alternate-type` is only supported for interface-owned types".to_string(),
+        });
+    };
+    let interface = &resolve.interfaces[interface_id];
+    let Some(type_id) = interface.types.get(type_name) else {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: directive_name.to_string(),
+            reason: format!("unknown alternate type `{type_name}`"),
+        });
+    };
+    resolve_authored_field_type_spec(resolve, &Type::Id(*type_id), path, context)
+}
+
+fn primitive_wit_type(type_name: &str) -> Option<AuthoredFieldTypeSpec> {
+    match type_name {
+        "bool" => Some(AuthoredFieldTypeSpec::Bool),
+        "u8" | "u16" | "u32" | "u64" | "s8" | "s16" | "s32" | "s64" => {
+            Some(AuthoredFieldTypeSpec::Int)
+        }
+        "f32" | "f64" => Some(AuthoredFieldTypeSpec::Float),
+        "char" | "string" => Some(AuthoredFieldTypeSpec::String),
+        "bytes" => Some(AuthoredFieldTypeSpec::Bytes),
+        _ => None,
+    }
+}
+
+fn resolve_function_signature_args(
     resolve: &Resolve,
     type_def: &TypeDef,
     signature_name: &str,
     path: &Path,
     context: &str,
-) -> Result<String> {
+) -> Result<(String, AuthoredFieldTypeSpec)> {
     let TypeOwner::Interface(interface_id) = type_def.owner else {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
@@ -3142,15 +3378,23 @@ fn resolve_function_signature_args_name(
         });
     };
 
-    validate_function_signature(function, path, context, signature_name)
+    let args = resolve_function_signature_args_for_function(
+        resolve,
+        function,
+        path,
+        context,
+        signature_name,
+    )?;
+    Ok((args.name, args.wit_type))
 }
 
-fn validate_function_signature(
+fn resolve_function_signature_args_for_function(
+    resolve: &Resolve,
     function: &Function,
     path: &Path,
     context: &str,
     signature_name: &str,
-) -> Result<String> {
+) -> Result<ResolvedFunctionSignatureArgs> {
     if !matches!(
         function.kind,
         FunctionKind::Freestanding | FunctionKind::AsyncFreestanding
@@ -3164,16 +3408,155 @@ fn validate_function_signature(
             ),
         });
     }
-    if function.params.len() != 1 {
+    if function.params.is_empty() {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
             context: context.to_string(),
             directive: "@nexus.function".to_string(),
-            reason: format!("signature `{signature_name}` must have exactly one parameter"),
+            reason: format!("signature `{signature_name}` must have at least one parameter"),
         });
     }
 
-    Ok(function.params[0].name.clone())
+    let function_args = function
+        .params
+        .iter()
+        .map(|param| {
+            let function_context = format!(
+                "{context} signature `{signature_name}` parameter `{}`",
+                param.name
+            );
+            Ok(FunctionArgSpec {
+                name: param.name.clone(),
+                field_type: resolve_authored_field_type_spec(
+                    resolve,
+                    &param.ty,
+                    path,
+                    &function_context,
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let varargs = function_varargs(function, path, context, signature_name)?;
+    let wit_type = if let Some(varargs) = &varargs {
+        function_args
+            .iter()
+            .find(|arg| arg.name == varargs.param)
+            .map(|arg| arg.field_type.clone())
+            .expect("validated varargs param should exist")
+    } else {
+        function_args_field_type(&function_args)
+    };
+    Ok(ResolvedFunctionSignatureArgs {
+        name: if let Some(varargs) = varargs.clone() {
+            varargs.param
+        } else if function.params.len() == 1 {
+            function_args[0].name.clone()
+        } else {
+            "args".to_string()
+        },
+        function_args: if let Some(varargs) = varargs {
+            let varargs_index = function_args
+                .iter()
+                .position(|arg| arg.name == varargs.param)
+                .expect("validated varargs param should exist");
+            FunctionArgsSpec::Varargs {
+                prefix: function_args[..varargs_index].to_vec(),
+                typescript_drop_prefix: varargs.typescript_drop_prefix,
+            }
+        } else {
+            FunctionArgsSpec::Fixed(function_args)
+        },
+        wit_type,
+    })
+}
+
+fn function_varargs(
+    function: &Function,
+    path: &Path,
+    context: &str,
+    signature_name: &str,
+) -> Result<Option<FunctionVarargsSpec>> {
+    let function_context = format!("{context} signature `{signature_name}`");
+    let directives = parse_directives(function.docs.contents.as_deref(), path, &function_context)?;
+    let Some(directive) = directive(&directives, "function-args", path, &function_context)? else {
+        return Ok(None);
+    };
+    let varargs = directive
+        .value("varargs")
+        .map(parse_bool)
+        .transpose()
+        .map_err(|reason| Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: function_context.clone(),
+            directive: "@nexus.function-args".to_string(),
+            reason,
+        })?
+        .unwrap_or(false);
+    if !varargs {
+        return Ok(None);
+    }
+    let typescript_drop_prefix = directive
+        .value("typescript-drop-prefix")
+        .map(parse_bool)
+        .transpose()
+        .map_err(|reason| Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: function_context.clone(),
+            directive: "@nexus.function-args".to_string(),
+            reason,
+        })?
+        .unwrap_or(false);
+    let param_name = if let Some(param_name) = directive.value("param") {
+        param_name.to_string()
+    } else if function.params.len() == 1 {
+        function.params[0].name.clone()
+    } else {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: function_context,
+            directive: "@nexus.function-args".to_string(),
+            reason:
+                "`param` is required when varargs is used on a signature with multiple parameters"
+                    .to_string(),
+        });
+    };
+    if !function.params.iter().any(|param| param.name == param_name) {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: function_context,
+            directive: "@nexus.function-args".to_string(),
+            reason: format!("unknown varargs parameter `{param_name}`"),
+        });
+    }
+    if function
+        .params
+        .last()
+        .is_none_or(|param| param.name != param_name)
+    {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: function_context,
+            directive: "@nexus.function-args".to_string(),
+            reason: format!("varargs parameter `{param_name}` must be the final parameter"),
+        });
+    }
+    Ok(Some(FunctionVarargsSpec {
+        param: param_name,
+        typescript_drop_prefix,
+    }))
+}
+
+fn function_args_field_type(args: &[FunctionArgSpec]) -> AuthoredFieldTypeSpec {
+    if let Some(first) = args.first()
+        && args.iter().all(|arg| arg.field_type == first.field_type)
+    {
+        return AuthoredFieldTypeSpec::List(Box::new(first.field_type.clone()));
+    }
+    AuthoredFieldTypeSpec::Tuple(
+        args.iter()
+            .map(|arg| arg.field_type.clone())
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn build_service(
@@ -3181,6 +3564,7 @@ fn build_service(
     key: &WorldKey,
     interface: &Interface,
     path: &Path,
+    language: Language,
 ) -> Result<ServiceSpec> {
     let interface_name = interface_export_name(key, interface);
     let context = format!("interface `{interface_name}`");
@@ -3208,7 +3592,7 @@ fn build_service(
             continue;
         }
         resources.push(build_resource(
-            resolve, interface, *type_id, type_def, path, &context,
+            resolve, interface, *type_id, type_def, path, &context, language,
         )?);
     }
 
@@ -3247,6 +3631,7 @@ fn build_resource(
     type_def: &TypeDef,
     path: &Path,
     service_context: &str,
+    language: Language,
 ) -> Result<ResourceSpec> {
     let resource_name = type_def
         .name
@@ -3276,6 +3661,7 @@ fn build_resource(
                     path,
                     &context,
                     "constructor",
+                    language,
                 )
             })
             .collect::<Result<Vec<_>>>()?,
@@ -3291,7 +3677,7 @@ fn build_resource(
                 FunctionKind::Method(id) | FunctionKind::AsyncMethod(id) if id == resource_id
             )
         })
-        .map(|function| build_resource_method(resolve, function, path, &context))
+        .map(|function| build_resource_method(resolve, function, path, &context, language))
         .collect::<Result<Vec<_>>>()?;
 
     for function in interface.functions.values() {
@@ -3321,6 +3707,7 @@ fn build_resource_method(
     function: &Function,
     path: &Path,
     resource_context: &str,
+    language: Language,
 ) -> Result<ResourceMethodSpec> {
     let method_name = function
         .name
@@ -3337,7 +3724,15 @@ fn build_resource_method(
         .iter()
         .skip_while(|param| param.name == "self")
         .map(|param| {
-            build_resource_field(resolve, &param.name, &param.ty, path, &context, "parameter")
+            build_resource_field(
+                resolve,
+                &param.name,
+                &param.ty,
+                path,
+                &context,
+                "parameter",
+                language,
+            )
         })
         .collect::<Result<Vec<_>>>()?;
     let result = function
@@ -3373,12 +3768,16 @@ fn build_resource_field(
     path: &Path,
     context: &str,
     _role: &str,
+    language: Language,
 ) -> Result<ResourceFieldSpec> {
     let field_type = resolve_authored_field_type_spec(resolve, ty, path, context)?;
+    let function = find_flattened_function_type_spec(resolve, ty, path, language)?
+        .and_then(|function_type| function_type.function);
     Ok(ResourceFieldSpec {
         name: name.to_string(),
         optional: is_optional_type(resolve, ty),
         field_type,
+        function,
     })
 }
 
@@ -3854,7 +4253,10 @@ mod tests {
     use crate::error::Error;
     use crate::language::Language;
 
-    use super::{ApiSpec, directive, load_linked_wit_metadata_from_inputs, parse_directives};
+    use super::{
+        ApiSpec, AuthoredFieldTypeSpec, FunctionArgSpec, FunctionArgsSpec, directive,
+        load_linked_wit_metadata_from_inputs, parse_directives,
+    };
 
     fn root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -4167,8 +4569,28 @@ interface workflow-service {
             Some("WorkflowResult")
         );
         assert_eq!(
+            model
+                .function("workflow_type")
+                .unwrap()
+                .alternate_type
+                .as_ref()
+                .unwrap()
+                .to_wit_string(),
+            "model.workflow-type"
+        );
+        assert_eq!(
             model.function("signal_name").unwrap().converter.as_deref(),
             Some("signal_function_to_proto")
+        );
+        assert_eq!(
+            model
+                .function("signal_name")
+                .unwrap()
+                .alternate_type
+                .as_ref()
+                .unwrap()
+                .to_wit_string(),
+            "string"
         );
         assert_eq!(
             model.field_source("namespace"),
@@ -4390,6 +4812,138 @@ interface workflow-service {
         assert_eq!(
             method.result.as_ref().unwrap().result_type.to_wit_string(),
             "list<string>"
+        );
+    }
+
+    #[test]
+    fn records_fixed_function_signature_args_as_fields() {
+        let wit = r#"
+package temporal:function-execution@1.0.0;
+
+world system {
+  export function-execution;
+}
+
+interface functions {
+  function-call: func(name: string, enabled: bool) -> string;
+
+  /// @nexus.function
+  ///   primary=true
+  ///   signature="function-call"
+  type executable-function = string;
+}
+
+/// @nexus.endpoint "function-execution"
+interface function-execution {
+  use functions.{executable-function};
+
+  record execute-function-request {
+    function: executable-function,
+  }
+
+  record execute-function-result {
+    value: string,
+  }
+
+  execute-function: func(request: execute-function-request) -> execute-function-result;
+}
+"#;
+
+        let spec = parse(Language::Python, wit);
+        let request = spec
+            .records
+            .get("function-execution.execute-function-request")
+            .unwrap();
+        let model = &request.generated_model;
+        assert_eq!(model.field_name_override("name"), Some("name"));
+        assert_eq!(model.field_name_override("enabled"), Some("enabled"));
+        assert_eq!(
+            model.field_wit_type("name").unwrap().to_wit_string(),
+            "string"
+        );
+        assert_eq!(
+            model.field_wit_type("enabled").unwrap().to_wit_string(),
+            "bool"
+        );
+        assert_eq!(
+            model.function("function").unwrap().arg_fields,
+            vec!["name".to_string(), "enabled".to_string()]
+        );
+        assert_ne!(
+            model.field_wit_type("name").unwrap().to_wit_string(),
+            "list<string>"
+        );
+        assert!(model.function("function").unwrap().primary);
+        assert_eq!(model.function("function").unwrap().args_field, "args");
+        assert_eq!(
+            model.function("function").unwrap().args,
+            FunctionArgsSpec::Fixed(vec![
+                FunctionArgSpec {
+                    name: "name".to_string(),
+                    field_type: AuthoredFieldTypeSpec::String,
+                },
+                FunctionArgSpec {
+                    name: "enabled".to_string(),
+                    field_type: AuthoredFieldTypeSpec::Bool,
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn records_varargs_function_args_from_signature_annotation() {
+        let wit = r#"
+package temporal:function-execution@1.0.0;
+
+world system {
+  export function-execution;
+}
+
+interface functions {
+  type function-args = list<string>;
+
+  /// @nexus.function-args varargs=true
+  function-call: func(args: function-args) -> string;
+
+  /// @nexus.function
+  ///   primary=true
+  ///   signature="function-call"
+  ///   args-field="args"
+  type executable-function = string;
+}
+
+/// @nexus.endpoint "function-execution"
+interface function-execution {
+  use functions.{executable-function};
+
+  record execute-function-request {
+    function: executable-function,
+  }
+
+  record execute-function-result {
+    value: string,
+  }
+
+  execute-function: func(request: execute-function-request) -> execute-function-result;
+}
+"#;
+
+        let spec = parse(Language::Python, wit);
+        let request = spec
+            .records
+            .get("function-execution.execute-function-request")
+            .unwrap();
+        let model = &request.generated_model;
+        assert_eq!(
+            model.field_wit_type("args").unwrap().to_wit_string(),
+            "list<string>"
+        );
+        assert_eq!(
+            model.function("function").unwrap().args,
+            FunctionArgsSpec::Varargs {
+                prefix: Vec::new(),
+                typescript_drop_prefix: false,
+            }
         );
     }
 

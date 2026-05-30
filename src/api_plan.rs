@@ -82,6 +82,7 @@ pub(crate) struct PlannedResourceField {
     pub(crate) name: String,
     pub(crate) optional: bool,
     pub(crate) kind: PlannedFieldKind,
+    pub(crate) function: Option<FunctionFieldSpec>,
 }
 
 #[derive(Debug, Clone)]
@@ -255,7 +256,7 @@ pub(crate) struct PlannedSourcedField {
 pub(crate) enum PlannedFieldRole {
     Plain,
     Function(FunctionFieldSpec),
-    FunctionArgs,
+    FunctionArgs(FunctionFieldSpec),
     WithArguments,
     WithArgumentsArgs,
 }
@@ -806,6 +807,7 @@ fn planned_resource_field(
         name: field.name.clone(),
         optional: field.optional,
         kind,
+        function: field.function.clone(),
     }
 }
 
@@ -1227,7 +1229,7 @@ fn planned_value_type_from_authored(
 ) -> PlannedValueType {
     match wit_type {
         AuthoredFieldTypeSpec::Bool => PlannedValueType::Scalar(PlannedScalarType::Bool),
-        AuthoredFieldTypeSpec::Int => PlannedValueType::Scalar(PlannedScalarType::Int64),
+        AuthoredFieldTypeSpec::Int => PlannedValueType::Scalar(PlannedScalarType::Int32),
         AuthoredFieldTypeSpec::Float => PlannedValueType::Scalar(PlannedScalarType::Float),
         AuthoredFieldTypeSpec::String => PlannedValueType::Scalar(PlannedScalarType::String),
         AuthoredFieldTypeSpec::Bytes => PlannedValueType::Scalar(PlannedScalarType::Bytes),
@@ -1376,11 +1378,10 @@ fn planned_field_role(
     {
         return PlannedFieldRole::Function(function.clone());
     }
-    if generated_model
+    if let Some(function) = generated_model
         .and_then(|generated_model| generated_model.function_for_args_field(proto_name))
-        .is_some()
     {
-        return PlannedFieldRole::FunctionArgs;
+        return PlannedFieldRole::FunctionArgs(function.clone());
     }
     if generated_model
         .and_then(|generated_model| generated_model.with_arguments(proto_name))
