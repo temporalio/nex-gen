@@ -4173,11 +4173,19 @@ fn function_unpacked_overload_return_annotation(
         .into_iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    erase_inactive_python_type_parameters(
+    let output_annotation = erase_inactive_python_type_parameters(
         &operation.overload_output_annotation,
         &operation.output_type_parameters,
         &active_type_parameters,
-    )
+    );
+    if operation.output_transform_expr.is_some()
+        || operation.output_resource_return.is_some()
+        || operation.output_direct_result
+    {
+        output_annotation
+    } else {
+        format!("temporalio.workflow.NexusOperationHandle[{output_annotation}]")
+    }
 }
 
 fn erase_inactive_python_type_parameters(
