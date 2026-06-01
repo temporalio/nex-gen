@@ -1,0 +1,1205 @@
+# WIT Author's Guide to nexus-api-gen
+
+This guide explains what the code generator produces from your WIT definitions,
+with examples in Python and TypeScript. It covers every type mapping, the
+resource name-binding mechanism (including edge cases), and a complete glossary
+of `@nexus` directives.
+
+> [!NOTE]
+> Go generation is in progress and not covered here.
+
+## Contents
+
+- [Quick Start](#quick-start)
+- [Type Mappings](#type-mappings)
+  - [Records](#records)
+  - [Enums](#enums)
+  - [Flags](#flags)
+  - [Variants](#variants)
+  - [Results](#results)
+  - [Tuples](#tuples)
+  - [Option Types](#option-types)
+  - [Lists and Maps](#lists-and-maps)
+- [Operations](#operations)
+  - [Internal Function + Convenience Wrapper](#internal-function--convenience-wrapper)
+  - [Forwarding Wrappers](#forwarding-wrappers)
+  - [Void Operations](#void-operations)
+- [Resources](#resources)
+  - [Resource Declaration](#resource-declaration)
+  - [Name-Binding: How Resource Methods Find Operations](#name-binding-how-resource-methods-find-operations)
+  - [Resource Return Binding](#resource-return-binding)
+  - [Edge Cases and Error Conditions](#edge-cases-and-error-conditions)
+- [Proto-Backed Models](#proto-backed-models)
+  - [from_proto and to_proto](#from_proto-and-to_proto)
+  - [Sourced Fields](#sourced-fields)
+  - [Omitted Fields](#omitted-fields)
+  - [Flattened Records](#flattened-records)
+  - [Output Transforms](#output-transforms)
+- [Directive Glossary](#directive-glossary)
+
+---
+
+## Quick Start
+
+A WIT file is the source of truth for a Nexus service's public API. The
+generator reads it and produces language-specific client code: data models,
+service definitions, and convenience wrappers that let callers invoke Nexus
+operations from Temporal workflows.
+
+Minimal example:
+
+```wit
+package temporal:user-service@1.0.0;
+
+world system {
+  export user-service;
+}
+
+/// @nexus.endpoint "user-service"
+interface user-service {
+  record get-user-request {
+    user-id: string,
+  }
+
+  record user-response {
+    user-id: string,
+    email: string,
+  }
+
+  get-user: func(request: get-user-request) -> user-response;
+}
+```
+
+This produces a data model for the request and response, a service definition,
+and a convenience wrapper function that lets callers write:
+
+**Python:**
+```python
+user = await get_user(user_id="abc")
+```
+
+**TypeScript:**
+```typescript
+const user = await getUser({ userId: "abc" });
+```
+
+---
+
+## Type Mappings
+
+### Records
+
+WIT records become dataclasses (Python) or interfaces (TypeScript).
+
+```wit
+record postal-address {
+  street: string,
+  city: string,
+  country: string,
+}
+```
+
+**Python:**
+```python
+@dataclasses.dataclass(slots=True)
+class PostalAddress:
+    street: str
+    city: str
+    country: str
+```
+
+**TypeScript:**
+```typescript
+export interface PostalAddress {
+  street: string;
+  city: string;
+  country: string;
+}
+export const PostalAddress = {};
+```
+
+TypeScript always emits a companion `const` alongside the interface. For
+WIT-direct records it is empty; for proto-backed records it gains `fromProto()`
+and `toProto()` methods.
+
+### Enums
+
+WIT enums become integer-valued enumerations.
+
+```wit
+enum user-status {
+  active,
+  suspended,
+  deleted,
+}
+```
+
+**Python:**
+```python
+class UserStatus(enum.IntEnum):
+    Active = 0
+    Suspended = 1
+    Deleted = 2
+```
+
+**TypeScript:**
+```typescript
+export enum UserStatus {
+  Active = 0,
+  Suspended = 1,
+  Deleted = 2,
+}
+```
+
+### Flags
+
+WIT flags become bit-shifted integer constants.
+
+```wit
+flags user-capability {
+  read-profile,
+  update-email,
+  deactivate,
+}
+```
+
+**Python:**
+```python
+class UserCapability(enum.IntFlag):
+    ReadProfile = 1 << 0
+    UpdateEmail = 1 << 1
+    Deactivate = 1 << 2
+```
+
+**TypeScript:**
+```typescript
+export enum UserCapability {
+  ReadProfile = 2 ** 0,
+  UpdateEmail = 2 ** 1,
+  Deactivate = 2 ** 2,
+}
+```
+
+### Variants
+
+WIT variants become discriminated unions using a `tag` field.
+
+```wit
+variant notification-target {
+  email(string),
+  sms(string),
+  none,
+}
+```
+
+**Python:**
+```python
+NotificationTarget = (
+    tuple[typing.Literal["email"], str]
+    | tuple[typing.Literal["sms"], str]
+    | tuple[typing.Literal["none"]]
+)
+```
+
+**TypeScript:**
+```typescript
+export type NotificationTarget =
+  | { tag: "email"; value: string }
+  | { tag: "sms"; value: string }
+  | { tag: "none" };
+```
+
+Cases with a payload carry a `value` field; cases without a payload do not.
+
+### Results
+
+WIT `result<T, E>` types use the same tagged-union pattern as variants, with
+tags `"ok"` and `"err"`.
+
+```wit
+record user-profile {
+  sync-state: result<string, string>,
+}
+```
+
+**Python:**
+```python
+sync_state: tuple[typing.Literal["ok"], str] | tuple[typing.Literal["err"], str]
+```
+
+**TypeScript:**
+```typescript
+syncState: { tag: "ok"; value: string } | { tag: "err"; value: string };
+```
+
+### Tuples
+
+WIT tuples map to native tuple types.
+
+```wit
+record postal-address {
+  coordinates: option<tuple<f64, f64>>,
+}
+```
+
+**Python:**
+```python
+coordinates: tuple[float, float] | None = None
+```
+
+**TypeScript:**
+```typescript
+coordinates?: [number, number];
+```
+
+### Option Types
+
+`option<T>` fields become optional with a `None`/`undefined` default.
+
+**Python:**
+```python
+# Required field: no default
+user_id: str
+# Optional field: defaults to None
+reason: str | None = None
+```
+
+**TypeScript:**
+```typescript
+// Required field: no ?
+userId: string;
+// Optional field: ? suffix
+reason?: string;
+```
+
+### Lists and Maps
+
+Lists and maps that are optional default to empty collections, not `None`.
+
+```wit
+record user-profile {
+  tags: list<string>,               // optional in this context
+  metadata: map<string, string>,    // optional in this context
+}
+```
+
+**Python:**
+```python
+tags: list[str] | None = dataclasses.field(default_factory=list)
+metadata: dict[str, str] | None = dataclasses.field(default_factory=dict)
+```
+
+**TypeScript:**
+```typescript
+tags?: string[];
+metadata?: Record<string, string>;
+```
+
+Whether a field is required or optional is determined by the WIT `option<>`
+wrapper (for WIT-direct fields) or proto field presence semantics (for
+proto-backed fields).
+
+---
+
+## Operations
+
+Every WIT function in the interface becomes a Nexus operation. The generator
+produces multiple layers of wrappers.
+
+### Internal Function + Convenience Wrapper
+
+For operations whose input is a generated record, the generator produces:
+
+1. An **internal function** that takes the raw request object
+2. A **convenience wrapper** that unpacks the record's fields into individual
+   parameters
+
+Given:
+
+```wit
+record get-user-request {
+  user-id: string,
+  consistency-token: option<string>,
+}
+
+get-user: func(request: get-user-request) -> user-result;
+```
+
+**Python:**
+```python
+# Internal: takes the request object directly
+async def _get_user(request: GetUserRequest) -> User:
+    nexus_client = workflow.create_nexus_client(
+        service="UserService", endpoint="user-service",
+    )
+    handle = await nexus_client.start_operation(
+        operation="GetUser", input=request, output_type=User,
+    )
+    return await handle
+
+# Convenience: unpacks fields into keyword-only arguments
+async def get_user(*, user_id: str, consistency_token: str | None = None) -> User:
+    request = GetUserRequest(user_id=user_id, consistency_token=consistency_token)
+    return await _get_user(request)
+```
+
+In Python, the convenience wrapper uses `*` to force keyword-only arguments.
+Optional record fields become optional keyword arguments with `= None` defaults.
+
+**TypeScript:**
+```typescript
+// Single function that takes the request interface
+export async function getUser(request: GetUserRequest): Promise<User> {
+    const client = workflow.createNexusServiceClient({
+        service: UserService, endpoint: "user-service",
+    });
+    const requestProto = nexusValue("user-service.get-user-request", request);
+    const handle = await client.startOperation(
+        UserService.operations.getUser, requestProto,
+    );
+    return await handle.result();
+}
+```
+
+TypeScript relies on the interface definition itself for the ergonomic API,
+so it does not need a separate convenience wrapper.
+
+### Forwarding Wrappers
+
+When the input type is an external type (set via `@nexus.type`) rather than a
+generated record, there are no fields to unpack. The generator produces a simple
+forwarding wrapper that accepts the external type directly.
+
+```wit
+retry-policy-operation: func(request: retry-policy) -> retry-policy;
+```
+
+Where `retry-policy` has `@nexus.type python="temporalio.common.RetryPolicy"`.
+
+**Python:**
+```python
+async def retry_policy_operation(
+    request: temporalio.common.RetryPolicy,
+) -> workflow.NexusOperationHandle[temporalio.api.common.v1.message_pb2.RetryPolicy]:
+    nexus_client = workflow.create_nexus_client(
+        service="TypeRoundtripService", endpoint="temporal-system",
+    )
+    return await nexus_client.start_operation(
+        operation="RetryPolicyOperation",
+        input=retry_policy_to_proto(request),
+        output_type=temporalio.api.common.v1.message_pb2.RetryPolicy,
+    )
+```
+
+No convenience wrapper is generated because there is only one parameter and no
+record to unpack.
+
+### Void Operations
+
+Operations with no return type produce wrappers that return a handle instead of
+a result.
+
+```wit
+deactivate: func(request: deactivate-request);
+```
+
+**Python:**
+```python
+# Standalone wrapper returns the handle
+async def deactivate(
+    *, user_id: str, reason: str | None = None,
+) -> workflow.NexusOperationHandle[None,]:
+    request = DeactivateRequest(user_id=user_id, reason=reason)
+    return await _deactivate(request)
+```
+
+**TypeScript:**
+```typescript
+export async function deactivate(
+    request: DeactivateRequest,
+): Promise<workflow.NexusOperationHandle<void>> {
+    const client = workflow.createNexusServiceClient({ ... });
+    return await client.startOperation(
+        TypeShowcase.operations.deactivate,
+        nexusValue("type-showcase.deactivate-request", request),
+    );
+}
+```
+
+Note that resource instance methods calling void operations do await the handle:
+
+```python
+# Resource method awaits the handle and returns None
+async def deactivate(self, reason: str | None = None) -> None:
+    request = DeactivateRequest(user_id=self.user_id, reason=reason)
+    handle = await _deactivate(request)
+    await handle
+```
+
+---
+
+## Resources
+
+Resources are the most complex feature of the code generator. They produce
+classes whose constructor fields represent the resource's identity, and whose
+methods delegate to Nexus operations.
+
+### Resource Declaration
+
+```wit
+resource user {
+  constructor(user-id: string, email: string);
+
+  update-email: func(email: string) -> user-result;
+}
+
+type user-result = own<user>;
+
+record update-email-request {
+  user-id: string,
+  email: string,
+}
+
+update-email: func(request: update-email-request) -> user-result;
+```
+
+**Python:**
+```python
+@dataclasses.dataclass
+class User:
+    user_id: str
+    email: str
+
+    async def update_email(self, email: str) -> User:
+        request = UpdateEmailRequest(user_id=self.user_id, email=email)
+        return await _update_email(request)
+```
+
+**TypeScript:**
+```typescript
+export class User {
+    public constructor(
+        public readonly userId: string,
+        public readonly email: string,
+    ) {}
+
+    public async updateEmail(email: string): Promise<User> {
+        return await updateEmail({ userId: this.userId, email: email });
+    }
+}
+```
+
+Key observations:
+
+- The resource's **constructor fields** become the class's identity fields
+  (`user_id`, `email`).
+- Resource methods fill in identity fields from `self` (`self.user_id`) and
+  accept only the remaining parameters.
+- A standalone convenience wrapper is also generated for each resource method,
+  taking all fields as explicit arguments.
+- Resource operations additionally produce three layers:
+  1. `User.update_email(self, email)` -- instance method, uses `self.user_id`
+  2. `_update_email(request)` -- internal standalone, takes request object
+  3. `update_email(*, user_id, email)` -- public standalone convenience
+
+### Name-Binding: How Resource Methods Find Operations
+
+This is the non-obvious part. The generator does not require you to explicitly
+say "method X calls operation Y." Instead, it uses **field-name matching** to
+automatically bind resource methods to operations.
+
+For each resource method, the generator builds a **name environment** from:
+- The resource's **constructor field names** (e.g., `user-id`, `email`)
+- The method's **parameter names** (e.g., `email`)
+
+It then tries every operation in the service as a candidate. For each
+candidate operation, it checks whether every **required** field in the
+operation's input record can be satisfied by a name in the environment.
+
+**Example walkthrough:**
+
+```wit
+resource user {
+  constructor(user-id: string, email: string);
+  update-email: func(email: string) -> user-result;
+}
+
+record update-email-request { user-id: string, email: string, }
+update-email: func(request: update-email-request) -> user-result;
+```
+
+The environment for the `update-email` method is:
+```
+user-id  =>  ResourceField("user-id")   (from constructor)
+email    =>  MethodParam("email")       (from method signature)
+```
+Notice that the method's `email` parameter shadows the `email` parameter we got 
+from the constructor!
+
+The generator tries the `update-email` operation, which has input
+`update-email-request` with required fields `user-id` and `email`. Both names
+are found in the environment, so the binding succeeds.
+
+The generated code then uses `self.user_id` for the resource field and the
+`email` parameter for the method parameter:
+```python
+request = UpdateEmailRequest(user_id=self.user_id, email=email)
+```
+
+**Nested struct matching:**
+
+When an operation's input contains a field whose type is itself a record, the
+generator recursively tries to match the nested record's fields against the
+same environment.
+
+```wit
+resource started-workflow {
+  constructor(namespace: string, workflow-id: string, run-id: option<string>);
+  cancel: func(reason: option<string>);
+}
+
+record workflow-execution { workflow-id: string, run-id: option<string>, }
+
+record cancel-workflow-request {
+  namespace: string,
+  workflow-execution: workflow-execution,
+  reason: option<string>,
+}
+```
+
+The environment for `cancel` is:
+```
+namespace    =>  ResourceField
+workflow-id  =>  ResourceField
+run-id       =>  ResourceField
+reason       =>  MethodParam
+```
+
+The `cancel-workflow-request` has three fields:
+- `namespace` -- directly matched to ResourceField
+- `workflow-execution` -- not directly in the environment, but it is a record
+  type, so the generator recurses into it and finds `workflow-id` and `run-id`,
+  both of which match
+- `reason` -- matched to MethodParam
+
+Result: the binding succeeds, and the generated code constructs the nested
+struct:
+
+```python
+request = CancelWorkflowRequest(
+    workflow_execution=WorkflowExecution(
+        workflow_id=self.workflow_id, run_id=self.run_id,
+    ),
+    reason=reason,
+)
+```
+
+**Return type filtering:**
+
+After field matching, the generator also filters candidates by return type.
+If the method returns `own<user>`, only operations that also return
+`own<user>` (or the equivalent proto type) are considered.
+
+**Disambiguation by name:**
+
+If multiple operations match a method's field requirements and return type, the
+generator tries to disambiguate by comparing the method name (converted to
+UpperCamelCase) with the operation names. If exactly one operation name matches,
+it wins. Otherwise, the generator raises an error.
+
+### Resource Return Binding
+
+When an operation returns a resource (via `own<resource-name>`), the generator
+must determine where each resource constructor field's value comes from. It
+searches **by name** in this order:
+
+1. **The operation's input (request)** -- for fields like `workflow-id` that the
+   caller provides
+2. **The operation's output (response)** -- for fields like `run-id` that come
+   back from the server
+
+```python
+# From start-workflow: workflow_id from request, run_id from response
+return StartedWorkflow(
+    namespace=request_proto.namespace,
+    workflow_id=request.workflow_id,
+    run_id=result.run_id or None,
+)
+```
+
+### Edge Cases and Error Conditions
+
+#### Same field name in constructor and method parameter
+
+When a resource constructor field and a method parameter have the same name,
+the **method parameter takes precedence**. This is the expected pattern for
+"update" operations:
+
+```wit
+resource user {
+  constructor(user-id: string, email: string);
+  update-email: func(email: string) -> user-result;
+}
+```
+
+Here `email` appears in both the constructor and the method. The method
+parameter wins, so the generated code passes the new email value (from the
+argument), not the old one (from `self`). The `user-id` field still comes from
+`self.user_id`.
+
+#### No matching operation found
+
+If no operation's input fields can be satisfied by the method's environment,
+the method becomes a **stub** that raises an error at runtime:
+
+```python
+async def get_result(self) -> ...:
+    raise NotImplementedError("started-workflow.get_result is not yet implemented")
+```
+
+```typescript
+public async getResult(): Promise<common.Payload[]> {
+    throw new Error("started-workflow.getResult is not yet implemented");
+}
+```
+
+A warning is emitted during generation.
+
+#### Multiple operations match ambiguously
+
+If two or more operations satisfy a method's field requirements and return type,
+and disambiguation by name fails, the generator raises
+`InvalidResourceMethod` with a list of the ambiguous matches. To fix this,
+rename either the method or one of the operations so the preferred name
+match succeeds, or adjust the operation's input record so fewer candidates
+match.
+
+#### Required field in operation input has no match
+
+If an operation's input record has a required field whose name does not appear
+in the resource constructor or method parameters, that operation will silently be
+skipped as a candidate. So watch out for typos!
+
+#### Resource field cannot be bound from input or output
+
+When an operation returns a resource but one of the resource's constructor
+fields cannot be found (by name) in either the operation's input or output
+records, the generator raises `InvalidResource`:
+
+```
+could not bind resource field `namespace` from operation input or output
+```
+
+#### Same operation bound by methods on two different resources
+
+Each operation can only be "owned" by one resource. If methods on different
+resources both try to bind the same operation, the generator raises an error.
+
+#### Duplicate resource type names
+
+If two resources in different services would produce the same generated type
+name, the generator raises an error.
+
+---
+
+## Proto-Backed Models
+
+When a WIT record is annotated with `@nexus.proto`, the generator produces
+`from_proto()` / `to_proto()` conversion methods alongside the model.
+
+### from_proto and to_proto
+
+```wit
+/// @nexus.proto "temporal.api.activity.v1.ActivityOptions"
+record activity-options {
+  task-queue: option<task-queue>,
+  retry-policy: retry-policy,
+}
+```
+
+**Python:**
+```python
+@dataclasses.dataclass(slots=True, kw_only=True)
+class ActivityOptions:
+    task_queue: str | None = None
+    retry_policy: temporalio.common.RetryPolicy
+
+    @classmethod
+    def from_proto(cls, proto) -> ActivityOptions:
+        if not proto.HasField("retry_policy"):
+            raise ValueError("missing required field ActivityOptions.retry_policy")
+        return cls(
+            task_queue=task_queue_from_proto(proto.task_queue)
+                if proto.HasField("task_queue") else None,
+            retry_policy=retry_policy_from_proto(proto.retry_policy),
+        )
+
+    def to_proto(self):
+        message = ...ActivityOptions()
+        if self.task_queue is not None:
+            message.task_queue.CopyFrom(task_queue_to_proto(self.task_queue))
+        message.retry_policy.CopyFrom(retry_policy_to_proto(self.retry_policy))
+        return message
+```
+
+**TypeScript:**
+```typescript
+export interface ActivityOptions {
+    taskQueue?: string;
+    retryPolicy: common.RetryPolicy;
+}
+
+export const ActivityOptions = {
+    fromProto(proto: temporal.api.activity.v1.IActivityOptions | null | undefined) {
+        if (proto == null) return undefined;
+        return {
+            taskQueue: proto.taskQueue == null ? undefined
+                : taskQueueFromProto(proto.taskQueue),
+            retryPolicy: requiredField(
+                retryPolicyFromProto(requiredField(proto.retryPolicy, ...)), ...
+            ),
+        };
+    },
+    toProto(model: ActivityOptions | null | undefined) {
+        if (model == null) return undefined;
+        return {
+            taskQueue: model.taskQueue == null ? undefined
+                : taskQueueToProto(model.taskQueue),
+            retryPolicy: retryPolicyToProto(model.retryPolicy),
+        };
+    },
+};
+```
+
+Required fields are validated in `from_proto` -- missing required proto fields
+raise a `ValueError` (Python) or throw an `Error` (TypeScript).
+
+### Sourced Fields
+
+Fields annotated with `@nexus.source` are not exposed in the generated API.
+Instead, the `to_proto()` method calls a support function to obtain the value.
+
+```wit
+record start-workflow-request {
+  workflow-id: string,
+  /// @nexus.source python="workflow_namespace" typescript="workflowNamespace"
+  namespace: string,
+}
+```
+
+The `namespace` field does not appear as a constructor parameter. In `to_proto()`:
+
+```python
+message.namespace = workflow_namespace()   # auto-injected
+```
+
+The support function must be defined in the support file referenced by
+`@nexus.support`.
+
+### Omitted Fields
+
+Fields annotated with `@nexus.omit` are excluded entirely from the generated
+API. They exist in the proto message but are not relevant to the API consumer.
+Use the `placeholder` type for omitted fields.
+
+```wit
+/// @nexus.omit
+identity: placeholder,
+/// @nexus.omit
+request-id: placeholder,
+```
+
+### Flattened Records
+
+A record annotated with `@nexus.flatten-in-api` has its fields "promoted" into
+the parent record's convenience wrapper instead of being passed as a nested
+object.
+
+```wit
+/// @nexus.flatten-in-api
+record user-metadata {
+  /// @nexus.flattened-type python="str"
+  static-summary: option<payload>,
+  /// @nexus.flattened-type python="str"
+  static-details: option<payload>,
+}
+```
+
+When a parent record has `user-metadata: option<user-metadata>`, the
+convenience wrapper exposes `static_summary` and `static_details` as top-level
+parameters instead of requiring a nested `UserMetadata(...)` object:
+
+```python
+async def signal_with_start_workflow(
+    ...,
+    static_summary: str | None = None,
+    static_details: str | None = None,
+) -> ...:
+    user_metadata = (
+        None if static_summary is None and static_details is None
+        else UserMetadata(static_summary=static_summary, static_details=static_details)
+    )
+```
+
+### Output Transforms
+
+An operation annotated with `@nexus.output-transform` transforms the raw
+operation result into a different type before returning it.
+
+```wit
+/// @nexus.output-transform
+///   python-type="workflow.ExternalWorkflowHandle[typing.Any]"
+///   python="workflow.get_external_workflow_handle(request.id, run_id=result.run_id)"
+///   typescript-type="workflow.ExternalWorkflowHandle"
+///   typescript="workflow.getExternalWorkflowHandle(request.id, result.runId ?? undefined)"
+signal-with-start-workflow: func(
+  request: signal-with-start-workflow-request,
+) -> signal-with-start-workflow-response;
+```
+
+The generated wrapper returns the transformed type. The transform expression
+has access to `request` (the input) and `result` (the raw response):
+
+```python
+result = await handle
+return workflow.get_external_workflow_handle(request.id, run_id=result.run_id)
+```
+
+```typescript
+const result = await handle.result();
+return workflow.getExternalWorkflowHandle(request.id, result.runId ?? undefined);
+```
+
+---
+
+## Directive Glossary
+
+All directives are written in WIT doc comments (`///`) and prefixed with
+`@nexus.`. Multi-line directives continue on subsequent `///` lines with
+indented key-value pairs.
+
+### @nexus.endpoint
+
+**Placement:** Interface doc comment
+**Syntax:** `@nexus.endpoint "<endpoint-name>"`
+
+Names the Nexus endpoint for the service. This is the value used when
+registering or connecting to the endpoint at runtime.
+
+```wit
+/// @nexus.endpoint "user-service"
+interface user-service { ... }
+```
+
+The service name (used in generated code) is derived from the interface name
+converted to PascalCase: `user-service` becomes `UserService`.
+
+---
+
+### @nexus.support
+
+**Placement:** Package doc comment
+**Syntax:** `@nexus.support python="<path>" typescript="<path>"`
+
+Includes external support code in the generated output. Paths are resolved
+relative to the WIT file. Python support files are copied into a private
+`_support/` package; TypeScript support files become `support.ts` next to the
+generated `index.ts`.
+
+```wit
+/// @nexus.support
+///   python="python/model_overrides.py"
+///   typescript="typescript/model_overrides.ts"
+package nexus:temporal-types@1.0.0;
+```
+
+---
+
+### @nexus.proto
+
+**Placement:** Type alias, record, or enum
+**Syntax:** `@nexus.proto "<fully.qualified.proto.MessageName>"`
+
+Maps a WIT type to a protobuf message or enum. The generator produces
+`from_proto()` / `to_proto()` methods and validates field mappings against the
+proto descriptor. Requires `--descriptors` on the CLI.
+
+```wit
+/// @nexus.proto "temporal.api.activity.v1.ActivityOptions"
+record activity-options { ... }
+```
+
+---
+
+### @nexus.proto-field
+
+**Placement:** Record field (within a `@nexus.proto` record)
+**Syntax:** `@nexus.proto-field "<proto_field_name>"`
+
+Maps a WIT field name to a differently-named proto field. Without this, the WIT
+name converted to `snake_case` is assumed to match.
+
+```wit
+record start-workflow-request {
+  /// @nexus.proto-field "workflow_type"
+  workflow: workflow-function,
+}
+```
+
+Here the WIT field `workflow` maps to proto field `workflow_type`.
+
+---
+
+### @nexus.type
+
+**Placement:** Type alias, enum, or record field
+**Syntax:** `@nexus.type python="<type>" typescript="<type>" go="<type>"`
+
+Substitutes the WIT type with a language-native type in generated code. Each
+language key is optional; omit a language to skip override for that target.
+
+```wit
+/// @nexus.type python="temporalio.common.RetryPolicy" typescript="common.RetryPolicy"
+type retry-policy = placeholder;
+```
+
+The `placeholder` WIT type is a string alias used when the actual type is
+entirely replaced by language-specific overrides.
+
+---
+
+### @nexus.omit
+
+**Placement:** Record field (within a `@nexus.proto` record)
+**Syntax:** `@nexus.omit` (no arguments)
+
+Excludes a proto field from the generated API. Use this for infrastructure
+fields (identity, request-id, headers) that are not relevant to API consumers.
+Omitted fields should use the `placeholder` type.
+
+```wit
+/// @nexus.omit
+identity: placeholder,
+```
+
+Cannot be combined with `@nexus.source`, `@nexus.type`, `@nexus.function`,
+`@nexus.default`, or `@nexus.flattened-type`.
+
+---
+
+### @nexus.source
+
+**Placement:** Record field (within a `@nexus.proto` record)
+**Syntax:** `@nexus.source python="<func>" typescript="<func>" go="<Func>"`
+
+Populates a field by calling a support function instead of exposing it as an API
+parameter. The function must be defined in the support file.
+
+```wit
+/// @nexus.source python="workflow_namespace" typescript="workflowNamespace"
+namespace: string,
+```
+
+In `to_proto()`, this becomes `message.namespace = workflow_namespace()`.
+
+Cannot be combined with `@nexus.default`.
+
+---
+
+### @nexus.default
+
+**Placement:** Record field (whose type is an enum)
+**Syntax:** `@nexus.default "<enum-case-name>"`
+
+Sets a default value for an enum field, making it optional in the generated API.
+
+```wit
+/// @nexus.default "allow-duplicate"
+id-reuse-policy: workflow-id-reuse-policy,
+```
+
+**Python:**
+```python
+id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (
+    temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
+)
+```
+
+Cannot be combined with `@nexus.source`.
+
+---
+
+### @nexus.doc
+
+**Placement:** Record field or operation (function)
+**Syntax:** `@nexus.doc "<text>" [returns="<text>"]`
+Per-language overrides: `python="<text>"` `typescript="<text>"`
+Return docs: `python-returns="<text>"` `typescript-returns="<text>"`
+
+Adds documentation to generated code. The default text applies to all languages;
+per-language keys override for specific targets. The `returns` key generates
+return-value documentation.
+
+```wit
+/// @nexus.doc
+///   "Signal a workflow, starting it first if needed."
+///   returns="A workflow handle to the started workflow."
+signal-with-start-workflow: func(...) -> ...;
+```
+
+---
+
+### @nexus.operation
+
+**Placement:** Operation (function)
+**Syntax:** `@nexus.operation name="<WireOperationName>"`
+
+Overrides the Nexus wire operation name. Without this, the WIT function name
+converted to UpperCamelCase is used (e.g., `signal-with-start-workflow` becomes
+`SignalWithStartWorkflow`).
+
+```wit
+/// @nexus.operation name="SignalWithStartWorkflowExecution"
+signal-with-start-workflow: func(...) -> ...;
+```
+
+---
+
+### @nexus.output-transform
+
+**Placement:** Operation (function)
+**Syntax:**
+```
+@nexus.output-transform
+  python-type="<type>" python="<expr>"
+  typescript-type="<type>" typescript="<expr>"
+```
+
+Transforms the raw operation result to a different return type. The expression
+has access to `request` and `result` variables.
+
+```wit
+/// @nexus.output-transform
+///   python-type="workflow.ExternalWorkflowHandle[typing.Any]"
+///   python="workflow.get_external_workflow_handle(request.id, run_id=result.run_id)"
+///   typescript-type="workflow.ExternalWorkflowHandle"
+///   typescript="workflow.getExternalWorkflowHandle(request.id, result.runId ?? undefined)"
+```
+
+Both the type and expression must be provided together for each language.
+
+---
+
+### @nexus.flatten-in-api
+
+**Placement:** Record type (with `@nexus.proto`)
+**Syntax:** `@nexus.flatten-in-api` (no arguments)
+
+Flattens the record's fields into the parent record's generated API surface
+instead of creating a nested model.
+
+```wit
+/// @nexus.proto "temporal.api.sdk.v1.UserMetadata"
+/// @nexus.flatten-in-api
+record user-metadata {
+  static-summary: option<payload>,
+  static-details: option<payload>,
+}
+```
+
+Only supported on record types.
+
+---
+
+### @nexus.flattened-type
+
+**Placement:** Field within a `@nexus.flatten-in-api` record
+**Syntax:** `@nexus.flattened-type python="<type>" typescript="<type>"`
+
+Overrides the type of a field when it is flattened into the parent API. Useful
+when the non-flattened type (e.g., `Payload`) should be simplified (e.g., to
+`str`) in the flattened context.
+
+```wit
+/// @nexus.flattened-type python="str"
+static-summary: option<payload>,
+```
+
+---
+
+### @nexus.function
+
+**Placement:** Type alias or record field
+**Syntax:**
+```
+@nexus.function
+  primary=<bool>
+  signature="<wit-function-name>"
+  args-field="<proto-field>"
+  [converter="<func>"]
+  [result="<type>"]
+```
+
+Marks a type as representing a callable function (workflow or signal). The
+generator produces overloaded constructors that accept either a string name or
+a typed callable reference.
+
+- `primary=true` marks the main function field (typically the workflow function)
+- `signature` references a WIT function definition used to derive argument types
+- `args-field` names the proto field that holds serialized function arguments
+- `converter` names an optional custom conversion function in the support file
+
+```wit
+/// @nexus.function primary=true signature="workflow-call" args-field="input"
+type workflow-function = placeholder;
+```
+
+---
+
+### @nexus.typescript-with-arguments
+
+**Placement:** Type alias or record field
+**Syntax:**
+```
+@nexus.typescript-with-arguments
+  signature="<wit-function>"
+  args-field="<proto-field>"
+  value-type="<ts-type>"
+  args-type="<ts-conditional-type>"
+  name-expr="<ts-expr>"
+```
+
+TypeScript-specific. Generates type-safe overloaded methods that accept typed
+signal/workflow definition objects. Uses TypeScript conditional types to infer
+argument types from the definition.
+
+```wit
+/// @nexus.typescript-with-arguments
+///   signature="signal-call"
+///   args-field="signal-input"
+///   value-type="workflow.SignalDefinition<any[]>"
+///   args-type="Value extends workflow.SignalDefinition<infer Args, any> ? Args : never"
+///   name-expr="value.name"
+type signal-function = placeholder;
+```
+
+All five keys are required.
+
+---
+
+### @nexus.add-rpc-compatible-with
+
+**Placement:** Type alias (in a linked/dependency WIT package)
+**Syntax:** `@nexus.add-rpc-compatible-with "<type-name>"`
+
+Declares that a type is assignment-compatible with another type for the
+`add-rpc` scaffolding command. This allows the scaffolder to substitute
+compatible types when generating WIT from proto RPCs.
+
+```wit
+/// @nexus.add-rpc-compatible-with "workflow-type"
+type workflow-function = placeholder;
+```
+
+This directive has no effect on code generation -- it only affects the `add-rpc`
+command.
