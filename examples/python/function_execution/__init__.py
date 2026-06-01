@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from . import service as _service
-from . import models
 from .operations.execute_function import execute_function
 from .operations.execute_counted_function import execute_counted_function
 from .operations.execute_named_function import execute_named_function
@@ -12,13 +11,11 @@ from .operations.execute_varargs_function import execute_varargs_function
 from .operations.execute_named_varargs_function import execute_named_varargs_function
 
 __all__ = [
-    "models",
     "execute_counted_function",
     "execute_function",
     "execute_named_function",
     "execute_named_varargs_function",
     "execute_varargs_function",
-    "__nexus_operation_registry__",
 ]
 
 

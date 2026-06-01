@@ -19,6 +19,7 @@ TASK_QUEUE = "demo-task-queue"
 import start_workflow
 import start_workflow.models
 import start_workflow.service
+from start_workflow._resources import StartedWorkflow
 
 START_WORKFLOW_OPERATION = start_workflow.__nexus_operation_registry__[
     ("WorkflowService", "StartWorkflow")
@@ -141,7 +142,7 @@ def test_generated_metadata() -> None:
     assert registry[("WorkflowService", "RestartWorkflow")] is restart_operation
     assert not hasattr(start_workflow, "WorkflowService")
     assert not hasattr(start_workflow, "StartWorkflowExecutionRequest")
-    assert hasattr(start_workflow, "StartedWorkflow")
+    assert not hasattr(start_workflow, "StartedWorkflow")
 
 
 def test_workflow_execution_serializes() -> None:
@@ -192,7 +193,7 @@ async def test_start_workflow_returns_wrapper_handle(
 
     result_error: pytest.ExceptionInfo[NotImplementedError]
     with pytest.raises(NotImplementedError) as result_error:
-        _ = await start_workflow.StartedWorkflow(
+        _ = await StartedWorkflow(
             namespace="default",
             workflow_id="workflow-id",
             run_id="run-456",

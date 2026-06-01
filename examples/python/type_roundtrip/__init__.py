@@ -4,15 +4,12 @@
 from __future__ import annotations
 
 from . import service as _service
-from . import models
 from .operations.retry_policy_operation import retry_policy_operation
 from .operations.activity_options_operation import activity_options_operation
 
 __all__ = [
-    "models",
     "activity_options_operation",
     "retry_policy_operation",
-    "__nexus_operation_registry__",
 ]
 
 

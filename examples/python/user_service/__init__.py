@@ -4,17 +4,12 @@
 from __future__ import annotations
 
 from . import service as _service
-from . import models
-from ._resources import User
 from .operations.get_user import get_user
 from ._resources.user import update_email
 
 __all__ = [
-    "models",
-    "User",
     "get_user",
     "update_email",
-    "__nexus_operation_registry__",
 ]
 
 
