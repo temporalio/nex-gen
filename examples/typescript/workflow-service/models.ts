@@ -61,6 +61,9 @@ export type ReplaceSignalWithStartWorkflowRequest<Base, New> = Omit<
 > &
   New;
 
+/**
+ * @experimental This API is experimental and subject to change.
+ */
 export type SignalWithStartWorkflowRequest<
   WorkflowFn extends (...args: any[]) => Promise<any> = (
     ...args: any[]

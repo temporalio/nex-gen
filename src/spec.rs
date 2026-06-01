@@ -414,6 +414,7 @@ pub struct ServiceSpec {
     pub name: String,
     pub wire_name: String,
     pub endpoint: Option<String>,
+    pub experimental: bool,
     pub operations: Vec<OperationSpec>,
     pub resources: Vec<ResourceSpec>,
 }
@@ -454,6 +455,7 @@ pub struct SupportFragmentSpec {
 pub struct OperationSpec {
     pub name: String,
     pub wire_name: String,
+    pub experimental: bool,
     pub doc: LanguageStringSpec,
     pub return_doc: LanguageStringSpec,
     pub input_proto: String,
@@ -523,6 +525,7 @@ pub struct ResourceResultSpec {
 pub struct WitRecordSpec {
     pub name: String,
     pub full_name: String,
+    pub experimental: bool,
     pub required_fields: BTreeSet<String>,
     pub generated_model: GeneratedModelSpec,
 }
@@ -1468,6 +1471,7 @@ pub struct TypeOverrideSpec {
     pub replacement: Option<TypeReplacementSpec>,
     pub authored_type: Option<AuthoredFieldTypeSpec>,
     pub flatten_in_api: bool,
+    pub experimental: bool,
     pub authored_record: bool,
     pub generated_model: GeneratedModelSpec,
 }
@@ -1495,6 +1499,10 @@ impl TypeOverrideSpec {
 
     pub fn flatten_in_api(&self) -> bool {
         self.flatten_in_api
+    }
+
+    pub fn experimental(&self) -> bool {
+        self.experimental
     }
 
     pub fn generated_model(&self) -> Option<&GeneratedModelSpec> {
@@ -1956,6 +1964,8 @@ fn build_wit_record_spec(
 
     let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
     let context = format!("type `{interface_name}.{type_name}`");
+    let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+    let experimental = experimental_directive(&directives, path, &context)?;
     let (required_fields, _omitted_fields, generated_model) = build_generated_model_from_record(
         resolve,
         type_def.owner,
@@ -1968,6 +1978,7 @@ fn build_wit_record_spec(
     Ok(Some(WitRecordSpec {
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
+        experimental,
         required_fields,
         generated_model,
     }))
@@ -2008,6 +2019,7 @@ fn build_type_override(
     let replacement = build_type_replacement(&directives, path, &context, &proto_name)?;
 
     let flatten_in_api = directive(&directives, "flatten-in-api", path, &context)?.is_some();
+    let experimental = experimental_directive(&directives, path, &context)?;
     let authored_record = matches!(type_def.kind, TypeDefKind::Record(_));
     if flatten_in_api && !authored_record {
         return Err(Error::InvalidWitDirective {
@@ -2051,6 +2063,7 @@ fn build_type_override(
         replacement,
         authored_type: resolve_authored_type_def_kind(resolve, type_def, path, &context)?,
         flatten_in_api,
+        experimental,
         authored_record,
         generated_model,
     };
@@ -3573,6 +3586,7 @@ fn build_service(
     let endpoint = directive_value(&directives, "endpoint", path, &context, "value")?;
     let service_name = interface_name.to_upper_camel_case();
     let wire_service_name = build_wire_service_name(&directives, path, &context, &service_name)?;
+    let experimental = experimental_directive(&directives, path, &context)?;
 
     let operations = interface
         .functions
@@ -3602,6 +3616,7 @@ fn build_service(
         name: service_name,
         wire_name: wire_service_name,
         endpoint,
+        experimental,
         operations,
         resources,
     })
@@ -3824,6 +3839,7 @@ fn build_operation(
     let directives = parse_directives(function.docs.contents.as_deref(), path, &context)?;
     let wire_operation_name =
         build_wire_operation_name(&directives, path, &context, &operation_name)?;
+    let experimental = experimental_directive(&directives, path, &context)?;
 
     let [parameter] = function.params.as_slice() else {
         return Err(Error::InvalidWit {
@@ -3880,6 +3896,7 @@ fn build_operation(
     Ok(OperationSpec {
         name: operation_name,
         wire_name: wire_operation_name,
+        experimental,
         doc: directive(&directives, "doc", path, &context)?
             .map(directive_language_string)
             .unwrap_or_default(),
@@ -4081,6 +4098,21 @@ fn directive_value(
     Ok(directive(directives, name, path, context)?
         .and_then(|directive| directive.value(key))
         .map(ToOwned::to_owned))
+}
+
+fn experimental_directive(directives: &[Directive], path: &Path, context: &str) -> Result<bool> {
+    let Some(directive) = directive(directives, "experimental", path, context)? else {
+        return Ok(false);
+    };
+    if !directive.args.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.experimental".to_string(),
+            reason: "does not take arguments".to_string(),
+        });
+    }
+    Ok(true)
 }
 
 fn directive<'a>(
@@ -4824,6 +4856,78 @@ interface workflow-service {
                 .and_then(|doc| doc.for_language(Language::Python)),
             Some("Python field doc")
         );
+    }
+
+    #[test]
+    fn parses_experimental_annotations() {
+        let wit = r#"
+package temporal:nexus@1.0.0;
+
+world system {
+  export workflow-service;
+}
+
+/// @nexus.endpoint "__temporal_system"
+/// @nexus.experimental
+interface workflow-service {
+  /// @nexus.experimental
+  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
+  record request {
+    id: string,
+  }
+
+  /// @nexus.experimental
+  request-op: func(request: request) -> request;
+}
+"#;
+
+        let spec = parse(Language::Python, wit);
+        assert!(spec.services[0].experimental);
+        assert!(
+            spec.services[0]
+                .operation("RequestOp")
+                .unwrap()
+                .experimental
+        );
+        assert!(
+            spec.type_override(
+                "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
+            )
+            .unwrap()
+            .experimental()
+        );
+        assert!(
+            spec.records
+                .get("workflow-service.request")
+                .unwrap()
+                .experimental
+        );
+    }
+
+    #[test]
+    fn rejects_experimental_annotation_arguments() {
+        let wit = r#"
+package temporal:nexus@1.0.0;
+
+world system {
+  export workflow-service;
+}
+
+/// @nexus.endpoint "__temporal_system"
+/// @nexus.experimental reason="preview"
+interface workflow-service {
+  record request {
+    id: string,
+  }
+
+  request-op: func(request: request) -> request;
+}
+"#;
+
+        let error = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
+            .unwrap_err();
+        assert!(error.to_string().contains("@nexus.experimental"));
+        assert!(error.to_string().contains("does not take arguments"));
     }
 
     #[test]

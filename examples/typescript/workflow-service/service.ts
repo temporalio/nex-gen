@@ -3,9 +3,15 @@
 import * as nexus from "nexus-rpc";
 import type { temporal } from "@temporalio/proto";
 
+/**
+ * @experimental This API is experimental and subject to change.
+ */
 export const WorkflowService = nexus.service(
   "temporal.api.workflowservice.v1.WorkflowService",
   {
+    /**
+     * @experimental This API is experimental and subject to change.
+     */
     signalWithStartWorkflow: nexus.operation<
       temporal.api.workflowservice.v1.ISignalWithStartWorkflowExecutionRequest,
       temporal.api.workflowservice.v1.ISignalWithStartWorkflowExecutionResponse

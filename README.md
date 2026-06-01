@@ -140,6 +140,7 @@ The WIT file defines the public surface. `@nexus` directives carry the parts WIT
 - sourced field expressions
 - function conversion metadata
 - output transforms
+- experimental service, operation, and record warnings
 
 Input WIT files can add support code with `@nexus.support`. Python support fragments are copied into the generated private `_support` package, and TypeScript support fragments are emitted as `support.ts` next to the generated `index.ts`.
 

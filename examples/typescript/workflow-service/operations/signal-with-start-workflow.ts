@@ -10,6 +10,7 @@ import type { SignalWithStartWorkflowRequest } from "../models.ts";
  *
  * @param request - Request for the operation.
  * @returns A workflow handle to the started workflow.
+ * @experimental This API is experimental and subject to change.
  */
 export async function signalWithStartWorkflow<
   WorkflowFn extends (...args: any[]) => Promise<any> = (

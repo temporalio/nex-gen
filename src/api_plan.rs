@@ -33,6 +33,7 @@ pub(crate) struct PlannedService {
     pub(crate) name: String,
     pub(crate) wire_name: String,
     pub(crate) endpoint: String,
+    pub(crate) experimental: bool,
     pub(crate) operations: Vec<PlannedOperation>,
     pub(crate) resources: Vec<PlannedResource>,
 }
@@ -41,6 +42,7 @@ pub(crate) struct PlannedService {
 pub(crate) struct PlannedOperation {
     pub(crate) name: String,
     pub(crate) wire_name: String,
+    pub(crate) experimental: bool,
     pub(crate) doc: LanguageStringSpec,
     pub(crate) return_doc: LanguageStringSpec,
     pub(crate) input: PlannedMessageType,
@@ -218,6 +220,7 @@ pub(crate) struct PlannedModel {
     pub(crate) name: String,
     pub(crate) capabilities: ModelCapabilities,
     pub(crate) flatten_in_api: bool,
+    pub(crate) experimental: bool,
     pub(crate) generated_model: GeneratedModelSpec,
     pub(crate) fields: Vec<PlannedField>,
     pub(crate) sourced_fields: Vec<PlannedSourcedField>,
@@ -525,6 +528,7 @@ fn plan_service(
         name: service.name.clone(),
         wire_name: service.wire_name.clone(),
         endpoint,
+        experimental: service.experimental,
         operations,
         resources,
     })
@@ -560,6 +564,7 @@ fn plan_operation(
     Ok(PlannedOperation {
         name: operation.name.clone(),
         wire_name: operation.wire_name.clone(),
+        experimental: operation.experimental,
         doc: operation.doc.clone(),
         return_doc: operation.return_doc.clone(),
         input,
@@ -863,6 +868,7 @@ fn ensure_wit_model_plan(
             name: record.name.clone(),
             capabilities: requested_capabilities,
             flatten_in_api: false,
+            experimental: record.experimental,
             generated_model: record.generated_model.clone(),
             fields: Vec::new(),
             sourced_fields: Vec::new(),
@@ -915,6 +921,7 @@ fn ensure_model_plan(
         .cloned()
         .unwrap_or_default();
     let flatten_in_api = type_override.is_some_and(|type_override| type_override.flatten_in_api());
+    let experimental = type_override.is_some_and(|type_override| type_override.experimental());
 
     plan.models.insert(
         message.full_name.clone(),
@@ -923,6 +930,7 @@ fn ensure_model_plan(
             name: planned_proto_model_name(message, spec),
             capabilities: requested_capabilities,
             flatten_in_api,
+            experimental,
             generated_model: generated_model.clone(),
             fields: Vec::new(),
             sourced_fields: Vec::new(),

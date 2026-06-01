@@ -411,6 +411,9 @@ async def signal_with_start_workflow(
 ) -> temporalio.workflow.ExternalWorkflowHandle[typing.Any]:
     """Signal a workflow, starting it first if needed.
 
+    .. warning::
+        This API is experimental and subject to change.
+
     Args:
         workflow: Workflow type name or callable identifying the workflow to start.
         positional_args: Positional arguments for workflow. Cannot be set if args is
