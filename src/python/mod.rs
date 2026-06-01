@@ -54,6 +54,7 @@ pub(crate) fn generate(
 
             Ok(RenderedService {
                 name: &service.name,
+                wire_name: &service.wire_name,
                 endpoint: service.endpoint.clone(),
                 operations,
                 resources: service.resources.clone(),
@@ -129,6 +130,7 @@ pub(crate) fn python_field_name(name: &str) -> String {
 #[derive(Debug)]
 struct RenderedService<'a> {
     name: &'a str,
+    wire_name: &'a str,
     endpoint: String,
     operations: Vec<RenderedOperation<'a>>,
     resources: Vec<PlannedResource>,
@@ -3056,7 +3058,13 @@ fn render_package_init(
 }
 
 fn render_service_definition(output: &mut String, service: &RenderedService<'_>) {
-    output.push_str("@service\n");
+    if service.wire_name == service.name {
+        output.push_str("@service\n");
+    } else {
+        output.push_str("@service(name=");
+        output.push_str(&python_string_literal(service.wire_name));
+        output.push_str(")\n");
+    }
     output.push_str("class ");
     output.push_str(service.name);
     output.push_str(":\n");
@@ -4926,7 +4934,7 @@ fn render_inline_nexus_client(output: &mut String, service: &RenderedService<'_>
     output.push_str("nexus_client = temporalio.workflow.create_nexus_client(\n");
     output.push_str(indent);
     output.push_str("    service=");
-    output.push_str(&python_string_literal(service.name));
+    output.push_str(&python_string_literal(service.wire_name));
     output.push_str(",\n");
     output.push_str(indent);
     output.push_str("    endpoint=");

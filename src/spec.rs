@@ -412,6 +412,7 @@ pub fn load_linked_wit_metadata_from_inputs(input_paths: &[PathBuf]) -> Result<L
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServiceSpec {
     pub name: String,
+    pub wire_name: String,
     pub endpoint: Option<String>,
     pub operations: Vec<OperationSpec>,
     pub resources: Vec<ResourceSpec>,
@@ -3571,6 +3572,7 @@ fn build_service(
     let directives = parse_directives(interface.docs.contents.as_deref(), path, &context)?;
     let endpoint = directive_value(&directives, "endpoint", path, &context, "value")?;
     let service_name = interface_name.to_upper_camel_case();
+    let wire_service_name = build_wire_service_name(&directives, path, &context, &service_name)?;
 
     let operations = interface
         .functions
@@ -3598,10 +3600,39 @@ fn build_service(
 
     Ok(ServiceSpec {
         name: service_name,
+        wire_name: wire_service_name,
         endpoint,
         operations,
         resources,
     })
+}
+
+fn build_wire_service_name(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+    default_wire_service_name: &str,
+) -> Result<String> {
+    let Some(directive) = directive(directives, "service-name", path, context)? else {
+        return Ok(default_wire_service_name.to_string());
+    };
+    let Some(name) = directive.value("name").or_else(|| directive.value("value")) else {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.service-name".to_string(),
+            reason: "missing required `name`".to_string(),
+        });
+    };
+    if name.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.service-name".to_string(),
+            reason: "`name` cannot be empty".to_string(),
+        });
+    }
+    Ok(name.to_string())
 }
 
 fn ensure_unique_wire_operation_names(
@@ -4444,6 +4475,7 @@ world system {
 }
 
 /// @nexus.endpoint "__temporal_system"
+/// @nexus.service-name "temporal.api.workflowservice.v1.WorkflowService"
 interface workflow-service {
   use nexus:temporal-types/model@1.0.0.{placeholder, retry-policy, signal-function, workflow-function};
 
@@ -4485,6 +4517,15 @@ interface workflow-service {
 
         let python = parse(Language::Python, wit);
         let typescript = parse(Language::TypeScript, wit);
+        assert_eq!(python.services[0].name, "WorkflowService");
+        assert_eq!(
+            python.services[0].wire_name,
+            "temporal.api.workflowservice.v1.WorkflowService"
+        );
+        assert_eq!(
+            typescript.services[0].wire_name,
+            "temporal.api.workflowservice.v1.WorkflowService"
+        );
         assert!(
             python
                 .imports_for_language(Language::Python)

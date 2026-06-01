@@ -26,7 +26,9 @@ function payloadJson(
 
 describe("workflow-service generated output", () => {
   test("exposes workflow service metadata", () => {
-    expect(WorkflowService.name).toBe("WorkflowService");
+    expect(WorkflowService.name).toBe(
+      "temporal.api.workflowservice.v1.WorkflowService",
+    );
     expect(WorkflowService.operations.signalWithStartWorkflow.name).toBe(
       "SignalWithStartWorkflowExecution",
     );

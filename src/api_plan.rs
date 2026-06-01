@@ -31,6 +31,7 @@ pub(crate) struct ApiPlan {
 #[derive(Debug, Clone)]
 pub(crate) struct PlannedService {
     pub(crate) name: String,
+    pub(crate) wire_name: String,
     pub(crate) endpoint: String,
     pub(crate) operations: Vec<PlannedOperation>,
     pub(crate) resources: Vec<PlannedResource>,
@@ -522,6 +523,7 @@ fn plan_service(
 
     Ok(PlannedService {
         name: service.name.clone(),
+        wire_name: service.wire_name.clone(),
         endpoint,
         operations,
         resources,

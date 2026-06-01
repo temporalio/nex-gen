@@ -7,7 +7,7 @@ from nexusrpc import Operation, service
 import temporalio.api.workflowservice.v1.request_response_pb2
 
 
-@service
+@service(name="temporal.api.workflowservice.v1.WorkflowService")
 class WorkflowService:
     signal_with_start_workflow: Operation[
         temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionRequest,

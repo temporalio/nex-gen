@@ -59,6 +59,7 @@ pub(crate) fn generate(
 
             Ok(RenderedService {
                 name: service.name.as_str(),
+                wire_name: service.wire_name.as_str(),
                 endpoint: service.endpoint.clone(),
                 operations,
                 resources: service.resources.clone(),
@@ -416,6 +417,7 @@ fn generic_model_annotation(model_name: &str, type_parameters: &[RenderedTypePar
 #[derive(Debug)]
 struct RenderedService<'a> {
     name: &'a str,
+    wire_name: &'a str,
     endpoint: String,
     operations: Vec<RenderedOperation<'a>>,
     resources: Vec<PlannedResource>,
@@ -3639,7 +3641,7 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
     output.push_str("export const ");
     output.push_str(service.name);
     output.push_str(" = nexus.service('");
-    output.push_str(service.name);
+    output.push_str(service.wire_name);
     output.push_str("', {\n");
     for operation in &service.operations {
         output.push_str("  ");

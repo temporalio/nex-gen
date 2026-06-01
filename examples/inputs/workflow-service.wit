@@ -5,6 +5,7 @@ world system {
 }
 
 /// @nexus.endpoint "temporal-system"
+/// @nexus.service-name "temporal.api.workflowservice.v1.WorkflowService"
 interface workflow-service {
   use nexus:temporal-types/model@1.0.0.{
     duration,

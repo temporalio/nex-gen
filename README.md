@@ -133,6 +133,7 @@ The `user-service` example is intentionally small and WIT-native. The `type-show
 The WIT file defines the public surface. `@nexus` directives carry the parts WIT does not express directly:
 
 - service endpoint names
+- service wire names
 - support file paths
 - language-native override types
 - flattened API-only field types
@@ -173,6 +174,7 @@ world system {
 }
 
 /// @nexus.endpoint "__temporal_system"
+/// @nexus.service-name "temporal.api.workflowservice.v1.WorkflowService"
 interface workflow-service {
   use nexus:temporal-types/model@1.0.0.{signal-function, task-queue, workflow-function};
 
