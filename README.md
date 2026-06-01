@@ -140,7 +140,10 @@ The WIT file defines the public surface. `@nexus` directives carry the parts WIT
 - sourced field expressions
 - function conversion metadata
 - output transforms
+- explicit resource method operation bindings
 - experimental service, operation, and record warnings
+
+Resource methods bind to operations only when the method and operation have the same generated operation name. When they intentionally differ, mark the method with `@nexus.operation`, for example `/// @nexus.operation "cancel-workflow"` on `cancel: func(...)` to bind it to `cancel-workflow: func(...)`.
 
 Input WIT files can add support code with `@nexus.support`. Python support fragments are copied into the generated private `_support` package, and TypeScript support fragments are emitted as `support.ts` next to the generated `index.ts`.
 

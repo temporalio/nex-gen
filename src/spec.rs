@@ -512,6 +512,7 @@ pub struct ResourceMethodSpec {
     pub name: String,
     pub params: Vec<ResourceFieldSpec>,
     pub result: Option<ResourceResultSpec>,
+    pub operation_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3765,6 +3766,7 @@ fn build_resource_method(
         "{resource_context} method `{}`",
         method_name.to_upper_camel_case()
     );
+    let directives = parse_directives(function.docs.contents.as_deref(), path, &context)?;
     let params = function
         .params
         .iter()
@@ -3791,7 +3793,35 @@ fn build_resource_method(
         name: method_name,
         params,
         result,
+        operation_name: build_resource_method_operation_name(&directives, path, &context)?,
     })
+}
+
+fn build_resource_method_operation_name(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<String>> {
+    let Some(directive) = directive(directives, "operation", path, context)? else {
+        return Ok(None);
+    };
+    let Some(name) = directive.value("name").or_else(|| directive.value("value")) else {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.operation".to_string(),
+            reason: "missing required `name`".to_string(),
+        });
+    };
+    if name.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.operation".to_string(),
+            reason: "`name` cannot be empty".to_string(),
+        });
+    }
+    Ok(Some(name.to_upper_camel_case()))
 }
 
 fn build_resource_result(

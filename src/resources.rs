@@ -291,32 +291,68 @@ fn resolve_resource_method(
         );
     }
 
+    if let Some(operation_name) = &method.operation_name {
+        let operation =
+            service
+                .operation(operation_name)
+                .ok_or_else(|| Error::InvalidResourceMethod {
+                    service: service.name.clone(),
+                    resource: resource.name.to_upper_camel_case(),
+                    method: method.name.to_string(),
+                    reason: format!("bound operation `{operation_name}` was not found"),
+                })?;
+        let Some(request_plan) =
+            synthesize_operation_request_plan(spec, descriptors, operation, &environment)?
+        else {
+            return Err(Error::InvalidResourceMethod {
+                service: service.name.clone(),
+                resource: resource.name.to_upper_camel_case(),
+                method: method.name.to_string(),
+                reason: format!(
+                    "bound operation `{operation_name}` cannot be called from resource fields and method parameters"
+                ),
+            });
+        };
+        if !resource_method_result_matches_operation(method, operation) {
+            return Err(Error::InvalidResourceMethod {
+                service: service.name.clone(),
+                resource: resource.name.to_upper_camel_case(),
+                method: method.name.to_string(),
+                reason: format!(
+                    "bound operation `{operation_name}` result does not match the method result"
+                ),
+            });
+        }
+        return Ok(ResolvedResourceMethodSpec {
+            name: method.name.clone(),
+            params: method.params.clone(),
+            result: method.result.clone(),
+            binding: ResolvedResourceMethodBinding::Operation {
+                operation_name: operation.name.clone(),
+                request_plan,
+            },
+        });
+    }
+
+    let implicit_operation_name = method.name.to_upper_camel_case();
     let mut matching_operations = Vec::new();
     for operation in &service.operations {
+        if operation.name != implicit_operation_name {
+            continue;
+        }
         let Some(request_plan) =
             synthesize_operation_request_plan(spec, descriptors, operation, &environment)?
         else {
             continue;
         };
 
-        if let Some(result) = &method.result {
-            if let Some(resource_name) = &result.resource {
-                if operation.output_resource() != Some(resource_name.as_str()) {
-                    continue;
-                }
-            } else if let Some(proto_name) = &result.proto {
-                if operation.output_proto() != Some(proto_name.as_str()) {
-                    continue;
-                }
-            } else {
-                continue;
-            }
+        if !resource_method_result_matches_operation(method, operation) {
+            continue;
         }
 
         matching_operations.push((operation.name.clone(), request_plan));
     }
 
-    let preferred_operation_name = method.name.to_upper_camel_case();
     let binding = match matching_operations.len() {
         0 => ResolvedResourceMethodBinding::Stub,
         1 => {
@@ -327,22 +363,6 @@ fn resolve_resource_method(
             }
         }
         _ => {
-            let preferred_matches = matching_operations
-                .iter()
-                .filter(|(name, _)| *name == preferred_operation_name)
-                .collect::<Vec<_>>();
-            if preferred_matches.len() == 1 {
-                let (operation_name, request_plan) = preferred_matches[0].clone();
-                return Ok(ResolvedResourceMethodSpec {
-                    name: method.name.clone(),
-                    params: method.params.clone(),
-                    result: method.result.clone(),
-                    binding: ResolvedResourceMethodBinding::Operation {
-                        operation_name: operation_name.clone(),
-                        request_plan: request_plan.clone(),
-                    },
-                });
-            }
             let matches = matching_operations
                 .iter()
                 .map(|(name, _)| name.as_str())
@@ -363,6 +383,22 @@ fn resolve_resource_method(
         result: method.result.clone(),
         binding,
     })
+}
+
+fn resource_method_result_matches_operation(
+    method: &ResourceMethodSpec,
+    operation: &crate::spec::OperationSpec,
+) -> bool {
+    let Some(result) = &method.result else {
+        return true;
+    };
+    if let Some(resource_name) = &result.resource {
+        operation.output_resource() == Some(resource_name.as_str())
+    } else if let Some(proto_name) = &result.proto {
+        operation.output_proto() == Some(proto_name.as_str())
+    } else {
+        false
+    }
 }
 
 fn synthesize_operation_request_plan(
@@ -713,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    fn prefers_exact_operation_name_for_ambiguous_resource_method() {
+    fn binds_implicit_resource_method_to_same_named_operation() {
         let wit = r#"
 package temporal:nexus@1.0.0;
 
@@ -828,7 +864,7 @@ interface workflow-service {
     }
 
     #[test]
-    fn resource_method_can_bind_operation_when_operation_name_differs_but_fields_match() {
+    fn resource_method_does_not_bind_operation_when_operation_name_differs_without_annotation() {
         let wit = r#"
 package temporal:users@1.0.0;
 
@@ -841,6 +877,47 @@ interface user-service {
   resource user {
     constructor(user-id: string, email: string);
 
+    update-email: func(email: string) -> user-result;
+  }
+
+  type user-result = own<user>;
+
+  record update-email-request {
+    user-id: string,
+    email: string,
+  }
+
+  updates-email: func(request: update-email-request) -> user-result;
+}
+"#;
+        let spec = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
+            .unwrap();
+        let service = &spec.services[0];
+        let resolved = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap();
+        let method = &resolved.resources[0].methods[0];
+
+        assert_eq!(method.name, "update-email");
+        assert!(matches!(
+            method.binding,
+            ResolvedResourceMethodBinding::Stub
+        ));
+    }
+
+    #[test]
+    fn resource_method_can_bind_operation_when_operation_name_differs_with_annotation() {
+        let wit = r#"
+package temporal:users@1.0.0;
+
+world system {
+  export user-service;
+}
+
+/// @nexus.endpoint "__user_service"
+interface user-service {
+  resource user {
+    constructor(user-id: string, email: string);
+
+    /// @nexus.operation "updates-email"
     update-email: func(email: string) -> user-result;
   }
 
@@ -891,6 +968,45 @@ interface user-service {
                 panic!("update-email should bind to UpdatesEmail");
             }
         }
+    }
+
+    #[test]
+    fn resource_method_rejects_unknown_explicit_operation_binding() {
+        let wit = r#"
+package temporal:users@1.0.0;
+
+world system {
+  export user-service;
+}
+
+/// @nexus.endpoint "__user_service"
+interface user-service {
+  resource user {
+    constructor(user-id: string, email: string);
+
+    /// @nexus.operation "updates-email"
+    update-email: func(email: string) -> user-result;
+  }
+
+  type user-result = own<user>;
+
+  record update-email-request {
+    user-id: string,
+    email: string,
+  }
+
+  update-email: func(request: update-email-request) -> user-result;
+}
+"#;
+        let spec = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
+            .unwrap();
+        let service = &spec.services[0];
+        let error = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "resource method `UserService.User.update-email` is invalid: bound operation `UpdatesEmail` was not found"
+        );
     }
 
     #[test]
