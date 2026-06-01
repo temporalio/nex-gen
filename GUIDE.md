@@ -618,14 +618,27 @@ searches **by name** in this order:
 2. **The operation's output (response)** -- for fields like `run-id` that come
    back from the server
 
+The type of message that comes back from the server is specified using the
+`@nexus.proto` directive:
+
+```wit
+/// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionResponse"
+type start-workflow-result = own<started-workflow>;
+```
+
+The generator proceeds to generate:
+
 ```python
-# From start-workflow: workflow_id from request, run_id from response
+# workflow_id comes from the request, run_id comes from the response
 return StartedWorkflow(
     namespace=request_proto.namespace,
     workflow_id=request.workflow_id,
     run_id=result.run_id or None,
 )
 ```
+
+If a resource constructor field name cannot be found in either, the generator
+raises `InvalidResource`.
 
 ### Edge Cases and Error Conditions
 
