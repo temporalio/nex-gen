@@ -618,6 +618,9 @@ searches **by name** in this order:
 2. **The operation's output (response)** -- for fields like `run-id` that come
    back from the server
 
+If both the request and response contain a field with the same name, the request
+takes priority.
+
 The type of message that comes back from the server is specified using the
 `@nexus.proto` directive:
 
