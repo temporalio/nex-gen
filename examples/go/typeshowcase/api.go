@@ -179,34 +179,41 @@ type GetUserOptions struct {
 	ConsistencyToken string
 }
 
-func GetUser(ctx workflow.Context, userId string, opts ...GetUserOptions) (*User, error) {
-	request := GetUserRequest{UserId: userId}
-	if len(opts) > 0 {
-		request.ConsistencyToken = opts[0].ConsistencyToken
-	}
-	return getUser(ctx, request)
+func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) (*User, error) {
+	return getUser(ctx, GetUserRequest{
+		UserId:           userId,
+		ConsistencyToken: opts.ConsistencyToken,
+	})
 }
 
 func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error) {
-	return updateEmail(ctx, UpdateEmailRequest{UserId: userId, Email: email})
+	return updateEmail(ctx, UpdateEmailRequest{
+		UserId: userId,
+		Email:  email,
+	})
 }
 
 func Rename(ctx workflow.Context, userId string, displayName string) (*User, error) {
-	return rename(ctx, RenameRequest{UserId: userId, DisplayName: displayName})
+	return rename(ctx, RenameRequest{
+		UserId:      userId,
+		DisplayName: displayName,
+	})
 }
 
 func SetProfile(ctx workflow.Context, userId string, profile UserProfile) (*User, error) {
-	return setProfile(ctx, SetProfileRequest{UserId: userId, Profile: profile})
+	return setProfile(ctx, SetProfileRequest{
+		UserId:  userId,
+		Profile: profile,
+	})
 }
 
 type DeactivateOptions struct {
 	Reason string
 }
 
-func Deactivate(ctx workflow.Context, userId string, opts ...DeactivateOptions) error {
-	request := DeactivateRequest{UserId: userId}
-	if len(opts) > 0 {
-		request.Reason = opts[0].Reason
-	}
-	return deactivate(ctx, request)
+func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) error {
+	return deactivate(ctx, DeactivateRequest{
+		UserId: userId,
+		Reason: opts.Reason,
+	})
 }

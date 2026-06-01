@@ -97,13 +97,20 @@ type StartWorkflowOptions struct {
 	WorkflowStartDelay time.Duration
 }
 
-func StartWorkflow(ctx workflow.Context, workflow string, workflowId string, taskQueue string, opts ...StartWorkflowOptions) (*StartedWorkflow, error) {
-	request := StartWorkflowRequest{Workflow: workflow, WorkflowId: workflowId, TaskQueue: taskQueue}
-	if len(opts) > 0 {
-		request.Args = opts[0].Args
-		request.WorkflowStartDelay = opts[0].WorkflowStartDelay
-	}
-	return startWorkflow(ctx, request)
+func StartWorkflow(
+	ctx workflow.Context,
+	workflow string,
+	workflowId string,
+	taskQueue string,
+	opts StartWorkflowOptions,
+) (*StartedWorkflow, error) {
+	return startWorkflow(ctx, StartWorkflowRequest{
+		Workflow:           workflow,
+		Args:               opts.Args,
+		WorkflowId:         workflowId,
+		TaskQueue:          taskQueue,
+		WorkflowStartDelay: opts.WorkflowStartDelay,
+	})
 }
 
 type RestartWorkflowOptions struct {
@@ -111,23 +118,29 @@ type RestartWorkflowOptions struct {
 	WorkflowStartDelay time.Duration
 }
 
-func RestartWorkflow(ctx workflow.Context, workflow string, workflowId string, taskQueue string, opts ...RestartWorkflowOptions) (*StartedWorkflow, error) {
-	request := StartWorkflowRequest{Workflow: workflow, WorkflowId: workflowId, TaskQueue: taskQueue}
-	if len(opts) > 0 {
-		request.Args = opts[0].Args
-		request.WorkflowStartDelay = opts[0].WorkflowStartDelay
-	}
-	return restartWorkflow(ctx, request)
+func RestartWorkflow(
+	ctx workflow.Context,
+	workflow string,
+	workflowId string,
+	taskQueue string,
+	opts RestartWorkflowOptions,
+) (*StartedWorkflow, error) {
+	return restartWorkflow(ctx, StartWorkflowRequest{
+		Workflow:           workflow,
+		Args:               opts.Args,
+		WorkflowId:         workflowId,
+		TaskQueue:          taskQueue,
+		WorkflowStartDelay: opts.WorkflowStartDelay,
+	})
 }
 
 type CancelWorkflowOptions struct {
 	Reason string
 }
 
-func CancelWorkflow(ctx workflow.Context, workflowExecution WorkflowExecution, opts ...CancelWorkflowOptions) (*CancelWorkflowResponse, error) {
-	request := CancelWorkflowRequest{WorkflowExecution: workflowExecution}
-	if len(opts) > 0 {
-		request.Reason = opts[0].Reason
-	}
-	return cancelWorkflow(ctx, request)
+func CancelWorkflow(ctx workflow.Context, workflowExecution WorkflowExecution, opts CancelWorkflowOptions) (*CancelWorkflowResponse, error) {
+	return cancelWorkflow(ctx, CancelWorkflowRequest{
+		WorkflowExecution: workflowExecution,
+		Reason:            opts.Reason,
+	})
 }

@@ -81,25 +81,34 @@ type SignalWithStartWorkflowOptions struct {
 	UserMetadata       *UserMetadata
 }
 
-func SignalWithStartWorkflow(ctx workflow.Context, workflow string, id string, taskQueue string, signal string, opts ...SignalWithStartWorkflowOptions) (*SignalWithStartWorkflowResponse, error) {
-	request := SignalWithStartWorkflowRequest{Workflow: workflow, Id: id, TaskQueue: taskQueue, Signal: signal}
-	if len(opts) > 0 {
-		request.Args = opts[0].Args
-		request.SignalArgs = opts[0].SignalArgs
-		request.ExecutionTimeout = opts[0].ExecutionTimeout
-		request.RunTimeout = opts[0].RunTimeout
-		request.TaskTimeout = opts[0].TaskTimeout
-		request.RequestId = opts[0].RequestId
-		request.IdReusePolicy = opts[0].IdReusePolicy
-		request.IdConflictPolicy = opts[0].IdConflictPolicy
-		request.RetryPolicy = opts[0].RetryPolicy
-		request.CronSchedule = opts[0].CronSchedule
-		request.Memo = opts[0].Memo
-		request.SearchAttributes = opts[0].SearchAttributes
-		request.Priority = opts[0].Priority
-		request.VersioningOverride = opts[0].VersioningOverride
-		request.StartDelay = opts[0].StartDelay
-		request.UserMetadata = opts[0].UserMetadata
-	}
-	return signalWithStartWorkflow(ctx, request)
+func SignalWithStartWorkflow(
+	ctx workflow.Context,
+	workflow string,
+	id string,
+	taskQueue string,
+	signal string,
+	opts SignalWithStartWorkflowOptions,
+) (*SignalWithStartWorkflowResponse, error) {
+	return signalWithStartWorkflow(ctx, SignalWithStartWorkflowRequest{
+		Workflow:           workflow,
+		Args:               opts.Args,
+		Id:                 id,
+		TaskQueue:          taskQueue,
+		Signal:             signal,
+		SignalArgs:         opts.SignalArgs,
+		ExecutionTimeout:   opts.ExecutionTimeout,
+		RunTimeout:         opts.RunTimeout,
+		TaskTimeout:        opts.TaskTimeout,
+		RequestId:          opts.RequestId,
+		IdReusePolicy:      opts.IdReusePolicy,
+		IdConflictPolicy:   opts.IdConflictPolicy,
+		RetryPolicy:        opts.RetryPolicy,
+		CronSchedule:       opts.CronSchedule,
+		Memo:               opts.Memo,
+		SearchAttributes:   opts.SearchAttributes,
+		Priority:           opts.Priority,
+		VersioningOverride: opts.VersioningOverride,
+		StartDelay:         opts.StartDelay,
+		UserMetadata:       opts.UserMetadata,
+	})
 }

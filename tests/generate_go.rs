@@ -267,13 +267,16 @@ fn go_type_showcase_generates_expected_types() {
 
     // Exported convenience wrappers -- all required fields become positional args
     assert!(rendered.contains("func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error)"));
-    assert!(rendered.contains("UpdateEmailRequest{UserId: userId, Email: email}"));
+    // The request struct is always constructed across multiple lines.
+    assert!(rendered.contains("UpdateEmailRequest{\n\t\tUserId: userId,\n\t\tEmail: email,\n\t}"));
     // Optional fields produce an options struct
     assert!(rendered.contains("type GetUserOptions struct"));
     assert!(rendered.contains("ConsistencyToken string"));
-    assert!(rendered.contains("func GetUser(ctx workflow.Context, userId string, opts ...GetUserOptions) (*User, error)"));
-    assert!(rendered.contains("request.ConsistencyToken = opts[0].ConsistencyToken"));
+    assert!(rendered.contains("func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) (*User, error)"));
+    assert!(
+        rendered.contains("GetUserRequest{\n\t\tUserId: userId,\n\t\tConsistencyToken: opts.ConsistencyToken,\n\t}")
+    );
     // Void convenience wrapper with options
     assert!(rendered.contains("type DeactivateOptions struct"));
-    assert!(rendered.contains("func Deactivate(ctx workflow.Context, userId string, opts ...DeactivateOptions) error"));
+    assert!(rendered.contains("func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) error"));
 }

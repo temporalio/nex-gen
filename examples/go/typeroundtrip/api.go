@@ -57,12 +57,11 @@ type ActivityOptionsOperationOptions struct {
 	Priority               temporal.Priority
 }
 
-func ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ...ActivityOptionsOperationOptions) (*ActivityOptions, error) {
-	request := ActivityOptions{RetryPolicy: retryPolicy}
-	if len(opts) > 0 {
-		request.TaskQueue = opts[0].TaskQueue
-		request.ScheduleToCloseTimeout = opts[0].ScheduleToCloseTimeout
-		request.Priority = opts[0].Priority
-	}
-	return activityOptionsOperation(ctx, request)
+func ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ActivityOptionsOperationOptions) (*ActivityOptions, error) {
+	return activityOptionsOperation(ctx, ActivityOptions{
+		TaskQueue:              opts.TaskQueue,
+		RetryPolicy:            retryPolicy,
+		ScheduleToCloseTimeout: opts.ScheduleToCloseTimeout,
+		Priority:               opts.Priority,
+	})
 }

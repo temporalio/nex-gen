@@ -1857,23 +1857,37 @@ fn render_options_struct(
 }
 
 /// Renders an exported convenience wrapper that unpacks required fields as
-/// positional arguments and optional fields into a variadic options struct.
+/// positional arguments and optional fields into a required options struct.
 ///
-/// When all fields are required:
+/// The request struct is always constructed across multiple lines. The function
+/// signature is also split across multiple lines when it has more than three
+/// parameters (counting `ctx`).
+///
 /// ```go
 /// func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error) {
-///     return updateEmail(ctx, UpdateEmailRequest{UserId: userId, Email: email})
+///     return updateEmail(ctx, UpdateEmailRequest{
+///         UserId: userId,
+///         Email:  email,
+///     })
 /// }
 /// ```
 ///
-/// When optional fields exist:
+/// With more than three parameters:
 /// ```go
-/// func GetUser(ctx workflow.Context, userId string, opts ...GetUserOptions) (*User, error) {
-///     request := GetUserRequest{UserId: userId}
-///     if len(opts) > 0 {
-///         request.ConsistencyToken = opts[0].ConsistencyToken
-///     }
-///     return getUser(ctx, request)
+/// func StartWorkflow(
+///     ctx workflow.Context,
+///     workflow string,
+///     workflowId string,
+///     taskQueue string,
+///     opts StartWorkflowOptions,
+/// ) (*StartedWorkflow, error) {
+///     return startWorkflow(ctx, StartWorkflowRequest{
+///         Workflow:           workflow,
+///         Args:               opts.Args,
+///         WorkflowId:         workflowId,
+///         TaskQueue:          taskQueue,
+///         WorkflowStartDelay: opts.WorkflowStartDelay,
+///     })
 /// }
 /// ```
 fn render_convenience_wrapper(
@@ -1884,22 +1898,45 @@ fn render_convenience_wrapper(
     let exported_name = go_field_name(operation.name);
     let has_optional = params.iter().any(|p| !p.required);
 
+    // Build the list of signature parameters (after `ctx`): one per required
+    // field, plus a trailing `opts` parameter when optional fields exist.
+    let mut signature_params: Vec<(String, String)> = params
+        .iter()
+        .filter(|p| p.required)
+        .map(|p| (p.param_name.clone(), p.go_type.clone()))
+        .collect();
+    if has_optional {
+        signature_params.push(("opts".to_string(), format!("{exported_name}Options")));
+    }
+
+    // The signature is multi-line when it has more than 3 parameters total
+    // (counting `ctx` plus the parameters above).
+    let multiline_signature = signature_params.len() + 1 > 3;
+
     // Function signature
     output.push_str("func ");
     output.push_str(&exported_name);
-    output.push_str("(ctx workflow.Context");
-    for param in params.iter().filter(|p| p.required) {
-        output.push_str(", ");
-        output.push_str(&param.param_name);
-        output.push(' ');
-        output.push_str(&param.go_type);
+    if multiline_signature {
+        output.push_str("(\n\tctx workflow.Context,\n");
+        for (name, ty) in &signature_params {
+            output.push('\t');
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(ty);
+            output.push_str(",\n");
+        }
+        output.push(')');
+    } else {
+        output.push_str("(ctx workflow.Context");
+        for (name, ty) in &signature_params {
+            output.push_str(", ");
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(ty);
+        }
+        output.push(')');
     }
-    if has_optional {
-        output.push_str(", opts ...");
-        output.push_str(&exported_name);
-        output.push_str("Options");
-    }
-    output.push_str(") ");
+    output.push(' ');
 
     // Return type
     if let Some(result_type) = &operation.output_type {
@@ -1911,56 +1948,27 @@ fn render_convenience_wrapper(
     }
     output.push_str(" {\n");
 
-    // Function body
-    if has_optional {
-        // Build request incrementally
-        output.push_str("\trequest := ");
-        output.push_str(&operation.input_type);
-        output.push('{');
-        let required_params: Vec<_> = params.iter().filter(|p| p.required).collect();
-        for (i, param) in required_params.iter().enumerate() {
-            output.push_str(&param.field_name);
-            output.push_str(": ");
+    // Function body -- build the request as a multi-line struct literal,
+    // sourcing required fields from positional args and optional fields from
+    // opts.
+    output.push_str("\treturn ");
+    output.push_str(&operation.func_name);
+    output.push_str("(ctx, ");
+    output.push_str(&operation.input_type);
+    output.push_str("{\n");
+    for param in params {
+        output.push_str("\t\t");
+        output.push_str(&param.field_name);
+        output.push_str(": ");
+        if param.required {
             output.push_str(&param.param_name);
-            if i + 1 < required_params.len() {
-                output.push_str(", ");
-            }
-        }
-        output.push_str("}\n");
-
-        // Apply optional fields from opts
-        output.push_str("\tif len(opts) > 0 {\n");
-        for param in params.iter().filter(|p| !p.required) {
-            output.push_str("\t\trequest.");
+        } else {
+            output.push_str("opts.");
             output.push_str(&param.field_name);
-            output.push_str(" = opts[0].");
-            output.push_str(&param.field_name);
-            output.push('\n');
         }
-        output.push_str("\t}\n");
-
-        // Call unexported function
-        output.push_str("\treturn ");
-        output.push_str(&operation.func_name);
-        output.push_str("(ctx, request)\n");
-    } else {
-        // All required -- inline the request construction
-        output.push_str("\treturn ");
-        output.push_str(&operation.func_name);
-        output.push_str("(ctx, ");
-        output.push_str(&operation.input_type);
-        output.push('{');
-        let required_params: Vec<_> = params.iter().filter(|p| p.required).collect();
-        for (i, param) in required_params.iter().enumerate() {
-            output.push_str(&param.field_name);
-            output.push_str(": ");
-            output.push_str(&param.param_name);
-            if i + 1 < required_params.len() {
-                output.push_str(", ");
-            }
-        }
-        output.push_str("})\n");
+        output.push_str(",\n");
     }
+    output.push_str("\t})\n");
 
     output.push_str("}\n");
 }

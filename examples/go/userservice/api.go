@@ -58,9 +58,14 @@ func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error
 // --- Operations (public API) ---
 
 func GetUser(ctx workflow.Context, userId string) (*User, error) {
-	return getUser(ctx, GetUserRequest{UserId: userId})
+	return getUser(ctx, GetUserRequest{
+		UserId: userId,
+	})
 }
 
 func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error) {
-	return updateEmail(ctx, UpdateEmailRequest{UserId: userId, Email: email})
+	return updateEmail(ctx, UpdateEmailRequest{
+		UserId: userId,
+		Email:  email,
+	})
 }
