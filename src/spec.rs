@@ -415,6 +415,7 @@ pub struct ServiceSpec {
     pub wire_name: String,
     pub endpoint: Option<String>,
     pub experimental: bool,
+    pub delay_load_temporalio_workflow: bool,
     pub operations: Vec<OperationSpec>,
     pub resources: Vec<ResourceSpec>,
 }
@@ -3587,6 +3588,8 @@ fn build_service(
     let service_name = interface_name.to_upper_camel_case();
     let wire_service_name = build_wire_service_name(&directives, path, &context, &service_name)?;
     let experimental = experimental_directive(&directives, path, &context)?;
+    let delay_load_temporalio_workflow =
+        delay_load_temporalio_workflow_directive(&directives, path, &context)?;
 
     let operations = interface
         .functions
@@ -3617,6 +3620,7 @@ fn build_service(
         wire_name: wire_service_name,
         endpoint,
         experimental,
+        delay_load_temporalio_workflow,
         operations,
         resources,
     })
@@ -4115,6 +4119,26 @@ fn experimental_directive(directives: &[Directive], path: &Path, context: &str) 
     Ok(true)
 }
 
+fn delay_load_temporalio_workflow_directive(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<bool> {
+    let Some(directive) = directive(directives, "delay-load-temporalio-workflow", path, context)?
+    else {
+        return Ok(false);
+    };
+    if !directive.args.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.delay-load-temporalio-workflow".to_string(),
+            reason: "does not take arguments".to_string(),
+        });
+    }
+    Ok(true)
+}
+
 fn directive<'a>(
     directives: &'a [Directive],
     name: &str,
@@ -4582,12 +4606,12 @@ interface workflow-service {
         assert!(
             python_support[0]
                 .path
-                .ends_with("deps/nexus-temporal-types/python/model_overrides.py")
+                .ends_with("deps/nexus-temporal-types/python/temporal_model_converters.py")
         );
         assert!(
             typescript_support[0]
                 .path
-                .ends_with("deps/nexus-temporal-types/typescript/model_overrides.ts")
+                .ends_with("deps/nexus-temporal-types/typescript/temporal_model_converters.ts")
         );
         assert!(
             python_support[0]
@@ -4902,6 +4926,30 @@ interface workflow-service {
                 .unwrap()
                 .experimental
         );
+    }
+
+    #[test]
+    fn parses_delay_load_temporalio_workflow_annotation() {
+        let wit = r#"
+package temporal:nexus@1.0.0;
+
+world system {
+  export workflow-service;
+}
+
+/// @nexus.endpoint "__temporal_system"
+/// @nexus.delay-load-temporalio-workflow
+interface workflow-service {
+  record request {
+    id: string,
+  }
+
+  request-op: func(request: request) -> request;
+}
+"#;
+
+        let spec = parse(Language::Python, wit);
+        assert!(spec.services[0].delay_load_temporalio_workflow);
     }
 
     #[test]
@@ -5220,7 +5268,7 @@ interface workflow-service {
         assert!(
             python_support[0]
                 .path
-                .ends_with("deps/nexus-temporal-types/python/model_overrides.py")
+                .ends_with("deps/nexus-temporal-types/python/temporal_model_converters.py")
         );
         assert!(python_support[1].path.ends_with("extra_support.py"));
         assert!(

@@ -348,7 +348,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(!rendered.contains("export enum WorkflowIdReusePolicy"));
     assert!(!rendered.contains("export enum WorkflowIdConflictPolicy"));
     assert!(!rendered.contains("signalWithStartWorkflowExecution("));
-    assert!(!rendered.contains("from './model_overrides.ts'"));
+    assert!(!rendered.contains("from './temporal_model_converters.ts'"));
 
     let start_workflow_rendered = generate_to_string_with_inputs(
         nex_gen::language::Language::TypeScript,

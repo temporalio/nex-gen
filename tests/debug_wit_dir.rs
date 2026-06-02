@@ -51,12 +51,12 @@ fn cli_debug_wit_dir_writes_prepared_workspace() {
     );
     assert!(
         output_dir
-            .join("deps/nexus-temporal-types/python/model_overrides.py")
+            .join("deps/nexus-temporal-types/python/temporal_model_converters.py")
             .is_file()
     );
     assert!(
         output_dir
-            .join("deps/nexus-temporal-types/typescript/model_overrides.ts")
+            .join("deps/nexus-temporal-types/typescript/temporal_model_converters.ts")
             .is_file()
     );
 

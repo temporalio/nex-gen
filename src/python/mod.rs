@@ -58,6 +58,7 @@ pub(crate) fn generate(
                 wire_name: &service.wire_name,
                 endpoint: service.endpoint.clone(),
                 experimental: service.experimental,
+                delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
                 operations,
                 resources: service.resources.clone(),
             })
@@ -135,6 +136,7 @@ struct RenderedService<'a> {
     wire_name: &'a str,
     endpoint: String,
     experimental: bool,
+    delay_load_temporalio_workflow: bool,
     operations: Vec<RenderedOperation<'a>>,
     resources: Vec<PlannedResource>,
 }
@@ -2396,11 +2398,21 @@ fn used_python_symbol_imports(body: &str, candidates: &[String]) -> Vec<String> 
 }
 
 fn render_named_python_import(output: &mut String, module: &str, names: &[String]) {
+    render_named_python_import_with_indent(output, module, names, "");
+}
+
+fn render_named_python_import_with_indent(
+    output: &mut String,
+    module: &str,
+    names: &[String],
+    indent: &str,
+) {
     if names.is_empty() {
         return;
     }
 
     if names.len() == 1 {
+        output.push_str(indent);
         output.push_str("from ");
         output.push_str(module);
         output.push_str(" import ");
@@ -2409,14 +2421,17 @@ fn render_named_python_import(output: &mut String, module: &str, names: &[String
         return;
     }
 
+    output.push_str(indent);
     output.push_str("from ");
     output.push_str(module);
     output.push_str(" import (\n");
     for name in names {
+        output.push_str(indent);
         output.push_str("    ");
         output.push_str(name);
         output.push_str(",\n");
     }
+    output.push_str(indent);
     output.push_str(")\n");
 }
 
@@ -2477,6 +2492,22 @@ fn render_optional_python_imports(
     module_imports: &BTreeSet<String>,
     language_imports: &[LanguageImportSpec],
 ) -> bool {
+    render_optional_python_imports_with_skipped_language_modules(
+        output,
+        body,
+        module_imports,
+        language_imports,
+        &BTreeSet::new(),
+    )
+}
+
+fn render_optional_python_imports_with_skipped_language_modules(
+    output: &mut String,
+    body: &str,
+    module_imports: &BTreeSet<String>,
+    language_imports: &[LanguageImportSpec],
+    skipped_language_modules: &BTreeSet<String>,
+) -> bool {
     let simple_imports = [
         ("import collections.abc\n", "collections.abc"),
         ("import dataclasses\n", "dataclasses"),
@@ -2493,8 +2524,13 @@ fn render_optional_python_imports(
         }
     }
     let used_module_imports = used_python_module_imports(body, module_imports);
-    wrote_any |=
-        render_language_python_imports(output, body, language_imports, &used_module_imports);
+    wrote_any |= render_language_python_imports(
+        output,
+        body,
+        language_imports,
+        &used_module_imports,
+        skipped_language_modules,
+    );
 
     if !used_module_imports.is_empty() {
         render_python_module_imports(output, &used_module_imports);
@@ -2509,10 +2545,14 @@ fn render_language_python_imports(
     body: &str,
     language_imports: &[LanguageImportSpec],
     skipped_module_imports: &BTreeSet<String>,
+    skipped_language_modules: &BTreeSet<String>,
 ) -> bool {
     let mut module_imports = BTreeSet::new();
     let mut named_imports = BTreeMap::<String, BTreeSet<String>>::new();
     for import in language_imports {
+        if skipped_language_modules.contains(&import.module) {
+            continue;
+        }
         let used = match import.import_style {
             LanguageImportStyle::Module | LanguageImportStyle::Namespace => {
                 body_uses_python_module_path(body, &import.reference)
@@ -2555,6 +2595,125 @@ fn render_language_python_imports(
             &names.into_iter().collect::<Vec<_>>(),
         );
     }
+    true
+}
+
+fn delayed_temporalio_workflow_skipped_language_modules(
+    service: &RenderedService<'_>,
+) -> BTreeSet<String> {
+    if service.delay_load_temporalio_workflow {
+        BTreeSet::from(["temporalio.workflow".to_string()])
+    } else {
+        BTreeSet::new()
+    }
+}
+
+fn temporalio_workflow_type_annotation(service: &RenderedService<'_>, annotation: &str) -> String {
+    if !service.delay_load_temporalio_workflow {
+        return annotation.to_string();
+    }
+
+    annotation
+        .replace(
+            "temporalio.workflow.NexusOperationHandle",
+            "NexusOperationHandle",
+        )
+        .replace(
+            "temporalio.workflow.ExternalWorkflowHandle",
+            "ExternalWorkflowHandle",
+        )
+}
+
+fn temporalio_workflow_type_ref(service: &RenderedService<'_>, name: &str) -> String {
+    if service.delay_load_temporalio_workflow {
+        name.to_string()
+    } else {
+        format!("temporalio.workflow.{name}")
+    }
+}
+
+fn temporalio_workflow_value_expr(service: &RenderedService<'_>, expression: &str) -> String {
+    if service.delay_load_temporalio_workflow {
+        expression.replace("temporalio.workflow.", "")
+    } else {
+        expression.to_string()
+    }
+}
+
+fn temporalio_workflow_runtime_names(expression: &str) -> Vec<String> {
+    const PREFIX: &str = "temporalio.workflow.";
+    let mut names = BTreeSet::new();
+    let mut index = 0;
+    while let Some(relative_start) = expression[index..].find(PREFIX) {
+        let name_start = index + relative_start + PREFIX.len();
+        let mut name_end = name_start;
+        for character in expression[name_start..].chars() {
+            if is_python_identifier_char(character) {
+                name_end += character.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if name_end > name_start {
+            names.insert(expression[name_start..name_end].to_string());
+        }
+        index = name_end;
+    }
+    names.into_iter().collect()
+}
+
+fn render_temporalio_workflow_runtime_imports(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    names: &[String],
+    indent: &str,
+) {
+    if !service.delay_load_temporalio_workflow || names.is_empty() {
+        return;
+    }
+
+    render_named_python_import_with_indent(output, "temporalio.workflow", names, indent);
+}
+
+fn temporalio_workflow_operation_runtime_names(
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) -> Vec<String> {
+    if !service.delay_load_temporalio_workflow {
+        return Vec::new();
+    }
+
+    let mut names = BTreeSet::from(["create_nexus_client".to_string()]);
+    if let Some(transform_expr) = &operation.output_transform_expr {
+        names.extend(temporalio_workflow_runtime_names(transform_expr));
+    }
+    names.into_iter().collect()
+}
+
+fn temporalio_workflow_type_checking_names(body: &str) -> Vec<String> {
+    ["ExternalWorkflowHandle", "NexusOperationHandle"]
+        .into_iter()
+        .filter(|name| body_uses_python_symbol(body, name))
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn render_temporalio_workflow_type_checking_imports(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    body: &str,
+) -> bool {
+    if !service.delay_load_temporalio_workflow {
+        return false;
+    }
+
+    let names = temporalio_workflow_type_checking_names(body);
+    if names.is_empty() {
+        return false;
+    }
+
+    output.push_str("if typing.TYPE_CHECKING:\n");
+    render_named_python_import_with_indent(output, "temporalio.workflow", &names, "    ");
     true
 }
 
@@ -2772,7 +2931,9 @@ fn render_resource_module_file(
             }
         }
     }
-    module_imports.insert("temporalio.workflow".to_string());
+    if !service.delay_load_temporalio_workflow {
+        module_imports.insert("temporalio.workflow".to_string());
+    }
     body.push_str("\n\n");
     body.push_str("nex_gen_runtime.register_nexus_type(");
     body.push_str(&resource.type_name);
@@ -2785,9 +2946,27 @@ fn render_resource_module_file(
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
-    let wrote_imports =
-        render_optional_python_imports(&mut output, &body, &module_imports, language_imports);
-    if wrote_imports {
+    let type_checking_names = temporalio_workflow_type_checking_names(&body);
+    let body_for_imports =
+        if service.delay_load_temporalio_workflow && !type_checking_names.is_empty() {
+            format!("{body}\ntyping.TYPE_CHECKING")
+        } else {
+            body.clone()
+        };
+    let skipped_language_modules = delayed_temporalio_workflow_skipped_language_modules(service);
+    let wrote_imports = render_optional_python_imports_with_skipped_language_modules(
+        &mut output,
+        &body_for_imports,
+        &module_imports,
+        language_imports,
+        &skipped_language_modules,
+    );
+    if wrote_imports && service.delay_load_temporalio_workflow && !type_checking_names.is_empty() {
+        output.push('\n');
+    }
+    let wrote_type_checking_imports =
+        render_temporalio_workflow_type_checking_imports(&mut output, service, &body);
+    if wrote_imports || wrote_type_checking_imports {
         output.push('\n');
     }
     let used_model_names = used_python_symbol_imports(&body, model_names);
@@ -2925,14 +3104,34 @@ fn render_operation_module(
         body.push_str("\n\n");
     }
     render_operation_functions(&mut body, service, operation);
-    module_imports.insert("temporalio.workflow".to_string());
+    if !service.delay_load_temporalio_workflow {
+        module_imports.insert("temporalio.workflow".to_string());
+    }
 
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
-    let wrote_imports =
-        render_optional_python_imports(&mut output, &body, &module_imports, language_imports);
-    if wrote_imports {
+    let type_checking_names = temporalio_workflow_type_checking_names(&body);
+    let body_for_imports =
+        if service.delay_load_temporalio_workflow && !type_checking_names.is_empty() {
+            format!("{body}\ntyping.TYPE_CHECKING")
+        } else {
+            body.clone()
+        };
+    let skipped_language_modules = delayed_temporalio_workflow_skipped_language_modules(service);
+    let wrote_imports = render_optional_python_imports_with_skipped_language_modules(
+        &mut output,
+        &body_for_imports,
+        &module_imports,
+        language_imports,
+        &skipped_language_modules,
+    );
+    if wrote_imports && service.delay_load_temporalio_workflow && !type_checking_names.is_empty() {
+        output.push('\n');
+    }
+    let wrote_type_checking_imports =
+        render_temporalio_workflow_type_checking_imports(&mut output, service, &body);
+    if wrote_imports || wrote_type_checking_imports {
         output.push('\n');
     }
     let used_model_names = used_python_symbol_imports(&body, model_names);
@@ -3659,6 +3858,7 @@ enum PythonTypeParameter {
 
 fn render_function_unpacked_overloads(
     output: &mut String,
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     unpacked_input: &RenderedUnpackedInput,
 ) {
@@ -3668,7 +3868,13 @@ fn render_function_unpacked_overloads(
     );
 
     for (index, overload_cases) in overload_combinations.iter().enumerate() {
-        render_function_unpacked_overload(output, operation, unpacked_input, overload_cases);
+        render_function_unpacked_overload(
+            output,
+            service,
+            operation,
+            unpacked_input,
+            overload_cases,
+        );
         if index + 1 != overload_combinations.len() {
             output.push('\n');
         }
@@ -4063,6 +4269,7 @@ fn overload_case_for_callable<'a>(
 
 fn render_function_unpacked_overload(
     output: &mut String,
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     unpacked_input: &RenderedUnpackedInput,
     overload_cases: &[RenderedFunctionOverloadCase],
@@ -4176,6 +4383,7 @@ fn render_function_unpacked_overload(
 
     output.push_str(") -> ");
     output.push_str(&function_unpacked_overload_return_annotation(
+        service,
         operation,
         primary_case,
     ));
@@ -4183,6 +4391,7 @@ fn render_function_unpacked_overload(
 }
 
 fn function_unpacked_overload_return_annotation(
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     primary_case: Option<&RenderedFunctionOverloadCase>,
 ) -> String {
@@ -4196,13 +4405,17 @@ fn function_unpacked_overload_return_annotation(
         &operation.output_type_parameters,
         &active_type_parameters,
     );
+    let output_annotation = temporalio_workflow_type_annotation(service, &output_annotation);
     if operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
         || operation.output_direct_result
     {
         output_annotation
     } else {
-        format!("temporalio.workflow.NexusOperationHandle[{output_annotation}]")
+        format!(
+            "{}[{output_annotation}]",
+            temporalio_workflow_type_ref(service, "NexusOperationHandle")
+        )
     }
 }
 
@@ -4265,10 +4478,10 @@ fn render_operation_functions(
     if let Some(unpacked_input) = &operation.unpacked_input {
         output.push('\n');
         if function_unpacked_needs_overloads(&unpacked_input.functions) {
-            render_function_unpacked_overloads(output, operation, unpacked_input);
+            render_function_unpacked_overloads(output, service, operation, unpacked_input);
             output.push('\n');
         }
-        render_unpacked_operation_function(output, operation, unpacked_input);
+        render_unpacked_operation_function(output, service, operation, unpacked_input);
     }
 }
 
@@ -4305,17 +4518,34 @@ fn render_request_only_operation_function(
         || operation.output_direct_result
     {
         output.push_str(") -> ");
-        output.push_str(&operation.output_annotation);
+        output.push_str(&temporalio_workflow_type_annotation(
+            service,
+            &operation.output_annotation,
+        ));
         output.push_str(":\n");
     } else {
-        output.push_str(") -> temporalio.workflow.NexusOperationHandle[\n");
+        output.push_str(") -> ");
+        output.push_str(&temporalio_workflow_type_ref(
+            service,
+            "NexusOperationHandle",
+        ));
+        output.push_str("[\n");
         output.push_str("    ");
-        output.push_str(&operation.output_annotation);
+        output.push_str(&temporalio_workflow_type_annotation(
+            service,
+            &operation.output_annotation,
+        ));
         output.push_str(",\n");
         output.push_str("]:\n");
         if render_request_doc {
             render_operation_docstring(output, operation, &[], None);
         }
+        render_temporalio_workflow_runtime_imports(
+            output,
+            service,
+            &temporalio_workflow_operation_runtime_names(service, operation),
+            "    ",
+        );
         render_inline_nexus_client(output, service, "    ");
         output.push_str("    return await nexus_client.start_operation(\n");
         output.push_str("        operation=");
@@ -4337,6 +4567,13 @@ fn render_request_only_operation_function(
     if render_request_doc {
         render_operation_docstring(output, operation, &[], None);
     }
+
+    render_temporalio_workflow_runtime_imports(
+        output,
+        service,
+        &temporalio_workflow_operation_runtime_names(service, operation),
+        "    ",
+    );
 
     if operation.output_direct_result {
         render_inline_nexus_client(output, service, "    ");
@@ -4374,7 +4611,7 @@ fn render_request_only_operation_function(
     if let Some(transform_expr) = &operation.output_transform_expr {
         output.push_str("    result = await handle\n");
         output.push_str("    return ");
-        output.push_str(transform_expr);
+        output.push_str(&temporalio_workflow_value_expr(service, transform_expr));
         output.push('\n');
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("    result = await handle\n");
@@ -4658,11 +4895,12 @@ fn python_docstring_literal_text(value: &str) -> String {
 
 fn render_unpacked_operation_function(
     output: &mut String,
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     unpacked_input: &RenderedUnpackedInput,
 ) {
     if !unpacked_input.functions.is_empty() {
-        render_function_unpacked_implementation(output, operation, unpacked_input);
+        render_function_unpacked_implementation(output, service, operation, unpacked_input);
         return;
     }
 
@@ -4688,12 +4926,23 @@ fn render_unpacked_operation_function(
         || operation.output_direct_result
     {
         output.push_str(") -> ");
-        output.push_str(&operation.output_annotation);
+        output.push_str(&temporalio_workflow_type_annotation(
+            service,
+            &operation.output_annotation,
+        ));
         output.push_str(":\n");
     } else {
-        output.push_str(") -> temporalio.workflow.NexusOperationHandle[\n");
+        output.push_str(") -> ");
+        output.push_str(&temporalio_workflow_type_ref(
+            service,
+            "NexusOperationHandle",
+        ));
+        output.push_str("[\n");
         output.push_str("    ");
-        output.push_str(&operation.output_annotation);
+        output.push_str(&temporalio_workflow_type_annotation(
+            service,
+            &operation.output_annotation,
+        ));
         output.push_str(",\n");
         output.push_str("]:\n");
     }
@@ -4719,6 +4968,7 @@ fn render_unpacked_operation_function(
 
 fn render_function_unpacked_implementation(
     output: &mut String,
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     unpacked_input: &RenderedUnpackedInput,
 ) {
@@ -4807,12 +5057,23 @@ fn render_function_unpacked_implementation(
         || operation.output_direct_result
     {
         output.push_str(") -> ");
-        output.push_str(&operation.output_annotation);
+        output.push_str(&temporalio_workflow_type_annotation(
+            service,
+            &operation.output_annotation,
+        ));
         output.push_str(":\n");
     } else {
-        output.push_str(") -> temporalio.workflow.NexusOperationHandle[\n");
+        output.push_str(") -> ");
+        output.push_str(&temporalio_workflow_type_ref(
+            service,
+            "NexusOperationHandle",
+        ));
+        output.push_str("[\n");
         output.push_str("    ");
-        output.push_str(&operation.output_annotation);
+        output.push_str(&temporalio_workflow_type_annotation(
+            service,
+            &operation.output_annotation,
+        ));
         output.push_str(",\n");
         output.push_str("]:\n");
     }
@@ -4980,7 +5241,11 @@ fn render_flattened_message_setup(
 
 fn render_inline_nexus_client(output: &mut String, service: &RenderedService<'_>, indent: &str) {
     output.push_str(indent);
-    output.push_str("nexus_client = temporalio.workflow.create_nexus_client(\n");
+    if service.delay_load_temporalio_workflow {
+        output.push_str("nexus_client = create_nexus_client(\n");
+    } else {
+        output.push_str("nexus_client = temporalio.workflow.create_nexus_client(\n");
+    }
     output.push_str(indent);
     output.push_str("    service=");
     output.push_str(&python_string_literal(service.wire_name));
@@ -5350,7 +5615,10 @@ class Example(enum.Enum):
         assert!(!output.contains("namespace: str | None = None"));
         assert!(output.contains("message.namespace = workflow_namespace()"));
         assert!(output.contains("result = await handle"));
-        assert!(output.contains("return temporalio.workflow.get_external_workflow_handle("));
+        assert!(output.contains(
+            "from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )"
+        ));
+        assert!(output.contains("return get_external_workflow_handle("));
         assert!(output.contains("run_id=result.run_id"));
         assert!(output.contains("signal_args: list[typing.Any] | None = None"));
         assert!(output.contains("temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE"));
@@ -5384,7 +5652,11 @@ class Example(enum.Enum):
         assert!(!output.contains("link_to_proto("));
         assert!(output.contains("async def _signal_with_start_workflow("));
         assert!(output.contains("request: SignalWithStartWorkflowRequest"));
-        assert!(output.contains(") -> temporalio.workflow.ExternalWorkflowHandle[typing.Any]:"));
+        assert!(output.contains(
+            "if typing.TYPE_CHECKING:\n    from temporalio.workflow import ExternalWorkflowHandle"
+        ));
+        assert!(output.contains(") -> ExternalWorkflowHandle[typing.Any]:"));
+        assert!(output.contains("    nexus_client = create_nexus_client("));
         assert!(!output.contains("(typing.TypedDict, total=False):"));
         assert!(!output.contains("typing.Unpack["));
         assert!(!output.contains("args: tuple[typing.Any, ...] | None = None"));
@@ -5398,9 +5670,7 @@ class Example(enum.Enum):
         ));
         assert!(output.contains("WorkflowArgs = typing_extensions.TypeVarTuple(\"WorkflowArgs\")"));
         assert!(output.contains("WorkflowResult = typing.TypeVar(\"WorkflowResult\")"));
-        assert!(
-            output.contains(") -> temporalio.workflow.ExternalWorkflowHandle[WorkflowResult]:")
-        );
+        assert!(output.contains(") -> ExternalWorkflowHandle[WorkflowResult]:"));
         assert!(output.contains("async def signal_with_start_workflow("));
         assert!(output.contains("*positional_args: typing_extensions.Unpack[WorkflowArgs],"));
         assert!(output.contains("args: list[typing.Any],"));
@@ -5488,7 +5758,7 @@ class Example(enum.Enum):
         assert!(!output.contains("class Priority:"));
         assert!(!output.contains("class VersioningOverride:"));
         assert!(!output.contains("build_signal_with_start_workflow_request"));
-        assert!(!output.contains("from model_overrides import"));
+        assert!(!output.contains("from temporal_model_converters import"));
 
         let type_roundtrip_spec = ApiSpec::load_for_language_with_inputs(
             Language::Python,
@@ -5574,6 +5844,73 @@ interface example-service {
         assert!(output.contains(
             "    \"\"\"Runs example.\n\n    .. warning::\n        This API is experimental and subject to change."
         ));
+    }
+
+    #[test]
+    fn delays_temporalio_workflow_imports_when_enabled() {
+        let wit = r#"
+package temporal:nexus@1.0.0;
+
+world system {
+  export example-service;
+}
+
+/// @nexus.endpoint "example"
+/// @nexus.delay-load-temporalio-workflow
+interface example-service {
+  record request {
+    id: string,
+  }
+
+  record response {
+    ok: bool,
+  }
+
+  start: func(request: request) -> response;
+
+  /// @nexus.output-transform
+  ///   python-type="temporalio.workflow.ExternalWorkflowHandle[str]"
+  ///   python="temporalio.workflow.get_external_workflow_handle(request.id)"
+  get-handle: func(request: request) -> response;
+}
+"#;
+        let spec = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
+            .unwrap();
+        let descriptors =
+            DescriptorIndex::from_descriptor_set(prost_types::FileDescriptorSet::default())
+                .unwrap();
+        let generated = generate_files(
+            Language::Python,
+            &spec,
+            &descriptors,
+            &crate::SupportFiles::default(),
+        )
+        .unwrap();
+
+        let start = generated
+            .files
+            .get(&PathBuf::from("operations/start.py"))
+            .expect("start operation should be rendered");
+        assert!(!start.contains("\nimport temporalio.workflow\n\n"));
+        assert!(start.contains(
+            "if typing.TYPE_CHECKING:\n    from temporalio.workflow import NexusOperationHandle\n"
+        ));
+        assert!(start.contains(
+            ") -> NexusOperationHandle[\n    Response,\n]:\n    from temporalio.workflow import create_nexus_client\n    nexus_client = create_nexus_client("
+        ));
+
+        let get_handle = generated
+            .files
+            .get(&PathBuf::from("operations/get_handle.py"))
+            .expect("get-handle operation should be rendered");
+        assert!(!get_handle.contains("\nimport temporalio.workflow\n\n"));
+        assert!(get_handle.contains(
+            "if typing.TYPE_CHECKING:\n    from temporalio.workflow import ExternalWorkflowHandle\n"
+        ));
+        assert!(get_handle.contains(
+            ") -> ExternalWorkflowHandle[str]:\n    from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )\n    request_proto = request\n    nexus_client = create_nexus_client("
+        ));
+        assert!(get_handle.contains("return get_external_workflow_handle(request.id)\n"));
     }
 
     #[test]

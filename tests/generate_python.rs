@@ -283,11 +283,18 @@ fn python_request_models_are_write_only() {
     assert!(!rendered.contains("namespace: str | None"));
     assert!(rendered.contains("message.namespace = workflow_namespace()"));
     assert!(rendered.contains("result = await handle"));
-    assert!(rendered.contains("return temporalio.workflow.get_external_workflow_handle("));
+    assert!(rendered.contains(
+        "from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )"
+    ));
+    assert!(rendered.contains("return get_external_workflow_handle("));
     assert!(rendered.contains("run_id=result.run_id"));
     assert!(rendered.contains("async def _signal_with_start_workflow("));
     assert!(rendered.contains("request: SignalWithStartWorkflowRequest"));
-    assert!(rendered.contains(") -> temporalio.workflow.ExternalWorkflowHandle[typing.Any]:"));
+    assert!(rendered.contains(
+        "if typing.TYPE_CHECKING:\n    from temporalio.workflow import ExternalWorkflowHandle"
+    ));
+    assert!(rendered.contains(") -> ExternalWorkflowHandle[typing.Any]:"));
+    assert!(rendered.contains("    nexus_client = create_nexus_client("));
     assert!(rendered.contains("async def signal_with_start_workflow("));
     assert!(rendered.contains("@typing.overload"));
     assert!(rendered.contains("workflow: str,"));
@@ -299,7 +306,7 @@ fn python_request_models_are_write_only() {
     ));
     assert!(rendered.contains("WorkflowArgs = typing_extensions.TypeVarTuple(\"WorkflowArgs\")"));
     assert!(rendered.contains("WorkflowResult = typing.TypeVar(\"WorkflowResult\")"));
-    assert!(rendered.contains(") -> temporalio.workflow.ExternalWorkflowHandle[WorkflowResult]:"));
+    assert!(rendered.contains(") -> ExternalWorkflowHandle[WorkflowResult]:"));
     assert!(rendered.contains("*positional_args: typing_extensions.Unpack[WorkflowArgs],"));
     assert!(rendered.contains("args: list[typing.Any],"));
     assert!(!rendered.contains("tuple[FirstWorkflowArg"));

@@ -6,6 +6,7 @@ world system {
 
 /// @nexus.endpoint "temporal-system"
 /// @nexus.service-name "temporal.api.workflowservice.v1.WorkflowService"
+/// @nexus.delay-load-temporalio-workflow
 /// @nexus.experimental
 interface workflow-service {
   use nexus:temporal-types/model@1.0.0.{

@@ -4363,7 +4363,7 @@ mod tests {
         SupportFiles {
             typescript: Some(
                 fs::read_to_string(root.join(
-                    "examples/inputs/deps/nexus-temporal-types/typescript/model_overrides.ts",
+                    "examples/inputs/deps/nexus-temporal-types/typescript/temporal_model_converters.ts",
                 ))
                 .unwrap(),
             ),
@@ -4589,7 +4589,7 @@ mod tests {
         );
         assert!(output.contains("const client = workflow.createNexusServiceClient({"));
         assert!(!output.contains("export class WorkflowServiceClient"));
-        assert!(!output.contains("from './model_overrides.ts'"));
+        assert!(!output.contains("from './temporal_model_converters.ts'"));
         assert!(!output.contains("// Included from support.$typescript"));
 
         let type_roundtrip_spec = ApiSpec::load_for_language_with_inputs(

@@ -11,7 +11,6 @@ import temporalio.api.taskqueue.v1.message_pb2 as taskqueue_pb2
 import temporalio.api.workflow.v1
 import temporalio.converter
 import temporalio.common
-import temporalio.workflow
 
 
 def retry_policy_from_proto(
@@ -31,14 +30,18 @@ def retry_policy_to_proto(
 def workflow_function_name(
     value: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],
 ) -> str:
-    name, _result_type = temporalio.workflow._Definition.get_name_and_result_type(value)  # pyright: ignore[reportPrivateUsage]
+    from temporalio.workflow import _Definition  # pyright: ignore[reportPrivateUsage]
+
+    name, _result_type = _Definition.get_name_and_result_type(value)
     return name
 
 
 def signal_function_to_proto(
     value: str | collections.abc.Callable[..., typing.Any],
 ) -> str:
-    return temporalio.workflow._SignalDefinition.must_name_from_fn_or_str(value)  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]
+    from temporalio.workflow import _SignalDefinition  # pyright: ignore[reportPrivateUsage]
+
+    return _SignalDefinition.must_name_from_fn_or_str(value)  # pyright: ignore[reportUnknownMemberType]
 
 
 def workflow_type_to_proto(
@@ -61,13 +64,17 @@ def task_queue_to_proto(
 
 
 def workflow_namespace() -> str:
-    return temporalio.workflow.info().namespace
+    from temporalio.workflow import info
+
+    return info().namespace
 
 
 def payloads_to_proto(
     values: collections.abc.Sequence[typing.Any],
 ) -> common_pb2.Payloads:
-    return temporalio.workflow.payload_converter().to_payloads_wrapper(values)
+    from temporalio.workflow import payload_converter
+
+    return payload_converter().to_payloads_wrapper(values)
 
 
 def _clone_payload(payload: common_pb2.Payload) -> common_pb2.Payload:
@@ -79,16 +86,20 @@ def _clone_payload(payload: common_pb2.Payload) -> common_pb2.Payload:
 def _value_to_payload(value: object | common_pb2.Payload) -> common_pb2.Payload:
     if isinstance(value, common_pb2.Payload):
         return _clone_payload(value)
-    payloads = temporalio.workflow.payload_converter().to_payloads_wrapper([value])
+    from temporalio.workflow import payload_converter
+
+    payloads = payload_converter().to_payloads_wrapper([value])
     return _clone_payload(payloads.payloads[0])
 
 
 def _payload_to_value(payload: common_pb2.Payload) -> object:
     wrapper = common_pb2.Payloads()
     wrapper.payloads.add().CopyFrom(payload)
+    from temporalio.workflow import payload_converter
+
     return typing.cast(
         object,
-        temporalio.workflow.payload_converter().from_payloads_wrapper(wrapper)[0],
+        payload_converter().from_payloads_wrapper(wrapper)[0],
     )
 
 

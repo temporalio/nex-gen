@@ -34,6 +34,7 @@ pub(crate) struct PlannedService {
     pub(crate) wire_name: String,
     pub(crate) endpoint: String,
     pub(crate) experimental: bool,
+    pub(crate) delay_load_temporalio_workflow: bool,
     pub(crate) operations: Vec<PlannedOperation>,
     pub(crate) resources: Vec<PlannedResource>,
 }
@@ -529,6 +530,7 @@ fn plan_service(
         wire_name: service.wire_name.clone(),
         endpoint,
         experimental: service.experimental,
+        delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
         operations,
         resources,
     })
