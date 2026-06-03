@@ -25,7 +25,10 @@ APP_ROOT = Path(__file__).resolve().parent
 OUTPUT_PATH = APP_ROOT.parent / "workflow_service"
 
 SIGNAL_WITH_START_OPERATION = workflow_service.__nexus_operation_registry__[
-    ("WorkflowService", "SignalWithStartWorkflowExecution")
+    (
+        "temporal.api.workflowservice.v1.WorkflowService",
+        "SignalWithStartWorkflowExecution",
+    )
 ]
 
 TASK_QUEUE = "demo-task-queue"
@@ -399,7 +402,12 @@ def test_generated_metadata() -> None:
 
     assert isinstance(signal_operation, Operation)
     assert (
-        registry[("WorkflowService", "SignalWithStartWorkflowExecution")]
+        registry[
+            (
+                "temporal.api.workflowservice.v1.WorkflowService",
+                "SignalWithStartWorkflowExecution",
+            )
+        ]
         is signal_operation
     )
     assert not hasattr(workflow_service, "WorkflowService")

@@ -3246,7 +3246,7 @@ fn render_package_init(
         for operation in &service.operations {
             output.push_str("    (\n");
             output.push_str("        \"");
-            output.push_str(service.name);
+            output.push_str(service.wire_name);
             output.push_str("\",\n");
             output.push_str("        \"");
             output.push_str(operation.wire_name);
