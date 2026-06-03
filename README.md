@@ -148,6 +148,19 @@ Resource methods bind to operations only when the method and operation have the 
 
 Input WIT files can add support code with `@nexus.support`. Python support fragments are copied into the generated private `_support` package, and TypeScript support fragments are emitted as `support.ts` next to the generated `index.ts`.
 
+Support code can also be supplied outside WIT with repeatable `--support-file`
+arguments on `generate`. Explicit support files apply to the selected
+`--lang`, are appended after WIT-declared support, and use the same generated
+layout as `@nexus.support` fragments:
+
+```bash
+cargo run -- generate \
+  --lang python \
+  --input examples/inputs/user-service.wit \
+  --support-file /path/to/custom_support.py \
+  --output /tmp/user_service
+```
+
 ## Runtimes
 
 The examples include small language runtimes that are not generated from WIT:

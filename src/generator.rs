@@ -84,14 +84,15 @@ pub fn generate_files(
     let plan = build_api_plan(spec, descriptors)?;
     let warnings = generation_warnings(&plan);
     let language_imports = spec.imports_for_language(language);
+    let support_fragments = if support.fragments.is_empty() {
+        spec.support.fragments_for_language(language)
+    } else {
+        &support.fragments
+    };
 
     let mut generated = match language {
-        Language::Python => python::generate(
-            &plan,
-            spec.support.fragments_for_language(language),
-            language_imports,
-        ),
-        Language::TypeScript => typescript::generate(&plan, support, language_imports),
+        Language::Python => python::generate(&plan, support_fragments, language_imports),
+        Language::TypeScript => typescript::generate(&plan, support_fragments, language_imports),
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = warnings;

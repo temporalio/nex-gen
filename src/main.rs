@@ -35,6 +35,8 @@ struct GenerateArgs {
     lang: CliLanguage,
     #[arg(long = "input", required = true)]
     inputs: Vec<PathBuf>,
+    #[arg(long = "support-file")]
+    support_paths: Vec<PathBuf>,
     #[arg(long)]
     descriptors: Vec<PathBuf>,
     #[arg(long)]
@@ -108,6 +110,7 @@ fn main() -> ExitCode {
         Commands::Generate(args) => generate_to_file(&GenerateRequest {
             language: args.lang.into(),
             input_paths: args.inputs,
+            support_paths: args.support_paths,
             descriptor_paths: args.descriptors,
             output_path: args.output,
             format: args.format,
