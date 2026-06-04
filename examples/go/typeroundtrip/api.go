@@ -4,6 +4,8 @@ package temporalsystem
 import (
 	"time"
 
+	activity "go.temporal.io/api/activity/v1"
+	common "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -23,26 +25,46 @@ type ActivityOptions struct {
 	Priority               temporal.Priority
 }
 
+func (m ActivityOptions) ToProto() *activity.ActivityOptions {
+	message := &activity.ActivityOptions{}
+	message.TaskQueue = TaskQueueToProto(m.TaskQueue)
+	message.RetryPolicy = RetryPolicyToProto(m.RetryPolicy)
+	message.ScheduleToCloseTimeout = DurationToProto(m.ScheduleToCloseTimeout)
+	message.Priority = PriorityToProto(m.Priority)
+	return message
+}
+
+func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
+	value := ActivityOptions{}
+	value.TaskQueue = TaskQueueFromProto(proto.GetTaskQueue())
+	value.RetryPolicy = RetryPolicyFromProto(proto.GetRetryPolicy())
+	value.ScheduleToCloseTimeout = DurationFromProto(proto.GetScheduleToCloseTimeout())
+	value.Priority = PriorityFromProto(proto.GetPriority())
+	return value
+}
+
 // --- Operations (internal) ---
 
 func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, request, workflow.NexusOperationOptions{})
-	var result temporal.RetryPolicy
+	fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, RetryPolicyToProto(request), workflow.NexusOperationOptions{})
+	var result common.RetryPolicy
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	value := RetryPolicyFromProto(&result)
+	return &value, nil
 }
 
 func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*ActivityOptions, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, ActivityOptionsOperationOp, request, workflow.NexusOperationOptions{})
-	var result ActivityOptions
+	fut := c.ExecuteOperation(ctx, ActivityOptionsOperationOp, request.ToProto(), workflow.NexusOperationOptions{})
+	var result activity.ActivityOptions
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	value := ActivityOptionsFromProto(&result)
+	return &value, nil
 }
 
 // --- Operations (public API) ---

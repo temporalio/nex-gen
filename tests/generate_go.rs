@@ -280,3 +280,57 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("type DeactivateOptions struct"));
     assert!(rendered.contains("func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) error"));
 }
+
+#[test]
+fn go_type_roundtrip_generates_proto_conversions() {
+    let root = project_root();
+    let rendered = generate_to_string_with_inputs(
+        nexus_api_gen::language::Language::Go,
+        &example_input_paths(&root, "type-roundtrip"),
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
+
+    // Aliased proto imports derived from the descriptors' `go_package` option.
+    assert!(rendered.contains("activity \"go.temporal.io/api/activity/v1\""));
+    assert!(rendered.contains("common \"go.temporal.io/api/common/v1\""));
+
+    // Generated model gets a ToProto method targeting the proto message type.
+    assert!(rendered.contains("func (m ActivityOptions) ToProto() *activity.ActivityOptions {"));
+    assert!(rendered.contains("message := &activity.ActivityOptions{}"));
+    // Replacement-typed fields call hand-written converter functions.
+    assert!(rendered.contains("message.RetryPolicy = RetryPolicyToProto(m.RetryPolicy)"));
+    assert!(rendered.contains("message.TaskQueue = TaskQueueToProto(m.TaskQueue)"));
+    assert!(rendered.contains("message.Priority = PriorityToProto(m.Priority)"));
+    assert!(
+        rendered.contains("message.ScheduleToCloseTimeout = DurationToProto(m.ScheduleToCloseTimeout)")
+    );
+    assert!(rendered.contains("return message"));
+
+    // Generated model gets a FromProto constructor.
+    assert!(
+        rendered.contains("func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {")
+    );
+    assert!(rendered.contains("value.RetryPolicy = RetryPolicyFromProto(proto.GetRetryPolicy())"));
+
+    // Operation functions convert the request to proto before the SDK call and
+    // decode the proto response afterwards.
+    assert!(rendered.contains(
+        "fut := c.ExecuteOperation(ctx, ActivityOptionsOperationOp, request.ToProto(), workflow.NexusOperationOptions{})"
+    ));
+    assert!(rendered.contains("var result activity.ActivityOptions"));
+    assert!(rendered.contains("value := ActivityOptionsFromProto(&result)"));
+
+    // Replacement-typed operations (request is a native SDK type) convert via
+    // the hand-written converter and decode the proto response.
+    assert!(rendered.contains(
+        "fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, RetryPolicyToProto(request), workflow.NexusOperationOptions{})"
+    ));
+    assert!(rendered.contains("var result common.RetryPolicy"));
+    assert!(rendered.contains("value := RetryPolicyFromProto(&result)"));
+
+    // The hand-written support fragment is emitted alongside api.go in the
+    // generated package.
+    assert!(rendered.contains("### model_overrides.go"));
+    assert!(rendered.contains("func RetryPolicyToProto(p temporal.RetryPolicy) *common.RetryPolicy {"));
+}

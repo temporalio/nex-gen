@@ -155,6 +155,7 @@ pub struct MessageMetadata {
     pub full_name: String,
     pub file_name: Option<String>,
     pub package: String,
+    pub go_package: Option<String>,
     pub descriptor: DescriptorProto,
 }
 
@@ -163,6 +164,7 @@ pub struct EnumMetadata {
     pub full_name: String,
     pub file_name: Option<String>,
     pub package: String,
+    pub go_package: Option<String>,
     pub descriptor: EnumDescriptorProto,
 }
 
@@ -238,6 +240,7 @@ fn index_message(
             full_name: full_name.clone(),
             file_name: file.name.clone(),
             package: package.to_string(),
+            go_package: file_go_package(file),
             descriptor: descriptor.clone(),
         },
     );
@@ -284,11 +287,22 @@ fn index_enum(
             full_name,
             file_name: file.name.clone(),
             package: package.to_string(),
+            go_package: file_go_package(file),
             descriptor: descriptor.clone(),
         },
     );
 
     Ok(())
+}
+
+/// Reads the `go_package` file option from a proto file descriptor, if present.
+///
+/// The option uses the conventional `<import path>[;<package alias>]` form,
+/// e.g. `go.temporal.io/api/common/v1;common`.
+fn file_go_package(file: &FileDescriptorProto) -> Option<String> {
+    file.options
+        .as_ref()
+        .and_then(|options| options.go_package.clone())
 }
 
 fn index_service(

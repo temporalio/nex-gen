@@ -8,6 +8,8 @@ import (
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	activitypb "go.temporal.io/api/activity/v1"
+	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
@@ -37,15 +39,16 @@ func TestTypeRoundtripSuite(t *testing.T) {
 
 func (s *TypeRoundtripTestSuite) TestRetryPolicyOperation() {
 	policy := temporal.RetryPolicy{MaximumAttempts: 3}
+	protoPolicy := &commonpb.RetryPolicy{MaximumAttempts: 3}
 
 	s.env.OnNexusOperation(
 		tr.ServiceName,
-		nexus.NewOperationReference[temporal.RetryPolicy, temporal.RetryPolicy](tr.RetryPolicyOperationOp),
-		policy,
+		nexus.NewOperationReference[*commonpb.RetryPolicy, *commonpb.RetryPolicy](tr.RetryPolicyOperationOp),
+		mock.Anything,
 		mock.Anything,
 	).Return(
-		&nexus.HandlerStartOperationResultSync[temporal.RetryPolicy]{
-			Value: policy,
+		&nexus.HandlerStartOperationResultSync[*commonpb.RetryPolicy]{
+			Value: protoPolicy,
 		},
 		nil,
 	)
@@ -68,25 +71,21 @@ func (s *TypeRoundtripTestSuite) TestActivityOptionsOperation() {
 		FairnessKey:    "tenant-a",
 		FairnessWeight: 2.5,
 	}
+	protoResult := tr.ActivityOptions{
+		TaskQueue:              "demo-task-queue",
+		RetryPolicy:            policy,
+		ScheduleToCloseTimeout: 7 * time.Second,
+		Priority:               priority,
+	}.ToProto()
 
 	s.env.OnNexusOperation(
 		tr.ServiceName,
-		nexus.NewOperationReference[tr.ActivityOptions, tr.ActivityOptions](tr.ActivityOptionsOperationOp),
-		tr.ActivityOptions{
-			TaskQueue:              "demo-task-queue",
-			RetryPolicy:            policy,
-			ScheduleToCloseTimeout: 7 * time.Second,
-			Priority:               priority,
-		},
+		nexus.NewOperationReference[*activitypb.ActivityOptions, *activitypb.ActivityOptions](tr.ActivityOptionsOperationOp),
+		mock.Anything,
 		mock.Anything,
 	).Return(
-		&nexus.HandlerStartOperationResultSync[tr.ActivityOptions]{
-			Value: tr.ActivityOptions{
-				TaskQueue:              "demo-task-queue",
-				RetryPolicy:            policy,
-				ScheduleToCloseTimeout: 7 * time.Second,
-				Priority:               priority,
-			},
+		&nexus.HandlerStartOperationResultSync[*activitypb.ActivityOptions]{
+			Value: protoResult,
 		},
 		nil,
 	)
@@ -111,34 +110,6 @@ func (s *TypeRoundtripTestSuite) TestActivityOptionsOperation() {
 	s.InDelta(2.5, float64(result.Priority.FairnessWeight), 0.01)
 }
 
-func (s *TypeRoundtripTestSuite) TestActivityOptionsOperationRequiredOnly() {
-	policy := temporal.RetryPolicy{MaximumAttempts: 5}
-
-	s.env.OnNexusOperation(
-		tr.ServiceName,
-		nexus.NewOperationReference[tr.ActivityOptions, tr.ActivityOptions](tr.ActivityOptionsOperationOp),
-		tr.ActivityOptions{RetryPolicy: policy},
-		mock.Anything,
-	).Return(
-		&nexus.HandlerStartOperationResultSync[tr.ActivityOptions]{
-			Value: tr.ActivityOptions{RetryPolicy: policy},
-		},
-		nil,
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*tr.ActivityOptions, error) {
-		return tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{})
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result tr.ActivityOptions
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal(int32(5), result.RetryPolicy.MaximumAttempts)
-	s.Equal("", result.TaskQueue)
-	s.Equal(time.Duration(0), result.ScheduleToCloseTimeout)
-}
-
 // --- Integration tests ---
 
 type TypeRoundtripIntegrationSuite struct {
@@ -153,13 +124,13 @@ func (s *TypeRoundtripIntegrationSuite) SetupTest() {
 	s.calls = nil
 
 	retryPolicyOp := nexus.NewSyncOperation(tr.RetryPolicyOperationOp,
-		func(ctx context.Context, input temporal.RetryPolicy, opts nexus.StartOperationOptions) (temporal.RetryPolicy, error) {
+		func(ctx context.Context, input *commonpb.RetryPolicy, opts nexus.StartOperationOptions) (*commonpb.RetryPolicy, error) {
 			s.calls = append(s.calls, testCall{"RetryPolicyOperation", input})
 			return input, nil
 		})
 
 	activityOptionsOp := nexus.NewSyncOperation(tr.ActivityOptionsOperationOp,
-		func(ctx context.Context, input tr.ActivityOptions, opts nexus.StartOperationOptions) (tr.ActivityOptions, error) {
+		func(ctx context.Context, input *activitypb.ActivityOptions, opts nexus.StartOperationOptions) (*activitypb.ActivityOptions, error) {
 			s.calls = append(s.calls, testCall{"ActivityOptionsOperation", input})
 			return input, nil
 		})
@@ -188,8 +159,8 @@ func (s *TypeRoundtripIntegrationSuite) TestRetryPolicyOperation() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("RetryPolicyOperation", s.calls[0].Operation)
-	handlerInput := s.calls[0].Input.(temporal.RetryPolicy)
-	s.Equal(int32(3), handlerInput.MaximumAttempts)
+	handlerInput := s.calls[0].Input.(*commonpb.RetryPolicy)
+	s.Equal(int32(3), handlerInput.GetMaximumAttempts())
 }
 
 func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperation() {
@@ -221,11 +192,11 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperation() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("ActivityOptionsOperation", s.calls[0].Operation)
-	handlerInput := s.calls[0].Input.(tr.ActivityOptions)
-	s.Equal(int32(3), handlerInput.RetryPolicy.MaximumAttempts)
-	s.Equal("demo-task-queue", handlerInput.TaskQueue)
-	s.Equal(7*time.Second, handlerInput.ScheduleToCloseTimeout)
-	s.Equal(4, handlerInput.Priority.PriorityKey)
+	handlerInput := s.calls[0].Input.(*activitypb.ActivityOptions)
+	s.Equal(int32(3), handlerInput.GetRetryPolicy().GetMaximumAttempts())
+	s.Equal("demo-task-queue", handlerInput.GetTaskQueue().GetName())
+	s.Equal(7*time.Second, handlerInput.GetScheduleToCloseTimeout().AsDuration())
+	s.Equal(int32(4), handlerInput.GetPriority().GetPriorityKey())
 }
 
 func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperationRequiredOnly() {
@@ -245,6 +216,6 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperationRequiredOnly
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("ActivityOptionsOperation", s.calls[0].Operation)
-	handlerInput := s.calls[0].Input.(tr.ActivityOptions)
-	s.Equal(int32(5), handlerInput.RetryPolicy.MaximumAttempts)
+	handlerInput := s.calls[0].Input.(*activitypb.ActivityOptions)
+	s.Equal(int32(5), handlerInput.GetRetryPolicy().GetMaximumAttempts())
 }

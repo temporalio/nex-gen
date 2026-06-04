@@ -86,7 +86,7 @@ pub fn generate_files(
     let warnings = generation_warnings(&plan);
 
     let mut generated = match language {
-        Language::Go => go::generate(&plan),
+        Language::Go => go::generate(&plan, spec.support.fragments_for_language(language)),
         Language::Python => python::generate(&plan, spec.support.fragments_for_language(language)),
         Language::TypeScript => typescript::generate(&plan, support),
         language => Err(Error::UnsupportedLanguage { language }),

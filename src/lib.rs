@@ -166,7 +166,7 @@ pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let use_default_languages = request.languages.is_empty();
     let languages = if use_default_languages {
-        vec![Language::Python, Language::TypeScript]
+        vec![Language::Python, Language::TypeScript, Language::Go]
     } else {
         request.languages.clone()
     };

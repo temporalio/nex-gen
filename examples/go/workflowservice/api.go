@@ -4,7 +4,9 @@ package temporalsystem
 import (
 	"time"
 
-	"go.temporal.io/api/enums/v1"
+	enums "go.temporal.io/api/enums/v1"
+	sdk "go.temporal.io/api/sdk/v1"
+	workflowservice "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -40,24 +42,77 @@ type SignalWithStartWorkflowRequest struct {
 	UserMetadata       *UserMetadata
 }
 
+func (m SignalWithStartWorkflowRequest) ToProto() *workflowservice.SignalWithStartWorkflowExecutionRequest {
+	message := &workflowservice.SignalWithStartWorkflowExecutionRequest{}
+	message.WorkflowType = WorkflowTypeToProto(m.Workflow)
+	message.Input = PayloadsToProto(m.Args)
+	message.WorkflowId = m.Id
+	message.TaskQueue = TaskQueueToProto(m.TaskQueue)
+	message.SignalName = m.Signal
+	message.SignalInput = PayloadsToProto(m.SignalArgs)
+	message.WorkflowExecutionTimeout = DurationToProto(m.ExecutionTimeout)
+	message.WorkflowRunTimeout = DurationToProto(m.RunTimeout)
+	message.WorkflowTaskTimeout = DurationToProto(m.TaskTimeout)
+	message.RequestId = m.RequestId
+	message.WorkflowIdReusePolicy = enums.WorkflowIdReusePolicy(m.IdReusePolicy)
+	message.WorkflowIdConflictPolicy = enums.WorkflowIdConflictPolicy(m.IdConflictPolicy)
+	message.RetryPolicy = RetryPolicyToProto(m.RetryPolicy)
+	message.CronSchedule = m.CronSchedule
+	message.Memo = MemoToProto(m.Memo)
+	message.SearchAttributes = SearchAttributesToProto(m.SearchAttributes)
+	message.Priority = PriorityToProto(m.Priority)
+	message.VersioningOverride = VersioningOverrideToProto(m.VersioningOverride)
+	message.WorkflowStartDelay = DurationToProto(m.StartDelay)
+	if m.UserMetadata != nil {
+		message.UserMetadata = (*m.UserMetadata).ToProto()
+	}
+	message.Namespace = WorkflowNamespace()
+	return message
+}
+
 type UserMetadata struct {
 	StaticSummary any
 	StaticDetails any
 }
 
+func (m UserMetadata) ToProto() *sdk.UserMetadata {
+	message := &sdk.UserMetadata{}
+	message.Summary = PayloadToProto(m.StaticSummary)
+	message.Details = PayloadToProto(m.StaticDetails)
+	return message
+}
+
+func UserMetadataFromProto(proto *sdk.UserMetadata) UserMetadata {
+	value := UserMetadata{}
+	value.StaticSummary = PayloadFromProto(proto.GetSummary())
+	value.StaticDetails = PayloadFromProto(proto.GetDetails())
+	return value
+}
+
 type SignalWithStartWorkflowResponse struct {
+}
+
+func (m SignalWithStartWorkflowResponse) ToProto() *workflowservice.SignalWithStartWorkflowExecutionResponse {
+	message := &workflowservice.SignalWithStartWorkflowExecutionResponse{}
+	return message
+}
+
+func SignalWithStartWorkflowResponseFromProto(proto *workflowservice.SignalWithStartWorkflowExecutionResponse) SignalWithStartWorkflowResponse {
+	value := SignalWithStartWorkflowResponse{}
+	return value
 }
 
 // --- Operations (internal) ---
 
 func signalWithStartWorkflow(ctx workflow.Context, request SignalWithStartWorkflowRequest) (*SignalWithStartWorkflowResponse, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, SignalWithStartWorkflowOp, request, workflow.NexusOperationOptions{})
-	var result SignalWithStartWorkflowResponse
+	fut := c.ExecuteOperation(ctx, SignalWithStartWorkflowOp, request.ToProto(), workflow.NexusOperationOptions{})
+	var result workflowservice.SignalWithStartWorkflowExecutionResponse
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	value := SignalWithStartWorkflowResponseFromProto(&result)
+	return &value, nil
 }
 
 // --- Operations (public API) ---

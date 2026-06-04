@@ -4,6 +4,8 @@ package temporalsystem
 import (
 	"time"
 
+	common "go.temporal.io/api/common/v1"
+	workflowservice "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -24,9 +26,28 @@ type StartWorkflowRequest struct {
 	WorkflowStartDelay time.Duration
 }
 
+func (m StartWorkflowRequest) ToProto() *workflowservice.StartWorkflowExecutionRequest {
+	message := &workflowservice.StartWorkflowExecutionRequest{}
+	message.WorkflowType = WorkflowTypeToProto(m.Workflow)
+	message.Input = PayloadsToProto(m.Args)
+	message.WorkflowId = m.WorkflowId
+	message.TaskQueue = TaskQueueToProto(m.TaskQueue)
+	message.WorkflowStartDelay = DurationToProto(m.WorkflowStartDelay)
+	message.Namespace = WorkflowNamespace()
+	return message
+}
+
 type CancelWorkflowRequest struct {
 	WorkflowExecution WorkflowExecution // required
 	Reason            string
+}
+
+func (m CancelWorkflowRequest) ToProto() *workflowservice.RequestCancelWorkflowExecutionRequest {
+	message := &workflowservice.RequestCancelWorkflowExecutionRequest{}
+	message.WorkflowExecution = m.WorkflowExecution.ToProto()
+	message.Reason = m.Reason
+	message.Namespace = WorkflowNamespace()
+	return message
 }
 
 type WorkflowExecution struct {
@@ -34,7 +55,31 @@ type WorkflowExecution struct {
 	RunId      string
 }
 
+func (m WorkflowExecution) ToProto() *common.WorkflowExecution {
+	message := &common.WorkflowExecution{}
+	message.WorkflowId = m.WorkflowId
+	message.RunId = m.RunId
+	return message
+}
+
+func WorkflowExecutionFromProto(proto *common.WorkflowExecution) WorkflowExecution {
+	value := WorkflowExecution{}
+	value.WorkflowId = proto.GetWorkflowId()
+	value.RunId = proto.GetRunId()
+	return value
+}
+
 type CancelWorkflowResponse struct {
+}
+
+func (m CancelWorkflowResponse) ToProto() *workflowservice.RequestCancelWorkflowExecutionResponse {
+	message := &workflowservice.RequestCancelWorkflowExecutionResponse{}
+	return message
+}
+
+func CancelWorkflowResponseFromProto(proto *workflowservice.RequestCancelWorkflowExecutionResponse) CancelWorkflowResponse {
+	value := CancelWorkflowResponse{}
+	return value
 }
 
 // --- Resources ---
@@ -82,12 +127,13 @@ func restartWorkflow(ctx workflow.Context, request StartWorkflowRequest) (*Start
 
 func cancelWorkflow(ctx workflow.Context, request CancelWorkflowRequest) (*CancelWorkflowResponse, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, CancelWorkflowOp, request, workflow.NexusOperationOptions{})
-	var result CancelWorkflowResponse
+	fut := c.ExecuteOperation(ctx, CancelWorkflowOp, request.ToProto(), workflow.NexusOperationOptions{})
+	var result workflowservice.RequestCancelWorkflowExecutionResponse
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	value := CancelWorkflowResponseFromProto(&result)
+	return &value, nil
 }
 
 // --- Operations (public API) ---
