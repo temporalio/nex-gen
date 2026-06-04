@@ -8,7 +8,7 @@ world system {
 interface workflow-service {
   use nexus:temporal-types/model@1.0.0.{duration, payloads, placeholder, task-queue, workflow-function};
 
-  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution" typescript-package="@temporalio/proto"
   record workflow-execution {
     workflow-id: string,
     run-id: option<string>,
@@ -17,6 +17,7 @@ interface workflow-service {
   resource started-workflow {
     constructor(namespace: string, workflow-id: string, run-id: option<string>);
 
+    /// @nexus.operation "cancel-workflow"
     cancel: func(reason: option<string>);
     restart-workflow: func(
       workflow: workflow-function,
@@ -25,7 +26,7 @@ interface workflow-service {
     get-result: func() -> payloads;
   }
 
-  /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionRequest"
+  /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionRequest" typescript-package="@temporalio/proto"
   record start-workflow-request {
     /// @nexus.proto-field "workflow_type"
     workflow: workflow-function,
@@ -82,10 +83,10 @@ interface workflow-service {
     time-skipping-config: placeholder,
   }
 
-  /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionResponse"
+  /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionResponse" typescript-package="@temporalio/proto"
   type start-workflow-result = own<started-workflow>;
 
-  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest"
+  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest" typescript-package="@temporalio/proto"
   record cancel-workflow-request {
     /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" go="WorkflowNamespace"
     namespace: string,
@@ -101,7 +102,7 @@ interface workflow-service {
     links: placeholder,
   }
 
-  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionResponse"
+  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionResponse" typescript-package="@temporalio/proto"
   record cancel-workflow-response {
   }
 

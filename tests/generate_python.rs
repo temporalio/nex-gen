@@ -5,8 +5,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use heck::ToSnakeCase;
-use nexus_api_gen::generate_to_string_with_inputs;
-use nexus_api_gen::generator::{GeneratedOutputLayout, generate_files};
+use nex_gen::generate_to_string_with_inputs;
+use nex_gen::generator::{GeneratedOutputLayout, generate_files};
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
@@ -105,7 +105,7 @@ fn read_python_package_files(dir: &Path) -> BTreeMap<PathBuf, String> {
 }
 
 fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: &Path) {
-    let status = Command::new(env!("CARGO_BIN_EXE_nexus-api-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
             "--lang",
@@ -172,7 +172,7 @@ fn unique_output_path(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nexus-api-gen-{label}-{unique}"))
+    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}"))
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn python_examples_generation_matches_checked_in_output() {
 fn cli_generates_wit_direct_example_without_descriptors() {
     let root = project_root();
     let output_path = unique_output_path("python-user-service-no-descriptors");
-    let output = Command::new(env!("CARGO_BIN_EXE_nexus-api-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
             "--lang",
@@ -239,18 +239,17 @@ fn python_example_suite_type_checks_and_runs() {
 #[test]
 fn python_request_models_are_write_only() {
     let root = project_root();
-    let spec = nexus_api_gen::spec::ApiSpec::load_for_language_with_inputs(
-        nexus_api_gen::language::Language::Python,
+    let spec = nex_gen::spec::ApiSpec::load_for_language_with_inputs(
+        nex_gen::language::Language::Python,
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
     )
     .unwrap();
-    let descriptors =
-        nexus_api_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
     let generated = generate_files(
-        nexus_api_gen::language::Language::Python,
+        nex_gen::language::Language::Python,
         &spec,
         &descriptors,
-        &nexus_api_gen::SupportFiles::default(),
+        &nex_gen::SupportFiles::default(),
     )
     .unwrap();
     assert_eq!(generated.layout, GeneratedOutputLayout::Directory);
@@ -259,7 +258,7 @@ fn python_request_models_are_write_only() {
         .get(&PathBuf::from("models.py"))
         .expect("Python package should include models.py");
     let rendered = generate_to_string_with_inputs(
-        nexus_api_gen::language::Language::Python,
+        nex_gen::language::Language::Python,
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
         &[descriptor_path(&root)],
     )
@@ -271,7 +270,7 @@ fn python_request_models_are_write_only() {
     ));
     assert!(rendered.contains("class SignalWithStartWorkflowRequest:"));
     assert!(rendered.contains(
-        "@dataclasses.dataclass(slots=True, kw_only=True)\nclass SignalWithStartWorkflowRequest:\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]\n    args: list[typing.Any] | None = None\n    id: str\n    task_queue: str\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]\n    signal_args: list[typing.Any] | None = None\n    execution_timeout: timedelta | None = None"
+        "@dataclasses.dataclass(slots=True, kw_only=True)\nclass SignalWithStartWorkflowRequest:\n    \"\"\"\n    .. warning::\n        This API is experimental and subject to change.\n    \"\"\"\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]]\n    args: list[typing.Any] | None = None\n    id: str\n    task_queue: str\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]\n    signal_args: list[typing.Any] | None = None\n    execution_timeout: datetime.timedelta | None = None"
     ));
     assert!(rendered.contains("temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE"));
     assert!(rendered.contains("args: list[typing.Any] | None = None"));
@@ -285,11 +284,17 @@ fn python_request_models_are_write_only() {
     assert!(rendered.contains("message.namespace = workflow_namespace()"));
     assert!(rendered.contains("result = await handle"));
     assert!(rendered.contains(
-        "return workflow.get_external_workflow_handle(request.id, run_id=result.run_id)"
+        "from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )"
     ));
+    assert!(rendered.contains("return get_external_workflow_handle("));
+    assert!(rendered.contains("run_id=result.run_id"));
     assert!(rendered.contains("async def _signal_with_start_workflow("));
     assert!(rendered.contains("request: SignalWithStartWorkflowRequest"));
-    assert!(rendered.contains(") -> workflow.ExternalWorkflowHandle[typing.Any]:"));
+    assert!(rendered.contains(
+        "if typing.TYPE_CHECKING:\n    from temporalio.workflow import ExternalWorkflowHandle"
+    ));
+    assert!(rendered.contains(") -> ExternalWorkflowHandle[typing.Any]:"));
+    assert!(rendered.contains("    nexus_client = create_nexus_client("));
     assert!(rendered.contains("async def signal_with_start_workflow("));
     assert!(rendered.contains("@typing.overload"));
     assert!(rendered.contains("workflow: str,"));
@@ -297,9 +302,11 @@ fn python_request_models_are_write_only() {
     assert!(rendered.contains("id: str,"));
     assert!(rendered.contains("args: list[typing.Any] | None = ...,"));
     assert!(rendered.contains(
-        "workflow: collections.abc.Callable[[typing.Any, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[object]],"
+        "workflow: collections.abc.Callable[[typing.Any, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[WorkflowResult]],"
     ));
     assert!(rendered.contains("WorkflowArgs = typing_extensions.TypeVarTuple(\"WorkflowArgs\")"));
+    assert!(rendered.contains("WorkflowResult = typing.TypeVar(\"WorkflowResult\")"));
+    assert!(rendered.contains(") -> ExternalWorkflowHandle[WorkflowResult]:"));
     assert!(rendered.contains("*positional_args: typing_extensions.Unpack[WorkflowArgs],"));
     assert!(rendered.contains("args: list[typing.Any],"));
     assert!(!rendered.contains("tuple[FirstWorkflowArg"));
@@ -310,7 +317,7 @@ fn python_request_models_are_write_only() {
     assert!(rendered.contains("signal_args: SignalArg,"));
     assert!(rendered.contains("signal_args: list[typing.Any],"));
     assert!(rendered.contains(
-        "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],\n    *positional_args: object,\n    args: list[typing.Any] | None = None,\n    id: str,\n    task_queue: str,\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],\n    signal_args: object | list[typing.Any] | None = None,"
+        "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],\n    *positional_args: object,\n    args: list[typing.Any] | None = None,\n    id: str,\n    task_queue: str,\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],\n    signal_args: object | list[typing.Any] | None = None,"
     ));
     assert!(rendered.contains(
         "signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],"
@@ -323,7 +330,7 @@ fn python_request_models_are_write_only() {
         1
     );
     assert!(rendered.contains(
-        "\"\"\"Signal a workflow, starting it first if needed.\n\n    Args:\n        workflow: Workflow type name or callable identifying the workflow to start.\n        positional_args: Positional arguments for workflow. Cannot be set if args is\n            set.\n        args: List-form arguments for workflow. Cannot be set if positional_args are\n            set. For typed workflow callables, list contents are not statically\n            typechecked; pass workflow arguments positionally for precise typechecking.\n        id: Unique identifier for the workflow execution.\n        task_queue: Task queue to run the workflow on.\n        signal: Signal name or callable to send with the start request.\n        signal_args: Argument value, or list of argument values, for signal. For typed\n            single-argument signals, scalar signal_args values are statically\n            typechecked. List-form signal_args values are not precisely typechecked."
+        "\"\"\"Signal a workflow, starting it first if needed.\n\n    .. warning::\n        This API is experimental and subject to change.\n\n    Args:\n        workflow: Workflow type name or callable identifying the workflow to start.\n        positional_args: Positional arguments for workflow. Cannot be set if args is\n            set.\n        args: List-form arguments for workflow. Cannot be set if positional_args are\n            set. For typed workflow callables, list contents are not statically\n            typechecked; pass workflow arguments positionally for precise typechecking.\n        id: Unique identifier for the workflow execution.\n        task_queue: Task queue to run the workflow on.\n        signal: Signal name or callable to send with the start request.\n        signal_args: Argument value, or list of argument values, for signal. For typed\n            single-argument signals, scalar signal_args values are statically\n            typechecked. List-form signal_args values are not precisely typechecked. To\n            pass a single signal argument that is itself a list, wrap it in another\n            list; otherwise the list is interpreted as multiple signal arguments."
     ));
     assert!(rendered.contains(
         "cron_schedule: Cron schedule for recurring workflow executions. See\n            https://docs.temporal.io/cron-job."
@@ -376,7 +383,7 @@ fn python_request_models_are_write_only() {
     assert!(models.contains("retry_policy_to_proto,"));
 
     let type_roundtrip_rendered = generate_to_string_with_inputs(
-        nexus_api_gen::language::Language::Python,
+        nex_gen::language::Language::Python,
         &example_input_paths(&root, TYPE_ROUNDTRIP_EXAMPLE_ID),
         &[descriptor_path(&root)],
     )

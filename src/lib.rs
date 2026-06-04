@@ -475,7 +475,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
     })?;
     format_example_output(repo_root, language, &output_path)?;
 
-    println!("Built {} with nexus-api-gen", output_path.display());
+    println!("Built {} with nex-gen", output_path.display());
     Ok(())
 }
 

@@ -4,10 +4,9 @@ import { fileURLToPath } from "node:url";
 import * as common from "@temporalio/common";
 import { temporal } from "@temporalio/proto";
 import * as nexus from "nexus-rpc";
-import { nexusValue, payloadConverter } from "../nexus-api-gen-runtime.ts";
+import { nexusValue, payloadConverter } from "../nex-gen-runtime.ts";
 
 import {
-  GetUserRequest,
   User,
   UserCapability,
   UserStatus,
@@ -102,7 +101,6 @@ describe("type-showcase generated output", () => {
     expect(TypeShowcase.operations.rename.name).toBe("Rename");
     expect(TypeShowcase.operations.setProfile.name).toBe("SetProfile");
     expect(TypeShowcase.operations.deactivate.name).toBe("Deactivate");
-    expect(GetUserRequest).toEqual({});
     expect(UserStatus.Active).toBe(0);
     expect(UserCapability.ReadProfile).toBe(1);
     expect(UserCapability.UpdateEmail).toBe(2);

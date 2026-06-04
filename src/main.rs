@@ -2,14 +2,14 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use nexus_api_gen::language::Language;
-use nexus_api_gen::{
+use nex_gen::language::Language;
+use nex_gen::{
     AddRpcRequest, BuildExamplesRequest, DebugWitDirRequest, GenerateRequest, add_rpc_to_file,
     build_examples, debug_wit_dir_to_file, generate_to_file,
 };
 
 #[derive(Parser)]
-#[command(name = "nexus-api-gen")]
+#[command(name = "nex-gen")]
 #[command(about = "Generate language-specific Nexus operation bindings from WIT")]
 struct Cli {
     #[command(subcommand)]

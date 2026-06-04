@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nexus_api_gen::generate_to_string_with_inputs;
+use nex_gen::generate_to_string_with_inputs;
 
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -108,7 +108,7 @@ fn read_go_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
 }
 
 fn generate_formatted_go_output(root: &Path, example_id: &str, output_path: &Path) {
-    let status = Command::new(env!("CARGO_BIN_EXE_nexus-api-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
             "--lang",
@@ -138,7 +138,7 @@ fn unique_output_path(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nexus-api-gen-{label}-{unique}"))
+    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}"))
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn go_examples_generation_matches_checked_in_output() {
 fn go_type_showcase_generates_expected_types() {
     let root = project_root();
     let rendered = generate_to_string_with_inputs(
-        nexus_api_gen::language::Language::Go,
+        nex_gen::language::Language::Go,
         &example_input_paths(&root, "type-showcase"),
         &[descriptor_path(&root)],
     )
@@ -285,7 +285,7 @@ fn go_type_showcase_generates_expected_types() {
 fn go_type_roundtrip_generates_proto_conversions() {
     let root = project_root();
     let rendered = generate_to_string_with_inputs(
-        nexus_api_gen::language::Language::Go,
+        nex_gen::language::Language::Go,
         &example_input_paths(&root, "type-roundtrip"),
         &[descriptor_path(&root)],
     )

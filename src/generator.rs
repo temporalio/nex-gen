@@ -84,11 +84,16 @@ pub fn generate_files(
     ensure_unique_resource_names(spec)?;
     let plan = build_api_plan(spec, descriptors)?;
     let warnings = generation_warnings(&plan);
+    let language_imports = spec.imports_for_language(language);
 
     let mut generated = match language {
         Language::Go => go::generate(&plan, spec.support.fragments_for_language(language)),
-        Language::Python => python::generate(&plan, spec.support.fragments_for_language(language)),
-        Language::TypeScript => typescript::generate(&plan, support),
+        Language::Python => python::generate(
+            &plan,
+            spec.support.fragments_for_language(language),
+            language_imports,
+        ),
+        Language::TypeScript => typescript::generate(&plan, support, language_imports),
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = warnings;

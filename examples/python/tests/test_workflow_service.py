@@ -25,7 +25,10 @@ APP_ROOT = Path(__file__).resolve().parent
 OUTPUT_PATH = APP_ROOT.parent / "workflow_service"
 
 SIGNAL_WITH_START_OPERATION = workflow_service.__nexus_operation_registry__[
-    ("WorkflowService", "SignalWithStartWorkflowExecution")
+    (
+        "temporal.api.workflowservice.v1.WorkflowService",
+        "SignalWithStartWorkflowExecution",
+    )
 ]
 
 TASK_QUEUE = "demo-task-queue"
@@ -38,9 +41,12 @@ POSITIONAL_WORKFLOW_ID = "workflow-positional"
 TUPLE_ONE_WORKFLOW_ID = "workflow-tuple-one"
 MINIMAL_WORKFLOW_ID = "workflow-minimal"
 HIGH_ARITY_WORKFLOW_ID = "workflow-high-arity"
+LIST_SIGNAL_SEPARATE_WORKFLOW_ID = "workflow-list-signal-separate"
+LIST_SIGNAL_WRAPPED_WORKFLOW_ID = "workflow-list-signal-wrapped"
 
 FULL_WORKFLOW_INPUT = [7, "nexus"]
 ARGS_SIGNAL_INPUT = ["wake-up"]
+LIST_SIGNAL_INPUT = ["one", "two"]
 HIGH_ARITY_SIGNAL_INPUT = [
     "one",
     "two",
@@ -61,6 +67,10 @@ class ExampleWorkflow:
     @workflow.signal
     def wake_up(self, reason: str) -> None:
         _ = reason
+
+    @workflow.signal
+    def wake_up_list(self, values: list[str]) -> None:
+        _ = values
 
     @workflow.signal
     def wake_up_many(
@@ -345,11 +355,31 @@ class WorkflowServiceCallerWorkflow:
             signal_name="wake_up_many",
             signal_input=HIGH_ARITY_SIGNAL_INPUT,
         )
+        list_signal_separate_handle = await workflow_service.signal_with_start_workflow(
+            workflow="ExampleWorkflow",
+            id=LIST_SIGNAL_SEPARATE_WORKFLOW_ID,
+            task_queue=TASK_QUEUE,
+            request_id=REQUEST_ID,
+            signal=ExampleWorkflow.wake_up_list,
+            signal_args=LIST_SIGNAL_INPUT,
+            cron_schedule=CRON_SCHEDULE,
+        )
+        list_signal_wrapped_handle = await workflow_service.signal_with_start_workflow(
+            workflow="ExampleWorkflow",
+            id=LIST_SIGNAL_WRAPPED_WORKFLOW_ID,
+            task_queue=TASK_QUEUE,
+            request_id=REQUEST_ID,
+            signal=ExampleWorkflow.wake_up_list,
+            signal_args=[LIST_SIGNAL_INPUT],
+            cron_schedule=CRON_SCHEDULE,
+        )
         return [
             (request_handle.id, request_handle.run_id),
             (positional_handle.id, positional_handle.run_id),
             (tuple_one_handle.id, tuple_one_handle.run_id),
             (minimal_handle.id, minimal_handle.run_id),
+            (list_signal_separate_handle.id, list_signal_separate_handle.run_id),
+            (list_signal_wrapped_handle.id, list_signal_wrapped_handle.run_id),
         ]
 
 
@@ -372,7 +402,12 @@ def test_generated_metadata() -> None:
 
     assert isinstance(signal_operation, Operation)
     assert (
-        registry[("WorkflowService", "SignalWithStartWorkflowExecution")]
+        registry[
+            (
+                "temporal.api.workflowservice.v1.WorkflowService",
+                "SignalWithStartWorkflowExecution",
+            )
+        ]
         is signal_operation
     )
     assert not hasattr(workflow_service, "WorkflowService")
@@ -409,8 +444,16 @@ async def test_signal_with_start_uses_real_nexus_client(
         (POSITIONAL_WORKFLOW_ID, expected_run_id(POSITIONAL_WORKFLOW_ID)),
         (TUPLE_ONE_WORKFLOW_ID, expected_run_id(TUPLE_ONE_WORKFLOW_ID)),
         (MINIMAL_WORKFLOW_ID, expected_run_id(MINIMAL_WORKFLOW_ID)),
+        (
+            LIST_SIGNAL_SEPARATE_WORKFLOW_ID,
+            expected_run_id(LIST_SIGNAL_SEPARATE_WORKFLOW_ID),
+        ),
+        (
+            LIST_SIGNAL_WRAPPED_WORKFLOW_ID,
+            expected_run_id(LIST_SIGNAL_WRAPPED_WORKFLOW_ID),
+        ),
     ]
-    assert len(service_handler.calls) == 4
+    assert len(service_handler.calls) == 6
     assert_full_signal_request(
         service_handler.calls[0],
         workflow_id=ARGS_WORKFLOW_ID,
@@ -426,6 +469,18 @@ async def test_signal_with_start_uses_real_nexus_client(
         workflow_id=TUPLE_ONE_WORKFLOW_ID,
     )
     assert_minimal_signal_request(service_handler.calls[3])
+    assert_common_signal_request(
+        service_handler.calls[4],
+        workflow_id=LIST_SIGNAL_SEPARATE_WORKFLOW_ID,
+        signal_name="wake_up_list",
+    )
+    assert_payload_count(service_handler.calls[4].signal_input, len(LIST_SIGNAL_INPUT))
+    assert_common_signal_request(
+        service_handler.calls[5],
+        workflow_id=LIST_SIGNAL_WRAPPED_WORKFLOW_ID,
+        signal_name="wake_up_list",
+    )
+    assert_payload_count(service_handler.calls[5].signal_input, 1)
 
 
 async def test_signal_with_start_rejects_positional_args_and_args() -> None:
@@ -445,6 +500,45 @@ async def test_signal_with_start_rejects_positional_args_and_args() -> None:
 
 
 if typing.TYPE_CHECKING:
+
+    async def _typecheck_signal_with_start_return_types() -> None:
+        positional_handle = await workflow_service.signal_with_start_workflow(
+            SingleArgWorkflow.run,
+            "positional",
+            id="typed-return-positional-workflow-input",
+            task_queue=TASK_QUEUE,
+            request_id=REQUEST_ID,
+            signal="wake_up",
+            cron_schedule=CRON_SCHEDULE,
+        )
+        _ = assert_type(positional_handle, workflow.ExternalWorkflowHandle[str])
+
+        list_args_handle = await workflow_service.signal_with_start_workflow(
+            workflow=ExampleWorkflow.run,
+            args=[7, "nexus"],
+            id="typed-return-list-workflow-input",
+            task_queue=TASK_QUEUE,
+            request_id=REQUEST_ID,
+            signal="wake_up",
+            cron_schedule=CRON_SCHEDULE,
+        )
+        _ = assert_type(list_args_handle, workflow.ExternalWorkflowHandle[str])
+
+        string_workflow_handle = await workflow_service.signal_with_start_workflow(
+            workflow="ExampleWorkflow",
+            id="string-workflow-return",
+            task_queue=TASK_QUEUE,
+            request_id=REQUEST_ID,
+            signal="wake_up",
+            cron_schedule=CRON_SCHEDULE,
+        )
+        _ = assert_type(
+            string_workflow_handle,
+            workflow.ExternalWorkflowHandle[typing.Any],
+        )
+
+    _ = _typecheck_signal_with_start_return_types
+
     _ = workflow_service.signal_with_start_workflow(
         SingleArgWorkflow.run,
         "positional",

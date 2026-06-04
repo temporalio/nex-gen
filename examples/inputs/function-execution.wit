@@ -1,0 +1,96 @@
+package temporal:function-execution@1.0.0;
+
+world system {
+  export function-execution;
+}
+
+interface functions {
+  /// String-shaped placeholder for semantic function marker types used only by generation.
+  type placeholder = string;
+
+  type function-args = list<string>;
+  type function-name = placeholder;
+
+  function-call: func(name: string, enabled: bool) -> string;
+  counted-function-call: func(name: string, count: u32) -> string;
+  /// @nexus.function-args varargs=true
+  varargs-function-call: func(args: function-args) -> string;
+
+  /// @nexus.function
+  ///   primary=true
+  ///   signature="function-call"
+  type executable-function = placeholder;
+
+  /// @nexus.function
+  ///   primary=true
+  ///   signature="counted-function-call"
+  type counted-function = placeholder;
+
+  /// @nexus.function
+  ///   primary=true
+  ///   signature="function-call"
+  ///   alternate-type="function-name"
+  type named-function = placeholder;
+
+  /// @nexus.function
+  ///   primary=true
+  ///   signature="varargs-function-call"
+  type varargs-function = placeholder;
+
+  /// @nexus.function
+  ///   primary=true
+  ///   signature="varargs-function-call"
+  ///   alternate-type="function-name"
+  type named-varargs-function = placeholder;
+}
+
+/// @nexus.endpoint "function-execution"
+interface function-execution {
+  use functions.{counted-function, executable-function, named-function, named-varargs-function, varargs-function};
+
+  record execute-function-request {
+    function: executable-function,
+  }
+
+  record execute-function-result {
+    value: string,
+  }
+
+  record execute-counted-function-request {
+    function: counted-function,
+  }
+
+  record execute-counted-function-result {
+    value: string,
+  }
+
+  record execute-named-function-request {
+    function: named-function,
+  }
+
+  record execute-named-function-result {
+    value: string,
+  }
+
+  record execute-varargs-function-request {
+    function: varargs-function,
+  }
+
+  record execute-varargs-function-result {
+    value: string,
+  }
+
+  record execute-named-varargs-function-request {
+    function: named-varargs-function,
+  }
+
+  record execute-named-varargs-function-result {
+    value: string,
+  }
+
+  execute-function: func(request: execute-function-request) -> execute-function-result;
+  execute-counted-function: func(request: execute-counted-function-request) -> execute-counted-function-result;
+  execute-named-function: func(request: execute-named-function-request) -> execute-named-function-result;
+  execute-varargs-function: func(request: execute-varargs-function-request) -> execute-varargs-function-result;
+  execute-named-varargs-function: func(request: execute-named-varargs-function-request) -> execute-named-varargs-function-result;
+}

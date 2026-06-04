@@ -31,7 +31,10 @@ pub(crate) struct ApiPlan {
 #[derive(Debug, Clone)]
 pub(crate) struct PlannedService {
     pub(crate) name: String,
+    pub(crate) wire_name: String,
     pub(crate) endpoint: String,
+    pub(crate) experimental: bool,
+    pub(crate) delay_load_temporalio_workflow: bool,
     pub(crate) operations: Vec<PlannedOperation>,
     pub(crate) resources: Vec<PlannedResource>,
 }
@@ -40,6 +43,7 @@ pub(crate) struct PlannedService {
 pub(crate) struct PlannedOperation {
     pub(crate) name: String,
     pub(crate) wire_name: String,
+    pub(crate) experimental: bool,
     pub(crate) doc: LanguageStringSpec,
     pub(crate) return_doc: LanguageStringSpec,
     pub(crate) input: PlannedMessageType,
@@ -82,6 +86,7 @@ pub(crate) struct PlannedResourceField {
     pub(crate) name: String,
     pub(crate) optional: bool,
     pub(crate) kind: PlannedFieldKind,
+    pub(crate) function: Option<FunctionFieldSpec>,
 }
 
 #[derive(Debug, Clone)]
@@ -223,6 +228,7 @@ pub(crate) struct PlannedModel {
     pub(crate) name: String,
     pub(crate) capabilities: ModelCapabilities,
     pub(crate) flatten_in_api: bool,
+    pub(crate) experimental: bool,
     pub(crate) generated_model: GeneratedModelSpec,
     pub(crate) fields: Vec<PlannedField>,
     pub(crate) sourced_fields: Vec<PlannedSourcedField>,
@@ -262,7 +268,7 @@ pub(crate) struct PlannedSourcedField {
 pub(crate) enum PlannedFieldRole {
     Plain,
     Function(FunctionFieldSpec),
-    FunctionArgs,
+    FunctionArgs(FunctionFieldSpec),
     WithArguments,
     WithArgumentsArgs,
 }
@@ -528,7 +534,10 @@ fn plan_service(
 
     Ok(PlannedService {
         name: service.name.clone(),
+        wire_name: service.wire_name.clone(),
         endpoint,
+        experimental: service.experimental,
+        delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
         operations,
         resources,
     })
@@ -564,6 +573,7 @@ fn plan_operation(
     Ok(PlannedOperation {
         name: operation.name.clone(),
         wire_name: operation.wire_name.clone(),
+        experimental: operation.experimental,
         doc: operation.doc.clone(),
         return_doc: operation.return_doc.clone(),
         input,
@@ -813,6 +823,7 @@ fn planned_resource_field(
         name: field.name.clone(),
         optional: field.optional,
         kind,
+        function: field.function.clone(),
     }
 }
 
@@ -866,6 +877,7 @@ fn ensure_wit_model_plan(
             name: record.name.clone(),
             capabilities: requested_capabilities,
             flatten_in_api: false,
+            experimental: record.experimental,
             generated_model: record.generated_model.clone(),
             fields: Vec::new(),
             sourced_fields: Vec::new(),
@@ -918,6 +930,7 @@ fn ensure_model_plan(
         .cloned()
         .unwrap_or_default();
     let flatten_in_api = type_override.is_some_and(|type_override| type_override.flatten_in_api());
+    let experimental = type_override.is_some_and(|type_override| type_override.experimental());
 
     plan.models.insert(
         message.full_name.clone(),
@@ -926,6 +939,7 @@ fn ensure_model_plan(
             name: planned_proto_model_name(message, spec),
             capabilities: requested_capabilities,
             flatten_in_api,
+            experimental,
             generated_model: generated_model.clone(),
             fields: Vec::new(),
             sourced_fields: Vec::new(),
@@ -1234,7 +1248,7 @@ fn planned_value_type_from_authored(
 ) -> PlannedValueType {
     match wit_type {
         AuthoredFieldTypeSpec::Bool => PlannedValueType::Scalar(PlannedScalarType::Bool),
-        AuthoredFieldTypeSpec::Int => PlannedValueType::Scalar(PlannedScalarType::Int64),
+        AuthoredFieldTypeSpec::Int => PlannedValueType::Scalar(PlannedScalarType::Int32),
         AuthoredFieldTypeSpec::Float => PlannedValueType::Scalar(PlannedScalarType::Float),
         AuthoredFieldTypeSpec::String => PlannedValueType::Scalar(PlannedScalarType::String),
         AuthoredFieldTypeSpec::Bytes => PlannedValueType::Scalar(PlannedScalarType::Bytes),
@@ -1383,11 +1397,10 @@ fn planned_field_role(
     {
         return PlannedFieldRole::Function(function.clone());
     }
-    if generated_model
+    if let Some(function) = generated_model
         .and_then(|generated_model| generated_model.function_for_args_field(proto_name))
-        .is_some()
     {
-        return PlannedFieldRole::FunctionArgs;
+        return PlannedFieldRole::FunctionArgs(function.clone());
     }
     if generated_model
         .and_then(|generated_model| generated_model.with_arguments(proto_name))

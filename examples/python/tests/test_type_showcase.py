@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import cast
 import uuid
 
-import nexus_api_gen_runtime
+import nex_gen_runtime
 from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
 from nexusrpc import Operation
 from temporalio.api.common.v1 import Payloads
@@ -23,6 +23,7 @@ TYPESCRIPT_WIRE_FIXTURE = WIRE_FIXTURE_DIR / "set-profile-request.typescript.pay
 import type_showcase
 import type_showcase.models
 import type_showcase.service
+from type_showcase._resources import User
 
 GET_USER_OPERATION = type_showcase.__nexus_operation_registry__[
     ("TypeShowcase", "GetUser")
@@ -66,8 +67,8 @@ def user_resource(
     *,
     email: str,
     display_name: str,
-) -> type_showcase.User:
-    return type_showcase.User(
+) -> User:
+    return User(
         user_id="user-123",
         email=email,
         display_name=display_name,
@@ -92,13 +93,13 @@ def read_payloads(path: Path) -> Payloads:
 
 
 async def encode_request(request: type_showcase.models.SetProfileRequest) -> Payloads:
-    return await nexus_api_gen_runtime.nexus_data_converter.encode_wrapper([request])
+    return await nex_gen_runtime.nexus_data_converter.encode_wrapper([request])
 
 
 async def decode_request(payloads: Payloads) -> type_showcase.models.SetProfileRequest:
     values = cast(
         list[object],
-        await nexus_api_gen_runtime.nexus_data_converter.decode_wrapper(
+        await nex_gen_runtime.nexus_data_converter.decode_wrapper(
             payloads,
             [type_showcase.models.SetProfileRequest],
         ),
@@ -129,7 +130,7 @@ class TypeShowcaseHandler:
         self,
         _ctx: StartOperationContext,
         input: type_showcase.models.GetUserRequest,
-    ) -> type_showcase.User:
+    ) -> User:
         self.calls.append(("GetUser", input))
         assert input.user_id == "user-123"
         assert input.consistency_token == "read-123"
@@ -140,7 +141,7 @@ class TypeShowcaseHandler:
         self,
         _ctx: StartOperationContext,
         input: type_showcase.models.UpdateEmailRequest,
-    ) -> type_showcase.User:
+    ) -> User:
         self.calls.append(("UpdateEmail", input))
         assert input.user_id == "user-123"
         assert input.email == "new@example.com"
@@ -151,7 +152,7 @@ class TypeShowcaseHandler:
         self,
         _ctx: StartOperationContext,
         input: type_showcase.models.RenameRequest,
-    ) -> type_showcase.User:
+    ) -> User:
         self.calls.append(("Rename", input))
         assert input.user_id == "user-123"
         assert input.display_name == "New Name"
@@ -162,7 +163,7 @@ class TypeShowcaseHandler:
         self,
         _ctx: StartOperationContext,
         input: type_showcase.models.SetProfileRequest,
-    ) -> type_showcase.User:
+    ) -> User:
         self.calls.append(("SetProfile", input))
         return user_resource(email="old@example.com", display_name="Old Name")
 
@@ -180,7 +181,7 @@ class TypeShowcaseHandler:
 @workflow.defn
 class TypeShowcaseCallerWorkflow:
     @workflow.run
-    async def run(self) -> type_showcase.User:
+    async def run(self) -> User:
         user = await type_showcase.get_user(
             user_id="user-123",
             consistency_token="read-123",
@@ -214,7 +215,7 @@ def test_generated_metadata() -> None:
     assert DEACTIVATE_OPERATION.name == "Deactivate"
     assert registry[("TypeShowcase", "Deactivate")] is DEACTIVATE_OPERATION
     assert not hasattr(type_showcase, "TypeShowcase")
-    assert hasattr(type_showcase, "User")
+    assert not hasattr(type_showcase, "User")
     assert not hasattr(type_showcase.models, "DeactivateResponse")
     assert not hasattr(type_showcase.models.GetUserRequest, "to_proto")
     assert type_showcase.models.UserStatus.Active == 0
@@ -272,7 +273,7 @@ async def test_get_user_returns_wit_user_resource_through_real_nexus_client(
         finally:
             await env.delete_nexus_endpoint(endpoint)
 
-    assert isinstance(user, type_showcase.User)
+    assert isinstance(user, User)
     assert user.user_id == "user-123"
     assert user.email == "new@example.com"
     assert user.display_name == "New Name"

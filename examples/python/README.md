@@ -7,7 +7,7 @@ Shared `uv`-managed Python 3.10+ example suite for generated outputs.
   where `<package_name>` is the snake_case WIT input name
 - Generated support fragments live under each package's private `_support/`
   package, and generated models are exposed as the public `models` module
-- `nexus_api_gen_runtime.py` provides shared example runtime serialization
+- `nex_gen_runtime.py` provides shared example runtime serialization
   helpers for WIT-direct generated values
 - Pytest files live in `examples/python/tests/`
 - `build_outputs.py` is a thin wrapper around `cargo build-examples --lang python`
@@ -35,10 +35,10 @@ cd examples/python
 uv run build_outputs.py workflow-service
 ```
 
-Set `NEXUS_API_GEN_BIN=/path/to/nexus-api-gen` to make `build_outputs.py` use an already-built binary instead of the cargo alias.
+Set `NEX_GEN_BIN=/path/to/nex-gen` to make `build_outputs.py` use an already-built binary instead of the cargo alias.
 
 ## Runtime
 
-`nexus_api_gen_runtime.py` is a small hand-written runtime used by the generated Python examples. It provides shared support for registering generated resource/model types and serializing WIT-direct values with the `json/nexus` payload encoding used in the example tests.
+`nex_gen_runtime.py` is a small hand-written runtime used by the generated Python examples. It provides shared support for registering generated resource/model types and serializing WIT-direct values with the `json/nexus` payload encoding used in the example tests.
 
 This runtime exists because that serialization behavior is not yet built into the Python SDK. It should eventually be removed once the SDK can natively serialize Nexus API generator values and resources.

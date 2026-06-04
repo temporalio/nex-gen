@@ -1,4 +1,4 @@
-# nexus-api-gen
+# nex-gen
 
 > [!WARNING]
 > This repository is experimental. Generated APIs, input formats, and CLI behavior
@@ -133,12 +133,18 @@ The `user-service` example is intentionally small and WIT-native. The `type-show
 The WIT file defines the public surface. `@nexus` directives carry the parts WIT does not express directly:
 
 - service endpoint names
+- service wire names
 - support file paths
 - language-native override types
 - flattened API-only field types
 - sourced field expressions
 - function conversion metadata
 - output transforms
+- explicit resource method operation bindings
+- experimental service, operation, and record warnings
+- `@nexus.delay-load-temporalio-workflow` on Python services that must not import `temporalio.workflow` until an operation executes
+
+Resource methods bind to operations only when the method and operation have the same generated operation name. When they intentionally differ, mark the method with `@nexus.operation`, for example `/// @nexus.operation "cancel-workflow"` on `cancel: func(...)` to bind it to `cancel-workflow: func(...)`.
 
 Input WIT files can add support code with `@nexus.support`. Python support fragments are copied into the generated private `_support` package, and TypeScript support fragments are emitted as `support.ts` next to the generated `index.ts`.
 
@@ -146,10 +152,10 @@ Input WIT files can add support code with `@nexus.support`. Python support fragm
 
 The examples include small language runtimes that are not generated from WIT:
 
-- Python: `examples/python/nexus_api_gen_runtime.py`
-- TypeScript: `examples/typescript/nexus-api-gen-runtime.ts`
+- Python: `examples/python/nex_gen_runtime.py`
+- TypeScript: `examples/typescript/nex-gen-runtime.ts`
 
-These runtimes provide shared serialization helpers for WIT-direct values, including the `json/nexus` payload encoding used by the example tests to round-trip generated records and resources through real Temporal Nexus clients. The TypeScript examples also include `nexus-api-gen-payload-converter.cjs` so the Temporal TypeScript SDK can load the same payload converter through its `payloadConverterPath` data-converter hook.
+These runtimes provide shared serialization helpers for WIT-direct values, including the `json/nexus` payload encoding used by the example tests to round-trip generated records and resources through real Temporal Nexus clients. The TypeScript examples also include `nex-gen-payload-converter.cjs` so the Temporal TypeScript SDK can load the same payload converter through its `payloadConverterPath` data-converter hook.
 
 These files are intentionally example/runtime shims. They should eventually be removed once the corresponding Temporal SDKs provide native serialization support for Nexus API generator values and resources.
 
@@ -173,6 +179,7 @@ world system {
 }
 
 /// @nexus.endpoint "__temporal_system"
+/// @nexus.service-name "temporal.api.workflowservice.v1.WorkflowService"
 interface workflow-service {
   use nexus:temporal-types/model@1.0.0.{signal-function, task-queue, workflow-function};
 

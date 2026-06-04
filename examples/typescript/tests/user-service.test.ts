@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
 
-import { GetUserRequest, User, UserService } from "../user-service/index.ts";
+import { User, UserService } from "../user-service/index.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(
@@ -14,7 +14,6 @@ describe("user-service generated output", () => {
     expect(UserService.name).toBe("UserService");
     expect(UserService.operations.getUser.name).toBe("GetUser");
     expect(UserService.operations.updateEmail.name).toBe("UpdateEmail");
-    expect(GetUserRequest).toEqual({});
   });
 
   test("passes WIT records through a real Nexus client", async () => {

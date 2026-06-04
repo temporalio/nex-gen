@@ -28,7 +28,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        env::temp_dir().join(format!("nexus-api-gen-{name}-{unique}"))
+        env::temp_dir().join(format!("nex-gen-{name}-{unique}"))
     }
 
     fn write_formatter_script(dir: &Path, name: &str, marker: &str) -> PathBuf {
@@ -56,7 +56,7 @@ mod tests {
         let output_path = temp_dir.join("output");
         write_formatter_script(&temp_dir, "ruff", "# formatted by test");
 
-        let status = Command::new(env!("CARGO_BIN_EXE_nexus-api-gen"))
+        let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
             .env("PATH", formatter_path_env(&temp_dir))
             .args([
                 "generate",
@@ -91,7 +91,7 @@ mod tests {
         let output_path = temp_dir.join("output");
         write_formatter_script(&temp_dir, "prettier", "// formatted by test");
 
-        let status = Command::new(env!("CARGO_BIN_EXE_nexus-api-gen"))
+        let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
             .env("PATH", formatter_path_env(&temp_dir))
             .args([
                 "generate",

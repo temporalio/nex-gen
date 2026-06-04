@@ -15,6 +15,7 @@ OUTPUT_PATH = APP_ROOT.parent / "user_service"
 import user_service
 import user_service.models
 import user_service.service
+from user_service._resources import User
 
 GET_USER_OPERATION = user_service.__nexus_operation_registry__[
     ("UserService", "GetUser")
@@ -27,8 +28,8 @@ UPDATE_EMAIL_OPERATION = user_service.__nexus_operation_registry__[
 def user_resource(
     *,
     email: str,
-) -> user_service.User:
-    return user_service.User(
+) -> User:
+    return User(
         user_id="user-123",
         email=email,
     )
@@ -44,7 +45,7 @@ class UserServiceHandler:
         self,
         _ctx: StartOperationContext,
         input: user_service.models.GetUserRequest,
-    ) -> user_service.User:
+    ) -> User:
         self.calls.append(("GetUser", input))
         assert input.user_id == "user-123"
         return user_resource(email="old@example.com")
@@ -54,7 +55,7 @@ class UserServiceHandler:
         self,
         _ctx: StartOperationContext,
         input: user_service.models.UpdateEmailRequest,
-    ) -> user_service.User:
+    ) -> User:
         self.calls.append(("UpdateEmail", input))
         assert input.user_id == "user-123"
         assert input.email == "new@example.com"
@@ -64,7 +65,7 @@ class UserServiceHandler:
 @workflow.defn
 class UserServiceCallerWorkflow:
     @workflow.run
-    async def run(self) -> user_service.User:
+    async def run(self) -> User:
         user = await user_service.get_user(user_id="user-123")
         return await user.update_email("new@example.com")
 
@@ -80,7 +81,7 @@ def test_generated_metadata() -> None:
     assert UPDATE_EMAIL_OPERATION.name == "UpdateEmail"
     assert registry[("UserService", "UpdateEmail")] is UPDATE_EMAIL_OPERATION
     assert not hasattr(user_service, "UserService")
-    assert hasattr(user_service, "User")
+    assert not hasattr(user_service, "User")
     assert not hasattr(user_service.models.GetUserRequest, "to_proto")
 
 
@@ -105,7 +106,7 @@ async def test_get_user_returns_user_resource(env: WorkflowEnvironment) -> None:
         finally:
             await env.delete_nexus_endpoint(endpoint)
 
-    assert isinstance(user, user_service.User)
+    assert isinstance(user, User)
     assert user.user_id == "user-123"
     assert user.email == "new@example.com"
 

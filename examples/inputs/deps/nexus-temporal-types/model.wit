@@ -1,6 +1,6 @@
 /// @nexus.support
-///   python="python/model_overrides.py"
-///   typescript="typescript/model_overrides.ts"
+///   python="python/temporal_model_converters.py"
+///   typescript="typescript/temporal_model_converters.ts"
 ///   go="go/model_overrides.go"
 package nexus:temporal-types@1.0.0;
 
@@ -8,87 +8,124 @@ interface model {
   /// String-shaped placeholder for semantic types that generators reinterpret.
   type placeholder = string;
 
-  /// @nexus.proto "temporal.api.common.v1.Payload"
-  /// @nexus.type python="typing.Any" typescript="common.Payload" go="any"
+  /// @nexus.proto "temporal.api.common.v1.Payload" typescript-package="@temporalio/proto"
+  /// @nexus.type python="typing.Any" typescript="common.Payload" typescript-package="@temporalio/common" go="any"
   type payload = placeholder;
 
   /// @nexus.proto "temporal.api.common.v1.Payloads"
+  ///   typescript-package="@temporalio/proto"
   type payloads = list<payload>;
 
   /// Callable result annotation for workflow functions.
-  /// @nexus.type python="collections.abc.Awaitable[object]" typescript="Promise<any>" go="any"
+  /// @nexus.type
+  ///   python="collections.abc.Awaitable[WorkflowResult]"
+  ///   typescript="Promise<any>"
+  ///   go="any"
   type workflow-result = placeholder;
 
-  workflow-call: async func(args: payloads) -> workflow-result;
+  /// Receiver/context argument for workflow callable method forms.
+  /// @nexus.type python="typing.Any" typescript="any"
+  type callable-prefix = placeholder;
+
+  /// @nexus.function-args
+  ///   varargs=true
+  ///   param="args"
+  ///   typescript-drop-prefix=true
+  workflow-call: async func(callable-prefix: callable-prefix, args: payloads) -> workflow-result;
 
   /// Callable result annotation for signal functions.
   /// @nexus.type python="None | collections.abc.Awaitable[None]" typescript="void" go="any"
   type signal-result = placeholder;
 
-  signal-call: func(signal-args: payloads) -> signal-result;
+  /// @nexus.function-args
+  ///   varargs=true
+  ///   param="signal-args"
+  ///   typescript-drop-prefix=true
+  signal-call: func(callable-prefix: callable-prefix, signal-args: payloads) -> signal-result;
 
-  /// @nexus.proto "temporal.api.common.v1.WorkflowType"
-  /// @nexus.type python="str | collections.abc.Callable[..., collections.abc.Awaitable[object]]" typescript="string | common.Workflow" go="string"
+  /// @nexus.proto "temporal.api.common.v1.WorkflowType" typescript-package="@temporalio/proto"
+  /// @nexus.type python="str" typescript="string" go="string"
   type workflow-type = placeholder;
 
   /// @nexus.function
   ///   primary=true
   ///   signature="workflow-call"
   ///   args-field="input"
+  ///   result-type-parameter="WorkflowResult"
+  ///   alternate-type="workflow-type"
   /// @nexus.add-rpc-compatible-with "workflow-type"
-  /// @nexus.type
-  ///   python="str | collections.abc.Callable[..., collections.abc.Awaitable[object]]"
-  ///   typescript="string | common.Workflow"
-  ///   go="string"
   type workflow-function = placeholder;
 
   /// @nexus.function
   ///   signature="signal-call"
   ///   args-field="signal-input"
-  ///   converter="signal_function_to_proto"
+  ///   alternate-type="string"
+  ///   python-converter="signal_function_to_proto"
+  ///   typescript-converter="signalFunctionToProto"
   /// @nexus.add-rpc-compatible-with "string"
   /// @nexus.typescript-with-arguments
   ///   signature="signal-call"
   ///   args-field="signal-input"
+  ///   alternate-type="string"
   ///   value-type="workflow.SignalDefinition<any[]>"
   ///   args-type="Value extends workflow.SignalDefinition<infer Args, any> ? Args : never"
   ///   name-expr="value.name"
-  /// @nexus.type
-  ///   python="str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]"
-  ///   typescript="string | workflow.SignalDefinition<any[]>"
-  ///   go="string"
+  ///   typescript-package="@temporalio/workflow"
   type signal-function = placeholder;
 
-  /// @nexus.proto "temporal.api.common.v1.RetryPolicy"
-  /// @nexus.type python="temporalio.common.RetryPolicy" typescript="common.RetryPolicy" go="go.temporal.io/sdk/temporal.RetryPolicy"
+  /// @nexus.proto "temporal.api.common.v1.RetryPolicy" typescript-package="@temporalio/proto"
+  /// @nexus.type
+  ///   python="temporalio.common.RetryPolicy"
+  ///   typescript="common.RetryPolicy"
+  ///   typescript-package="@temporalio/common"
+  ///   go="go.temporal.io/sdk/temporal.RetryPolicy"
   type retry-policy = placeholder;
 
-  /// @nexus.proto "temporal.api.taskqueue.v1.TaskQueue"
+  /// @nexus.proto "temporal.api.taskqueue.v1.TaskQueue" typescript-package="@temporalio/proto"
   /// @nexus.type python="str" typescript="string" go="string"
   type task-queue = placeholder;
 
-  /// @nexus.proto "temporal.api.common.v1.Memo"
+  /// @nexus.proto "temporal.api.common.v1.Memo" typescript-package="@temporalio/proto"
   /// @nexus.type python="collections.abc.Mapping[str, typing.Any]" typescript="Record<string, unknown>" go="map[string]any"
   type memo = placeholder;
 
-  /// @nexus.proto "temporal.api.common.v1.SearchAttributes"
-  /// @nexus.type python="temporalio.common.TypedSearchAttributes" typescript="common.TypedSearchAttributes"
+  /// @nexus.proto "temporal.api.common.v1.SearchAttributes" typescript-package="@temporalio/proto"
+  /// @nexus.type
+  ///   python="temporalio.common.TypedSearchAttributes"
+  ///   typescript="common.TypedSearchAttributes"
+  ///   typescript-package="@temporalio/common"
   type search-attributes = placeholder;
 
-  /// @nexus.proto "temporal.api.common.v1.Priority"
-  /// @nexus.type python="temporalio.common.Priority" typescript="common.Priority" go="go.temporal.io/sdk/temporal.Priority"
+  /// @nexus.proto "temporal.api.common.v1.Priority" typescript-package="@temporalio/proto"
+  /// @nexus.type
+  ///   python="temporalio.common.Priority"
+  ///   typescript="common.Priority"
+  ///   typescript-package="@temporalio/common"
+  ///   go="go.temporal.io/sdk/temporal.Priority"
   type priority = placeholder;
 
-  /// @nexus.proto "temporal.api.workflow.v1.VersioningOverride"
-  /// @nexus.type python="temporalio.common.VersioningOverride" typescript="common.VersioningOverride" go="go.temporal.io/sdk/client.VersioningOverride"
+  /// @nexus.proto "temporal.api.workflow.v1.VersioningOverride" typescript-package="@temporalio/proto"
+  /// @nexus.type
+  ///   python="temporalio.common.VersioningOverride"
+  ///   typescript="common.VersioningOverride"
+  ///   typescript-package="@temporalio/common"
+  ///   go="go.temporal.io/sdk/client.VersioningOverride"
   type versioning-override = placeholder;
 
-  /// @nexus.proto "google.protobuf.Duration"
-  /// @nexus.type python="timedelta" typescript="common.Duration" go="time.Duration"
+  /// @nexus.proto "google.protobuf.Duration" typescript-package="@temporalio/proto"
+  /// @nexus.type
+  ///   python="datetime.timedelta"
+  ///   typescript="common.Duration"
+  ///   typescript-package="@temporalio/common"
+  ///   go="time.Duration"
   type duration = placeholder;
 
-  /// @nexus.proto "temporal.api.enums.v1.WorkflowIdReusePolicy"
-  /// @nexus.type python="temporalio.common.WorkflowIDReusePolicy" typescript="common.WorkflowIdReusePolicy" go="go.temporal.io/api/enums/v1:enums.WorkflowIdReusePolicy"
+  /// @nexus.proto "temporal.api.enums.v1.WorkflowIdReusePolicy" typescript-package="@temporalio/proto"
+  /// @nexus.type
+  ///   python="temporalio.common.WorkflowIDReusePolicy"
+  ///   typescript="common.WorkflowIdReusePolicy"
+  ///   typescript-package="@temporalio/common"
+  ///   go="go.temporal.io/api/enums/v1:enums.WorkflowIdReusePolicy"
   enum workflow-id-reuse-policy {
     allow-duplicate,
     allow-duplicate-failed-only,
@@ -96,24 +133,28 @@ interface model {
     terminate-if-running,
   }
 
-  /// @nexus.proto "temporal.api.enums.v1.WorkflowIdConflictPolicy"
-  /// @nexus.type python="temporalio.common.WorkflowIDConflictPolicy" typescript="common.WorkflowIdConflictPolicy" go="go.temporal.io/api/enums/v1:enums.WorkflowIdConflictPolicy"
+  /// @nexus.proto "temporal.api.enums.v1.WorkflowIdConflictPolicy" typescript-package="@temporalio/proto"
+  /// @nexus.type
+  ///   python="temporalio.common.WorkflowIDConflictPolicy"
+  ///   typescript="common.WorkflowIdConflictPolicy"
+  ///   typescript-package="@temporalio/common"
+  ///   go="go.temporal.io/api/enums/v1:enums.WorkflowIdConflictPolicy"
   enum workflow-id-conflict-policy {
     fail,
     use-existing,
     terminate-existing,
   }
 
-  /// @nexus.proto "temporal.api.sdk.v1.UserMetadata"
+  /// @nexus.proto "temporal.api.sdk.v1.UserMetadata" typescript-package="@temporalio/proto"
   /// @nexus.flatten-in-api
   record user-metadata {
     /// @nexus.doc "Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format."
     /// @nexus.proto-field "summary"
-    /// @nexus.flattened-type python="str"
+    /// @nexus.flattened-type python="str" typescript="string"
     static-summary: option<payload>,
     /// @nexus.doc "General fixed details for the workflow execution that may appear in UI and CLI. This can be in Temporal Markdown format and can span multiple lines. This value is fixed on the workflow execution and cannot be updated."
     /// @nexus.proto-field "details"
-    /// @nexus.flattened-type python="str"
+    /// @nexus.flattened-type python="str" typescript="string"
     static-details: option<payload>,
   }
 }
