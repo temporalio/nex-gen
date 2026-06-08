@@ -72,10 +72,10 @@ func (s *TypeRoundtripTestSuite) TestActivityOptionsOperation() {
 		FairnessWeight: 2.5,
 	}
 	protoResult := tr.ActivityOptions{
-		TaskQueue:              "demo-task-queue",
+		TaskQueue:              ptr("demo-task-queue"),
 		RetryPolicy:            policy,
-		ScheduleToCloseTimeout: 7 * time.Second,
-		Priority:               priority,
+		ScheduleToCloseTimeout: ptr(7 * time.Second),
+		Priority:               &priority,
 	}.ToProto()
 
 	s.env.OnNexusOperation(
@@ -92,9 +92,9 @@ func (s *TypeRoundtripTestSuite) TestActivityOptionsOperation() {
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*tr.ActivityOptions, error) {
 		return tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{
-			TaskQueue:              "demo-task-queue",
-			ScheduleToCloseTimeout: 7 * time.Second,
-			Priority:               priority,
+			TaskQueue:              ptr("demo-task-queue"),
+			ScheduleToCloseTimeout: ptr(7 * time.Second),
+			Priority:               &priority,
 		})
 	})
 
@@ -103,8 +103,11 @@ func (s *TypeRoundtripTestSuite) TestActivityOptionsOperation() {
 	var result tr.ActivityOptions
 	s.NoError(s.env.GetWorkflowResult(&result))
 	s.Equal(int32(3), result.RetryPolicy.MaximumAttempts)
-	s.Equal("demo-task-queue", result.TaskQueue)
-	s.Equal(7*time.Second, result.ScheduleToCloseTimeout)
+	s.Require().NotNil(result.TaskQueue)
+	s.Equal("demo-task-queue", *result.TaskQueue)
+	s.Require().NotNil(result.ScheduleToCloseTimeout)
+	s.Equal(7*time.Second, *result.ScheduleToCloseTimeout)
+	s.Require().NotNil(result.Priority)
 	s.Equal(4, result.Priority.PriorityKey)
 	s.Equal("tenant-a", result.Priority.FairnessKey)
 	s.InDelta(2.5, float64(result.Priority.FairnessWeight), 0.01)
@@ -173,9 +176,9 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperation() {
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*tr.ActivityOptions, error) {
 		return tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{
-			TaskQueue:              "demo-task-queue",
-			ScheduleToCloseTimeout: 7 * time.Second,
-			Priority:               priority,
+			TaskQueue:              ptr("demo-task-queue"),
+			ScheduleToCloseTimeout: ptr(7 * time.Second),
+			Priority:               &priority,
 		})
 	})
 
@@ -184,8 +187,11 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperation() {
 	var result tr.ActivityOptions
 	s.NoError(s.env.GetWorkflowResult(&result))
 	s.Equal(int32(3), result.RetryPolicy.MaximumAttempts)
-	s.Equal("demo-task-queue", result.TaskQueue)
-	s.Equal(7*time.Second, result.ScheduleToCloseTimeout)
+	s.Require().NotNil(result.TaskQueue)
+	s.Equal("demo-task-queue", *result.TaskQueue)
+	s.Require().NotNil(result.ScheduleToCloseTimeout)
+	s.Equal(7*time.Second, *result.ScheduleToCloseTimeout)
+	s.Require().NotNil(result.Priority)
 	s.Equal(4, result.Priority.PriorityKey)
 	s.Equal("tenant-a", result.Priority.FairnessKey)
 	s.InDelta(2.5, float64(result.Priority.FairnessWeight), 0.01)
@@ -211,11 +217,20 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperationRequiredOnly
 	var result tr.ActivityOptions
 	s.NoError(s.env.GetWorkflowResult(&result))
 	s.Equal(int32(5), result.RetryPolicy.MaximumAttempts)
-	s.Equal("", result.TaskQueue)
-	s.Equal(time.Duration(0), result.ScheduleToCloseTimeout)
+	// Optional fields that were never set round-trip back as nil (absent),
+	// distinct from a present-but-zero value.
+	s.Nil(result.TaskQueue)
+	s.Nil(result.ScheduleToCloseTimeout)
+	s.Nil(result.Priority)
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("ActivityOptionsOperation", s.calls[0].Operation)
 	handlerInput := s.calls[0].Input.(*activitypb.ActivityOptions)
 	s.Equal(int32(5), handlerInput.GetRetryPolicy().GetMaximumAttempts())
+}
+
+// ptr returns a pointer to v, used to populate optional pointer fields in the
+// generated structs.
+func ptr[T any](v T) *T {
+	return &v
 }

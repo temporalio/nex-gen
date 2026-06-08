@@ -19,16 +19,16 @@ const ActivityOptionsOperationOp = "ActivityOptionsOperation"
 // --- Datatypes ---
 
 type ActivityOptions struct {
-	TaskQueue              string
+	TaskQueue              *string
 	RetryPolicy            temporal.RetryPolicy // required
-	ScheduleToCloseTimeout time.Duration
-	Priority               temporal.Priority
+	ScheduleToCloseTimeout *time.Duration
+	Priority               *temporal.Priority
 }
 
 func (m ActivityOptions) ToProto() *activity.ActivityOptions {
 	message := &activity.ActivityOptions{}
 	message.TaskQueue = TaskQueueToProto(m.TaskQueue)
-	message.RetryPolicy = RetryPolicyToProto(m.RetryPolicy)
+	message.RetryPolicy = RetryPolicyToProto(&m.RetryPolicy)
 	message.ScheduleToCloseTimeout = DurationToProto(m.ScheduleToCloseTimeout)
 	message.Priority = PriorityToProto(m.Priority)
 	return message
@@ -37,7 +37,9 @@ func (m ActivityOptions) ToProto() *activity.ActivityOptions {
 func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
 	value := ActivityOptions{}
 	value.TaskQueue = TaskQueueFromProto(proto.GetTaskQueue())
-	value.RetryPolicy = RetryPolicyFromProto(proto.GetRetryPolicy())
+	if converted := RetryPolicyFromProto(proto.GetRetryPolicy()); converted != nil {
+		value.RetryPolicy = *converted
+	}
 	value.ScheduleToCloseTimeout = DurationFromProto(proto.GetScheduleToCloseTimeout())
 	value.Priority = PriorityFromProto(proto.GetPriority())
 	return value
@@ -47,13 +49,12 @@ func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
 
 func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, RetryPolicyToProto(request), workflow.NexusOperationOptions{})
+	fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, RetryPolicyToProto(&request), workflow.NexusOperationOptions{})
 	var result common.RetryPolicy
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	value := RetryPolicyFromProto(&result)
-	return &value, nil
+	return RetryPolicyFromProto(&result), nil
 }
 
 func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*ActivityOptions, error) {
@@ -74,9 +75,9 @@ func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*
 }
 
 type ActivityOptionsOperationOptions struct {
-	TaskQueue              string
-	ScheduleToCloseTimeout time.Duration
-	Priority               temporal.Priority
+	TaskQueue              *string
+	ScheduleToCloseTimeout *time.Duration
+	Priority               *temporal.Priority
 }
 
 func ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ActivityOptionsOperationOptions) (*ActivityOptions, error) {

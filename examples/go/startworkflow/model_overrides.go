@@ -6,6 +6,13 @@
 // the Temporal SDK serializes onto the wire, keeping the Go bindings
 // wire-compatible with the Python and TypeScript bindings.
 //
+// Converters are pure structural translations: a `nil` input always produces a
+// `nil` output. They never invent zero values for absent data. The generated
+// `api.go` owns all presence/optionality logic -- it passes a pointer for
+// required values and dereferences results with a zero fallback, and it stores
+// optional values directly as pointers so that "unset" and "set to zero" remain
+// distinguishable.
+//
 // The `package` declaration below is replaced with the generated package name
 // when this file is emitted alongside `api.go`.
 package temporalsystem
@@ -19,38 +26,49 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
-	durationpb "google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // --- Duration (google.protobuf.Duration) ---
 
-func DurationToProto(d time.Duration) *durationpb.Duration {
-	return durationpb.New(d)
+func DurationToProto(d *time.Duration) *durationpb.Duration {
+	if d == nil {
+		return nil
+	}
+	return durationpb.New(*d)
 }
 
-func DurationFromProto(d *durationpb.Duration) time.Duration {
+func DurationFromProto(d *durationpb.Duration) *time.Duration {
 	if d == nil {
-		return 0
+		return nil
 	}
-	return d.AsDuration()
+	value := d.AsDuration()
+	return &value
 }
 
 // --- TaskQueue (temporal.api.taskqueue.v1.TaskQueue) ---
 
-func TaskQueueToProto(name string) *taskqueue.TaskQueue {
-	return &taskqueue.TaskQueue{Name: name}
+func TaskQueueToProto(name *string) *taskqueue.TaskQueue {
+	if name == nil {
+		return nil
+	}
+	return &taskqueue.TaskQueue{Name: *name}
 }
 
-func TaskQueueFromProto(tq *taskqueue.TaskQueue) string {
+func TaskQueueFromProto(tq *taskqueue.TaskQueue) *string {
 	if tq == nil {
-		return ""
+		return nil
 	}
-	return tq.GetName()
+	value := tq.GetName()
+	return &value
 }
 
 // --- RetryPolicy (temporal.api.common.v1.RetryPolicy) ---
 
-func RetryPolicyToProto(p temporal.RetryPolicy) *common.RetryPolicy {
+func RetryPolicyToProto(p *temporal.RetryPolicy) *common.RetryPolicy {
+	if p == nil {
+		return nil
+	}
 	proto := &common.RetryPolicy{
 		BackoffCoefficient:     p.BackoffCoefficient,
 		MaximumAttempts:        p.MaximumAttempts,
@@ -65,9 +83,9 @@ func RetryPolicyToProto(p temporal.RetryPolicy) *common.RetryPolicy {
 	return proto
 }
 
-func RetryPolicyFromProto(p *common.RetryPolicy) temporal.RetryPolicy {
+func RetryPolicyFromProto(p *common.RetryPolicy) *temporal.RetryPolicy {
 	if p == nil {
-		return temporal.RetryPolicy{}
+		return nil
 	}
 	policy := temporal.RetryPolicy{
 		BackoffCoefficient:     p.GetBackoffCoefficient(),
@@ -80,12 +98,15 @@ func RetryPolicyFromProto(p *common.RetryPolicy) temporal.RetryPolicy {
 	if interval := p.GetMaximumInterval(); interval != nil {
 		policy.MaximumInterval = interval.AsDuration()
 	}
-	return policy
+	return &policy
 }
 
 // --- Priority (temporal.api.common.v1.Priority) ---
 
-func PriorityToProto(p temporal.Priority) *common.Priority {
+func PriorityToProto(p *temporal.Priority) *common.Priority {
+	if p == nil {
+		return nil
+	}
 	return &common.Priority{
 		PriorityKey:    int32(p.PriorityKey),
 		FairnessKey:    p.FairnessKey,
@@ -93,11 +114,11 @@ func PriorityToProto(p temporal.Priority) *common.Priority {
 	}
 }
 
-func PriorityFromProto(p *common.Priority) temporal.Priority {
+func PriorityFromProto(p *common.Priority) *temporal.Priority {
 	if p == nil {
-		return temporal.Priority{}
+		return nil
 	}
-	return temporal.Priority{
+	return &temporal.Priority{
 		PriorityKey:    int(p.GetPriorityKey()),
 		FairnessKey:    p.GetFairnessKey(),
 		FairnessWeight: p.GetFairnessWeight(),
@@ -106,15 +127,19 @@ func PriorityFromProto(p *common.Priority) temporal.Priority {
 
 // --- WorkflowType (temporal.api.common.v1.WorkflowType) ---
 
-func WorkflowTypeToProto(name string) *common.WorkflowType {
-	return &common.WorkflowType{Name: name}
+func WorkflowTypeToProto(name *string) *common.WorkflowType {
+	if name == nil {
+		return nil
+	}
+	return &common.WorkflowType{Name: *name}
 }
 
-func WorkflowTypeFromProto(t *common.WorkflowType) string {
+func WorkflowTypeFromProto(t *common.WorkflowType) *string {
 	if t == nil {
-		return ""
+		return nil
 	}
-	return t.GetName()
+	value := t.GetName()
+	return &value
 }
 
 // --- Payload / Payloads (temporal.api.common.v1.Payload[s]) ---
@@ -195,7 +220,7 @@ func MemoFromProto(memo *common.Memo) map[string]any {
 // SDK's search-attribute encoder. This placeholder keeps the bindings
 // compiling; populate it when search-attribute support lands.
 
-func SearchAttributesToProto(_ string) *common.SearchAttributes {
+func SearchAttributesToProto(_ *string) *common.SearchAttributes {
 	return nil
 }
 
@@ -204,7 +229,7 @@ func SearchAttributesToProto(_ string) *common.SearchAttributes {
 // Versioning-override encoding is deferred. This placeholder keeps the bindings
 // compiling; populate it when versioning-override support lands.
 
-func VersioningOverrideToProto(_ client.VersioningOverride) *workflowpb.VersioningOverride {
+func VersioningOverrideToProto(_ *client.VersioningOverride) *workflowpb.VersioningOverride {
 	return nil
 }
 

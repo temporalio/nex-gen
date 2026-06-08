@@ -398,9 +398,13 @@ struct OperationProtoBinding {
     input_to_proto: String,
     /// Proto type expression for the response, or `None` for void operations.
     output_proto_type: Option<String>,
-    /// Expression template converting the proto response (bound to `result`)
-    /// to its native form. `None` for void operations.
+    /// Expression converting the proto response (bound to `&result`) to its
+    /// native form. `None` for void operations.
     output_from_proto: Option<String>,
+    /// Whether `output_from_proto` already evaluates to a pointer (override
+    /// converters return `*Native`) or to a value that must be addressed
+    /// (generated model converters return `Model`).
+    output_returns_pointer: bool,
 }
 
 /// A single parameter in an unpacked convenience wrapper function signature.
@@ -552,10 +556,12 @@ struct RenderedSourcedField {
 struct ResolvedGoType {
     /// Go type expression (e.g. `"string"`, `"PostalAddress"`, `"[]string"`).
     type_expr: String,
-    /// `true` when the resolved type is a struct (message/record/tuple) and an
-    /// optional field of this type should use a pointer to distinguish the
-    /// zero value from absence. Interfaces, slices, and maps are `false`
-    /// because their zero value (`nil`) already represents absence.
+    /// `true` when the resolved type is a struct (message/record/tuple).
+    ///
+    /// Optionality is now expressed uniformly with pointers (see
+    /// [`type_needs_pointer_when_optional`]), so this flag is retained only for
+    /// descriptive completeness of the resolved type.
+    #[allow(dead_code)]
     is_struct: bool,
 }
 
@@ -657,28 +663,38 @@ fn populate_operation_bindings(
             else {
                 continue;
             };
-            let input_to_proto = (input_conv.to_proto)("request");
-
-            let (output_proto_type, output_from_proto) = match &planned_op.output {
-                PlannedOperationOutput::Message(output) => {
-                    match operation_message_binding(output, "result", api_plan, imports) {
-                        Some((proto_type, conv)) => {
-                            // `result` is declared as a proto value; converters
-                            // take a pointer to the proto message.
-                            let from = (conv.from_proto)("&result");
-                            (Some(proto_type), Some(from))
-                        }
-                        None => continue,
-                    }
-                }
-                PlannedOperationOutput::Resource { .. } => continue,
-                PlannedOperationOutput::None => (None, None),
+            // Override converters take a pointer to the native value; generated
+            // model converters use a value receiver (`request.ToProto()`).
+            let input_arg = match input_conv.kind {
+                GoConversionKind::OverrideConverter => "&request".to_string(),
+                _ => "request".to_string(),
             };
+            let input_to_proto = (input_conv.to_proto)(&input_arg);
+
+            let (output_proto_type, output_from_proto, output_returns_pointer) =
+                match &planned_op.output {
+                    PlannedOperationOutput::Message(output) => {
+                        match operation_message_binding(output, "result", api_plan, imports) {
+                            Some((proto_type, conv)) => {
+                                // `result` is declared as a proto value;
+                                // converters take a pointer to the proto message.
+                                let from = (conv.from_proto)("&result");
+                                let returns_pointer =
+                                    conv.kind == GoConversionKind::OverrideConverter;
+                                (Some(proto_type), Some(from), returns_pointer)
+                            }
+                            None => continue,
+                        }
+                    }
+                    PlannedOperationOutput::Resource { .. } => continue,
+                    PlannedOperationOutput::None => (None, None, false),
+                };
 
             rendered_op.proto_binding = Some(OperationProtoBinding {
                 input_to_proto,
                 output_proto_type,
                 output_from_proto,
+                output_returns_pointer,
             });
         }
     }
@@ -1156,7 +1172,7 @@ fn build_field(
         PlannedFieldKind::Singular(value) => {
             let resolved =
                 resolve_planned_value_type(value, api_plan, enums, flags, variants, models)?;
-            if !field.required && resolved.is_struct {
+            if !field.required && type_needs_pointer_when_optional(value, &resolved.type_expr) {
                 format!("*{}", resolved.type_expr)
             } else {
                 resolved.type_expr
@@ -1170,6 +1186,24 @@ fn build_field(
         required: field.required,
         conversion: None,
     })
+}
+
+/// Returns `true` when an optional singular field of this value type must be
+/// rendered as a pointer (`*T`) so that absence is representable as `nil`.
+///
+/// Pointers are used for every value-like type -- scalars, enums, flags,
+/// messages, and override/replacement types -- so that "unset" is distinct from
+/// "set to the zero value". Types whose zero value is already `nil` need no
+/// pointer: variants (interfaces) and any `any`-typed value.
+fn type_needs_pointer_when_optional(value: &PlannedValueType, type_expr: &str) -> bool {
+    if matches!(value, PlannedValueType::Variant(_) | PlannedValueType::Unknown) {
+        return false;
+    }
+    // Already-nilable Go types (`any`, slices, maps) represent absence directly.
+    if type_expr == "any" || type_expr.starts_with("[]") || type_expr.starts_with("map[") {
+        return false;
+    }
+    true
 }
 
 /// Generates a named Go struct for a tuple type, using ordinal field names
@@ -1544,10 +1578,34 @@ fn is_go_keyword(name: &str) -> bool {
 /// values. Conversions never touch raw bytes -- they translate between the
 /// native value and a Go proto struct that the Temporal SDK serializes.
 struct GoValueConversion {
+    /// The structural shape of the conversion, which determines how the line
+    /// builders handle pointers and dereferencing.
+    kind: GoConversionKind,
     /// Produces the native expression from a proto expression.
     from_proto: Box<dyn Fn(&str) -> String>,
     /// Produces the proto expression from a native expression.
     to_proto: Box<dyn Fn(&str) -> String>,
+}
+
+/// Classifies a value conversion so the line builders know how to bridge
+/// pointer/value mismatches between the native field and the converter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GoConversionKind {
+    /// No conversion: native and proto share the same scalar Go type. The
+    /// `from_proto`/`to_proto` closures are the identity.
+    Scalar,
+    /// A cast between a named Go type and a proto enum type (value to value),
+    /// e.g. `enums.WorkflowIdReusePolicy(x)`.
+    Enum,
+    /// A hand-written override converter pair that is pointer-based on both the
+    /// native and proto sides: `FromProto(*Proto) *Native` and
+    /// `ToProto(*Native) *Proto`, each returning `nil` for `nil` input. The
+    /// converter owns nil passthrough; the caller supplies/consumes pointers.
+    OverrideConverter,
+    /// A generated model converter: `FromProto(*Proto) Model` (value result)
+    /// and `(Model) ToProto() *Proto` (value receiver). The native side is a
+    /// value, the proto side is a pointer.
+    ModelConverter,
 }
 
 /// Default Go `FromProto` converter name for an override/replacement type,
@@ -1604,7 +1662,7 @@ fn go_value_conversion(
 ) -> Option<GoValueConversion> {
     match value {
         PlannedValueType::Scalar(_) => Some(GoValueConversion {
-
+            kind: GoConversionKind::Scalar,
             from_proto: Box::new(|expr| expr.to_string()),
             to_proto: Box::new(|expr| expr.to_string()),
         }),
@@ -1642,7 +1700,7 @@ fn go_enum_conversion(
     let proto_type = proto_type?;
     let native_for_cast = native_type.clone();
     Some(GoValueConversion {
-
+        kind: GoConversionKind::Enum,
         from_proto: Box::new(move |expr| format!("{native_for_cast}(int32({expr}))")),
         to_proto: Box::new(move |expr| format!("{proto_type}({expr})")),
     })
@@ -1663,6 +1721,7 @@ fn go_message_conversion(
             let from = go_from_proto_converter(&message.info.full_name, replacement);
             let to = go_to_proto_converter(&message.info.full_name, replacement);
             return Some(GoValueConversion {
+                kind: GoConversionKind::OverrideConverter,
                 from_proto: Box::new(move |expr| format!("{from}({expr})")),
                 to_proto: Box::new(move |expr| format!("{to}({expr})")),
             });
@@ -1674,17 +1733,19 @@ fn go_message_conversion(
         let from = go_default_from_proto_name(&message.info.full_name);
         let to = go_default_to_proto_name(&message.info.full_name);
         return Some(GoValueConversion {
-
+            kind: GoConversionKind::OverrideConverter,
             from_proto: Box::new(move |expr| format!("{from}({expr})")),
             to_proto: Box::new(move |expr| format!("{to}({expr})")),
         });
     }
 
-    // Generated proto-backed model: use its own ToProto/FromProto.
+    // Generated proto-backed model: use its own ToProto/FromProto. Generated
+    // models keep value-based `FromProto(*Proto) Model` / `(Model) ToProto()`
+    // shapes, so they behave like a pointer converter only on the proto side.
     if message.source == PlannedMessageSource::Proto {
         let model_name = message.model_name.clone();
         return Some(GoValueConversion {
-
+            kind: GoConversionKind::ModelConverter,
             from_proto: Box::new(move |expr| format!("{model_name}FromProto({expr})")),
             to_proto: Box::new(|expr| format!("{expr}.ToProto()")),
         });
@@ -1700,20 +1761,6 @@ fn go_message_conversion(
 /// `TaskQueue`).
 fn go_proto_field_name(proto_name: &str) -> String {
     proto_name.to_upper_camel_case()
-}
-
-/// Returns `true` when a singular value renders as a Go struct (and therefore
-/// an optional field of this type uses a pointer). Mirrors the `is_struct`
-/// logic in [`resolve_planned_value_type`]: only generated proto/WIT message
-/// models are structs; scalars, enums, replacement types, and authored types
-/// are not.
-fn value_is_struct(value: &PlannedValueType) -> bool {
-    match value {
-        PlannedValueType::Message(message_type) => {
-            message_type.replacement.is_none() && message_type.authored_type.is_none()
-        }
-        _ => false,
-    }
 }
 
 /// Populates proto conversion metadata for every proto-backed model that was
@@ -1808,10 +1855,10 @@ fn build_field_conversion(
     match &field.kind {
         PlannedFieldKind::Singular(value) => {
             let conversion = go_value_conversion(value, api_plan, imports)?;
-            // The struct field is rendered as a pointer only for optional
-            // struct-typed values (see `build_field`). Override/replacement and
-            // scalar values are non-pointer even when optional.
-            let field_is_pointer = !field.required && value_is_struct(value);
+            // Any value with a conversion (scalar, enum, message, override) is
+            // rendered as a pointer when optional, matching `build_field`. Types
+            // that lack a conversion (variants, unknown) never reach here.
+            let field_is_pointer = !field.required;
             let to_lines =
                 singular_to_proto_lines(&conversion, &receiver, &proto_field, field_is_pointer);
             let from_lines =
@@ -1846,26 +1893,42 @@ fn build_field_conversion(
 /// `ToProto` lines for a singular field.
 ///
 /// `field_is_pointer` indicates whether the native struct field is rendered as
-/// a pointer (optional struct-typed values). Pointer fields are guarded and
-/// dereferenced; all other fields convert directly.
+/// a pointer (an optional field). The generated code bridges the pointer/value
+/// mismatch with the converter while delegating all nil handling either to a
+/// guard here or to the converter's nil passthrough.
 fn singular_to_proto_lines(
     conversion: &GoValueConversion,
     receiver: &str,
     proto_field: &str,
     field_is_pointer: bool,
 ) -> Vec<String> {
-    if field_is_pointer {
-        // Optional struct fields are rendered as pointers; dereference when
-        // present. The native receiver is a pointer (`*T`), so pass `*recv`.
-        let converted = (conversion.to_proto)(&format!("(*{receiver})"));
-        vec![
-            format!("if {receiver} != nil {{"),
-            format!("\tmessage.{proto_field} = {converted}"),
-            "}".to_string(),
-        ]
-    } else {
-        let converted = (conversion.to_proto)(receiver);
-        vec![format!("message.{proto_field} = {converted}")]
+    let assign = |converted: &str| format!("message.{proto_field} = {converted}");
+    match conversion.kind {
+        // Override converters are nil-safe and pointer-based on the native
+        // side, so they need no guard: pass the pointer (optional) or the
+        // address of the value (required) straight through.
+        GoConversionKind::OverrideConverter => {
+            let arg = if field_is_pointer {
+                receiver.to_string()
+            } else {
+                format!("&{receiver}")
+            };
+            vec![assign(&(conversion.to_proto)(&arg))]
+        }
+        // Scalars, enums, and generated models convert a value. For optional
+        // (pointer) fields, guard against nil and dereference.
+        GoConversionKind::Scalar | GoConversionKind::Enum | GoConversionKind::ModelConverter => {
+            if field_is_pointer {
+                let converted = (conversion.to_proto)(&format!("(*{receiver})"));
+                vec![
+                    format!("if {receiver} != nil {{"),
+                    format!("\t{}", assign(&converted)),
+                    "}".to_string(),
+                ]
+            } else {
+                vec![assign(&(conversion.to_proto)(receiver))]
+            }
+        }
     }
 }
 
@@ -1877,19 +1940,50 @@ fn singular_from_proto_lines(
     field_is_pointer: bool,
 ) -> Vec<String> {
     let getter = format!("proto.Get{proto_field}()");
-    if field_is_pointer {
-        // Optional struct field: only set when the proto field is present,
-        // storing a pointer to the converted value.
-        let converted = (conversion.from_proto)(&getter);
-        vec![
-            format!("if proto.Get{proto_field}() != nil {{"),
-            format!("\tconverted := {converted}"),
-            format!("\tvalue.{go_field} = &converted"),
-            "}".to_string(),
-        ]
-    } else {
-        let converted = (conversion.from_proto)(&getter);
-        vec![format!("value.{go_field} = {converted}")]
+    match conversion.kind {
+        // Override converters return a pointer (`*Native`) and pass nil
+        // through. For optional fields, assign directly; for required fields,
+        // dereference with a zero fallback when present.
+        GoConversionKind::OverrideConverter => {
+            let converted = (conversion.from_proto)(&getter);
+            if field_is_pointer {
+                vec![format!("value.{go_field} = {converted}")]
+            } else {
+                vec![
+                    format!("if converted := {converted}; converted != nil {{"),
+                    format!("\tvalue.{go_field} = *converted"),
+                    "}".to_string(),
+                ]
+            }
+        }
+        // Generated models return a value, but only construct it when the proto
+        // message is present so an absent optional stays nil.
+        GoConversionKind::ModelConverter => {
+            let converted = (conversion.from_proto)(&getter);
+            if field_is_pointer {
+                vec![
+                    format!("if {getter} != nil {{"),
+                    format!("\tconverted := {converted}"),
+                    format!("\tvalue.{go_field} = &converted"),
+                    "}".to_string(),
+                ]
+            } else {
+                vec![format!("value.{go_field} = {converted}")]
+            }
+        }
+        // Scalars and enums convert a value directly. Proto scalar fields carry
+        // no presence information, so an optional field is always populated.
+        GoConversionKind::Scalar | GoConversionKind::Enum => {
+            let converted = (conversion.from_proto)(&getter);
+            if field_is_pointer {
+                vec![
+                    format!("converted := {converted}"),
+                    format!("value.{go_field} = &converted"),
+                ]
+            } else {
+                vec![format!("value.{go_field} = {converted}")]
+            }
+        }
     }
 }
 
@@ -1978,10 +2072,26 @@ fn build_sourced_conversion(
     match &sourced.kind {
         PlannedFieldKind::Singular(value) => {
             let conversion = go_value_conversion(value, api_plan, imports)?;
-            let converted = (conversion.to_proto)(source_expr);
-            Some(RenderedSourcedField {
-                to_proto_lines: vec![format!("message.{proto_field} = {converted}")],
-            })
+            match conversion.kind {
+                // Override converters need the address of the sourced value, so
+                // bind it to a local first (Go forbids taking the address of a
+                // call expression).
+                GoConversionKind::OverrideConverter => {
+                    let converted = (conversion.to_proto)("&sourced");
+                    Some(RenderedSourcedField {
+                        to_proto_lines: vec![
+                            format!("sourced := {source_expr}"),
+                            format!("message.{proto_field} = {converted}"),
+                        ],
+                    })
+                }
+                _ => {
+                    let converted = (conversion.to_proto)(source_expr);
+                    Some(RenderedSourcedField {
+                        to_proto_lines: vec![format!("message.{proto_field} = {converted}")],
+                    })
+                }
+            }
         }
         PlannedFieldKind::Repeated(value) => {
             let conversion = go_value_conversion(value, api_plan, imports)?;
@@ -2461,8 +2571,8 @@ fn resolve_resource_field_kind(kind: &PlannedFieldKind, optional: bool) -> Strin
             format!("[]{element_type}")
         }
         PlannedFieldKind::Singular(value) => {
-            let (base_type, is_struct) = resolve_resource_value_type_with_struct_flag(value);
-            if optional && is_struct {
+            let (base_type, _is_struct) = resolve_resource_value_type_with_struct_flag(value);
+            if optional && type_needs_pointer_when_optional(value, &base_type) {
                 format!("*{base_type}")
             } else {
                 base_type
@@ -2813,10 +2923,18 @@ fn render_operation_function_proto(
         output.push_str("\tif err := fut.Get(ctx, &result); err != nil {\n");
         output.push_str("\t\treturn nil, err\n");
         output.push_str("\t}\n");
-        output.push_str("\tvalue := ");
-        output.push_str(from_proto);
-        output.push('\n');
-        output.push_str("\treturn &value, nil\n");
+        if binding.output_returns_pointer {
+            // The converter already yields `*Native`; return it directly.
+            output.push_str("\treturn ");
+            output.push_str(from_proto);
+            output.push_str(", nil\n");
+        } else {
+            // The converter yields a `Model` value; return its address.
+            output.push_str("\tvalue := ");
+            output.push_str(from_proto);
+            output.push('\n');
+            output.push_str("\treturn &value, nil\n");
+        }
     } else {
         output.push_str("\treturn fut.Get(ctx, nil)\n");
     }

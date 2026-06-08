@@ -202,8 +202,9 @@ fn go_type_showcase_generates_expected_types() {
     // Records with required/optional fields
     assert!(rendered.contains("type GetUserRequest struct"));
     assert!(rendered.contains("UserId string // required"));
-    assert!(rendered.contains("ConsistencyToken string\n"));
-    assert!(!rendered.contains("ConsistencyToken *string"));
+    // Optional scalar fields are rendered as pointers so absence is
+    // representable as nil (distinct from a present zero value).
+    assert!(rendered.contains("ConsistencyToken *string"));
 
     assert!(rendered.contains("type PostalAddress struct"));
     assert!(rendered.contains("Street string // required"));
@@ -232,9 +233,8 @@ fn go_type_showcase_generates_expected_types() {
 
     assert!(rendered.contains("type DeactivateRequest struct"));
     assert!(rendered.contains("UserId string // required"));
-    // Optional scalar -- plain type, no pointer, no required comment
-    assert!(rendered.contains("Reason string\n"));
-    assert!(!rendered.contains("Reason *string"));
+    // Optional scalar -- pointer so absence is representable as nil.
+    assert!(rendered.contains("Reason *string"));
 
     // Resource struct
     assert!(rendered.contains("type User struct"));
@@ -250,9 +250,9 @@ fn go_type_showcase_generates_expected_types() {
         "func (u *User) Rename(ctx workflow.Context, displayName string) (*User, error)"
     ));
     assert!(rendered.contains("RenameRequest{UserId: u.UserId, DisplayName: displayName}"));
-    // Void resource method
+    // Void resource method -- optional param is a pointer.
     assert!(
-        rendered.contains("func (u *User) Deactivate(ctx workflow.Context, reason string) error")
+        rendered.contains("func (u *User) Deactivate(ctx workflow.Context, reason *string) error")
     );
     assert!(rendered.contains("DeactivateRequest{UserId: u.UserId, Reason: reason}"));
 
@@ -269,9 +269,9 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error)"));
     // The request struct is always constructed across multiple lines.
     assert!(rendered.contains("UpdateEmailRequest{\n\t\tUserId: userId,\n\t\tEmail: email,\n\t}"));
-    // Optional fields produce an options struct
+    // Optional fields produce an options struct (pointer-typed)
     assert!(rendered.contains("type GetUserOptions struct"));
-    assert!(rendered.contains("ConsistencyToken string"));
+    assert!(rendered.contains("ConsistencyToken *string"));
     assert!(rendered.contains("func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) (*User, error)"));
     assert!(
         rendered.contains("GetUserRequest{\n\t\tUserId: userId,\n\t\tConsistencyToken: opts.ConsistencyToken,\n\t}")
@@ -295,11 +295,20 @@ fn go_type_roundtrip_generates_proto_conversions() {
     assert!(rendered.contains("activity \"go.temporal.io/api/activity/v1\""));
     assert!(rendered.contains("common \"go.temporal.io/api/common/v1\""));
 
+    // Optional override-typed fields are rendered as pointers; the required
+    // retry-policy field stays a value. (Assertions use the un-gofmt'd output,
+    // so fields are single-space separated.)
+    assert!(rendered.contains("TaskQueue *string"));
+    assert!(rendered.contains("RetryPolicy temporal.RetryPolicy // required"));
+    assert!(rendered.contains("ScheduleToCloseTimeout *time.Duration"));
+    assert!(rendered.contains("Priority *temporal.Priority"));
+
     // Generated model gets a ToProto method targeting the proto message type.
     assert!(rendered.contains("func (m ActivityOptions) ToProto() *activity.ActivityOptions {"));
     assert!(rendered.contains("message := &activity.ActivityOptions{}"));
-    // Replacement-typed fields call hand-written converter functions.
-    assert!(rendered.contains("message.RetryPolicy = RetryPolicyToProto(m.RetryPolicy)"));
+    // Optional override fields pass the pointer straight to the nil-safe
+    // converter; the required field passes its address.
+    assert!(rendered.contains("message.RetryPolicy = RetryPolicyToProto(&m.RetryPolicy)"));
     assert!(rendered.contains("message.TaskQueue = TaskQueueToProto(m.TaskQueue)"));
     assert!(rendered.contains("message.Priority = PriorityToProto(m.Priority)"));
     assert!(
@@ -307,11 +316,17 @@ fn go_type_roundtrip_generates_proto_conversions() {
     );
     assert!(rendered.contains("return message"));
 
-    // Generated model gets a FromProto constructor.
+    // Generated model gets a FromProto constructor. Optional override fields
+    // assign the converter's pointer result directly; the required field is
+    // dereferenced with a nil guard.
     assert!(
         rendered.contains("func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {")
     );
-    assert!(rendered.contains("value.RetryPolicy = RetryPolicyFromProto(proto.GetRetryPolicy())"));
+    assert!(rendered.contains("value.TaskQueue = TaskQueueFromProto(proto.GetTaskQueue())"));
+    assert!(rendered.contains(
+        "if converted := RetryPolicyFromProto(proto.GetRetryPolicy()); converted != nil {"
+    ));
+    assert!(rendered.contains("value.RetryPolicy = *converted"));
 
     // Operation functions convert the request to proto before the SDK call and
     // decode the proto response afterwards.
@@ -321,16 +336,22 @@ fn go_type_roundtrip_generates_proto_conversions() {
     assert!(rendered.contains("var result activity.ActivityOptions"));
     assert!(rendered.contains("value := ActivityOptionsFromProto(&result)"));
 
-    // Replacement-typed operations (request is a native SDK type) convert via
-    // the hand-written converter and decode the proto response.
+    // Replacement-typed operations (request is a native SDK value) convert via
+    // the hand-written converter (passing the address) and return the proto
+    // response converted to a pointer directly.
     assert!(rendered.contains(
-        "fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, RetryPolicyToProto(request), workflow.NexusOperationOptions{})"
+        "fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, RetryPolicyToProto(&request), workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains("var result common.RetryPolicy"));
-    assert!(rendered.contains("value := RetryPolicyFromProto(&result)"));
+    assert!(rendered.contains("return RetryPolicyFromProto(&result), nil"));
 
-    // The hand-written support fragment is emitted alongside api.go in the
-    // generated package.
+    // The hand-written support fragment is emitted alongside api.go with the
+    // pointer-in/pointer-out converter contract.
     assert!(rendered.contains("### model_overrides.go"));
-    assert!(rendered.contains("func RetryPolicyToProto(p temporal.RetryPolicy) *common.RetryPolicy {"));
+    assert!(
+        rendered.contains("func RetryPolicyToProto(p *temporal.RetryPolicy) *common.RetryPolicy {")
+    );
+    assert!(
+        rendered.contains("func RetryPolicyFromProto(p *common.RetryPolicy) *temporal.RetryPolicy {")
+    );
 }

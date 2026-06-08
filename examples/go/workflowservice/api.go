@@ -26,38 +26,46 @@ type SignalWithStartWorkflowRequest struct {
 	TaskQueue          string // required
 	Signal             string // required
 	SignalArgs         []any
-	ExecutionTimeout   time.Duration
-	RunTimeout         time.Duration
-	TaskTimeout        time.Duration
-	RequestId          string
-	IdReusePolicy      enums.WorkflowIdReusePolicy
-	IdConflictPolicy   enums.WorkflowIdConflictPolicy
-	RetryPolicy        temporal.RetryPolicy
-	CronSchedule       string
+	ExecutionTimeout   *time.Duration
+	RunTimeout         *time.Duration
+	TaskTimeout        *time.Duration
+	RequestId          *string
+	IdReusePolicy      *enums.WorkflowIdReusePolicy
+	IdConflictPolicy   *enums.WorkflowIdConflictPolicy
+	RetryPolicy        *temporal.RetryPolicy
+	CronSchedule       *string
 	Memo               map[string]any
-	SearchAttributes   string
-	Priority           temporal.Priority
-	VersioningOverride client.VersioningOverride
-	StartDelay         time.Duration
+	SearchAttributes   *string
+	Priority           *temporal.Priority
+	VersioningOverride *client.VersioningOverride
+	StartDelay         *time.Duration
 	UserMetadata       *UserMetadata
 }
 
 func (m SignalWithStartWorkflowRequest) ToProto() *workflowservice.SignalWithStartWorkflowExecutionRequest {
 	message := &workflowservice.SignalWithStartWorkflowExecutionRequest{}
-	message.WorkflowType = WorkflowTypeToProto(m.Workflow)
+	message.WorkflowType = WorkflowTypeToProto(&m.Workflow)
 	message.Input = PayloadsToProto(m.Args)
 	message.WorkflowId = m.Id
-	message.TaskQueue = TaskQueueToProto(m.TaskQueue)
+	message.TaskQueue = TaskQueueToProto(&m.TaskQueue)
 	message.SignalName = m.Signal
 	message.SignalInput = PayloadsToProto(m.SignalArgs)
 	message.WorkflowExecutionTimeout = DurationToProto(m.ExecutionTimeout)
 	message.WorkflowRunTimeout = DurationToProto(m.RunTimeout)
 	message.WorkflowTaskTimeout = DurationToProto(m.TaskTimeout)
-	message.RequestId = m.RequestId
-	message.WorkflowIdReusePolicy = enums.WorkflowIdReusePolicy(m.IdReusePolicy)
-	message.WorkflowIdConflictPolicy = enums.WorkflowIdConflictPolicy(m.IdConflictPolicy)
+	if m.RequestId != nil {
+		message.RequestId = (*m.RequestId)
+	}
+	if m.IdReusePolicy != nil {
+		message.WorkflowIdReusePolicy = enums.WorkflowIdReusePolicy((*m.IdReusePolicy))
+	}
+	if m.IdConflictPolicy != nil {
+		message.WorkflowIdConflictPolicy = enums.WorkflowIdConflictPolicy((*m.IdConflictPolicy))
+	}
 	message.RetryPolicy = RetryPolicyToProto(m.RetryPolicy)
-	message.CronSchedule = m.CronSchedule
+	if m.CronSchedule != nil {
+		message.CronSchedule = (*m.CronSchedule)
+	}
 	message.Memo = MemoToProto(m.Memo)
 	message.SearchAttributes = SearchAttributesToProto(m.SearchAttributes)
 	message.Priority = PriorityToProto(m.Priority)
@@ -120,19 +128,19 @@ func signalWithStartWorkflow(ctx workflow.Context, request SignalWithStartWorkfl
 type SignalWithStartWorkflowOptions struct {
 	Args               []any
 	SignalArgs         []any
-	ExecutionTimeout   time.Duration
-	RunTimeout         time.Duration
-	TaskTimeout        time.Duration
-	RequestId          string
-	IdReusePolicy      enums.WorkflowIdReusePolicy
-	IdConflictPolicy   enums.WorkflowIdConflictPolicy
-	RetryPolicy        temporal.RetryPolicy
-	CronSchedule       string
+	ExecutionTimeout   *time.Duration
+	RunTimeout         *time.Duration
+	TaskTimeout        *time.Duration
+	RequestId          *string
+	IdReusePolicy      *enums.WorkflowIdReusePolicy
+	IdConflictPolicy   *enums.WorkflowIdConflictPolicy
+	RetryPolicy        *temporal.RetryPolicy
+	CronSchedule       *string
 	Memo               map[string]any
-	SearchAttributes   string
-	Priority           temporal.Priority
-	VersioningOverride client.VersioningOverride
-	StartDelay         time.Duration
+	SearchAttributes   *string
+	Priority           *temporal.Priority
+	VersioningOverride *client.VersioningOverride
+	StartDelay         *time.Duration
 	UserMetadata       *UserMetadata
 }
 

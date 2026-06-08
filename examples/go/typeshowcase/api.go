@@ -54,7 +54,7 @@ func (NotificationTargetNone) isNotificationTarget() {}
 
 type GetUserRequest struct {
 	UserId           string // required
-	ConsistencyToken string
+	ConsistencyToken *string
 }
 
 type UpdateEmailRequest struct {
@@ -100,7 +100,7 @@ type Coordinates struct {
 
 type DeactivateRequest struct {
 	UserId string // required
-	Reason string
+	Reason *string
 }
 
 // --- Resources ---
@@ -121,7 +121,7 @@ func (u *User) Rename(ctx workflow.Context, displayName string) (*User, error) {
 	return rename(ctx, RenameRequest{UserId: u.UserId, DisplayName: displayName})
 }
 
-func (u *User) Deactivate(ctx workflow.Context, reason string) error {
+func (u *User) Deactivate(ctx workflow.Context, reason *string) error {
 	return deactivate(ctx, DeactivateRequest{UserId: u.UserId, Reason: reason})
 }
 
@@ -176,7 +176,7 @@ func deactivate(ctx workflow.Context, request DeactivateRequest) error {
 // --- Operations (public API) ---
 
 type GetUserOptions struct {
-	ConsistencyToken string
+	ConsistencyToken *string
 }
 
 func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) (*User, error) {
@@ -208,7 +208,7 @@ func SetProfile(ctx workflow.Context, userId string, profile UserProfile) (*User
 }
 
 type DeactivateOptions struct {
-	Reason string
+	Reason *string
 }
 
 func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) error {

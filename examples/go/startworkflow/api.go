@@ -23,15 +23,15 @@ type StartWorkflowRequest struct {
 	Args               []any
 	WorkflowId         string // required
 	TaskQueue          string // required
-	WorkflowStartDelay time.Duration
+	WorkflowStartDelay *time.Duration
 }
 
 func (m StartWorkflowRequest) ToProto() *workflowservice.StartWorkflowExecutionRequest {
 	message := &workflowservice.StartWorkflowExecutionRequest{}
-	message.WorkflowType = WorkflowTypeToProto(m.Workflow)
+	message.WorkflowType = WorkflowTypeToProto(&m.Workflow)
 	message.Input = PayloadsToProto(m.Args)
 	message.WorkflowId = m.WorkflowId
-	message.TaskQueue = TaskQueueToProto(m.TaskQueue)
+	message.TaskQueue = TaskQueueToProto(&m.TaskQueue)
 	message.WorkflowStartDelay = DurationToProto(m.WorkflowStartDelay)
 	message.Namespace = WorkflowNamespace()
 	return message
@@ -39,33 +39,38 @@ func (m StartWorkflowRequest) ToProto() *workflowservice.StartWorkflowExecutionR
 
 type CancelWorkflowRequest struct {
 	WorkflowExecution WorkflowExecution // required
-	Reason            string
+	Reason            *string
 }
 
 func (m CancelWorkflowRequest) ToProto() *workflowservice.RequestCancelWorkflowExecutionRequest {
 	message := &workflowservice.RequestCancelWorkflowExecutionRequest{}
 	message.WorkflowExecution = m.WorkflowExecution.ToProto()
-	message.Reason = m.Reason
+	if m.Reason != nil {
+		message.Reason = (*m.Reason)
+	}
 	message.Namespace = WorkflowNamespace()
 	return message
 }
 
 type WorkflowExecution struct {
 	WorkflowId string // required
-	RunId      string
+	RunId      *string
 }
 
 func (m WorkflowExecution) ToProto() *common.WorkflowExecution {
 	message := &common.WorkflowExecution{}
 	message.WorkflowId = m.WorkflowId
-	message.RunId = m.RunId
+	if m.RunId != nil {
+		message.RunId = (*m.RunId)
+	}
 	return message
 }
 
 func WorkflowExecutionFromProto(proto *common.WorkflowExecution) WorkflowExecution {
 	value := WorkflowExecution{}
 	value.WorkflowId = proto.GetWorkflowId()
-	value.RunId = proto.GetRunId()
+	converted := proto.GetRunId()
+	value.RunId = &converted
 	return value
 }
 
@@ -87,10 +92,10 @@ func CancelWorkflowResponseFromProto(proto *workflowservice.RequestCancelWorkflo
 type StartedWorkflow struct {
 	Namespace  string // required
 	WorkflowId string // required
-	RunId      string
+	RunId      *string
 }
 
-func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) error {
+func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason *string) error {
 	_, err := cancelWorkflow(ctx, CancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reason})
 	return err
 }
@@ -140,7 +145,7 @@ func cancelWorkflow(ctx workflow.Context, request CancelWorkflowRequest) (*Cance
 
 type StartWorkflowOptions struct {
 	Args               []any
-	WorkflowStartDelay time.Duration
+	WorkflowStartDelay *time.Duration
 }
 
 func StartWorkflow(
@@ -161,7 +166,7 @@ func StartWorkflow(
 
 type RestartWorkflowOptions struct {
 	Args               []any
-	WorkflowStartDelay time.Duration
+	WorkflowStartDelay *time.Duration
 }
 
 func RestartWorkflow(
@@ -181,7 +186,7 @@ func RestartWorkflow(
 }
 
 type CancelWorkflowOptions struct {
-	Reason string
+	Reason *string
 }
 
 func CancelWorkflow(ctx workflow.Context, workflowExecution WorkflowExecution, opts CancelWorkflowOptions) (*CancelWorkflowResponse, error) {

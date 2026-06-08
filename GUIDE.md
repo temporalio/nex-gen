@@ -6,7 +6,23 @@ resource name-binding mechanism (including edge cases), and a complete glossary
 of `@nexus` directives.
 
 > [!NOTE]
-> Go generation is in progress and not covered here.
+> Go generation supports proto-backed models. Generated Go models gain
+> `ToProto`/`FromProto` methods that convert between native Go values and the
+> Temporal Go SDK's protobuf structs, keeping the wire format compatible with
+> the Python and TypeScript bindings.
+>
+> Converters for type-replaced SDK types live in a hand-written
+> `model_overrides.go` support fragment and follow a strict pointer contract:
+> `XToProto(*Native) *Proto` and `XFromProto(*Proto) *Native`, each returning
+> `nil` for `nil` input. Converters never invent zero values -- the generated
+> `api.go` owns all nil/presence handling. Optional fields are rendered as
+> pointers (`*T`) so that an unset value (`nil`) stays distinct from a value
+> that was explicitly set to the zero value; required fields stay values and are
+> dereferenced from the converter's pointer result with a nil guard.
+>
+> Payload, memo, search-attribute, and versioning-override conversions are
+> partial: the codegen is in place but their converters are placeholders pending
+> full Temporal Go SDK data-converter integration.
 
 ## Contents
 
