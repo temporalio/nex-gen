@@ -10,6 +10,7 @@ The WIT definition is the source of truth for the public API. Protobuf descripto
 
 ## Contents
 
+- [Current Status](#current-status)
 - [Examples](#examples)
 - [WIT-Direct Generation](#wit-direct-generation)
 - [WIT Directives](#wit-directives)
@@ -17,14 +18,28 @@ The WIT definition is the source of truth for the public API. Protobuf descripto
 - [Proto Backing](#proto-backing)
 - [Validation](#validation)
 
-Current status:
+## Current Status
 
-- Python generation is implemented
-- TypeScript generation is implemented
-- WIT records, enums, flags, variants, results, resources, resource methods, and no-result operations are supported without proto backing
-- proto-backed request models can serialize into proto inputs when WIT types are annotated with `@nexus.proto`
-- proto-backed response and nested models remain bidirectional where generated
-- support files, native type substitutions, sourced fields, function metadata, flattened API fields, and output transforms are driven from WIT `@nexus` directives
+| Feature | What it covers | Python | TypeScript | Go |
+| --- | --- | :-: | :-: | :-: |
+| Core API generation | WIT types become native data types; WIT functions and resources become wrappers that invoke Nexus operations from Temporal workflows | ✅ | ✅ | ✅\* |
+| Service definitions | Generated service and operation descriptors, used to register operation handlers and to mock operations in tests | ✅ | ✅ | ❌ |
+| Proto backing | Generated models convert to and from Temporal's protobuf messages at the Nexus boundary (`@nexus.proto` and related directives) | ✅ | ✅ | ✅\* |
+| Ergonomics directives | `@nexus` directives that polish the generated API: transforming raw responses into workflow handles, flattening nested parameters, accepting typed workflow/signal functions, doc comments | ✅ | ✅ | ❌ |
+| `json/nexus` runtime | Serialization shim that lets non-proto (WIT-direct) values round-trip through a Temporal server using a wire format shared across languages | ✅ | ✅ | ❌ |
+
+\* Go partial support:
+
+- **Core API generation**: tuples and results are supported as direct record
+  fields only, not inside lists, maps, or other containers.
+- **Proto backing**: flags, variants, tuples, results, and type-replaced
+  external types are omitted from `ToProto`/`FromProto`; sourced fields are
+  emitted on the `ToProto` side only; the `--support-file` CLI flag is ignored
+  for Go.
+
+Because Go has no `json/nexus` runtime, only the proto-backed Go examples share
+a wire format with the Python and TypeScript bindings; WIT-direct Go models
+serialize with the Temporal Go SDK's default converter.
 
 ## Examples
 
@@ -121,10 +136,20 @@ cargo run -- generate \
   --output /tmp/user-service
 ```
 
+Generate Go:
+
+```bash
+cargo run -- generate \
+  --lang go \
+  --input examples/inputs/user-service.wit \
+  --output /tmp/userservice
+```
+
 Add `--format` to run a formatter after generation:
 
 - Python: `ruff format`
 - TypeScript: `prettier --write`
+- Go: `gofmt -w`
 
 The `user-service` example is intentionally small and WIT-native. The `type-showcase` example demonstrates broader WIT type coverage: records, enums, flags, variants, results, maps, tuples, resources, resource methods, and an operation with no return value without proto annotations.
 
