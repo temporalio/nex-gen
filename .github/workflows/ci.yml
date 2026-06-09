@@ -47,6 +47,12 @@ jobs:
           cache: npm
           cache-dependency-path: examples/typescript/package-lock.json
 
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version-file: examples/go/go.mod
+          cache-dependency-path: examples/go/go.sum
+
       - name: Install Python dependencies
         working-directory: examples/python
         run: uv sync --locked
@@ -68,3 +74,17 @@ jobs:
       - name: Check TypeScript formatting
         working-directory: examples/typescript
         run: npm exec -- prettier --check .
+
+      - name: Check Go formatting
+        working-directory: examples/go
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt required for:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - name: Run Go tests
+        working-directory: examples/go
+        run: go test ./...

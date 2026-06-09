@@ -26,3 +26,6 @@ run cargo test
 run_in examples/python uv run ruff format --check .
 
 run_in examples/typescript npm exec -- prettier --check .
+
+run_in examples/go bash -c 'unformatted="$(gofmt -l .)"; if [ -n "$unformatted" ]; then echo "gofmt required for:" >&2; echo "$unformatted" >&2; exit 1; fi'
+run_in examples/go go test ./...
