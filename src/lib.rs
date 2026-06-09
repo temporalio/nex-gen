@@ -22,17 +22,17 @@ use error::Result;
 use generator::{GeneratedFiles, GeneratedOutputLayout, generate_files};
 use heck::ToSnakeCase;
 use language::Language;
-use spec::{ApiSpec, write_prepared_wit_directory};
+use spec::{ApiSpec, SupportFragmentSpec, write_prepared_wit_directory};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SupportFiles {
-    pub python: Option<String>,
-    pub typescript: Option<String>,
+    pub fragments: Vec<SupportFragmentSpec>,
 }
 
 pub struct GenerateRequest {
     pub language: Language,
     pub input_paths: Vec<PathBuf>,
+    pub support_paths: Vec<PathBuf>,
     pub descriptor_paths: Vec<PathBuf>,
     pub output_path: PathBuf,
     pub format: bool,
@@ -72,10 +72,18 @@ pub fn generate_to_string_with_inputs(
     input_paths: &[PathBuf],
     descriptor_paths: &[PathBuf],
 ) -> Result<String> {
-    let input_path = primary_input_path(input_paths)?;
+    generate_to_string_with_inputs_and_support(language, input_paths, descriptor_paths, &[])
+}
+
+pub fn generate_to_string_with_inputs_and_support(
+    language: Language,
+    input_paths: &[PathBuf],
+    descriptor_paths: &[PathBuf],
+    support_paths: &[PathBuf],
+) -> Result<String> {
     let spec = ApiSpec::load_for_language_with_inputs(language, input_paths)?;
     let descriptors = DescriptorIndex::load_many(descriptor_paths)?;
-    let support = load_support_files(language, &spec, input_path)?;
+    let support = load_support_files(language, &spec, support_paths)?;
     let generated = generate_files(language, &spec, &descriptors, &support)?;
     print_warnings(&generated);
     Ok(match generated.layout {
@@ -88,10 +96,9 @@ pub fn generate_to_string_with_inputs(
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
-    let input_path = primary_input_path(&request.input_paths)?;
     let spec = ApiSpec::load_for_language_with_inputs(request.language, &request.input_paths)?;
     let descriptors = DescriptorIndex::load_many(&request.descriptor_paths)?;
-    let support = load_support_files(request.language, &spec, input_path)?;
+    let support = load_support_files(request.language, &spec, &request.support_paths)?;
     let generated = generate_files(request.language, &spec, &descriptors, &support)?;
     print_warnings(&generated);
 
@@ -193,16 +200,6 @@ pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn primary_input_path(input_paths: &[PathBuf]) -> Result<&Path> {
-    input_paths
-        .first()
-        .map(PathBuf::as_path)
-        .ok_or_else(|| error::Error::InvalidWit {
-            path: PathBuf::from("<input>"),
-            reason: "at least one WIT input path is required".to_string(),
-        })
 }
 
 fn format_generated_file(language: Language, output_path: &Path) -> Result<()> {
@@ -338,32 +335,31 @@ fn format_formatter_command(program: &str, args: &[String]) -> String {
 fn load_support_files(
     language: Language,
     spec: &ApiSpec,
-    _input_path: &Path,
+    support_paths: &[PathBuf],
 ) -> Result<SupportFiles> {
-    let support_fragments = spec.support.fragments_for_language(language);
-    let support_contents = if support_fragments.is_empty() {
-        None
-    } else {
-        Some(
-            support_fragments
-                .iter()
-                .map(|fragment| fragment.contents.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-        )
-    };
-
-    Ok(match language {
-        Language::Python => SupportFiles {
-            python: support_contents,
-            typescript: None,
-        },
-        Language::TypeScript => SupportFiles {
-            python: None,
-            typescript: support_contents,
-        },
-        _ => SupportFiles::default(),
+    let mut support_fragments = spec.support.fragments_for_language(language).to_vec();
+    support_fragments.extend(load_support_fragments_from_paths(support_paths)?);
+    Ok(SupportFiles {
+        fragments: support_fragments,
     })
+}
+
+fn load_support_fragments_from_paths(
+    support_paths: &[PathBuf],
+) -> Result<Vec<SupportFragmentSpec>> {
+    support_paths
+        .iter()
+        .map(|path| {
+            let contents = fs::read_to_string(path).map_err(|source| error::Error::ReadFile {
+                path: path.clone(),
+                source,
+            })?;
+            Ok(SupportFragmentSpec {
+                path: path.to_string_lossy().replace('\\', "/"),
+                contents,
+            })
+        })
+        .collect()
 }
 
 fn discover_example_ids(repo_root: &Path, language: Language) -> Result<Vec<String>> {
@@ -469,6 +465,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
     generate_to_file(&GenerateRequest {
         language,
         input_paths,
+        support_paths: Vec::new(),
         descriptor_paths: vec![descriptor_path],
         output_path: output_path.clone(),
         format: false,

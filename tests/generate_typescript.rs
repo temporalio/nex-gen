@@ -169,6 +169,47 @@ fn typescript_examples_generation_matches_checked_in_output() {
 }
 
 #[test]
+fn cli_generates_typescript_support_file_from_parameter() {
+    let root = project_root();
+    let temp_dir = unique_output_path("typescript-support-file-input");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let support_path = temp_dir.join("custom-support.ts");
+    let output_path = temp_dir.join("output");
+    fs::write(
+        &support_path,
+        "export function customSupportHook(): string {\n  return \"custom\";\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args([
+            "generate",
+            "--lang",
+            "typescript",
+            "--input",
+            input_path(&root, "user-service").to_str().unwrap(),
+            "--support-file",
+            support_path.to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fs::read_to_string(output_path.join("support.ts"))
+            .unwrap()
+            .contains("export function customSupportHook()")
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn typescript_example_suite_typechecks_and_tests() {
     let root = project_root();
     let example_dir = typescript_root(&root);

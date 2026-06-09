@@ -217,6 +217,51 @@ fn cli_generates_wit_direct_example_without_descriptors() {
 }
 
 #[test]
+fn cli_generates_python_support_file_from_parameter() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-support-file-input");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let support_path = temp_dir.join("custom_support.py");
+    let output_path = temp_dir.join("output");
+    fs::write(
+        &support_path,
+        "def custom_support_hook() -> str:\n    return 'custom'\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args([
+            "generate",
+            "--lang",
+            "python",
+            "--input",
+            input_path(&root, "user-service").to_str().unwrap(),
+            "--support-file",
+            support_path.to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(output_path.join("_support/custom_support.py")).unwrap(),
+        "def custom_support_hook() -> str:\n    return 'custom'\n"
+    );
+    assert!(
+        fs::read_to_string(output_path.join("_support/__init__.py"))
+            .unwrap()
+            .contains("from .custom_support import *")
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn python_example_suite_type_checks_and_runs() {
     let root = project_root();
     let example_dir = python_root(&root);
