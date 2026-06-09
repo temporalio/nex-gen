@@ -24,4 +24,6 @@ target-version = "py310"
 
 [tool.basedpyright]
 exclude = [".venv"]
+reportAny = false
+reportExplicitAny = false
 reportUnnecessaryTypeIgnoreComment = "error"

@@ -2332,7 +2332,6 @@ fn support_module_name(fragment: &SupportFragmentSpec) -> Result<String> {
 
 fn render_generated_file_header(output: &mut String) {
     output.push_str(GENERATED_HEADER);
-    output.push_str("\n# pyright: reportAny=false");
     output.push_str("\n\n");
     output.push_str("from __future__ import annotations\n");
 }
