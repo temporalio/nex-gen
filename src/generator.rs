@@ -92,7 +92,7 @@ pub fn generate_files(
     };
 
     let mut generated = match language {
-        Language::Go => go::generate(&plan, spec.support.fragments_for_language(language)),
+        Language::Go => go::generate(&plan, support_fragments),
         Language::Python => python::generate(&plan, support_fragments, language_imports),
         Language::TypeScript => typescript::generate(&plan, support_fragments, language_imports),
         language => Err(Error::UnsupportedLanguage { language }),

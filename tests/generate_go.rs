@@ -142,6 +142,48 @@ fn unique_output_path(label: &str) -> PathBuf {
 }
 
 #[test]
+fn cli_generates_go_support_file_from_parameter() {
+    let root = project_root();
+    let temp_dir = unique_output_path("go-support-file-input");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let support_path = temp_dir.join("custom_support.go");
+    let output_path = temp_dir.join("output");
+    fs::write(
+        &support_path,
+        "package placeholder\n\nfunc CustomSupportHook() string {\n\treturn \"custom\"\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args([
+            "generate",
+            "--lang",
+            "go",
+            "--input",
+            input_path(&root, "user-service").to_str().unwrap(),
+            "--support-file",
+            support_path.to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The explicit support file is emitted even though the WIT-direct
+    // user-service package performs no proto conversion, and its package
+    // declaration is rewritten to the generated package name.
+    let support_contents = fs::read_to_string(output_path.join("custom_support.go")).unwrap();
+    assert!(support_contents.starts_with("package userservice\n"));
+    assert!(support_contents.contains("func CustomSupportHook() string"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn go_examples_generation_matches_checked_in_output() {
     let root = project_root();
     for example_id in go_example_ids(&root) {

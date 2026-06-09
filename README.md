@@ -34,8 +34,7 @@ The WIT definition is the source of truth for the public API. Protobuf descripto
   fields only, not inside lists, maps, or other containers.
 - **Proto backing**: flags, variants, tuples, results, and type-replaced
   external types are omitted from `ToProto`/`FromProto`; sourced fields are
-  emitted on the `ToProto` side only; the `--support-file` CLI flag is ignored
-  for Go.
+  emitted on the `ToProto` side only.
 
 Because Go has no `json/nexus` runtime, only the proto-backed Go examples share
 a wire format with the Python and TypeScript bindings; WIT-direct Go models

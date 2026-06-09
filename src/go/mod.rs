@@ -124,16 +124,13 @@ pub(crate) fn generate(
     files.insert(PathBuf::from("api.go"), output);
 
     // Emit hand-written support fragments (e.g. proto converter functions) as
-    // additional Go files in the same package, but only when the generated code
-    // actually performs proto conversion (i.e. proto imports were collected).
-    // WIT-native packages need no converters and would otherwise carry an
-    // unused support file.
-    if !proto_imports.is_empty() {
-        for fragment in support_fragments {
-            let file_name = support_file_name(fragment)?;
-            let contents = rewrite_support_package(&fragment.contents, &package_name);
-            files.insert(PathBuf::from(file_name), contents);
-        }
+    // additional Go files in the same package. Like the Python and TypeScript
+    // backends, all fragments are emitted unconditionally, even when nothing
+    // in the generated code references them.
+    for fragment in support_fragments {
+        let file_name = support_file_name(fragment)?;
+        let contents = rewrite_support_package(&fragment.contents, &package_name);
+        files.insert(PathBuf::from(file_name), contents);
     }
 
     Ok(GeneratedFiles::directory(files))
