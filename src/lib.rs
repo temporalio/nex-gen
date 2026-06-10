@@ -2,6 +2,7 @@ mod api_plan;
 
 pub mod add_rpc;
 pub mod descriptors;
+pub mod dotnet;
 pub mod error;
 pub mod generator;
 pub mod language;
@@ -527,6 +528,7 @@ fn python_example_package_name(example_id: &str) -> String {
 
 fn format_example_output(repo_root: &Path, language: Language, output_path: &Path) -> Result<()> {
     let (cwd, program, args): (PathBuf, &str, Vec<String>) = match language {
+        Language::Dotnet => return Ok(()),
         Language::Python => (
             example_language_root(repo_root, language),
             "uv",
