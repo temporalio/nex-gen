@@ -8,62 +8,62 @@ using System.Collections.Generic;
 namespace NexGen.FunctionExecution
 {
 
-public class ExecuteFunctionRequest
-{
-    public string Function { get; init; } = default!;
-    public string Name { get; init; } = default!;
-    public bool Enabled { get; init; } = default!;
-}
+    public class ExecuteFunctionRequest
+    {
+        public string Function { get; init; } = default!;
+        public string Name { get; init; } = default!;
+        public bool Enabled { get; init; } = default!;
+    }
 
-public class ExecuteFunctionResult
-{
-    public string Value { get; init; } = default!;
-}
+    public class ExecuteFunctionResult
+    {
+        public string Value { get; init; } = default!;
+    }
 
-public class ExecuteCountedFunctionRequest
-{
-    public string Function { get; init; } = default!;
-    public string Name { get; init; } = default!;
-    public int Count { get; init; } = default!;
-}
+    public class ExecuteCountedFunctionRequest
+    {
+        public string Function { get; init; } = default!;
+        public string Name { get; init; } = default!;
+        public int Count { get; init; } = default!;
+    }
 
-public class ExecuteCountedFunctionResult
-{
-    public string Value { get; init; } = default!;
-}
+    public class ExecuteCountedFunctionResult
+    {
+        public string Value { get; init; } = default!;
+    }
 
-public class ExecuteNamedFunctionRequest
-{
-    public string Function { get; init; } = default!;
-    public string Name { get; init; } = default!;
-    public bool Enabled { get; init; } = default!;
-}
+    public class ExecuteNamedFunctionRequest
+    {
+        public string Function { get; init; } = default!;
+        public string Name { get; init; } = default!;
+        public bool Enabled { get; init; } = default!;
+    }
 
-public class ExecuteNamedFunctionResult
-{
-    public string Value { get; init; } = default!;
-}
+    public class ExecuteNamedFunctionResult
+    {
+        public string Value { get; init; } = default!;
+    }
 
-public class ExecuteVarargsFunctionRequest
-{
-    public string Function { get; init; } = default!;
-    public IReadOnlyList<string>? Args { get; init; }
-}
+    public class ExecuteVarargsFunctionRequest
+    {
+        public string Function { get; init; } = default!;
+        public IReadOnlyList<string>? Args { get; init; }
+    }
 
-public class ExecuteVarargsFunctionResult
-{
-    public string Value { get; init; } = default!;
-}
+    public class ExecuteVarargsFunctionResult
+    {
+        public string Value { get; init; } = default!;
+    }
 
-public class ExecuteNamedVarargsFunctionRequest
-{
-    public string Function { get; init; } = default!;
-    public IReadOnlyList<string>? Args { get; init; }
-}
+    public class ExecuteNamedVarargsFunctionRequest
+    {
+        public string Function { get; init; } = default!;
+        public IReadOnlyList<string>? Args { get; init; }
+    }
 
-public class ExecuteNamedVarargsFunctionResult
-{
-    public string Value { get; init; } = default!;
-}
+    public class ExecuteNamedVarargsFunctionResult
+    {
+        public string Value { get; init; } = default!;
+    }
 
 }

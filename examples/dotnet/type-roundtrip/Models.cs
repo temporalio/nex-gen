@@ -9,32 +9,32 @@ using NexGen.Support;
 namespace NexGen.TypeRoundtripService
 {
 
-internal class ActivityOptions
-{
-    public string? TaskQueue { get; init; }
-    public Temporalio.Common.RetryPolicy RetryPolicy { get; init; } = default!;
-    public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
-    public Temporalio.Common.Priority? Priority { get; init; }
-
-    public Temporalio.Api.Activity.V1.ActivityOptions ToProto()
+    internal class ActivityOptions
     {
-        var proto = new Temporalio.Api.Activity.V1.ActivityOptions();
-        if (TaskQueue is { } taskQueue)
-        {
-            proto.TaskQueue = taskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);
-        }
-        proto.RetryPolicy = RetryPolicy.ToProto();
-        if (ScheduleToCloseTimeout is { } scheduleToCloseTimeout)
-        {
-            proto.ScheduleToCloseTimeout = scheduleToCloseTimeout.ToProto();
-        }
-        if (Priority is { } priority)
-        {
-            proto.Priority = priority.ToProto();
-        }
-        return proto;
-    }
+        public string? TaskQueue { get; init; }
+        public Temporalio.Common.RetryPolicy RetryPolicy { get; init; } = default!;
+        public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
+        public Temporalio.Common.Priority? Priority { get; init; }
 
-}
+        public Temporalio.Api.Activity.V1.ActivityOptions ToProto()
+        {
+            var proto = new Temporalio.Api.Activity.V1.ActivityOptions();
+            if (TaskQueue is { } taskQueue)
+            {
+                proto.TaskQueue = taskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);
+            }
+            proto.RetryPolicy = RetryPolicy.ToProto();
+            if (ScheduleToCloseTimeout is { } scheduleToCloseTimeout)
+            {
+                proto.ScheduleToCloseTimeout = scheduleToCloseTimeout.ToProto();
+            }
+            if (Priority is { } priority)
+            {
+                proto.Priority = priority.ToProto();
+            }
+            return proto;
+        }
+
+    }
 
 }

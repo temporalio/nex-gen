@@ -7,16 +7,16 @@ using NexusRpc;
 namespace NexGen.WorkflowService
 {
 
-[NexusService("temporal.api.workflowservice.v1.WorkflowService")]
-internal interface IWorkflowService
-{
-    /// <summary>
-    /// Signal a workflow, starting it first if needed.
-    /// </summary>
-    /// <returns>A workflow handle to the started workflow.</returns>
-    [NexusOperation("SignalWithStartWorkflowExecution")]
-    Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse SignalWithStartWorkflow(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest request);
+    [NexusService("temporal.api.workflowservice.v1.WorkflowService")]
+    internal interface IWorkflowService
+    {
+        /// <summary>
+        /// Signal a workflow, starting it first if needed.
+        /// </summary>
+        /// <returns>A workflow handle to the started workflow.</returns>
+        [NexusOperation("SignalWithStartWorkflowExecution")]
+        Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse SignalWithStartWorkflow(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest request);
 
-}
+    }
 
 }

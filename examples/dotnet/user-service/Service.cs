@@ -7,15 +7,15 @@ using NexusRpc;
 namespace NexGen.UserService
 {
 
-[NexusService("UserService")]
-internal interface IUserService
-{
-    [NexusOperation("GetUser")]
-    User GetUser(GetUserRequest request);
+    [NexusService("UserService")]
+    internal interface IUserService
+    {
+        [NexusOperation("GetUser")]
+        User GetUser(GetUserRequest request);
 
-    [NexusOperation("UpdateEmail")]
-    User UpdateEmail(UpdateEmailRequest request);
+        [NexusOperation("UpdateEmail")]
+        User UpdateEmail(UpdateEmailRequest request);
 
-}
+    }
 
 }

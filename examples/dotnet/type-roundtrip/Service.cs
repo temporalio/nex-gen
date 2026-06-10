@@ -7,15 +7,15 @@ using NexusRpc;
 namespace NexGen.TypeRoundtripService
 {
 
-[NexusService("TypeRoundtripService")]
-internal interface ITypeRoundtripService
-{
-    [NexusOperation("RetryPolicyOperation")]
-    Temporalio.Common.RetryPolicy RetryPolicyOperation(Temporalio.Common.RetryPolicy request);
+    [NexusService("TypeRoundtripService")]
+    internal interface ITypeRoundtripService
+    {
+        [NexusOperation("RetryPolicyOperation")]
+        Temporalio.Common.RetryPolicy RetryPolicyOperation(Temporalio.Common.RetryPolicy request);
 
-    [NexusOperation("ActivityOptionsOperation")]
-    Temporalio.Api.Activity.V1.ActivityOptions ActivityOptionsOperation(Temporalio.Api.Activity.V1.ActivityOptions request);
+        [NexusOperation("ActivityOptionsOperation")]
+        Temporalio.Api.Activity.V1.ActivityOptions ActivityOptionsOperation(Temporalio.Api.Activity.V1.ActivityOptions request);
 
-}
+    }
 
 }

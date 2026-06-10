@@ -9,79 +9,79 @@ using NexGen.Support;
 namespace NexGen.StartWorkflowService
 {
 
-internal class StartWorkflowRequest
-{
-    public string Workflow { get; init; } = default!;
-    public IReadOnlyCollection<object?>? Args { get; init; }
-    public string WorkflowId { get; init; } = default!;
-    public string TaskQueue { get; init; } = default!;
-    public System.TimeSpan? WorkflowStartDelay { get; init; }
-
-    public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest ToProto()
+    internal class StartWorkflowRequest
     {
-        var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest();
-        proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
-        proto.WorkflowType = Workflow.ToProto(default(Temporalio.Api.Common.V1.WorkflowType)!);
-        if (Args is { } args)
+        public string Workflow { get; init; } = default!;
+        public IReadOnlyCollection<object?>? Args { get; init; }
+        public string WorkflowId { get; init; } = default!;
+        public string TaskQueue { get; init; } = default!;
+        public System.TimeSpan? WorkflowStartDelay { get; init; }
+
+        public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest ToProto()
         {
-            proto.Input = args.ToProto();
+            var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest();
+            proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
+            proto.WorkflowType = Workflow.ToProto(default(Temporalio.Api.Common.V1.WorkflowType)!);
+            if (Args is { } args)
+            {
+                proto.Input = args.ToProto();
+            }
+            proto.WorkflowId = WorkflowId;
+            proto.TaskQueue = TaskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);
+            if (WorkflowStartDelay is { } workflowStartDelay)
+            {
+                proto.WorkflowStartDelay = workflowStartDelay.ToProto();
+            }
+            return proto;
         }
-        proto.WorkflowId = WorkflowId;
-        proto.TaskQueue = TaskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);
-        if (WorkflowStartDelay is { } workflowStartDelay)
-        {
-            proto.WorkflowStartDelay = workflowStartDelay.ToProto();
-        }
-        return proto;
+
     }
 
-}
-
-internal class CancelWorkflowRequest
-{
-    public WorkflowExecution WorkflowExecution { get; init; } = default!;
-    public string? Reason { get; init; }
-
-    public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest ToProto()
+    internal class CancelWorkflowRequest
     {
-        var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest();
-        proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
-        proto.WorkflowExecution = WorkflowExecution.ToProto();
-        if (Reason is { } reason)
+        public WorkflowExecution WorkflowExecution { get; init; } = default!;
+        public string? Reason { get; init; }
+
+        public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest ToProto()
         {
-            proto.Reason = reason;
+            var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest();
+            proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
+            proto.WorkflowExecution = WorkflowExecution.ToProto();
+            if (Reason is { } reason)
+            {
+                proto.Reason = reason;
+            }
+            return proto;
         }
-        return proto;
+
     }
 
-}
-
-public class WorkflowExecution
-{
-    public string WorkflowId { get; init; } = default!;
-    public string? RunId { get; init; }
-
-    public Temporalio.Api.Common.V1.WorkflowExecution ToProto()
+    public class WorkflowExecution
     {
-        var proto = new Temporalio.Api.Common.V1.WorkflowExecution();
-        proto.WorkflowId = WorkflowId;
-        if (RunId is { } runId)
+        public string WorkflowId { get; init; } = default!;
+        public string? RunId { get; init; }
+
+        public Temporalio.Api.Common.V1.WorkflowExecution ToProto()
         {
-            proto.RunId = runId;
+            var proto = new Temporalio.Api.Common.V1.WorkflowExecution();
+            proto.WorkflowId = WorkflowId;
+            if (RunId is { } runId)
+            {
+                proto.RunId = runId;
+            }
+            return proto;
         }
-        return proto;
+
     }
 
-}
-
-public class CancelWorkflowResponse
-{
-    public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse ToProto()
+    public class CancelWorkflowResponse
     {
-        var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse();
-        return proto;
-    }
+        public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse ToProto()
+        {
+            var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse();
+            return proto;
+        }
 
-}
+    }
 
 }

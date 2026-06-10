@@ -8,15 +8,15 @@ using System.Collections.Generic;
 namespace NexGen.UserService
 {
 
-internal class GetUserRequest
-{
-    public string UserId { get; init; } = default!;
-}
+    internal class GetUserRequest
+    {
+        public string UserId { get; init; } = default!;
+    }
 
-internal class UpdateEmailRequest
-{
-    public string UserId { get; init; } = default!;
-    public string Email { get; init; } = default!;
-}
+    internal class UpdateEmailRequest
+    {
+        public string UserId { get; init; } = default!;
+        public string Email { get; init; } = default!;
+    }
 
 }

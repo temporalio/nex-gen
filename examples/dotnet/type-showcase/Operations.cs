@@ -15,122 +15,127 @@ using Temporalio.Workflows;
 namespace NexGen.TypeShowcase
 {
 
-public class GetUserOptions
-{
-    public string UserId { get; set; } = default!;
-    public string? ConsistencyToken { get; set; }
-}
-
-public class UpdateEmailOptions
-{
-    public string UserId { get; set; } = default!;
-    public string Email { get; set; } = default!;
-}
-
-public class RenameOptions
-{
-    public string UserId { get; set; } = default!;
-    public string DisplayName { get; set; } = default!;
-}
-
-public class SetProfileOptions
-{
-    public string UserId { get; set; } = default!;
-    public UserProfile Profile { get; set; } = default!;
-}
-
-public class DeactivateOptions
-{
-    public string UserId { get; set; } = default!;
-    public string? Reason { get; set; }
-}
-
-public static class TypeShowcaseOperations
-{
-    private static async Task<User> GetUserAsync(GetUserRequest request)
+    public class GetUserOptions
     {
-        var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
-        var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.GetUser(request)).ConfigureAwait(true);
-        return result;
+        public string UserId { get; set; } = default!;
+        public string? ConsistencyToken { get; set; }
     }
 
-    public static Task<User> GetUserAsync(GetUserOptions options)
+    public class UpdateEmailOptions
     {
-        var request = new GetUserRequest
+        public string UserId { get; set; } = default!;
+        public string Email { get; set; } = default!;
+    }
+
+    public class RenameOptions
+    {
+        public string UserId { get; set; } = default!;
+        public string DisplayName { get; set; } = default!;
+    }
+
+    public class SetProfileOptions
+    {
+        public string UserId { get; set; } = default!;
+        public UserProfile Profile { get; set; } = default!;
+    }
+
+    public class DeactivateOptions
+    {
+        public string UserId { get; set; } = default!;
+        public string? Reason { get; set; }
+    }
+
+    public static class TypeShowcaseOperations
+    {
+        private static async Task<User> GetUserAsync(GetUserRequest request)
         {
-            UserId = options.UserId,
-            ConsistencyToken = options.ConsistencyToken,
-        };
-        return GetUserAsync(request);
-    }
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.GetUser(request)).ConfigureAwait(true);
+            return result;
+        }
 
-    private static async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
-    {
-        var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
-        var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
-        return result;
-    }
-
-    public static Task<User> UpdateEmailAsync(UpdateEmailOptions options)
-    {
-        var request = new UpdateEmailRequest
+        /// <param name="options">Options for the operation.</param>
+        public static Task<User> GetUserAsync(GetUserOptions options)
         {
-            UserId = options.UserId,
-            Email = options.Email,
-        };
-        return UpdateEmailAsync(request);
-    }
+            var request = new GetUserRequest
+            {
+                UserId = options.UserId,
+                ConsistencyToken = options.ConsistencyToken,
+            };
+            return GetUserAsync(request);
+        }
 
-    private static async Task<User> RenameAsync(RenameRequest request)
-    {
-        var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
-        var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.Rename(request)).ConfigureAwait(true);
-        return result;
-    }
-
-    public static Task<User> RenameAsync(RenameOptions options)
-    {
-        var request = new RenameRequest
+        private static async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
         {
-            UserId = options.UserId,
-            DisplayName = options.DisplayName,
-        };
-        return RenameAsync(request);
-    }
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
+            return result;
+        }
 
-    private static async Task<User> SetProfileAsync(SetProfileRequest request)
-    {
-        var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
-        var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.SetProfile(request)).ConfigureAwait(true);
-        return result;
-    }
-
-    public static Task<User> SetProfileAsync(SetProfileOptions options)
-    {
-        var request = new SetProfileRequest
+        /// <param name="options">Options for the operation.</param>
+        public static Task<User> UpdateEmailAsync(UpdateEmailOptions options)
         {
-            UserId = options.UserId,
-            Profile = options.Profile,
-        };
-        return SetProfileAsync(request);
-    }
+            var request = new UpdateEmailRequest
+            {
+                UserId = options.UserId,
+                Email = options.Email,
+            };
+            return UpdateEmailAsync(request);
+        }
 
-    private static async Task DeactivateAsync(DeactivateRequest request)
-    {
-        var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
-        await client.ExecuteNexusOperationAsync(svc => svc.Deactivate(request)).ConfigureAwait(true);
-    }
-
-    public static Task DeactivateAsync(DeactivateOptions options)
-    {
-        var request = new DeactivateRequest
+        private static async Task<User> RenameAsync(RenameRequest request)
         {
-            UserId = options.UserId,
-            Reason = options.Reason,
-        };
-        return DeactivateAsync(request);
-    }
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.Rename(request)).ConfigureAwait(true);
+            return result;
+        }
 
-}
+        /// <param name="options">Options for the operation.</param>
+        public static Task<User> RenameAsync(RenameOptions options)
+        {
+            var request = new RenameRequest
+            {
+                UserId = options.UserId,
+                DisplayName = options.DisplayName,
+            };
+            return RenameAsync(request);
+        }
+
+        private static async Task<User> SetProfileAsync(SetProfileRequest request)
+        {
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.SetProfile(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        public static Task<User> SetProfileAsync(SetProfileOptions options)
+        {
+            var request = new SetProfileRequest
+            {
+                UserId = options.UserId,
+                Profile = options.Profile,
+            };
+            return SetProfileAsync(request);
+        }
+
+        private static async Task DeactivateAsync(DeactivateRequest request)
+        {
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            await client.ExecuteNexusOperationAsync(svc => svc.Deactivate(request)).ConfigureAwait(true);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        public static Task DeactivateAsync(DeactivateOptions options)
+        {
+            var request = new DeactivateRequest
+            {
+                UserId = options.UserId,
+                Reason = options.Reason,
+            };
+            return DeactivateAsync(request);
+        }
+
+    }
 
 }

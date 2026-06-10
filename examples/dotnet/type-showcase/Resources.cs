@@ -8,29 +8,29 @@ using System.Collections.Generic;
 namespace NexGen.TypeShowcase
 {
 
-public class User
-{
-    public User(string userId, string email, string displayName, UserStatus status, UserProfile profile)
+    public class User
     {
-        UserId = userId;
-        Email = email;
-        DisplayName = displayName;
-        Status = status;
-        Profile = profile;
+        public User(string userId, string email, string displayName, UserStatus status, UserProfile profile)
+        {
+            UserId = userId;
+            Email = email;
+            DisplayName = displayName;
+            Status = status;
+            Profile = profile;
+        }
+
+        public string UserId { get; }
+        public string Email { get; }
+        public string DisplayName { get; }
+        public UserStatus Status { get; }
+        public UserProfile Profile { get; }
+
+        public User UpdateEmail(string email) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+
+        public User Rename(string displayName) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+
+        public void Deactivate(string? reason) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+
     }
-
-    public string UserId { get; }
-    public string Email { get; }
-    public string DisplayName { get; }
-    public UserStatus Status { get; }
-    public UserProfile Profile { get; }
-
-    public User UpdateEmail(string email) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
-
-    public User Rename(string displayName) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
-
-    public void Deactivate(string? reason) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
-
-}
 
 }
