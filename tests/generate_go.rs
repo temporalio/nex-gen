@@ -247,6 +247,77 @@ interface namespace-service {
 }
 
 #[test]
+fn go_unconvertible_proto_field_fails_generation() {
+    let root = project_root();
+    let temp_dir = unique_output_path("go-unconvertible-input");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("unconvertible.wit");
+    // The `namespace-state` alias is type-replaced for Python only; Go has no
+    // native type or converter for it, so generation must fail loudly instead
+    // of silently omitting the field from `ToProto`/`FromProto`.
+    fs::write(
+        &wit_path,
+        r#"package temporal:unconvertible@1.0.0;
+
+world system {
+  export namespace-service;
+}
+
+/// @nexus.endpoint "namespace-service"
+interface namespace-service {
+  /// String-shaped placeholder for omitted and replaced fields.
+  type placeholder = string;
+
+  /// @nexus.proto "temporal.api.enums.v1.NamespaceState"
+  /// @nexus.type python="int"
+  type namespace-state = placeholder;
+
+  /// @nexus.proto "temporal.api.namespace.v1.NamespaceInfo"
+  record namespace-info {
+    name: option<string>,
+    state: option<namespace-state>,
+    /// @nexus.omit
+    description: placeholder,
+    /// @nexus.omit
+    owner-email: placeholder,
+    /// @nexus.omit
+    data: placeholder,
+    /// @nexus.omit
+    id: placeholder,
+    /// @nexus.omit
+    capabilities: placeholder,
+    /// @nexus.omit
+    limits: placeholder,
+    /// @nexus.omit
+    supports-schedules: placeholder,
+  }
+
+  describe-namespace: func(request: namespace-info);
+}
+"#,
+    )
+    .unwrap();
+
+    let error = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &[wit_path],
+        &[descriptor_path(&root)],
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        error.contains("NamespaceInfo.state"),
+        "error should name the field: {error}"
+    );
+    assert!(
+        error.contains("`go=`"),
+        "error should mention the missing go= annotation: {error}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn go_examples_generation_matches_checked_in_output() {
     let root = project_root();
     for example_id in go_example_ids(&root) {

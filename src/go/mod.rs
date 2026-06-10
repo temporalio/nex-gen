@@ -99,8 +99,8 @@ pub(crate) fn generate(
     // Second pass: compute proto conversion metadata for proto-backed models
     // and collect the aliased proto imports they require.
     let mut proto_imports = GoImportCollector::default();
-    populate_proto_conversions(api_plan, &mut models, &mut proto_imports);
-    populate_operation_bindings(api_plan, &mut services, &mut proto_imports);
+    populate_proto_conversions(api_plan, &mut models, &mut proto_imports)?;
+    populate_operation_bindings(api_plan, &mut services, &mut proto_imports)?;
 
     // Operation wrapper functions require the workflow package.
     let has_operations = services.iter().any(|s| !s.operations.is_empty());
@@ -626,16 +626,25 @@ fn resolve_operation<'a>(
 /// when the message is not proto-backed or cannot be converted.
 fn operation_message_binding(
     message: &PlannedMessageType,
-    value_expr: &str,
+    operation_name: &str,
+    direction: &str,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
-) -> Option<(String, GoValueConversion)> {
-    let proto_ref = go_proto_ref(&message.info)?;
+) -> Result<Option<(String, GoValueConversion)>> {
+    // Messages without proto descriptor info (WIT-native records) are sent
+    // natively rather than through proto -- not a proto binding at all.
+    let Some(proto_ref) = go_proto_ref(&message.info) else {
+        return Ok(None);
+    };
     let alias = imports.register(&proto_ref);
     let proto_type = format!("*{}", proto_ref.qualified(&alias));
-    let conversion = go_message_conversion(message, api_plan, imports)?;
-    let _ = value_expr;
-    Some((proto_type, conversion))
+    let conversion = go_message_conversion(message, api_plan, imports).map_err(|reason| {
+        Error::UnsupportedGoProtoConversion {
+            context: format!("operation `{operation_name}` {direction}"),
+            reason,
+        }
+    })?;
+    Ok(Some((proto_type, conversion)))
 }
 
 /// Populates proto bindings on operations whose input/output messages are
@@ -644,7 +653,7 @@ fn populate_operation_bindings(
     api_plan: &ApiPlan,
     services: &mut [RenderedService<'_>],
     imports: &mut GoImportCollector,
-) {
+) -> Result<()> {
     for (service, planned_service) in services.iter_mut().zip(api_plan.services.iter()) {
         for (rendered_op, planned_op) in service
             .operations
@@ -655,8 +664,13 @@ fn populate_operation_bindings(
             if planned_op.output_resource_return.is_some() {
                 continue;
             }
-            let Some((_input_proto_type, input_conv)) =
-                operation_message_binding(&planned_op.input, "request", api_plan, imports)
+            let Some((_input_proto_type, input_conv)) = operation_message_binding(
+                &planned_op.input,
+                &planned_op.name,
+                "input",
+                api_plan,
+                imports,
+            )?
             else {
                 continue;
             };
@@ -671,7 +685,13 @@ fn populate_operation_bindings(
             let (output_proto_type, output_from_proto, output_returns_pointer) =
                 match &planned_op.output {
                     PlannedOperationOutput::Message(output) => {
-                        match operation_message_binding(output, "result", api_plan, imports) {
+                        match operation_message_binding(
+                            output,
+                            &planned_op.name,
+                            "output",
+                            api_plan,
+                            imports,
+                        )? {
                             Some((proto_type, conv)) => {
                                 // `result` is declared as a proto value;
                                 // converters take a pointer to the proto message.
@@ -695,6 +715,7 @@ fn populate_operation_bindings(
             });
         }
     }
+    Ok(())
 }
 
 /// Resolves a [`PlannedMessageType`] to its Go type expression, accounting for
@@ -1646,19 +1667,21 @@ fn go_to_proto_converter(full_name: &str, replacement: &TypeReplacementSpec) -> 
         .unwrap_or_else(|| go_default_to_proto_name(full_name))
 }
 
+/// The result of building a Go proto conversion: either the conversion, or a
+/// human-readable reason why the value cannot be converted. Callers attach
+/// model/field context and fail generation -- unconvertible values must never
+/// be silently omitted from the wire format.
+type GoConversionResult<T> = std::result::Result<T, String>;
+
 /// Builds the [`GoValueConversion`] for a single planned value type, registering
 /// any proto imports it requires in `imports`.
-///
-/// Returns `None` when the value type cannot be converted in this iteration
-/// (e.g. variants, tuples, results, or proto-backed types whose descriptor
-/// lacks a `go_package`). Callers degrade such fields gracefully.
 fn go_value_conversion(
     value: &PlannedValueType,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
-) -> Option<GoValueConversion> {
+) -> GoConversionResult<GoValueConversion> {
     match value {
-        PlannedValueType::Scalar(_) => Some(GoValueConversion {
+        PlannedValueType::Scalar(_) => Ok(GoValueConversion {
             kind: GoConversionKind::Scalar,
             from_proto: Box::new(|expr| expr.to_string()),
             to_proto: Box::new(|expr| expr.to_string()),
@@ -1667,9 +1690,23 @@ fn go_value_conversion(
         PlannedValueType::Message(message_type) => {
             go_message_conversion(message_type, api_plan, imports)
         }
-        // Flags, variants, tuples, results, external, and unknown values are
-        // not converted in this iteration.
-        _ => None,
+        // The planner never produces these inside proto-backed models today;
+        // if it ever does, fail loudly instead of dropping data.
+        PlannedValueType::Flags(_) => Err("flags values have no Go proto conversion".to_string()),
+        PlannedValueType::Variant(_) => {
+            Err("variant values have no Go proto conversion".to_string())
+        }
+        PlannedValueType::Tuple(_) => Err("tuple values have no Go proto conversion".to_string()),
+        PlannedValueType::Result { .. } => {
+            Err("result values have no Go proto conversion".to_string())
+        }
+        PlannedValueType::External { .. } => {
+            Err("externally-typed values (via `@nexus.type`) have no Go proto conversion"
+                .to_string())
+        }
+        PlannedValueType::Unknown => {
+            Err("the proto type could not be resolved from the provided descriptors".to_string())
+        }
     }
 }
 
@@ -1687,25 +1724,39 @@ fn go_scalar_type_expr(scalar: &PlannedScalarType) -> &'static str {
 
 /// Returns the Go type expression for the proto-side representation of a map
 /// key or value (e.g. `string` or `*common.Payload`), registering any proto
-/// import it requires. Returns `None` when the value has no proto-side Go type
-/// (mirroring [`go_value_conversion`]).
+/// import it requires. Returns a reason when the value has no proto-side Go
+/// type (mirroring [`go_value_conversion`]).
 fn go_proto_value_type(
     value: &PlannedValueType,
     imports: &mut GoImportCollector,
-) -> Option<String> {
+) -> GoConversionResult<String> {
     match value {
-        PlannedValueType::Scalar(scalar) => Some(go_scalar_type_expr(scalar).to_string()),
-        PlannedValueType::Enum(enum_type) => enum_type.info.as_ref().and_then(|info| {
-            go_proto_ref(info).map(|proto_ref| {
-                let alias = imports.register(&proto_ref);
-                proto_ref.qualified(&alias)
-            })
-        }),
-        PlannedValueType::Message(message) => go_proto_ref(&message.info).map(|proto_ref| {
+        PlannedValueType::Scalar(scalar) => Ok(go_scalar_type_expr(scalar).to_string()),
+        PlannedValueType::Enum(enum_type) => {
+            let info = enum_type
+                .info
+                .as_ref()
+                .ok_or_else(|| "the enum has no proto descriptor info".to_string())?;
+            let proto_ref = go_proto_ref(info).ok_or_else(|| {
+                format!(
+                    "proto enum `{}` has no `go_package` option in its descriptor",
+                    info.full_name
+                )
+            })?;
             let alias = imports.register(&proto_ref);
-            format!("*{}", proto_ref.qualified(&alias))
-        }),
-        _ => None,
+            Ok(proto_ref.qualified(&alias))
+        }
+        PlannedValueType::Message(message) => {
+            let proto_ref = go_proto_ref(&message.info).ok_or_else(|| {
+                format!(
+                    "proto message `{}` has no `go_package` option in its descriptor",
+                    message.info.full_name
+                )
+            })?;
+            let alias = imports.register(&proto_ref);
+            Ok(format!("*{}", proto_ref.qualified(&alias)))
+        }
+        _ => Err("the value has no proto-side Go type".to_string()),
     }
 }
 
@@ -1714,25 +1765,36 @@ fn go_proto_value_type(
 fn go_enum_conversion(
     enum_type: &PlannedEnumType,
     imports: &mut GoImportCollector,
-) -> Option<GoValueConversion> {
+) -> GoConversionResult<GoValueConversion> {
     // Native Go enum type expression (replacement type or generated name).
     let native_type = if let Some(replacement) = &enum_type.replacement {
-        go_replacement_type_name(replacement)?
+        go_replacement_type_name(replacement).ok_or_else(|| {
+            "the type-replaced enum has no `go=` annotation in its `@nexus.type` directive"
+                .to_string()
+        })?
     } else {
-        enum_type.name.clone()?
+        enum_type
+            .name
+            .clone()
+            .ok_or_else(|| "the enum has no generated Go name".to_string())?
     };
 
     // The proto enum type, derived from the descriptor.
-    let proto_type = enum_type.info.as_ref().and_then(|info| {
-        go_proto_ref(info).map(|proto_ref| {
-            let alias = imports.register(&proto_ref);
-            proto_ref.qualified(&alias)
-        })
-    });
+    let info = enum_type
+        .info
+        .as_ref()
+        .ok_or_else(|| "the enum has no proto descriptor info".to_string())?;
+    let proto_ref = go_proto_ref(info).ok_or_else(|| {
+        format!(
+            "proto enum `{}` has no `go_package` option in its descriptor",
+            info.full_name
+        )
+    })?;
+    let alias = imports.register(&proto_ref);
+    let proto_type = proto_ref.qualified(&alias);
 
-    let proto_type = proto_type?;
     let native_for_cast = native_type.clone();
-    Some(GoValueConversion {
+    Ok(GoValueConversion {
         kind: GoConversionKind::Enum,
         from_proto: Box::new(move |expr| format!("{native_for_cast}(int32({expr}))")),
         to_proto: Box::new(move |expr| format!("{proto_type}({expr})")),
@@ -1746,14 +1808,14 @@ fn go_message_conversion(
     message: &PlannedMessageType,
     _api_plan: &ApiPlan,
     _imports: &mut GoImportCollector,
-) -> Option<GoValueConversion> {
+) -> GoConversionResult<GoValueConversion> {
     // Replacement type: use override converter functions (hand-written in the
     // support file).
     if let Some(replacement) = &message.replacement {
         if go_replacement_type_name(replacement).is_some() {
             let from = go_from_proto_converter(&message.info.full_name, replacement);
             let to = go_to_proto_converter(&message.info.full_name, replacement);
-            return Some(GoValueConversion {
+            return Ok(GoValueConversion {
                 kind: GoConversionKind::OverrideConverter,
                 from_proto: Box::new(move |expr| format!("{from}({expr})")),
                 to_proto: Box::new(move |expr| format!("{to}({expr})")),
@@ -1765,11 +1827,22 @@ fn go_message_conversion(
     if message.authored_type.is_some() {
         let from = go_default_from_proto_name(&message.info.full_name);
         let to = go_default_to_proto_name(&message.info.full_name);
-        return Some(GoValueConversion {
+        return Ok(GoValueConversion {
             kind: GoConversionKind::OverrideConverter,
             from_proto: Box::new(move |expr| format!("{from}({expr})")),
             to_proto: Box::new(move |expr| format!("{to}({expr})")),
         });
+    }
+
+    // A type-replaced message without a `go=` annotation has no Go-side type
+    // to convert through; its generated model was never planned, so falling
+    // through to the model converter would reference a function that does not
+    // exist.
+    if message.replacement.is_some() {
+        return Err(format!(
+            "type-replaced message `{}` has no `go=` annotation in its `@nexus.type` directive",
+            message.info.full_name
+        ));
     }
 
     // Generated proto-backed model: use its own ToProto/FromProto. Generated
@@ -1777,16 +1850,18 @@ fn go_message_conversion(
     // shapes, so they behave like a pointer converter only on the proto side.
     if message.source == PlannedMessageSource::Proto {
         let model_name = message.model_name.clone();
-        return Some(GoValueConversion {
+        return Ok(GoValueConversion {
             kind: GoConversionKind::ModelConverter,
             from_proto: Box::new(move |expr| format!("{model_name}FromProto({expr})")),
             to_proto: Box::new(|expr| format!("{expr}.ToProto()")),
         });
     }
 
-    // WIT-native nested model: also has generated ToProto/FromProto when it is
-    // itself proto-backed; otherwise skip (pure-WIT models are not serialized).
-    None
+    // WIT-native nested model: not serialized through proto.
+    Err(format!(
+        "WIT-native record `{}` has no proto conversion",
+        message.model_name
+    ))
 }
 
 /// Computes the proto field accessor name on a Go proto struct from the WIT
@@ -1804,7 +1879,7 @@ fn populate_proto_conversions(
     api_plan: &ApiPlan,
     models: &mut IndexMap<String, RenderedModel>,
     imports: &mut GoImportCollector,
-) {
+) -> Result<()> {
     // Process every rendered model that carries proto type info. Empty response
     // models (skipped by the planner) still get trivial conversions so that
     // operation bindings referencing them resolve.
@@ -1829,9 +1904,11 @@ fn populate_proto_conversions(
             continue;
         }
 
-        let Some(proto_ref) = go_proto_ref(&proto_info) else {
-            continue;
-        };
+        let proto_ref =
+            go_proto_ref(&proto_info).ok_or_else(|| Error::UnsupportedGoProtoConversion {
+                context: format!("model `{}`", proto_info.full_name),
+                reason: "its proto descriptor has no `go_package` option".to_string(),
+            })?;
         let alias = imports.register(&proto_ref);
         let proto_type = proto_ref.qualified(&alias);
 
@@ -1841,8 +1918,8 @@ fn populate_proto_conversions(
             .unwrap_or_default();
         let (field_conversions, sourced) = match api_plan.models.get(&full_name) {
             Some(planned_model) => (
-                build_field_conversions(planned_model, &native_field_types, api_plan, imports),
-                build_sourced_conversions(planned_model, api_plan, imports),
+                build_field_conversions(planned_model, &native_field_types, api_plan, imports)?,
+                build_sourced_conversions(planned_model, api_plan, imports)?,
             ),
             None => (Vec::new(), Vec::new()),
         };
@@ -1858,9 +1935,10 @@ fn populate_proto_conversions(
         model.sourced_fields = sourced;
         // Attach per-field conversions by matching exported field names.
         for (rendered_field, conversion) in model.fields.iter_mut().zip(field_conversions) {
-            rendered_field.conversion = conversion;
+            rendered_field.conversion = Some(conversion);
         }
     }
+    Ok(())
 }
 
 /// Builds per-field conversion metadata for a proto-backed model, in field
@@ -1873,7 +1951,7 @@ fn build_field_conversions(
     native_field_types: &[String],
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
-) -> Vec<Option<RenderedFieldConversion>> {
+) -> Result<Vec<RenderedFieldConversion>> {
     planned_model
         .fields
         .iter()
@@ -1883,20 +1961,25 @@ fn build_field_conversions(
                 .get(index)
                 .map(String::as_str)
                 .unwrap_or("");
-            build_field_conversion(field, native_go_type, api_plan, imports)
+            build_field_conversion(field, native_go_type, api_plan, imports).map_err(|reason| {
+                Error::UnsupportedGoProtoConversion {
+                    context: format!("field `{}.{}`", field.owner_name, field.authored_name),
+                    reason,
+                }
+            })
         })
         .collect()
 }
 
-/// Builds the conversion lines for a single field. Returns `None` when the
-/// field cannot be converted in this iteration (the field is then omitted from
-/// proto serialization, degrading gracefully).
+/// Builds the conversion lines for a single field. Returns the reason when the
+/// field cannot be converted; the caller fails generation rather than omitting
+/// the field from proto serialization.
 fn build_field_conversion(
     field: &PlannedField,
     native_go_type: &str,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
-) -> Option<RenderedFieldConversion> {
+) -> GoConversionResult<RenderedFieldConversion> {
     let proto_field = go_proto_field_name(&field.proto_name);
     let go_field = go_field_name(&field.authored_name);
     let receiver = format!("m.{go_field}");
@@ -1905,14 +1988,13 @@ fn build_field_conversion(
         PlannedFieldKind::Singular(value) => {
             let conversion = go_value_conversion(value, api_plan, imports)?;
             // Any value with a conversion (scalar, enum, message, override) is
-            // rendered as a pointer when optional, matching `build_field`. Types
-            // that lack a conversion (variants, unknown) never reach here.
+            // rendered as a pointer when optional, matching `build_field`.
             let field_is_pointer = !field.required;
             let to_lines =
                 singular_to_proto_lines(&conversion, &receiver, &proto_field, field_is_pointer);
             let from_lines =
                 singular_from_proto_lines(&conversion, &proto_field, &go_field, field_is_pointer);
-            Some(RenderedFieldConversion {
+            Ok(RenderedFieldConversion {
                 to_proto_lines: to_lines,
                 from_proto_lines: from_lines,
             })
@@ -1921,7 +2003,7 @@ fn build_field_conversion(
             let conversion = go_value_conversion(value, api_plan, imports)?;
             let to_lines = repeated_to_proto_lines(&conversion, &receiver, &proto_field);
             let from_lines = repeated_from_proto_lines(&conversion, &proto_field, &go_field);
-            Some(RenderedFieldConversion {
+            Ok(RenderedFieldConversion {
                 to_proto_lines: to_lines,
                 from_proto_lines: from_lines,
             })
@@ -1929,13 +2011,16 @@ fn build_field_conversion(
         PlannedFieldKind::Map { key, value } => {
             // Map keys are always scalars; only the value may need conversion.
             let conversion = go_value_conversion(value, api_plan, imports)?;
-            let key_type = go_proto_value_type(key, imports)?;
-            let value_type = go_proto_value_type(value, imports)?;
+            let key_type =
+                go_proto_value_type(key, imports).map_err(|reason| format!("map key: {reason}"))?;
+            let value_type = go_proto_value_type(value, imports)
+                .map_err(|reason| format!("map value: {reason}"))?;
             let proto_map_type = format!("map[{key_type}]{value_type}");
-            let to_lines = map_to_proto_lines(&conversion, &proto_map_type, &receiver, &proto_field);
+            let to_lines =
+                map_to_proto_lines(&conversion, &proto_map_type, &receiver, &proto_field);
             let from_lines =
                 map_from_proto_lines(&conversion, native_go_type, &proto_field, &go_field);
-            Some(RenderedFieldConversion {
+            Ok(RenderedFieldConversion {
                 to_proto_lines: to_lines,
                 from_proto_lines: from_lines,
             })
@@ -2131,11 +2216,21 @@ fn build_sourced_conversions(
     planned_model: &PlannedModel,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
-) -> Vec<RenderedSourcedField> {
+) -> Result<Vec<RenderedSourcedField>> {
     planned_model
         .sourced_fields
         .iter()
-        .filter_map(|sourced| build_sourced_conversion(sourced, api_plan, imports))
+        .map(|sourced| {
+            build_sourced_conversion(sourced, api_plan, imports).map_err(|reason| {
+                Error::UnsupportedGoProtoConversion {
+                    context: format!(
+                        "sourced field `{}.{}`",
+                        planned_model.name, sourced.proto_name
+                    ),
+                    reason,
+                }
+            })
+        })
         .collect()
 }
 
@@ -2143,7 +2238,7 @@ fn build_sourced_conversion(
     sourced: &PlannedSourcedField,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
-) -> Option<RenderedSourcedField> {
+) -> GoConversionResult<RenderedSourcedField> {
     let proto_field = go_proto_field_name(&sourced.proto_name);
     let source_expr = &sourced.source_expr;
     match &sourced.kind {
@@ -2155,7 +2250,7 @@ fn build_sourced_conversion(
                 // call expression).
                 GoConversionKind::OverrideConverter => {
                     let converted = (conversion.to_proto)("&sourced");
-                    Some(RenderedSourcedField {
+                    Ok(RenderedSourcedField {
                         to_proto_lines: vec![
                             format!("sourced := {source_expr}"),
                             format!("message.{proto_field} = {converted}"),
@@ -2164,7 +2259,7 @@ fn build_sourced_conversion(
                 }
                 _ => {
                     let converted = (conversion.to_proto)(source_expr);
-                    Some(RenderedSourcedField {
+                    Ok(RenderedSourcedField {
                         to_proto_lines: vec![format!("message.{proto_field} = {converted}")],
                     })
                 }
@@ -2173,7 +2268,7 @@ fn build_sourced_conversion(
         PlannedFieldKind::Repeated(value) => {
             let conversion = go_value_conversion(value, api_plan, imports)?;
             let converted = (conversion.to_proto)("item");
-            Some(RenderedSourcedField {
+            Ok(RenderedSourcedField {
                 to_proto_lines: vec![
                     format!("for _, item := range {source_expr} {{"),
                     format!("\tmessage.{proto_field} = append(message.{proto_field}, {converted})"),
@@ -2183,8 +2278,10 @@ fn build_sourced_conversion(
         }
         PlannedFieldKind::Map { key, value } => {
             let conversion = go_value_conversion(value, api_plan, imports)?;
-            let key_type = go_proto_value_type(key, imports)?;
-            let value_type = go_proto_value_type(value, imports)?;
+            let key_type =
+                go_proto_value_type(key, imports).map_err(|reason| format!("map key: {reason}"))?;
+            let value_type = go_proto_value_type(value, imports)
+                .map_err(|reason| format!("map value: {reason}"))?;
             let proto_map_type = format!("map[{key_type}]{value_type}");
             // Bind the source expression to a field-unique local so it is
             // evaluated once and the lines cannot collide with other sourced
@@ -2197,7 +2294,7 @@ fn build_sourced_conversion(
                 &local,
                 &proto_field,
             ));
-            Some(RenderedSourcedField { to_proto_lines })
+            Ok(RenderedSourcedField { to_proto_lines })
         }
     }
 }

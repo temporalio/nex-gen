@@ -230,6 +230,9 @@ pub enum Error {
     #[error("Go code generation does not support {context}: {reason}")]
     UnsupportedGoType { context: String, reason: String },
 
+    #[error("Go proto conversion for {context} is not supported: {reason}")]
+    UnsupportedGoProtoConversion { context: String, reason: String },
+
     #[error("type override `{type_name}` cannot use `{property}`")]
     UnsupportedTypeOverrideProperty {
         type_name: String,
