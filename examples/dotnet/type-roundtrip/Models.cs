@@ -21,7 +21,7 @@ internal class ActivityOptions
         var proto = new Temporalio.Api.Activity.V1.ActivityOptions();
         if (TaskQueue is { } taskQueue)
         {
-            proto.TaskQueue = taskQueue.ToProto<Temporalio.Api.TaskQueue.V1.TaskQueue>();
+            proto.TaskQueue = taskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);
         }
         proto.RetryPolicy = RetryPolicy.ToProto();
         if (ScheduleToCloseTimeout is { } scheduleToCloseTimeout)

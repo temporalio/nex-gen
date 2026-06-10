@@ -45,24 +45,11 @@ internal static class TemporalFunctionNames
 
 internal static class ProtoExtensions
 {
-    internal static TProto ToProto<TProto>(this string value)
-    {
-        var targetType = typeof(TProto);
-        if (targetType == typeof(ApiCommon.WorkflowType))
-        {
-            return (TProto)(object)new ApiCommon.WorkflowType { Name = value };
-        }
-        if (targetType == typeof(ApiTaskQueue.TaskQueue))
-        {
-            return (TProto)(object)new ApiTaskQueue.TaskQueue { Name = value };
-        }
-        if (targetType == typeof(ApiCommon.Payload))
-        {
-            return (TProto)(object)Workflow.PayloadConverter.ToPayload(value);
-        }
+    internal static ApiCommon.WorkflowType ToProto(this string value, ApiCommon.WorkflowType _) =>
+        new() { Name = value };
 
-        throw new NotSupportedException($"No proto converter is registered from {typeof(string).FullName} to {targetType.FullName}");
-    }
+    internal static ApiTaskQueue.TaskQueue ToProto(this string value, ApiTaskQueue.TaskQueue _) =>
+        new() { Name = value };
 
     internal static ApiCommon.Payload ToProto(this object? value) =>
         Workflow.PayloadConverter.ToPayload(value);
