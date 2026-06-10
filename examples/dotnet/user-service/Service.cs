@@ -4,7 +4,8 @@
 
 using NexusRpc;
 
-namespace NexusApiGen.UserService;
+namespace NexGen.UserService
+{
 
 [NexusService("UserService")]
 internal interface IUserService
@@ -17,3 +18,4 @@ internal interface IUserService
 
 }
 
+}

@@ -450,6 +450,7 @@ impl SupportSpec {
 pub struct SupportFragmentSpec {
     pub path: String,
     pub contents: String,
+    pub prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -672,6 +673,13 @@ fn collect_support_fragment_from_docs(
     else {
         return Ok(());
     };
+    let prefix = directive_value_for_language(
+        &directives,
+        "support-prefix",
+        origin_path,
+        context,
+        language,
+    )?;
 
     let resolved_path = resolve_support_path(origin_path, &relative_path);
     let normalized_path = resolved_path.to_string_lossy().replace('\\', "/");
@@ -683,6 +691,7 @@ fn collect_support_fragment_from_docs(
     fragments.push(SupportFragmentSpec {
         path: normalized_path,
         contents,
+        prefix,
     });
     Ok(())
 }
@@ -2758,11 +2767,7 @@ fn build_source_call(
         });
     };
 
-    let valid_helper_name = match language {
-        Language::Dotnet => is_valid_dotnet_source_helper_name(helper_name),
-        _ => is_valid_support_helper_name(helper_name),
-    };
-    if !valid_helper_name {
+    if !is_valid_support_helper_path(helper_name) {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
             context: context.to_string(),
@@ -2783,7 +2788,7 @@ fn is_valid_support_helper_name(name: &str) -> bool {
         && chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
 }
 
-fn is_valid_dotnet_source_helper_name(name: &str) -> bool {
+fn is_valid_support_helper_path(name: &str) -> bool {
     name.split('.').all(is_valid_support_helper_name)
 }
 
@@ -4176,11 +4181,7 @@ fn directive_function_name_extractor(
     let Some(extractor) = spec.for_language(language) else {
         return Ok(None);
     };
-    let valid = match language {
-        Language::Dotnet => is_valid_dotnet_source_helper_name(extractor),
-        _ => is_valid_support_helper_name(extractor),
-    };
-    if !valid {
+    if !is_valid_support_helper_path(extractor) {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
             context: context.to_string(),
@@ -4681,6 +4682,7 @@ interface workflow-service {
 
         let python = parse(Language::Python, wit);
         let typescript = parse(Language::TypeScript, wit);
+        let dotnet = parse(Language::Dotnet, wit);
         assert_eq!(python.services[0].name, "WorkflowService");
         assert_eq!(
             python.services[0].wire_name,
@@ -4709,8 +4711,10 @@ interface workflow-service {
         let typescript_support = typescript
             .support
             .fragments_for_language(Language::TypeScript);
+        let dotnet_support = dotnet.support.fragments_for_language(Language::Dotnet);
         assert_eq!(python_support.len(), 1);
         assert_eq!(typescript_support.len(), 1);
+        assert_eq!(dotnet_support.len(), 1);
         assert!(
             python_support[0]
                 .path
@@ -4731,6 +4735,7 @@ interface workflow-service {
                 .contents
                 .contains("export function retryPolicyFromProto(")
         );
+        assert_eq!(dotnet_support[0].prefix.as_deref(), Some("NexGen.Support"));
         assert!(
             python
                 .type_override("temporal.api.common.v1.Payloads")
@@ -4881,7 +4886,7 @@ world system {
 interface workflow-service {
   /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
   record request {
-    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" dotnet="NexusApiGen.Support.TemporalWorkflowContext.WorkflowNamespace"
+    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" dotnet="TemporalWorkflowContext.WorkflowNamespace"
     namespace: option<string>,
   }
 
@@ -4923,7 +4928,7 @@ interface workflow-service {
                 )
                 .unwrap()
                 .field_source("namespace"),
-            Some("NexusApiGen.Support.TemporalWorkflowContext.WorkflowNamespace()")
+            Some("TemporalWorkflowContext.WorkflowNamespace()")
         );
     }
 

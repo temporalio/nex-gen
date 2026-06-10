@@ -11,16 +11,17 @@ using ApiDeployment = Temporalio.Api.Deployment.V1;
 using ApiTaskQueue = Temporalio.Api.TaskQueue.V1;
 using ApiWorkflow = Temporalio.Api.Workflow.V1;
 
-namespace NexusApiGen.Support;
-
-public static class TemporalWorkflowContext
+namespace NexGen.Support
 {
-    public static string WorkflowNamespace() => Workflow.Info.Namespace;
+
+internal static class TemporalWorkflowContext
+{
+    internal static string WorkflowNamespace() => Workflow.Info.Namespace;
 }
 
-public static class TemporalFunctionNames
+internal static class TemporalFunctionNames
 {
-    public static string WorkflowName(MethodInfo method)
+    internal static string WorkflowName(MethodInfo method)
     {
         if (method.GetCustomAttribute<WorkflowRunAttribute>() == null)
         {
@@ -33,7 +34,7 @@ public static class TemporalFunctionNames
                 $"{method} cannot be used directly since it is a dynamic workflow");
     }
 
-    public static string SignalName(MethodInfo method)
+    internal static string SignalName(MethodInfo method)
     {
         var definition = WorkflowSignalDefinition.FromMethod(method);
         return definition.Name ??
@@ -42,102 +43,153 @@ public static class TemporalFunctionNames
     }
 }
 
-public static class ProtoConverters
+internal static class ProtoExtensions
 {
-    public static TProto ToProto<TProto>(object? value)
+    internal static TProto ToProto<TProto>(this string value)
     {
         var targetType = typeof(TProto);
         if (targetType == typeof(ApiCommon.WorkflowType))
         {
-            return Cast<TProto>(new ApiCommon.WorkflowType { Name = Require<string>(value) });
+            return (TProto)(object)new ApiCommon.WorkflowType { Name = value };
         }
         if (targetType == typeof(ApiTaskQueue.TaskQueue))
         {
-            return Cast<TProto>(new ApiTaskQueue.TaskQueue { Name = Require<string>(value) });
-        }
-        if (targetType == typeof(Duration))
-        {
-            return Cast<TProto>(Duration.FromTimeSpan(Require<TimeSpan>(value)));
+            return (TProto)(object)new ApiTaskQueue.TaskQueue { Name = value };
         }
         if (targetType == typeof(ApiCommon.Payload))
         {
-            return Cast<TProto>(Workflow.PayloadConverter.ToPayload(value));
-        }
-        if (targetType == typeof(ApiCommon.Payloads))
-        {
-            return Cast<TProto>(ToPayloads(Require<IEnumerable<object?>>(value)));
-        }
-        if (targetType == typeof(ApiCommon.RetryPolicy))
-        {
-            return Cast<TProto>(ToRetryPolicy(Require<Temporalio.Common.RetryPolicy>(value)));
-        }
-        if (targetType == typeof(ApiCommon.Memo))
-        {
-            return Cast<TProto>(ToMemo(Require<IReadOnlyDictionary<string, object?>>(value)));
-        }
-        if (targetType == typeof(ApiCommon.SearchAttributes))
-        {
-            return Cast<TProto>(Require<SearchAttributeCollection>(value).ToProto());
-        }
-        if (targetType == typeof(ApiCommon.Priority))
-        {
-            return Cast<TProto>(ToPriority(Require<Temporalio.Common.Priority>(value)));
-        }
-        if (targetType == typeof(ApiWorkflow.VersioningOverride))
-        {
-            return Cast<TProto>(ToVersioningOverride(Require<Temporalio.Common.VersioningOverride>(value)));
+            return (TProto)(object)Workflow.PayloadConverter.ToPayload(value);
         }
 
-        throw new NotSupportedException($"No proto converter is registered for {targetType.FullName}");
+        throw new NotSupportedException($"No proto converter is registered from {typeof(string).FullName} to {targetType.FullName}");
     }
 
-    public static TValue FromProto<TProto, TValue>(TProto proto)
+    internal static ApiCommon.Payload ToProto(this object? value) =>
+        Workflow.PayloadConverter.ToPayload(value);
+
+    internal static ApiCommon.Payloads ToProto(this IEnumerable<object?> value) =>
+        ToPayloads(value);
+
+    internal static Duration ToProto(this TimeSpan value) =>
+        Duration.FromTimeSpan(value);
+
+    internal static ApiCommon.RetryPolicy ToProto(this Temporalio.Common.RetryPolicy value) =>
+        ToRetryPolicy(value);
+
+    internal static ApiCommon.Memo ToProto(this IReadOnlyDictionary<string, object?> value) =>
+        ToMemo(value);
+
+    internal static ApiCommon.SearchAttributes ToProto(this SearchAttributeCollection value) =>
+        value.ToProto();
+
+    internal static ApiCommon.Priority ToProto(this Temporalio.Common.Priority value) =>
+        ToPriority(value);
+
+    internal static ApiWorkflow.VersioningOverride ToProto(this Temporalio.Common.VersioningOverride value) =>
+        ToVersioningOverride(value);
+
+    internal static string FromProto(this ApiCommon.WorkflowType proto)
     {
         if (proto is null)
         {
             throw new ArgumentNullException(nameof(proto));
         }
-        if (proto is ApiCommon.WorkflowType workflowType)
+        return proto.Name;
+    }
+
+    internal static string FromProto(this ApiTaskQueue.TaskQueue proto)
+    {
+        if (proto is null)
         {
-            return Cast<TValue>(workflowType.Name);
+            throw new ArgumentNullException(nameof(proto));
         }
-        if (proto is ApiTaskQueue.TaskQueue taskQueue)
+        return proto.Name;
+    }
+
+    internal static TimeSpan FromProto(this Duration proto)
+    {
+        if (proto is null)
         {
-            return Cast<TValue>(taskQueue.Name);
+            throw new ArgumentNullException(nameof(proto));
         }
-        if (proto is Duration duration)
+        return proto.ToTimeSpan();
+    }
+
+    internal static object? FromProto(this ApiCommon.Payload proto)
+    {
+        if (proto is null)
         {
-            return Cast<TValue>(duration.ToTimeSpan());
+            throw new ArgumentNullException(nameof(proto));
         }
-        if (proto is ApiCommon.Payload payload)
+        return Workflow.PayloadConverter.ToValue<object?>(proto);
+    }
+
+    internal static IReadOnlyCollection<object?> FromProto(this ApiCommon.Payloads proto)
+    {
+        if (proto is null)
         {
-            return Cast<TValue>(Workflow.PayloadConverter.ToValue<object?>(payload));
+            throw new ArgumentNullException(nameof(proto));
         }
-        if (proto is ApiCommon.Payloads payloads)
+        return PayloadsToValues(proto);
+    }
+
+    internal static Temporalio.Common.RetryPolicy FromProto(this ApiCommon.RetryPolicy proto)
+    {
+        if (proto is null)
         {
-            return Cast<TValue>(PayloadsToValues(payloads));
+            throw new ArgumentNullException(nameof(proto));
         }
-        if (proto is ApiCommon.RetryPolicy retryPolicy)
+        return FromRetryPolicy(proto);
+    }
+
+    internal static IReadOnlyDictionary<string, object?> FromProto(this ApiCommon.Memo proto)
+    {
+        if (proto is null)
         {
-            return Cast<TValue>(FromRetryPolicy(retryPolicy));
+            throw new ArgumentNullException(nameof(proto));
         }
-        if (proto is ApiCommon.Memo memo)
+        return proto.Fields.ToDictionary(item => item.Key, item => Workflow.PayloadConverter.ToValue<object?>(item.Value));
+    }
+
+    internal static SearchAttributeCollection FromProto(this ApiCommon.SearchAttributes proto)
+    {
+        if (proto is null)
         {
-            return Cast<TValue>(memo.Fields.ToDictionary(item => item.Key, item => Workflow.PayloadConverter.ToValue<object?>(item.Value)));
+            throw new ArgumentNullException(nameof(proto));
         }
-        if (proto is ApiCommon.SearchAttributes searchAttributes)
+        return SearchAttributeCollection.FromProto(proto);
+    }
+
+    internal static Temporalio.Common.Priority FromProto(this ApiCommon.Priority proto)
+    {
+        if (proto is null)
         {
-            return Cast<TValue>(SearchAttributeCollection.FromProto(searchAttributes));
+            throw new ArgumentNullException(nameof(proto));
         }
-        if (proto is ApiCommon.Priority priority)
+        return new Temporalio.Common.Priority(
+            proto.PriorityKey == 0 ? null : proto.PriorityKey,
+            string.IsNullOrEmpty(proto.FairnessKey) ? null : proto.FairnessKey,
+            proto.FairnessWeight == 0f ? null : proto.FairnessWeight);
+    }
+
+    internal static Temporalio.Common.VersioningOverride FromProto(this ApiWorkflow.VersioningOverride proto)
+    {
+        if (proto is null)
         {
-            return Cast<TValue>(new Temporalio.Common.Priority(
-                priority.PriorityKey == 0 ? null : priority.PriorityKey,
-                string.IsNullOrEmpty(priority.FairnessKey) ? null : priority.FairnessKey,
-                priority.FairnessWeight == 0f ? null : priority.FairnessWeight));
+            throw new ArgumentNullException(nameof(proto));
+        }
+        if (proto.Pinned is { } pinned)
+        {
+            return new Temporalio.Common.VersioningOverride.Pinned(
+                new WorkerDeploymentVersion(pinned.Version.DeploymentName, pinned.Version.BuildId),
+                (Temporalio.Common.VersioningOverride.PinnedOverrideBehavior)pinned.Behavior);
+        }
+        if (proto.AutoUpgrade)
+        {
+            return new Temporalio.Common.VersioningOverride.AutoUpgrade();
         }
 
-        throw new NotSupportedException($"No proto converter is registered for {proto.GetType().FullName}");
+        throw new NotSupportedException("Unsupported versioning override proto");
     }
 
     private static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values)
@@ -234,14 +286,5 @@ public static class ProtoConverters
             _ => throw new ArgumentException("Unknown versioning override type", nameof(versioningOverride)),
         };
 
-    private static TValue Require<TValue>(object? value)
-    {
-        if (value is TValue typed)
-        {
-            return typed;
-        }
-        throw new ArgumentException($"Expected value of type {typeof(TValue).FullName}", nameof(value));
-    }
-
-    private static TValue Cast<TValue>(object? value) => (TValue)value!;
+}
 }

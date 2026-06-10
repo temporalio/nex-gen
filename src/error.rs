@@ -99,6 +99,16 @@ pub enum Error {
     #[error("language `{language}` is not implemented yet")]
     UnsupportedLanguage { language: Language },
 
+    #[error("{language} support prefix `{prefix}` is not supported")]
+    UnsupportedSupportPrefix { language: Language, prefix: String },
+
+    #[error("invalid {language} support prefix `{prefix}`: {reason}")]
+    InvalidSupportPrefix {
+        language: Language,
+        prefix: String,
+        reason: String,
+    },
+
     #[error("RPC `{name}` was not found in the descriptor set")]
     UnknownRpcName { name: String },
 

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use heck::ToKebabCase;
 use prost::Message;
 use prost_types::{
-    DescriptorProto, EnumDescriptorProto, FileDescriptorProto, FileDescriptorSet,
+    DescriptorProto, EnumDescriptorProto, FileDescriptorProto, FileDescriptorSet, FileOptions,
     MethodDescriptorProto, ServiceDescriptorProto,
 };
 
@@ -155,6 +155,7 @@ pub struct MessageMetadata {
     pub full_name: String,
     pub file_name: Option<String>,
     pub package: String,
+    pub file_options: Option<FileOptions>,
     pub descriptor: DescriptorProto,
 }
 
@@ -163,6 +164,7 @@ pub struct EnumMetadata {
     pub full_name: String,
     pub file_name: Option<String>,
     pub package: String,
+    pub file_options: Option<FileOptions>,
     pub descriptor: EnumDescriptorProto,
 }
 
@@ -176,6 +178,7 @@ pub struct RpcMetadata {
     pub output_type: String,
     pub file_name: Option<String>,
     pub package: String,
+    pub file_options: Option<FileOptions>,
     pub descriptor: MethodDescriptorProto,
 }
 
@@ -238,6 +241,7 @@ fn index_message(
             full_name: full_name.clone(),
             file_name: file.name.clone(),
             package: package.to_string(),
+            file_options: file.options.clone(),
             descriptor: descriptor.clone(),
         },
     );
@@ -284,6 +288,7 @@ fn index_enum(
             full_name,
             file_name: file.name.clone(),
             package: package.to_string(),
+            file_options: file.options.clone(),
             descriptor: descriptor.clone(),
         },
     );
@@ -329,6 +334,7 @@ fn index_service(
             output_type: method.output_type.clone().unwrap_or_default(),
             file_name: file.name.clone(),
             package: package.to_string(),
+            file_options: file.options.clone(),
             descriptor: method.clone(),
         });
     }
@@ -376,8 +382,8 @@ fn tokens_are_subsequence(query: &[String], candidate: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use prost_types::{
-        DescriptorProto, FileDescriptorProto, FileDescriptorSet, MethodDescriptorProto,
-        ServiceDescriptorProto,
+        DescriptorProto, FileDescriptorProto, FileDescriptorSet, FileOptions,
+        MethodDescriptorProto, ServiceDescriptorProto,
     };
 
     use super::DescriptorIndex;
@@ -458,5 +464,33 @@ mod tests {
                 ref name,
             } if name == "pkg.Svc.Run"
         ));
+    }
+
+    #[test]
+    fn records_descriptor_file_options_on_indexed_types() {
+        let index = DescriptorIndex::from_descriptor_set(FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("types.proto".to_string()),
+                package: Some("pkg".to_string()),
+                options: Some(FileOptions {
+                    csharp_namespace: Some("Example.Proto".to_string()),
+                    java_package: Some("example.proto".to_string()),
+                    ..Default::default()
+                }),
+                message_type: vec![DescriptorProto {
+                    name: Some("Request".to_string()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        })
+        .unwrap();
+
+        let options = index
+            .message("pkg.Request")
+            .and_then(|message| message.file_options.as_ref())
+            .expect("message should carry descriptor file options");
+        assert_eq!(options.csharp_namespace.as_deref(), Some("Example.Proto"));
+        assert_eq!(options.java_package.as_deref(), Some("example.proto"));
     }
 }

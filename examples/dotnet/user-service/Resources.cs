@@ -5,7 +5,8 @@
 using System;
 using System.Collections.Generic;
 
-namespace NexusApiGen.UserService;
+namespace NexGen.UserService
+{
 
 public class User
 {
@@ -22,3 +23,4 @@ public class User
 
 }
 
+}

@@ -12,12 +12,13 @@ using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
 
-namespace NexusApiGen.TypeRoundtripService;
+namespace NexGen.TypeRoundtripService
+{
 
 public class ActivityOptionsOperationOptions
 {
     public string? TaskQueue { get; set; }
-    public required Temporalio.Common.RetryPolicy RetryPolicy { get; set; }
+    public Temporalio.Common.RetryPolicy RetryPolicy { get; set; } = default!;
     public System.TimeSpan? ScheduleToCloseTimeout { get; set; }
     public Temporalio.Common.Priority? Priority { get; set; }
 }
@@ -60,3 +61,4 @@ public static class TypeRoundtripServiceOperations
 
 }
 
+}

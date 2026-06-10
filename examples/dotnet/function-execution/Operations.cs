@@ -12,7 +12,8 @@ using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
 
-namespace NexusApiGen.FunctionExecution;
+namespace NexGen.FunctionExecution
+{
 
 public static class FunctionExecutionOperations
 {
@@ -53,3 +54,4 @@ public static class FunctionExecutionOperations
 
 }
 
+}

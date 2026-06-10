@@ -5,7 +5,8 @@
 using System;
 using System.Collections.Generic;
 
-namespace NexusApiGen.TypeShowcase;
+namespace NexGen.TypeShowcase
+{
 
 public class User
 {
@@ -32,3 +33,4 @@ public class User
 
 }
 
+}

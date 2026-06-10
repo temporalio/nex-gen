@@ -5,7 +5,8 @@
 using System;
 using System.Collections.Generic;
 
-namespace NexusApiGen.StartWorkflowService;
+namespace NexGen.StartWorkflowService
+{
 
 public class StartedWorkflow
 {
@@ -28,3 +29,4 @@ public class StartedWorkflow
 
 }
 
+}

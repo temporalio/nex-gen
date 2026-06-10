@@ -30,6 +30,7 @@ pub(crate) fn generate(
     support_fragments: &[SupportFragmentSpec],
     language_imports: &[LanguageImportSpec],
 ) -> Result<GeneratedFiles> {
+    reject_support_prefixes(Language::Python, support_fragments)?;
     let mut enums = IndexMap::new();
     let mut flags = IndexMap::new();
     let mut variants = IndexMap::new();
@@ -87,6 +88,22 @@ pub(crate) fn generate(
         support_fragments,
         language_imports,
     )
+}
+
+fn reject_support_prefixes(
+    language: Language,
+    support_fragments: &[SupportFragmentSpec],
+) -> Result<()> {
+    if let Some(prefix) = support_fragments
+        .iter()
+        .find_map(|fragment| fragment.prefix.as_deref())
+    {
+        return Err(Error::UnsupportedSupportPrefix {
+            language,
+            prefix: prefix.to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn ensure_resource_field_types(

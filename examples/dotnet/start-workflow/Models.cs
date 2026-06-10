@@ -4,31 +4,33 @@
 
 using System;
 using System.Collections.Generic;
+using NexGen.Support;
 
-namespace NexusApiGen.StartWorkflowService;
+namespace NexGen.StartWorkflowService
+{
 
 internal class StartWorkflowRequest
 {
-    public required string Workflow { get; init; }
+    public string Workflow { get; init; } = default!;
     public IReadOnlyCollection<object?>? Args { get; init; }
-    public required string WorkflowId { get; init; }
-    public required string TaskQueue { get; init; }
+    public string WorkflowId { get; init; } = default!;
+    public string TaskQueue { get; init; } = default!;
     public System.TimeSpan? WorkflowStartDelay { get; init; }
 
     public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest ToProto()
     {
         var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest();
-        proto.Namespace = NexusApiGen.Support.TemporalWorkflowContext.WorkflowNamespace();
-        proto.WorkflowType = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.WorkflowType>(Workflow);
+        proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
+        proto.WorkflowType = Workflow.ToProto<Temporalio.Api.Common.V1.WorkflowType>();
         if (Args is { } args)
         {
-            proto.Input = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.Payloads>(args);
+            proto.Input = args.ToProto();
         }
         proto.WorkflowId = WorkflowId;
-        proto.TaskQueue = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.TaskQueue.V1.TaskQueue>(TaskQueue);
+        proto.TaskQueue = TaskQueue.ToProto<Temporalio.Api.TaskQueue.V1.TaskQueue>();
         if (WorkflowStartDelay is { } workflowStartDelay)
         {
-            proto.WorkflowStartDelay = NexusApiGen.Support.ProtoConverters.ToProto<Google.Protobuf.WellKnownTypes.Duration>(workflowStartDelay);
+            proto.WorkflowStartDelay = workflowStartDelay.ToProto();
         }
         return proto;
     }
@@ -37,13 +39,13 @@ internal class StartWorkflowRequest
 
 internal class CancelWorkflowRequest
 {
-    public required WorkflowExecution WorkflowExecution { get; init; }
+    public WorkflowExecution WorkflowExecution { get; init; } = default!;
     public string? Reason { get; init; }
 
     public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest ToProto()
     {
         var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest();
-        proto.Namespace = NexusApiGen.Support.TemporalWorkflowContext.WorkflowNamespace();
+        proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
         proto.WorkflowExecution = WorkflowExecution.ToProto();
         if (Reason is { } reason)
         {
@@ -56,7 +58,7 @@ internal class CancelWorkflowRequest
 
 public class WorkflowExecution
 {
-    public required string WorkflowId { get; init; }
+    public string WorkflowId { get; init; } = default!;
     public string? RunId { get; init; }
 
     public Temporalio.Api.Common.V1.WorkflowExecution ToProto()
@@ -82,3 +84,4 @@ public class CancelWorkflowResponse
 
 }
 
+}

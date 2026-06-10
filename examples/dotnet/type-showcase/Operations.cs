@@ -12,35 +12,36 @@ using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
 
-namespace NexusApiGen.TypeShowcase;
+namespace NexGen.TypeShowcase
+{
 
 public class GetUserOptions
 {
-    public required string UserId { get; set; }
+    public string UserId { get; set; } = default!;
     public string? ConsistencyToken { get; set; }
 }
 
 public class UpdateEmailOptions
 {
-    public required string UserId { get; set; }
-    public required string Email { get; set; }
+    public string UserId { get; set; } = default!;
+    public string Email { get; set; } = default!;
 }
 
 public class RenameOptions
 {
-    public required string UserId { get; set; }
-    public required string DisplayName { get; set; }
+    public string UserId { get; set; } = default!;
+    public string DisplayName { get; set; } = default!;
 }
 
 public class SetProfileOptions
 {
-    public required string UserId { get; set; }
-    public required UserProfile Profile { get; set; }
+    public string UserId { get; set; } = default!;
+    public UserProfile Profile { get; set; } = default!;
 }
 
 public class DeactivateOptions
 {
-    public required string UserId { get; set; }
+    public string UserId { get; set; } = default!;
     public string? Reason { get; set; }
 }
 
@@ -132,3 +133,4 @@ public static class TypeShowcaseOperations
 
 }
 
+}
