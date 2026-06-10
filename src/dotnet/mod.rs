@@ -1706,8 +1706,8 @@ fn message_to_proto_expr(message: &PlannedMessageType, source_expr: &str) -> Str
     {
         if dotnet_message_type(message) == "string" {
             format!(
-                "{source_expr}.ToProto<{}>()",
-                dotnet_proto_type_name_for_message(message)
+                "{source_expr}.ToProto(default({})!)",
+                dotnet_proto_type_name_for_message(message),
             )
         } else {
             format!("{source_expr}.ToProto()")

@@ -90,13 +90,13 @@ internal class SignalWithStartWorkflowRequest
     {
         var proto = new Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest();
         proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
-        proto.WorkflowType = Workflow.ToProto<Temporalio.Api.Common.V1.WorkflowType>();
+        proto.WorkflowType = Workflow.ToProto(default(Temporalio.Api.Common.V1.WorkflowType)!);
         if (Args is { } args)
         {
             proto.Input = args.ToProto();
         }
         proto.WorkflowId = Id;
-        proto.TaskQueue = TaskQueue.ToProto<Temporalio.Api.TaskQueue.V1.TaskQueue>();
+        proto.TaskQueue = TaskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);
         proto.SignalName = Signal;
         if (SignalArgs is { } signalArgs)
         {

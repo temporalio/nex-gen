@@ -328,8 +328,10 @@ fn dotnet_renders_proto_backed_temporal_types() {
     ));
     assert!(rendered.contains("public Temporalio.Api.Sdk.V1.UserMetadata ToProto()"));
     assert!(rendered.contains("using NexGen.Support;"));
-    assert!(rendered.contains("Workflow.ToProto<Temporalio.Api.Common.V1.WorkflowType>()"));
-    assert!(rendered.contains("TaskQueue.ToProto<Temporalio.Api.TaskQueue.V1.TaskQueue>()"));
+    assert!(rendered.contains("Workflow.ToProto(default(Temporalio.Api.Common.V1.WorkflowType)!)"));
+    assert!(
+        rendered.contains("TaskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!)")
+    );
     assert!(rendered.contains("proto.UserMetadata = userMetadata.ToProto();"));
     assert!(!rendered.contains("var protoRequest = ToProto(request);"));
     assert!(!rendered.contains("private static Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest ToProto(SignalWithStartWorkflowRequest request)"));
@@ -352,6 +354,14 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("internal static class TemporalWorkflowContext"));
     assert!(rendered.contains("internal static class TemporalFunctionNames"));
     assert!(rendered.contains("internal static class ProtoExtensions"));
+    assert!(rendered.contains(
+        "internal static ApiCommon.WorkflowType ToProto(this string value, ApiCommon.WorkflowType _)"
+    ));
+    assert!(rendered.contains(
+        "internal static ApiTaskQueue.TaskQueue ToProto(this string value, ApiTaskQueue.TaskQueue _)"
+    ));
+    assert!(!rendered.contains("internal static TProto ToProto<TProto>(this string value)"));
+    assert!(!rendered.contains("targetType == typeof"));
     assert!(!rendered.contains("public static class TemporalWorkflowContext"));
     assert!(!rendered.contains("public static class TemporalFunctionNames"));
     assert!(!rendered.contains("public static class ProtoExtensions"));
