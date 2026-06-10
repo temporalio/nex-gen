@@ -4,25 +4,33 @@
 
 using System;
 using System.Collections.Generic;
+using NexGen.Support;
 
-namespace NexusApiGen.WorkflowService;
+namespace NexGen.WorkflowService
+{
 
 /// <summary>
 /// Request fields for signaling a workflow, starting it first if needed.
 /// </summary>
 internal class SignalWithStartWorkflowRequest
 {
-    public required string Workflow { get; init; }
+    /// <summary>
+    /// Workflow type name or workflow expression identifying the workflow to start.
+    /// </summary>
+    public string Workflow { get; init; } = default!;
     public IReadOnlyCollection<object?>? Args { get; init; }
     /// <summary>
     /// Unique identifier for the workflow execution.
     /// </summary>
-    public required string Id { get; init; }
+    public string Id { get; init; } = default!;
     /// <summary>
     /// Task queue to run the workflow on.
     /// </summary>
-    public required string TaskQueue { get; init; }
-    public required string Signal { get; init; }
+    public string TaskQueue { get; init; } = default!;
+    /// <summary>
+    /// Signal name or signal expression to send with the start request.
+    /// </summary>
+    public string Signal { get; init; } = default!;
     public IReadOnlyCollection<object?>? SignalArgs { get; init; }
     /// <summary>
     /// Total workflow execution timeout, including retries and continue-as-new.
@@ -81,30 +89,30 @@ internal class SignalWithStartWorkflowRequest
     public Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest ToProto()
     {
         var proto = new Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest();
-        proto.Namespace = NexusApiGen.Support.TemporalWorkflowContext.WorkflowNamespace();
-        proto.WorkflowType = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.WorkflowType>(Workflow);
+        proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
+        proto.WorkflowType = Workflow.ToProto<Temporalio.Api.Common.V1.WorkflowType>();
         if (Args is { } args)
         {
-            proto.Input = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.Payloads>(args);
+            proto.Input = args.ToProto();
         }
         proto.WorkflowId = Id;
-        proto.TaskQueue = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.TaskQueue.V1.TaskQueue>(TaskQueue);
+        proto.TaskQueue = TaskQueue.ToProto<Temporalio.Api.TaskQueue.V1.TaskQueue>();
         proto.SignalName = Signal;
         if (SignalArgs is { } signalArgs)
         {
-            proto.SignalInput = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.Payloads>(signalArgs);
+            proto.SignalInput = signalArgs.ToProto();
         }
         if (ExecutionTimeout is { } executionTimeout)
         {
-            proto.WorkflowExecutionTimeout = NexusApiGen.Support.ProtoConverters.ToProto<Google.Protobuf.WellKnownTypes.Duration>(executionTimeout);
+            proto.WorkflowExecutionTimeout = executionTimeout.ToProto();
         }
         if (RunTimeout is { } runTimeout)
         {
-            proto.WorkflowRunTimeout = NexusApiGen.Support.ProtoConverters.ToProto<Google.Protobuf.WellKnownTypes.Duration>(runTimeout);
+            proto.WorkflowRunTimeout = runTimeout.ToProto();
         }
         if (TaskTimeout is { } taskTimeout)
         {
-            proto.WorkflowTaskTimeout = NexusApiGen.Support.ProtoConverters.ToProto<Google.Protobuf.WellKnownTypes.Duration>(taskTimeout);
+            proto.WorkflowTaskTimeout = taskTimeout.ToProto();
         }
         if (RequestId is { } requestId)
         {
@@ -120,7 +128,7 @@ internal class SignalWithStartWorkflowRequest
         }
         if (RetryPolicy is { } retryPolicy)
         {
-            proto.RetryPolicy = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.RetryPolicy>(retryPolicy);
+            proto.RetryPolicy = retryPolicy.ToProto();
         }
         if (CronSchedule is { } cronSchedule)
         {
@@ -128,23 +136,23 @@ internal class SignalWithStartWorkflowRequest
         }
         if (Memo is { } memo)
         {
-            proto.Memo = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.Memo>(memo);
+            proto.Memo = memo.ToProto();
         }
         if (SearchAttributes is { } searchAttributes)
         {
-            proto.SearchAttributes = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.SearchAttributes>(searchAttributes);
+            proto.SearchAttributes = searchAttributes.ToProto();
         }
         if (Priority is { } priority)
         {
-            proto.Priority = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.Priority>(priority);
+            proto.Priority = priority.ToProto();
         }
         if (VersioningOverride is { } versioningOverride)
         {
-            proto.VersioningOverride = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Workflow.V1.VersioningOverride>(versioningOverride);
+            proto.VersioningOverride = versioningOverride.ToProto();
         }
         if (StartDelay is { } startDelay)
         {
-            proto.WorkflowStartDelay = NexusApiGen.Support.ProtoConverters.ToProto<Google.Protobuf.WellKnownTypes.Duration>(startDelay);
+            proto.WorkflowStartDelay = startDelay.ToProto();
         }
         if (UserMetadata is { } userMetadata)
         {
@@ -171,14 +179,15 @@ public class UserMetadata
         var proto = new Temporalio.Api.Sdk.V1.UserMetadata();
         if (StaticSummary is { } staticSummary)
         {
-            proto.Summary = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.Payload>(staticSummary);
+            proto.Summary = staticSummary.ToProto();
         }
         if (StaticDetails is { } staticDetails)
         {
-            proto.Details = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.Payload>(staticDetails);
+            proto.Details = staticDetails.ToProto();
         }
         return proto;
     }
 
 }
 
+}

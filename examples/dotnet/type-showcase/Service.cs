@@ -4,7 +4,8 @@
 
 using NexusRpc;
 
-namespace NexusApiGen.TypeShowcase;
+namespace NexGen.TypeShowcase
+{
 
 [NexusService("TypeShowcase")]
 internal interface ITypeShowcase
@@ -26,3 +27,4 @@ internal interface ITypeShowcase
 
 }
 
+}

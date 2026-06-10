@@ -8,7 +8,7 @@ world system {
 interface start-workflow-service {
   use nexus:temporal-types/model@1.0.0.{duration, payloads, placeholder, task-queue, workflow-function};
 
-  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution" typescript-package="@temporalio/proto" dotnet-type="Temporalio.Api.Common.V1.WorkflowExecution"
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution" typescript-package="@temporalio/proto"
   record workflow-execution {
     workflow-id: string,
     run-id: option<string>,
@@ -26,14 +26,14 @@ interface start-workflow-service {
     get-result: func() -> payloads;
   }
 
-  /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionRequest" typescript-package="@temporalio/proto" dotnet-type="Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest"
+  /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionRequest" typescript-package="@temporalio/proto"
   record start-workflow-request {
     /// @nexus.proto-field "workflow_type"
     workflow: workflow-function,
     workflow-id: string,
     task-queue: task-queue,
     workflow-start-delay: option<duration>,
-    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" dotnet="NexusApiGen.Support.TemporalWorkflowContext.WorkflowNamespace"
+    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" dotnet="TemporalWorkflowContext.WorkflowNamespace"
     namespace: string,
     /// @nexus.omit
     workflow-execution-timeout: placeholder,
@@ -83,12 +83,12 @@ interface start-workflow-service {
     time-skipping-config: placeholder,
   }
 
-  /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionResponse" typescript-package="@temporalio/proto" dotnet-type="Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse"
+  /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionResponse" typescript-package="@temporalio/proto"
   type start-workflow-result = own<started-workflow>;
 
-  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest" typescript-package="@temporalio/proto" dotnet-type="Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest"
+  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest" typescript-package="@temporalio/proto"
   record cancel-workflow-request {
-    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" dotnet="NexusApiGen.Support.TemporalWorkflowContext.WorkflowNamespace"
+    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" dotnet="TemporalWorkflowContext.WorkflowNamespace"
     namespace: string,
     workflow-execution: workflow-execution,
     reason: option<string>,
@@ -102,7 +102,7 @@ interface start-workflow-service {
     links: placeholder,
   }
 
-  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionResponse" typescript-package="@temporalio/proto" dotnet-type="Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse"
+  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionResponse" typescript-package="@temporalio/proto"
   record cancel-workflow-response {
   }
 

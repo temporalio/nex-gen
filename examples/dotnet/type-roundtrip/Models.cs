@@ -4,13 +4,15 @@
 
 using System;
 using System.Collections.Generic;
+using NexGen.Support;
 
-namespace NexusApiGen.TypeRoundtripService;
+namespace NexGen.TypeRoundtripService
+{
 
 internal class ActivityOptions
 {
     public string? TaskQueue { get; init; }
-    public required Temporalio.Common.RetryPolicy RetryPolicy { get; init; }
+    public Temporalio.Common.RetryPolicy RetryPolicy { get; init; } = default!;
     public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
     public Temporalio.Common.Priority? Priority { get; init; }
 
@@ -19,19 +21,20 @@ internal class ActivityOptions
         var proto = new Temporalio.Api.Activity.V1.ActivityOptions();
         if (TaskQueue is { } taskQueue)
         {
-            proto.TaskQueue = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.TaskQueue.V1.TaskQueue>(taskQueue);
+            proto.TaskQueue = taskQueue.ToProto<Temporalio.Api.TaskQueue.V1.TaskQueue>();
         }
-        proto.RetryPolicy = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.RetryPolicy>(RetryPolicy);
+        proto.RetryPolicy = RetryPolicy.ToProto();
         if (ScheduleToCloseTimeout is { } scheduleToCloseTimeout)
         {
-            proto.ScheduleToCloseTimeout = NexusApiGen.Support.ProtoConverters.ToProto<Google.Protobuf.WellKnownTypes.Duration>(scheduleToCloseTimeout);
+            proto.ScheduleToCloseTimeout = scheduleToCloseTimeout.ToProto();
         }
         if (Priority is { } priority)
         {
-            proto.Priority = NexusApiGen.Support.ProtoConverters.ToProto<Temporalio.Api.Common.V1.Priority>(priority);
+            proto.Priority = priority.ToProto();
         }
         return proto;
     }
 
 }
 
+}

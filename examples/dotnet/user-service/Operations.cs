@@ -12,17 +12,18 @@ using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
 
-namespace NexusApiGen.UserService;
+namespace NexGen.UserService
+{
 
 public class GetUserOptions
 {
-    public required string UserId { get; set; }
+    public string UserId { get; set; } = default!;
 }
 
 public class UpdateEmailOptions
 {
-    public required string UserId { get; set; }
-    public required string Email { get; set; }
+    public string UserId { get; set; } = default!;
+    public string Email { get; set; } = default!;
 }
 
 public static class UserServiceOperations
@@ -62,3 +63,4 @@ public static class UserServiceOperations
 
 }
 
+}

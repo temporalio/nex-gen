@@ -25,6 +25,8 @@ pub(crate) fn generate(
     support_fragments: &[SupportFragmentSpec],
     _language_imports: &[LanguageImportSpec],
 ) -> Result<GeneratedFiles> {
+    let support_prefix = dotnet_support_prefix(support_fragments)?;
+    validate_dotnet_support_references(api_plan, support_prefix.as_deref())?;
     let namespace = dotnet_namespace(api_plan);
     let mut files = BTreeMap::<PathBuf, String>::new();
     files.insert(
@@ -36,6 +38,7 @@ pub(crate) fn generate(
             api_plan.variants.values().collect::<Vec<_>>().as_slice(),
             api_plan.models.values().collect::<Vec<_>>().as_slice(),
             api_plan,
+            support_prefix.as_deref(),
         ),
     );
     files.insert(
@@ -49,7 +52,7 @@ pub(crate) fn generate(
     {
         files.insert(
             "Operations.cs".into(),
-            render_operations_file(&namespace, api_plan),
+            render_operations_file(&namespace, api_plan, support_prefix.as_deref()),
         );
     }
     if api_plan
@@ -68,6 +71,105 @@ pub(crate) fn generate(
     Ok(GeneratedFiles::directory(files))
 }
 
+fn dotnet_support_prefix(support_fragments: &[SupportFragmentSpec]) -> Result<Option<String>> {
+    let mut prefix = None::<String>;
+    for fragment in support_fragments {
+        let Some(fragment_prefix) = fragment.prefix.as_deref() else {
+            continue;
+        };
+        validate_dotnet_support_name(fragment_prefix).map_err(|reason| {
+            Error::InvalidSupportPrefix {
+                language: Language::Dotnet,
+                prefix: fragment_prefix.to_string(),
+                reason,
+            }
+        })?;
+        if let Some(existing) = &prefix {
+            if existing != fragment_prefix {
+                return Err(Error::InvalidSupportPrefix {
+                    language: Language::Dotnet,
+                    prefix: fragment_prefix.to_string(),
+                    reason: format!("conflicts with support prefix `{existing}`"),
+                });
+            }
+        } else {
+            prefix = Some(fragment_prefix.to_string());
+        }
+    }
+    Ok(prefix)
+}
+
+fn validate_dotnet_support_references(
+    api_plan: &ApiPlan,
+    support_prefix: Option<&str>,
+) -> Result<()> {
+    for model in api_plan.models.values() {
+        for sourced_field in &model.sourced_fields {
+            if let Some(reference) = sourced_field.source_expr.strip_suffix("()") {
+                validate_dotnet_support_reference(reference, support_prefix)?;
+            }
+        }
+        for field in &model.fields {
+            if let Some(extractor) = field
+                .function
+                .as_ref()
+                .and_then(|function| function.name_extractor.as_deref())
+            {
+                validate_dotnet_support_reference(extractor, support_prefix)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_dotnet_support_reference(reference: &str, support_prefix: Option<&str>) -> Result<()> {
+    let qualified = qualify_dotnet_support_reference(reference, support_prefix);
+    validate_dotnet_support_name(&qualified).map_err(|reason| Error::InvalidSupportPrefix {
+        language: Language::Dotnet,
+        prefix: support_prefix.unwrap_or("").to_string(),
+        reason: format!("invalid support reference `{reference}`: {reason}"),
+    })
+}
+
+fn validate_dotnet_support_name(name: &str) -> std::result::Result<(), String> {
+    if name.split('.').all(is_valid_csharp_identifier) {
+        Ok(())
+    } else {
+        Err("must be a dotted C# identifier path".to_string())
+    }
+}
+
+fn is_valid_csharp_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn qualify_dotnet_support_call(source_expr: &str, support_prefix: Option<&str>) -> String {
+    if let Some(reference) = source_expr.strip_suffix("()") {
+        format!(
+            "{}()",
+            qualify_dotnet_support_reference(reference, support_prefix)
+        )
+    } else {
+        source_expr.to_string()
+    }
+}
+
+fn qualify_dotnet_support_reference(reference: &str, support_prefix: Option<&str>) -> String {
+    let Some(prefix) = support_prefix.filter(|prefix| !prefix.is_empty()) else {
+        return reference.to_string();
+    };
+    if reference == prefix || reference.starts_with(&format!("{prefix}.")) {
+        reference.to_string()
+    } else {
+        format!("{prefix}.{reference}")
+    }
+}
+
 fn render_models_file(
     namespace: &str,
     enums: &[&PlannedEnum],
@@ -75,6 +177,7 @@ fn render_models_file(
     variants: &[&crate::api_plan::PlannedVariant],
     models: &[&PlannedModel],
     api_plan: &ApiPlan,
+    support_prefix: Option<&str>,
 ) -> String {
     let needs_result = models.iter().any(|model| {
         model
@@ -82,7 +185,14 @@ fn render_models_file(
             .iter()
             .any(|field| field_kind_uses_result(&field.kind))
     });
-    let mut output = generated_file_prelude(namespace, &["System", "System.Collections.Generic"]);
+    let mut imports = vec!["System", "System.Collections.Generic"];
+    if models
+        .iter()
+        .any(|model| model_uses_proto_extensions(model, api_plan))
+    {
+        imports.push("NexGen.Support");
+    }
+    let mut output = generated_file_prelude(namespace, &imports);
     if needs_result {
         render_result_helper(&mut output);
     }
@@ -96,8 +206,9 @@ fn render_models_file(
         render_variant(&mut output, variant);
     }
     for model in models {
-        render_model(&mut output, model, api_plan);
+        render_model(&mut output, model, api_plan, support_prefix);
     }
+    close_namespace(&mut output);
     output
 }
 
@@ -115,10 +226,15 @@ fn render_service_file(namespace: &str, api_plan: &ApiPlan) -> String {
         }
         output.push_str("}\n\n");
     }
+    close_namespace(&mut output);
     output
 }
 
-fn render_operations_file(namespace: &str, api_plan: &ApiPlan) -> String {
+fn render_operations_file(
+    namespace: &str,
+    api_plan: &ApiPlan,
+    support_prefix: Option<&str>,
+) -> String {
     let mut output = generated_file_prelude(
         namespace,
         &[
@@ -134,8 +250,9 @@ fn render_operations_file(namespace: &str, api_plan: &ApiPlan) -> String {
         ],
     );
     for service in &api_plan.services {
-        render_operations_class(&mut output, service, api_plan);
+        render_operations_class(&mut output, service, api_plan, support_prefix);
     }
+    close_namespace(&mut output);
     output
 }
 
@@ -146,6 +263,7 @@ fn render_resources_file(namespace: &str, api_plan: &ApiPlan) -> String {
             render_resource(&mut output, resource);
         }
     }
+    close_namespace(&mut output);
     output
 }
 
@@ -164,8 +282,12 @@ fn generated_file_prelude(namespace: &str, imports: &[&str]) -> String {
     }
     output.push_str("namespace ");
     output.push_str(namespace);
-    output.push_str(";\n\n");
+    output.push_str("\n{\n\n");
     output
+}
+
+fn close_namespace(output: &mut String) {
+    output.push_str("}\n");
 }
 
 fn dotnet_doc(spec: &crate::spec::LanguageStringSpec) -> Option<&str> {
@@ -191,7 +313,7 @@ fn render_operation_xml_doc(
         indent,
         dotnet_doc(&operation.doc),
         request_doc
-            .map(|doc| vec![("request", doc)])
+            .map(|doc| vec![("request".to_string(), doc.to_string())])
             .unwrap_or_default(),
         return_doc,
     );
@@ -227,7 +349,7 @@ fn render_xml_doc(
     output: &mut String,
     indent: &str,
     summary: Option<&str>,
-    params: Vec<(&str, &str)>,
+    params: Vec<(String, String)>,
     returns: Option<&str>,
 ) {
     if summary.is_none() && params.is_empty() && returns.is_none() {
@@ -243,7 +365,7 @@ fn render_xml_doc(
     for (name, doc) in params {
         output.push_str(indent);
         output.push_str("/// <param name=\"");
-        output.push_str(name);
+        output.push_str(&name);
         output.push_str("\">");
         output.push_str(&xml_doc_escape(doc.trim()));
         output.push_str("</param>\n");
@@ -288,7 +410,12 @@ fn render_service_operation(output: &mut String, operation: &PlannedOperation, a
     output.push_str(");\n\n");
 }
 
-fn render_operations_class(output: &mut String, service: &PlannedService, api_plan: &ApiPlan) {
+fn render_operations_class(
+    output: &mut String,
+    service: &PlannedService,
+    api_plan: &ApiPlan,
+    support_prefix: Option<&str>,
+) {
     let service_type = format!("I{}", csharp_type_name(&service.name));
     for operation in &service.operations {
         render_operation_options_type(output, operation, api_plan);
@@ -303,6 +430,7 @@ fn render_operations_class(output: &mut String, service: &PlannedService, api_pl
             api_plan,
             &service_type,
             &service.endpoint,
+            support_prefix,
         );
     }
     render_expression_helpers_if_needed(output, service, api_plan);
@@ -315,6 +443,7 @@ fn render_operation_extension(
     api_plan: &ApiPlan,
     service_type: &str,
     endpoint: &str,
+    support_prefix: Option<&str>,
 ) {
     let method_name = format!("{}Async", csharp_type_name(&operation.name));
     let raw_return = operation_raw_return_type(operation);
@@ -367,6 +496,7 @@ fn render_operation_extension(
             &raw_return,
             &high_level_return,
             api_plan,
+            support_prefix,
         );
     }
 }
@@ -512,6 +642,7 @@ fn render_operation_flattened_overload(
     high_level_return: &str,
     api_plan: &ApiPlan,
     overload: &FlattenedOverload,
+    support_prefix: Option<&str>,
 ) {
     render_flattened_method_signature(
         output,
@@ -523,7 +654,7 @@ fn render_operation_flattened_overload(
         api_plan,
         overload,
     );
-    render_flattened_method_body(output, operation, model, api_plan, overload);
+    render_flattened_method_body(output, operation, model, api_plan, overload, support_prefix);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -590,7 +721,7 @@ fn render_flattened_method_signature(
     api_plan: &ApiPlan,
     overload: &FlattenedOverload,
 ) {
-    render_operation_summary_xml_doc(output, "    ", operation);
+    render_operation_flattened_xml_doc(output, "    ", operation, model, api_plan, overload);
     output.push_str("    public static ");
     if raw_return == "void" {
         output.push_str("Task ");
@@ -614,6 +745,86 @@ fn render_flattened_method_signature(
         }
     }
     output.push_str(")\n    {\n");
+}
+
+fn render_operation_flattened_xml_doc(
+    output: &mut String,
+    indent: &str,
+    operation: &PlannedOperation,
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+    overload: &FlattenedOverload,
+) {
+    let return_doc = match operation.output {
+        PlannedOperationOutput::None => None,
+        _ => dotnet_doc(&operation.return_doc),
+    };
+    render_xml_doc(
+        output,
+        indent,
+        dotnet_doc(&operation.doc),
+        flattened_method_parameter_docs(model, api_plan, overload),
+        return_doc,
+    );
+}
+
+fn flattened_method_parameter_docs(
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+    overload: &FlattenedOverload,
+) -> Vec<(String, String)> {
+    let mut params = Vec::new();
+    for field in &model.fields {
+        if field.function.is_none() {
+            continue;
+        }
+        if let Some(nested_model) = flattened_nested_model(field, api_plan) {
+            for nested_field in &nested_model.fields {
+                if nested_field.function.is_none() {
+                    continue;
+                }
+                push_field_parameter_doc(&mut params, nested_field);
+            }
+            continue;
+        }
+        push_field_parameter_doc(&mut params, field);
+        if matches!(overload.function_mode(field), FlattenedFunctionMode::String) {
+            push_function_args_parameter_docs(&mut params, model, field);
+        }
+    }
+    if model_has_options_fields(model, api_plan)
+        && let Some(request_doc) = dotnet_doc(model.generated_model.doc())
+    {
+        params.push(("options".to_string(), request_doc.to_string()));
+    }
+    params
+}
+
+fn push_field_parameter_doc(params: &mut Vec<(String, String)>, field: &PlannedField) {
+    let Some(doc) = field.doc.as_ref().and_then(dotnet_doc) else {
+        return;
+    };
+    params.push((csharp_parameter_name(&field.authored_name), doc.to_string()));
+}
+
+fn push_function_args_parameter_docs(
+    params: &mut Vec<(String, String)>,
+    model: &PlannedModel,
+    function_field: &PlannedField,
+) {
+    let Some(function) = &function_field.function else {
+        return;
+    };
+    for arg_field_name in &function.arg_fields {
+        let Some(arg_field) = model
+            .fields
+            .iter()
+            .find(|field| &field.proto_name == arg_field_name)
+        else {
+            continue;
+        };
+        push_field_parameter_doc(params, arg_field);
+    }
 }
 
 fn render_flattened_parameters(
@@ -658,6 +869,38 @@ fn render_flattened_parameters(
         if !field.required {
             output.push_str(" = null");
         }
+        if matches!(overload.function_mode(field), FlattenedFunctionMode::String) {
+            render_function_args_parameters(output, model, field, api_plan, has_parameters);
+        }
+    }
+}
+
+fn render_function_args_parameters(
+    output: &mut String,
+    model: &PlannedModel,
+    function_field: &PlannedField,
+    api_plan: &ApiPlan,
+    has_parameters: &mut bool,
+) {
+    let Some(function) = &function_field.function else {
+        return;
+    };
+    for arg_field_name in &function.arg_fields {
+        let Some(arg_field) = model
+            .fields
+            .iter()
+            .find(|field| &field.proto_name == arg_field_name)
+        else {
+            continue;
+        };
+        render_parameter_separator(output, has_parameters);
+        output.push_str(&flattened_parameter_type(
+            arg_field,
+            api_plan,
+            FlattenedFunctionMode::String,
+        ));
+        output.push(' ');
+        output.push_str(&csharp_parameter_name(&arg_field.authored_name));
     }
 }
 
@@ -700,6 +943,7 @@ fn render_flattened_method_body(
     model: &PlannedModel,
     api_plan: &ApiPlan,
     overload: &FlattenedOverload,
+    support_prefix: Option<&str>,
 ) {
     let options_required = model_options_required(model, api_plan);
     for field in &model.fields {
@@ -743,25 +987,28 @@ fn render_flattened_method_body(
                 FlattenedFunctionMode::Expression
             )
         {
-            output.push_str(&function_name_expression(field));
+            output.push_str(&function_name_expression(field, support_prefix));
         } else if field.function_args
-            && function_args_field_mode(model, field, overload)
-                .is_some_and(|mode| matches!(mode, FlattenedFunctionMode::Expression))
+            && let Some(mode) = function_args_field_mode(model, field, overload)
         {
-            let function_field = model
-                .fields
-                .iter()
-                .find(|candidate| {
-                    candidate
-                        .function
-                        .as_ref()
-                        .is_some_and(|function| function.arg_fields.contains(&field.proto_name))
-                })
-                .expect("function args field should have a function field");
-            output.push_str(&csharp_parameter_name(&format!(
-                "{}Args",
-                function_field.authored_name
-            )));
+            if matches!(mode, FlattenedFunctionMode::Expression) {
+                let function_field = model
+                    .fields
+                    .iter()
+                    .find(|candidate| {
+                        candidate
+                            .function
+                            .as_ref()
+                            .is_some_and(|function| function.arg_fields.contains(&field.proto_name))
+                    })
+                    .expect("function args field should have a function field");
+                output.push_str(&csharp_parameter_name(&format!(
+                    "{}Args",
+                    function_field.authored_name
+                )));
+            } else {
+                output.push_str(&csharp_parameter_name(&field.authored_name));
+            }
         } else if field.function.is_none() {
             output.push_str(&option_field_expr(field, options_required));
         } else {
@@ -776,13 +1023,14 @@ fn render_flattened_method_body(
     output.push_str("    }\n\n");
 }
 
-fn function_name_expression(field: &PlannedField) -> String {
+fn function_name_expression(field: &PlannedField, support_prefix: Option<&str>) -> String {
     let method_var = csharp_parameter_name(&format!("{}Method", field.authored_name));
     let extractor = field
         .function
         .as_ref()
         .and_then(|function| function.name_extractor.as_deref())
         .expect("expression overloads require function name extractors");
+    let extractor = qualify_dotnet_support_reference(extractor, support_prefix);
     format!("{extractor}({method_var})")
 }
 
@@ -835,39 +1083,37 @@ fn render_operation_options_type(
     for field in &model.fields {
         if let Some(nested_model) = flattened_nested_model(field, api_plan) {
             for nested_field in &nested_model.fields {
-                if nested_field.function.is_some() {
+                if !field_is_options_field(nested_field) {
                     continue;
                 }
                 render_field_xml_doc(output, "    ", nested_field);
                 output.push_str("    public ");
-                if field.required && nested_field.required {
-                    output.push_str("required ");
-                }
-                output.push_str(&flattened_nested_parameter_type(
-                    nested_model,
-                    nested_field,
-                    api_plan,
-                ));
+                let field_type =
+                    flattened_nested_parameter_type(nested_model, nested_field, api_plan);
+                output.push_str(&field_type);
                 output.push(' ');
                 output.push_str(&field_property_name(nested_field));
                 output.push_str(" { get; set; }");
+                if field.required && nested_field.required {
+                    output.push_str(" = default!;");
+                }
                 output.push('\n');
             }
             continue;
         }
-        if field.function.is_some() {
+        if !field_is_options_field(field) {
             continue;
         }
         let field_type = flattened_parameter_type(field, api_plan, FlattenedFunctionMode::String);
         render_field_xml_doc(output, "    ", field);
         output.push_str("    public ");
-        if field.required {
-            output.push_str("required ");
-        }
         output.push_str(&field_type);
         output.push(' ');
         output.push_str(&field_property_name(field));
         output.push_str(" { get; set; }");
+        if field.required {
+            output.push_str(" = default!;");
+        }
         output.push('\n');
     }
     output.push_str("}\n\n");
@@ -880,12 +1126,9 @@ fn operation_options_type_name(operation: &PlannedOperation) -> String {
 fn model_has_options_fields(model: &PlannedModel, api_plan: &ApiPlan) -> bool {
     model.fields.iter().any(|field| {
         if let Some(nested_model) = flattened_nested_model(field, api_plan) {
-            nested_model
-                .fields
-                .iter()
-                .any(|nested_field| nested_field.function.is_none())
+            nested_model.fields.iter().any(field_is_options_field)
         } else {
-            field.function.is_none()
+            field_is_options_field(field)
         }
     })
 }
@@ -894,14 +1137,17 @@ fn model_options_required(model: &PlannedModel, api_plan: &ApiPlan) -> bool {
     model.fields.iter().any(|field| {
         if let Some(nested_model) = flattened_nested_model(field, api_plan) {
             field.required
-                && nested_model
-                    .fields
-                    .iter()
-                    .any(|nested_field| nested_field.required && nested_field.function.is_none())
+                && nested_model.fields.iter().any(|nested_field| {
+                    nested_field.required && field_is_options_field(nested_field)
+                })
         } else {
-            field.required && field.function.is_none()
+            field.required && field_is_options_field(field)
         }
     })
+}
+
+fn field_is_options_field(field: &PlannedField) -> bool {
+    field.function.is_none() && !field.function_args
 }
 
 fn nested_model_init_expr(
@@ -912,7 +1158,7 @@ fn nested_model_init_expr(
     let checks = model
         .fields
         .iter()
-        .filter(|nested_field| nested_field.function.is_none())
+        .filter(|nested_field| field_is_options_field(nested_field))
         .map(|nested_field| {
             format!(
                 "{} != null",
@@ -924,7 +1170,7 @@ fn nested_model_init_expr(
     let assignments = model
         .fields
         .iter()
-        .filter(|nested_field| nested_field.function.is_none())
+        .filter(|nested_field| field_is_options_field(nested_field))
         .map(|nested_field| {
             let value_expr = option_nested_field_expr(field, nested_field, options_required);
             format!("{} = {}", field_property_name(nested_field), value_expr)
@@ -973,6 +1219,7 @@ fn render_operation_flattened_extension(
     raw_return: &str,
     high_level_return: &str,
     api_plan: &ApiPlan,
+    support_prefix: Option<&str>,
 ) {
     for overload in flattened_overloads(model) {
         render_operation_flattened_overload(
@@ -984,6 +1231,7 @@ fn render_operation_flattened_extension(
             high_level_return,
             api_plan,
             &overload,
+            support_prefix,
         );
     }
 }
@@ -1065,7 +1313,12 @@ fn render_variant(output: &mut String, variant: &crate::api_plan::PlannedVariant
     output.push_str("}\n\n");
 }
 
-fn render_model(output: &mut String, model: &PlannedModel, api_plan: &ApiPlan) {
+fn render_model(
+    output: &mut String,
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+    support_prefix: Option<&str>,
+) {
     render_xml_summary(output, "", dotnet_doc(model.generated_model.doc()));
     output.push_str(model_access(model, api_plan));
     output.push_str(" class ");
@@ -1074,20 +1327,20 @@ fn render_model(output: &mut String, model: &PlannedModel, api_plan: &ApiPlan) {
     for field in &model.fields {
         render_field_xml_doc(output, "    ", field);
         output.push_str("    public ");
-        if field.required {
-            output.push_str("required ");
-        }
         output.push_str(&field_type(field, api_plan));
         output.push(' ');
         output.push_str(&field_property_name(field));
         output.push_str(" { get; init; }");
+        if field.required {
+            output.push_str(" = default!;");
+        }
         output.push('\n');
     }
     if model_needs_to_proto_method(model) {
         if !model.fields.is_empty() {
             output.push('\n');
         }
-        render_model_to_proto_method(output, model, api_plan);
+        render_model_to_proto_method(output, model, api_plan, support_prefix);
     }
     output.push_str("}\n\n");
 }
@@ -1342,7 +1595,12 @@ fn model_needs_to_proto_method(model: &PlannedModel) -> bool {
         && dotnet_proto_type_name_for_info(&model.info) != csharp_type_name(&model.name)
 }
 
-fn render_model_to_proto_method(output: &mut String, model: &PlannedModel, api_plan: &ApiPlan) {
+fn render_model_to_proto_method(
+    output: &mut String,
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+    support_prefix: Option<&str>,
+) {
     let raw_type = dotnet_proto_type_name_for_info(&model.info);
     output.push_str("    public ");
     output.push_str(&raw_type);
@@ -1354,9 +1612,10 @@ fn render_model_to_proto_method(output: &mut String, model: &PlannedModel, api_p
         output.push_str("        proto.");
         output.push_str(&csharp_type_name(&sourced_field.proto_name));
         output.push_str(" = ");
+        let source_expr = qualify_dotnet_support_call(&sourced_field.source_expr, support_prefix);
         output.push_str(&field_kind_to_proto_expr(
             &sourced_field.kind,
-            &sourced_field.source_expr,
+            &source_expr,
             false,
             api_plan,
         ));
@@ -1445,12 +1704,65 @@ fn message_to_proto_expr(message: &PlannedMessageType, source_expr: &str) -> Str
     if matches!(message.source, PlannedMessageSource::Proto)
         && dotnet_message_type(message) != dotnet_proto_type_name_for_message(message)
     {
-        format!(
-            "NexusApiGen.Support.ProtoConverters.ToProto<{}>({source_expr})",
-            dotnet_proto_type_name_for_message(message)
-        )
+        if dotnet_message_type(message) == "string" {
+            format!(
+                "{source_expr}.ToProto<{}>()",
+                dotnet_proto_type_name_for_message(message)
+            )
+        } else {
+            format!("{source_expr}.ToProto()")
+        }
     } else {
         source_expr.to_string()
+    }
+}
+
+fn model_uses_proto_extensions(model: &PlannedModel, api_plan: &ApiPlan) -> bool {
+    model
+        .sourced_fields
+        .iter()
+        .any(|field| field_kind_uses_proto_extensions(&field.kind, api_plan))
+        || model
+            .fields
+            .iter()
+            .any(|field| field_kind_uses_proto_extensions(&field.kind, api_plan))
+}
+
+fn field_kind_uses_proto_extensions(kind: &PlannedFieldKind, api_plan: &ApiPlan) -> bool {
+    match kind {
+        PlannedFieldKind::Singular(value) => value_uses_proto_extensions(value, api_plan),
+        PlannedFieldKind::Repeated(value) => value_uses_proto_extensions(value, api_plan),
+        PlannedFieldKind::Map { key, value } => {
+            value_uses_proto_extensions(key, api_plan)
+                || value_uses_proto_extensions(value, api_plan)
+        }
+    }
+}
+
+fn value_uses_proto_extensions(value: &PlannedValueType, api_plan: &ApiPlan) -> bool {
+    match value {
+        PlannedValueType::Message(message) => {
+            api_plan
+                .models
+                .get(&message.info.full_name)
+                .is_some_and(|model| model_needs_to_proto_method(model))
+                || (matches!(message.source, PlannedMessageSource::Proto)
+                    && dotnet_message_type(message) != dotnet_proto_type_name_for_message(message))
+        }
+        PlannedValueType::External { fallback, .. } => {
+            value_uses_proto_extensions(fallback, api_plan)
+        }
+        PlannedValueType::Result { ok, err } => {
+            ok.as_deref()
+                .is_some_and(|ok| value_uses_proto_extensions(ok, api_plan))
+                || err
+                    .as_deref()
+                    .is_some_and(|err| value_uses_proto_extensions(err, api_plan))
+        }
+        PlannedValueType::Tuple(items) => items
+            .iter()
+            .any(|item| value_uses_proto_extensions(item, api_plan)),
+        _ => false,
     }
 }
 
@@ -1671,10 +1983,34 @@ fn dotnet_proto_type_name_for_message(message: &PlannedMessageType) -> String {
 }
 
 fn dotnet_proto_type_name_for_info(info: &PlannedTypeInfo) -> String {
-    info.proto_type_name
-        .for_language(Language::Dotnet)
-        .map(str::to_string)
+    info.file_options
+        .as_ref()
+        .and_then(|options| options.csharp_namespace.as_deref())
+        .filter(|namespace| !namespace.is_empty())
+        .map(|namespace| format!("{namespace}.{}", dotnet_proto_relative_type_name(info)))
+        .or_else(|| {
+            info.proto_type_name
+                .for_language(Language::Dotnet)
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| dotnet_proto_type_name_fallback(&info.full_name))
+}
+
+fn dotnet_proto_relative_type_name(info: &PlannedTypeInfo) -> String {
+    let relative_name = info
+        .full_name
+        .strip_prefix(&format!("{}.", info.package))
+        .unwrap_or(&info.full_name);
+    let mut parts = relative_name.split('.');
+    let Some(first) = parts.next() else {
+        return String::new();
+    };
+    let mut type_name = csharp_type_name(first);
+    for part in parts {
+        type_name.push_str(".Types.");
+        type_name.push_str(&csharp_type_name(part));
+    }
+    type_name
 }
 
 fn dotnet_proto_type_name_fallback(full_name: &str) -> String {
@@ -1733,8 +2069,8 @@ fn dotnet_namespace(api_plan: &ApiPlan) -> String {
     api_plan
         .services
         .first()
-        .map(|service| format!("NexusApiGen.{}", csharp_type_name(&service.name)))
-        .unwrap_or_else(|| "NexusApiGen.Generated".to_string())
+        .map(|service| format!("NexGen.{}", csharp_type_name(&service.name)))
+        .unwrap_or_else(|| "NexGen.Generated".to_string())
 }
 
 fn field_property_name(field: &PlannedField) -> String {
@@ -1868,7 +2204,14 @@ const CSHARP_KEYWORDS: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::dotnet_proto_type_name_fallback;
+    use std::collections::BTreeMap;
+
+    use prost_types::FileOptions;
+
+    use super::{dotnet_proto_type_name_fallback, dotnet_proto_type_name_for_info};
+    use crate::api_plan::PlannedTypeInfo;
+    use crate::language::Language;
+    use crate::spec::LanguageStringSpec;
 
     #[test]
     fn proto_type_name_fallback_pascal_cases_dotted_parts() {
@@ -1879,6 +2222,50 @@ mod tests {
         assert_eq!(
             dotnet_proto_type_name_fallback("company.widgets.v1.Widget"),
             "Company.Widgets.V1.Widget"
+        );
+    }
+
+    #[test]
+    fn proto_type_name_uses_csharp_namespace_file_option() {
+        let info = PlannedTypeInfo {
+            full_name: "temporal.api.workflow.v1.VersioningOverride.PinnedOverride".to_string(),
+            package: "temporal.api.workflow.v1".to_string(),
+            file_name: Some("temporal/api/workflow/v1/message.proto".to_string()),
+            file_options: Some(FileOptions {
+                csharp_namespace: Some("Temporalio.Api.Workflow.V1".to_string()),
+                ..Default::default()
+            }),
+            proto_type_name: LanguageStringSpec::default(),
+        };
+
+        assert_eq!(
+            dotnet_proto_type_name_for_info(&info),
+            "Temporalio.Api.Workflow.V1.VersioningOverride.Types.PinnedOverride"
+        );
+    }
+
+    #[test]
+    fn proto_type_name_prefers_csharp_namespace_file_option_over_wit_override() {
+        let info = PlannedTypeInfo {
+            full_name: "temporal.api.common.v1.Payload".to_string(),
+            package: "temporal.api.common.v1".to_string(),
+            file_name: Some("temporal/api/common/v1/message.proto".to_string()),
+            file_options: Some(FileOptions {
+                csharp_namespace: Some("Temporalio.Api.Common.V1".to_string()),
+                ..Default::default()
+            }),
+            proto_type_name: LanguageStringSpec {
+                default: None,
+                by_language: BTreeMap::from([(
+                    Language::Dotnet,
+                    "Should.Not.Be.Used.Payload".to_string(),
+                )]),
+            },
+        };
+
+        assert_eq!(
+            dotnet_proto_type_name_for_info(&info),
+            "Temporalio.Api.Common.V1.Payload"
         );
     }
 }

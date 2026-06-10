@@ -4,7 +4,8 @@
 
 using NexusRpc;
 
-namespace NexusApiGen.TypeRoundtripService;
+namespace NexGen.TypeRoundtripService
+{
 
 [NexusService("TypeRoundtripService")]
 internal interface ITypeRoundtripService
@@ -17,3 +18,4 @@ internal interface ITypeRoundtripService
 
 }
 
+}

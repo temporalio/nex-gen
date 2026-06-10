@@ -5,63 +5,65 @@
 using System;
 using System.Collections.Generic;
 
-namespace NexusApiGen.FunctionExecution;
+namespace NexGen.FunctionExecution
+{
 
 public class ExecuteFunctionRequest
 {
-    public required string Function { get; init; }
-    public required string Name { get; init; }
-    public required bool Enabled { get; init; }
+    public string Function { get; init; } = default!;
+    public string Name { get; init; } = default!;
+    public bool Enabled { get; init; } = default!;
 }
 
 public class ExecuteFunctionResult
 {
-    public required string Value { get; init; }
+    public string Value { get; init; } = default!;
 }
 
 public class ExecuteCountedFunctionRequest
 {
-    public required string Function { get; init; }
-    public required string Name { get; init; }
-    public required int Count { get; init; }
+    public string Function { get; init; } = default!;
+    public string Name { get; init; } = default!;
+    public int Count { get; init; } = default!;
 }
 
 public class ExecuteCountedFunctionResult
 {
-    public required string Value { get; init; }
+    public string Value { get; init; } = default!;
 }
 
 public class ExecuteNamedFunctionRequest
 {
-    public required string Function { get; init; }
-    public required string Name { get; init; }
-    public required bool Enabled { get; init; }
+    public string Function { get; init; } = default!;
+    public string Name { get; init; } = default!;
+    public bool Enabled { get; init; } = default!;
 }
 
 public class ExecuteNamedFunctionResult
 {
-    public required string Value { get; init; }
+    public string Value { get; init; } = default!;
 }
 
 public class ExecuteVarargsFunctionRequest
 {
-    public required string Function { get; init; }
+    public string Function { get; init; } = default!;
     public IReadOnlyList<string>? Args { get; init; }
 }
 
 public class ExecuteVarargsFunctionResult
 {
-    public required string Value { get; init; }
+    public string Value { get; init; } = default!;
 }
 
 public class ExecuteNamedVarargsFunctionRequest
 {
-    public required string Function { get; init; }
+    public string Function { get; init; } = default!;
     public IReadOnlyList<string>? Args { get; init; }
 }
 
 public class ExecuteNamedVarargsFunctionResult
 {
-    public required string Value { get; init; }
+    public string Value { get; init; } = default!;
 }
 
+}

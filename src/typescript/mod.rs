@@ -14,7 +14,7 @@ use crate::api_plan::{
     PlannedScalarType, PlannedSourcedField, PlannedTypeInfo, PlannedValueType, PlannedVariant,
     relative_descriptor_name,
 };
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::generator::{GeneratedFiles, ModelCapabilities};
 use crate::language::Language;
 use crate::resources::{
@@ -34,6 +34,7 @@ pub(crate) fn generate(
     support_fragments: &[SupportFragmentSpec],
     language_imports: &[LanguageImportSpec],
 ) -> Result<GeneratedFiles> {
+    reject_support_prefixes(Language::TypeScript, support_fragments)?;
     let mut enums = IndexMap::new();
     let mut flags = IndexMap::new();
     let mut variants = IndexMap::new();
@@ -99,6 +100,22 @@ pub(crate) fn generate(
         language_imports,
         support_source.as_deref(),
     ))
+}
+
+fn reject_support_prefixes(
+    language: Language,
+    support_fragments: &[SupportFragmentSpec],
+) -> Result<()> {
+    if let Some(prefix) = support_fragments
+        .iter()
+        .find_map(|fragment| fragment.prefix.as_deref())
+    {
+        return Err(Error::UnsupportedSupportPrefix {
+            language,
+            prefix: prefix.to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn ensure_resource_field_types(
@@ -4378,6 +4395,7 @@ mod tests {
             fragments: vec![SupportFragmentSpec {
                 path: path.to_string_lossy().into_owned(),
                 contents: fs::read_to_string(path).unwrap(),
+                prefix: None,
             }],
         }
     }

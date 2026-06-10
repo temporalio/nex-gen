@@ -2,10 +2,11 @@ using System;
 using System.Threading.Tasks;
 using Temporalio.Common;
 using Temporalio.Workflows;
-using WorkflowExample = NexusApiGen.WorkflowService;
-using StartWorkflowExample = NexusApiGen.StartWorkflowService;
+using WorkflowExample = NexGen.WorkflowService;
+using StartWorkflowExample = NexGen.StartWorkflowService;
 
-namespace NexusApiGen.DotNetExamples.Tests;
+namespace NexGen.DotNetExamples.Tests
+{
 
 [Workflow]
 public class ExampleWorkflow
@@ -40,4 +41,5 @@ public static class GeneratedApiCompileChecks
                 TaskQueue = "task-queue",
                 WorkflowStartDelay = TimeSpan.FromSeconds(1),
             });
+}
 }

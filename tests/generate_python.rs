@@ -5,8 +5,10 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use heck::ToSnakeCase;
+use nex_gen::SupportFiles;
 use nex_gen::generate_to_string_with_inputs;
 use nex_gen::generator::{GeneratedOutputLayout, generate_files};
+use nex_gen::spec::SupportFragmentSpec;
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
@@ -437,4 +439,29 @@ fn python_request_models_are_write_only() {
     assert!(type_roundtrip_rendered.contains("task_queue: str | None = None,"));
     assert!(type_roundtrip_rendered.contains("retry_policy: temporalio.common.RetryPolicy,"));
     assert!(type_roundtrip_rendered.contains("request = ActivityOptions("));
+}
+
+#[test]
+fn python_rejects_support_prefix() {
+    let root = project_root();
+    let spec = nex_gen::spec::ApiSpec::load_for_language_with_inputs(
+        nex_gen::language::Language::Python,
+        &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
+    )
+    .unwrap();
+    let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let err = generate_files(
+        nex_gen::language::Language::Python,
+        &spec,
+        &descriptors,
+        &SupportFiles {
+            fragments: vec![SupportFragmentSpec {
+                path: "support.py".to_string(),
+                contents: String::new(),
+                prefix: Some("example.support".to_string()),
+            }],
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("support prefix"));
 }

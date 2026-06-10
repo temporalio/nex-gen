@@ -5,16 +5,18 @@
 using System;
 using System.Collections.Generic;
 
-namespace NexusApiGen.UserService;
+namespace NexGen.UserService
+{
 
 internal class GetUserRequest
 {
-    public required string UserId { get; init; }
+    public string UserId { get; init; } = default!;
 }
 
 internal class UpdateEmailRequest
 {
-    public required string UserId { get; init; }
-    public required string Email { get; init; }
+    public string UserId { get; init; } = default!;
+    public string Email { get; init; } = default!;
 }
 
+}

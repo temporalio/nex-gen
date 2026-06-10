@@ -12,27 +12,26 @@ using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
 
-namespace NexusApiGen.StartWorkflowService;
+namespace NexGen.StartWorkflowService
+{
 
 public class StartWorkflowOptions
 {
-    public IReadOnlyCollection<object?>? Args { get; set; }
-    public required string WorkflowId { get; set; }
-    public required string TaskQueue { get; set; }
+    public string WorkflowId { get; set; } = default!;
+    public string TaskQueue { get; set; } = default!;
     public System.TimeSpan? WorkflowStartDelay { get; set; }
 }
 
 public class RestartWorkflowOptions
 {
-    public IReadOnlyCollection<object?>? Args { get; set; }
-    public required string WorkflowId { get; set; }
-    public required string TaskQueue { get; set; }
+    public string WorkflowId { get; set; } = default!;
+    public string TaskQueue { get; set; } = default!;
     public System.TimeSpan? WorkflowStartDelay { get; set; }
 }
 
 public class CancelWorkflowOptions
 {
-    public required WorkflowExecution WorkflowExecution { get; set; }
+    public WorkflowExecution WorkflowExecution { get; set; } = default!;
     public string? Reason { get; set; }
 }
 
@@ -46,12 +45,12 @@ public static class StartWorkflowServiceOperations
         return new StartedWorkflow(protoRequest.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
     }
 
-    public static Task<StartedWorkflow> StartWorkflowAsync(string workflow, StartWorkflowOptions options)
+    public static Task<StartedWorkflow> StartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, StartWorkflowOptions options)
     {
         var request = new StartWorkflowRequest
         {
             Workflow = workflow,
-            Args = options.Args,
+            Args = args,
             WorkflowId = options.WorkflowId,
             TaskQueue = options.TaskQueue,
             WorkflowStartDelay = options.WorkflowStartDelay,
@@ -64,7 +63,7 @@ public static class StartWorkflowServiceOperations
         var (workflowMethod, workflowArgs) = ExtractCall(workflow);
         var request = new StartWorkflowRequest
         {
-            Workflow = NexusApiGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
+            Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
             Args = workflowArgs,
             WorkflowId = options.WorkflowId,
             TaskQueue = options.TaskQueue,
@@ -81,12 +80,12 @@ public static class StartWorkflowServiceOperations
         return new StartedWorkflow(protoRequest.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
     }
 
-    public static Task<StartedWorkflow> RestartWorkflowAsync(string workflow, RestartWorkflowOptions options)
+    public static Task<StartedWorkflow> RestartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, RestartWorkflowOptions options)
     {
         var request = new StartWorkflowRequest
         {
             Workflow = workflow,
-            Args = options.Args,
+            Args = args,
             WorkflowId = options.WorkflowId,
             TaskQueue = options.TaskQueue,
             WorkflowStartDelay = options.WorkflowStartDelay,
@@ -99,7 +98,7 @@ public static class StartWorkflowServiceOperations
         var (workflowMethod, workflowArgs) = ExtractCall(workflow);
         var request = new StartWorkflowRequest
         {
-            Workflow = NexusApiGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
+            Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
             Args = workflowArgs,
             WorkflowId = options.WorkflowId,
             TaskQueue = options.TaskQueue,
@@ -146,3 +145,4 @@ public static class StartWorkflowServiceOperations
 
 }
 
+}

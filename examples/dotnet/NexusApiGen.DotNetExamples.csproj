@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <LangVersion>12.0</LangVersion>
+    <LangVersion>9.0</LangVersion>
     <Nullable>enable</Nullable>
-    <AssemblyName>NexusApiGen.DotNetExamples</AssemblyName>
+    <AssemblyName>NexGen.DotNetExamples</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

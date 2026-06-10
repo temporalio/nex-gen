@@ -5,7 +5,8 @@
 using System;
 using System.Collections.Generic;
 
-namespace NexusApiGen.TypeShowcase;
+namespace NexGen.TypeShowcase
+{
 
 public sealed class NexusResult<TOk, TErr>
 {
@@ -67,49 +68,50 @@ public abstract class NotificationTarget
 
 internal class GetUserRequest
 {
-    public required string UserId { get; init; }
+    public string UserId { get; init; } = default!;
     public string? ConsistencyToken { get; init; }
 }
 
 internal class UpdateEmailRequest
 {
-    public required string UserId { get; init; }
-    public required string Email { get; init; }
+    public string UserId { get; init; } = default!;
+    public string Email { get; init; } = default!;
 }
 
 internal class RenameRequest
 {
-    public required string UserId { get; init; }
-    public required string DisplayName { get; init; }
+    public string UserId { get; init; } = default!;
+    public string DisplayName { get; init; } = default!;
 }
 
 internal class SetProfileRequest
 {
-    public required string UserId { get; init; }
-    public required UserProfile Profile { get; init; }
+    public string UserId { get; init; } = default!;
+    public UserProfile Profile { get; init; } = default!;
 }
 
 public class UserProfile
 {
-    public required IReadOnlyList<string> Tags { get; init; }
-    public required IReadOnlyDictionary<string, string> Metadata { get; init; }
-    public required UserCapability Capabilities { get; init; }
-    public required NexusResult<string, string> SyncState { get; init; }
-    public required NotificationTarget NotificationTarget { get; init; }
+    public IReadOnlyList<string> Tags { get; init; } = default!;
+    public IReadOnlyDictionary<string, string> Metadata { get; init; } = default!;
+    public UserCapability Capabilities { get; init; } = default!;
+    public NexusResult<string, string> SyncState { get; init; } = default!;
+    public NotificationTarget NotificationTarget { get; init; } = default!;
     public PostalAddress? Address { get; init; }
 }
 
 public class PostalAddress
 {
-    public required string Street { get; init; }
-    public required string City { get; init; }
-    public required string Country { get; init; }
+    public string Street { get; init; } = default!;
+    public string City { get; init; } = default!;
+    public string Country { get; init; } = default!;
     public (double, double)? Coordinates { get; init; }
 }
 
 internal class DeactivateRequest
 {
-    public required string UserId { get; init; }
+    public string UserId { get; init; } = default!;
     public string? Reason { get; init; }
 }
 
+}

@@ -356,6 +356,7 @@ fn load_support_fragments_from_paths(
             Ok(SupportFragmentSpec {
                 path: path.to_string_lossy().replace('\\', "/"),
                 contents,
+                prefix: None,
             })
         })
         .collect()

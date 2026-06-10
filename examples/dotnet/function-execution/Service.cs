@@ -4,7 +4,8 @@
 
 using NexusRpc;
 
-namespace NexusApiGen.FunctionExecution;
+namespace NexGen.FunctionExecution
+{
 
 [NexusService("FunctionExecution")]
 internal interface IFunctionExecution
@@ -26,3 +27,4 @@ internal interface IFunctionExecution
 
 }
 
+}

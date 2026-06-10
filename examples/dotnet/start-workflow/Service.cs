@@ -4,7 +4,8 @@
 
 using NexusRpc;
 
-namespace NexusApiGen.StartWorkflowService;
+namespace NexGen.StartWorkflowService
+{
 
 [NexusService("StartWorkflowService")]
 internal interface IStartWorkflowService
@@ -20,3 +21,4 @@ internal interface IStartWorkflowService
 
 }
 
+}

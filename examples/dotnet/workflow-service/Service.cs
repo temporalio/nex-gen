@@ -4,7 +4,8 @@
 
 using NexusRpc;
 
-namespace NexusApiGen.WorkflowService;
+namespace NexGen.WorkflowService
+{
 
 [NexusService("temporal.api.workflowservice.v1.WorkflowService")]
 internal interface IWorkflowService
@@ -18,3 +19,4 @@ internal interface IWorkflowService
 
 }
 
+}
