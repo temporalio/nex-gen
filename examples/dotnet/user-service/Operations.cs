@@ -15,52 +15,54 @@ using Temporalio.Workflows;
 namespace NexGen.UserService
 {
 
-public class GetUserOptions
-{
-    public string UserId { get; set; } = default!;
-}
-
-public class UpdateEmailOptions
-{
-    public string UserId { get; set; } = default!;
-    public string Email { get; set; } = default!;
-}
-
-public static class UserServiceOperations
-{
-    private static async Task<User> GetUserAsync(GetUserRequest request)
+    public class GetUserOptions
     {
-        var client = Workflow.CreateNexusWorkflowClient<IUserService>("user-service");
-        var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.GetUser(request)).ConfigureAwait(true);
-        return result;
+        public string UserId { get; set; } = default!;
     }
 
-    public static Task<User> GetUserAsync(GetUserOptions options)
+    public class UpdateEmailOptions
     {
-        var request = new GetUserRequest
+        public string UserId { get; set; } = default!;
+        public string Email { get; set; } = default!;
+    }
+
+    public static class UserServiceOperations
+    {
+        private static async Task<User> GetUserAsync(GetUserRequest request)
         {
-            UserId = options.UserId,
-        };
-        return GetUserAsync(request);
-    }
+            var client = Workflow.CreateNexusWorkflowClient<IUserService>("user-service");
+            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.GetUser(request)).ConfigureAwait(true);
+            return result;
+        }
 
-    private static async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
-    {
-        var client = Workflow.CreateNexusWorkflowClient<IUserService>("user-service");
-        var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
-        return result;
-    }
-
-    public static Task<User> UpdateEmailAsync(UpdateEmailOptions options)
-    {
-        var request = new UpdateEmailRequest
+        /// <param name="options">Options for the operation.</param>
+        public static Task<User> GetUserAsync(GetUserOptions options)
         {
-            UserId = options.UserId,
-            Email = options.Email,
-        };
-        return UpdateEmailAsync(request);
-    }
+            var request = new GetUserRequest
+            {
+                UserId = options.UserId,
+            };
+            return GetUserAsync(request);
+        }
 
-}
+        private static async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
+        {
+            var client = Workflow.CreateNexusWorkflowClient<IUserService>("user-service");
+            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        public static Task<User> UpdateEmailAsync(UpdateEmailOptions options)
+        {
+            var request = new UpdateEmailRequest
+            {
+                UserId = options.UserId,
+                Email = options.Email,
+            };
+            return UpdateEmailAsync(request);
+        }
+
+    }
 
 }

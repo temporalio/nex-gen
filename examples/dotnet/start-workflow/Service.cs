@@ -7,18 +7,18 @@ using NexusRpc;
 namespace NexGen.StartWorkflowService
 {
 
-[NexusService("StartWorkflowService")]
-internal interface IStartWorkflowService
-{
-    [NexusOperation("StartWorkflow")]
-    Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse StartWorkflow(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest request);
+    [NexusService("StartWorkflowService")]
+    internal interface IStartWorkflowService
+    {
+        [NexusOperation("StartWorkflow")]
+        Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse StartWorkflow(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest request);
 
-    [NexusOperation("RestartWorkflow")]
-    Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse RestartWorkflow(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest request);
+        [NexusOperation("RestartWorkflow")]
+        Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse RestartWorkflow(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest request);
 
-    [NexusOperation("CancelWorkflow")]
-    Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse CancelWorkflow(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest request);
+        [NexusOperation("CancelWorkflow")]
+        Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse CancelWorkflow(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest request);
 
-}
+    }
 
 }

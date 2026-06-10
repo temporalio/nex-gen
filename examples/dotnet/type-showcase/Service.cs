@@ -7,24 +7,24 @@ using NexusRpc;
 namespace NexGen.TypeShowcase
 {
 
-[NexusService("TypeShowcase")]
-internal interface ITypeShowcase
-{
-    [NexusOperation("GetUser")]
-    User GetUser(GetUserRequest request);
+    [NexusService("TypeShowcase")]
+    internal interface ITypeShowcase
+    {
+        [NexusOperation("GetUser")]
+        User GetUser(GetUserRequest request);
 
-    [NexusOperation("UpdateEmail")]
-    User UpdateEmail(UpdateEmailRequest request);
+        [NexusOperation("UpdateEmail")]
+        User UpdateEmail(UpdateEmailRequest request);
 
-    [NexusOperation("Rename")]
-    User Rename(RenameRequest request);
+        [NexusOperation("Rename")]
+        User Rename(RenameRequest request);
 
-    [NexusOperation("SetProfile")]
-    User SetProfile(SetProfileRequest request);
+        [NexusOperation("SetProfile")]
+        User SetProfile(SetProfileRequest request);
 
-    [NexusOperation("Deactivate")]
-    void Deactivate(DeactivateRequest request);
+        [NexusOperation("Deactivate")]
+        void Deactivate(DeactivateRequest request);
 
-}
+    }
 
 }

@@ -8,110 +8,110 @@ using System.Collections.Generic;
 namespace NexGen.TypeShowcase
 {
 
-public sealed class NexusResult<TOk, TErr>
-{
-    private NexusResult(bool isOk, TOk? ok, TErr? err)
+    public sealed class NexusResult<TOk, TErr>
     {
-        IsOk = isOk;
-        Ok = ok;
-        Err = err;
+        private NexusResult(bool isOk, TOk? ok, TErr? err)
+        {
+            IsOk = isOk;
+            Ok = ok;
+            Err = err;
+        }
+
+        public bool IsOk { get; }
+        public TOk? Ok { get; }
+        public TErr? Err { get; }
+
+        public static NexusResult<TOk, TErr> FromOk(TOk value) => new(true, value, default);
+        public static NexusResult<TOk, TErr> FromErr(TErr value) => new(false, default, value);
     }
 
-    public bool IsOk { get; }
-    public TOk? Ok { get; }
-    public TErr? Err { get; }
-
-    public static NexusResult<TOk, TErr> FromOk(TOk value) => new(true, value, default);
-    public static NexusResult<TOk, TErr> FromErr(TErr value) => new(false, default, value);
-}
-
-public enum UserStatus
-{
-    Active = 0,
-    Suspended = 1,
-    Deleted = 2,
-}
-
-[Flags]
-public enum UserCapability
-{
-    None = 0,
-    ReadProfile = 1 << 0,
-    UpdateEmail = 1 << 1,
-    Deactivate = 1 << 2,
-}
-
-public abstract class NotificationTarget
-{
-    private NotificationTarget() { }
-
-    public sealed class Email : NotificationTarget
+    public enum UserStatus
     {
-        public Email(string value) => Value = value;
-
-        public string Value { get; }
+        Active = 0,
+        Suspended = 1,
+        Deleted = 2,
     }
 
-    public sealed class Sms : NotificationTarget
+    [Flags]
+    public enum UserCapability
     {
-        public Sms(string value) => Value = value;
-
-        public string Value { get; }
+        None = 0,
+        ReadProfile = 1 << 0,
+        UpdateEmail = 1 << 1,
+        Deactivate = 1 << 2,
     }
 
-    public sealed class None : NotificationTarget
+    public abstract class NotificationTarget
     {
-        public None() { }
+        private NotificationTarget() { }
+
+        public sealed class Email : NotificationTarget
+        {
+            public Email(string value) => Value = value;
+
+            public string Value { get; }
+        }
+
+        public sealed class Sms : NotificationTarget
+        {
+            public Sms(string value) => Value = value;
+
+            public string Value { get; }
+        }
+
+        public sealed class None : NotificationTarget
+        {
+            public None() { }
+        }
+
     }
 
-}
+    internal class GetUserRequest
+    {
+        public string UserId { get; init; } = default!;
+        public string? ConsistencyToken { get; init; }
+    }
 
-internal class GetUserRequest
-{
-    public string UserId { get; init; } = default!;
-    public string? ConsistencyToken { get; init; }
-}
+    internal class UpdateEmailRequest
+    {
+        public string UserId { get; init; } = default!;
+        public string Email { get; init; } = default!;
+    }
 
-internal class UpdateEmailRequest
-{
-    public string UserId { get; init; } = default!;
-    public string Email { get; init; } = default!;
-}
+    internal class RenameRequest
+    {
+        public string UserId { get; init; } = default!;
+        public string DisplayName { get; init; } = default!;
+    }
 
-internal class RenameRequest
-{
-    public string UserId { get; init; } = default!;
-    public string DisplayName { get; init; } = default!;
-}
+    internal class SetProfileRequest
+    {
+        public string UserId { get; init; } = default!;
+        public UserProfile Profile { get; init; } = default!;
+    }
 
-internal class SetProfileRequest
-{
-    public string UserId { get; init; } = default!;
-    public UserProfile Profile { get; init; } = default!;
-}
+    public class UserProfile
+    {
+        public IReadOnlyList<string> Tags { get; init; } = default!;
+        public IReadOnlyDictionary<string, string> Metadata { get; init; } = default!;
+        public UserCapability Capabilities { get; init; } = default!;
+        public NexusResult<string, string> SyncState { get; init; } = default!;
+        public NotificationTarget NotificationTarget { get; init; } = default!;
+        public PostalAddress? Address { get; init; }
+    }
 
-public class UserProfile
-{
-    public IReadOnlyList<string> Tags { get; init; } = default!;
-    public IReadOnlyDictionary<string, string> Metadata { get; init; } = default!;
-    public UserCapability Capabilities { get; init; } = default!;
-    public NexusResult<string, string> SyncState { get; init; } = default!;
-    public NotificationTarget NotificationTarget { get; init; } = default!;
-    public PostalAddress? Address { get; init; }
-}
+    public class PostalAddress
+    {
+        public string Street { get; init; } = default!;
+        public string City { get; init; } = default!;
+        public string Country { get; init; } = default!;
+        public (double, double)? Coordinates { get; init; }
+    }
 
-public class PostalAddress
-{
-    public string Street { get; init; } = default!;
-    public string City { get; init; } = default!;
-    public string Country { get; init; } = default!;
-    public (double, double)? Coordinates { get; init; }
-}
-
-internal class DeactivateRequest
-{
-    public string UserId { get; init; } = default!;
-    public string? Reason { get; init; }
-}
+    internal class DeactivateRequest
+    {
+        public string UserId { get; init; } = default!;
+        public string? Reason { get; init; }
+    }
 
 }

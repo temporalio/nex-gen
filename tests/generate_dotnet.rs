@@ -236,7 +236,7 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
     assert!(rendered.contains("internal interface ITypeShowcase"));
     assert!(rendered.contains("[NexusOperation(\"SetProfile\")]"));
     assert!(rendered.contains("User SetProfile(SetProfileRequest request);"));
-    assert!(rendered.contains("[Flags]\npublic enum UserCapability"));
+    assert!(rendered.contains("[Flags]\n    public enum UserCapability"));
     assert!(rendered.contains("public abstract class NotificationTarget"));
     assert!(rendered.contains("public class User"));
     assert!(rendered.contains("public class GetUserOptions"));

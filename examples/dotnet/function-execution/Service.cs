@@ -7,24 +7,24 @@ using NexusRpc;
 namespace NexGen.FunctionExecution
 {
 
-[NexusService("FunctionExecution")]
-internal interface IFunctionExecution
-{
-    [NexusOperation("ExecuteFunction")]
-    ExecuteFunctionResult ExecuteFunction(ExecuteFunctionRequest request);
+    [NexusService("FunctionExecution")]
+    internal interface IFunctionExecution
+    {
+        [NexusOperation("ExecuteFunction")]
+        ExecuteFunctionResult ExecuteFunction(ExecuteFunctionRequest request);
 
-    [NexusOperation("ExecuteCountedFunction")]
-    ExecuteCountedFunctionResult ExecuteCountedFunction(ExecuteCountedFunctionRequest request);
+        [NexusOperation("ExecuteCountedFunction")]
+        ExecuteCountedFunctionResult ExecuteCountedFunction(ExecuteCountedFunctionRequest request);
 
-    [NexusOperation("ExecuteNamedFunction")]
-    ExecuteNamedFunctionResult ExecuteNamedFunction(ExecuteNamedFunctionRequest request);
+        [NexusOperation("ExecuteNamedFunction")]
+        ExecuteNamedFunctionResult ExecuteNamedFunction(ExecuteNamedFunctionRequest request);
 
-    [NexusOperation("ExecuteVarargsFunction")]
-    ExecuteVarargsFunctionResult ExecuteVarargsFunction(ExecuteVarargsFunctionRequest request);
+        [NexusOperation("ExecuteVarargsFunction")]
+        ExecuteVarargsFunctionResult ExecuteVarargsFunction(ExecuteVarargsFunctionRequest request);
 
-    [NexusOperation("ExecuteNamedVarargsFunction")]
-    ExecuteNamedVarargsFunctionResult ExecuteNamedVarargsFunction(ExecuteNamedVarargsFunctionRequest request);
+        [NexusOperation("ExecuteNamedVarargsFunction")]
+        ExecuteNamedVarargsFunctionResult ExecuteNamedVarargsFunction(ExecuteNamedVarargsFunctionRequest request);
 
-}
+    }
 
 }

@@ -8,25 +8,25 @@ using System.Collections.Generic;
 namespace NexGen.StartWorkflowService
 {
 
-public class StartedWorkflow
-{
-    public StartedWorkflow(string @namespace, string workflowId, string? runId)
+    public class StartedWorkflow
     {
-        Namespace = @namespace;
-        WorkflowId = workflowId;
-        RunId = runId;
+        public StartedWorkflow(string @namespace, string workflowId, string? runId)
+        {
+            Namespace = @namespace;
+            WorkflowId = workflowId;
+            RunId = runId;
+        }
+
+        public string Namespace { get; }
+        public string WorkflowId { get; }
+        public string? RunId { get; }
+
+        public void Cancel(string? reason) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+
+        public StartedWorkflow RestartWorkflow(string workflow, string taskQueue) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+
+        public IReadOnlyCollection<object?> GetResult() => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+
     }
-
-    public string Namespace { get; }
-    public string WorkflowId { get; }
-    public string? RunId { get; }
-
-    public void Cancel(string? reason) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
-
-    public StartedWorkflow RestartWorkflow(string workflow, string taskQueue) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
-
-    public IReadOnlyCollection<object?> GetResult() => throw new NotSupportedException("Resource methods require a bound Nexus client.");
-
-}
 
 }

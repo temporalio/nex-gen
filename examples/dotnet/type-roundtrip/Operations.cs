@@ -15,50 +15,51 @@ using Temporalio.Workflows;
 namespace NexGen.TypeRoundtripService
 {
 
-public class ActivityOptionsOperationOptions
-{
-    public string? TaskQueue { get; set; }
-    public Temporalio.Common.RetryPolicy RetryPolicy { get; set; } = default!;
-    public System.TimeSpan? ScheduleToCloseTimeout { get; set; }
-    public Temporalio.Common.Priority? Priority { get; set; }
-}
-
-public static class TypeRoundtripServiceOperations
-{
-    public static async Task<Temporalio.Common.RetryPolicy> RetryPolicyOperationAsync(Temporalio.Common.RetryPolicy request)
+    public class ActivityOptionsOperationOptions
     {
-        var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>("temporal-system");
-        var result = await client.ExecuteNexusOperationAsync<Temporalio.Common.RetryPolicy>(svc => svc.RetryPolicyOperation(request)).ConfigureAwait(true);
-        return result;
+        public string? TaskQueue { get; set; }
+        public Temporalio.Common.RetryPolicy RetryPolicy { get; set; } = default!;
+        public System.TimeSpan? ScheduleToCloseTimeout { get; set; }
+        public Temporalio.Common.Priority? Priority { get; set; }
     }
 
-    public static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(Temporalio.Api.Activity.V1.ActivityOptions request)
+    public static class TypeRoundtripServiceOperations
     {
-        var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>("temporal-system");
-        var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(request)).ConfigureAwait(true);
-        return result;
-    }
-
-    private static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptions request)
-    {
-        var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>("temporal-system");
-        var protoRequest = request.ToProto();
-        var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(protoRequest)).ConfigureAwait(true);
-        return result;
-    }
-
-    public static Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptionsOperationOptions options)
-    {
-        var request = new ActivityOptions
+        public static async Task<Temporalio.Common.RetryPolicy> RetryPolicyOperationAsync(Temporalio.Common.RetryPolicy request)
         {
-            TaskQueue = options.TaskQueue,
-            RetryPolicy = options.RetryPolicy,
-            ScheduleToCloseTimeout = options.ScheduleToCloseTimeout,
-            Priority = options.Priority,
-        };
-        return ActivityOptionsOperationAsync(request);
-    }
+            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>("temporal-system");
+            var result = await client.ExecuteNexusOperationAsync<Temporalio.Common.RetryPolicy>(svc => svc.RetryPolicyOperation(request)).ConfigureAwait(true);
+            return result;
+        }
 
-}
+        public static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(Temporalio.Api.Activity.V1.ActivityOptions request)
+        {
+            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>("temporal-system");
+            var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        private static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptions request)
+        {
+            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>("temporal-system");
+            var protoRequest = request.ToProto();
+            var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(protoRequest)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        public static Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptionsOperationOptions options)
+        {
+            var request = new ActivityOptions
+            {
+                TaskQueue = options.TaskQueue,
+                RetryPolicy = options.RetryPolicy,
+                ScheduleToCloseTimeout = options.ScheduleToCloseTimeout,
+                Priority = options.Priority,
+            };
+            return ActivityOptionsOperationAsync(request);
+        }
+
+    }
 
 }

@@ -287,7 +287,24 @@ fn generated_file_prelude(namespace: &str, imports: &[&str]) -> String {
 }
 
 fn close_namespace(output: &mut String) {
+    indent_namespace_body(output);
     output.push_str("}\n");
+}
+
+fn indent_namespace_body(output: &mut String) {
+    let Some(body_start) = output.find("\n{\n\n").map(|index| index + "\n{\n\n".len()) else {
+        return;
+    };
+    let body = output[body_start..].to_string();
+    output.truncate(body_start);
+    for line in body.split_inclusive('\n') {
+        if line == "\n" {
+            output.push('\n');
+        } else {
+            output.push_str("    ");
+            output.push_str(line);
+        }
+    }
 }
 
 fn dotnet_doc(spec: &crate::spec::LanguageStringSpec) -> Option<&str> {
@@ -792,19 +809,31 @@ fn flattened_method_parameter_docs(
             push_function_args_parameter_docs(&mut params, model, field);
         }
     }
-    if model_has_options_fields(model, api_plan)
-        && let Some(request_doc) = dotnet_doc(model.generated_model.doc())
-    {
-        params.push(("options".to_string(), request_doc.to_string()));
+    if model_has_options_fields(model, api_plan) {
+        params.push((
+            "options".to_string(),
+            dotnet_doc(model.generated_model.doc())
+                .map(str::to_string)
+                .unwrap_or_else(|| "Options for the operation.".to_string()),
+        ));
     }
     params
 }
 
 fn push_field_parameter_doc(params: &mut Vec<(String, String)>, field: &PlannedField) {
-    let Some(doc) = field.doc.as_ref().and_then(dotnet_doc) else {
-        return;
-    };
-    params.push((csharp_parameter_name(&field.authored_name), doc.to_string()));
+    params.push((
+        csharp_parameter_name(&field.authored_name),
+        field
+            .doc
+            .as_ref()
+            .and_then(dotnet_doc)
+            .map(str::to_string)
+            .unwrap_or_else(|| fallback_parameter_doc(field)),
+    ));
+}
+
+fn fallback_parameter_doc(field: &PlannedField) -> String {
+    format!("The {} value.", csharp_parameter_name(&field.authored_name))
 }
 
 fn push_function_args_parameter_docs(

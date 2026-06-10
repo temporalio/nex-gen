@@ -8,19 +8,19 @@ using System.Collections.Generic;
 namespace NexGen.UserService
 {
 
-public class User
-{
-    public User(string userId, string email)
+    public class User
     {
-        UserId = userId;
-        Email = email;
+        public User(string userId, string email)
+        {
+            UserId = userId;
+            Email = email;
+        }
+
+        public string UserId { get; }
+        public string Email { get; }
+
+        public User UpdateEmail(string email) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+
     }
-
-    public string UserId { get; }
-    public string Email { get; }
-
-    public User UpdateEmail(string email) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
-
-}
 
 }
