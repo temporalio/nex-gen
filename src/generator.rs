@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::SupportFiles;
 use crate::api_plan::build_api_plan;
 use crate::descriptors::DescriptorIndex;
+use crate::dotnet;
 use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::python;
@@ -91,6 +92,7 @@ pub fn generate_files(
     };
 
     let mut generated = match language {
+        Language::Dotnet => dotnet::generate(&plan, support_fragments, language_imports),
         Language::Python => python::generate(&plan, support_fragments, language_imports),
         Language::TypeScript => typescript::generate(&plan, support_fragments, language_imports),
         language => Err(Error::UnsupportedLanguage { language }),

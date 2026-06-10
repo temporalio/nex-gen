@@ -1468,6 +1468,7 @@ impl LanguageStringSpec {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TypeOverrideSpec {
     pub model_name: Option<String>,
+    pub proto_type_name: LanguageStringSpec,
     pub required_fields: BTreeSet<String>,
     pub omitted_fields: BTreeSet<String>,
     pub replacement: Option<TypeReplacementSpec>,
@@ -1485,6 +1486,10 @@ impl TypeOverrideSpec {
 
     pub fn model_name(&self) -> Option<&str> {
         self.model_name.as_deref()
+    }
+
+    pub fn proto_type_name(&self) -> &LanguageStringSpec {
+        &self.proto_type_name
     }
 
     pub fn is_field_omitted(&self, field_name: &str) -> bool {
@@ -1529,6 +1534,7 @@ pub struct TypeReplacementSpec {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GeneratedModelSpec {
+    pub doc: LanguageStringSpec,
     pub declared_fields: Vec<String>,
     pub field_names: BTreeMap<String, String>,
     pub field_docs: BTreeMap<String, LanguageStringSpec>,
@@ -1543,7 +1549,8 @@ pub struct GeneratedModelSpec {
 
 impl GeneratedModelSpec {
     pub fn is_empty(&self) -> bool {
-        self.declared_fields.is_empty()
+        self.doc.is_empty()
+            && self.declared_fields.is_empty()
             && self.field_names.is_empty()
             && self.field_docs.is_empty()
             && self.field_annotations.is_empty()
@@ -1557,6 +1564,10 @@ impl GeneratedModelSpec {
 
     pub fn field_name_override(&self, field_name: &str) -> Option<&str> {
         self.field_names.get(field_name).map(String::as_str)
+    }
+
+    pub fn doc(&self) -> &LanguageStringSpec {
+        &self.doc
     }
 
     pub fn field_doc(&self, field_name: &str) -> Option<&LanguageStringSpec> {
@@ -1709,6 +1720,7 @@ pub struct FunctionFieldSpec {
     pub args: FunctionArgsSpec,
     pub alternate_type: Option<AuthoredFieldTypeSpec>,
     pub converter: Option<String>,
+    pub name_extractor: Option<String>,
     pub result_type_parameter: Option<String>,
 }
 
@@ -1968,10 +1980,14 @@ fn build_wit_record_spec(
     let context = format!("type `{interface_name}.{type_name}`");
     let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
     let experimental = experimental_directive(&directives, path, &context)?;
+    let model_doc = directive(&directives, "doc", path, &context)?
+        .map(directive_language_string)
+        .unwrap_or_default();
     let (required_fields, _omitted_fields, generated_model) = build_generated_model_from_record(
         resolve,
         type_def.owner,
         record,
+        model_doc,
         path,
         &context,
         language,
@@ -2014,9 +2030,18 @@ fn build_type_override(
     let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
     let context = format!("type `{interface_name}.{type_name}`");
     let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
-    let Some(proto_name) = directive_value(&directives, "proto", path, &context, "value")? else {
+    let Some(proto_directive) = directive(&directives, "proto", path, &context)? else {
         return Ok(None);
     };
+    let Some(proto_name) = proto_directive.value("value").map(ToOwned::to_owned) else {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.proto".to_string(),
+            reason: "missing required proto type name".to_string(),
+        });
+    };
+    let proto_type_name = directive_prefixed_language_string(proto_directive, "type");
 
     let replacement = build_type_replacement(&directives, path, &context, &proto_name)?;
 
@@ -2043,14 +2068,20 @@ fn build_type_override(
     }
 
     let (required_fields, omitted_fields, generated_model) = match &type_def.kind {
-        TypeDefKind::Record(record) => build_generated_model_from_record(
-            resolve,
-            type_def.owner,
-            record,
-            path,
-            &context,
-            language,
-        )?,
+        TypeDefKind::Record(record) => {
+            let model_doc = directive(&directives, "doc", path, &context)?
+                .map(directive_language_string)
+                .unwrap_or_default();
+            build_generated_model_from_record(
+                resolve,
+                type_def.owner,
+                record,
+                model_doc,
+                path,
+                &context,
+                language,
+            )?
+        }
         _ => (
             BTreeSet::new(),
             BTreeSet::new(),
@@ -2060,6 +2091,7 @@ fn build_type_override(
 
     let type_override = TypeOverrideSpec {
         model_name: authored_record.then(|| type_name.to_upper_camel_case()),
+        proto_type_name,
         required_fields,
         omitted_fields,
         replacement,
@@ -2077,6 +2109,7 @@ fn build_generated_model_from_record(
     resolve: &Resolve,
     owner: TypeOwner,
     record: &wit_parser::Record,
+    doc: LanguageStringSpec,
     path: &Path,
     context: &str,
     language: Language,
@@ -2284,6 +2317,7 @@ fn build_generated_model_from_record(
         required_fields,
         omitted_fields,
         GeneratedModelSpec {
+            doc,
             declared_fields,
             field_names,
             field_docs,
@@ -2724,7 +2758,11 @@ fn build_source_call(
         });
     };
 
-    if !is_valid_support_helper_name(helper_name) {
+    let valid_helper_name = match language {
+        Language::Dotnet => is_valid_dotnet_source_helper_name(helper_name),
+        _ => is_valid_support_helper_name(helper_name),
+    };
+    if !valid_helper_name {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
             context: context.to_string(),
@@ -2743,6 +2781,10 @@ fn is_valid_support_helper_name(name: &str) -> bool {
     };
     (first == '_' || first.is_ascii_alphabetic())
         && chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn is_valid_dotnet_source_helper_name(name: &str) -> bool {
+    name.split('.').all(is_valid_support_helper_name)
 }
 
 fn build_function_field(
@@ -2794,6 +2836,7 @@ fn build_function_field(
         },
         alternate_type: function_alternate_type(resolve, owner, directive, path, context)?,
         converter: directive_converter(directive, language),
+        name_extractor: directive_function_name_extractor(directive, language, path, context)?,
         result_type_parameter: directive_result_type_parameter(directive),
     }))
 }
@@ -2864,6 +2907,12 @@ fn build_function_field_for_type_alias(
                     context,
                 )?,
                 converter,
+                name_extractor: directive_function_name_extractor(
+                    function_directive,
+                    language,
+                    path,
+                    context,
+                )?,
                 result_type_parameter: directive_result_type_parameter(function_directive),
             },
         )));
@@ -4116,6 +4165,35 @@ fn directive_converter(directive: &Directive, language: Language) -> Option<Stri
     spec.for_language(language).map(ToOwned::to_owned)
 }
 
+fn directive_function_name_extractor(
+    directive: &Directive,
+    language: Language,
+    path: &Path,
+    context: &str,
+) -> Result<Option<String>> {
+    let mut spec = directive_prefixed_language_string(directive, "name-extractor");
+    spec.default = directive.value("name-extractor").map(ToOwned::to_owned);
+    let Some(extractor) = spec.for_language(language) else {
+        return Ok(None);
+    };
+    let valid = match language {
+        Language::Dotnet => is_valid_dotnet_source_helper_name(extractor),
+        _ => is_valid_support_helper_name(extractor),
+    };
+    if !valid {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.function".to_string(),
+            reason: format!(
+                "invalid `{}` name-extractor `{extractor}`",
+                language_key(language)
+            ),
+        });
+    }
+    Ok(Some(extractor.to_string()))
+}
+
 fn directive_result_type_parameter(directive: &Directive) -> Option<String> {
     directive
         .value("result-type-parameter")
@@ -4803,7 +4881,7 @@ world system {
 interface workflow-service {
   /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
   record request {
-    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace"
+    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" dotnet="NexusApiGen.Support.TemporalWorkflowContext.WorkflowNamespace"
     namespace: option<string>,
   }
 
@@ -4816,6 +4894,9 @@ interface workflow-service {
                 .unwrap();
         let typescript =
             ApiSpec::parse_for_language(Language::TypeScript, wit, PathBuf::from("inline.wit"))
+                .unwrap();
+        let dotnet =
+            ApiSpec::parse_for_language(Language::Dotnet, wit, PathBuf::from("inline.wit"))
                 .unwrap();
         assert_eq!(
             python
@@ -4834,6 +4915,15 @@ interface workflow-service {
                 .unwrap()
                 .field_source("namespace"),
             Some("workflowNamespace()")
+        );
+        assert_eq!(
+            dotnet
+                .type_override(
+                    "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
+                )
+                .unwrap()
+                .field_source("namespace"),
+            Some("NexusApiGen.Support.TemporalWorkflowContext.WorkflowNamespace()")
         );
     }
 

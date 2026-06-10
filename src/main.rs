@@ -75,12 +75,14 @@ struct DebugWitDirArgs {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum CliLanguage {
+    Dotnet,
     Python,
     Typescript,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum ExampleCliLanguage {
+    Dotnet,
     Python,
     Typescript,
 }
@@ -88,6 +90,7 @@ enum ExampleCliLanguage {
 impl From<CliLanguage> for Language {
     fn from(value: CliLanguage) -> Self {
         match value {
+            CliLanguage::Dotnet => Language::Dotnet,
             CliLanguage::Python => Language::Python,
             CliLanguage::Typescript => Language::TypeScript,
         }
@@ -97,6 +100,7 @@ impl From<CliLanguage> for Language {
 impl From<ExampleCliLanguage> for Language {
     fn from(value: ExampleCliLanguage) -> Self {
         match value {
+            ExampleCliLanguage::Dotnet => Language::Dotnet,
             ExampleCliLanguage::Python => Language::Python,
             ExampleCliLanguage::Typescript => Language::TypeScript,
         }

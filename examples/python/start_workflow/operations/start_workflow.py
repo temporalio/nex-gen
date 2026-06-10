@@ -21,7 +21,7 @@ async def _start_workflow(
 ) -> StartedWorkflow:
     request_proto = request.to_proto()
     nexus_client = temporalio.workflow.create_nexus_client(
-        service="WorkflowService",
+        service="StartWorkflowService",
         endpoint="temporal-system",
     )
     handle = await nexus_client.start_operation(

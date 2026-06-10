@@ -7,7 +7,7 @@ import temporalio.api.workflowservice.v1.request_response_pb2
 
 
 @service
-class WorkflowService:
+class StartWorkflowService:
     start_workflow: Operation[
         temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest,
         temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
