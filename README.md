@@ -32,9 +32,9 @@ The WIT definition is the source of truth for the public API. Protobuf descripto
 
 - **Core API generation**: tuples and results are supported as direct record
   fields only, not inside lists, maps, or other containers.
-- **Proto backing**: flags, variants, tuples, results, and type-replaced
-  external types are omitted from `ToProto`/`FromProto`; sourced fields are
-  emitted on the `ToProto` side only.
+- **Proto backing**: fields whose values the Go backend cannot convert (for
+  example a type-replaced enum or message without a `go=` annotation) are
+  silently omitted from `ToProto`/`FromProto` instead of failing generation.
 
 Because Go has no `json/nexus` runtime, only the proto-backed Go examples share
 a wire format with the Python and TypeScript bindings; WIT-direct Go models

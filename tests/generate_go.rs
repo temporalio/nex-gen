@@ -184,6 +184,69 @@ fn cli_generates_go_support_file_from_parameter() {
 }
 
 #[test]
+fn go_sourced_map_field_converts_to_proto() {
+    let root = project_root();
+    let temp_dir = unique_output_path("go-sourced-map-input");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("sourced-map.wit");
+    fs::write(
+        &wit_path,
+        r#"package temporal:sourced-map@1.0.0;
+
+world system {
+  export namespace-service;
+}
+
+/// @nexus.endpoint "namespace-service"
+interface namespace-service {
+  /// String-shaped placeholder for omitted fields.
+  type placeholder = string;
+
+  /// @nexus.proto "temporal.api.namespace.v1.NamespaceInfo"
+  record namespace-info {
+    name: option<string>,
+    /// @nexus.source go="NamespaceData"
+    data: option<map<string, string>>,
+    /// @nexus.omit
+    state: placeholder,
+    /// @nexus.omit
+    description: placeholder,
+    /// @nexus.omit
+    owner-email: placeholder,
+    /// @nexus.omit
+    id: placeholder,
+    /// @nexus.omit
+    capabilities: placeholder,
+    /// @nexus.omit
+    limits: placeholder,
+    /// @nexus.omit
+    supports-schedules: placeholder,
+  }
+
+  describe-namespace: func(request: namespace-info);
+}
+"#,
+    )
+    .unwrap();
+
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &[wit_path],
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
+
+    // The sourced map is bound to a field-unique local, evaluated once, and
+    // copied into a properly typed proto map.
+    assert!(rendered.contains("sourcedData := NamespaceData()"));
+    assert!(rendered.contains("if len(sourcedData) > 0 {"));
+    assert!(rendered.contains("message.Data = make(map[string]string, len(sourcedData))"));
+    assert!(rendered.contains("for k, v := range sourcedData {"));
+    assert!(rendered.contains("message.Data[k] = v"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn go_examples_generation_matches_checked_in_output() {
     let root = project_root();
     for example_id in go_example_ids(&root) {

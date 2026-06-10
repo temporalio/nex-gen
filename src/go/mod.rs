@@ -1673,6 +1673,42 @@ fn go_value_conversion(
     }
 }
 
+/// Returns the Go type expression for a planned scalar value.
+fn go_scalar_type_expr(scalar: &PlannedScalarType) -> &'static str {
+    match scalar {
+        PlannedScalarType::Float => "float64",
+        PlannedScalarType::Int32 => "int32",
+        PlannedScalarType::Int64 => "int64",
+        PlannedScalarType::Bool => "bool",
+        PlannedScalarType::String => "string",
+        PlannedScalarType::Bytes => "[]byte",
+    }
+}
+
+/// Returns the Go type expression for the proto-side representation of a map
+/// key or value (e.g. `string` or `*common.Payload`), registering any proto
+/// import it requires. Returns `None` when the value has no proto-side Go type
+/// (mirroring [`go_value_conversion`]).
+fn go_proto_value_type(
+    value: &PlannedValueType,
+    imports: &mut GoImportCollector,
+) -> Option<String> {
+    match value {
+        PlannedValueType::Scalar(scalar) => Some(go_scalar_type_expr(scalar).to_string()),
+        PlannedValueType::Enum(enum_type) => enum_type.info.as_ref().and_then(|info| {
+            go_proto_ref(info).map(|proto_ref| {
+                let alias = imports.register(&proto_ref);
+                proto_ref.qualified(&alias)
+            })
+        }),
+        PlannedValueType::Message(message) => go_proto_ref(&message.info).map(|proto_ref| {
+            let alias = imports.register(&proto_ref);
+            format!("*{}", proto_ref.qualified(&alias))
+        }),
+        _ => None,
+    }
+}
+
 /// Builds a conversion for an enum value. Replacement enums backed by a proto
 /// enum cast through the proto enum type; generated enums cast directly.
 fn go_enum_conversion(
@@ -1799,9 +1835,13 @@ fn populate_proto_conversions(
         let alias = imports.register(&proto_ref);
         let proto_type = proto_ref.qualified(&alias);
 
+        let native_field_types: Vec<String> = models
+            .get(&full_name)
+            .map(|model| model.fields.iter().map(|f| f.go_type.clone()).collect())
+            .unwrap_or_default();
         let (field_conversions, sourced) = match api_plan.models.get(&full_name) {
             Some(planned_model) => (
-                build_field_conversions(planned_model, api_plan, imports),
+                build_field_conversions(planned_model, &native_field_types, api_plan, imports),
                 build_sourced_conversions(planned_model, api_plan, imports),
             ),
             None => (Vec::new(), Vec::new()),
@@ -1825,15 +1865,26 @@ fn populate_proto_conversions(
 
 /// Builds per-field conversion metadata for a proto-backed model, in field
 /// declaration order (matching the rendered struct fields).
+/// `native_field_types` carries the rendered Go type expression of each field,
+/// in the same order, for conversions that need to construct native values
+/// (e.g. `make` for map fields).
 fn build_field_conversions(
     planned_model: &PlannedModel,
+    native_field_types: &[String],
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
 ) -> Vec<Option<RenderedFieldConversion>> {
     planned_model
         .fields
         .iter()
-        .map(|field| build_field_conversion(field, api_plan, imports))
+        .enumerate()
+        .map(|(index, field)| {
+            let native_go_type = native_field_types
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or("");
+            build_field_conversion(field, native_go_type, api_plan, imports)
+        })
         .collect()
 }
 
@@ -1842,6 +1893,7 @@ fn build_field_conversions(
 /// proto serialization, degrading gracefully).
 fn build_field_conversion(
     field: &PlannedField,
+    native_go_type: &str,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
 ) -> Option<RenderedFieldConversion> {
@@ -1874,11 +1926,15 @@ fn build_field_conversion(
                 from_proto_lines: from_lines,
             })
         }
-        PlannedFieldKind::Map { value, .. } => {
+        PlannedFieldKind::Map { key, value } => {
             // Map keys are always scalars; only the value may need conversion.
             let conversion = go_value_conversion(value, api_plan, imports)?;
-            let to_lines = map_to_proto_lines(&conversion, &receiver, &proto_field);
-            let from_lines = map_from_proto_lines(&conversion, &proto_field, &go_field);
+            let key_type = go_proto_value_type(key, imports)?;
+            let value_type = go_proto_value_type(value, imports)?;
+            let proto_map_type = format!("map[{key_type}]{value_type}");
+            let to_lines = map_to_proto_lines(&conversion, &proto_map_type, &receiver, &proto_field);
+            let from_lines =
+                map_from_proto_lines(&conversion, native_go_type, &proto_field, &go_field);
             Some(RenderedFieldConversion {
                 to_proto_lines: to_lines,
                 from_proto_lines: from_lines,
@@ -2012,16 +2068,23 @@ fn repeated_from_proto_lines(
     ]
 }
 
-/// `ToProto` lines for a map field (string-keyed; values may be converted).
+/// `ToProto` lines for a map field. `proto_map_type` is the Go type expression
+/// of the proto struct's map field (e.g. `map[string]string`).
 fn map_to_proto_lines(
     conversion: &GoValueConversion,
+    proto_map_type: &str,
     receiver: &str,
     proto_field: &str,
 ) -> Vec<String> {
-    let converted = (conversion.to_proto)("v");
+    // Override converters are pointer-based on the native side; the range
+    // value variable is addressable, so pass its address.
+    let converted = match conversion.kind {
+        GoConversionKind::OverrideConverter => (conversion.to_proto)("&v"),
+        _ => (conversion.to_proto)("v"),
+    };
     vec![
         format!("if len({receiver}) > 0 {{"),
-        format!("\tmessage.{proto_field} = make(map[string]{}, len({receiver}))", "interface{}"),
+        format!("\tmessage.{proto_field} = make({proto_map_type}, len({receiver}))"),
         format!("\tfor k, v := range {receiver} {{"),
         format!("\t\tmessage.{proto_field}[k] = {converted}"),
         "\t}".to_string(),
@@ -2029,21 +2092,38 @@ fn map_to_proto_lines(
     ]
 }
 
-/// `FromProto` lines for a map field.
+/// `FromProto` lines for a map field. `native_map_type` is the Go type
+/// expression of the native struct's map field (e.g. `map[string]string`).
 fn map_from_proto_lines(
     conversion: &GoValueConversion,
+    native_map_type: &str,
     proto_field: &str,
     go_field: &str,
 ) -> Vec<String> {
+    let getter = format!("proto.Get{proto_field}()");
     let converted = (conversion.from_proto)("v");
-    vec![
-        format!("for k, v := range proto.Get{proto_field}() {{"),
-        format!("\tif value.{go_field} == nil {{"),
-        format!("\t\tvalue.{go_field} = map[string]interface{{}}{{}}"),
-        "\t}".to_string(),
-        format!("\tvalue.{go_field}[k] = {converted}"),
-        "}".to_string(),
-    ]
+    let mut lines = vec![
+        format!("if len({getter}) > 0 {{"),
+        format!("\tvalue.{go_field} = make({native_map_type}, len({getter}))"),
+        format!("\tfor k, v := range {getter} {{"),
+    ];
+    match conversion.kind {
+        // Override converters return a pointer and pass nil through; only
+        // present values land in the native map.
+        GoConversionKind::OverrideConverter => {
+            lines.push(format!(
+                "\t\tif converted := {converted}; converted != nil {{"
+            ));
+            lines.push(format!("\t\t\tvalue.{go_field}[k] = *converted"));
+            lines.push("\t\t}".to_string());
+        }
+        _ => {
+            lines.push(format!("\t\tvalue.{go_field}[k] = {converted}"));
+        }
+    }
+    lines.push("\t}".to_string());
+    lines.push("}".to_string());
+    lines
 }
 
 /// Builds `ToProto` lines for sourced (write-only) fields.
@@ -2101,7 +2181,24 @@ fn build_sourced_conversion(
                 ],
             })
         }
-        PlannedFieldKind::Map { .. } => None,
+        PlannedFieldKind::Map { key, value } => {
+            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let key_type = go_proto_value_type(key, imports)?;
+            let value_type = go_proto_value_type(value, imports)?;
+            let proto_map_type = format!("map[{key_type}]{value_type}");
+            // Bind the source expression to a field-unique local so it is
+            // evaluated once and the lines cannot collide with other sourced
+            // fields in the same `ToProto` body.
+            let local = format!("sourced{proto_field}");
+            let mut to_proto_lines = vec![format!("{local} := {source_expr}")];
+            to_proto_lines.extend(map_to_proto_lines(
+                &conversion,
+                &proto_map_type,
+                &local,
+                &proto_field,
+            ));
+            Some(RenderedSourcedField { to_proto_lines })
+        }
     }
 }
 
