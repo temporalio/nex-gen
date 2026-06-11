@@ -14,10 +14,18 @@ namespace NexGen.WorkflowService
     /// </summary>
     internal class SignalWithStartWorkflowRequest
     {
+        internal SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal)
+        {
+            Workflow = workflow;
+            Id = id;
+            TaskQueue = taskQueue;
+            Signal = signal;
+        }
+
         /// <summary>
         /// Workflow type name or workflow expression identifying the workflow to start.
         /// </summary>
-        public string Workflow { get; init; } = default!;
+        public string Workflow { get; init; }
         /// <summary>
         /// Arguments for the workflow.
         /// </summary>
@@ -25,15 +33,15 @@ namespace NexGen.WorkflowService
         /// <summary>
         /// Unique identifier for the workflow execution.
         /// </summary>
-        public string Id { get; init; } = default!;
+        public string Id { get; init; }
         /// <summary>
         /// Task queue to run the workflow on.
         /// </summary>
-        public string TaskQueue { get; init; } = default!;
+        public string TaskQueue { get; init; }
         /// <summary>
         /// Signal name or signal expression to send with the start request.
         /// </summary>
-        public string Signal { get; init; } = default!;
+        public string Signal { get; init; }
         /// <summary>
         /// Arguments for the signal.
         /// </summary>

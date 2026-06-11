@@ -68,49 +68,93 @@ namespace NexGen.TypeShowcase
 
     internal class GetUserRequest
     {
-        public string UserId { get; init; } = default!;
+        internal GetUserRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
         public string? ConsistencyToken { get; init; }
     }
 
     internal class UpdateEmailRequest
     {
-        public string UserId { get; init; } = default!;
-        public string Email { get; init; } = default!;
+        internal UpdateEmailRequest(string userId, string email)
+        {
+            UserId = userId;
+            Email = email;
+        }
+
+        public string UserId { get; init; }
+        public string Email { get; init; }
     }
 
     internal class RenameRequest
     {
-        public string UserId { get; init; } = default!;
-        public string DisplayName { get; init; } = default!;
+        internal RenameRequest(string userId, string displayName)
+        {
+            UserId = userId;
+            DisplayName = displayName;
+        }
+
+        public string UserId { get; init; }
+        public string DisplayName { get; init; }
     }
 
     internal class SetProfileRequest
     {
-        public string UserId { get; init; } = default!;
-        public UserProfile Profile { get; init; } = default!;
+        internal SetProfileRequest(string userId, UserProfile profile)
+        {
+            UserId = userId;
+            Profile = profile;
+        }
+
+        public string UserId { get; init; }
+        public UserProfile Profile { get; init; }
     }
 
     public class UserProfile
     {
-        public IReadOnlyList<string> Tags { get; init; } = default!;
-        public IReadOnlyDictionary<string, string> Metadata { get; init; } = default!;
-        public UserCapability Capabilities { get; init; } = default!;
-        public NexusResult<string, string> SyncState { get; init; } = default!;
-        public NotificationTarget NotificationTarget { get; init; } = default!;
+        public UserProfile(IReadOnlyList<string> tags, IReadOnlyDictionary<string, string> metadata, UserCapability capabilities, NexusResult<string, string> syncState, NotificationTarget notificationTarget)
+        {
+            Tags = tags;
+            Metadata = metadata;
+            Capabilities = capabilities;
+            SyncState = syncState;
+            NotificationTarget = notificationTarget;
+        }
+
+        public IReadOnlyList<string> Tags { get; init; }
+        public IReadOnlyDictionary<string, string> Metadata { get; init; }
+        public UserCapability Capabilities { get; init; }
+        public NexusResult<string, string> SyncState { get; init; }
+        public NotificationTarget NotificationTarget { get; init; }
         public PostalAddress? Address { get; init; }
     }
 
     public class PostalAddress
     {
-        public string Street { get; init; } = default!;
-        public string City { get; init; } = default!;
-        public string Country { get; init; } = default!;
+        public PostalAddress(string street, string city, string country)
+        {
+            Street = street;
+            City = city;
+            Country = country;
+        }
+
+        public string Street { get; init; }
+        public string City { get; init; }
+        public string Country { get; init; }
         public (double, double)? Coordinates { get; init; }
     }
 
     internal class DeactivateRequest
     {
-        public string UserId { get; init; } = default!;
+        internal DeactivateRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
         public string? Reason { get; init; }
     }
 

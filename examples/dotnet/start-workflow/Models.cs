@@ -11,13 +11,20 @@ namespace NexGen.StartWorkflowService
 
     internal class StartWorkflowRequest
     {
-        public string Workflow { get; init; } = default!;
+        internal StartWorkflowRequest(string workflow, string workflowId, string taskQueue)
+        {
+            Workflow = workflow;
+            WorkflowId = workflowId;
+            TaskQueue = taskQueue;
+        }
+
+        public string Workflow { get; init; }
         /// <summary>
         /// Arguments for the workflow.
         /// </summary>
         public IReadOnlyCollection<object?>? Args { get; init; }
-        public string WorkflowId { get; init; } = default!;
-        public string TaskQueue { get; init; } = default!;
+        public string WorkflowId { get; init; }
+        public string TaskQueue { get; init; }
         public System.TimeSpan? WorkflowStartDelay { get; init; }
 
         public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest ToProto()
@@ -42,7 +49,12 @@ namespace NexGen.StartWorkflowService
 
     internal class CancelWorkflowRequest
     {
-        public WorkflowExecution WorkflowExecution { get; init; } = default!;
+        internal CancelWorkflowRequest(WorkflowExecution workflowExecution)
+        {
+            WorkflowExecution = workflowExecution;
+        }
+
+        public WorkflowExecution WorkflowExecution { get; init; }
         public string? Reason { get; init; }
 
         public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest ToProto()
@@ -61,7 +73,12 @@ namespace NexGen.StartWorkflowService
 
     public class WorkflowExecution
     {
-        public string WorkflowId { get; init; } = default!;
+        public WorkflowExecution(string workflowId)
+        {
+            WorkflowId = workflowId;
+        }
+
+        public string WorkflowId { get; init; }
         public string? RunId { get; init; }
 
         public Temporalio.Api.Common.V1.WorkflowExecution ToProto()

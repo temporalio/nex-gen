@@ -1059,57 +1059,96 @@ fn render_flattened_method_body(
     }
     output.push_str("        var request = new ");
     output.push_str(&csharp_type_name(&model.name));
-    output.push_str("\n        {\n");
-    for field in &model.fields {
-        output.push_str("            ");
-        output.push_str(&field_property_name(field));
-        output.push_str(" = ");
-        if let Some(nested_model) = flattened_nested_model(field, api_plan) {
-            output.push_str(&nested_model_init_expr(
+    let field_exprs = model
+        .fields
+        .iter()
+        .map(|field| {
+            (
                 field,
-                nested_model,
-                options_required,
-            ));
-        } else if field.function.is_some()
-            && matches!(
-                overload.function_mode(field),
-                FlattenedFunctionMode::Expression
+                flattened_request_field_expr(
+                    field,
+                    model,
+                    api_plan,
+                    overload,
+                    support_namespace,
+                    options_required,
+                ),
             )
-        {
-            output.push_str(&function_name_expression(field, support_namespace));
-        } else if field.function_args
-            && let Some(mode) = function_args_field_mode(model, field, overload)
-        {
-            if matches!(mode, FlattenedFunctionMode::Expression) {
-                let function_field = model
-                    .fields
-                    .iter()
-                    .find(|candidate| {
-                        candidate
-                            .function
-                            .as_ref()
-                            .is_some_and(|function| function.arg_fields.contains(&field.proto_name))
-                    })
-                    .expect("function args field should have a function field");
-                let args_expr =
-                    csharp_parameter_name(&format!("{}Args", function_field.authored_name));
-                output.push_str(&args_expr);
-            } else {
-                let args_expr = csharp_parameter_name(&field.authored_name);
-                output.push_str(&args_expr);
-            }
-        } else if field.function.is_none() {
-            output.push_str(&option_field_expr(field, options_required));
-        } else {
-            output.push_str(&csharp_parameter_name(&field.authored_name));
+        })
+        .collect::<Vec<_>>();
+    output.push('(');
+    output.push_str(
+        &field_exprs
+            .iter()
+            .filter(|(field, _)| field.required)
+            .map(|(_, expr)| expr.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    output.push(')');
+    let optional_field_exprs = field_exprs
+        .iter()
+        .filter(|(field, _)| !field.required)
+        .collect::<Vec<_>>();
+    if optional_field_exprs.is_empty() {
+        output.push_str(";\n");
+    } else {
+        output.push_str("\n        {\n");
+        for (field, expr) in optional_field_exprs {
+            output.push_str("            ");
+            output.push_str(&field_property_name(field));
+            output.push_str(" = ");
+            output.push_str(expr);
+            output.push_str(",\n");
         }
-        output.push_str(",\n");
+        output.push_str("        };\n");
     }
-    output.push_str("        };\n");
     output.push_str("        return ");
     output.push_str(&csharp_type_name(&operation.name));
     output.push_str("Async(request);\n");
     output.push_str("    }\n\n");
+}
+
+fn flattened_request_field_expr(
+    field: &PlannedField,
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+    overload: &FlattenedOverload,
+    support_namespace: Option<&str>,
+    options_required: bool,
+) -> String {
+    if let Some(nested_model) = flattened_nested_model(field, api_plan) {
+        nested_model_init_expr(field, nested_model, options_required)
+    } else if field.function.is_some()
+        && matches!(
+            overload.function_mode(field),
+            FlattenedFunctionMode::Expression
+        )
+    {
+        function_name_expression(field, support_namespace)
+    } else if field.function_args
+        && let Some(mode) = function_args_field_mode(model, field, overload)
+    {
+        if matches!(mode, FlattenedFunctionMode::Expression) {
+            let function_field = model
+                .fields
+                .iter()
+                .find(|candidate| {
+                    candidate
+                        .function
+                        .as_ref()
+                        .is_some_and(|function| function.arg_fields.contains(&field.proto_name))
+                })
+                .expect("function args field should have a function field");
+            csharp_parameter_name(&format!("{}Args", function_field.authored_name))
+        } else {
+            csharp_parameter_name(&field.authored_name)
+        }
+    } else if field.function.is_none() {
+        option_field_expr(field, options_required)
+    } else {
+        csharp_parameter_name(&field.authored_name)
+    }
 }
 
 fn function_name_expression(field: &PlannedField, support_namespace: Option<&str>) -> String {
@@ -1167,26 +1206,23 @@ fn render_operation_options_type(
 
     render_xml_summary(output, "", dotnet_doc(&operation.doc));
     output.push_str("public class ");
-    output.push_str(&operation_options_type_name(operation));
+    let options_type_name = operation_options_type_name(operation);
+    output.push_str(&options_type_name);
     output.push_str("\n{\n");
+    let mut option_fields = Vec::<(&PlannedField, String, bool)>::new();
     for field in &model.fields {
         if let Some(nested_model) = flattened_nested_model(field, api_plan) {
             for nested_field in &nested_model.fields {
                 if !field_is_options_field(nested_field) {
                     continue;
                 }
-                render_field_xml_doc(output, "    ", nested_field);
-                output.push_str("    public ");
                 let field_type =
                     flattened_nested_parameter_type(nested_model, nested_field, api_plan);
-                output.push_str(&field_type);
-                output.push(' ');
-                output.push_str(&field_property_name(nested_field));
-                output.push_str(" { get; set; }");
-                if field.required && nested_field.required {
-                    output.push_str(" = default!;");
-                }
-                output.push('\n');
+                option_fields.push((
+                    nested_field,
+                    field_type,
+                    field.required && nested_field.required,
+                ));
             }
             continue;
         }
@@ -1195,18 +1231,52 @@ fn render_operation_options_type(
         }
         let field_type =
             flattened_parameter_type(model, field, api_plan, FlattenedFunctionMode::String);
+        option_fields.push((field, field_type, field.required));
+    }
+    render_operation_options_constructor(output, &options_type_name, &option_fields);
+    for (field, field_type, _) in option_fields {
         render_field_xml_doc(output, "    ", field);
         output.push_str("    public ");
         output.push_str(&field_type);
         output.push(' ');
         output.push_str(&field_property_name(field));
-        output.push_str(" { get; set; }");
-        if field.required {
-            output.push_str(" = default!;");
-        }
-        output.push('\n');
+        output.push_str(" { get; set; }\n");
     }
     output.push_str("}\n\n");
+}
+
+fn render_operation_options_constructor(
+    output: &mut String,
+    type_name: &str,
+    option_fields: &[(&PlannedField, String, bool)],
+) {
+    let required_fields = option_fields
+        .iter()
+        .filter(|(_, _, required)| *required)
+        .collect::<Vec<_>>();
+    if required_fields.is_empty() {
+        return;
+    }
+    output.push_str("    public ");
+    output.push_str(type_name);
+    output.push('(');
+    for (index, (field, field_type, _)) in required_fields.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
+        }
+        output.push_str(field_type);
+        output.push(' ');
+        output.push_str(&csharp_parameter_name(&field.authored_name));
+    }
+    output.push_str(")\n    {\n");
+    for (field, _, _) in required_fields {
+        output.push_str("        ");
+        output.push_str(&field_property_name(field));
+        output.push_str(" = ");
+        output.push_str(&csharp_parameter_name(&field.authored_name));
+        output.push_str(";\n");
+    }
+    output.push_str("    }\n\n");
 }
 
 fn operation_options_type_name(operation: &PlannedOperation) -> String {
@@ -1245,10 +1315,13 @@ fn nested_model_init_expr(
     model: &PlannedModel,
     options_required: bool,
 ) -> String {
-    let checks = model
+    let option_fields = model
         .fields
         .iter()
         .filter(|nested_field| field_is_options_field(nested_field))
+        .collect::<Vec<_>>();
+    let checks = option_fields
+        .iter()
         .map(|nested_field| {
             format!(
                 "{} != null",
@@ -1257,24 +1330,45 @@ fn nested_model_init_expr(
         })
         .collect::<Vec<_>>()
         .join(" || ");
-    let assignments = model
-        .fields
+    let init_expr = model_init_expr(
+        &csharp_type_name(&model.name),
+        option_fields
+            .into_iter()
+            .map(|nested_field| {
+                (
+                    nested_field,
+                    option_nested_field_expr(field, nested_field, options_required),
+                )
+            })
+            .collect(),
+    );
+    if field.required {
+        init_expr
+    } else {
+        format!("{checks} ? {init_expr} : null")
+    }
+}
+
+fn model_init_expr(type_name: &str, field_exprs: Vec<(&PlannedField, String)>) -> String {
+    let constructor_args = field_exprs
         .iter()
-        .filter(|nested_field| field_is_options_field(nested_field))
-        .map(|nested_field| {
-            let value_expr = option_nested_field_expr(field, nested_field, options_required);
-            format!("{} = {}", field_property_name(nested_field), value_expr)
-        })
+        .filter(|(field, _)| field.required)
+        .map(|(_, expr)| expr.as_str())
         .collect::<Vec<_>>()
         .join(", ");
-    if field.required {
-        format!("new {} {{ {assignments} }}", csharp_type_name(&model.name))
-    } else {
-        format!(
-            "{checks} ? new {} {{ {assignments} }} : null",
-            csharp_type_name(&model.name)
-        )
+    let assignments = field_exprs
+        .iter()
+        .filter(|(field, _)| !field.required)
+        .map(|(field, expr)| format!("{} = {}", field_property_name(field), expr))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut expr = format!("new {type_name}({constructor_args})");
+    if !assignments.is_empty() {
+        expr.push_str(" { ");
+        expr.push_str(&assignments);
+        expr.push_str(" }");
     }
+    expr
 }
 
 fn option_field_expr(field: &PlannedField, options_required: bool) -> String {
@@ -1410,21 +1504,20 @@ fn render_model(
     support_namespace: Option<&str>,
 ) {
     render_xml_summary(output, "", dotnet_doc(model.generated_model.doc()));
-    output.push_str(model_access(model, api_plan));
+    let access = model_access(model, api_plan);
+    output.push_str(access);
     output.push_str(" class ");
-    output.push_str(&csharp_type_name(&model.name));
+    let type_name = csharp_type_name(&model.name);
+    output.push_str(&type_name);
     output.push_str("\n{\n");
+    render_model_constructor(output, access, &type_name, model, api_plan);
     for field in &model.fields {
         render_field_xml_doc(output, "    ", field);
         output.push_str("    public ");
         output.push_str(&model_field_type(model, field, api_plan));
         output.push(' ');
         output.push_str(&field_property_name(field));
-        output.push_str(" { get; init; }");
-        if field.required {
-            output.push_str(" = default!;");
-        }
-        output.push('\n');
+        output.push_str(" { get; init; }\n");
     }
     if model_needs_to_proto_method(model) {
         if !model.fields.is_empty() {
@@ -1433,6 +1526,45 @@ fn render_model(
         render_model_to_proto_method(output, model, api_plan, support_namespace);
     }
     output.push_str("}\n\n");
+}
+
+fn render_model_constructor(
+    output: &mut String,
+    access: &str,
+    type_name: &str,
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+) {
+    let required_fields = model
+        .fields
+        .iter()
+        .filter(|field| field.required)
+        .collect::<Vec<_>>();
+    if required_fields.is_empty() {
+        return;
+    }
+    output.push_str("    ");
+    output.push_str(access);
+    output.push(' ');
+    output.push_str(type_name);
+    output.push('(');
+    for (index, field) in required_fields.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
+        }
+        output.push_str(&model_field_type(model, field, api_plan));
+        output.push(' ');
+        output.push_str(&csharp_parameter_name(&field.authored_name));
+    }
+    output.push_str(")\n    {\n");
+    for field in required_fields {
+        output.push_str("        ");
+        output.push_str(&field_property_name(field));
+        output.push_str(" = ");
+        output.push_str(&csharp_parameter_name(&field.authored_name));
+        output.push_str(";\n");
+    }
+    output.push_str("    }\n\n");
 }
 
 fn model_access(model: &PlannedModel, api_plan: &ApiPlan) -> &'static str {

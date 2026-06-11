@@ -10,13 +10,24 @@ namespace NexGen.UserService
 
     internal class GetUserRequest
     {
-        public string UserId { get; init; } = default!;
+        internal GetUserRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
     }
 
     internal class UpdateEmailRequest
     {
-        public string UserId { get; init; } = default!;
-        public string Email { get; init; } = default!;
+        internal UpdateEmailRequest(string userId, string email)
+        {
+            UserId = userId;
+            Email = email;
+        }
+
+        public string UserId { get; init; }
+        public string Email { get; init; }
     }
 
 }

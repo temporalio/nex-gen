@@ -11,8 +11,13 @@ namespace NexGen.TypeRoundtripService
 
     internal class ActivityOptions
     {
+        internal ActivityOptions(Temporalio.Common.RetryPolicy retryPolicy)
+        {
+            RetryPolicy = retryPolicy;
+        }
+
         public string? TaskQueue { get; init; }
-        public Temporalio.Common.RetryPolicy RetryPolicy { get; init; } = default!;
+        public Temporalio.Common.RetryPolicy RetryPolicy { get; init; }
         public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
         public Temporalio.Common.Priority? Priority { get; init; }
 

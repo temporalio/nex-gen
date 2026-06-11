@@ -24,10 +24,8 @@ namespace NexGen.DotNetExamples.Tests
             WorkflowExample.WorkflowServiceOperations.SignalWithStartWorkflowAsync<ExampleWorkflow, string>(
                 workflow => workflow.RunAsync("workflow-input"),
                 signal: workflow => workflow.NotifyAsync("signal-input"),
-                options: new WorkflowExample.SignalWithStartWorkflowOptions
+                options: new WorkflowExample.SignalWithStartWorkflowOptions("workflow-id", "task-queue")
                 {
-                    Id = "workflow-id",
-                    TaskQueue = "task-queue",
                     ExecutionTimeout = TimeSpan.FromMinutes(5),
                     RetryPolicy = new RetryPolicy { MaximumAttempts = 3 },
                 });
@@ -35,10 +33,8 @@ namespace NexGen.DotNetExamples.Tests
         internal static Task<StartWorkflowExample.StartedWorkflow> StartWorkflowAsync() =>
             StartWorkflowExample.StartWorkflowServiceOperations.StartWorkflowAsync<ExampleWorkflow, string>(
                 workflow => workflow.RunAsync("workflow-input"),
-                options: new StartWorkflowExample.StartWorkflowOptions
+                options: new StartWorkflowExample.StartWorkflowOptions("workflow-id", "task-queue")
                 {
-                    WorkflowId = "workflow-id",
-                    TaskQueue = "task-queue",
                     WorkflowStartDelay = TimeSpan.FromSeconds(1),
                 });
     }
