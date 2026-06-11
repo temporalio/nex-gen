@@ -30,7 +30,7 @@ pub(crate) fn generate(
     support_fragments: &[SupportFragmentSpec],
     language_imports: &[LanguageImportSpec],
 ) -> Result<GeneratedFiles> {
-    reject_support_prefixes(Language::Python, support_fragments)?;
+    reject_support_namespaces(Language::Python, support_fragments)?;
     let mut enums = IndexMap::new();
     let mut flags = IndexMap::new();
     let mut variants = IndexMap::new();
@@ -90,17 +90,17 @@ pub(crate) fn generate(
     )
 }
 
-fn reject_support_prefixes(
+fn reject_support_namespaces(
     language: Language,
     support_fragments: &[SupportFragmentSpec],
 ) -> Result<()> {
-    if let Some(prefix) = support_fragments
+    if let Some(namespace) = support_fragments
         .iter()
-        .find_map(|fragment| fragment.prefix.as_deref())
+        .find_map(|fragment| fragment.namespace.as_deref())
     {
-        return Err(Error::UnsupportedSupportPrefix {
+        return Err(Error::UnsupportedSupportNamespace {
             language,
-            prefix: prefix.to_string(),
+            namespace: namespace.to_string(),
         });
     }
     Ok(())
@@ -5041,19 +5041,31 @@ fn render_unpacked_operation_docstring(
                     ),
                 }
             };
-            args.push((
-                field.attr_name.clone(),
-                field.doc.clone().unwrap_or(generated_doc),
-            ));
+            args.push((field.attr_name.clone(), generated_doc));
             continue;
         }
 
-        if let Some(doc) = &field.doc {
+        if let Some(doc) = &field.doc
+            && !python_field_doc_rendered_as_function_arg(unpacked_input, &field.attr_name)
+        {
             args.push((field.attr_name.clone(), doc.clone()));
         }
     }
 
     render_operation_docstring(output, operation, &args, operation.return_doc.as_deref());
+}
+
+fn python_field_doc_rendered_as_function_arg(
+    unpacked_input: &RenderedUnpackedInput,
+    field_name: &str,
+) -> bool {
+    unpacked_input.functions.iter().any(|function| {
+        python_function_fixed_positional_args(function).is_some_and(|parameters| {
+            parameters
+                .iter()
+                .any(|parameter| parameter.name == field_name)
+        })
+    })
 }
 
 fn render_operation_docstring(

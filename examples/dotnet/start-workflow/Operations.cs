@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
+using NexGen.Support;
 
 namespace NexGen.StartWorkflowService
 {
@@ -46,14 +47,14 @@ namespace NexGen.StartWorkflowService
         }
 
         /// <param name="workflow">The workflow value.</param>
-        /// <param name="args">The args value.</param>
+        /// <param name="args">Arguments for the workflow.</param>
         /// <param name="options">Options for the operation.</param>
         public static Task<StartedWorkflow> StartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, StartWorkflowOptions options)
         {
             var request = new StartWorkflowRequest
             {
                 Workflow = workflow,
-                Args = args,
+                Args = args == null ? null : args.ToProto(),
                 WorkflowId = options.WorkflowId,
                 TaskQueue = options.TaskQueue,
                 WorkflowStartDelay = options.WorkflowStartDelay,
@@ -69,7 +70,7 @@ namespace NexGen.StartWorkflowService
             var request = new StartWorkflowRequest
             {
                 Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
-                Args = workflowArgs,
+                Args = workflowArgs.ToProto(),
                 WorkflowId = options.WorkflowId,
                 TaskQueue = options.TaskQueue,
                 WorkflowStartDelay = options.WorkflowStartDelay,
@@ -86,14 +87,14 @@ namespace NexGen.StartWorkflowService
         }
 
         /// <param name="workflow">The workflow value.</param>
-        /// <param name="args">The args value.</param>
+        /// <param name="args">Arguments for the workflow.</param>
         /// <param name="options">Options for the operation.</param>
         public static Task<StartedWorkflow> RestartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, RestartWorkflowOptions options)
         {
             var request = new StartWorkflowRequest
             {
                 Workflow = workflow,
-                Args = args,
+                Args = args == null ? null : args.ToProto(),
                 WorkflowId = options.WorkflowId,
                 TaskQueue = options.TaskQueue,
                 WorkflowStartDelay = options.WorkflowStartDelay,
@@ -109,7 +110,7 @@ namespace NexGen.StartWorkflowService
             var request = new StartWorkflowRequest
             {
                 Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
-                Args = workflowArgs,
+                Args = workflowArgs.ToProto(),
                 WorkflowId = options.WorkflowId,
                 TaskQueue = options.TaskQueue,
                 WorkflowStartDelay = options.WorkflowStartDelay,

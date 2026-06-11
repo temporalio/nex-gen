@@ -2,7 +2,7 @@
 ///   python="python/temporal_model_converters.py"
 ///   typescript="typescript/temporal_model_converters.ts"
 ///   dotnet="dotnet/TemporalSupport.cs"
-/// @nexus.support-prefix dotnet="NexGen.Support"
+/// @nexus.support-namespace dotnet="NexGen.Support"
 package nexus:temporal-types@1.0.0;
 
 interface model {
@@ -10,12 +10,11 @@ interface model {
   type placeholder = string;
 
   /// @nexus.proto "temporal.api.common.v1.Payload" typescript-package="@temporalio/proto"
-  /// @nexus.type python="typing.Any" typescript="common.Payload" dotnet="object" typescript-package="@temporalio/common"
+  /// @nexus.type python="typing.Any" typescript="common.Payload" dotnet="object?" typescript-package="@temporalio/common"
   type payload = placeholder;
 
   /// @nexus.proto "temporal.api.common.v1.Payloads"
   ///   typescript-package="@temporalio/proto"
-  /// @nexus.type dotnet="IReadOnlyCollection<object?>"
   type payloads = list<payload>;
 
   /// Callable result annotation for workflow functions.

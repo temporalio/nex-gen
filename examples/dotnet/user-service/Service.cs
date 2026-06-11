@@ -2,6 +2,9 @@
 #nullable enable
 #pragma warning disable CS1591
 
+using System;
+using System.Collections.Generic;
+using System.Reflection;
 using NexusRpc;
 
 namespace NexGen.UserService
@@ -16,6 +19,52 @@ namespace NexGen.UserService
         [NexusOperation("UpdateEmail")]
         User UpdateEmail(UpdateEmailRequest request);
 
+    }
+
+    public sealed class NexGenNexusOperation
+    {
+        public NexGenNexusOperation(string endpoint, string service, string operation, Type serviceType, MethodInfo method, Type? requestType, Type responseType)
+        {
+            Endpoint = endpoint;
+            Service = service;
+            Operation = operation;
+            ServiceType = serviceType;
+            Method = method;
+            RequestType = requestType;
+            ResponseType = responseType;
+        }
+
+        public string Endpoint { get; }
+        public string Service { get; }
+        public string Operation { get; }
+        public Type ServiceType { get; }
+        public MethodInfo Method { get; }
+        public Type? RequestType { get; }
+        public Type ResponseType { get; }
+    }
+
+    public static class NexGenOperationRegistry
+    {
+        public static IReadOnlyDictionary<(string Service, string Operation), NexGenNexusOperation> Operations { get; } =
+            new Dictionary<(string Service, string Operation), NexGenNexusOperation>
+            {
+                [("UserService", "GetUser")] = new NexGenNexusOperation(
+                    endpoint: "user-service",
+                    service: "UserService",
+                    operation: "GetUser",
+                    serviceType: typeof(IUserService),
+                    method: typeof(IUserService).GetMethod(nameof(IUserService.GetUser))!,
+                    requestType: typeof(GetUserRequest),
+                    responseType: typeof(User)),
+                [("UserService", "UpdateEmail")] = new NexGenNexusOperation(
+                    endpoint: "user-service",
+                    service: "UserService",
+                    operation: "UpdateEmail",
+                    serviceType: typeof(IUserService),
+                    method: typeof(IUserService).GetMethod(nameof(IUserService.UpdateEmail))!,
+                    requestType: typeof(UpdateEmailRequest),
+                    responseType: typeof(User)),
+            };
     }
 
 }

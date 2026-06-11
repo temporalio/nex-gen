@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
+using NexGen.Support;
 
 namespace NexGen.WorkflowService
 {
@@ -109,9 +110,9 @@ namespace NexGen.WorkflowService
         /// Signal a workflow, starting it first if needed.
         /// </summary>
         /// <param name="workflow">Workflow type name or workflow expression identifying the workflow to start.</param>
-        /// <param name="args">The args value.</param>
+        /// <param name="args">Arguments for the workflow.</param>
         /// <param name="signal">Signal name or signal expression to send with the start request.</param>
-        /// <param name="signalArgs">The signalArgs value.</param>
+        /// <param name="signalArgs">Arguments for the signal.</param>
         /// <param name="options">Request fields for signaling a workflow, starting it first if needed.</param>
         /// <returns>A workflow handle to the started workflow.</returns>
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)
@@ -119,11 +120,11 @@ namespace NexGen.WorkflowService
             var request = new SignalWithStartWorkflowRequest
             {
                 Workflow = workflow,
-                Args = args,
+                Args = args == null ? null : args.ToProto(),
                 Id = options.Id,
                 TaskQueue = options.TaskQueue,
                 Signal = signal,
-                SignalArgs = signalArgs,
+                SignalArgs = signalArgs == null ? null : signalArgs.ToProto(),
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
@@ -147,7 +148,7 @@ namespace NexGen.WorkflowService
         /// </summary>
         /// <param name="workflow">Workflow type name or workflow expression identifying the workflow to start.</param>
         /// <param name="signal">Signal name or signal expression to send with the start request.</param>
-        /// <param name="signalArgs">The signalArgs value.</param>
+        /// <param name="signalArgs">Arguments for the signal.</param>
         /// <param name="options">Request fields for signaling a workflow, starting it first if needed.</param>
         /// <returns>A workflow handle to the started workflow.</returns>
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)
@@ -156,11 +157,11 @@ namespace NexGen.WorkflowService
             var request = new SignalWithStartWorkflowRequest
             {
                 Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
-                Args = workflowArgs,
+                Args = workflowArgs.ToProto(),
                 Id = options.Id,
                 TaskQueue = options.TaskQueue,
                 Signal = signal,
-                SignalArgs = signalArgs,
+                SignalArgs = signalArgs == null ? null : signalArgs.ToProto(),
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
@@ -183,7 +184,7 @@ namespace NexGen.WorkflowService
         /// Signal a workflow, starting it first if needed.
         /// </summary>
         /// <param name="workflow">Workflow type name or workflow expression identifying the workflow to start.</param>
-        /// <param name="args">The args value.</param>
+        /// <param name="args">Arguments for the workflow.</param>
         /// <param name="signal">Signal name or signal expression to send with the start request.</param>
         /// <param name="options">Request fields for signaling a workflow, starting it first if needed.</param>
         /// <returns>A workflow handle to the started workflow.</returns>
@@ -193,11 +194,11 @@ namespace NexGen.WorkflowService
             var request = new SignalWithStartWorkflowRequest
             {
                 Workflow = workflow,
-                Args = args,
+                Args = args == null ? null : args.ToProto(),
                 Id = options.Id,
                 TaskQueue = options.TaskQueue,
                 Signal = NexGen.Support.TemporalFunctionNames.SignalName(signalMethod),
-                SignalArgs = signalArgs,
+                SignalArgs = signalArgs.ToProto(),
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
@@ -230,11 +231,11 @@ namespace NexGen.WorkflowService
             var request = new SignalWithStartWorkflowRequest
             {
                 Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
-                Args = workflowArgs,
+                Args = workflowArgs.ToProto(),
                 Id = options.Id,
                 TaskQueue = options.TaskQueue,
                 Signal = NexGen.Support.TemporalFunctionNames.SignalName(signalMethod),
-                SignalArgs = signalArgs,
+                SignalArgs = signalArgs.ToProto(),
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,

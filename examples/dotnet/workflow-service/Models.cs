@@ -18,7 +18,10 @@ namespace NexGen.WorkflowService
         /// Workflow type name or workflow expression identifying the workflow to start.
         /// </summary>
         public string Workflow { get; init; } = default!;
-        public IReadOnlyCollection<object?>? Args { get; init; }
+        /// <summary>
+        /// Arguments for the workflow.
+        /// </summary>
+        public Temporalio.Api.Common.V1.Payloads? Args { get; init; }
         /// <summary>
         /// Unique identifier for the workflow execution.
         /// </summary>
@@ -31,7 +34,10 @@ namespace NexGen.WorkflowService
         /// Signal name or signal expression to send with the start request.
         /// </summary>
         public string Signal { get; init; } = default!;
-        public IReadOnlyCollection<object?>? SignalArgs { get; init; }
+        /// <summary>
+        /// Arguments for the signal.
+        /// </summary>
+        public Temporalio.Api.Common.V1.Payloads? SignalArgs { get; init; }
         /// <summary>
         /// Total workflow execution timeout, including retries and continue-as-new.
         /// </summary>
@@ -93,14 +99,14 @@ namespace NexGen.WorkflowService
             proto.WorkflowType = Workflow.ToProto(default(Temporalio.Api.Common.V1.WorkflowType)!);
             if (Args is { } args)
             {
-                proto.Input = args.ToProto();
+                proto.Input = args;
             }
             proto.WorkflowId = Id;
             proto.TaskQueue = TaskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);
             proto.SignalName = Signal;
             if (SignalArgs is { } signalArgs)
             {
-                proto.SignalInput = signalArgs.ToProto();
+                proto.SignalInput = signalArgs;
             }
             if (ExecutionTimeout is { } executionTimeout)
             {

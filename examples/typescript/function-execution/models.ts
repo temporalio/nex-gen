@@ -46,7 +46,13 @@ export interface ExecuteFunctionRequest<
   ) => string,
 > {
   function_: FunctionFn;
+  /**
+   * The name argument for the function.
+   */
   name: string;
+  /**
+   * The enabled argument for the function.
+   */
   enabled: boolean;
 }
 
@@ -61,7 +67,13 @@ export interface ExecuteCountedFunctionRequest<
   ) => string,
 > {
   function_: FunctionFn;
+  /**
+   * The name argument for the function.
+   */
   name: string;
+  /**
+   * The count argument for the function.
+   */
   count: number;
 }
 
@@ -76,7 +88,13 @@ export interface ExecuteNamedFunctionRequest<
   ) => string,
 > {
   function_: string | FunctionFn;
+  /**
+   * The name argument for the function.
+   */
   name: string;
+  /**
+   * The enabled argument for the function.
+   */
   enabled: boolean;
 }
 

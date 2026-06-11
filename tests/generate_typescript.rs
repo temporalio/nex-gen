@@ -213,7 +213,7 @@ fn cli_generates_typescript_support_file_from_parameter() {
 }
 
 #[test]
-fn typescript_rejects_support_prefix() {
+fn typescript_rejects_support_namespace() {
     let root = project_root();
     let spec = nex_gen::spec::ApiSpec::load_for_language_with_inputs(
         nex_gen::language::Language::TypeScript,
@@ -229,12 +229,12 @@ fn typescript_rejects_support_prefix() {
             fragments: vec![SupportFragmentSpec {
                 path: "support.ts".to_string(),
                 contents: String::new(),
-                prefix: Some("example.support".to_string()),
+                namespace: Some("example.support".to_string()),
             }],
         },
     )
     .unwrap_err();
-    assert!(err.to_string().contains("support prefix"));
+    assert!(err.to_string().contains("support namespace"));
 }
 
 #[test]

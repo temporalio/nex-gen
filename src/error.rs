@@ -99,13 +99,16 @@ pub enum Error {
     #[error("language `{language}` is not implemented yet")]
     UnsupportedLanguage { language: Language },
 
-    #[error("{language} support prefix `{prefix}` is not supported")]
-    UnsupportedSupportPrefix { language: Language, prefix: String },
-
-    #[error("invalid {language} support prefix `{prefix}`: {reason}")]
-    InvalidSupportPrefix {
+    #[error("{language} support namespace `{namespace}` is not supported")]
+    UnsupportedSupportNamespace {
         language: Language,
-        prefix: String,
+        namespace: String,
+    },
+
+    #[error("invalid {language} support namespace `{namespace}`: {reason}")]
+    InvalidSupportNamespace {
+        language: Language,
+        namespace: String,
         reason: String,
     },
 

@@ -56,7 +56,7 @@ class StartedWorkflow:
 
     async def get_result(
         self,
-    ) -> Payloads:
+    ) -> collections.abc.Sequence[typing.Any]:
         raise NotImplementedError("started-workflow.get_result is not yet implemented")
 
 
