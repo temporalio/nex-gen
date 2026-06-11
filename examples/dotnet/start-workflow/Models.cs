@@ -15,7 +15,7 @@ namespace NexGen.StartWorkflowService
         /// <summary>
         /// Arguments for the workflow.
         /// </summary>
-        public Temporalio.Api.Common.V1.Payloads? Args { get; init; }
+        public IReadOnlyCollection<object?>? Args { get; init; }
         public string WorkflowId { get; init; } = default!;
         public string TaskQueue { get; init; } = default!;
         public System.TimeSpan? WorkflowStartDelay { get; init; }
@@ -27,7 +27,7 @@ namespace NexGen.StartWorkflowService
             proto.WorkflowType = Workflow.ToProto(default(Temporalio.Api.Common.V1.WorkflowType)!);
             if (Args is { } args)
             {
-                proto.Input = args;
+                proto.Input = args.ToProto();
             }
             proto.WorkflowId = WorkflowId;
             proto.TaskQueue = TaskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);

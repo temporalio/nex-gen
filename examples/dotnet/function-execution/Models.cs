@@ -68,7 +68,7 @@ namespace NexGen.FunctionExecution
         /// <summary>
         /// Arguments for the function.
         /// </summary>
-        public IReadOnlyList<string>? Args { get; init; }
+        public IReadOnlyCollection<string>? Args { get; init; }
     }
 
     public class ExecuteVarargsFunctionResult
@@ -82,7 +82,7 @@ namespace NexGen.FunctionExecution
         /// <summary>
         /// Arguments for the function.
         /// </summary>
-        public IReadOnlyList<string>? Args { get; init; }
+        public IReadOnlyCollection<string>? Args { get; init; }
     }
 
     public class ExecuteNamedVarargsFunctionResult

@@ -220,12 +220,7 @@ fn render_models_file(
 fn render_service_file(namespace: &str, api_plan: &ApiPlan) -> String {
     let mut output = generated_file_prelude(
         namespace,
-        &[
-            "System",
-            "System.Collections.Generic",
-            "System.Reflection",
-            "NexusRpc",
-        ],
+        &["System", "System.Collections.Generic", "NexusRpc"],
     );
     for service in &api_plan.services {
         output.push_str("[NexusService(");
@@ -255,7 +250,7 @@ fn render_operations_file(
     api_plan: &ApiPlan,
     support_namespace: Option<&str>,
 ) -> String {
-    let mut imports = vec![
+    let imports = [
         "System",
         "System.Collections.Generic",
         "System.Linq",
@@ -266,11 +261,6 @@ fn render_operations_file(
         "Temporalio.Converters",
         "Temporalio.Workflows",
     ];
-    if operations_use_support_extensions(api_plan)
-        && let Some(support_namespace) = support_namespace
-    {
-        imports.push(support_namespace);
-    }
     let mut output = generated_file_prelude(namespace, &imports);
     for service in &api_plan.services {
         render_operations_class(&mut output, service, api_plan, support_namespace);
@@ -288,22 +278,6 @@ fn render_resources_file(namespace: &str, api_plan: &ApiPlan) -> String {
     }
     close_namespace(&mut output);
     output
-}
-
-fn operations_use_support_extensions(api_plan: &ApiPlan) -> bool {
-    api_plan.services.iter().any(|service| {
-        service.operations.iter().any(|operation| {
-            api_plan
-                .models
-                .get(&operation.input.info.full_name)
-                .is_some_and(|model| {
-                    model
-                        .fields
-                        .iter()
-                        .any(|field| field.function_args && function_args_field_stores_proto(field))
-                })
-        })
-    })
 }
 
 fn generated_file_prelude(namespace: &str, imports: &[&str]) -> String {
@@ -467,81 +441,41 @@ fn render_service_operation(output: &mut String, operation: &PlannedOperation, a
 }
 
 fn render_operation_registry(output: &mut String, api_plan: &ApiPlan) {
-    output.push_str("public sealed class NexGenNexusOperation\n{\n");
-    output.push_str("    public NexGenNexusOperation(string endpoint, string service, string operation, Type serviceType, MethodInfo method, Type? requestType, Type responseType)\n");
-    output.push_str("    {\n");
-    output.push_str("        Endpoint = endpoint;\n");
-    output.push_str("        Service = service;\n");
-    output.push_str("        Operation = operation;\n");
-    output.push_str("        ServiceType = serviceType;\n");
-    output.push_str("        Method = method;\n");
-    output.push_str("        RequestType = requestType;\n");
-    output.push_str("        ResponseType = responseType;\n");
-    output.push_str("    }\n\n");
-    output.push_str("    public string Endpoint { get; }\n");
-    output.push_str("    public string Service { get; }\n");
-    output.push_str("    public string Operation { get; }\n");
-    output.push_str("    public Type ServiceType { get; }\n");
-    output.push_str("    public MethodInfo Method { get; }\n");
-    output.push_str("    public Type? RequestType { get; }\n");
-    output.push_str("    public Type ResponseType { get; }\n");
-    output.push_str("}\n\n");
-
     output.push_str("public static class NexGenOperationRegistry\n{\n");
-    output.push_str("    public static IReadOnlyDictionary<(string Service, string Operation), NexGenNexusOperation> Operations { get; } =\n");
     output.push_str(
-        "        new Dictionary<(string Service, string Operation), NexGenNexusOperation>\n",
+        "    internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =\n",
     );
+    output.push_str("        new Dictionary<string, ServiceDefinition>\n");
     output.push_str("        {\n");
     for service in &api_plan.services {
         let service_type = format!("I{}", csharp_type_name(&service.name));
+        output.push_str("            [");
+        output.push_str(&csharp_string_literal(&service.wire_name));
+        output.push_str("] = ServiceDefinition.FromType<");
+        output.push_str(&service_type);
+        output.push_str(">(),\n");
+    }
+    output.push_str("        };\n\n");
+    output.push_str("    public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =\n");
+    output.push_str(
+        "        new Dictionary<(string Service, string Operation), OperationDefinition>\n",
+    );
+    output.push_str("        {\n");
+    for service in &api_plan.services {
         for operation in &service.operations {
             output.push_str("            [(");
             output.push_str(&csharp_string_literal(&service.wire_name));
             output.push_str(", ");
             output.push_str(&csharp_string_literal(&operation.wire_name));
-            output.push_str(")] = new NexGenNexusOperation(\n");
-            output.push_str("                endpoint: ");
-            output.push_str(&csharp_string_literal(&service.endpoint));
-            output.push_str(",\n");
-            output.push_str("                service: ");
+            output.push_str(")] = Services[");
             output.push_str(&csharp_string_literal(&service.wire_name));
-            output.push_str(",\n");
-            output.push_str("                operation: ");
+            output.push_str("].Operations[");
             output.push_str(&csharp_string_literal(&operation.wire_name));
-            output.push_str(",\n");
-            output.push_str("                serviceType: typeof(");
-            output.push_str(&service_type);
-            output.push_str("),\n");
-            output.push_str("                method: typeof(");
-            output.push_str(&service_type);
-            output.push_str(").GetMethod(nameof(");
-            output.push_str(&service_type);
-            output.push('.');
-            output.push_str(&csharp_type_name(&operation.name));
-            output.push_str("))!,\n");
-            output.push_str("                requestType: ");
-            output.push_str(&operation_request_type_expr(operation, api_plan));
-            output.push_str(",\n");
-            output.push_str("                responseType: ");
-            output.push_str(&operation_response_type_expr(operation));
-            output.push_str("),\n");
+            output.push_str("],\n");
         }
     }
     output.push_str("        };\n");
     output.push_str("}\n\n");
-}
-
-fn operation_request_type_expr(operation: &PlannedOperation, api_plan: &ApiPlan) -> String {
-    if operation_has_input(operation, api_plan) {
-        format!("typeof({})", operation_raw_input_type(&operation.input))
-    } else {
-        "null".to_string()
-    }
-}
-
-fn operation_response_type_expr(operation: &PlannedOperation) -> String {
-    format!("typeof({})", operation_raw_return_type(operation))
 }
 
 fn render_operations_class(
@@ -1159,20 +1093,10 @@ fn render_flattened_method_body(
                     .expect("function args field should have a function field");
                 let args_expr =
                     csharp_parameter_name(&format!("{}Args", function_field.authored_name));
-                output.push_str(&function_args_request_expr(
-                    field,
-                    &args_expr,
-                    false,
-                    support_namespace,
-                ));
+                output.push_str(&args_expr);
             } else {
                 let args_expr = csharp_parameter_name(&field.authored_name);
-                output.push_str(&function_args_request_expr(
-                    field,
-                    &args_expr,
-                    !field.required,
-                    support_namespace,
-                ));
+                output.push_str(&args_expr);
             }
         } else if field.function.is_none() {
             output.push_str(&option_field_expr(field, options_required));
@@ -1493,7 +1417,7 @@ fn render_model(
     for field in &model.fields {
         render_field_xml_doc(output, "    ", field);
         output.push_str("    public ");
-        output.push_str(&field_type(field, api_plan));
+        output.push_str(&model_field_type(model, field, api_plan));
         output.push(' ');
         output.push_str(&field_property_name(field));
         output.push_str(" { get; init; }");
@@ -1789,13 +1713,18 @@ fn render_model_to_proto_method(
         output.push_str(";\n");
     }
     for field in &model.fields {
-        render_field_to_proto_assignment(output, field, api_plan);
+        render_field_to_proto_assignment(output, model, field, api_plan);
     }
     output.push_str("        return proto;\n");
     output.push_str("    }\n\n");
 }
 
-fn render_field_to_proto_assignment(output: &mut String, field: &PlannedField, api_plan: &ApiPlan) {
+fn render_field_to_proto_assignment(
+    output: &mut String,
+    model: &PlannedModel,
+    field: &PlannedField,
+    api_plan: &ApiPlan,
+) {
     let property_name = field_property_name(field);
     let source_expr = property_name.to_string();
     let target = format!("proto.{}", csharp_type_name(&field.proto_name));
@@ -1803,7 +1732,7 @@ fn render_field_to_proto_assignment(output: &mut String, field: &PlannedField, a
         output.push_str("        ");
         output.push_str(&target);
         output.push_str(" = ");
-        output.push_str(&field_to_proto_expr(field, &source_expr, api_plan));
+        output.push_str(&field_to_proto_expr(model, field, &source_expr, api_plan));
         output.push_str(";\n");
     } else {
         output.push_str("        if (");
@@ -1815,6 +1744,7 @@ fn render_field_to_proto_assignment(output: &mut String, field: &PlannedField, a
         output.push_str(&target);
         output.push_str(" = ");
         output.push_str(&field_to_proto_expr(
+            model,
             field,
             &csharp_parameter_name(&field.authored_name),
             api_plan,
@@ -1824,7 +1754,15 @@ fn render_field_to_proto_assignment(output: &mut String, field: &PlannedField, a
     }
 }
 
-fn field_to_proto_expr(field: &PlannedField, source_expr: &str, api_plan: &ApiPlan) -> String {
+fn field_to_proto_expr(
+    model: &PlannedModel,
+    field: &PlannedField,
+    source_expr: &str,
+    api_plan: &ApiPlan,
+) -> String {
+    if function_args_field_uses_logical_storage(model, field) {
+        return format!("{source_expr}.ToProto()");
+    }
     field_kind_to_proto_expr(&field.kind, source_expr, !field.required, api_plan)
 }
 
@@ -1889,10 +1827,10 @@ fn model_uses_proto_extensions(model: &PlannedModel, api_plan: &ApiPlan) -> bool
         .sourced_fields
         .iter()
         .any(|field| field_kind_uses_proto_extensions(&field.kind, api_plan))
-        || model
-            .fields
-            .iter()
-            .any(|field| field_kind_uses_proto_extensions(&field.kind, api_plan))
+        || model.fields.iter().any(|field| {
+            function_args_field_uses_logical_storage(model, field)
+                || field_kind_uses_proto_extensions(&field.kind, api_plan)
+        })
 }
 
 fn field_kind_uses_proto_extensions(kind: &PlannedFieldKind, api_plan: &ApiPlan) -> bool {
@@ -1965,6 +1903,19 @@ fn field_type(field: &PlannedField, api_plan: &ApiPlan) -> String {
     } else {
         nullable_type(&base)
     }
+}
+
+fn model_field_type(model: &PlannedModel, field: &PlannedField, api_plan: &ApiPlan) -> String {
+    if field.function_args
+        && let Some(base) = function_args_parameter_type(model, field)
+    {
+        return if field.required {
+            base
+        } else {
+            nullable_type(&base)
+        };
+    }
+    field_type(field, api_plan)
 }
 
 fn high_level_field_kind_type(kind: &PlannedFieldKind, api_plan: &ApiPlan) -> String {
@@ -2092,28 +2043,18 @@ fn dotnet_authored_type(wit_type: &AuthoredFieldTypeSpec) -> String {
     }
 }
 
-fn function_args_request_expr(
-    field: &PlannedField,
-    source_expr: &str,
-    optional: bool,
-    _support_namespace: Option<&str>,
-) -> String {
-    if !function_args_field_stores_proto(field) {
-        return source_expr.to_string();
-    }
-    if optional {
-        format!("{source_expr} == null ? null : {source_expr}.ToProto()")
-    } else {
-        format!("{source_expr}.ToProto()")
-    }
-}
-
 fn function_args_field_stores_proto(field: &PlannedField) -> bool {
     matches!(
         &field.kind,
         PlannedFieldKind::Singular(PlannedValueType::Message(message))
             if matches!(message.source, PlannedMessageSource::Proto)
     )
+}
+
+fn function_args_field_uses_logical_storage(model: &PlannedModel, field: &PlannedField) -> bool {
+    field.function_args
+        && function_args_field_stores_proto(field)
+        && function_args_parameter_type(model, field).is_some()
 }
 
 fn function_expression_type(function: &FunctionFieldSpec) -> String {

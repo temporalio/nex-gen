@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using NexusRpc;
 
 namespace NexGen.UserService
@@ -21,49 +20,19 @@ namespace NexGen.UserService
 
     }
 
-    public sealed class NexGenNexusOperation
-    {
-        public NexGenNexusOperation(string endpoint, string service, string operation, Type serviceType, MethodInfo method, Type? requestType, Type responseType)
-        {
-            Endpoint = endpoint;
-            Service = service;
-            Operation = operation;
-            ServiceType = serviceType;
-            Method = method;
-            RequestType = requestType;
-            ResponseType = responseType;
-        }
-
-        public string Endpoint { get; }
-        public string Service { get; }
-        public string Operation { get; }
-        public Type ServiceType { get; }
-        public MethodInfo Method { get; }
-        public Type? RequestType { get; }
-        public Type ResponseType { get; }
-    }
-
     public static class NexGenOperationRegistry
     {
-        public static IReadOnlyDictionary<(string Service, string Operation), NexGenNexusOperation> Operations { get; } =
-            new Dictionary<(string Service, string Operation), NexGenNexusOperation>
+        internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =
+            new Dictionary<string, ServiceDefinition>
             {
-                [("UserService", "GetUser")] = new NexGenNexusOperation(
-                    endpoint: "user-service",
-                    service: "UserService",
-                    operation: "GetUser",
-                    serviceType: typeof(IUserService),
-                    method: typeof(IUserService).GetMethod(nameof(IUserService.GetUser))!,
-                    requestType: typeof(GetUserRequest),
-                    responseType: typeof(User)),
-                [("UserService", "UpdateEmail")] = new NexGenNexusOperation(
-                    endpoint: "user-service",
-                    service: "UserService",
-                    operation: "UpdateEmail",
-                    serviceType: typeof(IUserService),
-                    method: typeof(IUserService).GetMethod(nameof(IUserService.UpdateEmail))!,
-                    requestType: typeof(UpdateEmailRequest),
-                    responseType: typeof(User)),
+                ["UserService"] = ServiceDefinition.FromType<IUserService>(),
+            };
+
+        public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =
+            new Dictionary<(string Service, string Operation), OperationDefinition>
+            {
+                [("UserService", "GetUser")] = Services["UserService"].Operations["GetUser"],
+                [("UserService", "UpdateEmail")] = Services["UserService"].Operations["UpdateEmail"],
             };
     }
 

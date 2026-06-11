@@ -11,7 +11,6 @@ using System.Threading.Tasks;
 using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
-using NexGen.Support;
 
 namespace NexGen.StartWorkflowService
 {
@@ -54,7 +53,7 @@ namespace NexGen.StartWorkflowService
             var request = new StartWorkflowRequest
             {
                 Workflow = workflow,
-                Args = args == null ? null : args.ToProto(),
+                Args = args,
                 WorkflowId = options.WorkflowId,
                 TaskQueue = options.TaskQueue,
                 WorkflowStartDelay = options.WorkflowStartDelay,
@@ -70,7 +69,7 @@ namespace NexGen.StartWorkflowService
             var request = new StartWorkflowRequest
             {
                 Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
-                Args = workflowArgs.ToProto(),
+                Args = workflowArgs,
                 WorkflowId = options.WorkflowId,
                 TaskQueue = options.TaskQueue,
                 WorkflowStartDelay = options.WorkflowStartDelay,
@@ -94,7 +93,7 @@ namespace NexGen.StartWorkflowService
             var request = new StartWorkflowRequest
             {
                 Workflow = workflow,
-                Args = args == null ? null : args.ToProto(),
+                Args = args,
                 WorkflowId = options.WorkflowId,
                 TaskQueue = options.TaskQueue,
                 WorkflowStartDelay = options.WorkflowStartDelay,
@@ -110,7 +109,7 @@ namespace NexGen.StartWorkflowService
             var request = new StartWorkflowRequest
             {
                 Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
-                Args = workflowArgs.ToProto(),
+                Args = workflowArgs,
                 WorkflowId = options.WorkflowId,
                 TaskQueue = options.TaskQueue,
                 WorkflowStartDelay = options.WorkflowStartDelay,
