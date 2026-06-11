@@ -14,7 +14,7 @@ interface type-roundtrip-service {
     task-queue,
   };
 
-  /// @nexus.proto "temporal.api.activity.v1.ActivityOptions" typescript-package="@temporalio/proto"
+  /// @nexus.proto "temporal.api.activity.v1.ActivityOptions" typescript-import="@temporalio/proto"
   record activity-options {
     task-queue: option<task-queue>,
     retry-policy: retry-policy,
