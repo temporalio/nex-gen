@@ -12,6 +12,7 @@ const GetUserOp = "GetUser"
 const UpdateEmailOp = "UpdateEmail"
 const RenameOp = "Rename"
 const SetProfileOp = "SetProfile"
+const RecordSyncOp = "RecordSync"
 const DeactivateOp = "Deactivate"
 
 // --- Datatypes ---
@@ -98,6 +99,27 @@ type Coordinates struct {
 	Second float64 // required
 }
 
+type RecordSyncRequest struct {
+	UserId string     // required
+	Report SyncReport // required
+}
+
+type SyncReport struct {
+	Route        []Tuple2[float64, float64]        // required
+	Attempts     []Result[string, string]          // required
+	RegionStatus map[string]Result[string, string] // required
+}
+
+type Tuple2[T1, T2 any] struct {
+	First  T1
+	Second T2
+}
+
+type Result[T, E any] struct {
+	Result T
+	Error  E
+}
+
 type DeactivateRequest struct {
 	UserId string // required
 	Reason *string
@@ -167,6 +189,12 @@ func setProfile(ctx workflow.Context, request SetProfileRequest) (*User, error) 
 	return &result, nil
 }
 
+func recordSync(ctx workflow.Context, request RecordSyncRequest) error {
+	c := workflow.NewNexusClient(Endpoint, ServiceName)
+	fut := c.ExecuteOperation(ctx, RecordSyncOp, request, workflow.NexusOperationOptions{})
+	return fut.Get(ctx, nil)
+}
+
 func deactivate(ctx workflow.Context, request DeactivateRequest) error {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
 	fut := c.ExecuteOperation(ctx, DeactivateOp, request, workflow.NexusOperationOptions{})
@@ -204,6 +232,13 @@ func SetProfile(ctx workflow.Context, userId string, profile UserProfile) (*User
 	return setProfile(ctx, SetProfileRequest{
 		UserId:  userId,
 		Profile: profile,
+	})
+}
+
+func RecordSync(ctx workflow.Context, userId string, report SyncReport) error {
+	return recordSync(ctx, RecordSyncRequest{
+		UserId: userId,
+		Report: report,
 	})
 }
 

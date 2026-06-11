@@ -865,18 +865,44 @@ fn resolve_planned_value_type(
                 is_struct: true,
             })
         }
-        PlannedValueType::Tuple(items) => Err(Error::UnsupportedGoType {
-            context: format!("tuple with {} element(s) in this position", items.len()),
-            reason:
-                "tuples are only supported as direct record fields, not inside lists, maps, or other containers"
-                    .to_string(),
-        }),
-        PlannedValueType::Result { .. } => Err(Error::UnsupportedGoType {
-            context: "result type in this position".to_string(),
-            reason:
-                "results are only supported as direct record fields, not inside lists, maps, or other containers"
-                    .to_string(),
-        }),
+        // Tuples and results inside containers (lists, maps, variant payloads,
+        // resource fields) instantiate shared generic helper types; direct
+        // record fields keep their field-named structs (see `build_field`).
+        PlannedValueType::Tuple(items) => {
+            let type_name = ensure_generic_tuple(items.len(), models)?;
+            let args = items
+                .iter()
+                .map(|item| {
+                    resolve_planned_value_type(item, api_plan, enums, flags, variants, models)
+                        .map(|resolved| resolved.type_expr)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(ResolvedGoType {
+                type_expr: format!("{type_name}[{}]", args.join(", ")),
+                is_struct: true,
+            })
+        }
+        PlannedValueType::Result { ok, err } => {
+            ensure_generic_result(models);
+            let ok_type = match ok {
+                Some(ok) => {
+                    resolve_planned_value_type(ok, api_plan, enums, flags, variants, models)?
+                        .type_expr
+                }
+                None => "struct{}".to_string(),
+            };
+            let err_type = match err {
+                Some(err) => {
+                    resolve_planned_value_type(err, api_plan, enums, flags, variants, models)?
+                        .type_expr
+                }
+                None => "error".to_string(),
+            };
+            Ok(ResolvedGoType {
+                type_expr: format!("Result[{ok_type}, {err_type}]"),
+                is_struct: true,
+            })
+        }
         PlannedValueType::External {
             type_name,
             fallback,
@@ -1222,6 +1248,87 @@ fn type_needs_pointer_when_optional(value: &PlannedValueType, type_expr: &str) -
         return false;
     }
     true
+}
+
+/// Key prefix for generic helper models in the rendered-model map, chosen so
+/// it can never collide with a WIT record or proto message full name.
+const GENERIC_MODEL_KEY_PREFIX: &str = "nex-gen::generic::";
+
+/// Ensures the generic tuple helper type for the given arity is rendered
+/// (e.g. `type Tuple2[T1, T2 any] struct { First T1; Second T2 }`) and returns
+/// its Go type name (`Tuple2`).
+fn ensure_generic_tuple(
+    arity: usize,
+    models: &mut IndexMap<String, RenderedModel>,
+) -> Result<String> {
+    if arity == 0 || arity > TUPLE_FIELD_NAMES.len() {
+        return Err(Error::UnsupportedGoType {
+            context: format!("tuple with {arity} element(s)"),
+            reason: format!(
+                "tuples are supported with 1 to {} elements",
+                TUPLE_FIELD_NAMES.len()
+            ),
+        });
+    }
+
+    let type_name = format!("Tuple{arity}");
+    let key = format!("{GENERIC_MODEL_KEY_PREFIX}{type_name}");
+    if !models.contains_key(&key) {
+        let params = (1..=arity)
+            .map(|index| format!("T{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let fields = (0..arity)
+            .map(|index| RenderedField {
+                name: TUPLE_FIELD_NAMES[index].to_string(),
+                go_type: format!("T{}", index + 1),
+                required: false,
+                conversion: None,
+            })
+            .collect();
+        models.insert(
+            key,
+            RenderedModel {
+                name: format!("{type_name}[{params} any]"),
+                fields,
+                proto_info: None,
+                proto: None,
+                sourced_fields: Vec::new(),
+            },
+        );
+    }
+    Ok(type_name)
+}
+
+/// Ensures the generic result helper type is rendered:
+/// `type Result[T, E any] struct { Result T; Error E }`.
+fn ensure_generic_result(models: &mut IndexMap<String, RenderedModel>) {
+    let key = format!("{GENERIC_MODEL_KEY_PREFIX}Result");
+    if !models.contains_key(&key) {
+        models.insert(
+            key,
+            RenderedModel {
+                name: "Result[T, E any]".to_string(),
+                fields: vec![
+                    RenderedField {
+                        name: "Result".to_string(),
+                        go_type: "T".to_string(),
+                        required: false,
+                        conversion: None,
+                    },
+                    RenderedField {
+                        name: "Error".to_string(),
+                        go_type: "E".to_string(),
+                        required: false,
+                        conversion: None,
+                    },
+                ],
+                proto_info: None,
+                proto: None,
+                sourced_fields: Vec::new(),
+            },
+        );
+    }
 }
 
 /// Generates a named Go struct for a tuple type, using ordinal field names
@@ -2814,8 +2921,28 @@ fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (St
             }
             (message_type.model_name.clone(), true)
         }
-        PlannedValueType::Tuple(_) => ("any".to_string(), false),
-        PlannedValueType::Result { .. } => ("any".to_string(), false),
+        // Mirrors `resolve_planned_value_type`: containers of tuples/results
+        // instantiate the shared generic helper types, which were registered
+        // by `ensure_resource_field_types`.
+        PlannedValueType::Tuple(items) => {
+            let args = items
+                .iter()
+                .map(resolve_resource_value_type)
+                .collect::<Vec<_>>()
+                .join(", ");
+            (format!("Tuple{}[{args}]", items.len()), true)
+        }
+        PlannedValueType::Result { ok, err } => {
+            let ok_type = ok
+                .as_deref()
+                .map(resolve_resource_value_type)
+                .unwrap_or_else(|| "struct{}".to_string());
+            let err_type = err
+                .as_deref()
+                .map(resolve_resource_value_type)
+                .unwrap_or_else(|| "error".to_string());
+            (format!("Result[{ok_type}, {err_type}]"), true)
+        }
         PlannedValueType::External {
             type_name,
             fallback,

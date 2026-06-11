@@ -412,6 +412,19 @@ fn go_type_showcase_generates_expected_types() {
     // Optional scalar -- pointer so absence is representable as nil.
     assert!(rendered.contains("Reason *string"));
 
+    // Tuples and results inside containers instantiate shared generic helper
+    // types instead of field-named structs.
+    assert!(rendered.contains("type SyncReport struct"));
+    assert!(rendered.contains("Route []Tuple2[float64, float64] // required"));
+    assert!(rendered.contains("Attempts []Result[string, string] // required"));
+    assert!(rendered.contains("RegionStatus map[string]Result[string, string] // required"));
+    assert!(rendered.contains("type Tuple2[T1, T2 any] struct {"));
+    assert!(rendered.contains("First T1"));
+    assert!(rendered.contains("Second T2"));
+    assert!(rendered.contains("type Result[T, E any] struct {"));
+    assert!(rendered.contains("Result T"));
+    assert!(rendered.contains("Error E"));
+
     // Resource struct
     assert!(rendered.contains("type User struct"));
     assert!(rendered.contains("DisplayName string // required"));

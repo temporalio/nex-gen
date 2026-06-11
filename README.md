@@ -22,16 +22,11 @@ The WIT definition is the source of truth for the public API. Protobuf descripto
 
 | Feature | What it covers | Python | TypeScript | Go |
 | --- | --- | :-: | :-: | :-: |
-| Core API generation | WIT types become native data types; WIT functions and resources become wrappers that invoke Nexus operations from Temporal workflows | ✅ | ✅ | ✅\* |
+| Core API generation | WIT types become native data types; WIT functions and resources become wrappers that invoke Nexus operations from Temporal workflows | ✅ | ✅ | ✅ |
 | Service definitions | Generated service and operation descriptors, used to register operation handlers and to mock operations in tests | ✅ | ✅ | ❌ |
 | Proto backing | Generated models convert to and from Temporal's protobuf messages at the Nexus boundary (`@nexus.proto` and related directives) | ✅ | ✅ | ✅ |
 | Ergonomics directives | `@nexus` directives that polish the generated API: transforming raw responses into workflow handles, flattening nested parameters, accepting typed workflow/signal functions, doc comments | ✅ | ✅ | ❌ |
 | `json/nexus` runtime | Serialization shim that lets non-proto (WIT-direct) values round-trip through a Temporal server using a wire format shared across languages | ✅ | ✅ | ❌ |
-
-\* Go partial support:
-
-- **Core API generation**: tuples and results are supported as direct record
-  fields only, not inside lists, maps, or other containers.
 
 Because Go has no `json/nexus` runtime, only the proto-backed Go examples share
 a wire format with the Python and TypeScript bindings; WIT-direct Go models
