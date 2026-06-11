@@ -14,7 +14,9 @@ describe("start-workflow generated output", () => {
   test("exposes workflow service metadata", () => {
     expect(StartWorkflowService.name).toBe("StartWorkflowService");
     expect(StartWorkflowService.operations.startWorkflow.name).toBe("StartWorkflow");
-    expect(StartWorkflowService.operations.restartWorkflow.name).toBe("RestartWorkflow");
+    expect(StartWorkflowService.operations.restartWorkflow.name).toBe(
+      "RestartWorkflow",
+    );
     expect(StartWorkflowService.operations.cancelWorkflow.name).toBe("CancelWorkflow");
   });
 

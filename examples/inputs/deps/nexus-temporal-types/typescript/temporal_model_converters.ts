@@ -3,7 +3,9 @@ import type { google, temporal } from "@temporalio/proto";
 import * as workflow from "@temporalio/workflow";
 import type Long from "long";
 
-function int64ToNumber(value: Long | number | string | object | null | undefined): number {
+function int64ToNumber(
+  value: Long | number | string | object | null | undefined,
+): number {
   if (value == null) {
     return 0;
   }
@@ -17,7 +19,11 @@ function int64ToNumber(value: Long | number | string | object | null | undefined
     return value.toNumber();
   }
   if ("low" in value && "high" in value) {
-    const longValue = value as { low: number; high: number; unsigned?: boolean };
+    const longValue = value as {
+      low: number;
+      high: number;
+      unsigned?: boolean;
+    };
     const low = longValue.low >>> 0;
     return longValue.high * 4_294_967_296 + low;
   }
@@ -30,7 +36,10 @@ function durationToMillis(
   if (proto == null) {
     return undefined;
   }
-  return int64ToNumber(proto.seconds) * 1000 + Math.floor((proto.nanos ?? 0) / 1_000_000);
+  return (
+    int64ToNumber(proto.seconds) * 1000 +
+    Math.floor((proto.nanos ?? 0) / 1_000_000)
+  );
 }
 
 export function retryPolicyFromProto(
@@ -63,9 +72,7 @@ export function workflowTypeToProto(
   return { name: workflowFunctionName(workflowType) };
 }
 
-export function workflowFunctionName(
-  value: string | common.Workflow,
-): string {
+export function workflowFunctionName(value: string | common.Workflow): string {
   return typeof value === "string" ? value : common.extractWorkflowType(value);
 }
 
@@ -112,7 +119,9 @@ function configuredPayloadConverter(): common.PayloadConverter {
     }
   ).__TEMPORAL_ACTIVATOR__;
   if (activator?.payloadConverter == null) {
-    throw new Error("payload converter is unavailable outside workflow context");
+    throw new Error(
+      "payload converter is unavailable outside workflow context",
+    );
   }
   return activator.payloadConverter;
 }
@@ -178,8 +187,7 @@ function isValidSearchAttributeValue(
       return value instanceof Date;
     case common.SearchAttributeType.KEYWORD_LIST:
       return (
-        Array.isArray(value) &&
-        value.every((item) => typeof item === "string")
+        Array.isArray(value) && value.every((item) => typeof item === "string")
       );
     default:
       return false;
@@ -244,10 +252,12 @@ export function searchAttributesToProto(
 ): temporal.api.common.v1.ISearchAttributes {
   return {
     indexedFields: Object.fromEntries(
-      searchAttributes.getAll().map((pair): [string, common.Payload] => [
-        pair.key.name,
-        typedSearchAttributePayload(pair.value, pair.key.type),
-      ]),
+      searchAttributes
+        .getAll()
+        .map((pair): [string, common.Payload] => [
+          pair.key.name,
+          typedSearchAttributePayload(pair.value, pair.key.type),
+        ]),
     ),
   };
 }

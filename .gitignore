@@ -30,3 +30,7 @@ examples/python/.idea/
 # TypeScript validation app
 examples/typescript/node_modules/
 examples/typescript/*.tsbuildinfo
+
+# .NET validation app
+**/bin/
+**/obj/
