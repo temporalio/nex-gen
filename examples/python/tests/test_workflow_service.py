@@ -511,7 +511,9 @@ if typing.TYPE_CHECKING:
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
-        _ = assert_type(positional_handle, workflow.ExternalWorkflowHandle[SingleArgWorkflow])
+        _ = assert_type(
+            positional_handle, workflow.ExternalWorkflowHandle[SingleArgWorkflow]
+        )
 
         list_args_handle = await workflow_service.signal_with_start_workflow(
             workflow=ExampleWorkflow.run,
@@ -522,7 +524,9 @@ if typing.TYPE_CHECKING:
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
-        _ = assert_type(list_args_handle, workflow.ExternalWorkflowHandle[ExampleWorkflow])
+        _ = assert_type(
+            list_args_handle, workflow.ExternalWorkflowHandle[ExampleWorkflow]
+        )
 
         string_workflow_handle = await workflow_service.signal_with_start_workflow(
             workflow="ExampleWorkflow",
