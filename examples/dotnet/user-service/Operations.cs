@@ -17,13 +17,24 @@ namespace NexGen.UserService
 
     public class GetUserOptions
     {
-        public string UserId { get; set; } = default!;
+        public GetUserOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
     }
 
     public class UpdateEmailOptions
     {
-        public string UserId { get; set; } = default!;
-        public string Email { get; set; } = default!;
+        public UpdateEmailOptions(string userId, string email)
+        {
+            UserId = userId;
+            Email = email;
+        }
+
+        public string UserId { get; set; }
+        public string Email { get; set; }
     }
 
     public static class UserServiceOperations
@@ -38,10 +49,7 @@ namespace NexGen.UserService
         /// <param name="options">Options for the operation.</param>
         public static Task<User> GetUserAsync(GetUserOptions options)
         {
-            var request = new GetUserRequest
-            {
-                UserId = options.UserId,
-            };
+            var request = new GetUserRequest(options.UserId);
             return GetUserAsync(request);
         }
 
@@ -55,11 +63,7 @@ namespace NexGen.UserService
         /// <param name="options">Options for the operation.</param>
         public static Task<User> UpdateEmailAsync(UpdateEmailOptions options)
         {
-            var request = new UpdateEmailRequest
-            {
-                UserId = options.UserId,
-                Email = options.Email,
-            };
+            var request = new UpdateEmailRequest(options.UserId, options.Email);
             return UpdateEmailAsync(request);
         }
 

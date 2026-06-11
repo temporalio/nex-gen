@@ -17,8 +17,13 @@ namespace NexGen.TypeRoundtripService
 
     public class ActivityOptionsOperationOptions
     {
+        public ActivityOptionsOperationOptions(Temporalio.Common.RetryPolicy retryPolicy)
+        {
+            RetryPolicy = retryPolicy;
+        }
+
         public string? TaskQueue { get; set; }
-        public Temporalio.Common.RetryPolicy RetryPolicy { get; set; } = default!;
+        public Temporalio.Common.RetryPolicy RetryPolicy { get; set; }
         public System.TimeSpan? ScheduleToCloseTimeout { get; set; }
         public Temporalio.Common.Priority? Priority { get; set; }
     }
@@ -50,10 +55,9 @@ namespace NexGen.TypeRoundtripService
         /// <param name="options">Options for the operation.</param>
         public static Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptionsOperationOptions options)
         {
-            var request = new ActivityOptions
+            var request = new ActivityOptions(options.RetryPolicy)
             {
                 TaskQueue = options.TaskQueue,
-                RetryPolicy = options.RetryPolicy,
                 ScheduleToCloseTimeout = options.ScheduleToCloseTimeout,
                 Priority = options.Priority,
             };

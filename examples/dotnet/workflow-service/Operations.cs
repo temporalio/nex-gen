@@ -20,14 +20,20 @@ namespace NexGen.WorkflowService
     /// </summary>
     public class SignalWithStartWorkflowOptions
     {
+        public SignalWithStartWorkflowOptions(string id, string taskQueue)
+        {
+            Id = id;
+            TaskQueue = taskQueue;
+        }
+
         /// <summary>
         /// Unique identifier for the workflow execution.
         /// </summary>
-        public string Id { get; set; } = default!;
+        public string Id { get; set; }
         /// <summary>
         /// Task queue to run the workflow on.
         /// </summary>
-        public string TaskQueue { get; set; } = default!;
+        public string TaskQueue { get; set; }
         /// <summary>
         /// Total workflow execution timeout, including retries and continue-as-new.
         /// </summary>
@@ -116,13 +122,9 @@ namespace NexGen.WorkflowService
         /// <returns>A workflow handle to the started workflow.</returns>
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)
         {
-            var request = new SignalWithStartWorkflowRequest
+            var request = new SignalWithStartWorkflowRequest(workflow, options.Id, options.TaskQueue, signal)
             {
-                Workflow = workflow,
                 Args = args,
-                Id = options.Id,
-                TaskQueue = options.TaskQueue,
-                Signal = signal,
                 SignalArgs = signalArgs,
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
@@ -137,7 +139,7 @@ namespace NexGen.WorkflowService
                 Priority = options.Priority,
                 VersioningOverride = options.VersioningOverride,
                 StartDelay = options.StartDelay,
-                UserMetadata = options.StaticSummary != null || options.StaticDetails != null ? new UserMetadata { StaticSummary = options.StaticSummary, StaticDetails = options.StaticDetails } : null,
+                UserMetadata = options.StaticSummary != null || options.StaticDetails != null ? new UserMetadata() { StaticSummary = options.StaticSummary, StaticDetails = options.StaticDetails } : null,
             };
             return SignalWithStartWorkflowAsync(request);
         }
@@ -153,13 +155,9 @@ namespace NexGen.WorkflowService
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)
         {
             var (workflowMethod, workflowArgs) = ExtractCall(workflow);
-            var request = new SignalWithStartWorkflowRequest
+            var request = new SignalWithStartWorkflowRequest(NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.Id, options.TaskQueue, signal)
             {
-                Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
                 Args = workflowArgs,
-                Id = options.Id,
-                TaskQueue = options.TaskQueue,
-                Signal = signal,
                 SignalArgs = signalArgs,
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
@@ -174,7 +172,7 @@ namespace NexGen.WorkflowService
                 Priority = options.Priority,
                 VersioningOverride = options.VersioningOverride,
                 StartDelay = options.StartDelay,
-                UserMetadata = options.StaticSummary != null || options.StaticDetails != null ? new UserMetadata { StaticSummary = options.StaticSummary, StaticDetails = options.StaticDetails } : null,
+                UserMetadata = options.StaticSummary != null || options.StaticDetails != null ? new UserMetadata() { StaticSummary = options.StaticSummary, StaticDetails = options.StaticDetails } : null,
             };
             return SignalWithStartWorkflowAsync(request);
         }
@@ -190,13 +188,9 @@ namespace NexGen.WorkflowService
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow>(string workflow, IReadOnlyCollection<object?>? args, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)
         {
             var (signalMethod, signalArgs) = ExtractCall(signal);
-            var request = new SignalWithStartWorkflowRequest
+            var request = new SignalWithStartWorkflowRequest(workflow, options.Id, options.TaskQueue, NexGen.Support.TemporalFunctionNames.SignalName(signalMethod))
             {
-                Workflow = workflow,
                 Args = args,
-                Id = options.Id,
-                TaskQueue = options.TaskQueue,
-                Signal = NexGen.Support.TemporalFunctionNames.SignalName(signalMethod),
                 SignalArgs = signalArgs,
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
@@ -211,7 +205,7 @@ namespace NexGen.WorkflowService
                 Priority = options.Priority,
                 VersioningOverride = options.VersioningOverride,
                 StartDelay = options.StartDelay,
-                UserMetadata = options.StaticSummary != null || options.StaticDetails != null ? new UserMetadata { StaticSummary = options.StaticSummary, StaticDetails = options.StaticDetails } : null,
+                UserMetadata = options.StaticSummary != null || options.StaticDetails != null ? new UserMetadata() { StaticSummary = options.StaticSummary, StaticDetails = options.StaticDetails } : null,
             };
             return SignalWithStartWorkflowAsync(request);
         }
@@ -227,13 +221,9 @@ namespace NexGen.WorkflowService
         {
             var (workflowMethod, workflowArgs) = ExtractCall(workflow);
             var (signalMethod, signalArgs) = ExtractCall(signal);
-            var request = new SignalWithStartWorkflowRequest
+            var request = new SignalWithStartWorkflowRequest(NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.Id, options.TaskQueue, NexGen.Support.TemporalFunctionNames.SignalName(signalMethod))
             {
-                Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
                 Args = workflowArgs,
-                Id = options.Id,
-                TaskQueue = options.TaskQueue,
-                Signal = NexGen.Support.TemporalFunctionNames.SignalName(signalMethod),
                 SignalArgs = signalArgs,
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
@@ -248,7 +238,7 @@ namespace NexGen.WorkflowService
                 Priority = options.Priority,
                 VersioningOverride = options.VersioningOverride,
                 StartDelay = options.StartDelay,
-                UserMetadata = options.StaticSummary != null || options.StaticDetails != null ? new UserMetadata { StaticSummary = options.StaticSummary, StaticDetails = options.StaticDetails } : null,
+                UserMetadata = options.StaticSummary != null || options.StaticDetails != null ? new UserMetadata() { StaticSummary = options.StaticSummary, StaticDetails = options.StaticDetails } : null,
             };
             return SignalWithStartWorkflowAsync(request);
         }

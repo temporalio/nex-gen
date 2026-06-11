@@ -10,61 +10,102 @@ namespace NexGen.FunctionExecution
 
     public class ExecuteFunctionRequest
     {
-        public string Function { get; init; } = default!;
+        public ExecuteFunctionRequest(string function, string name, bool enabled)
+        {
+            Function = function;
+            Name = name;
+            Enabled = enabled;
+        }
+
+        public string Function { get; init; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; init; } = default!;
+        public string Name { get; init; }
         /// <summary>
         /// The enabled argument for the function.
         /// </summary>
-        public bool Enabled { get; init; } = default!;
+        public bool Enabled { get; init; }
     }
 
     public class ExecuteFunctionResult
     {
-        public string Value { get; init; } = default!;
+        public ExecuteFunctionResult(string value)
+        {
+            Value = value;
+        }
+
+        public string Value { get; init; }
     }
 
     public class ExecuteCountedFunctionRequest
     {
-        public string Function { get; init; } = default!;
+        public ExecuteCountedFunctionRequest(string function, string name, int count)
+        {
+            Function = function;
+            Name = name;
+            Count = count;
+        }
+
+        public string Function { get; init; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; init; } = default!;
+        public string Name { get; init; }
         /// <summary>
         /// The count argument for the function.
         /// </summary>
-        public int Count { get; init; } = default!;
+        public int Count { get; init; }
     }
 
     public class ExecuteCountedFunctionResult
     {
-        public string Value { get; init; } = default!;
+        public ExecuteCountedFunctionResult(string value)
+        {
+            Value = value;
+        }
+
+        public string Value { get; init; }
     }
 
     public class ExecuteNamedFunctionRequest
     {
-        public string Function { get; init; } = default!;
+        public ExecuteNamedFunctionRequest(string function, string name, bool enabled)
+        {
+            Function = function;
+            Name = name;
+            Enabled = enabled;
+        }
+
+        public string Function { get; init; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; init; } = default!;
+        public string Name { get; init; }
         /// <summary>
         /// The enabled argument for the function.
         /// </summary>
-        public bool Enabled { get; init; } = default!;
+        public bool Enabled { get; init; }
     }
 
     public class ExecuteNamedFunctionResult
     {
-        public string Value { get; init; } = default!;
+        public ExecuteNamedFunctionResult(string value)
+        {
+            Value = value;
+        }
+
+        public string Value { get; init; }
     }
 
     public class ExecuteVarargsFunctionRequest
     {
-        public string Function { get; init; } = default!;
+        public ExecuteVarargsFunctionRequest(string function)
+        {
+            Function = function;
+        }
+
+        public string Function { get; init; }
         /// <summary>
         /// Arguments for the function.
         /// </summary>
@@ -73,12 +114,22 @@ namespace NexGen.FunctionExecution
 
     public class ExecuteVarargsFunctionResult
     {
-        public string Value { get; init; } = default!;
+        public ExecuteVarargsFunctionResult(string value)
+        {
+            Value = value;
+        }
+
+        public string Value { get; init; }
     }
 
     public class ExecuteNamedVarargsFunctionRequest
     {
-        public string Function { get; init; } = default!;
+        public ExecuteNamedVarargsFunctionRequest(string function)
+        {
+            Function = function;
+        }
+
+        public string Function { get; init; }
         /// <summary>
         /// Arguments for the function.
         /// </summary>
@@ -87,7 +138,12 @@ namespace NexGen.FunctionExecution
 
     public class ExecuteNamedVarargsFunctionResult
     {
-        public string Value { get; init; } = default!;
+        public ExecuteNamedVarargsFunctionResult(string value)
+        {
+            Value = value;
+        }
+
+        public string Value { get; init; }
     }
 
 }

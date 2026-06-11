@@ -17,31 +17,59 @@ namespace NexGen.TypeShowcase
 
     public class GetUserOptions
     {
-        public string UserId { get; set; } = default!;
+        public GetUserOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
         public string? ConsistencyToken { get; set; }
     }
 
     public class UpdateEmailOptions
     {
-        public string UserId { get; set; } = default!;
-        public string Email { get; set; } = default!;
+        public UpdateEmailOptions(string userId, string email)
+        {
+            UserId = userId;
+            Email = email;
+        }
+
+        public string UserId { get; set; }
+        public string Email { get; set; }
     }
 
     public class RenameOptions
     {
-        public string UserId { get; set; } = default!;
-        public string DisplayName { get; set; } = default!;
+        public RenameOptions(string userId, string displayName)
+        {
+            UserId = userId;
+            DisplayName = displayName;
+        }
+
+        public string UserId { get; set; }
+        public string DisplayName { get; set; }
     }
 
     public class SetProfileOptions
     {
-        public string UserId { get; set; } = default!;
-        public UserProfile Profile { get; set; } = default!;
+        public SetProfileOptions(string userId, UserProfile profile)
+        {
+            UserId = userId;
+            Profile = profile;
+        }
+
+        public string UserId { get; set; }
+        public UserProfile Profile { get; set; }
     }
 
     public class DeactivateOptions
     {
-        public string UserId { get; set; } = default!;
+        public DeactivateOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
         public string? Reason { get; set; }
     }
 
@@ -57,9 +85,8 @@ namespace NexGen.TypeShowcase
         /// <param name="options">Options for the operation.</param>
         public static Task<User> GetUserAsync(GetUserOptions options)
         {
-            var request = new GetUserRequest
+            var request = new GetUserRequest(options.UserId)
             {
-                UserId = options.UserId,
                 ConsistencyToken = options.ConsistencyToken,
             };
             return GetUserAsync(request);
@@ -75,11 +102,7 @@ namespace NexGen.TypeShowcase
         /// <param name="options">Options for the operation.</param>
         public static Task<User> UpdateEmailAsync(UpdateEmailOptions options)
         {
-            var request = new UpdateEmailRequest
-            {
-                UserId = options.UserId,
-                Email = options.Email,
-            };
+            var request = new UpdateEmailRequest(options.UserId, options.Email);
             return UpdateEmailAsync(request);
         }
 
@@ -93,11 +116,7 @@ namespace NexGen.TypeShowcase
         /// <param name="options">Options for the operation.</param>
         public static Task<User> RenameAsync(RenameOptions options)
         {
-            var request = new RenameRequest
-            {
-                UserId = options.UserId,
-                DisplayName = options.DisplayName,
-            };
+            var request = new RenameRequest(options.UserId, options.DisplayName);
             return RenameAsync(request);
         }
 
@@ -111,11 +130,7 @@ namespace NexGen.TypeShowcase
         /// <param name="options">Options for the operation.</param>
         public static Task<User> SetProfileAsync(SetProfileOptions options)
         {
-            var request = new SetProfileRequest
-            {
-                UserId = options.UserId,
-                Profile = options.Profile,
-            };
+            var request = new SetProfileRequest(options.UserId, options.Profile);
             return SetProfileAsync(request);
         }
 
@@ -128,9 +143,8 @@ namespace NexGen.TypeShowcase
         /// <param name="options">Options for the operation.</param>
         public static Task DeactivateAsync(DeactivateOptions options)
         {
-            var request = new DeactivateRequest
+            var request = new DeactivateRequest(options.UserId)
             {
-                UserId = options.UserId,
                 Reason = options.Reason,
             };
             return DeactivateAsync(request);
