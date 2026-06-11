@@ -116,7 +116,7 @@ async def _restart_workflow(
 @typing.overload
 async def restart_workflow(
     workflow: str,
-    *positional_args: object,
+    *args: object,
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: datetime.timedelta | None = ...,
@@ -144,7 +144,7 @@ async def restart_workflow(
         [SelfType, typing_extensions.Unpack[WorkflowArgs]],
         collections.abc.Awaitable[object],
     ],
-    *positional_args: typing_extensions.Unpack[WorkflowArgs],
+    *args: typing_extensions.Unpack[WorkflowArgs],
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: datetime.timedelta | None = ...,

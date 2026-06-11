@@ -343,7 +343,7 @@ fn python_request_models_are_write_only() {
     assert!(rendered.contains("async def signal_with_start_workflow("));
     assert!(rendered.contains("@typing.overload"));
     assert!(rendered.contains("workflow: str,"));
-    assert!(rendered.contains("*positional_args: object,"));
+    assert!(rendered.contains("*args: object,"));
     assert!(rendered.contains("id: str,"));
     assert!(rendered.contains("args: list[typing.Any] | None = ...,"));
     assert!(rendered.contains(
@@ -353,7 +353,7 @@ fn python_request_models_are_write_only() {
     assert!(rendered.contains("WorkflowResult = typing.TypeVar(\"WorkflowResult\")"));
     assert!(rendered.contains("SelfType = typing.TypeVar(\"SelfType\")"));
     assert!(rendered.contains(") -> ExternalWorkflowHandle[SelfType]:"));
-    assert!(rendered.contains("*positional_args: typing_extensions.Unpack[WorkflowArgs],"));
+    assert!(rendered.contains("*args: typing_extensions.Unpack[WorkflowArgs],"));
     assert!(rendered.contains("args: list[typing.Any],"));
     assert!(!rendered.contains("tuple[FirstWorkflowArg"));
     assert!(rendered.contains(

@@ -35,7 +35,7 @@ async def _execute_varargs_function(
 @typing.overload
 async def execute_varargs_function(
     function: collections.abc.Callable[[typing_extensions.Unpack[FunctionArgs]], str],
-    *positional_args: typing_extensions.Unpack[FunctionArgs],
+    *args: typing_extensions.Unpack[FunctionArgs],
 ) -> temporalio.workflow.NexusOperationHandle[ExecuteVarargsFunctionResult]: ...
 
 

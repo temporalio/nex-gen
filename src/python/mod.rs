@@ -4388,7 +4388,13 @@ fn render_function_unpacked_overload(
             if positional_arg.variadic {
                 output.push('*');
             }
-            output.push_str(&positional_arg.name);
+            output.push_str(&function_overload_positional_arg_render_name(
+                positional_arg,
+                unpacked_input,
+                primary_function,
+                primary_case,
+                overload_cases,
+            ));
             output.push_str(": ");
             output.push_str(&positional_arg.annotation);
             output.push_str(",\n");
@@ -4482,6 +4488,100 @@ fn render_function_unpacked_overload(
         overload_cases,
     ));
     output.push_str(": ...\n");
+}
+
+fn function_overload_positional_arg_render_name(
+    positional_arg: &RenderedFunctionOverloadPositionalArg,
+    unpacked_input: &RenderedUnpackedInput,
+    primary_function: Option<&RenderedFunctionField>,
+    primary_case: Option<&RenderedFunctionOverloadCase>,
+    overload_cases: &[RenderedFunctionOverloadCase],
+) -> String {
+    if positional_arg.variadic
+        && positional_arg.name == "positional_args"
+        && !function_unpacked_overload_renders_parameter_name(
+            unpacked_input,
+            primary_function,
+            primary_case,
+            overload_cases,
+            "args",
+        )
+    {
+        "args".to_string()
+    } else {
+        positional_arg.name.clone()
+    }
+}
+
+fn function_unpacked_overload_renders_parameter_name(
+    unpacked_input: &RenderedUnpackedInput,
+    primary_function: Option<&RenderedFunctionField>,
+    primary_case: Option<&RenderedFunctionOverloadCase>,
+    overload_cases: &[RenderedFunctionOverloadCase],
+    name: &str,
+) -> bool {
+    if let Some(function) = primary_function {
+        if function.callable_field_name == name {
+            return true;
+        }
+        if primary_case.is_some_and(|case| {
+            case.positional_args.iter().any(|arg| arg.name == name)
+                || (case.args_annotation.is_some() && case.args_field_name == name)
+        }) {
+            return true;
+        }
+    }
+
+    for field in &unpacked_input.parameters {
+        if primary_function.is_some_and(|function| function.callable_field_name == field.attr_name)
+        {
+            continue;
+        }
+        if primary_function
+            .and_then(python_function_fixed_positional_args)
+            .is_some_and(|parameters| {
+                parameters
+                    .iter()
+                    .any(|parameter| parameter.name == field.attr_name)
+            })
+        {
+            continue;
+        }
+        if primary_function.is_some_and(|function| function.args_field_name == field.attr_name) {
+            if primary_case.is_some_and(|case| case.args_annotation.is_some())
+                && field.attr_name == name
+            {
+                return true;
+            }
+            continue;
+        }
+
+        if overload_cases
+            .iter()
+            .any(|case| case.callable_field_name == field.attr_name)
+        {
+            if field.attr_name == name {
+                return true;
+            }
+            continue;
+        }
+
+        if let Some(function_case) = overload_cases
+            .iter()
+            .find(|function_case| function_case.args_field_name == field.attr_name)
+        {
+            if function_case.args_annotation.is_some() && field.attr_name == name {
+                return true;
+            }
+            continue;
+        }
+
+        if field.attr_name == name {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn render_function_unpacked_overload_case_doc(
@@ -5894,7 +5994,7 @@ class Example(enum.Enum):
         assert!(!output.contains("signal_args: tuple[typing.Any, ...] | None = None"));
         assert!(output.contains("@typing.overload"));
         assert!(output.contains("workflow: str,"));
-        assert!(output.contains("*positional_args: object,"));
+        assert!(output.contains("*args: object,"));
         assert!(output.contains("args: list[typing.Any] | None = ...,"));
         assert!(output.contains(
             "workflow: collections.abc.Callable[[SelfType, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[WorkflowResult]],"
@@ -5904,7 +6004,7 @@ class Example(enum.Enum):
         assert!(output.contains("SelfType = typing.TypeVar(\"SelfType\")"));
         assert!(output.contains(") -> ExternalWorkflowHandle[SelfType]:"));
         assert!(output.contains("async def signal_with_start_workflow("));
-        assert!(output.contains("*positional_args: typing_extensions.Unpack[WorkflowArgs],"));
+        assert!(output.contains("*args: typing_extensions.Unpack[WorkflowArgs],"));
         assert!(output.contains("args: list[typing.Any],"));
         assert!(!output.contains("tuple[FirstWorkflowArg"));
         assert!(output.contains(

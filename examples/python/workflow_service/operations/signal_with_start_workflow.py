@@ -52,7 +52,7 @@ async def _signal_with_start_workflow(
 @typing.overload
 async def signal_with_start_workflow(
     workflow: str,
-    *positional_args: object,
+    *args: object,
     id: str,
     task_queue: str,
     signal: str,
@@ -114,7 +114,7 @@ async def signal_with_start_workflow(
         [SelfType, typing_extensions.Unpack[WorkflowArgs]],
         collections.abc.Awaitable[WorkflowResult],
     ],
-    *positional_args: typing_extensions.Unpack[WorkflowArgs],
+    *args: typing_extensions.Unpack[WorkflowArgs],
     id: str,
     task_queue: str,
     signal: str,
@@ -176,7 +176,7 @@ async def signal_with_start_workflow(
 @typing.overload
 async def signal_with_start_workflow(
     workflow: str,
-    *positional_args: object,
+    *args: object,
     id: str,
     task_queue: str,
     signal: collections.abc.Callable[
@@ -240,7 +240,7 @@ async def signal_with_start_workflow(
         [SelfType, typing_extensions.Unpack[WorkflowArgs]],
         collections.abc.Awaitable[WorkflowResult],
     ],
-    *positional_args: typing_extensions.Unpack[WorkflowArgs],
+    *args: typing_extensions.Unpack[WorkflowArgs],
     id: str,
     task_queue: str,
     signal: collections.abc.Callable[
@@ -304,7 +304,7 @@ async def signal_with_start_workflow(
 @typing.overload
 async def signal_with_start_workflow(
     workflow: str,
-    *positional_args: object,
+    *args: object,
     id: str,
     task_queue: str,
     signal: collections.abc.Callable[
@@ -370,7 +370,7 @@ async def signal_with_start_workflow(
         [SelfType, typing_extensions.Unpack[WorkflowArgs]],
         collections.abc.Awaitable[WorkflowResult],
     ],
-    *positional_args: typing_extensions.Unpack[WorkflowArgs],
+    *args: typing_extensions.Unpack[WorkflowArgs],
     id: str,
     task_queue: str,
     signal: collections.abc.Callable[
@@ -436,7 +436,7 @@ async def signal_with_start_workflow(
 @typing.overload
 async def signal_with_start_workflow(
     workflow: str,
-    *positional_args: object,
+    *args: object,
     id: str,
     task_queue: str,
     signal: collections.abc.Callable[..., None | collections.abc.Awaitable[None]],
@@ -498,7 +498,7 @@ async def signal_with_start_workflow(
         [SelfType, typing_extensions.Unpack[WorkflowArgs]],
         collections.abc.Awaitable[WorkflowResult],
     ],
-    *positional_args: typing_extensions.Unpack[WorkflowArgs],
+    *args: typing_extensions.Unpack[WorkflowArgs],
     id: str,
     task_queue: str,
     signal: collections.abc.Callable[..., None | collections.abc.Awaitable[None]],
