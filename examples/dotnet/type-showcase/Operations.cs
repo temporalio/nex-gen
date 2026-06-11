@@ -62,6 +62,18 @@ namespace NexGen.TypeShowcase
         public UserProfile Profile { get; set; }
     }
 
+    public class RecordSyncOptions
+    {
+        public RecordSyncOptions(string userId, SyncReport report)
+        {
+            UserId = userId;
+            Report = report;
+        }
+
+        public string UserId { get; set; }
+        public SyncReport Report { get; set; }
+    }
+
     public class DeactivateOptions
     {
         public DeactivateOptions(string userId)
@@ -132,6 +144,19 @@ namespace NexGen.TypeShowcase
         {
             var request = new SetProfileRequest(options.UserId, options.Profile);
             return SetProfileAsync(request);
+        }
+
+        private static async Task RecordSyncAsync(RecordSyncRequest request)
+        {
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            await client.ExecuteNexusOperationAsync(svc => svc.RecordSync(request)).ConfigureAwait(true);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        public static Task RecordSyncAsync(RecordSyncOptions options)
+        {
+            var request = new RecordSyncRequest(options.UserId, options.Report);
+            return RecordSyncAsync(request);
         }
 
         private static async Task DeactivateAsync(DeactivateRequest request)

@@ -147,6 +147,32 @@ namespace NexGen.TypeShowcase
         public (double, double)? Coordinates { get; init; }
     }
 
+    internal class RecordSyncRequest
+    {
+        internal RecordSyncRequest(string userId, SyncReport report)
+        {
+            UserId = userId;
+            Report = report;
+        }
+
+        public string UserId { get; init; }
+        public SyncReport Report { get; init; }
+    }
+
+    public class SyncReport
+    {
+        public SyncReport(IReadOnlyList<(double, double)> route, IReadOnlyList<NexusResult<string, string>> attempts, IReadOnlyDictionary<string, NexusResult<string, string>> regionStatus)
+        {
+            Route = route;
+            Attempts = attempts;
+            RegionStatus = regionStatus;
+        }
+
+        public IReadOnlyList<(double, double)> Route { get; init; }
+        public IReadOnlyList<NexusResult<string, string>> Attempts { get; init; }
+        public IReadOnlyDictionary<string, NexusResult<string, string>> RegionStatus { get; init; }
+    }
+
     internal class DeactivateRequest
     {
         internal DeactivateRequest(string userId)

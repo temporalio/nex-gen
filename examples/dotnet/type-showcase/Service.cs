@@ -24,6 +24,9 @@ namespace NexGen.TypeShowcase
         [NexusOperation("SetProfile")]
         User SetProfile(SetProfileRequest request);
 
+        [NexusOperation("RecordSync")]
+        void RecordSync(RecordSyncRequest request);
+
         [NexusOperation("Deactivate")]
         void Deactivate(DeactivateRequest request);
 
@@ -44,6 +47,7 @@ namespace NexGen.TypeShowcase
                 [("TypeShowcase", "UpdateEmail")] = Services["TypeShowcase"].Operations["UpdateEmail"],
                 [("TypeShowcase", "Rename")] = Services["TypeShowcase"].Operations["Rename"],
                 [("TypeShowcase", "SetProfile")] = Services["TypeShowcase"].Operations["SetProfile"],
+                [("TypeShowcase", "RecordSync")] = Services["TypeShowcase"].Operations["RecordSync"],
                 [("TypeShowcase", "Deactivate")] = Services["TypeShowcase"].Operations["Deactivate"],
             };
     }
