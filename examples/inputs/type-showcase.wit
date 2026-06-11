@@ -70,6 +70,17 @@ interface type-showcase {
     profile: user-profile,
   }
 
+  record sync-report {
+    route: list<tuple<f64, f64>>,
+    attempts: list<result<string, string>>,
+    region-status: map<string, result<string, string>>,
+  }
+
+  record record-sync-request {
+    user-id: string,
+    report: sync-report,
+  }
+
   record deactivate-request {
     user-id: string,
     reason: option<string>,
@@ -79,5 +90,6 @@ interface type-showcase {
   update-email: func(request: update-email-request) -> user-result;
   rename: func(request: rename-request) -> user-result;
   set-profile: func(request: set-profile-request) -> user-result;
+  record-sync: func(request: record-sync-request);
   deactivate: func(request: deactivate-request);
 }

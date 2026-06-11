@@ -12,7 +12,7 @@ import {
   UserStatus,
   TypeShowcase,
 } from "../type-showcase/index.ts";
-import type { SetProfileRequest } from "../type-showcase/index.ts";
+import type { RecordSyncRequest, SetProfileRequest } from "../type-showcase/index.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const wireFixtureDir = fileURLToPath(
@@ -20,6 +20,8 @@ const wireFixtureDir = fileURLToPath(
 );
 const typescriptWireFixture = `${wireFixtureDir}set-profile-request.typescript.payloads`;
 const pythonWireFixture = `${wireFixtureDir}set-profile-request.python.payloads`;
+const typescriptRecordSyncFixture = `${wireFixtureDir}record-sync-request.typescript.payloads`;
+const pythonRecordSyncFixture = `${wireFixtureDir}record-sync-request.python.payloads`;
 const workflowsPath = fileURLToPath(
   new URL("./workflows/type-showcase.ts", import.meta.url),
 );
@@ -100,6 +102,7 @@ describe("type-showcase generated output", () => {
     expect(TypeShowcase.operations.updateEmail.name).toBe("UpdateEmail");
     expect(TypeShowcase.operations.rename.name).toBe("Rename");
     expect(TypeShowcase.operations.setProfile.name).toBe("SetProfile");
+    expect(TypeShowcase.operations.recordSync.name).toBe("RecordSync");
     expect(TypeShowcase.operations.deactivate.name).toBe("Deactivate");
     expect(UserStatus.Active).toBe(0);
     expect(UserCapability.ReadProfile).toBe(1);
@@ -125,6 +128,9 @@ describe("type-showcase generated output", () => {
         async setProfile(_ctx, input) {
           calls.push(["SetProfile", input]);
           return userResource("new@example.com", "New Name");
+        },
+        async recordSync(_ctx, input) {
+          calls.push(["RecordSync", input]);
         },
         async deactivate(_ctx, input) {
           calls.push(["Deactivate", input]);
@@ -182,6 +188,26 @@ describe("type-showcase generated output", () => {
             userId: "user-123",
           },
         ],
+        [
+          "RecordSync",
+          {
+            report: {
+              route: [
+                [45.5152, -122.6784],
+                [47.6062, -122.3321],
+              ],
+              attempts: [
+                { tag: "ok", value: "synced" },
+                { tag: "err", value: "timeout" },
+              ],
+              regionStatus: {
+                "us-west": { tag: "ok", value: "healthy" },
+                "eu-central": { tag: "err", value: "degraded" },
+              },
+            },
+            userId: "user-123",
+          },
+        ],
       ]);
     });
   });
@@ -194,5 +220,38 @@ describe("type-showcase generated output", () => {
     expect(payloadJson(typescriptPayloads)["user-id"]).toBe("user-123");
     expect(decodeRequest(readPayloads(typescriptWireFixture))).toEqual(expected);
     expect(decodeRequest(readPayloads(pythonWireFixture))).toEqual(expected);
+  });
+
+  test("round-trips containers of tuples and results across languages", () => {
+    // Map keys containing dashes are data and must be preserved verbatim by
+    // the type-directed runtime, unlike record field names.
+    const expected: RecordSyncRequest = {
+      userId: "user-123",
+      report: {
+        route: [
+          [45.5152, -122.6784],
+          [47.6062, -122.3321],
+        ],
+        attempts: [
+          { tag: "ok", value: "synced" },
+          { tag: "err", value: "timeout" },
+        ],
+        regionStatus: {
+          "us-west": { tag: "ok", value: "healthy" },
+          "eu-central": { tag: "err", value: "degraded" },
+        },
+      },
+    };
+    const typescriptPayloads =
+      common.toPayloads(
+        payloadConverter,
+        nexusValue("type-showcase.record-sync-request", expected),
+      ) ?? [];
+    writePayloads(typescriptRecordSyncFixture, typescriptPayloads);
+
+    const decode = (payloads: temporal.api.common.v1.IPayload[]): RecordSyncRequest =>
+      common.fromPayloadsAtIndex<RecordSyncRequest>(payloadConverter, 0, payloads);
+    expect(decode(readPayloads(typescriptRecordSyncFixture))).toEqual(expected);
+    expect(decode(readPayloads(pythonRecordSyncFixture))).toEqual(expected);
   });
 });

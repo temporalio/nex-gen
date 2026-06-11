@@ -19,6 +19,10 @@ OUTPUT_PATH = APP_ROOT.parent / "type_showcase"
 WIRE_FIXTURE_DIR = APP_ROOT.parent.parent / "wire" / "type-showcase"
 PYTHON_WIRE_FIXTURE = WIRE_FIXTURE_DIR / "set-profile-request.python.payloads"
 TYPESCRIPT_WIRE_FIXTURE = WIRE_FIXTURE_DIR / "set-profile-request.typescript.payloads"
+PYTHON_RECORD_SYNC_FIXTURE = WIRE_FIXTURE_DIR / "record-sync-request.python.payloads"
+TYPESCRIPT_RECORD_SYNC_FIXTURE = (
+    WIRE_FIXTURE_DIR / "record-sync-request.typescript.payloads"
+)
 
 import type_showcase
 import type_showcase.models
@@ -60,6 +64,17 @@ def user_profile() -> type_showcase.models.UserProfile:
         ),
         metadata={"tier": "enterprise"},
         tags=["admin", "beta"],
+    )
+
+
+def sync_report() -> type_showcase.models.SyncReport:
+    return type_showcase.models.SyncReport(
+        route=[(45.5152, -122.6784), (47.6062, -122.3321)],
+        attempts=[("ok", "synced"), ("err", "timeout")],
+        region_status={
+            "us-west": ("ok", "healthy"),
+            "eu-central": ("err", "degraded"),
+        },
     )
 
 
@@ -168,6 +183,16 @@ class TypeShowcaseHandler:
         return user_resource(email="old@example.com", display_name="Old Name")
 
     @sync_operation
+    async def record_sync(
+        self,
+        _ctx: StartOperationContext,
+        input: type_showcase.models.RecordSyncRequest,
+    ) -> None:
+        self.calls.append(("RecordSync", input))
+        assert input.user_id == "user-123"
+        assert input.report == sync_report()
+
+    @sync_operation
     async def deactivate(
         self,
         _ctx: StartOperationContext,
@@ -189,6 +214,11 @@ class TypeShowcaseCallerWorkflow:
         updated_user = await user.update_email("new@example.com")
         renamed_user = await updated_user.rename("New Name")
         await renamed_user.deactivate(reason="requested")
+        record_sync_handle = await type_showcase.record_sync(
+            user_id="user-123",
+            report=sync_report(),
+        )
+        await record_sync_handle
         return renamed_user
 
 
@@ -250,6 +280,48 @@ async def test_type_showcase_request_wire_fixtures_are_cross_language_compatible
     assert await decode_request(read_payloads(TYPESCRIPT_WIRE_FIXTURE)) == expected
 
 
+def sample_record_sync_request() -> type_showcase.models.RecordSyncRequest:
+    return type_showcase.models.RecordSyncRequest(
+        user_id="user-123",
+        report=sync_report(),
+    )
+
+
+async def decode_record_sync_request(
+    payloads: Payloads,
+) -> type_showcase.models.RecordSyncRequest:
+    values = cast(
+        list[object],
+        await nex_gen_runtime.nexus_data_converter.decode_wrapper(
+            payloads,
+            [type_showcase.models.RecordSyncRequest],
+        ),
+    )
+    assert len(values) == 1
+    value = values[0]
+    assert isinstance(value, type_showcase.models.RecordSyncRequest)
+    return value
+
+
+async def test_record_sync_wire_fixtures_are_cross_language_compatible() -> None:
+    """Containers of tuples and results -- including map keys containing
+    dashes, which must be preserved verbatim -- round-trip across languages."""
+    expected = sample_record_sync_request()
+    python_payloads = await nex_gen_runtime.nexus_data_converter.encode_wrapper(
+        [expected]
+    )
+    write_payloads(PYTHON_RECORD_SYNC_FIXTURE, python_payloads)
+
+    assert (
+        await decode_record_sync_request(read_payloads(PYTHON_RECORD_SYNC_FIXTURE))
+        == expected
+    )
+    assert (
+        await decode_record_sync_request(read_payloads(TYPESCRIPT_RECORD_SYNC_FIXTURE))
+        == expected
+    )
+
+
 async def test_get_user_returns_wit_user_resource_through_real_nexus_client(
     env: WorkflowEnvironment,
 ) -> None:
@@ -284,7 +356,7 @@ async def test_get_user_returns_wit_user_resource_through_real_nexus_client(
         user.profile.capabilities & type_showcase.models.UserCapability.ReadProfile
     ) == type_showcase.models.UserCapability.ReadProfile
 
-    assert len(service_handler.calls) == 4
+    assert len(service_handler.calls) == 5
     get_user_operation, get_user_request = service_handler.calls[0]
     assert get_user_operation == "GetUser"
     assert isinstance(get_user_request, type_showcase.models.GetUserRequest)
@@ -308,3 +380,11 @@ async def test_get_user_returns_wit_user_resource_through_real_nexus_client(
     assert isinstance(deactivate_request, type_showcase.models.DeactivateRequest)
     assert deactivate_request.user_id == "user-123"
     assert deactivate_request.reason == "requested"
+
+    # Containers of tuples and results round-trip through the json/nexus
+    # wire format.
+    record_sync_operation, record_sync_request = service_handler.calls[4]
+    assert record_sync_operation == "RecordSync"
+    assert isinstance(record_sync_request, type_showcase.models.RecordSyncRequest)
+    assert record_sync_request.user_id == "user-123"
+    assert record_sync_request.report == sync_report()

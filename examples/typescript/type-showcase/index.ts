@@ -5,6 +5,7 @@ export { getUser } from "./operations/get-user.ts";
 export { updateEmail } from "./operations/update-email.ts";
 export { rename } from "./operations/rename.ts";
 export { setProfile } from "./operations/set-profile.ts";
+export { recordSync } from "./operations/record-sync.ts";
 export { deactivate } from "./operations/deactivate.ts";
 export { UserStatus, UserCapability } from "./models.ts";
 export type {
@@ -15,6 +16,8 @@ export type {
   SetProfileRequest,
   UserProfile,
   PostalAddress,
+  RecordSyncRequest,
+  SyncReport,
   DeactivateRequest,
 } from "./models.ts";
 export { User } from "./resources.ts";

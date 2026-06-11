@@ -7,11 +7,13 @@ from .operations.get_user import get_user
 from ._resources.user import update_email
 from ._resources.user import rename
 from .operations.set_profile import set_profile
+from .operations.record_sync import record_sync
 from ._resources.user import deactivate
 
 __all__ = [
     "deactivate",
     "get_user",
+    "record_sync",
     "rename",
     "set_profile",
     "update_email",
@@ -35,6 +37,10 @@ __nexus_operation_registry__ = {
         "TypeShowcase",
         "SetProfile",
     ): _service.TypeShowcase.set_profile,
+    (
+        "TypeShowcase",
+        "RecordSync",
+    ): _service.TypeShowcase.record_sync,
     (
         "TypeShowcase",
         "Deactivate",
