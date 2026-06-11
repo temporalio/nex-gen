@@ -34,6 +34,13 @@ async def _execute_named_varargs_function(
 async def execute_named_varargs_function(
     function: str,
     *positional_args: object,
+) -> temporalio.workflow.NexusOperationHandle[ExecuteNamedVarargsFunctionResult]: ...
+
+
+@typing.overload
+async def execute_named_varargs_function(
+    function: str,
+    *,
     args: list[typing.Any] | None = ...,
 ) -> temporalio.workflow.NexusOperationHandle[ExecuteNamedVarargsFunctionResult]: ...
 

@@ -3937,16 +3937,39 @@ fn function_overload_cases(
     };
     let mut cases = Vec::new();
     if let Some(alternate_annotation) = &function.alternate_annotation {
-        cases.push(RenderedFunctionOverloadCase {
-            callable_field_name: function.callable_field_name.clone(),
-            args_field_name: function.args_field_name.clone(),
-            callable_annotation: alternate_annotation.clone(),
-            positional_args: python_alternate_function_positional_args(function),
-            args_annotation: python_alternate_function_args_annotation(function),
-            args_optional: true,
-            result_type_parameter: None,
-            type_parameters: Vec::new(),
-        });
+        if function.primary && matches!(function.args, RenderedFunctionArgs::Varargs { .. }) {
+            cases.push(RenderedFunctionOverloadCase {
+                callable_field_name: function.callable_field_name.clone(),
+                args_field_name: function.args_field_name.clone(),
+                callable_annotation: alternate_annotation.clone(),
+                positional_args: python_alternate_function_positional_args(function),
+                args_annotation: None,
+                args_optional: false,
+                result_type_parameter: None,
+                type_parameters: Vec::new(),
+            });
+            cases.push(RenderedFunctionOverloadCase {
+                callable_field_name: function.callable_field_name.clone(),
+                args_field_name: function.args_field_name.clone(),
+                callable_annotation: alternate_annotation.clone(),
+                positional_args: Vec::new(),
+                args_annotation: python_alternate_function_args_annotation(function),
+                args_optional: true,
+                result_type_parameter: None,
+                type_parameters: Vec::new(),
+            });
+        } else {
+            cases.push(RenderedFunctionOverloadCase {
+                callable_field_name: function.callable_field_name.clone(),
+                args_field_name: function.args_field_name.clone(),
+                callable_annotation: alternate_annotation.clone(),
+                positional_args: python_alternate_function_positional_args(function),
+                args_annotation: python_alternate_function_args_annotation(function),
+                args_optional: true,
+                result_type_parameter: None,
+                type_parameters: Vec::new(),
+            });
+        }
     }
 
     match &function.args {

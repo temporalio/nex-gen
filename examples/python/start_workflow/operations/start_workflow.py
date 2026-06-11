@@ -41,6 +41,16 @@ async def _start_workflow(
 async def start_workflow(
     workflow: str,
     *positional_args: object,
+    workflow_id: str,
+    task_queue: str,
+    workflow_start_delay: datetime.timedelta | None = ...,
+) -> StartedWorkflow: ...
+
+
+@typing.overload
+async def start_workflow(
+    workflow: str,
+    *,
     args: list[typing.Any] | None = ...,
     workflow_id: str,
     task_queue: str,

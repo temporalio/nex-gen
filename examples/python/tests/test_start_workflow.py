@@ -219,8 +219,8 @@ if typing.TYPE_CHECKING:
         task_queue=TASK_QUEUE,
     )
 
-    _ = start_workflow.start_workflow(
-        ExampleWorkflow.run,  # pyright: ignore[reportArgumentType]
+    start_workflow.start_workflow(  # pyright: ignore[reportCallIssue]
+        ExampleWorkflow.run,
         "customer-123",
         args=["customer-456"],
         workflow_id="conflicting-typed-workflow-input",
@@ -231,6 +231,14 @@ if typing.TYPE_CHECKING:
         workflow=ExampleWorkflow.run,
         args=["customer-123"],
         workflow_id="typed-list-workflow-input-fallback",
+        task_queue=TASK_QUEUE,
+    )
+
+    start_workflow.start_workflow(  # pyright: ignore[reportCallIssue]
+        "ExampleWorkflow",
+        "customer-123",
+        args=["customer-456"],
+        workflow_id="conflicting-string-workflow-input",
         task_queue=TASK_QUEUE,
     )
 

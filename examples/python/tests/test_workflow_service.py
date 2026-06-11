@@ -487,7 +487,7 @@ async def test_signal_with_start_rejects_positional_args_and_args() -> None:
     with pytest.raises(
         TypeError, match="cannot specify both positional arguments and args"
     ):
-        _ = await workflow_service.signal_with_start_workflow(
+        await workflow_service.signal_with_start_workflow(  # pyright: ignore[reportCallIssue]
             "SingleArgWorkflow",
             "positional",
             args=["tuple-one"],
@@ -610,7 +610,18 @@ if typing.TYPE_CHECKING:
     )
 
     workflow_service.signal_with_start_workflow(  # pyright: ignore[reportCallIssue]
-        SingleArgWorkflow.run,  # pyright: ignore[reportArgumentType]
+        "ExampleWorkflow",
+        "positional",
+        args=["keyword"],
+        id="conflicting-string-workflow-input",
+        task_queue=TASK_QUEUE,
+        request_id=REQUEST_ID,
+        signal="wake_up",
+        cron_schedule=CRON_SCHEDULE,
+    )
+
+    workflow_service.signal_with_start_workflow(  # pyright: ignore[reportCallIssue]
+        SingleArgWorkflow.run,
         "positional",
         args=["tuple-one"],
         id="conflicting-typed-callable-workflow-input",
