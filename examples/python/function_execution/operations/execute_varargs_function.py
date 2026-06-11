@@ -30,6 +30,8 @@ async def _execute_varargs_function(
     )
 
 
+# Overload case:
+# - function callable with typed positional function arguments
 @typing.overload
 async def execute_varargs_function(
     function: collections.abc.Callable[[typing_extensions.Unpack[FunctionArgs]], str],
@@ -37,6 +39,8 @@ async def execute_varargs_function(
 ) -> temporalio.workflow.NexusOperationHandle[ExecuteVarargsFunctionResult]: ...
 
 
+# Overload case:
+# - function callable with list-form function arguments
 @typing.overload
 async def execute_varargs_function(
     function: collections.abc.Callable[..., str],

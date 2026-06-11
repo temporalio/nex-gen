@@ -3839,6 +3839,7 @@ struct RenderedFunctionOverloadCase {
     args_annotation: Option<String>,
     args_optional: bool,
     result_type_parameter: Option<String>,
+    self_type_parameter: Option<String>,
     type_parameters: Vec<PythonTypeParameter>,
 }
 
@@ -3935,6 +3936,7 @@ fn function_overload_cases(
     } else {
         &function.erased_result_annotation
     };
+    let self_type_parameter = python_function_self_type_parameter(function);
     let mut cases = Vec::new();
     if let Some(alternate_annotation) = &function.alternate_annotation {
         if function.primary && matches!(function.args, RenderedFunctionArgs::Varargs { .. }) {
@@ -3946,6 +3948,7 @@ fn function_overload_cases(
                 args_annotation: None,
                 args_optional: false,
                 result_type_parameter: None,
+                self_type_parameter: None,
                 type_parameters: Vec::new(),
             });
             cases.push(RenderedFunctionOverloadCase {
@@ -3956,6 +3959,7 @@ fn function_overload_cases(
                 args_annotation: python_alternate_function_args_annotation(function),
                 args_optional: true,
                 result_type_parameter: None,
+                self_type_parameter: None,
                 type_parameters: Vec::new(),
             });
         } else {
@@ -3967,6 +3971,7 @@ fn function_overload_cases(
                 args_annotation: python_alternate_function_args_annotation(function),
                 args_optional: true,
                 result_type_parameter: None,
+                self_type_parameter: None,
                 type_parameters: Vec::new(),
             });
         }
@@ -3976,10 +3981,17 @@ fn function_overload_cases(
         RenderedFunctionArgs::Varargs { prefix } if function.primary => {
             let type_parameter_prefix = function_overload_parameter_prefix(function);
             let function_args = format!("{type_parameter_prefix}Args");
-            let callable_args = python_varargs_callable_arg_list(prefix, &function_args);
+            let callable_args = python_varargs_callable_arg_list(
+                prefix,
+                &function_args,
+                self_type_parameter.as_ref(),
+            );
             let mut type_parameters = Vec::new();
             if let Some(result_type_parameter) = &result_type_parameter {
                 type_parameters.push(PythonTypeParameter::TypeVar(result_type_parameter.clone()));
+            }
+            if let Some(self_type_parameter) = &self_type_parameter {
+                type_parameters.push(PythonTypeParameter::TypeVar(self_type_parameter.clone()));
             }
             type_parameters.push(PythonTypeParameter::TypeVarTuple(function_args.clone()));
             cases.push(RenderedFunctionOverloadCase {
@@ -3997,23 +4009,44 @@ fn function_overload_cases(
                 args_annotation: None,
                 args_optional: false,
                 result_type_parameter: result_type_parameter.clone(),
+                self_type_parameter: self_type_parameter.clone(),
                 type_parameters,
             });
             let type_parameters = result_type_parameter
                 .iter()
                 .map(|name| PythonTypeParameter::TypeVar(name.clone()))
+                .chain(self_type_parameter.iter().filter_map(|name| {
+                    if output_type_parameters.is_empty() {
+                        None
+                    } else {
+                        Some(PythonTypeParameter::TypeVar(name.clone()))
+                    }
+                }))
                 .collect();
+            let (callable_annotation, case_self_type_parameter) =
+                if self_type_parameter.is_some() && !output_type_parameters.is_empty() {
+                    (
+                        format!(
+                            "collections.abc.Callable[[{}], {}]",
+                            callable_args, result_annotation
+                        ),
+                        self_type_parameter.clone(),
+                    )
+                } else {
+                    (
+                        format!("collections.abc.Callable[..., {}]", result_annotation),
+                        None,
+                    )
+                };
             cases.push(RenderedFunctionOverloadCase {
                 callable_field_name: function.callable_field_name.clone(),
                 args_field_name: function.args_field_name.clone(),
-                callable_annotation: format!(
-                    "collections.abc.Callable[..., {}]",
-                    result_annotation
-                ),
+                callable_annotation,
                 positional_args: Vec::new(),
                 args_annotation: Some("list[typing.Any]".to_string()),
                 args_optional: false,
                 result_type_parameter: result_type_parameter.clone(),
+                self_type_parameter: case_self_type_parameter,
                 type_parameters,
             });
         }
@@ -4022,7 +4055,14 @@ fn function_overload_cases(
             let first_arg = format!("{type_parameter_prefix}Arg");
             let callable_prefix = prefix
                 .iter()
-                .map(|parameter| parameter.annotation.clone())
+                .enumerate()
+                .map(|(index, parameter)| {
+                    self_type_parameter
+                        .as_ref()
+                        .filter(|_| index == 0)
+                        .cloned()
+                        .unwrap_or_else(|| parameter.annotation.clone())
+                })
                 .collect::<Vec<_>>();
             let no_arg_callable_args = python_callable_arg_list(&callable_prefix);
             let mut one_arg_callable_prefix = callable_prefix;
@@ -4031,6 +4071,11 @@ fn function_overload_cases(
             let type_parameters = result_type_parameter
                 .iter()
                 .map(|name| PythonTypeParameter::TypeVar(name.clone()))
+                .chain(
+                    self_type_parameter
+                        .iter()
+                        .map(|name| PythonTypeParameter::TypeVar(name.clone())),
+                )
                 .collect();
             cases.push(RenderedFunctionOverloadCase {
                 callable_field_name: function.callable_field_name.clone(),
@@ -4043,11 +4088,15 @@ fn function_overload_cases(
                 args_annotation: None,
                 args_optional: false,
                 result_type_parameter: result_type_parameter.clone(),
+                self_type_parameter: self_type_parameter.clone(),
                 type_parameters,
             });
             let mut type_parameters = Vec::new();
             if let Some(result_type_parameter) = &result_type_parameter {
                 type_parameters.push(PythonTypeParameter::TypeVar(result_type_parameter.clone()));
+            }
+            if let Some(self_type_parameter) = &self_type_parameter {
+                type_parameters.push(PythonTypeParameter::TypeVar(self_type_parameter.clone()));
             }
             type_parameters.push(PythonTypeParameter::TypeVar(first_arg.clone()));
             cases.push(RenderedFunctionOverloadCase {
@@ -4061,6 +4110,7 @@ fn function_overload_cases(
                 args_annotation: Some(first_arg.clone()),
                 args_optional: false,
                 result_type_parameter: result_type_parameter.clone(),
+                self_type_parameter: self_type_parameter.clone(),
                 type_parameters,
             });
             let type_parameters = result_type_parameter
@@ -4078,6 +4128,7 @@ fn function_overload_cases(
                 args_annotation: Some("list[typing.Any]".to_string()),
                 args_optional: false,
                 result_type_parameter: result_type_parameter.clone(),
+                self_type_parameter: None,
                 type_parameters,
             });
         }
@@ -4121,6 +4172,7 @@ fn function_overload_cases(
                 },
                 args_optional: false,
                 result_type_parameter: result_type_parameter.clone(),
+                self_type_parameter: None,
                 type_parameters,
             });
         }
@@ -4181,10 +4233,29 @@ fn python_rendered_function_callable_annotation_with_result(
     }
 }
 
-fn python_varargs_callable_arg_list(prefix: &[RenderedFunctionArg], varargs_name: &str) -> String {
+fn python_function_self_type_parameter(function: &RenderedFunctionField) -> Option<String> {
+    match &function.args {
+        RenderedFunctionArgs::Varargs { prefix } if !prefix.is_empty() => {
+            Some("SelfType".to_string())
+        }
+        _ => None,
+    }
+}
+
+fn python_varargs_callable_arg_list(
+    prefix: &[RenderedFunctionArg],
+    varargs_name: &str,
+    self_type_parameter: Option<&String>,
+) -> String {
     let mut args = prefix
         .iter()
-        .map(|parameter| parameter.annotation.clone())
+        .enumerate()
+        .map(|(index, parameter)| {
+            self_type_parameter
+                .filter(|_| index == 0)
+                .cloned()
+                .unwrap_or_else(|| parameter.annotation.clone())
+        })
         .collect::<Vec<_>>();
     args.push(format!("typing_extensions.Unpack[{varargs_name}]"));
     args.join(", ")
@@ -4296,6 +4367,7 @@ fn render_function_unpacked_overload(
     unpacked_input: &RenderedUnpackedInput,
     overload_cases: &[RenderedFunctionOverloadCase],
 ) {
+    render_function_unpacked_overload_case_doc(output, unpacked_input, overload_cases);
     output.push_str("@typing.overload\n");
     output.push_str("async def ");
     output.push_str(&operation.attr_name);
@@ -4407,26 +4479,148 @@ fn render_function_unpacked_overload(
     output.push_str(&function_unpacked_overload_return_annotation(
         service,
         operation,
-        primary_case,
+        overload_cases,
     ));
     output.push_str(": ...\n");
+}
+
+fn render_function_unpacked_overload_case_doc(
+    output: &mut String,
+    unpacked_input: &RenderedUnpackedInput,
+    overload_cases: &[RenderedFunctionOverloadCase],
+) {
+    output.push_str("# Overload case:\n");
+    for overload_case in ordered_function_overload_cases(unpacked_input, overload_cases) {
+        output.push_str("# - ");
+        output.push_str(&function_overload_case_doc(&overload_case));
+        output.push('\n');
+    }
+}
+
+fn ordered_function_overload_cases<'a>(
+    unpacked_input: &RenderedUnpackedInput,
+    overload_cases: &'a [RenderedFunctionOverloadCase],
+) -> Vec<&'a RenderedFunctionOverloadCase> {
+    let mut ordered = Vec::new();
+    let mut rendered = BTreeSet::new();
+    for field in &unpacked_input.parameters {
+        if let Some(overload_case) = overload_cases
+            .iter()
+            .find(|overload_case| overload_case.callable_field_name == field.attr_name)
+        {
+            rendered.insert(overload_case.callable_field_name.clone());
+            ordered.push(overload_case);
+        }
+    }
+    for overload_case in overload_cases {
+        if !rendered.contains(&overload_case.callable_field_name) {
+            ordered.push(overload_case);
+        }
+    }
+    ordered
+}
+
+fn function_overload_case_doc(overload_case: &RenderedFunctionOverloadCase) -> String {
+    let callable_label = python_readable_name(&overload_case.callable_field_name);
+    let callable_kind = if overload_case
+        .callable_annotation
+        .starts_with("collections.abc.Callable")
+    {
+        if overload_case.self_type_parameter.is_some() {
+            "method callable"
+        } else {
+            "callable"
+        }
+    } else {
+        "name"
+    };
+    let args_label = python_function_args_doc_label(
+        &overload_case.callable_field_name,
+        &overload_case.args_field_name,
+    );
+    format!(
+        "{callable_label} {callable_kind} with {}",
+        function_overload_args_doc(overload_case, &args_label)
+    )
+}
+
+fn python_readable_name(name: &str) -> String {
+    name.replace('_', " ")
+}
+
+fn python_function_args_doc_label(callable_field_name: &str, args_field_name: &str) -> String {
+    if args_field_name == "args" {
+        return format!("{} arguments", python_readable_name(callable_field_name));
+    }
+    if let Some(prefix) = args_field_name.strip_suffix("_args") {
+        return format!("{} arguments", python_readable_name(prefix));
+    }
+    python_readable_name(args_field_name)
+}
+
+fn function_overload_args_doc(
+    overload_case: &RenderedFunctionOverloadCase,
+    args_label: &str,
+) -> String {
+    if !overload_case.positional_args.is_empty() {
+        if overload_case
+            .callable_annotation
+            .starts_with("collections.abc.Callable")
+            && overload_case
+                .positional_args
+                .iter()
+                .any(|arg| arg.annotation != "object")
+        {
+            return format!("typed positional {args_label}");
+        }
+        return format!("positional {args_label}");
+    }
+
+    let Some(args_annotation) = &overload_case.args_annotation else {
+        return format!("no {args_label}");
+    };
+
+    if args_annotation.contains("list[") {
+        if overload_case.args_optional {
+            format!("optional list-form {args_label}")
+        } else {
+            format!("list-form {args_label}")
+        }
+    } else {
+        format!("a typed single {args_label}")
+    }
 }
 
 fn function_unpacked_overload_return_annotation(
     service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
-    primary_case: Option<&RenderedFunctionOverloadCase>,
+    overload_cases: &[RenderedFunctionOverloadCase],
 ) -> String {
-    let active_type_parameters = primary_case
-        .and_then(|function_case| function_case.result_type_parameter.as_ref())
-        .into_iter()
+    let mut active_type_parameters = overload_cases
+        .iter()
+        .filter_map(|function_case| function_case.result_type_parameter.as_ref())
         .cloned()
         .collect::<BTreeSet<_>>();
-    let output_annotation = erase_inactive_python_type_parameters(
+    let self_type_parameter = overload_cases
+        .iter()
+        .find_map(|function_case| function_case.self_type_parameter.as_ref());
+    if self_type_parameter.is_some() {
+        active_type_parameters.extend(operation.output_type_parameters.iter().cloned());
+    }
+    let mut output_annotation = erase_inactive_python_type_parameters(
         &operation.overload_output_annotation,
         &operation.output_type_parameters,
         &active_type_parameters,
     );
+    if let Some(self_type_parameter) = self_type_parameter {
+        for output_type_parameter in &operation.output_type_parameters {
+            output_annotation = replace_python_identifier(
+                &output_annotation,
+                output_type_parameter,
+                self_type_parameter,
+            );
+        }
+    }
     let output_annotation = temporalio_workflow_type_annotation(service, &output_annotation);
     if operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
@@ -4454,10 +4648,18 @@ fn erase_inactive_python_type_parameters(
 }
 
 fn erase_python_type_parameters(annotation: &str, type_parameters: &BTreeSet<String>) -> String {
+    erase_python_type_parameters_with_replacement(annotation, type_parameters, "object")
+}
+
+fn erase_python_type_parameters_with_replacement(
+    annotation: &str,
+    type_parameters: &BTreeSet<String>,
+    replacement: &str,
+) -> String {
     type_parameters
         .iter()
         .fold(annotation.to_string(), |current, name| {
-            replace_python_identifier(&current, name, "typing.Any")
+            replace_python_identifier(&current, name, replacement)
         })
 }
 
@@ -4540,9 +4742,8 @@ fn render_request_only_operation_function(
         || operation.output_direct_result
     {
         output.push_str(") -> ");
-        output.push_str(&temporalio_workflow_type_annotation(
-            service,
-            &operation.output_annotation,
+        output.push_str(&function_unpacked_implementation_return_annotation(
+            service, operation,
         ));
         output.push_str(":\n");
     } else {
@@ -4948,9 +5149,8 @@ fn render_unpacked_operation_function(
         || operation.output_direct_result
     {
         output.push_str(") -> ");
-        output.push_str(&temporalio_workflow_type_annotation(
-            service,
-            &operation.output_annotation,
+        output.push_str(&function_unpacked_implementation_return_annotation(
+            service, operation,
         ));
         output.push_str(":\n");
     } else {
@@ -4961,9 +5161,8 @@ fn render_unpacked_operation_function(
         ));
         output.push_str("[\n");
         output.push_str("    ");
-        output.push_str(&temporalio_workflow_type_annotation(
-            service,
-            &operation.output_annotation,
+        output.push_str(&function_unpacked_implementation_return_annotation(
+            service, operation,
         ));
         output.push_str(",\n");
         output.push_str("]:\n");
@@ -4986,6 +5185,18 @@ fn render_unpacked_operation_function(
     output.push_str("    return await ");
     output.push_str(&request_operation_function_name(operation));
     output.push_str("(request)\n");
+}
+
+fn function_unpacked_implementation_return_annotation(
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) -> String {
+    let output_annotation = erase_python_type_parameters_with_replacement(
+        &operation.overload_output_annotation,
+        &operation.output_type_parameters,
+        "typing.Any",
+    );
+    temporalio_workflow_type_annotation(service, &output_annotation)
 }
 
 fn render_function_unpacked_implementation(
@@ -5079,9 +5290,8 @@ fn render_function_unpacked_implementation(
         || operation.output_direct_result
     {
         output.push_str(") -> ");
-        output.push_str(&temporalio_workflow_type_annotation(
-            service,
-            &operation.output_annotation,
+        output.push_str(&function_unpacked_implementation_return_annotation(
+            service, operation,
         ));
         output.push_str(":\n");
     } else {
@@ -5092,9 +5302,8 @@ fn render_function_unpacked_implementation(
         ));
         output.push_str("[\n");
         output.push_str("    ");
-        output.push_str(&temporalio_workflow_type_annotation(
-            service,
-            &operation.output_annotation,
+        output.push_str(&function_unpacked_implementation_return_annotation(
+            service, operation,
         ));
         output.push_str(",\n");
         output.push_str("]:\n");
@@ -5625,7 +5834,7 @@ class Example(enum.Enum):
         assert!(output.contains("retry_policy_to_proto,"));
         assert!(output.contains("def retry_policy_from_proto("));
         assert!(output.contains(
-            "workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]]"
+            "workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]"
         ));
         assert!(output.contains("id: str"));
         assert!(output.contains("task_queue: str"));
@@ -5677,7 +5886,7 @@ class Example(enum.Enum):
         assert!(output.contains(
             "if typing.TYPE_CHECKING:\n    from temporalio.workflow import ExternalWorkflowHandle"
         ));
-        assert!(output.contains(") -> ExternalWorkflowHandle[typing.Any]:"));
+        assert!(output.contains(") -> ExternalWorkflowHandle[object]:"));
         assert!(output.contains("    nexus_client = create_nexus_client("));
         assert!(!output.contains("(typing.TypedDict, total=False):"));
         assert!(!output.contains("typing.Unpack["));
@@ -5688,24 +5897,25 @@ class Example(enum.Enum):
         assert!(output.contains("*positional_args: object,"));
         assert!(output.contains("args: list[typing.Any] | None = ...,"));
         assert!(output.contains(
-            "workflow: collections.abc.Callable[[typing.Any, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[WorkflowResult]],"
+            "workflow: collections.abc.Callable[[SelfType, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[WorkflowResult]],"
         ));
         assert!(output.contains("WorkflowArgs = typing_extensions.TypeVarTuple(\"WorkflowArgs\")"));
         assert!(output.contains("WorkflowResult = typing.TypeVar(\"WorkflowResult\")"));
-        assert!(output.contains(") -> ExternalWorkflowHandle[WorkflowResult]:"));
+        assert!(output.contains("SelfType = typing.TypeVar(\"SelfType\")"));
+        assert!(output.contains(") -> ExternalWorkflowHandle[SelfType]:"));
         assert!(output.contains("async def signal_with_start_workflow("));
         assert!(output.contains("*positional_args: typing_extensions.Unpack[WorkflowArgs],"));
         assert!(output.contains("args: list[typing.Any],"));
         assert!(!output.contains("tuple[FirstWorkflowArg"));
         assert!(output.contains(
-            "signal: collections.abc.Callable[[typing.Any, SignalArg], None | collections.abc.Awaitable[None]],"
+            "signal: collections.abc.Callable[[SelfType, SignalArg], None | collections.abc.Awaitable[None]],"
         ));
         assert!(output.contains("SignalArg = typing.TypeVar(\"SignalArg\")"));
         assert!(output.contains("signal_args: SignalArg,"));
         assert!(output.contains("signal_args: list[typing.Any],"));
         assert!(output.contains("async def signal_with_start_workflow("));
         assert!(output.contains(
-            "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],\n    *positional_args: object,\n    args: list[typing.Any] | None = None,"
+            "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],\n    *positional_args: object,\n    args: list[typing.Any] | None = None,"
         ));
         assert!(output.contains(
             "signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],"

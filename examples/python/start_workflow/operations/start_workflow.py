@@ -13,8 +13,8 @@ from ..models import StartWorkflowRequest
 from .._resources import StartedWorkflow
 
 
-WorkflowArgs = typing_extensions.TypeVarTuple("WorkflowArgs")
 SelfType = typing.TypeVar("SelfType")
+WorkflowArgs = typing_extensions.TypeVarTuple("WorkflowArgs")
 
 
 async def _start_workflow(
@@ -38,6 +38,8 @@ async def _start_workflow(
     )
 
 
+# Overload case:
+# - workflow name with positional workflow arguments
 @typing.overload
 async def start_workflow(
     workflow: str,
@@ -48,17 +50,21 @@ async def start_workflow(
 ) -> StartedWorkflow: ...
 
 
+# Overload case:
+# - workflow name with optional list-form workflow arguments
 @typing.overload
 async def start_workflow(
     workflow: str,
     *,
-    args: list[object] | None = ...,
+    args: list[typing.Any] | None = ...,
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: datetime.timedelta | None = ...,
 ) -> StartedWorkflow: ...
 
 
+# Overload case:
+# - workflow method callable with typed positional workflow arguments
 @typing.overload
 async def start_workflow(
     workflow: collections.abc.Callable[
@@ -72,11 +78,13 @@ async def start_workflow(
 ) -> StartedWorkflow: ...
 
 
+# Overload case:
+# - workflow callable with list-form workflow arguments
 @typing.overload
 async def start_workflow(
     workflow: collections.abc.Callable[..., collections.abc.Awaitable[object]],
     *,
-    args: list[object],
+    args: list[typing.Any],
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: datetime.timedelta | None = ...,
@@ -84,10 +92,9 @@ async def start_workflow(
 
 
 async def start_workflow(
-    workflow: str
-    | collections.abc.Callable[..., collections.abc.Awaitable[object]],
+    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],
     *positional_args: object,
-    args: list[object] | None = None,
+    args: list[typing.Any] | None = None,
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: datetime.timedelta | None = None,
@@ -102,7 +109,7 @@ async def start_workflow(
     """
     if positional_args and args is not None:
         raise TypeError("cannot specify both positional arguments and args")
-    normalized_args: list[object] | None = (
+    normalized_args: list[typing.Any] | None = (
         list(positional_args) if positional_args else args
     )
     request = StartWorkflowRequest(

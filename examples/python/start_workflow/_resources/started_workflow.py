@@ -18,6 +18,7 @@ from ..models import (
 )
 
 
+SelfType = typing.TypeVar("SelfType")
 WorkflowArgs = typing_extensions.TypeVarTuple("WorkflowArgs")
 
 
@@ -43,7 +44,7 @@ class StartedWorkflow:
     async def restart_workflow(
         self,
         workflow: str
-        | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],
+        | collections.abc.Callable[..., collections.abc.Awaitable[object]],
         task_queue: str,
     ) -> StartedWorkflow:
         request = StartWorkflowRequest(
@@ -110,6 +111,8 @@ async def _restart_workflow(
     )
 
 
+# Overload case:
+# - workflow name with positional workflow arguments
 @typing.overload
 async def restart_workflow(
     workflow: str,
@@ -120,6 +123,8 @@ async def restart_workflow(
 ) -> StartedWorkflow: ...
 
 
+# Overload case:
+# - workflow name with optional list-form workflow arguments
 @typing.overload
 async def restart_workflow(
     workflow: str,
@@ -131,11 +136,13 @@ async def restart_workflow(
 ) -> StartedWorkflow: ...
 
 
+# Overload case:
+# - workflow method callable with typed positional workflow arguments
 @typing.overload
 async def restart_workflow(
     workflow: collections.abc.Callable[
-        [typing.Any, typing_extensions.Unpack[WorkflowArgs]],
-        collections.abc.Awaitable[typing.Any],
+        [SelfType, typing_extensions.Unpack[WorkflowArgs]],
+        collections.abc.Awaitable[object],
     ],
     *positional_args: typing_extensions.Unpack[WorkflowArgs],
     workflow_id: str,
@@ -144,9 +151,11 @@ async def restart_workflow(
 ) -> StartedWorkflow: ...
 
 
+# Overload case:
+# - workflow callable with list-form workflow arguments
 @typing.overload
 async def restart_workflow(
-    workflow: collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],
+    workflow: collections.abc.Callable[..., collections.abc.Awaitable[object]],
     *,
     args: list[typing.Any],
     workflow_id: str,
@@ -156,8 +165,7 @@ async def restart_workflow(
 
 
 async def restart_workflow(
-    workflow: str
-    | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],
+    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],
     *positional_args: object,
     args: list[typing.Any] | None = None,
     workflow_id: str,

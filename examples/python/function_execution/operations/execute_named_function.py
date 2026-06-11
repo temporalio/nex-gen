@@ -26,6 +26,8 @@ async def _execute_named_function(
     )
 
 
+# Overload case:
+# - function name with positional function arguments
 @typing.overload
 async def execute_named_function(
     function: str,
@@ -34,6 +36,8 @@ async def execute_named_function(
 ) -> temporalio.workflow.NexusOperationHandle[ExecuteNamedFunctionResult]: ...
 
 
+# Overload case:
+# - function callable with typed positional function arguments
 @typing.overload
 async def execute_named_function(
     function: collections.abc.Callable[[str, bool], str],
