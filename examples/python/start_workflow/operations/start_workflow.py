@@ -14,6 +14,7 @@ from .._resources import StartedWorkflow
 
 
 WorkflowArgs = typing_extensions.TypeVarTuple("WorkflowArgs")
+SelfType = typing.TypeVar("SelfType")
 
 
 async def _start_workflow(
@@ -51,7 +52,7 @@ async def start_workflow(
 async def start_workflow(
     workflow: str,
     *,
-    args: list[typing.Any] | None = ...,
+    args: list[object] | None = ...,
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: datetime.timedelta | None = ...,
@@ -61,8 +62,8 @@ async def start_workflow(
 @typing.overload
 async def start_workflow(
     workflow: collections.abc.Callable[
-        [typing.Any, typing_extensions.Unpack[WorkflowArgs]],
-        collections.abc.Awaitable[typing.Any],
+        [SelfType, typing_extensions.Unpack[WorkflowArgs]],
+        collections.abc.Awaitable[object],
     ],
     *positional_args: typing_extensions.Unpack[WorkflowArgs],
     workflow_id: str,
@@ -73,9 +74,9 @@ async def start_workflow(
 
 @typing.overload
 async def start_workflow(
-    workflow: collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],
+    workflow: collections.abc.Callable[..., collections.abc.Awaitable[object]],
     *,
-    args: list[typing.Any],
+    args: list[object],
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: datetime.timedelta | None = ...,
@@ -84,9 +85,9 @@ async def start_workflow(
 
 async def start_workflow(
     workflow: str
-    | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],
+    | collections.abc.Callable[..., collections.abc.Awaitable[object]],
     *positional_args: object,
-    args: list[typing.Any] | None = None,
+    args: list[object] | None = None,
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: datetime.timedelta | None = None,
@@ -101,7 +102,7 @@ async def start_workflow(
     """
     if positional_args and args is not None:
         raise TypeError("cannot specify both positional arguments and args")
-    normalized_args: list[typing.Any] | None = (
+    normalized_args: list[object] | None = (
         list(positional_args) if positional_args else args
     )
     request = StartWorkflowRequest(

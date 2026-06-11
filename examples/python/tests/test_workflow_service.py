@@ -511,7 +511,7 @@ if typing.TYPE_CHECKING:
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
-        _ = assert_type(positional_handle, workflow.ExternalWorkflowHandle[str])
+        _ = assert_type(positional_handle, workflow.ExternalWorkflowHandle[SingleArgWorkflow])
 
         list_args_handle = await workflow_service.signal_with_start_workflow(
             workflow=ExampleWorkflow.run,
@@ -522,7 +522,7 @@ if typing.TYPE_CHECKING:
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
-        _ = assert_type(list_args_handle, workflow.ExternalWorkflowHandle[str])
+        _ = assert_type(list_args_handle, workflow.ExternalWorkflowHandle[ExampleWorkflow])
 
         string_workflow_handle = await workflow_service.signal_with_start_workflow(
             workflow="ExampleWorkflow",
@@ -534,7 +534,7 @@ if typing.TYPE_CHECKING:
         )
         _ = assert_type(
             string_workflow_handle,
-            workflow.ExternalWorkflowHandle[typing.Any],
+            workflow.ExternalWorkflowHandle[object],
         )
 
     _ = _typecheck_signal_with_start_return_types
@@ -633,7 +633,7 @@ if typing.TYPE_CHECKING:
 
     workflow_service.signal_with_start_workflow(  # pyright: ignore[reportCallIssue]
         workflow=SingleArgWorkflow.run,
-        args="scalar",  # pyright: ignore[reportArgumentType]
+        args="im a sequence here's my spout",  # pyright: ignore[reportArgumentType]
         id="typed-scalar-keyword-workflow-input",
         task_queue=TASK_QUEUE,
         request_id=REQUEST_ID,
