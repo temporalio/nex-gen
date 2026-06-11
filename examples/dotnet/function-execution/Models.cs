@@ -11,7 +11,13 @@ namespace NexGen.FunctionExecution
     public class ExecuteFunctionRequest
     {
         public string Function { get; init; } = default!;
+        /// <summary>
+        /// The name argument for the function.
+        /// </summary>
         public string Name { get; init; } = default!;
+        /// <summary>
+        /// The enabled argument for the function.
+        /// </summary>
         public bool Enabled { get; init; } = default!;
     }
 
@@ -23,7 +29,13 @@ namespace NexGen.FunctionExecution
     public class ExecuteCountedFunctionRequest
     {
         public string Function { get; init; } = default!;
+        /// <summary>
+        /// The name argument for the function.
+        /// </summary>
         public string Name { get; init; } = default!;
+        /// <summary>
+        /// The count argument for the function.
+        /// </summary>
         public int Count { get; init; } = default!;
     }
 
@@ -35,7 +47,13 @@ namespace NexGen.FunctionExecution
     public class ExecuteNamedFunctionRequest
     {
         public string Function { get; init; } = default!;
+        /// <summary>
+        /// The name argument for the function.
+        /// </summary>
         public string Name { get; init; } = default!;
+        /// <summary>
+        /// The enabled argument for the function.
+        /// </summary>
         public bool Enabled { get; init; } = default!;
     }
 
@@ -47,6 +65,9 @@ namespace NexGen.FunctionExecution
     public class ExecuteVarargsFunctionRequest
     {
         public string Function { get; init; } = default!;
+        /// <summary>
+        /// Arguments for the function.
+        /// </summary>
         public IReadOnlyList<string>? Args { get; init; }
     }
 
@@ -58,6 +79,9 @@ namespace NexGen.FunctionExecution
     public class ExecuteNamedVarargsFunctionRequest
     {
         public string Function { get; init; } = default!;
+        /// <summary>
+        /// Arguments for the function.
+        /// </summary>
         public IReadOnlyList<string>? Args { get; init; }
     }
 

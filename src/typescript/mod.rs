@@ -34,7 +34,7 @@ pub(crate) fn generate(
     support_fragments: &[SupportFragmentSpec],
     language_imports: &[LanguageImportSpec],
 ) -> Result<GeneratedFiles> {
-    reject_support_prefixes(Language::TypeScript, support_fragments)?;
+    reject_support_namespaces(Language::TypeScript, support_fragments)?;
     let mut enums = IndexMap::new();
     let mut flags = IndexMap::new();
     let mut variants = IndexMap::new();
@@ -102,17 +102,17 @@ pub(crate) fn generate(
     ))
 }
 
-fn reject_support_prefixes(
+fn reject_support_namespaces(
     language: Language,
     support_fragments: &[SupportFragmentSpec],
 ) -> Result<()> {
-    if let Some(prefix) = support_fragments
+    if let Some(namespace) = support_fragments
         .iter()
-        .find_map(|fragment| fragment.prefix.as_deref())
+        .find_map(|fragment| fragment.namespace.as_deref())
     {
-        return Err(Error::UnsupportedSupportPrefix {
+        return Err(Error::UnsupportedSupportNamespace {
             language,
-            prefix: prefix.to_string(),
+            namespace: namespace.to_string(),
         });
     }
     Ok(())
@@ -3457,9 +3457,6 @@ fn push_wrapped_typescript_doc_line(
 }
 
 fn typescript_model_field_doc(model: &RenderedModel, field: &RenderedField) -> Option<String> {
-    if let Some(doc) = &field.doc {
-        return Some(doc.clone());
-    }
     if let Some(function) = model
         .functions
         .iter()
@@ -3476,6 +3473,9 @@ fn typescript_model_field_doc(model: &RenderedModel, field: &RenderedField) -> O
             "Arguments for {}.",
             with_arguments.value_field_name
         ));
+    }
+    if let Some(doc) = &field.doc {
+        return Some(doc.clone());
     }
     None
 }
@@ -4395,7 +4395,7 @@ mod tests {
             fragments: vec![SupportFragmentSpec {
                 path: path.to_string_lossy().into_owned(),
                 contents: fs::read_to_string(path).unwrap(),
-                prefix: None,
+                namespace: None,
             }],
         }
     }

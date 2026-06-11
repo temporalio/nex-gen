@@ -2,6 +2,9 @@
 #nullable enable
 #pragma warning disable CS1591
 
+using System;
+using System.Collections.Generic;
+using System.Reflection;
 using NexusRpc;
 
 namespace NexGen.WorkflowService
@@ -17,6 +20,44 @@ namespace NexGen.WorkflowService
         [NexusOperation("SignalWithStartWorkflowExecution")]
         Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse SignalWithStartWorkflow(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest request);
 
+    }
+
+    public sealed class NexGenNexusOperation
+    {
+        public NexGenNexusOperation(string endpoint, string service, string operation, Type serviceType, MethodInfo method, Type? requestType, Type responseType)
+        {
+            Endpoint = endpoint;
+            Service = service;
+            Operation = operation;
+            ServiceType = serviceType;
+            Method = method;
+            RequestType = requestType;
+            ResponseType = responseType;
+        }
+
+        public string Endpoint { get; }
+        public string Service { get; }
+        public string Operation { get; }
+        public Type ServiceType { get; }
+        public MethodInfo Method { get; }
+        public Type? RequestType { get; }
+        public Type ResponseType { get; }
+    }
+
+    public static class NexGenOperationRegistry
+    {
+        public static IReadOnlyDictionary<(string Service, string Operation), NexGenNexusOperation> Operations { get; } =
+            new Dictionary<(string Service, string Operation), NexGenNexusOperation>
+            {
+                [("temporal.api.workflowservice.v1.WorkflowService", "SignalWithStartWorkflowExecution")] = new NexGenNexusOperation(
+                    endpoint: "temporal-system",
+                    service: "temporal.api.workflowservice.v1.WorkflowService",
+                    operation: "SignalWithStartWorkflowExecution",
+                    serviceType: typeof(IWorkflowService),
+                    method: typeof(IWorkflowService).GetMethod(nameof(IWorkflowService.SignalWithStartWorkflow))!,
+                    requestType: typeof(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest),
+                    responseType: typeof(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse)),
+            };
     }
 
 }

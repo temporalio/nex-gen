@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import type { temporal } from "@temporalio/proto";
 import * as nexus from "nexus-rpc";
 
-import { StartedWorkflow, WorkflowService } from "../start-workflow/index.ts";
+import { StartedWorkflow, StartWorkflowService } from "../start-workflow/index.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(
@@ -12,16 +12,16 @@ const workflowsPath = fileURLToPath(
 
 describe("start-workflow generated output", () => {
   test("exposes workflow service metadata", () => {
-    expect(WorkflowService.name).toBe("WorkflowService");
-    expect(WorkflowService.operations.startWorkflow.name).toBe("StartWorkflow");
-    expect(WorkflowService.operations.restartWorkflow.name).toBe("RestartWorkflow");
-    expect(WorkflowService.operations.cancelWorkflow.name).toBe("CancelWorkflow");
+    expect(StartWorkflowService.name).toBe("StartWorkflowService");
+    expect(StartWorkflowService.operations.startWorkflow.name).toBe("StartWorkflow");
+    expect(StartWorkflowService.operations.restartWorkflow.name).toBe("RestartWorkflow");
+    expect(StartWorkflowService.operations.cancelWorkflow.name).toBe("CancelWorkflow");
   });
 
   test("returns a started workflow wrapper handle through a real Nexus client", async () => {
     await withWorkflowEnvironment(async (env) => {
       const calls: Array<[string, unknown]> = [];
-      const handler = nexus.serviceHandler(WorkflowService, {
+      const handler = nexus.serviceHandler(StartWorkflowService, {
         async startWorkflow(_ctx, input) {
           calls.push(["StartWorkflow", input]);
           return {

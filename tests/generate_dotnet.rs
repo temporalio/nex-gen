@@ -236,6 +236,21 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
     assert!(rendered.contains("internal interface ITypeShowcase"));
     assert!(rendered.contains("[NexusOperation(\"SetProfile\")]"));
     assert!(rendered.contains("User SetProfile(SetProfileRequest request);"));
+    assert!(rendered.contains("public sealed class NexGenNexusOperation"));
+    assert!(rendered.contains("public static class NexGenOperationRegistry"));
+    assert!(rendered.contains(
+        "public static IReadOnlyDictionary<(string Service, string Operation), NexGenNexusOperation> Operations"
+    ));
+    assert!(rendered.contains("[(\"TypeShowcase\", \"SetProfile\")]"));
+    assert!(rendered.contains("endpoint: \"type-showcase\""));
+    assert!(rendered.contains("serviceType: typeof(ITypeShowcase)"));
+    assert!(
+        rendered
+            .contains("method: typeof(ITypeShowcase).GetMethod(nameof(ITypeShowcase.SetProfile))!")
+    );
+    assert!(rendered.contains("requestType: typeof(SetProfileRequest)"));
+    assert!(rendered.contains("responseType: typeof(User)"));
+    assert!(rendered.contains("responseType: typeof(void)"));
     assert!(rendered.contains("[Flags]\n    public enum UserCapability"));
     assert!(rendered.contains("public abstract class NotificationTarget"));
     assert!(rendered.contains("public class User"));
@@ -267,6 +282,16 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("namespace NexGen.WorkflowService;"));
     assert!(!rendered.contains("namespace NexGen.Support;"));
     assert!(rendered.contains("Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse SignalWithStartWorkflow(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest request);"));
+    assert!(rendered.contains(
+        "[(\"temporal.api.workflowservice.v1.WorkflowService\", \"SignalWithStartWorkflowExecution\")]"
+    ));
+    assert!(rendered.contains("endpoint: \"temporal-system\""));
+    assert!(rendered.contains(
+        "requestType: typeof(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest)"
+    ));
+    assert!(rendered.contains(
+        "responseType: typeof(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse)"
+    ));
     assert!(rendered.contains("/// Signal a workflow, starting it first if needed."));
     assert!(rendered.contains("/// <returns>A workflow handle to the started workflow.</returns>"));
     assert!(
@@ -274,11 +299,15 @@ fn dotnet_renders_proto_backed_temporal_types() {
             .contains("/// Request fields for signaling a workflow, starting it first if needed.")
     );
     assert!(rendered.contains("/// <param name=\"workflow\">Workflow type name or workflow expression identifying the workflow to start.</param>"));
+    assert!(rendered.contains("/// <param name=\"args\">Arguments for the workflow.</param>"));
     assert!(rendered.contains("/// <param name=\"signal\">Signal name or signal expression to send with the start request.</param>"));
+    assert!(rendered.contains("/// <param name=\"signalArgs\">Arguments for the signal.</param>"));
     assert!(rendered.contains("/// <param name=\"options\">Request fields for signaling a workflow, starting it first if needed.</param>"));
     assert!(rendered.contains("/// Unique identifier for the workflow execution."));
     assert!(rendered.contains("/// Cron schedule for recurring workflow executions. See https://docs.temporal.io/cron-job."));
     assert!(rendered.contains("/// Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format."));
+    assert!(rendered.contains("/// <summary>\n        /// Arguments for the workflow.\n        /// </summary>\n        public Temporalio.Api.Common.V1.Payloads? Args"));
+    assert!(rendered.contains("/// <summary>\n        /// Arguments for the signal.\n        /// </summary>\n        public Temporalio.Api.Common.V1.Payloads? SignalArgs"));
     assert!(rendered.contains("Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow, TResult>"));
     assert!(!rendered.contains("this NexusWorkflowClient<"));
     assert!(
@@ -315,9 +344,9 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(
         rendered.contains("Signal = NexGen.Support.TemporalFunctionNames.SignalName(signalMethod)")
     );
-    assert!(rendered.contains("Args = workflowArgs"));
-    assert!(rendered.contains("Args = args"));
-    assert!(rendered.contains("SignalArgs = signalArgs"));
+    assert!(rendered.contains("Args = workflowArgs.ToProto()"));
+    assert!(rendered.contains("Args = args == null ? null : args.ToProto()"));
+    assert!(rendered.contains("SignalArgs = signalArgs == null ? null : signalArgs.ToProto()"));
     assert!(!rendered.contains("Args = options.Args"));
     assert!(!rendered.contains("SignalArgs = options.SignalArgs"));
     assert!(!rendered.contains("WorkflowNameFromRunMethod"));
@@ -340,7 +369,9 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("ExecutionTimeout = options.ExecutionTimeout"));
     assert!(rendered.contains("proto.RetryPolicy = retryPolicy.ToProto();"));
     assert!(rendered.contains("proto.WorkflowExecutionTimeout = executionTimeout.ToProto();"));
-    assert!(rendered.contains("proto.Input = args.ToProto();"));
+    assert!(rendered.contains("public Temporalio.Api.Common.V1.Payloads? Args { get; init; }"));
+    assert!(rendered.contains("proto.Input = args;"));
+    assert!(rendered.contains("Args = args == null ? null : args.ToProto(),"));
     assert!(rendered.contains("proto.Summary = staticSummary.ToProto();"));
     assert!(
         rendered.contains(

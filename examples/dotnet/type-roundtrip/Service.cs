@@ -2,6 +2,9 @@
 #nullable enable
 #pragma warning disable CS1591
 
+using System;
+using System.Collections.Generic;
+using System.Reflection;
 using NexusRpc;
 
 namespace NexGen.TypeRoundtripService
@@ -16,6 +19,52 @@ namespace NexGen.TypeRoundtripService
         [NexusOperation("ActivityOptionsOperation")]
         Temporalio.Api.Activity.V1.ActivityOptions ActivityOptionsOperation(Temporalio.Api.Activity.V1.ActivityOptions request);
 
+    }
+
+    public sealed class NexGenNexusOperation
+    {
+        public NexGenNexusOperation(string endpoint, string service, string operation, Type serviceType, MethodInfo method, Type? requestType, Type responseType)
+        {
+            Endpoint = endpoint;
+            Service = service;
+            Operation = operation;
+            ServiceType = serviceType;
+            Method = method;
+            RequestType = requestType;
+            ResponseType = responseType;
+        }
+
+        public string Endpoint { get; }
+        public string Service { get; }
+        public string Operation { get; }
+        public Type ServiceType { get; }
+        public MethodInfo Method { get; }
+        public Type? RequestType { get; }
+        public Type ResponseType { get; }
+    }
+
+    public static class NexGenOperationRegistry
+    {
+        public static IReadOnlyDictionary<(string Service, string Operation), NexGenNexusOperation> Operations { get; } =
+            new Dictionary<(string Service, string Operation), NexGenNexusOperation>
+            {
+                [("TypeRoundtripService", "RetryPolicyOperation")] = new NexGenNexusOperation(
+                    endpoint: "temporal-system",
+                    service: "TypeRoundtripService",
+                    operation: "RetryPolicyOperation",
+                    serviceType: typeof(ITypeRoundtripService),
+                    method: typeof(ITypeRoundtripService).GetMethod(nameof(ITypeRoundtripService.RetryPolicyOperation))!,
+                    requestType: typeof(Temporalio.Common.RetryPolicy),
+                    responseType: typeof(Temporalio.Common.RetryPolicy)),
+                [("TypeRoundtripService", "ActivityOptionsOperation")] = new NexGenNexusOperation(
+                    endpoint: "temporal-system",
+                    service: "TypeRoundtripService",
+                    operation: "ActivityOptionsOperation",
+                    serviceType: typeof(ITypeRoundtripService),
+                    method: typeof(ITypeRoundtripService).GetMethod(nameof(ITypeRoundtripService.ActivityOptionsOperation))!,
+                    requestType: typeof(Temporalio.Api.Activity.V1.ActivityOptions),
+                    responseType: typeof(Temporalio.Api.Activity.V1.ActivityOptions)),
+            };
     }
 
 }

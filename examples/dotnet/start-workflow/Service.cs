@@ -2,6 +2,9 @@
 #nullable enable
 #pragma warning disable CS1591
 
+using System;
+using System.Collections.Generic;
+using System.Reflection;
 using NexusRpc;
 
 namespace NexGen.StartWorkflowService
@@ -19,6 +22,60 @@ namespace NexGen.StartWorkflowService
         [NexusOperation("CancelWorkflow")]
         Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse CancelWorkflow(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest request);
 
+    }
+
+    public sealed class NexGenNexusOperation
+    {
+        public NexGenNexusOperation(string endpoint, string service, string operation, Type serviceType, MethodInfo method, Type? requestType, Type responseType)
+        {
+            Endpoint = endpoint;
+            Service = service;
+            Operation = operation;
+            ServiceType = serviceType;
+            Method = method;
+            RequestType = requestType;
+            ResponseType = responseType;
+        }
+
+        public string Endpoint { get; }
+        public string Service { get; }
+        public string Operation { get; }
+        public Type ServiceType { get; }
+        public MethodInfo Method { get; }
+        public Type? RequestType { get; }
+        public Type ResponseType { get; }
+    }
+
+    public static class NexGenOperationRegistry
+    {
+        public static IReadOnlyDictionary<(string Service, string Operation), NexGenNexusOperation> Operations { get; } =
+            new Dictionary<(string Service, string Operation), NexGenNexusOperation>
+            {
+                [("StartWorkflowService", "StartWorkflow")] = new NexGenNexusOperation(
+                    endpoint: "temporal-system",
+                    service: "StartWorkflowService",
+                    operation: "StartWorkflow",
+                    serviceType: typeof(IStartWorkflowService),
+                    method: typeof(IStartWorkflowService).GetMethod(nameof(IStartWorkflowService.StartWorkflow))!,
+                    requestType: typeof(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest),
+                    responseType: typeof(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse)),
+                [("StartWorkflowService", "RestartWorkflow")] = new NexGenNexusOperation(
+                    endpoint: "temporal-system",
+                    service: "StartWorkflowService",
+                    operation: "RestartWorkflow",
+                    serviceType: typeof(IStartWorkflowService),
+                    method: typeof(IStartWorkflowService).GetMethod(nameof(IStartWorkflowService.RestartWorkflow))!,
+                    requestType: typeof(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest),
+                    responseType: typeof(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse)),
+                [("StartWorkflowService", "CancelWorkflow")] = new NexGenNexusOperation(
+                    endpoint: "temporal-system",
+                    service: "StartWorkflowService",
+                    operation: "CancelWorkflow",
+                    serviceType: typeof(IStartWorkflowService),
+                    method: typeof(IStartWorkflowService).GetMethod(nameof(IStartWorkflowService.CancelWorkflow))!,
+                    requestType: typeof(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest),
+                    responseType: typeof(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse)),
+            };
     }
 
 }
