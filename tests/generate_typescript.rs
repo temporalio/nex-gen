@@ -359,7 +359,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(input_index < workflow_id_index);
     assert!(workflow_id_index < task_queue_index);
     assert!(task_queue_index < signal_name_index);
-    assert!(rendered.contains("signalName: signalFunctionToProto("));
+    assert!(rendered.contains("signalName: signalFunctionName("));
     assert!(!rendered.contains("signalName: ((value) =>"));
     assert!(rendered.contains("workflowType: workflowTypeToProto("));
     assert!(rendered.contains("taskQueue: taskQueueToProto("));

@@ -84,7 +84,6 @@ pub fn generate_files(
     ensure_unique_resource_names(spec)?;
     let plan = build_api_plan(spec, descriptors)?;
     let warnings = generation_warnings(&plan);
-    let language_imports = spec.imports_for_language(language);
     let support_fragments = if support.fragments.is_empty() {
         spec.support.fragments_for_language(language)
     } else {
@@ -92,9 +91,9 @@ pub fn generate_files(
     };
 
     let mut generated = match language {
-        Language::Dotnet => dotnet::generate(&plan, support_fragments, language_imports),
-        Language::Python => python::generate(&plan, support_fragments, language_imports),
-        Language::TypeScript => typescript::generate(&plan, support_fragments, language_imports),
+        Language::Dotnet => dotnet::generate(&plan, support_fragments),
+        Language::Python => python::generate(&plan, support_fragments),
+        Language::TypeScript => typescript::generate(&plan, support_fragments),
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = warnings;

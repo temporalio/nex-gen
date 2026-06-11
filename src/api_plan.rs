@@ -17,7 +17,6 @@ use crate::spec::{
     ApiSpec, AuthoredFieldTypeSpec, FunctionFieldSpec, GeneratedModelSpec, LanguageStringSpec,
     OperationOutputTransformSpec, OperationSpec, ResourceFieldSpec, ServiceSpec,
     TypeReplacementSpec, WitEnumSpec, WitFlagsSpec, WitRecordSpec, WitVariantSpec,
-    WithArgumentsFieldSpec,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -126,6 +125,7 @@ pub(crate) struct PlannedTypeInfo {
     pub(crate) package: String,
     pub(crate) file_name: Option<String>,
     pub(crate) file_options: Option<FileOptions>,
+    pub(crate) proto_reference: crate::spec::LanguageStringSpec,
     pub(crate) proto_type_name: crate::spec::LanguageStringSpec,
 }
 
@@ -136,6 +136,10 @@ impl PlannedTypeInfo {
             package: message.package.clone(),
             file_name: message.file_name.clone(),
             file_options: message.file_options.clone(),
+            proto_reference: spec
+                .type_override(&message.full_name)
+                .map(|type_override| type_override.proto_reference().clone())
+                .unwrap_or_default(),
             proto_type_name: spec
                 .type_override(&message.full_name)
                 .map(|type_override| type_override.proto_type_name().clone())
@@ -149,6 +153,10 @@ impl PlannedTypeInfo {
             package: enumeration.package.clone(),
             file_name: enumeration.file_name.clone(),
             file_options: enumeration.file_options.clone(),
+            proto_reference: spec
+                .type_override(&enumeration.full_name)
+                .map(|type_override| type_override.proto_reference().clone())
+                .unwrap_or_default(),
             proto_type_name: spec
                 .type_override(&enumeration.full_name)
                 .map(|type_override| type_override.proto_type_name().clone())
@@ -162,6 +170,7 @@ impl PlannedTypeInfo {
             package: String::new(),
             file_name: None,
             file_options: None,
+            proto_reference: crate::spec::LanguageStringSpec::default(),
             proto_type_name: crate::spec::LanguageStringSpec::default(),
         }
     }
@@ -172,6 +181,7 @@ impl PlannedTypeInfo {
             package: String::new(),
             file_name: None,
             file_options: None,
+            proto_reference: crate::spec::LanguageStringSpec::default(),
             proto_type_name: crate::spec::LanguageStringSpec::default(),
         }
     }
@@ -182,6 +192,7 @@ impl PlannedTypeInfo {
             package: String::new(),
             file_name: None,
             file_options: None,
+            proto_reference: crate::spec::LanguageStringSpec::default(),
             proto_type_name: crate::spec::LanguageStringSpec::default(),
         }
     }
@@ -192,6 +203,7 @@ impl PlannedTypeInfo {
             package: String::new(),
             file_name: None,
             file_options: None,
+            proto_reference: crate::spec::LanguageStringSpec::default(),
             proto_type_name: crate::spec::LanguageStringSpec::default(),
         }
     }
@@ -261,8 +273,6 @@ pub(crate) struct PlannedField {
     pub(crate) role: PlannedFieldRole,
     pub(crate) function: Option<FunctionFieldSpec>,
     pub(crate) function_args: bool,
-    pub(crate) with_arguments: Option<WithArgumentsFieldSpec>,
-    pub(crate) with_arguments_args: bool,
     pub(crate) kind: PlannedFieldKind,
 }
 
@@ -283,8 +293,6 @@ pub(crate) enum PlannedFieldRole {
     Plain,
     Function(FunctionFieldSpec),
     FunctionArgs(FunctionFieldSpec),
-    WithArguments,
-    WithArgumentsArgs,
 }
 
 #[derive(Debug, Clone)]
@@ -1153,12 +1161,6 @@ fn plan_field(
         function_args: generated_model
             .and_then(|generated_model| generated_model.function_for_args_field(&proto_name))
             .is_some(),
-        with_arguments: generated_model
-            .and_then(|generated_model| generated_model.with_arguments(&proto_name))
-            .cloned(),
-        with_arguments_args: generated_model
-            .and_then(|generated_model| generated_model.with_arguments_for_args_field(&proto_name))
-            .is_some(),
         kind: planned_field_kind(field, spec, descriptors, plan),
         proto_name,
     }
@@ -1198,11 +1200,6 @@ fn plan_wit_field(
         function_args: record
             .generated_model
             .function_for_args_field(field_name)
-            .is_some(),
-        with_arguments: record.generated_model.with_arguments(field_name).cloned(),
-        with_arguments_args: record
-            .generated_model
-            .with_arguments_for_args_field(field_name)
             .is_some(),
         kind: planned_field_kind_from_authored(wit_type, spec, descriptors, plan),
     }
@@ -1415,18 +1412,6 @@ fn planned_field_role(
         .and_then(|generated_model| generated_model.function_for_args_field(proto_name))
     {
         return PlannedFieldRole::FunctionArgs(function.clone());
-    }
-    if generated_model
-        .and_then(|generated_model| generated_model.with_arguments(proto_name))
-        .is_some()
-    {
-        return PlannedFieldRole::WithArguments;
-    }
-    if generated_model
-        .and_then(|generated_model| generated_model.with_arguments_for_args_field(proto_name))
-        .is_some()
-    {
-        return PlannedFieldRole::WithArgumentsArgs;
     }
     PlannedFieldRole::Plain
 }

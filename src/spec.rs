@@ -33,7 +33,6 @@ fn split_input_paths(input_paths: &[PathBuf]) -> Result<(&PathBuf, &[PathBuf])> 
 pub struct ApiSpec {
     pub version: String,
     pub support: SupportSpec,
-    pub language_imports: BTreeMap<Language, Vec<LanguageImportSpec>>,
     pub services: Vec<ServiceSpec>,
     pub types: BTreeMap<String, TypeOverrideSpec>,
     pub records: BTreeMap<String, WitRecordSpec>,
@@ -142,7 +141,6 @@ impl ApiSpec {
         let world_id = select_world(resolve, package_id, &path)?;
         let world = &resolve.worlds[world_id];
         let support = collect_support_spec(resolve, package_id, package_origins)?;
-        let language_imports = collect_language_imports(resolve, package_origins, &path)?;
 
         let mut types = BTreeMap::new();
         let mut records = BTreeMap::new();
@@ -183,7 +181,6 @@ impl ApiSpec {
                 .map(ToString::to_string)
                 .unwrap_or_else(|| "0.0.0".to_string()),
             support,
-            language_imports,
             services,
             types,
             records,
@@ -191,13 +188,6 @@ impl ApiSpec {
             flags,
             variants,
         })
-    }
-
-    pub fn imports_for_language(&self, language: Language) -> &[LanguageImportSpec] {
-        self.language_imports
-            .get(&language)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
     }
 }
 
@@ -337,8 +327,7 @@ pub fn load_linked_wit_metadata_from_inputs(input_paths: &[PathBuf]) -> Result<L
                 }
 
                 for directive in &directives {
-                    if directive.name != "function" && directive.name != "typescript-with-arguments"
-                    {
+                    if directive.name != "function" {
                         continue;
                     }
                     let Some(signature_name) = directive.value("signature") else {
@@ -710,349 +699,6 @@ fn resolve_support_path(base_dir: &Path, support_path: &str) -> PathBuf {
     } else {
         base_dir.join(support_path)
     }
-}
-
-fn collect_language_imports(
-    resolve: &Resolve,
-    package_origins: &PackageOrigins,
-    fallback_path: &Path,
-) -> Result<BTreeMap<Language, Vec<LanguageImportSpec>>> {
-    let mut imports = BTreeSet::new();
-    for (package_id, package) in resolve.packages.iter() {
-        let origin_path = package_origins
-            .get(&package_id)
-            .map(PathBuf::as_path)
-            .unwrap_or(fallback_path);
-        let package_name = if let Some(version) = &package.name.version {
-            format!(
-                "{}:{}@{}",
-                package.name.namespace, package.name.name, version
-            )
-        } else {
-            format!("{}:{}", package.name.namespace, package.name.name)
-        };
-
-        collect_language_imports_from_docs(
-            package.docs.contents.as_deref(),
-            origin_path,
-            &format!("package `{package_name}`"),
-            &mut imports,
-        )?;
-
-        for (world_name, world_id) in &package.worlds {
-            let world = &resolve.worlds[*world_id];
-            collect_language_imports_from_docs(
-                world.docs.contents.as_deref(),
-                origin_path,
-                &format!("package `{package_name}` world `{world_name}`"),
-                &mut imports,
-            )?;
-        }
-
-        for (interface_name, interface_id) in &package.interfaces {
-            let interface = &resolve.interfaces[*interface_id];
-            collect_language_imports_from_docs(
-                interface.docs.contents.as_deref(),
-                origin_path,
-                &format!("interface `{interface_name}`"),
-                &mut imports,
-            )?;
-
-            for type_id in interface.types.values() {
-                let type_def = &resolve.types[*type_id];
-                let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
-                let type_context = format!("type `{interface_name}.{type_name}`");
-                collect_language_imports_from_docs(
-                    type_def.docs.contents.as_deref(),
-                    origin_path,
-                    &type_context,
-                    &mut imports,
-                )?;
-                collect_language_imports_from_type_def(
-                    type_def,
-                    origin_path,
-                    &type_context,
-                    &mut imports,
-                )?;
-            }
-
-            for function in interface.functions.values() {
-                collect_language_imports_from_docs(
-                    function.docs.contents.as_deref(),
-                    origin_path,
-                    &format!("interface `{interface_name}` function `{}`", function.name),
-                    &mut imports,
-                )?;
-            }
-        }
-    }
-
-    let mut imports_by_language = BTreeMap::<Language, Vec<LanguageImportSpec>>::new();
-    for import in imports {
-        imports_by_language
-            .entry(import.language)
-            .or_default()
-            .push(import);
-    }
-    Ok(imports_by_language)
-}
-
-fn collect_language_imports_from_type_def(
-    type_def: &TypeDef,
-    origin_path: &Path,
-    context: &str,
-    imports: &mut BTreeSet<LanguageImportSpec>,
-) -> Result<()> {
-    match &type_def.kind {
-        TypeDefKind::Record(record) => {
-            for field in &record.fields {
-                collect_language_imports_from_docs(
-                    field.docs.contents.as_deref(),
-                    origin_path,
-                    &format!("{context} field `{}`", field.name),
-                    imports,
-                )?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn collect_language_imports_from_docs(
-    docs: Option<&str>,
-    path: &Path,
-    context: &str,
-    imports: &mut BTreeSet<LanguageImportSpec>,
-) -> Result<()> {
-    for directive in parse_directives(docs, path, context)? {
-        collect_typescript_imports_from_directive(&directive, path, context, imports)?;
-        collect_python_imports_from_directive(&directive, imports)?;
-    }
-    Ok(())
-}
-
-fn collect_typescript_imports_from_directive(
-    directive: &Directive,
-    path: &Path,
-    context: &str,
-    imports: &mut BTreeSet<LanguageImportSpec>,
-) -> Result<()> {
-    let Some(package) = directive.value("typescript-package") else {
-        return Ok(());
-    };
-
-    let expressions = typescript_import_expressions(directive);
-    if expressions.is_empty() {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: format!("@nexus.{}", directive.name),
-            reason: "`typescript-package` requires a TypeScript type expression".to_string(),
-        });
-    }
-
-    let mut namespaces = BTreeSet::new();
-    for expression in expressions {
-        namespaces.extend(typescript_qualified_namespaces(expression));
-    }
-
-    match namespaces.len() {
-        0 => Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: format!("@nexus.{}", directive.name),
-            reason: "`typescript-package` requires a TypeScript type expression with a qualified namespace".to_string(),
-        }),
-        1 => {
-            let namespace = namespaces.into_iter().next().expect("namespace count checked");
-            imports.insert(LanguageImportSpec {
-                language: Language::TypeScript,
-                reference: namespace.clone(),
-                module: package.to_string(),
-                name: Some(namespace),
-                type_only: true,
-                import_style: if directive.name == "proto" {
-                    LanguageImportStyle::Named
-                } else {
-                    LanguageImportStyle::Namespace
-                },
-            });
-            Ok(())
-        }
-        _ => Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: format!("@nexus.{}", directive.name),
-            reason: "multiple TypeScript namespaces in one annotated import are not supported"
-                .to_string(),
-        }),
-    }
-}
-
-fn collect_python_imports_from_directive(
-    directive: &Directive,
-    imports: &mut BTreeSet<LanguageImportSpec>,
-) -> Result<()> {
-    for expression in python_import_expressions(directive) {
-        for module_path in python_qualified_module_paths(expression) {
-            imports.insert(LanguageImportSpec {
-                language: Language::Python,
-                reference: module_path.clone(),
-                module: module_path,
-                name: None,
-                type_only: false,
-                import_style: LanguageImportStyle::Module,
-            });
-        }
-    }
-    Ok(())
-}
-
-fn typescript_import_expressions(directive: &Directive) -> Vec<&str> {
-    match directive.name.as_str() {
-        "proto" => directive.value("value").into_iter().collect(),
-        "type" | "flattened-type" => directive
-            .value("typescript")
-            .or_else(|| directive.value("value"))
-            .into_iter()
-            .collect(),
-        "function" => directive
-            .value("typescript-result")
-            .or_else(|| directive.value("result"))
-            .into_iter()
-            .collect(),
-        "typescript-with-arguments" => ["value-type", "args-type"]
-            .into_iter()
-            .filter_map(|key| directive.value(key))
-            .collect(),
-        "output-transform" => directive.value("typescript-type").into_iter().collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn python_import_expressions(directive: &Directive) -> Vec<&str> {
-    match directive.name.as_str() {
-        "type" | "flattened-type" => directive
-            .value("python")
-            .or_else(|| directive.value("value"))
-            .into_iter()
-            .collect(),
-        "function" => directive
-            .value("python-result")
-            .or_else(|| directive.value("result"))
-            .into_iter()
-            .collect(),
-        "output-transform" => directive.value("python-type").into_iter().collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn python_qualified_module_paths(expression: &str) -> BTreeSet<String> {
-    let chars = expression.char_indices().collect::<Vec<_>>();
-    let mut module_paths = BTreeSet::new();
-    let mut index = 0;
-    while index < chars.len() {
-        let (start_byte, ch) = chars[index];
-        if !is_python_identifier_start(ch) {
-            index += 1;
-            continue;
-        }
-
-        let before = expression[..start_byte].chars().next_back();
-        if before.is_some_and(|before| is_python_identifier_char(before) || before == '.') {
-            index += 1;
-            continue;
-        }
-
-        let mut end = index + 1;
-        while end < chars.len() {
-            let ch = chars[end].1;
-            if is_python_identifier_char(ch) || ch == '.' {
-                end += 1;
-            } else {
-                break;
-            }
-        }
-        let end_byte = chars
-            .get(end)
-            .map(|(byte, _)| *byte)
-            .unwrap_or(expression.len());
-        let qualified_name = expression[start_byte..end_byte].trim_end_matches('.');
-        if let Some(module_path) = python_module_path_for_qualified_name(qualified_name) {
-            module_paths.insert(module_path.to_string());
-        }
-        index = end;
-    }
-    module_paths
-}
-
-fn python_module_path_for_qualified_name(qualified_name: &str) -> Option<&str> {
-    let (module_path, _) = qualified_name.rsplit_once('.')?;
-    if is_builtin_python_import(module_path) {
-        return None;
-    }
-    Some(module_path)
-}
-
-fn is_builtin_python_import(module_path: &str) -> bool {
-    matches!(
-        module_path,
-        "collections.abc" | "typing" | "typing_extensions"
-    )
-}
-
-fn is_python_identifier_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || ch == '_'
-}
-
-fn is_python_identifier_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_'
-}
-
-fn typescript_qualified_namespaces(expression: &str) -> BTreeSet<String> {
-    let chars = expression.char_indices().collect::<Vec<_>>();
-    let mut namespaces = BTreeSet::new();
-    let mut index = 0;
-    while index < chars.len() {
-        let (start_byte, ch) = chars[index];
-        if !is_typescript_identifier_start(ch) {
-            index += 1;
-            continue;
-        }
-
-        let before = expression[..start_byte].chars().next_back();
-        if before.is_some_and(|before| is_typescript_identifier_char(before) || before == '.') {
-            index += 1;
-            continue;
-        }
-
-        let mut end = index + 1;
-        while end < chars.len() && is_typescript_identifier_char(chars[end].1) {
-            end += 1;
-        }
-        let end_byte = chars
-            .get(end)
-            .map(|(byte, _)| *byte)
-            .unwrap_or(expression.len());
-        let mut after = end;
-        while after < chars.len() && chars[after].1.is_whitespace() {
-            after += 1;
-        }
-        if after < chars.len() && chars[after].1 == '.' {
-            namespaces.insert(expression[start_byte..end_byte].to_string());
-        }
-        index = end;
-    }
-    namespaces
-}
-
-fn is_typescript_identifier_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || ch == '_' || ch == '$'
-}
-
-fn is_typescript_identifier_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_' || ch == '$'
 }
 
 struct PreparedWitWorkspace {
@@ -1459,6 +1105,8 @@ pub struct OperationOutputTransformSpec {
 pub struct LanguageStringSpec {
     pub default: Option<String>,
     pub by_language: BTreeMap<Language, String>,
+    pub default_import: Option<String>,
+    pub imports: BTreeMap<Language, String>,
 }
 
 impl LanguageStringSpec {
@@ -1466,6 +1114,13 @@ impl LanguageStringSpec {
         self.by_language
             .get(&language)
             .or(self.default.as_ref())
+            .map(String::as_str)
+    }
+
+    pub fn import_for_language(&self, language: Language) -> Option<&str> {
+        self.imports
+            .get(&language)
+            .or(self.default_import.as_ref())
             .map(String::as_str)
     }
 
@@ -1477,6 +1132,7 @@ impl LanguageStringSpec {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TypeOverrideSpec {
     pub model_name: Option<String>,
+    pub proto_reference: LanguageStringSpec,
     pub proto_type_name: LanguageStringSpec,
     pub required_fields: BTreeSet<String>,
     pub omitted_fields: BTreeSet<String>,
@@ -1499,6 +1155,10 @@ impl TypeOverrideSpec {
 
     pub fn proto_type_name(&self) -> &LanguageStringSpec {
         &self.proto_type_name
+    }
+
+    pub fn proto_reference(&self) -> &LanguageStringSpec {
+        &self.proto_reference
     }
 
     pub fn is_field_omitted(&self, field_name: &str) -> bool {
@@ -1553,7 +1213,6 @@ pub struct GeneratedModelSpec {
     pub field_defaults: BTreeMap<String, FieldDefaultSpec>,
     pub field_sources: BTreeMap<String, String>,
     pub functions: BTreeMap<String, FunctionFieldSpec>,
-    pub with_arguments: BTreeMap<String, WithArgumentsFieldSpec>,
 }
 
 impl GeneratedModelSpec {
@@ -1568,7 +1227,6 @@ impl GeneratedModelSpec {
             && self.field_defaults.is_empty()
             && self.field_sources.is_empty()
             && self.functions.is_empty()
-            && self.with_arguments.is_empty()
     }
 
     pub fn field_name_override(&self, field_name: &str) -> Option<&str> {
@@ -1614,19 +1272,6 @@ impl GeneratedModelSpec {
                 .iter()
                 .any(|arg_field| arg_field == field_name)
         })
-    }
-
-    pub fn with_arguments(&self, field_name: &str) -> Option<&WithArgumentsFieldSpec> {
-        self.with_arguments.get(field_name)
-    }
-
-    pub fn with_arguments_for_args_field(
-        &self,
-        field_name: &str,
-    ) -> Option<&WithArgumentsFieldSpec> {
-        self.with_arguments
-            .values()
-            .find(|with_arguments| with_arguments.args_field == field_name)
     }
 }
 
@@ -1776,6 +1421,7 @@ pub struct FunctionFieldSpec {
     pub converter: Option<String>,
     pub name_extractor: Option<String>,
     pub result_type_parameter: Option<String>,
+    pub type_descriptor: Option<FunctionTypeDescriptorSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1800,19 +1446,15 @@ pub enum FunctionResultSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WithArgumentsFieldSpec {
-    pub args_field: String,
-    pub value_type: String,
-    pub args_type: String,
-    pub name_expr: String,
-    pub alternate_type: Option<AuthoredFieldTypeSpec>,
+pub struct FunctionTypeDescriptorSpec {
+    pub value_type: LanguageStringSpec,
+    pub args_type: LanguageStringSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FlattenedFunctionTypeSpec {
     arg_fields: Vec<FlattenedFunctionArgSpec>,
     function: Option<FunctionFieldSpec>,
-    with_arguments: Option<WithArgumentsFieldSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2100,6 +1742,11 @@ fn build_type_override(
             reason: "missing required proto type name".to_string(),
         });
     };
+    let mut proto_reference = LanguageStringSpec {
+        default: Some(proto_name.clone()),
+        ..Default::default()
+    };
+    apply_directive_imports(&mut proto_reference, proto_directive);
     let proto_type_name = directive_prefixed_language_string(proto_directive, "type");
 
     let replacement = build_type_replacement(&directives, path, &context, &proto_name, language)?;
@@ -2150,6 +1797,7 @@ fn build_type_override(
 
     let type_override = TypeOverrideSpec {
         model_name: authored_record.then(|| type_name.to_upper_camel_case()),
+        proto_reference,
         proto_type_name,
         required_fields,
         omitted_fields,
@@ -2186,19 +1834,9 @@ fn build_generated_model_from_record(
     let mut field_defaults = BTreeMap::new();
     let mut field_sources = BTreeMap::new();
     let mut functions = BTreeMap::new();
-    let mut with_arguments = BTreeMap::new();
-
     for field in &record.fields {
         let field_context = format!("{context} field `{}`", field.name);
         let directives = parse_directives(field.docs.contents.as_deref(), path, &field_context)?;
-        if directive(&directives, "with-arguments", path, &field_context)?.is_some() {
-            return Err(Error::InvalidWitDirective {
-                path: path.to_path_buf(),
-                context: field_context,
-                directive: "@nexus.with-arguments".to_string(),
-                reason: "renamed to `@nexus.typescript-with-arguments`".to_string(),
-            });
-        }
         let omit_directive = directive(&directives, "omit", path, &field_context)?;
         let proto_field_name =
             directive_value(&directives, "proto-field", path, &field_context, "value")?
@@ -2215,16 +1853,7 @@ fn build_generated_model_from_record(
                 reason: "cannot be combined with `@nexus.source`".to_string(),
             });
         }
-        let typescript_with_arguments_directive = directive(
-            &directives,
-            "typescript-with-arguments",
-            path,
-            &field_context,
-        )?;
-        let flattened_function_type = if omit_directive.is_none()
-            && function_directive.is_none()
-            && typescript_with_arguments_directive.is_none()
-        {
+        let flattened_function_type = if omit_directive.is_none() && function_directive.is_none() {
             find_flattened_function_type_spec(resolve, &field.ty, path, language)?
         } else {
             None
@@ -2249,14 +1878,8 @@ fn build_generated_model_from_record(
                 });
             }
 
-            for conflicting_directive in [
-                "source",
-                "type",
-                "flattened-type",
-                "function",
-                "default",
-                "typescript-with-arguments",
-            ] {
+            for conflicting_directive in ["source", "type", "flattened-type", "function", "default"]
+            {
                 if directive(&directives, conflicting_directive, path, &field_context)?.is_some() {
                     return Err(Error::InvalidWitDirective {
                         path: path.to_path_buf(),
@@ -2331,13 +1954,6 @@ fn build_generated_model_from_record(
             functions.insert(proto_field_name.clone(), function);
         }
 
-        if language == Language::TypeScript
-            && let Some(with_arguments_field) =
-                build_with_arguments_field(resolve, owner, &directives, path, &field_context)?
-        {
-            with_arguments.insert(proto_field_name.clone(), with_arguments_field);
-        }
-
         if field_sources.contains_key(&proto_field_name)
             && functions.contains_key(&proto_field_name)
         {
@@ -2379,9 +1995,6 @@ fn build_generated_model_from_record(
             if let Some(function) = flattened_function_type.function {
                 functions.insert(proto_field_name.clone(), function);
             }
-            if let Some(with_arguments_field) = flattened_function_type.with_arguments {
-                with_arguments.insert(proto_field_name.clone(), with_arguments_field);
-            }
         }
     }
 
@@ -2399,7 +2012,6 @@ fn build_generated_model_from_record(
             field_defaults,
             field_sources,
             functions,
-            with_arguments,
         },
     ))
 }
@@ -2425,6 +2037,8 @@ fn generated_function_arg_doc(
     LanguageStringSpec {
         default: Some(doc),
         by_language: BTreeMap::new(),
+        default_import: None,
+        imports: BTreeMap::new(),
     }
 }
 
@@ -2939,6 +2553,7 @@ fn build_function_field(
         converter: directive_converter(directive, language),
         name_extractor: directive_function_name_extractor(directive, language, path, context)?,
         result_type_parameter: directive_result_type_parameter(directive),
+        type_descriptor: function_type_descriptor(directive, path, context)?,
     }))
 }
 
@@ -3021,6 +2636,7 @@ fn build_function_field_for_type_alias(
                     context,
                 )?,
                 result_type_parameter: directive_result_type_parameter(function_directive),
+                type_descriptor: function_type_descriptor(function_directive, path, context)?,
             },
         )));
     }
@@ -3051,6 +2667,29 @@ fn function_alternate_type(
             resolve_named_wit_type(resolve, owner, type_name, path, context, "@nexus.function")
         })
         .transpose()
+}
+
+fn function_type_descriptor(
+    directive: &Directive,
+    path: &Path,
+    context: &str,
+) -> Result<Option<FunctionTypeDescriptorSpec>> {
+    let value_type = directive_language_string_for_key(directive, "value-type");
+    let args_type = directive_language_string_for_key(directive, "args-type");
+    if value_type.is_empty() != args_type.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.function".to_string(),
+            reason: "`value-type` and `args-type` must be specified together".to_string(),
+        });
+    }
+    Ok(
+        (!value_type.is_empty()).then_some(FunctionTypeDescriptorSpec {
+            value_type,
+            args_type,
+        }),
+    )
 }
 
 fn function_args_for_language(args: FunctionArgsSpec, language: Language) -> FunctionArgsSpec {
@@ -3085,172 +2724,6 @@ fn function_arg_fields(function_args: &FunctionArgsSpec, args_field: &str) -> Ve
         FunctionArgsSpec::Varargs { .. } => vec![args_field.to_string()],
         FunctionArgsSpec::Fixed(args) => args.iter().map(|arg| arg.name.to_snake_case()).collect(),
     }
-}
-
-fn build_with_arguments_field(
-    resolve: &Resolve,
-    owner: TypeOwner,
-    directives: &[Directive],
-    path: &Path,
-    context: &str,
-) -> Result<Option<WithArgumentsFieldSpec>> {
-    let Some(directive) = directive(directives, "typescript-with-arguments", path, context)? else {
-        return Ok(None);
-    };
-
-    let Some(args_field) = directive.value("args-field") else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
-            reason: "missing required `args-field`".to_string(),
-        });
-    };
-    let Some(value_type) = directive.value("value-type") else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
-            reason: "missing required `value-type`".to_string(),
-        });
-    };
-    let Some(args_type) = directive.value("args-type") else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
-            reason: "missing required `args-type`".to_string(),
-        });
-    };
-    let Some(name_expr) = directive.value("name-expr") else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
-            reason: "missing required `name-expr`".to_string(),
-        });
-    };
-
-    Ok(Some(WithArgumentsFieldSpec {
-        args_field: args_field.to_snake_case(),
-        value_type: value_type.to_string(),
-        args_type: args_type.to_string(),
-        name_expr: name_expr.to_string(),
-        alternate_type: with_arguments_alternate_type(resolve, owner, directive, path, context)?
-            .map(|field_type| authored_field_type_for_language(field_type, Language::TypeScript)),
-    }))
-}
-
-fn build_with_arguments_field_for_type_alias(
-    resolve: &Resolve,
-    type_def: &TypeDef,
-    directives: &[Directive],
-    path: &Path,
-    context: &str,
-) -> Result<Option<(String, AuthoredFieldTypeSpec, WithArgumentsFieldSpec)>> {
-    let Some(directive) = directive(directives, "typescript-with-arguments", path, context)? else {
-        return Ok(None);
-    };
-
-    let (args_name, args_wit_type) = if let Some(signature_name) = directive.value("signature") {
-        if directive.value("args-name").is_some() {
-            return Err(Error::InvalidWitDirective {
-                path: path.to_path_buf(),
-                context: context.to_string(),
-                directive: "@nexus.typescript-with-arguments".to_string(),
-                reason: "signature cannot be combined with args-name".to_string(),
-            });
-        }
-        let (args_name, args_type) =
-            resolve_function_signature_args(resolve, type_def, signature_name, path, context)?;
-        (
-            args_name,
-            authored_field_type_for_language(args_type, Language::TypeScript),
-        )
-    } else if directive.value("args-name").is_some() {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
-            reason: "type-level with-arguments annotations must use `signature`".to_string(),
-        });
-    } else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
-            reason: "missing required `args-name` or `signature`".to_string(),
-        });
-    };
-
-    let Some(value_type) = directive.value("value-type") else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
-            reason: "missing required `value-type`".to_string(),
-        });
-    };
-    let Some(args_type) = directive.value("args-type") else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
-            reason: "missing required `args-type`".to_string(),
-        });
-    };
-    let Some(name_expr) = directive.value("name-expr") else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
-            reason: "missing required `name-expr`".to_string(),
-        });
-    };
-
-    Ok(Some((
-        args_name.clone(),
-        args_wit_type,
-        WithArgumentsFieldSpec {
-            args_field: directive
-                .value("args-field")
-                .unwrap_or(&args_name)
-                .to_snake_case(),
-            value_type: value_type.to_string(),
-            args_type: args_type.to_string(),
-            name_expr: name_expr.to_string(),
-            alternate_type: with_arguments_alternate_type(
-                resolve,
-                type_def.owner,
-                directive,
-                path,
-                context,
-            )?
-            .map(|field_type| authored_field_type_for_language(field_type, Language::TypeScript)),
-        },
-    )))
-}
-
-fn with_arguments_alternate_type(
-    resolve: &Resolve,
-    owner: TypeOwner,
-    directive: &Directive,
-    path: &Path,
-    context: &str,
-) -> Result<Option<AuthoredFieldTypeSpec>> {
-    directive
-        .value("alternate-type")
-        .map(|type_name| {
-            resolve_named_wit_type(
-                resolve,
-                owner,
-                type_name,
-                path,
-                context,
-                "@nexus.typescript-with-arguments",
-            )
-        })
-        .transpose()
 }
 
 fn flattened_function_arg_fields(
@@ -3300,83 +2773,12 @@ fn find_flattened_function_type_spec(
                     &context,
                     language,
                 )?;
-                let with_arguments = if language == Language::TypeScript {
-                    build_with_arguments_field_for_type_alias(
-                        resolve,
-                        type_def,
-                        &directives,
-                        path,
-                        &context,
-                    )?
-                } else {
-                    None
-                };
-                if function.is_some() || with_arguments.is_some() {
-                    let arg_fields = match (&function, &with_arguments) {
-                        (
-                            Some((function_args_name, function_args_type, function)),
-                            Some((
-                                with_arguments_args_name,
-                                with_arguments_args_type,
-                                with_arguments,
-                            )),
-                        ) => {
-                            if function_args_name != with_arguments_args_name {
-                                return Err(Error::InvalidWitDirective {
-                                    path: path.to_path_buf(),
-                                    context,
-                                    directive: "@nexus.typescript-with-arguments".to_string(),
-                                    reason: format!(
-                                        "args-name `{with_arguments_args_name}` does not match function signature args-name `{function_args_name}`"
-                                    ),
-                                });
-                            }
-                            if function.args_field != with_arguments.args_field {
-                                return Err(Error::InvalidWitDirective {
-                                    path: path.to_path_buf(),
-                                    context,
-                                    directive: "@nexus.typescript-with-arguments".to_string(),
-                                    reason: format!(
-                                        "args-field `{}` does not match function args-field `{}`",
-                                        with_arguments.args_field, function.args_field
-                                    ),
-                                });
-                            }
-                            if function_args_type != with_arguments_args_type {
-                                return Err(Error::InvalidWitDirective {
-                                    path: path.to_path_buf(),
-                                    context,
-                                    directive: "@nexus.typescript-with-arguments".to_string(),
-                                    reason: format!(
-                                        "args type `{}` does not match function args type `{}`",
-                                        with_arguments_args_type.to_wit_string(),
-                                        function_args_type.to_wit_string()
-                                    ),
-                                });
-                            }
-                            flattened_function_arg_fields(
-                                function,
-                                function_args_name,
-                                function_args_type,
-                            )
-                        }
-                        (Some((args_name, args_type, function)), None) => {
-                            flattened_function_arg_fields(function, args_name, args_type)
-                        }
-                        (None, Some((args_name, args_type, with_arguments))) => {
-                            vec![FlattenedFunctionArgSpec {
-                                args_name: args_name.clone(),
-                                field_name: with_arguments.args_field.clone(),
-                                field_type: args_type.clone(),
-                                required: false,
-                            }]
-                        }
-                        (None, None) => unreachable!("checked for a present flattened function"),
-                    };
+                if let Some((args_name, args_type, function)) = function {
+                    let arg_fields =
+                        flattened_function_arg_fields(&function, &args_name, &args_type);
                     return Ok(Some(FlattenedFunctionTypeSpec {
                         arg_fields,
-                        function: function.map(|(_, _, function)| function),
-                        with_arguments: with_arguments.map(|(_, _, with_arguments)| with_arguments),
+                        function: Some(function),
                     }));
                 }
                 match &type_def.kind {
@@ -3572,7 +2974,7 @@ fn resolve_function_signature_args(
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
             context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
+            directive: "@nexus.function".to_string(),
             reason: "signature is only supported on interface-owned types".to_string(),
         });
     };
@@ -3581,7 +2983,7 @@ fn resolve_function_signature_args(
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
             context: context.to_string(),
-            directive: "@nexus.typescript-with-arguments".to_string(),
+            directive: "@nexus.function".to_string(),
             reason: format!("unknown signature `{signature_name}`"),
         });
     };
@@ -4278,12 +3680,15 @@ fn directive_language_string(directive: &Directive) -> LanguageStringSpec {
     let mut spec = LanguageStringSpec {
         default: directive.value("value").map(ToOwned::to_owned),
         by_language: BTreeMap::new(),
+        default_import: None,
+        imports: BTreeMap::new(),
     };
     for language in all_languages() {
         if let Some(value) = directive.value(language_key(language)) {
             spec.by_language.insert(language, value.to_string());
         }
     }
+    apply_directive_imports(&mut spec, directive);
     spec
 }
 
@@ -4294,6 +3699,13 @@ fn directive_prefixed_language_string(directive: &Directive, suffix: &str) -> La
             spec.by_language.insert(language, value.to_string());
         }
     }
+    apply_directive_imports(&mut spec, directive);
+    spec
+}
+
+fn directive_language_string_for_key(directive: &Directive, key: &str) -> LanguageStringSpec {
+    let mut spec = directive_prefixed_language_string(directive, key);
+    spec.default = directive.value(key).map(ToOwned::to_owned);
     spec
 }
 
@@ -4307,6 +3719,15 @@ fn directive_result_language_string(directive: &Directive) -> LanguageStringSpec
     let mut spec = directive_prefixed_language_string(directive, "result");
     spec.default = directive.value("result").map(ToOwned::to_owned);
     spec
+}
+
+fn apply_directive_imports(spec: &mut LanguageStringSpec, directive: &Directive) {
+    spec.default_import = directive.value("import").map(ToOwned::to_owned);
+    for language in all_languages() {
+        if let Some(value) = directive.value(&format!("{}-import", language_key(language))) {
+            spec.imports.insert(language, value.to_string());
+        }
+    }
 }
 
 fn directive_converter(directive: &Directive, language: Language) -> Option<String> {
@@ -4585,7 +4006,6 @@ fn parse_bool(value: &str) -> std::result::Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -4818,7 +4238,7 @@ interface workflow-service {
   ///   python="temporalio.workflow.get_external_workflow_handle(request.workflow_id, run_id=result.run_id)"
   ///   typescript-type="workflow.ExternalWorkflowHandle"
   ///   typescript="workflow.getExternalWorkflowHandle(request.workflowId, result.runId ?? undefined)"
-  ///   typescript-package="@temporalio/workflow"
+  ///   typescript-import="@temporalio/workflow"
   signal-with-start-workflow-execution: func(
     request: signal-with-start-workflow-request
   ) -> signal-with-start-workflow-response;
@@ -4837,21 +4257,6 @@ interface workflow-service {
             typescript.services[0].wire_name,
             "temporal.api.workflowservice.v1.WorkflowService"
         );
-        assert!(
-            python
-                .imports_for_language(Language::Python)
-                .iter()
-                .any(|import| import.reference == "temporalio.workflow"
-                    && import.module == "temporalio.workflow")
-        );
-        assert!(
-            python
-                .imports_for_language(Language::TypeScript)
-                .iter()
-                .any(|import| import.reference == "workflow"
-                    && import.module == "@temporalio/workflow")
-        );
-
         let python_support = python.support.fragments_for_language(Language::Python);
         let typescript_support = typescript
             .support
@@ -4976,7 +4381,6 @@ interface workflow-service {
                 .flatten_in_api()
         );
         assert!(typescript_model.function("workflow_type").is_some());
-        assert!(typescript_model.with_arguments("signal_name").is_some());
         assert!(typescript_model.function("signal_name").is_some());
         assert_eq!(
             typescript_model
@@ -4991,41 +4395,24 @@ interface workflow-service {
                 .unwrap()
                 .converter
                 .as_deref(),
-            Some("signalFunctionToProto")
+            None
         );
-    }
-
-    #[test]
-    fn rejects_legacy_with_arguments_directive_name() {
-        let wit = r#"
-package temporal:nexus@1.0.0;
-
-world system {
-  export workflow-service;
-}
-
-interface workflow-service {
-  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
-  record request {
-    /// @nexus.with-arguments
-    ///   args-field="signal-input"
-    ///   value-type="workflow.SignalDefinition<any[]>"
-    ///   args-type="Value extends workflow.SignalDefinition<infer Args, any> ? Args : never"
-    ///   name-expr="value.name"
-    signal: string,
-  }
-
-  request-op: func(request: request) -> request;
-}
-"#;
-
-        let error =
-            ApiSpec::parse_for_language(Language::TypeScript, wit, PathBuf::from("inline.wit"))
-                .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("renamed to `@nexus.typescript-with-arguments`")
+        assert_eq!(
+            typescript_model
+                .function("signal_name")
+                .unwrap()
+                .name_extractor
+                .as_deref(),
+            Some("signalFunctionName")
+        );
+        assert_eq!(
+            typescript_model
+                .function("signal_name")
+                .unwrap()
+                .type_descriptor
+                .as_ref()
+                .and_then(|descriptor| descriptor.value_type.for_language(Language::TypeScript)),
+            Some("workflow.SignalDefinition<any[]>")
         );
     }
 
@@ -5943,24 +5330,6 @@ interface example {
             Some("temporalio.common.RetryPolicy")
         );
         assert_eq!(directive.value("typescript"), Some("common.RetryPolicy"));
-    }
-
-    #[test]
-    fn infers_python_imports_from_qualified_type_paths() {
-        assert_eq!(
-            super::python_qualified_module_paths(
-                "temporalio.common.RetryPolicy | datetime.timedelta | typing.Any",
-            ),
-            ["datetime".to_string(), "temporalio.common".to_string()]
-                .into_iter()
-                .collect()
-        );
-        assert_eq!(
-            super::python_qualified_module_paths(
-                "str | collections.abc.Callable[..., collections.abc.Awaitable[object]]",
-            ),
-            BTreeSet::new()
-        );
     }
 
     #[test]

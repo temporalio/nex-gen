@@ -69,7 +69,7 @@ export function workflowFunctionName(
   return typeof value === "string" ? value : common.extractWorkflowType(value);
 }
 
-export function signalFunctionToProto(
+export function signalFunctionName(
   value: string | workflow.SignalDefinition<any[]>,
 ): string {
   return typeof value === "string" ? value : value.name;
