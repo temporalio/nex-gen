@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using NexusRpc;
 
 namespace NexGen.TypeShowcase
@@ -30,73 +29,22 @@ namespace NexGen.TypeShowcase
 
     }
 
-    public sealed class NexGenNexusOperation
-    {
-        public NexGenNexusOperation(string endpoint, string service, string operation, Type serviceType, MethodInfo method, Type? requestType, Type responseType)
-        {
-            Endpoint = endpoint;
-            Service = service;
-            Operation = operation;
-            ServiceType = serviceType;
-            Method = method;
-            RequestType = requestType;
-            ResponseType = responseType;
-        }
-
-        public string Endpoint { get; }
-        public string Service { get; }
-        public string Operation { get; }
-        public Type ServiceType { get; }
-        public MethodInfo Method { get; }
-        public Type? RequestType { get; }
-        public Type ResponseType { get; }
-    }
-
     public static class NexGenOperationRegistry
     {
-        public static IReadOnlyDictionary<(string Service, string Operation), NexGenNexusOperation> Operations { get; } =
-            new Dictionary<(string Service, string Operation), NexGenNexusOperation>
+        internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =
+            new Dictionary<string, ServiceDefinition>
             {
-                [("TypeShowcase", "GetUser")] = new NexGenNexusOperation(
-                    endpoint: "type-showcase",
-                    service: "TypeShowcase",
-                    operation: "GetUser",
-                    serviceType: typeof(ITypeShowcase),
-                    method: typeof(ITypeShowcase).GetMethod(nameof(ITypeShowcase.GetUser))!,
-                    requestType: typeof(GetUserRequest),
-                    responseType: typeof(User)),
-                [("TypeShowcase", "UpdateEmail")] = new NexGenNexusOperation(
-                    endpoint: "type-showcase",
-                    service: "TypeShowcase",
-                    operation: "UpdateEmail",
-                    serviceType: typeof(ITypeShowcase),
-                    method: typeof(ITypeShowcase).GetMethod(nameof(ITypeShowcase.UpdateEmail))!,
-                    requestType: typeof(UpdateEmailRequest),
-                    responseType: typeof(User)),
-                [("TypeShowcase", "Rename")] = new NexGenNexusOperation(
-                    endpoint: "type-showcase",
-                    service: "TypeShowcase",
-                    operation: "Rename",
-                    serviceType: typeof(ITypeShowcase),
-                    method: typeof(ITypeShowcase).GetMethod(nameof(ITypeShowcase.Rename))!,
-                    requestType: typeof(RenameRequest),
-                    responseType: typeof(User)),
-                [("TypeShowcase", "SetProfile")] = new NexGenNexusOperation(
-                    endpoint: "type-showcase",
-                    service: "TypeShowcase",
-                    operation: "SetProfile",
-                    serviceType: typeof(ITypeShowcase),
-                    method: typeof(ITypeShowcase).GetMethod(nameof(ITypeShowcase.SetProfile))!,
-                    requestType: typeof(SetProfileRequest),
-                    responseType: typeof(User)),
-                [("TypeShowcase", "Deactivate")] = new NexGenNexusOperation(
-                    endpoint: "type-showcase",
-                    service: "TypeShowcase",
-                    operation: "Deactivate",
-                    serviceType: typeof(ITypeShowcase),
-                    method: typeof(ITypeShowcase).GetMethod(nameof(ITypeShowcase.Deactivate))!,
-                    requestType: typeof(DeactivateRequest),
-                    responseType: typeof(void)),
+                ["TypeShowcase"] = ServiceDefinition.FromType<ITypeShowcase>(),
+            };
+
+        public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =
+            new Dictionary<(string Service, string Operation), OperationDefinition>
+            {
+                [("TypeShowcase", "GetUser")] = Services["TypeShowcase"].Operations["GetUser"],
+                [("TypeShowcase", "UpdateEmail")] = Services["TypeShowcase"].Operations["UpdateEmail"],
+                [("TypeShowcase", "Rename")] = Services["TypeShowcase"].Operations["Rename"],
+                [("TypeShowcase", "SetProfile")] = Services["TypeShowcase"].Operations["SetProfile"],
+                [("TypeShowcase", "Deactivate")] = Services["TypeShowcase"].Operations["Deactivate"],
             };
     }
 

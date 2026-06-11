@@ -11,7 +11,6 @@ using System.Threading.Tasks;
 using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
-using NexGen.Support;
 
 namespace NexGen.WorkflowService
 {
@@ -120,11 +119,11 @@ namespace NexGen.WorkflowService
             var request = new SignalWithStartWorkflowRequest
             {
                 Workflow = workflow,
-                Args = args == null ? null : args.ToProto(),
+                Args = args,
                 Id = options.Id,
                 TaskQueue = options.TaskQueue,
                 Signal = signal,
-                SignalArgs = signalArgs == null ? null : signalArgs.ToProto(),
+                SignalArgs = signalArgs,
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
@@ -157,11 +156,11 @@ namespace NexGen.WorkflowService
             var request = new SignalWithStartWorkflowRequest
             {
                 Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
-                Args = workflowArgs.ToProto(),
+                Args = workflowArgs,
                 Id = options.Id,
                 TaskQueue = options.TaskQueue,
                 Signal = signal,
-                SignalArgs = signalArgs == null ? null : signalArgs.ToProto(),
+                SignalArgs = signalArgs,
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
@@ -194,11 +193,11 @@ namespace NexGen.WorkflowService
             var request = new SignalWithStartWorkflowRequest
             {
                 Workflow = workflow,
-                Args = args == null ? null : args.ToProto(),
+                Args = args,
                 Id = options.Id,
                 TaskQueue = options.TaskQueue,
                 Signal = NexGen.Support.TemporalFunctionNames.SignalName(signalMethod),
-                SignalArgs = signalArgs.ToProto(),
+                SignalArgs = signalArgs,
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
@@ -231,11 +230,11 @@ namespace NexGen.WorkflowService
             var request = new SignalWithStartWorkflowRequest
             {
                 Workflow = NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod),
-                Args = workflowArgs.ToProto(),
+                Args = workflowArgs,
                 Id = options.Id,
                 TaskQueue = options.TaskQueue,
                 Signal = NexGen.Support.TemporalFunctionNames.SignalName(signalMethod),
-                SignalArgs = signalArgs.ToProto(),
+                SignalArgs = signalArgs,
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,

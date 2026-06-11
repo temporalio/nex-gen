@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using NexusRpc;
 
 namespace NexGen.FunctionExecution
@@ -30,73 +29,22 @@ namespace NexGen.FunctionExecution
 
     }
 
-    public sealed class NexGenNexusOperation
-    {
-        public NexGenNexusOperation(string endpoint, string service, string operation, Type serviceType, MethodInfo method, Type? requestType, Type responseType)
-        {
-            Endpoint = endpoint;
-            Service = service;
-            Operation = operation;
-            ServiceType = serviceType;
-            Method = method;
-            RequestType = requestType;
-            ResponseType = responseType;
-        }
-
-        public string Endpoint { get; }
-        public string Service { get; }
-        public string Operation { get; }
-        public Type ServiceType { get; }
-        public MethodInfo Method { get; }
-        public Type? RequestType { get; }
-        public Type ResponseType { get; }
-    }
-
     public static class NexGenOperationRegistry
     {
-        public static IReadOnlyDictionary<(string Service, string Operation), NexGenNexusOperation> Operations { get; } =
-            new Dictionary<(string Service, string Operation), NexGenNexusOperation>
+        internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =
+            new Dictionary<string, ServiceDefinition>
             {
-                [("FunctionExecution", "ExecuteFunction")] = new NexGenNexusOperation(
-                    endpoint: "function-execution",
-                    service: "FunctionExecution",
-                    operation: "ExecuteFunction",
-                    serviceType: typeof(IFunctionExecution),
-                    method: typeof(IFunctionExecution).GetMethod(nameof(IFunctionExecution.ExecuteFunction))!,
-                    requestType: typeof(ExecuteFunctionRequest),
-                    responseType: typeof(ExecuteFunctionResult)),
-                [("FunctionExecution", "ExecuteCountedFunction")] = new NexGenNexusOperation(
-                    endpoint: "function-execution",
-                    service: "FunctionExecution",
-                    operation: "ExecuteCountedFunction",
-                    serviceType: typeof(IFunctionExecution),
-                    method: typeof(IFunctionExecution).GetMethod(nameof(IFunctionExecution.ExecuteCountedFunction))!,
-                    requestType: typeof(ExecuteCountedFunctionRequest),
-                    responseType: typeof(ExecuteCountedFunctionResult)),
-                [("FunctionExecution", "ExecuteNamedFunction")] = new NexGenNexusOperation(
-                    endpoint: "function-execution",
-                    service: "FunctionExecution",
-                    operation: "ExecuteNamedFunction",
-                    serviceType: typeof(IFunctionExecution),
-                    method: typeof(IFunctionExecution).GetMethod(nameof(IFunctionExecution.ExecuteNamedFunction))!,
-                    requestType: typeof(ExecuteNamedFunctionRequest),
-                    responseType: typeof(ExecuteNamedFunctionResult)),
-                [("FunctionExecution", "ExecuteVarargsFunction")] = new NexGenNexusOperation(
-                    endpoint: "function-execution",
-                    service: "FunctionExecution",
-                    operation: "ExecuteVarargsFunction",
-                    serviceType: typeof(IFunctionExecution),
-                    method: typeof(IFunctionExecution).GetMethod(nameof(IFunctionExecution.ExecuteVarargsFunction))!,
-                    requestType: typeof(ExecuteVarargsFunctionRequest),
-                    responseType: typeof(ExecuteVarargsFunctionResult)),
-                [("FunctionExecution", "ExecuteNamedVarargsFunction")] = new NexGenNexusOperation(
-                    endpoint: "function-execution",
-                    service: "FunctionExecution",
-                    operation: "ExecuteNamedVarargsFunction",
-                    serviceType: typeof(IFunctionExecution),
-                    method: typeof(IFunctionExecution).GetMethod(nameof(IFunctionExecution.ExecuteNamedVarargsFunction))!,
-                    requestType: typeof(ExecuteNamedVarargsFunctionRequest),
-                    responseType: typeof(ExecuteNamedVarargsFunctionResult)),
+                ["FunctionExecution"] = ServiceDefinition.FromType<IFunctionExecution>(),
+            };
+
+        public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =
+            new Dictionary<(string Service, string Operation), OperationDefinition>
+            {
+                [("FunctionExecution", "ExecuteFunction")] = Services["FunctionExecution"].Operations["ExecuteFunction"],
+                [("FunctionExecution", "ExecuteCountedFunction")] = Services["FunctionExecution"].Operations["ExecuteCountedFunction"],
+                [("FunctionExecution", "ExecuteNamedFunction")] = Services["FunctionExecution"].Operations["ExecuteNamedFunction"],
+                [("FunctionExecution", "ExecuteVarargsFunction")] = Services["FunctionExecution"].Operations["ExecuteVarargsFunction"],
+                [("FunctionExecution", "ExecuteNamedVarargsFunction")] = Services["FunctionExecution"].Operations["ExecuteNamedVarargsFunction"],
             };
     }
 
