@@ -6,6 +6,7 @@ from nexusrpc import Operation, service
 from .models import (
     DeactivateRequest,
     GetUserRequest,
+    RecordSyncRequest,
     RenameRequest,
     SetProfileRequest,
     UpdateEmailRequest,
@@ -34,6 +35,11 @@ class TypeShowcase:
         SetProfileRequest,
         User,
     ] = Operation(name="SetProfile")
+
+    record_sync: Operation[
+        RecordSyncRequest,
+        None,
+    ] = Operation(name="RecordSync")
 
     deactivate: Operation[
         DeactivateRequest,

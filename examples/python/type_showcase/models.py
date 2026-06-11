@@ -63,6 +63,25 @@ class PostalAddress:
 
 
 @dataclasses.dataclass(slots=True)
+class RecordSyncRequest:
+    user_id: str
+    report: SyncReport
+
+
+@dataclasses.dataclass(slots=True)
+class SyncReport:
+    route: list[tuple[float, float]] | None = dataclasses.field(default_factory=list)
+    attempts: (
+        list[tuple[typing.Literal["ok"], str] | tuple[typing.Literal["err"], str]]
+        | None
+    ) = dataclasses.field(default_factory=list)
+    region_status: (
+        dict[str, tuple[typing.Literal["ok"], str] | tuple[typing.Literal["err"], str]]
+        | None
+    ) = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(slots=True)
 class DeactivateRequest:
     user_id: str
     reason: str | None = None
@@ -85,6 +104,10 @@ nex_gen_runtime.register_nexus_type(
 )
 nex_gen_runtime.register_nexus_type(UserProfile, "type-showcase.user-profile")
 nex_gen_runtime.register_nexus_type(PostalAddress, "type-showcase.postal-address")
+nex_gen_runtime.register_nexus_type(
+    RecordSyncRequest, "type-showcase.record-sync-request"
+)
+nex_gen_runtime.register_nexus_type(SyncReport, "type-showcase.sync-report")
 nex_gen_runtime.register_nexus_type(
     DeactivateRequest, "type-showcase.deactivate-request"
 )
