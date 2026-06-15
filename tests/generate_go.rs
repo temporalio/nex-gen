@@ -597,6 +597,24 @@ fn go_type_roundtrip_generates_proto_conversions() {
 }
 
 #[test]
+fn go_flatten_in_api_embeds_options_value() {
+    let root = project_root();
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &example_input_paths(&root, "workflow-service"),
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
+
+    assert!(rendered.contains("type SignalWithStartWorkflowOptions struct {"));
+    assert!(rendered.contains("\tUserMetadata\n}\n\n// Signal a workflow"));
+    assert!(!rendered.contains("\tUserMetadata *UserMetadata\n}\n\n// Signal a workflow"));
+    assert!(rendered.contains("\t\tUserMetadata: &opts.UserMetadata,\n"));
+    assert!(rendered.contains("\tStaticSummary any"));
+    assert!(rendered.contains("\tStaticDetails any"));
+}
+
+#[test]
 fn go_doc_directives_render_godoc_comments() {
     let temp_dir = unique_output_path("go-doc-directives-input");
     fs::create_dir_all(&temp_dir).unwrap();

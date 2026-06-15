@@ -442,6 +442,9 @@ struct RenderedUnpackedParam {
     /// Whether this parameter is required (positional argument) or optional
     /// (placed in the options struct).
     required: bool,
+    /// Whether this optional parameter should be embedded as a value in the
+    /// generated options struct because its model is marked `flatten-in-api`.
+    embed_in_options: bool,
 }
 
 /// A WIT enum rendered as a Go `type <Name> int32` with associated constants.
@@ -652,15 +655,27 @@ fn resolve_operation<'a>(
     // Build unpacked input params from the rendered model, if the input type
     // is a generated model (not an external/replacement type).
     let unpacked_input = models.get(&operation.input.info.full_name).map(|model| {
+        let planned_fields = api_plan
+            .models
+            .get(&operation.input.info.full_name)
+            .map(|planned_model| planned_model.fields.as_slice());
         model
             .fields
             .iter()
-            .map(|field| RenderedUnpackedParam {
-                field_name: field.name.clone(),
-                doc: field.doc.clone(),
-                param_name: go_unexported_name(&field.name),
-                go_type: field.go_type.clone(),
-                required: field.required,
+            .enumerate()
+            .map(|(index, field)| {
+                let planned_field = planned_fields.and_then(|fields| fields.get(index));
+                RenderedUnpackedParam {
+                    field_name: field.name.clone(),
+                    doc: field.doc.clone(),
+                    param_name: go_unexported_name(&field.name),
+                    go_type: field.go_type.clone(),
+                    required: field.required,
+                    embed_in_options: planned_field.is_some_and(|planned_field| {
+                        !planned_field.required
+                            && field_kind_is_flattened_message(&planned_field.kind, api_plan)
+                    }),
+                }
             })
             .collect()
     });
@@ -679,6 +694,16 @@ fn resolve_operation<'a>(
         unpacked_input,
         proto_binding: None,
     })
+}
+
+fn field_kind_is_flattened_message(kind: &PlannedFieldKind, api_plan: &ApiPlan) -> bool {
+    let PlannedFieldKind::Singular(PlannedValueType::Message(message)) = kind else {
+        return false;
+    };
+    api_plan
+        .models
+        .get(&message.info.full_name)
+        .is_some_and(|model| model.flatten_in_api)
 }
 
 /// Computes the proto binding for an operation message: the proto type
@@ -3545,9 +3570,13 @@ fn render_options_struct(
             render_go_doc_comment(output, "\t", doc);
         }
         output.push('\t');
-        output.push_str(&param.field_name);
-        output.push(' ');
-        output.push_str(&param.go_type);
+        if param.embed_in_options {
+            output.push_str(param.go_type.trim_start_matches('*'));
+        } else {
+            output.push_str(&param.field_name);
+            output.push(' ');
+            output.push_str(&param.go_type);
+        }
         output.push('\n');
     }
     output.push_str("}\n");
@@ -3665,6 +3694,10 @@ fn render_convenience_wrapper(
         output.push_str(": ");
         if param.required {
             output.push_str(&param.param_name);
+        } else if param.embed_in_options {
+            output.push('&');
+            output.push_str("opts.");
+            output.push_str(&param.field_name);
         } else {
             output.push_str("opts.");
             output.push_str(&param.field_name);

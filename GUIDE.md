@@ -876,6 +876,11 @@ async def signal_with_start_workflow(
     )
 ```
 
+In the snippet above, notice that the entire `user-metadata` field is `None` if 
+all its constituent fields are `None`. This is the behavior in Python and Typescript,
+but not in Go; in Go we implement flattening with value embedding, so `user-metadata` 
+is never nil.
+
 ### Output Transforms
 
 An operation annotated with `@nexus.output-transform` transforms the raw
@@ -1156,6 +1161,21 @@ record user-metadata {
 
 Only supported on record types.
 
+In Go, `@nexus.flatten-in-api` is rendered as value embedding in the generated
+operation options struct. For a parent request with
+`user-metadata: option<user-metadata>`, the options struct embeds
+`UserMetadata`, so callers can set fields through the embedded value:
+
+```go
+opts := SomeOperationOptions{}
+opts.StaticSummary = "Nightly sync"
+```
+
+This differs from the nil-collapse behavior shown in
+[Flattened Records](#flattened-records): because the Go options struct contains
+an embedded zero-value record, generated Go cannot distinguish "omitted" from
+"present with zero-value fields".
+
 ---
 
 ### @nexus.flattened-type
@@ -1166,6 +1186,9 @@ Only supported on record types.
 Overrides the type of a field when it is flattened into the parent API. Useful
 when the non-flattened type (e.g., `Payload`) should be simplified (e.g., to
 `str`) in the flattened context.
+
+Go ignores `@nexus.flattened-type`; embedded fields keep the generated model's
+normal Go field types.
 
 ```wit
 /// @nexus.flattened-type python="str"

@@ -183,8 +183,8 @@ type SignalWithStartWorkflowOptions struct {
 	VersioningOverride *client.VersioningOverride
 	// Amount of time to wait before starting the workflow. This does not work with
 	// cron-schedule.
-	StartDelay   *time.Duration
-	UserMetadata *UserMetadata
+	StartDelay *time.Duration
+	UserMetadata
 }
 
 // Signal a workflow, starting it first if needed.
@@ -218,6 +218,6 @@ func SignalWithStartWorkflow(
 		Priority:           opts.Priority,
 		VersioningOverride: opts.VersioningOverride,
 		StartDelay:         opts.StartDelay,
-		UserMetadata:       opts.UserMetadata,
+		UserMetadata:       &opts.UserMetadata,
 	})
 }
