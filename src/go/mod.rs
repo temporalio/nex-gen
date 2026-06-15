@@ -385,6 +385,17 @@ struct RenderedOperation<'a> {
     /// For resource-returning operations this is the resource type name
     /// (e.g. `"User"`).
     output_type: Option<String>,
+    /// Go type for the raw operation result before applying an output
+    /// transform. This is only distinct from `output_type` for transformed
+    /// operations.
+    raw_output_type: Option<String>,
+    /// Go expression for an `@nexus.output-transform`, if one is configured.
+    /// The expression is rendered with `request` and raw `result` in scope and
+    /// must evaluate to `(output_transform_type, error)`.
+    output_transform_expr: Option<&'a str>,
+    /// Go return type for an `@nexus.output-transform`, with any embedded
+    /// import path stripped from the WIT annotation.
+    output_transform_type: Option<String>,
     /// Unpacked input parameters for the exported convenience wrapper, or
     /// `None` when the input type is an external/replacement type that cannot
     /// be unpacked into individual arguments.
@@ -595,14 +606,41 @@ fn resolve_operation<'a>(
 ) -> Result<RenderedOperation<'a>> {
     resolve_message_types(&operation.input, api_plan, enums, flags, variants, models)?;
     let input_type = resolve_message_go_type(&operation.input);
+    let go_output_transform = operation.output_transform.as_ref().and_then(|transform| {
+        Some((
+            transform.type_name.for_language(Language::Go)?,
+            transform.transform.for_language(Language::Go)?,
+        ))
+    });
+    let raw_output_type = if go_output_transform.is_some() {
+        match &operation.output {
+            PlannedOperationOutput::Message(output) => {
+                if go_proto_ref(&output.info).is_some() {
+                    None
+                } else {
+                    resolve_message_types(output, api_plan, enums, flags, variants, models)?;
+                    Some(resolve_message_go_type(output))
+                }
+            }
+            PlannedOperationOutput::Resource { type_name } => Some(type_name.clone()),
+            PlannedOperationOutput::None => None,
+        }
+    } else {
+        None
+    };
+
     let output_type = match &operation.output {
         PlannedOperationOutput::Message(output) => {
             if let Some(resource_return) = &operation.output_resource_return {
                 // The operation returns a resource constructed from the proto
                 // response -- use the resource type name.
                 Some(resource_return.resource_type_name.clone())
+            } else if let Some((transform_type, _)) = go_output_transform {
+                // Output transforms expose their transformed type to callers,
+                // while the raw operation output is still resolved below for
+                // result decoding.
+                Some(go_type_expr(transform_type))
             } else {
-                // Normal output message -- resolve to generate the model.
                 resolve_message_types(output, api_plan, enums, flags, variants, models)?;
                 Some(resolve_message_go_type(output))
             }
@@ -635,6 +673,9 @@ fn resolve_operation<'a>(
         func_name: go_unexported_name(&operation.name),
         input_type,
         output_type,
+        raw_output_type,
+        output_transform_expr: go_output_transform.map(|(_, expr)| expr),
+        output_transform_type: go_output_transform.map(|(type_name, _)| go_type_expr(type_name)),
         unpacked_input,
         proto_binding: None,
     })
@@ -664,6 +705,15 @@ fn operation_message_binding(
         }
     })?;
     Ok(Some((proto_type, conversion)))
+}
+
+fn operation_message_proto_type(
+    message: &PlannedMessageType,
+    imports: &mut GoImportCollector,
+) -> Option<String> {
+    let proto_ref = go_proto_ref(&message.info)?;
+    let alias = imports.register(&proto_ref);
+    Some(format!("*{}", proto_ref.qualified(&alias)))
 }
 
 /// Populates proto bindings on operations whose input/output messages are
@@ -700,26 +750,38 @@ fn populate_operation_bindings(
                 _ => "request".to_string(),
             };
             let input_to_proto = (input_conv.to_proto)(&input_arg);
+            let has_go_output_transform =
+                planned_op
+                    .output_transform
+                    .as_ref()
+                    .is_some_and(|transform| {
+                        transform.type_name.for_language(Language::Go).is_some()
+                            && transform.transform.for_language(Language::Go).is_some()
+                    });
 
             let (output_proto_type, output_from_proto, output_returns_pointer) =
                 match &planned_op.output {
                     PlannedOperationOutput::Message(output) => {
-                        match operation_message_binding(
-                            output,
-                            &planned_op.name,
-                            "output",
-                            api_plan,
-                            imports,
-                        )? {
-                            Some((proto_type, conv)) => {
-                                // `result` is declared as a proto value;
-                                // converters take a pointer to the proto message.
-                                let from = (conv.from_proto)("&result");
-                                let returns_pointer =
-                                    conv.kind == GoConversionKind::OverrideConverter;
-                                (Some(proto_type), Some(from), returns_pointer)
+                        if has_go_output_transform {
+                            (operation_message_proto_type(output, imports), None, false)
+                        } else {
+                            match operation_message_binding(
+                                output,
+                                &planned_op.name,
+                                "output",
+                                api_plan,
+                                imports,
+                            )? {
+                                Some((proto_type, conv)) => {
+                                    // `result` is declared as a proto value;
+                                    // converters take a pointer to the proto message.
+                                    let from = (conv.from_proto)("&result");
+                                    let returns_pointer =
+                                        conv.kind == GoConversionKind::OverrideConverter;
+                                    (Some(proto_type), Some(from), returns_pointer)
+                                }
+                                None => continue,
                             }
-                            None => continue,
                         }
                     }
                     PlannedOperationOutput::Resource { .. } => continue,
@@ -1597,6 +1659,11 @@ fn parse_go_import(type_expr: &str) -> (Option<String>, String) {
     (None, type_expr.to_string())
 }
 
+fn go_type_expr(type_expr: &str) -> String {
+    let (_import_path, code_expr) = parse_go_import(type_expr);
+    code_expr
+}
+
 /// Walks the [`ApiPlan`] and collects Go import paths from any `@nexus.type`
 /// annotations that embed a module path (e.g. `go.temporal.io/sdk/temporal.RetryPolicy`).
 fn collect_imports_from_plan(api_plan: &ApiPlan, imports: &mut BTreeSet<String>) {
@@ -1610,6 +1677,17 @@ fn collect_imports_from_plan(api_plan: &ApiPlan, imports: &mut BTreeSet<String>)
             collect_imports_from_message_type(&operation.input, imports);
             if let PlannedOperationOutput::Message(output) = &operation.output {
                 collect_imports_from_message_type(output, imports);
+            }
+            if let Some(transform) = &operation.output_transform {
+                if let (Some(annotation), Some(_expr)) = (
+                    transform.type_name.for_language(Language::Go),
+                    transform.transform.for_language(Language::Go),
+                ) {
+                    let (import_path, _) = parse_go_import(annotation);
+                    if let Some(path) = import_path {
+                        imports.insert(path);
+                    }
+                }
             }
         }
     }
@@ -3254,7 +3332,39 @@ fn render_operation_function(output: &mut String, operation: &RenderedOperation<
 
     let op_const = format!("{}Op", go_field_name(operation.name));
 
-    if let Some(result_type) = &operation.output_type {
+    if let (Some(transform_expr), Some(transform_type)) = (
+        operation.output_transform_expr,
+        operation.output_transform_type.as_ref(),
+    ) {
+        output.push_str("func ");
+        output.push_str(&operation.func_name);
+        output.push_str("(ctx workflow.Context, request ");
+        output.push_str(&operation.input_type);
+        output.push_str(") (");
+        output.push_str(transform_type);
+        output.push_str(", error) {\n");
+        output.push_str("\tc := workflow.NewNexusClient(Endpoint, ServiceName)\n");
+        output.push_str("\tfut := c.ExecuteOperation(ctx, ");
+        output.push_str(&op_const);
+        output.push_str(", request, workflow.NexusOperationOptions{})\n");
+        if let Some(raw_result_type) = &operation.raw_output_type {
+            output.push_str("\tvar result ");
+            output.push_str(raw_result_type);
+            output.push('\n');
+            output.push_str("\tif err := fut.Get(ctx, &result); err != nil {\n");
+        } else {
+            output.push_str("\tif err := fut.Get(ctx, nil); err != nil {\n");
+        }
+        output.push_str("\t\tvar zero ");
+        output.push_str(transform_type);
+        output.push('\n');
+        output.push_str("\t\treturn zero, err\n");
+        output.push_str("\t}\n");
+        output.push_str("\treturn ");
+        output.push_str(transform_expr);
+        output.push('\n');
+        output.push_str("}\n");
+    } else if let Some(result_type) = &operation.output_type {
         // Operation with a return value
         output.push_str("func ");
         output.push_str(&operation.func_name);
@@ -3321,10 +3431,16 @@ fn render_operation_function_proto(
     output.push_str(&operation.input_type);
     output.push_str(") ");
 
-    let returns_value =
-        operation.output_type.is_some() && binding.output_from_proto.is_some();
+    let returns_value = operation.output_type.is_some() && binding.output_from_proto.is_some();
 
-    if let Some(result_type) = &operation.output_type {
+    if let (Some(_transform_expr), Some(transform_type)) = (
+        operation.output_transform_expr,
+        operation.output_transform_type.as_ref(),
+    ) {
+        output.push('(');
+        output.push_str(transform_type);
+        output.push_str(", error)");
+    } else if let Some(result_type) = &operation.output_type {
         if returns_value {
             output.push_str("(*");
             output.push_str(result_type);
@@ -3346,7 +3462,36 @@ fn render_operation_function_proto(
     output.push_str(&binding.input_to_proto);
     output.push_str(", workflow.NexusOperationOptions{})\n");
 
-    if returns_value {
+    if let (Some(transform_expr), Some(transform_type)) = (
+        operation.output_transform_expr,
+        operation.output_transform_type.as_ref(),
+    ) {
+        if let Some(proto_value_type) = binding
+            .output_proto_type
+            .as_deref()
+            .map(|value| value.trim_start_matches('*'))
+        {
+            output.push_str("\tvar result ");
+            output.push_str(proto_value_type);
+            output.push('\n');
+            output.push_str("\tif err := fut.Get(ctx, &result); err != nil {\n");
+        } else if let Some(raw_result_type) = &operation.raw_output_type {
+            output.push_str("\tvar result ");
+            output.push_str(raw_result_type);
+            output.push('\n');
+            output.push_str("\tif err := fut.Get(ctx, &result); err != nil {\n");
+        } else {
+            output.push_str("\tif err := fut.Get(ctx, nil); err != nil {\n");
+        }
+        output.push_str("\t\tvar zero ");
+        output.push_str(transform_type);
+        output.push('\n');
+        output.push_str("\t\treturn zero, err\n");
+        output.push_str("\t}\n");
+        output.push_str("\treturn ");
+        output.push_str(transform_expr);
+        output.push('\n');
+    } else if returns_value {
         let proto_value_type = binding
             .output_proto_type
             .as_deref()
@@ -3493,7 +3638,11 @@ fn render_convenience_wrapper(
     output.push(' ');
 
     // Return type
-    if let Some(result_type) = &operation.output_type {
+    if let Some(transform_type) = &operation.output_transform_type {
+        output.push('(');
+        output.push_str(transform_type);
+        output.push_str(", error)");
+    } else if let Some(result_type) = &operation.output_type {
         output.push_str("(*");
         output.push_str(result_type);
         output.push_str(", error)");
@@ -3546,7 +3695,11 @@ fn render_forwarding_wrapper(output: &mut String, operation: &RenderedOperation<
     output.push_str(&operation.input_type);
     output.push_str(") ");
 
-    if let Some(result_type) = &operation.output_type {
+    if let Some(transform_type) = &operation.output_transform_type {
+        output.push('(');
+        output.push_str(transform_type);
+        output.push_str(", error)");
+    } else if let Some(result_type) = &operation.output_type {
         output.push_str("(*");
         output.push_str(result_type);
         output.push_str(", error)");

@@ -318,6 +318,55 @@ interface namespace-service {
 }
 
 #[test]
+fn go_output_transform_returns_transformed_type() {
+    let temp_dir = unique_output_path("go-output-transform");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("go-output-transform.wit");
+    fs::write(
+        &wit_path,
+        r#"package temporal:go-output-transform@1.0.0;
+
+world system {
+  export sample-service;
+}
+
+/// @nexus.endpoint "sample-service"
+interface sample-service {
+  record transform-request {
+    id: string,
+  }
+
+  record transform-response {
+    value: string,
+  }
+
+  /// @nexus.output-transform
+  ///   go-type="example.com/nexgen/handles:handles.ValueHandle"
+  ///   go="handles.NewValueHandle(request.Id, result.Value)"
+  get-handle: func(request: transform-request) -> transform-response;
+}
+"#,
+    )
+    .unwrap();
+
+    let rendered =
+        generate_to_string_with_inputs(nex_gen::language::Language::Go, &[wit_path], &[]).unwrap();
+
+    assert!(rendered.contains("\"example.com/nexgen/handles\""));
+    assert!(rendered.contains(
+        "func getHandle(ctx workflow.Context, request TransformRequest) (handles.ValueHandle, error) {"
+    ));
+    assert!(rendered.contains("\tvar result TransformResponse\n"));
+    assert!(rendered.contains("\tif err := fut.Get(ctx, &result); err != nil {\n"));
+    assert!(rendered.contains("\t\tvar zero handles.ValueHandle\n\t\treturn zero, err\n"));
+    assert!(rendered.contains("\treturn handles.NewValueHandle(request.Id, result.Value)\n"));
+    assert!(rendered.contains(
+        "func GetHandle(ctx workflow.Context, id string) (handles.ValueHandle, error) {"
+    ));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn go_examples_generation_matches_checked_in_output() {
     let root = project_root();
     for example_id in go_example_ids(&root) {

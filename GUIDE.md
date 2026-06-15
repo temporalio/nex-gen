@@ -887,13 +887,17 @@ operation result into a different type before returning it.
 ///   python="workflow.get_external_workflow_handle(request.id, run_id=result.run_id)"
 ///   typescript-type="workflow.ExternalWorkflowHandle"
 ///   typescript="workflow.getExternalWorkflowHandle(request.id, result.runId ?? undefined)"
+///   go-type="example.com/handles:handles.WorkflowHandle"
+///   go="handles.FromSignalWithStart(request, &result)"
 signal-with-start-workflow: func(
   request: signal-with-start-workflow-request,
 ) -> signal-with-start-workflow-response;
 ```
 
 The generated wrapper returns the transformed type. The transform expression
-has access to `request` (the input) and `result` (the raw response):
+has access to `request` (the input) and `result` (the raw response). Go
+transform expressions must evaluate to `(T, error)`, where `T` is the
+`go-type` value:
 
 ```python
 result = await handle
@@ -903,6 +907,10 @@ return workflow.get_external_workflow_handle(request.id, run_id=result.run_id)
 ```typescript
 const result = await handle.result();
 return workflow.getExternalWorkflowHandle(request.id, result.runId ?? undefined);
+```
+
+```go
+return handles.FromSignalWithStart(request, &result)
 ```
 
 ---
@@ -1108,10 +1116,12 @@ signal-with-start-workflow: func(...) -> ...;
 @nexus.output-transform
   python-type="<type>" python="<expr>"
   typescript-type="<type>" typescript="<expr>"
+  go-type="<type>" go="<expr-returning-T-error>"
 ```
 
 Transforms the raw operation result to a different return type. The expression
-has access to `request` and `result` variables.
+has access to `request` and `result` variables. Go expressions must return
+`(T, error)`.
 
 ```wit
 /// @nexus.output-transform
@@ -1119,6 +1129,8 @@ has access to `request` and `result` variables.
 ///   python="workflow.get_external_workflow_handle(request.id, run_id=result.run_id)"
 ///   typescript-type="workflow.ExternalWorkflowHandle"
 ///   typescript="workflow.getExternalWorkflowHandle(request.id, result.runId ?? undefined)"
+///   go-type="example.com/handles:handles.WorkflowHandle"
+///   go="handles.FromSignalWithStart(request, &result)"
 ```
 
 Both the type and expression must be provided together for each language.
