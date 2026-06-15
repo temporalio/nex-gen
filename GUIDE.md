@@ -54,6 +54,7 @@ of `@nexus` directives.
   - [Omitted Fields](#omitted-fields)
   - [Flattened Records](#flattened-records)
   - [Output Transforms](#output-transforms)
+- [Function References](#function-references)
 - [Directive Glossary](#directive-glossary)
 
 ---
@@ -920,6 +921,366 @@ return handles.FromSignalWithStart(request, &result)
 
 ---
 
+## Function References
+
+Nexus and Temporal often need to identify a function by name on the wire, while
+SDK users want to pass a typed Python callable. WIT does not have a first-class
+"callable reference" field type, so `@nexus.function` marks a WIT type as a
+semantic function reference. The directive tells the generator which WIT
+function describes the callable's arguments and result, whether a raw name is
+also accepted, and where any serialized arguments live in proto-backed records.
+
+Use this when the generated API should feel like an SDK call:
+
+```python
+await start_workflow(MyWorkflow.run, "user-123", id="sync-user", task_queue="workers")
+```
+
+instead of forcing callers to manually build wire-shaped data:
+
+```python
+await start_workflow(workflow="MyWorkflow", args=["user-123"], ...)
+```
+
+### Basic usage
+
+To use `@nexus.function`, define a WIT function that has the signature you want:
+
+```wit
+my-function-call: func(name: string, enabled: bool) -> string;
+```
+
+Then define a type alias that points to the function you defined:
+
+```wit
+/// @nexus.function signature="my-function-call"
+type my-exe = placeholder;
+```
+
+Now any field of type `my-exe` is treated as a function reference with the specified signature.
+
+```wit
+record execute-function-request {
+  function: my-exe,
+}
+```
+
+Generated Python:
+
+```python
+@dataclasses.dataclass(slots=True)
+class ExecuteFunctionRequest:
+    function: collections.abc.Callable[[str, bool], str]
+    name: str
+    enabled: bool
+```
+
+### `alternate-type`
+
+`alternate-type` allows the caller to pass other types as the
+function argument, besides callables.
+
+```wit
+function-call: func(name: string, enabled: bool) -> string;
+
+/// @nexus.function
+///   signature="function-call"
+///   alternate-type="string"
+type named-function = placeholder;
+```
+
+Now in the generated Python, `function` can be a string:
+
+```python
+@dataclasses.dataclass(slots=True)
+class ExecuteNamedFunctionRequest:
+    function: str | collections.abc.Callable[[str, bool], str]
+    name: str
+    enabled: bool
+```
+
+### `@nexus.function-args`
+
+`@nexus.function-args varargs=true` changes the last parameter into
+a variable argument list.
+
+```wit
+/// @nexus.function-args varargs=true
+varargs-function-call: func(args: list<string>) -> string;
+
+/// @nexus.function signature="varargs-function-call"
+type varargs-function = placeholder;
+```
+
+When the signature has multiple parameters, use `param` to
+specify which one is variadic:
+
+```wit
+/// @nexus.function-args
+///   varargs=true
+///   param="args"
+///   typescript-drop-prefix=true
+workflow-call: func(pfx: callable-prefix, args: list<string>) -> workflow-result;
+```
+
+`typescript-drop-prefix=true` is TypeScript-specific. It tells TypeScript
+generation to omit prefix parameters from callable argument inference, which is
+useful for Temporal method forms that include an implicit receiver/context
+parameter. Python keeps the prefix in the callable annotation where needed.
+
+### `args-field`
+
+For proto-backed APIs, the WIT record often
+has a wire field like `input` or `signal-input` that stores a payload list.
+`args-field` maps the ergonomic Python arguments back to that field.
+
+```wit
+type payloads = list<string>;
+
+/// @nexus.function-args varargs=true
+workflow-call: func(args: payloads) -> string;
+
+/// @nexus.function
+///   signature="workflow-call"
+///   args-field="input"
+type workflow-function = placeholder;
+```
+
+Generated Python request model and proto conversion:
+
+```python
+@dataclasses.dataclass(slots=True, kw_only=True)
+class StartWorkflowRequest:
+    workflow: collections.abc.Callable[..., str]
+    args: list[typing.Any] | None = None
+
+    def to_proto(self):
+        if self.args is not None:
+            message.input.CopyFrom(payloads_to_proto(self.args))
+        return message
+```
+
+### `result-type-parameter`
+
+`result-type-parameter` names a generated Python type variable for the callable
+result. The motivation is typed handles: if the caller starts `MyWorkflow.run`
+and that workflow returns `OrderSummary`, the returned handle should be typed as
+`ExternalWorkflowHandle[OrderSummary]`.
+
+```wit
+type payloads = list<string>;
+
+/// @nexus.type python="collections.abc.Awaitable[WorkflowResult]"
+type workflow-result = placeholder;
+
+/// @nexus.function-args varargs=true
+workflow-call: async func(args: payloads) -> workflow-result;
+
+/// @nexus.function
+///   signature="workflow-call"
+///   result-type-parameter="WorkflowResult"
+type workflow-function = placeholder;
+```
+
+Generated Python overloads can preserve the callable result type in the handle:
+
+```python
+WorkflowResult = typing.TypeVar("WorkflowResult")
+
+@typing.overload
+async def start_workflow(
+    *,
+    workflow: collections.abc.Callable[..., collections.abc.Awaitable[WorkflowResult]],
+    args: list[typing.Any],
+) -> ExternalWorkflowHandle[WorkflowResult]: ...
+```
+
+Without a typed callable, generated Python has no result type to infer.
+
+### `primary`
+
+When an operation has multiple `@nexus.function` parameters, use `primary=true` to
+indicate which function is "primary".
+
+```wit
+type payloads = list<string>;
+type task-queue = string;
+type workflow-type = string;
+
+/// @nexus.type python="collections.abc.Awaitable[WorkflowResult]"
+type workflow-result = placeholder;
+
+/// @nexus.type python="None"
+type signal-result = placeholder;
+
+/// @nexus.function-args varargs=true
+workflow-call: async func(args: payloads) -> workflow-result;
+
+/// @nexus.function-args varargs=true
+signal-call: func(signal-args: payloads) -> signal-result;
+
+/// @nexus.function
+///   primary=true
+///   signature="workflow-call"
+///   result-type-parameter="WorkflowResult"
+type workflow-function = placeholder;
+
+/// @nexus.function
+///   signature="signal-call"
+type signal-function = placeholder;
+
+record signal-with-start-workflow-request {
+  workflow: workflow-function,
+  signal: signal-function,
+}
+```
+
+Generated Python dataclass:
+
+```python
+@dataclasses.dataclass(slots=True, kw_only=True)
+class SignalWithStartWorkflowRequest:
+    workflow: collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]]
+    args: list[typing.Any] | None = None
+    signal: collections.abc.Callable[..., None]
+    signal_args: list[typing.Any] | None = None
+```
+
+Generated Python operation overload:
+
+```python
+WorkflowResult = typing.TypeVar("WorkflowResult")
+WorkflowArgs = typing_extensions.TypeVarTuple("WorkflowArgs")
+
+@typing.overload
+async def signal_with_start_workflow(
+    workflow: collections.abc.Callable[
+        [typing_extensions.Unpack[WorkflowArgs]],
+        collections.abc.Awaitable[WorkflowResult],
+    ],
+    *positional_args: typing_extensions.Unpack[WorkflowArgs],
+    signal: collections.abc.Callable[..., None | collections.abc.Awaitable[None]],
+    signal_args: list[typing.Any] | None = ...,
+) -> ExternalWorkflowHandle[WorkflowResult]: ...
+```
+
+Here `workflow` is primary, so workflow arguments become positional operation
+arguments and the workflow result type flows into the returned handle. `signal`
+is still a typed function reference, but its arguments stay in `signal_args`.
+
+### `converter`, `python-converter`, and `typescript-converter`
+
+Converters tell proto-backed generation how to turn the callable reference into
+the wire value. Signals are the common example: callers
+can pass a string signal name or a Python signal method, while the proto field
+is just `signal_name`.
+
+```wit
+/// @nexus.function
+///   signature="signal-call"
+///   args-field="signal-input"
+///   alternate-type="string"
+///   python-converter="signal_function_to_proto"
+///   typescript-converter="signalFunctionToProto"
+type signal-function = placeholder;
+```
+
+Generated Python imports and calls the converter in `to_proto()`:
+
+```python
+from ._support import signal_function_to_proto
+
+@dataclasses.dataclass(slots=True, kw_only=True)
+class SignalWithStartWorkflowRequest:
+    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]
+    signal_args: list[typing.Any] | None = None
+
+    def to_proto(self):
+        message.signal_name = signal_function_to_proto(self.signal)
+        if self.signal_args is not None:
+            message.signal_input.CopyFrom(payloads_to_proto(self.signal_args))
+        return message
+```
+
+Use `converter="<func>"` when the same helper name applies to every generated
+language, or use language-prefixed keys such as `python-converter` and
+`typescript-converter` when helper names differ.
+
+### Direct Field Result Overrides
+
+Most authored APIs should use the type-alias `signature` form because it keeps
+arguments and result types in WIT. A direct record-field annotation is available
+for the narrower case where the field itself describes a callable and the
+result type is already language-specific.
+
+```wit
+type function-args = list<string>;
+
+record invoke-request {
+  /// @nexus.function
+  ///   args-field="args"
+  ///   python-result="typing.Any"
+  target: placeholder,
+  args: function-args,
+}
+```
+
+Generated Python:
+
+```python
+@dataclasses.dataclass(slots=True)
+class InvokeRequest:
+    target: collections.abc.Callable[..., typing.Any]
+    args: list[typing.Any] | None = None
+```
+
+Use `result` when one result annotation works for every language, or
+language-prefixed keys such as `python-result` and `typescript-result` when it
+does not. Do not combine these result overrides with `signature` on a type
+alias.
+
+### TypeScript Companion: `@nexus.typescript-with-arguments`
+
+`@nexus.typescript-with-arguments` is not a Python feature, but it often appears
+beside `@nexus.function` because TypeScript SDK objects can carry their own
+argument types. It lets TypeScript accept values such as
+`workflow.SignalDefinition<any[]>` and infer `signalArgs` from that definition.
+
+```wit
+/// @nexus.typescript-with-arguments
+///   signature="signal-call"
+///   args-field="signal-input"
+///   alternate-type="string"
+///   value-type="workflow.SignalDefinition<any[]>"
+///   args-type="Value extends workflow.SignalDefinition<infer Args, any> ? Args : never"
+///   name-expr="value.name"
+///   typescript-package="@temporalio/workflow"
+type signal-function = placeholder;
+```
+
+### Option Summary
+
+| Option | Motivation | Generated effect |
+| --- | --- | --- |
+| `signature` | Keep callable shape in a WIT function instead of a placeholder alias. | Derives callable argument and result annotations. Required for type-alias `@nexus.function`. |
+| `alternate-type` | Accept raw names as well as typed callables. | Generates union annotations and overloads such as `str | Callable[...]`. |
+| `args-field` | Map ergonomic function args to a wire field such as `input` or `signal-input`. | Stores normalized args in that request/proto field. Defaults to the signature's args name for type aliases. |
+| `result-type-parameter` | Preserve the callable's result type in returned handles. | Emits a type variable such as `WorkflowResult` and uses it in callable overload returns. |
+| `primary` | Identify the main callable when a request has multiple function references. | Enables positional primary args and result type propagation. Defaults to `false`. |
+| `converter` | Reuse the same conversion helper name in all languages. | Calls the helper when converting the function field to proto. |
+| `<language>-converter` | Use language-specific conversion helper names. | Python uses `python-converter`; TypeScript uses `typescript-converter`. |
+| `result` / `<language>-result` | Direct field-level form when there is no type alias `signature`. | Supplies the callable result annotation directly. Prefer `signature` for authored aliases. |
+
+`@nexus.function-args` options:
+
+| Option | Motivation | Generated effect |
+| --- | --- | --- |
+| `varargs` | Treat a final list-shaped signature parameter as `*args`. | Generates positional overloads plus list-form `args`. |
+| `param` | Disambiguate which final parameter is the varargs list. | Required when the signature has more than one parameter. |
+| `typescript-drop-prefix` | Remove implicit receiver/context parameters from TypeScript inference. | TypeScript omits the prefix from inferred argument tuples. |
+
+---
+
 ## Directive Glossary
 
 All directives are written in WIT doc comments (`///`) and prefixed with
@@ -1203,25 +1564,40 @@ static-summary: option<payload>,
 **Syntax:**
 ```
 @nexus.function
-  primary=<bool>
   signature="<wit-function-name>"
-  args-field="<proto-field>"
+  [alternate-type="<wit-type>"]
+  [args-field="<request-or-proto-field>"]
+  [result-type-parameter="<PythonTypeVarName>"]
+  [primary=<bool>]
   [converter="<func>"]
-  [result="<type>"]
+  [<language>-converter="<func>"]
 ```
 
-Marks a type as representing a callable function (workflow or signal). The
-generator produces overloaded constructors that accept either a string name or
-a typed callable reference.
+Marks a type alias as a callable function reference. See
+[Function References](#function-references) for motivation, WIT samples, and
+generated Python samples.
 
-- `primary=true` marks the main function field (typically the workflow function)
-- `signature` references a WIT function definition used to derive argument types
-- `args-field` names the proto field that holds serialized function arguments
-- `converter` names an optional custom conversion function in the support file
+---
+
+### @nexus.function-args
+
+**Placement:** Function used as a `@nexus.function signature`
+**Syntax:**
+```
+@nexus.function-args
+  varargs=true
+  [param="<final-parameter-name>"]
+  [typescript-drop-prefix=<bool>]
+```
+
+Marks the final signature parameter as a variable argument list. See
+[Function References](#function-references) for examples.
 
 ```wit
-/// @nexus.function primary=true signature="workflow-call" args-field="input"
-type workflow-function = placeholder;
+/// @nexus.function-args
+///   varargs=true
+///   param="args"
+workflow-call: async func(callable-prefix: callable-prefix, args: payloads) -> workflow-result;
 ```
 
 ---
