@@ -23,6 +23,9 @@ of `@nexus` directives.
 > Payload, memo, search-attribute, and versioning-override conversions are
 > partial: the codegen is in place but their converters are placeholders pending
 > full Temporal Go SDK data-converter integration.
+>
+> `@nexus.doc` text (including `go=`/`go-returns=` overrides) renders as godoc
+> comments on generated struct fields and exported wrapper functions.
 
 ## Contents
 
@@ -1065,8 +1068,8 @@ Cannot be combined with `@nexus.source`.
 
 **Placement:** Record field or operation (function)
 **Syntax:** `@nexus.doc "<text>" [returns="<text>"]`
-Per-language overrides: `python="<text>"` `typescript="<text>"`
-Return docs: `python-returns="<text>"` `typescript-returns="<text>"`
+Per-language overrides: `python="<text>"` `typescript="<text>"` `go="<text>"`
+Return docs: `python-returns="<text>"` `typescript-returns="<text>"` `go-returns="<text>"`
 
 Adds documentation to generated code. The default text applies to all languages;
 per-language keys override for specific targets. The `returns` key generates

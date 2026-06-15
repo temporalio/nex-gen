@@ -20,26 +20,47 @@ const SignalWithStartWorkflowOp = "SignalWithStartWorkflowExecution"
 // --- Datatypes ---
 
 type SignalWithStartWorkflowRequest struct {
-	Workflow           string // required
-	Args               []any
-	Id                 string // required
-	TaskQueue          string // required
-	Signal             string // required
-	SignalArgs         []any
-	ExecutionTimeout   *time.Duration
-	RunTimeout         *time.Duration
-	TaskTimeout        *time.Duration
-	RequestId          *string
-	IdReusePolicy      *enums.WorkflowIdReusePolicy
-	IdConflictPolicy   *enums.WorkflowIdConflictPolicy
-	RetryPolicy        *temporal.RetryPolicy
-	CronSchedule       *string
-	Memo               map[string]any
-	SearchAttributes   *string
-	Priority           *temporal.Priority
+	// Required.
+	Workflow string
+	Args     []any
+	// Required. Unique identifier for the workflow execution.
+	Id string
+	// Required. Task queue to run the workflow on.
+	TaskQueue string
+	// Required.
+	Signal     string
+	SignalArgs []any
+	// Total workflow execution timeout, including retries and continue-as-new.
+	ExecutionTimeout *time.Duration
+	// Timeout of a single workflow run.
+	RunTimeout *time.Duration
+	// Timeout of a single workflow task.
+	TaskTimeout *time.Duration
+	// Request ID used to deduplicate workflow start requests.
+	RequestId *string
+	// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
+	IdReusePolicy *enums.WorkflowIdReusePolicy
+	// Behavior when a workflow is currently running with the same ID. Set to use-existing
+	// for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is
+	// terminate-if-running.
+	IdConflictPolicy *enums.WorkflowIdConflictPolicy
+	// Retry policy for the workflow.
+	RetryPolicy *temporal.RetryPolicy
+	// Cron schedule for recurring workflow executions. See
+	// https://docs.temporal.io/cron-job.
+	CronSchedule *string
+	// Memo for the workflow.
+	Memo map[string]any
+	// Typed search attributes for the workflow.
+	SearchAttributes *string
+	// Priority of the workflow execution.
+	Priority *temporal.Priority
+	// Override for workflow versioning behavior.
 	VersioningOverride *client.VersioningOverride
-	StartDelay         *time.Duration
-	UserMetadata       *UserMetadata
+	// Amount of time to wait before starting the workflow. This does not work with
+	// cron-schedule.
+	StartDelay   *time.Duration
+	UserMetadata *UserMetadata
 }
 
 func (m SignalWithStartWorkflowRequest) ToProto() *workflowservice.SignalWithStartWorkflowExecutionRequest {
@@ -79,7 +100,12 @@ func (m SignalWithStartWorkflowRequest) ToProto() *workflowservice.SignalWithSta
 }
 
 type UserMetadata struct {
+	// Single-line fixed summary for the workflow execution that may appear in UI and CLI.
+	// This can be in single-line Temporal Markdown format.
 	StaticSummary any
+	// General fixed details for the workflow execution that may appear in UI and CLI. This
+	// can be in Temporal Markdown format and can span multiple lines. This value is fixed
+	// on the workflow execution and cannot be updated.
 	StaticDetails any
 }
 
@@ -126,24 +152,44 @@ func signalWithStartWorkflow(ctx workflow.Context, request SignalWithStartWorkfl
 // --- Operations (public API) ---
 
 type SignalWithStartWorkflowOptions struct {
-	Args               []any
-	SignalArgs         []any
-	ExecutionTimeout   *time.Duration
-	RunTimeout         *time.Duration
-	TaskTimeout        *time.Duration
-	RequestId          *string
-	IdReusePolicy      *enums.WorkflowIdReusePolicy
-	IdConflictPolicy   *enums.WorkflowIdConflictPolicy
-	RetryPolicy        *temporal.RetryPolicy
-	CronSchedule       *string
-	Memo               map[string]any
-	SearchAttributes   *string
-	Priority           *temporal.Priority
+	Args       []any
+	SignalArgs []any
+	// Total workflow execution timeout, including retries and continue-as-new.
+	ExecutionTimeout *time.Duration
+	// Timeout of a single workflow run.
+	RunTimeout *time.Duration
+	// Timeout of a single workflow task.
+	TaskTimeout *time.Duration
+	// Request ID used to deduplicate workflow start requests.
+	RequestId *string
+	// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
+	IdReusePolicy *enums.WorkflowIdReusePolicy
+	// Behavior when a workflow is currently running with the same ID. Set to use-existing
+	// for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is
+	// terminate-if-running.
+	IdConflictPolicy *enums.WorkflowIdConflictPolicy
+	// Retry policy for the workflow.
+	RetryPolicy *temporal.RetryPolicy
+	// Cron schedule for recurring workflow executions. See
+	// https://docs.temporal.io/cron-job.
+	CronSchedule *string
+	// Memo for the workflow.
+	Memo map[string]any
+	// Typed search attributes for the workflow.
+	SearchAttributes *string
+	// Priority of the workflow execution.
+	Priority *temporal.Priority
+	// Override for workflow versioning behavior.
 	VersioningOverride *client.VersioningOverride
-	StartDelay         *time.Duration
-	UserMetadata       *UserMetadata
+	// Amount of time to wait before starting the workflow. This does not work with
+	// cron-schedule.
+	StartDelay   *time.Duration
+	UserMetadata *UserMetadata
 }
 
+// Signal a workflow, starting it first if needed.
+//
+// Returns: A workflow handle to the started workflow.
 func SignalWithStartWorkflow(
 	ctx workflow.Context,
 	workflow string,

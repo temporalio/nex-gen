@@ -17,51 +17,67 @@ const ExecuteNamedVarargsFunctionOp = "ExecuteNamedVarargsFunction"
 // --- Datatypes ---
 
 type ExecuteFunctionRequest struct {
-	Function string // required
-	Name     string // required
-	Enabled  bool   // required
+	// Required.
+	Function string
+	// Required.
+	Name string
+	// Required.
+	Enabled bool
 }
 
 type ExecuteFunctionResult struct {
-	Value string // required
+	// Required.
+	Value string
 }
 
 type ExecuteCountedFunctionRequest struct {
-	Function string // required
-	Name     string // required
-	Count    int32  // required
+	// Required.
+	Function string
+	// Required.
+	Name string
+	// Required.
+	Count int32
 }
 
 type ExecuteCountedFunctionResult struct {
-	Value string // required
+	// Required.
+	Value string
 }
 
 type ExecuteNamedFunctionRequest struct {
-	Function string // required
-	Name     string // required
-	Enabled  bool   // required
+	// Required.
+	Function string
+	// Required.
+	Name string
+	// Required.
+	Enabled bool
 }
 
 type ExecuteNamedFunctionResult struct {
-	Value string // required
+	// Required.
+	Value string
 }
 
 type ExecuteVarargsFunctionRequest struct {
-	Function string // required
+	// Required.
+	Function string
 	Args     []string
 }
 
 type ExecuteVarargsFunctionResult struct {
-	Value string // required
+	// Required.
+	Value string
 }
 
 type ExecuteNamedVarargsFunctionRequest struct {
-	Function string // required
+	// Required.
+	Function string
 	Args     []string
 }
 
 type ExecuteNamedVarargsFunctionResult struct {
-	Value string // required
+	// Required.
+	Value string
 }
 
 // --- Operations (internal) ---

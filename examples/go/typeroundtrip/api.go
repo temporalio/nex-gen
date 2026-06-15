@@ -19,8 +19,9 @@ const ActivityOptionsOperationOp = "ActivityOptionsOperation"
 // --- Datatypes ---
 
 type ActivityOptions struct {
-	TaskQueue              *string
-	RetryPolicy            temporal.RetryPolicy // required
+	TaskQueue *string
+	// Required.
+	RetryPolicy            temporal.RetryPolicy
 	ScheduleToCloseTimeout *time.Duration
 	Priority               *temporal.Priority
 }

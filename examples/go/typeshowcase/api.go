@@ -54,60 +54,84 @@ type NotificationTargetNone struct{}
 func (NotificationTargetNone) isNotificationTarget() {}
 
 type GetUserRequest struct {
-	UserId           string // required
+	// Required.
+	UserId           string
 	ConsistencyToken *string
 }
 
 type UpdateEmailRequest struct {
-	UserId string // required
-	Email  string // required
+	// Required.
+	UserId string
+	// Required.
+	Email string
 }
 
 type RenameRequest struct {
-	UserId      string // required
-	DisplayName string // required
+	// Required.
+	UserId string
+	// Required.
+	DisplayName string
 }
 
 type SetProfileRequest struct {
-	UserId  string      // required
-	Profile UserProfile // required
+	// Required.
+	UserId string
+	// Required.
+	Profile UserProfile
 }
 
 type UserProfile struct {
-	Tags               []string           // required
-	Metadata           map[string]string  // required
-	Capabilities       UserCapability     // required
-	SyncState          SyncState          // required
-	NotificationTarget NotificationTarget // required
+	// Required.
+	Tags []string
+	// Required.
+	Metadata map[string]string
+	// Required.
+	Capabilities UserCapability
+	// Required.
+	SyncState SyncState
+	// Required.
+	NotificationTarget NotificationTarget
 	Address            *PostalAddress
 }
 
 type SyncState struct {
-	Result string // required
-	Error  string // required
+	// Required.
+	Result string
+	// Required.
+	Error string
 }
 
 type PostalAddress struct {
-	Street      string // required
-	City        string // required
-	Country     string // required
+	// Required.
+	Street string
+	// Required.
+	City string
+	// Required.
+	Country     string
 	Coordinates *Coordinates
 }
 
 type Coordinates struct {
-	First  float64 // required
-	Second float64 // required
+	// Required.
+	First float64
+	// Required.
+	Second float64
 }
 
 type RecordSyncRequest struct {
-	UserId string     // required
-	Report SyncReport // required
+	// Required.
+	UserId string
+	// Required.
+	Report SyncReport
 }
 
 type SyncReport struct {
-	Route        []Tuple2[float64, float64]        // required
-	Attempts     []Result[string, string]          // required
-	RegionStatus map[string]Result[string, string] // required
+	// Required.
+	Route []Tuple2[float64, float64]
+	// Required.
+	Attempts []Result[string, string]
+	// Required.
+	RegionStatus map[string]Result[string, string]
 }
 
 type Tuple2[T1, T2 any] struct {
@@ -121,18 +145,24 @@ type Result[T, E any] struct {
 }
 
 type DeactivateRequest struct {
-	UserId string // required
+	// Required.
+	UserId string
 	Reason *string
 }
 
 // --- Resources ---
 
 type User struct {
-	UserId      string      // required
-	Email       string      // required
-	DisplayName string      // required
-	Status      UserStatus  // required
-	Profile     UserProfile // required
+	// Required.
+	UserId string
+	// Required.
+	Email string
+	// Required.
+	DisplayName string
+	// Required.
+	Status UserStatus
+	// Required.
+	Profile UserProfile
 }
 
 func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error) {

@@ -14,19 +14,24 @@ const UpdateEmailOp = "UpdateEmail"
 // --- Datatypes ---
 
 type GetUserRequest struct {
-	UserId string // required
+	// Required.
+	UserId string
 }
 
 type UpdateEmailRequest struct {
-	UserId string // required
-	Email  string // required
+	// Required.
+	UserId string
+	// Required.
+	Email string
 }
 
 // --- Resources ---
 
 type User struct {
-	UserId string // required
-	Email  string // required
+	// Required.
+	UserId string
+	// Required.
+	Email string
 }
 
 func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error) {

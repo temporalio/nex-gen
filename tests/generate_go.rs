@@ -377,47 +377,49 @@ fn go_type_showcase_generates_expected_types() {
 
     // Records with required/optional fields
     assert!(rendered.contains("type GetUserRequest struct"));
-    assert!(rendered.contains("UserId string // required"));
+    assert!(rendered.contains("\t// Required.\n\tUserId string"));
     // Optional scalar fields are rendered as pointers so absence is
     // representable as nil (distinct from a present zero value).
     assert!(rendered.contains("ConsistencyToken *string"));
 
     assert!(rendered.contains("type PostalAddress struct"));
-    assert!(rendered.contains("Street string // required"));
-    assert!(rendered.contains("City string // required"));
-    assert!(rendered.contains("Country string // required"));
+    assert!(rendered.contains("\t// Required.\n\tStreet string"));
+    assert!(rendered.contains("\t// Required.\n\tCity string"));
+    assert!(rendered.contains("\t// Required.\n\tCountry string"));
     // Tuple field generates a named struct with ordinal fields
     assert!(rendered.contains("Coordinates *Coordinates"));
     assert!(rendered.contains("type Coordinates struct"));
-    assert!(rendered.contains("First float64 // required"));
-    assert!(rendered.contains("Second float64 // required"));
+    assert!(rendered.contains("\t// Required.\n\tFirst float64"));
+    assert!(rendered.contains("\t// Required.\n\tSecond float64"));
 
     assert!(rendered.contains("type UserProfile struct"));
-    assert!(rendered.contains("Tags []string // required"));
-    assert!(rendered.contains("Metadata map[string]string // required"));
-    assert!(rendered.contains("Capabilities UserCapability // required"));
+    assert!(rendered.contains("\t// Required.\n\tTags []string"));
+    assert!(rendered.contains("\t// Required.\n\tMetadata map[string]string"));
+    assert!(rendered.contains("\t// Required.\n\tCapabilities UserCapability"));
     // Result field generates a named struct
-    assert!(rendered.contains("SyncState SyncState // required"));
+    assert!(rendered.contains("\t// Required.\n\tSyncState SyncState"));
     assert!(rendered.contains("type SyncState struct"));
-    assert!(rendered.contains("Result string // required"));
-    assert!(rendered.contains("Error string // required"));
+    assert!(rendered.contains("\t// Required.\n\tResult string"));
+    assert!(rendered.contains("\t// Required.\n\tError string"));
     // Variant interface field
-    assert!(rendered.contains("NotificationTarget NotificationTarget // required"));
-    // Optional struct field keeps pointer
+    assert!(rendered.contains("\t// Required.\n\tNotificationTarget NotificationTarget"));
+    // Optional struct field keeps pointer and is not marked required.
     assert!(rendered.contains("Address *PostalAddress"));
-    assert!(!rendered.contains("Address *PostalAddress // required"));
+    assert!(!rendered.contains("\t// Required.\n\tAddress *PostalAddress"));
 
     assert!(rendered.contains("type DeactivateRequest struct"));
-    assert!(rendered.contains("UserId string // required"));
+    assert!(rendered.contains("\t// Required.\n\tUserId string"));
     // Optional scalar -- pointer so absence is representable as nil.
     assert!(rendered.contains("Reason *string"));
 
     // Tuples and results inside containers instantiate shared generic helper
     // types instead of field-named structs.
     assert!(rendered.contains("type SyncReport struct"));
-    assert!(rendered.contains("Route []Tuple2[float64, float64] // required"));
-    assert!(rendered.contains("Attempts []Result[string, string] // required"));
-    assert!(rendered.contains("RegionStatus map[string]Result[string, string] // required"));
+    assert!(rendered.contains("\t// Required.\n\tRoute []Tuple2[float64, float64]"));
+    assert!(rendered.contains("\t// Required.\n\tAttempts []Result[string, string]"));
+    assert!(
+        rendered.contains("\t// Required.\n\tRegionStatus map[string]Result[string, string]")
+    );
     assert!(rendered.contains("type Tuple2[T1, T2 any] struct {"));
     assert!(rendered.contains("First T1"));
     assert!(rendered.contains("Second T2"));
@@ -427,9 +429,9 @@ fn go_type_showcase_generates_expected_types() {
 
     // Resource struct
     assert!(rendered.contains("type User struct"));
-    assert!(rendered.contains("DisplayName string // required"));
-    assert!(rendered.contains("Status UserStatus // required"));
-    assert!(rendered.contains("Profile UserProfile // required"));
+    assert!(rendered.contains("\t// Required.\n\tDisplayName string"));
+    assert!(rendered.contains("\t// Required.\n\tStatus UserStatus"));
+    assert!(rendered.contains("\t// Required.\n\tProfile UserProfile"));
 
     // Resource methods
     assert!(rendered
@@ -488,7 +490,7 @@ fn go_type_roundtrip_generates_proto_conversions() {
     // retry-policy field stays a value. (Assertions use the un-gofmt'd output,
     // so fields are single-space separated.)
     assert!(rendered.contains("TaskQueue *string"));
-    assert!(rendered.contains("RetryPolicy temporal.RetryPolicy // required"));
+    assert!(rendered.contains("\t// Required.\n\tRetryPolicy temporal.RetryPolicy"));
     assert!(rendered.contains("ScheduleToCloseTimeout *time.Duration"));
     assert!(rendered.contains("Priority *temporal.Priority"));
 
@@ -543,4 +545,77 @@ fn go_type_roundtrip_generates_proto_conversions() {
     assert!(
         rendered.contains("func RetryPolicyFromProto(p *common.RetryPolicy) *temporal.RetryPolicy {")
     );
+}
+
+#[test]
+fn go_doc_directives_render_godoc_comments() {
+    let temp_dir = unique_output_path("go-doc-directives-input");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("doc-service.wit");
+    fs::write(
+        &wit_path,
+        r#"package temporal:doc-demo@1.0.0;
+
+world system {
+  export doc-service;
+}
+
+/// @nexus.endpoint "doc-service"
+interface doc-service {
+  record greet-request {
+    /// @nexus.doc "Name of the person to greet."
+    name: string,
+    /// @nexus.doc "Default greeting doc." go="Go-specific greeting doc."
+    greeting: option<string>,
+    /// @nexus.doc python="Python-only field doc."
+    locale: option<string>,
+    /// @nexus.doc "A very long field doc that has to be wrapped because it exceeds the generated comment line width by a comfortable margin for testing."
+    salutation: option<string>,
+  }
+
+  record greet-response {
+    message: string,
+  }
+
+  /// @nexus.doc
+  ///   "Greets the given person."
+  ///   returns="The rendered greeting."
+  greet: func(request: greet-request) -> greet-response;
+}
+"#,
+    )
+    .unwrap();
+
+    let rendered =
+        generate_to_string_with_inputs(nex_gen::language::Language::Go, &[wit_path], &[]).unwrap();
+
+    // Field docs become godoc comments above the request struct fields.
+    // Required fields fold a `Required.` prefix into the doc comment.
+    // (Assertions use the un-gofmt'd output, so fields are single-space
+    // separated.)
+    assert!(rendered.contains("\t// Required. Name of the person to greet.\n\tName string"));
+
+    // Required fields without any doc text get a bare `// Required.` comment.
+    assert!(rendered.contains("\t// Required.\n\tMessage string"));
+
+    // The `go=` override wins over the default text, on both the request
+    // struct and the options struct; the default-only doc falls through.
+    assert!(rendered.contains("\t// Go-specific greeting doc.\n\tGreeting *string"));
+    assert!(!rendered.contains("Default greeting doc."));
+
+    // Per-language docs without a default or `go=` key are omitted from Go.
+    assert!(!rendered.contains("Python-only field doc."));
+
+    // Long docs wrap across comment lines.
+    assert!(rendered.contains(
+        "\t// A very long field doc that has to be wrapped because it exceeds the generated\n\t// comment line width by a comfortable margin for testing.\n\tSalutation *string"
+    ));
+
+    // Operation docs render on the exported convenience wrapper, with the
+    // `returns=` text in a separate paragraph.
+    assert!(rendered.contains(
+        "// Greets the given person.\n//\n// Returns: The rendered greeting.\nfunc Greet("
+    ));
+
+    fs::remove_dir_all(temp_dir).unwrap();
 }

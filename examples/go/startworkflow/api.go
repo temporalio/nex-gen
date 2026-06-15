@@ -19,10 +19,13 @@ const CancelWorkflowOp = "CancelWorkflow"
 // --- Datatypes ---
 
 type StartWorkflowRequest struct {
-	Workflow           string // required
-	Args               []any
-	WorkflowId         string // required
-	TaskQueue          string // required
+	// Required.
+	Workflow string
+	Args     []any
+	// Required.
+	WorkflowId string
+	// Required.
+	TaskQueue          string
 	WorkflowStartDelay *time.Duration
 }
 
@@ -38,7 +41,8 @@ func (m StartWorkflowRequest) ToProto() *workflowservice.StartWorkflowExecutionR
 }
 
 type CancelWorkflowRequest struct {
-	WorkflowExecution WorkflowExecution // required
+	// Required.
+	WorkflowExecution WorkflowExecution
 	Reason            *string
 }
 
@@ -53,7 +57,8 @@ func (m CancelWorkflowRequest) ToProto() *workflowservice.RequestCancelWorkflowE
 }
 
 type WorkflowExecution struct {
-	WorkflowId string // required
+	// Required.
+	WorkflowId string
 	RunId      *string
 }
 
@@ -90,8 +95,10 @@ func CancelWorkflowResponseFromProto(proto *workflowservice.RequestCancelWorkflo
 // --- Resources ---
 
 type StartedWorkflow struct {
-	Namespace  string // required
-	WorkflowId string // required
+	// Required.
+	Namespace string
+	// Required.
+	WorkflowId string
 	RunId      *string
 }
 

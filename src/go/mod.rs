@@ -27,6 +27,10 @@ const TUPLE_FIELD_NAMES: &[&str] = &[
     "First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth",
 ];
 
+/// Maximum rendered line width for generated Go doc comments, matching the
+/// width used by the Python and TypeScript backends.
+const GO_DOC_COMMENT_LINE_LENGTH: usize = 88;
+
 /// Entry point for the Go code generator.
 ///
 /// Walks the [`ApiPlan`] to collect all referenced enums, flags, variants, and
@@ -367,6 +371,12 @@ struct RenderedOperation<'a> {
     name: &'a str,
     /// Wire-format operation name (e.g. `"GetUser"`).
     wire_name: &'a str,
+    /// Doc text for the operation (from `@nexus.doc`), rendered as a godoc
+    /// comment on the exported wrapper function.
+    doc: Option<&'a str>,
+    /// Return-value doc text (from `@nexus.doc returns=`), rendered as a
+    /// `Returns:` paragraph in the wrapper's godoc comment.
+    return_doc: Option<&'a str>,
     /// Unexported Go function name (e.g. `"getUser"`).
     func_name: String,
     /// Go type for the request parameter (e.g. `"GetUserRequest"`).
@@ -410,6 +420,9 @@ struct RenderedUnpackedParam {
     /// Exported Go field name used when setting the request struct field
     /// (e.g. `"UserId"`).
     field_name: String,
+    /// Doc text for the field (from `@nexus.doc`), rendered as a godoc
+    /// comment on the options struct field for optional parameters.
+    doc: Option<String>,
     /// Unexported Go parameter name used in the function signature
     /// (e.g. `"userId"`).
     param_name: String,
@@ -518,10 +531,13 @@ struct RenderedModelProto {
 struct RenderedField {
     /// Exported Go field name in UpperCamelCase (e.g. `"UserId"`, `"First"`).
     name: String,
+    /// Doc text for the field (from `@nexus.doc`), rendered as a godoc
+    /// comment above the struct field.
+    doc: Option<String>,
     /// Go type expression (e.g. `"string"`, `"*PostalAddress"`, `"[]string"`).
     go_type: String,
     /// Whether the field is required in the WIT definition. Rendered as a
-    /// `// required` trailing comment in the generated Go struct.
+    /// leading `// Required.` godoc comment on the generated Go struct field.
     required: bool,
     /// Proto conversion metadata, present when the owning model is
     /// proto-backed. `None` for tuple/result helper structs.
@@ -603,6 +619,7 @@ fn resolve_operation<'a>(
             .iter()
             .map(|field| RenderedUnpackedParam {
                 field_name: field.name.clone(),
+                doc: field.doc.clone(),
                 param_name: go_unexported_name(&field.name),
                 go_type: field.go_type.clone(),
                 required: field.required,
@@ -613,6 +630,8 @@ fn resolve_operation<'a>(
     Ok(RenderedOperation {
         name: operation.name.as_str(),
         wire_name: operation.wire_name.as_str(),
+        doc: operation.doc.for_language(Language::Go),
+        return_doc: operation.return_doc.for_language(Language::Go),
         func_name: go_unexported_name(&operation.name),
         input_type,
         output_type,
@@ -1149,7 +1168,8 @@ fn ensure_rendered_model(
 /// Converts a [`PlannedField`] into a [`RenderedField`] by resolving its type
 /// to a Go type expression.
 ///
-/// - Required fields use the plain type and are annotated with `// required`.
+/// - Required fields use the plain type and are annotated with a leading
+///   `// Required.` godoc comment.
 /// - Optional struct-typed fields use a pointer (`*PostalAddress`) since a
 ///   zero-value struct is ambiguous.
 /// - Optional scalar/enum/flags/interface fields use the plain type (the zero
@@ -1226,6 +1246,11 @@ fn build_field(
 
     Ok(RenderedField {
         name: field_name,
+        doc: field
+            .doc
+            .as_ref()
+            .and_then(|doc| doc.for_language(Language::Go))
+            .map(str::to_string),
         go_type,
         required: field.required,
         conversion: None,
@@ -1281,6 +1306,7 @@ fn ensure_generic_tuple(
         let fields = (0..arity)
             .map(|index| RenderedField {
                 name: TUPLE_FIELD_NAMES[index].to_string(),
+                doc: None,
                 go_type: format!("T{}", index + 1),
                 required: false,
                 conversion: None,
@@ -1312,12 +1338,14 @@ fn ensure_generic_result(models: &mut IndexMap<String, RenderedModel>) {
                 fields: vec![
                     RenderedField {
                         name: "Result".to_string(),
+                        doc: None,
                         go_type: "T".to_string(),
                         required: false,
                         conversion: None,
                     },
                     RenderedField {
                         name: "Error".to_string(),
+                        doc: None,
                         go_type: "E".to_string(),
                         required: false,
                         conversion: None,
@@ -1366,6 +1394,7 @@ fn build_tuple_struct(
                 resolve_planned_value_type(item, api_plan, enums, flags, variants, models)?;
             Ok(RenderedField {
                 name: ordinal_name.to_string(),
+                doc: None,
                 go_type: resolved.type_expr,
                 required: true,
                 conversion: None,
@@ -1427,6 +1456,7 @@ fn build_result_struct(
             resolve_planned_value_type(ok_type, api_plan, enums, flags, variants, models)?;
         fields.push(RenderedField {
             name: "Result".to_string(),
+            doc: None,
             go_type: resolved.type_expr,
             required: true,
             conversion: None,
@@ -1441,6 +1471,7 @@ fn build_result_struct(
     };
     fields.push(RenderedField {
         name: "Error".to_string(),
+        doc: None,
         go_type: error_type,
         required: true,
         conversion: None,
@@ -2561,6 +2592,97 @@ fn render_file(
     output
 }
 
+/// Renders a Go doc comment (`// ...`), wrapping each paragraph to the
+/// format line length. Blank lines in the input are preserved as `//`
+/// separator lines.
+///
+/// ```go
+/// // Behavior when a workflow is currently running with the same ID. Set to
+/// // use-existing for idempotent deduplication on workflow ID.
+/// ```
+fn render_go_doc_comment(output: &mut String, indent: &str, text: &str) {
+    let max_width = GO_DOC_COMMENT_LINE_LENGTH.saturating_sub(indent.chars().count() + 3);
+    for line in text.trim().lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            output.push_str(indent);
+            output.push_str("//\n");
+            continue;
+        }
+        let mut current = String::new();
+        for word in line.split_whitespace() {
+            let separator_width = usize::from(!current.is_empty());
+            if !current.is_empty()
+                && current.chars().count() + separator_width + word.chars().count() > max_width
+            {
+                output.push_str(indent);
+                output.push_str("// ");
+                output.push_str(&current);
+                output.push('\n');
+                current.clear();
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+        output.push_str(indent);
+        output.push_str("// ");
+        output.push_str(&current);
+        output.push('\n');
+    }
+}
+
+/// Renders the leading godoc comment for a struct field. Required fields are
+/// prefixed with `Required.`; the prefix is folded onto the first line of the
+/// field's `@nexus.doc`/WIT doc text when present.
+///
+/// ```go
+/// // Required. Unique identifier for the workflow execution.
+/// Id string
+/// ```
+fn render_field_doc_comment(output: &mut String, indent: &str, doc: Option<&str>, required: bool) {
+    match (required, doc) {
+        (true, Some(doc)) => {
+            let trimmed = doc.trim();
+            let combined = if trimmed.is_empty() {
+                "Required.".to_string()
+            } else {
+                format!("Required. {trimmed}")
+            };
+            render_go_doc_comment(output, indent, &combined);
+        }
+        (true, None) => render_go_doc_comment(output, indent, "Required."),
+        (false, Some(doc)) => render_go_doc_comment(output, indent, doc),
+        (false, None) => {}
+    }
+}
+
+/// Renders the godoc comment for an exported operation wrapper function from
+/// the operation's `@nexus.doc` text and `returns=` text.
+///
+/// ```go
+/// // Signal a workflow, starting it first if needed.
+/// //
+/// // Returns: A workflow handle to the started workflow.
+/// ```
+fn render_operation_doc_comment(output: &mut String, operation: &RenderedOperation<'_>) {
+    let doc = operation.doc.map(str::trim).filter(|doc| !doc.is_empty());
+    let return_doc = operation
+        .return_doc
+        .map(str::trim)
+        .filter(|doc| !doc.is_empty());
+    if let Some(doc) = doc {
+        render_go_doc_comment(output, "", doc);
+    }
+    if let Some(return_doc) = return_doc {
+        if doc.is_some() {
+            output.push_str("//\n");
+        }
+        render_go_doc_comment(output, "", &format!("Returns: {return_doc}"));
+    }
+}
+
 /// Renders a WIT enum as a Go named integer type with a `const` block.
 ///
 /// ```go
@@ -2677,11 +2799,12 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
 }
 
 /// Renders a WIT record (or proto message) as a Go struct. Required fields
-/// are annotated with a trailing `// required` comment.
+/// are annotated with a leading `// Required.` godoc comment.
 ///
 /// ```go
 /// type DeactivateRequest struct {
-///     UserId string // required
+///     // Required.
+///     UserId string
 ///     Reason string
 /// }
 /// ```
@@ -2694,13 +2817,11 @@ fn render_model(output: &mut String, model: &RenderedModel) {
         output.push_str("}\n");
     } else {
         for field in &model.fields {
+            render_field_doc_comment(output, "\t", field.doc.as_deref(), field.required);
             output.push('\t');
             output.push_str(&field.name);
             output.push(' ');
             output.push_str(&field.go_type);
-            if field.required {
-                output.push_str(" // required");
-            }
             output.push('\n');
         }
         output.push_str("}\n");
@@ -2825,8 +2946,10 @@ fn render_service_constants(output: &mut String, service: &RenderedService<'_>) 
 ///
 /// ```go
 /// type User struct {
-///     UserId string // required
-///     Email  string // required
+///     // Required.
+///     UserId string
+///     // Required.
+///     Email  string
 /// }
 /// ```
 fn render_resource(output: &mut String, resource: &PlannedResource) {
@@ -2842,13 +2965,11 @@ fn render_resource(output: &mut String, resource: &PlannedResource) {
     for field in &resource.fields {
         let field_name = go_field_name(&field.name);
         let go_type = resolve_resource_field_kind(&field.kind, field.optional);
+        render_field_doc_comment(output, "\t", None, !field.optional);
         output.push('\t');
         output.push_str(&field_name);
         output.push(' ');
         output.push_str(&go_type);
-        if !field.optional {
-            output.push_str(" // required");
-        }
         output.push('\n');
     }
     output.push_str("}\n");
@@ -3275,6 +3396,9 @@ fn render_options_struct(
     output.push_str(&go_field_name(operation.name));
     output.push_str("Options struct {\n");
     for param in params.iter().filter(|p| !p.required) {
+        if let Some(doc) = &param.doc {
+            render_go_doc_comment(output, "\t", doc);
+        }
         output.push('\t');
         output.push_str(&param.field_name);
         output.push(' ');
@@ -3325,6 +3449,8 @@ fn render_convenience_wrapper(
 ) {
     let exported_name = go_field_name(operation.name);
     let has_optional = params.iter().any(|p| !p.required);
+
+    render_operation_doc_comment(output, operation);
 
     // Build the list of signature parameters (after `ctx`): one per required
     // field, plus a trailing `opts` parameter when optional fields exist.
@@ -3413,6 +3539,7 @@ fn render_convenience_wrapper(
 fn render_forwarding_wrapper(output: &mut String, operation: &RenderedOperation<'_>) {
     let exported_name = go_field_name(operation.name);
 
+    render_operation_doc_comment(output, operation);
     output.push_str("func ");
     output.push_str(&exported_name);
     output.push_str("(ctx workflow.Context, request ");
