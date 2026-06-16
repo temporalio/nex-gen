@@ -6,13 +6,10 @@ import { temporal } from "@temporalio/proto";
 import * as nexus from "nexus-rpc";
 import { nexusValue, payloadConverter } from "../nex-gen-runtime.ts";
 
-import {
-  User,
-  UserCapability,
-  UserStatus,
-  TypeShowcase,
-} from "../type-showcase/index.ts";
 import type { RecordSyncRequest, SetProfileRequest } from "../type-showcase/index.ts";
+import { UserCapability, UserStatus } from "../type-showcase/models.ts";
+import { User } from "../type-showcase/resources.ts";
+import { TypeShowcase } from "../type-showcase/service.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const wireFixtureDir = fileURLToPath(

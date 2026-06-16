@@ -3,7 +3,8 @@
 import * as workflow from "@temporalio/workflow";
 import { TypeShowcase } from "../service.ts";
 import type { UpdateEmailRequest } from "../models.ts";
-import { User } from "../resources.ts";
+import "../resources.ts";
+import type { User } from "../resources.ts";
 import { nexusValue } from "../../nex-gen-runtime.ts";
 
 /**

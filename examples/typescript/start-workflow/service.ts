@@ -17,3 +17,25 @@ export const WorkflowService = nexus.service("WorkflowService", {
     temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse
   >({ name: "CancelWorkflow" }),
 });
+
+export const operationRegistry = [
+  {
+    service: "WorkflowService",
+    operation: "StartWorkflow",
+    inputType: "temporal.api.workflowservice.v1.StartWorkflowExecutionRequest",
+    outputType: "temporal.api.workflowservice.v1.StartWorkflowExecutionResponse",
+  },
+  {
+    service: "WorkflowService",
+    operation: "RestartWorkflow",
+    inputType: "temporal.api.workflowservice.v1.StartWorkflowExecutionRequest",
+    outputType: "temporal.api.workflowservice.v1.StartWorkflowExecutionResponse",
+  },
+  {
+    service: "WorkflowService",
+    operation: "CancelWorkflow",
+    inputType: "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest",
+    outputType:
+      "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionResponse",
+  },
+] as const;

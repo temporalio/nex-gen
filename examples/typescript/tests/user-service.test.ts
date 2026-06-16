@@ -2,7 +2,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
 
-import { User, UserService } from "../user-service/index.ts";
+import { User } from "../user-service/resources.ts";
+import { UserService } from "../user-service/service.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(

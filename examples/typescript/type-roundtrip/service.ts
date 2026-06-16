@@ -2,6 +2,7 @@
 
 import * as nexus from "nexus-rpc";
 import type { temporal } from "@temporalio/proto";
+import type { ActivityOptions } from "./models.ts";
 
 export const TypeRoundtripService = nexus.service("TypeRoundtripService", {
   retryPolicyOperation: nexus.operation<
@@ -13,3 +14,18 @@ export const TypeRoundtripService = nexus.service("TypeRoundtripService", {
     temporal.api.activity.v1.IActivityOptions
   >({ name: "ActivityOptionsOperation" }),
 });
+
+export const operationRegistry = [
+  {
+    service: "TypeRoundtripService",
+    operation: "RetryPolicyOperation",
+    inputType: "temporal.api.common.v1.RetryPolicy",
+    outputType: "temporal.api.common.v1.RetryPolicy",
+  },
+  {
+    service: "TypeRoundtripService",
+    operation: "ActivityOptionsOperation",
+    inputType: "temporal.api.activity.v1.ActivityOptions",
+    outputType: "temporal.api.activity.v1.ActivityOptions",
+  },
+] as const;

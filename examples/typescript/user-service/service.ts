@@ -9,3 +9,18 @@ export const UserService = nexus.service("UserService", {
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
 });
+
+export const operationRegistry = [
+  {
+    service: "UserService",
+    operation: "GetUser",
+    inputType: "user-service.get-user-request",
+    outputType: "User",
+  },
+  {
+    service: "UserService",
+    operation: "UpdateEmail",
+    inputType: "user-service.update-email-request",
+    outputType: "User",
+  },
+] as const;
