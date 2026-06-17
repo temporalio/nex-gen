@@ -95,7 +95,7 @@ namespace NexGen.StartWorkflowService
 
     }
 
-    public class CancelWorkflowResponse
+    internal class CancelWorkflowResponse
     {
         public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse ToProto()
         {

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 use heck::{ToLowerCamelCase, ToUpperCamelCase};
@@ -1584,15 +1584,236 @@ fn render_model_constructor(
 }
 
 fn model_access(model: &PlannedModel, api_plan: &ApiPlan) -> &'static str {
-    if api_plan.services.iter().any(|service| {
-        service.operations.iter().any(|operation| {
-            operation.input.info.full_name == model.info.full_name
-                && operation_has_flattened_convenience(operation, model, api_plan)
-        })
-    }) {
-        "internal"
-    } else {
+    if public_model_names(api_plan).contains(&model.info.full_name) {
         "public"
+    } else {
+        "internal"
+    }
+}
+
+fn public_model_names(api_plan: &ApiPlan) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for service in &api_plan.services {
+        for operation in &service.operations {
+            collect_public_operation_models(&mut names, operation, api_plan);
+        }
+        for resource in &service.resources {
+            collect_public_resource_models(&mut names, resource, api_plan);
+        }
+    }
+
+    loop {
+        let before = names.len();
+        for name in names.clone() {
+            let Some(model) = api_plan.models.get(&name) else {
+                continue;
+            };
+            for field in &model.fields {
+                collect_public_field_kind_models(&mut names, &field.kind, api_plan);
+            }
+        }
+        if names.len() == before {
+            break;
+        }
+    }
+
+    names
+}
+
+fn collect_public_operation_models(
+    names: &mut HashSet<String>,
+    operation: &PlannedOperation,
+    api_plan: &ApiPlan,
+) {
+    let raw_input_type = operation_raw_input_type(&operation.input);
+    let high_level_input_type = operation_input_type(&operation.input, api_plan);
+    let has_input = operation_has_input(operation, api_plan);
+    if has_input
+        && (high_level_input_type == raw_input_type
+            || !operation_requires_high_level_request(operation))
+        && operation_request_method_access(operation, RequestArgumentKind::Raw, api_plan)
+            == "public"
+    {
+        collect_public_operation_input_models(names, &operation.input, &raw_input_type, api_plan);
+    }
+    if has_input
+        && high_level_input_type != raw_input_type
+        && operation_request_method_access(operation, RequestArgumentKind::HighLevel, api_plan)
+            == "public"
+    {
+        collect_public_operation_input_models(
+            names,
+            &operation.input,
+            &high_level_input_type,
+            api_plan,
+        );
+    }
+
+    if let PlannedOperationOutput::Message(message) = &operation.output
+        && operation.output_transform.is_none()
+        && operation.output_resource_return.is_none()
+        && operation_return_type(operation) == csharp_type_name(&message.model_name)
+    {
+        collect_public_message_models(names, message, api_plan);
+    }
+
+    let Some(model) = api_plan.models.get(&operation.input.info.full_name) else {
+        return;
+    };
+    if !operation_has_flattened_convenience(operation, model, api_plan) {
+        return;
+    }
+    for overload in flattened_overloads(model) {
+        collect_public_flattened_parameter_models(names, model, api_plan, &overload);
+    }
+    collect_public_operation_options_models(names, model, api_plan);
+}
+
+fn collect_public_flattened_parameter_models(
+    names: &mut HashSet<String>,
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+    overload: &FlattenedOverload,
+) {
+    for field in &model.fields {
+        if field.function.is_none() {
+            continue;
+        }
+        if let Some(nested_model) = flattened_nested_model(field, api_plan) {
+            for nested_field in &nested_model.fields {
+                if nested_field.function.is_some() {
+                    collect_public_field_kind_models(names, &nested_field.kind, api_plan);
+                }
+            }
+            continue;
+        }
+        collect_public_field_kind_models(names, &field.kind, api_plan);
+        if matches!(overload.function_mode(field), FlattenedFunctionMode::String)
+            && let Some(function) = &field.function
+        {
+            for arg_field_name in &function.arg_fields {
+                if let Some(arg_field) = model
+                    .fields
+                    .iter()
+                    .find(|candidate| &candidate.proto_name == arg_field_name)
+                {
+                    collect_public_field_kind_models(names, &arg_field.kind, api_plan);
+                }
+            }
+        }
+    }
+}
+
+fn collect_public_operation_options_models(
+    names: &mut HashSet<String>,
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+) {
+    if !model_has_options_fields(model, api_plan) {
+        return;
+    }
+    for field in &model.fields {
+        if let Some(nested_model) = flattened_nested_model(field, api_plan) {
+            for nested_field in &nested_model.fields {
+                if field_is_options_field(nested_field) {
+                    collect_public_field_kind_models(names, &nested_field.kind, api_plan);
+                }
+            }
+            continue;
+        }
+        if field_is_options_field(field) {
+            collect_public_field_kind_models(names, &field.kind, api_plan);
+        }
+    }
+}
+
+fn collect_public_resource_models(
+    names: &mut HashSet<String>,
+    resource: &PlannedResource,
+    api_plan: &ApiPlan,
+) {
+    for field in &resource.fields {
+        collect_public_field_kind_models(names, &field.kind, api_plan);
+    }
+    for method in &resource.methods {
+        for param in &method.params {
+            collect_public_field_kind_models(names, &param.kind, api_plan);
+        }
+        if let Some(result) = &method.result
+            && let PlannedResourceMethodResultKind::Value(kind) = &result.kind
+        {
+            collect_public_field_kind_models(names, kind, api_plan);
+        }
+    }
+}
+
+fn collect_public_field_kind_models(
+    names: &mut HashSet<String>,
+    kind: &PlannedFieldKind,
+    api_plan: &ApiPlan,
+) {
+    match kind {
+        PlannedFieldKind::Singular(value) => collect_public_value_models(names, value, api_plan),
+        PlannedFieldKind::Repeated(value) => collect_public_value_models(names, value, api_plan),
+        PlannedFieldKind::Map { key, value } => {
+            collect_public_value_models(names, key, api_plan);
+            collect_public_value_models(names, value, api_plan);
+        }
+    }
+}
+
+fn collect_public_value_models(
+    names: &mut HashSet<String>,
+    value: &PlannedValueType,
+    api_plan: &ApiPlan,
+) {
+    match value {
+        PlannedValueType::Message(message) => {
+            collect_public_message_models(names, message, api_plan)
+        }
+        PlannedValueType::Tuple(items) => {
+            for item in items {
+                collect_public_value_models(names, item, api_plan);
+            }
+        }
+        PlannedValueType::Result { ok, err } => {
+            if let Some(ok) = ok {
+                collect_public_value_models(names, ok, api_plan);
+            }
+            if let Some(err) = err {
+                collect_public_value_models(names, err, api_plan);
+            }
+        }
+        PlannedValueType::External {
+            type_name,
+            fallback,
+        } => {
+            if type_name.for_language(Language::Dotnet).is_none() {
+                collect_public_value_models(names, fallback, api_plan);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_public_message_models(
+    names: &mut HashSet<String>,
+    message: &PlannedMessageType,
+    api_plan: &ApiPlan,
+) {
+    if message.replacement.is_none() && api_plan.models.contains_key(&message.info.full_name) {
+        names.insert(message.info.full_name.clone());
+    }
+}
+
+fn collect_public_operation_input_models(
+    names: &mut HashSet<String>,
+    message: &PlannedMessageType,
+    input_type: &str,
+    api_plan: &ApiPlan,
+) {
+    if input_type == csharp_type_name(&message.model_name) {
+        collect_public_message_models(names, message, api_plan);
     }
 }
 

@@ -340,6 +340,8 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("required "));
     assert!(rendered.contains("internal class SignalWithStartWorkflowRequest"));
     assert!(!rendered.contains("public class SignalWithStartWorkflowRequest"));
+    assert!(rendered.contains("internal class UserMetadata"));
+    assert!(!rendered.contains("public class UserMetadata"));
     assert!(!rendered.contains("IReadOnlyCollection<object?>? Args { get; set; }"));
     assert!(!rendered.contains("IReadOnlyCollection<object?>? SignalArgs { get; set; }"));
     assert!(rendered.contains("SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)"));
