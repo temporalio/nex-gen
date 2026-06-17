@@ -125,13 +125,14 @@ func startWorkflow(ctx workflow.Context, request StartWorkflowRequest) (*Started
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
+	namespace := requestProto.GetNamespace()
 	runIdValue := result.GetRunId()
 	var runId *string
 	if runIdValue != "" {
 		runId = &runIdValue
 	}
 	return &StartedWorkflow{
-		Namespace:  requestProto.GetNamespace(),
+		Namespace:  namespace,
 		WorkflowId: request.WorkflowId,
 		RunId:      runId,
 	}, nil
@@ -145,13 +146,14 @@ func restartWorkflow(ctx workflow.Context, request StartWorkflowRequest) (*Start
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
+	namespace := requestProto.GetNamespace()
 	runIdValue := result.GetRunId()
 	var runId *string
 	if runIdValue != "" {
 		runId = &runIdValue
 	}
 	return &StartedWorkflow{
-		Namespace:  requestProto.GetNamespace(),
+		Namespace:  namespace,
 		WorkflowId: request.WorkflowId,
 		RunId:      runId,
 	}, nil

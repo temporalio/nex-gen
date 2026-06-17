@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use crate::api_plan::{
     ApiPlan, PlannedEnumType, PlannedField, PlannedFieldKind, PlannedFlags, PlannedMessageSource,
     PlannedMessageType, PlannedModel, PlannedOperation, PlannedOperationOutput,
-    PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedResource,
+    PlannedOperationResourceReturn, PlannedResource, PlannedResourceField,
     PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedScalarType,
     PlannedSourcedField, PlannedTypeInfo, PlannedValueType, PlannedVariant, message_model_name,
 };
@@ -401,9 +401,6 @@ struct RenderedOperation<'a> {
     /// `None` when the input type is an external/replacement type that cannot
     /// be unpacked into individual arguments.
     unpacked_input: Option<Vec<RenderedUnpackedParam>>,
-    /// Resource-return binding, when the operation output is a proto response
-    /// used to construct a native resource handle.
-    output_resource_return: Option<PlannedOperationResourceReturn>,
     /// Proto serialization binding for the request/response, populated in a
     /// second pass when the input/output messages are proto-backed. When
     /// present, the operation function converts native values to/from proto and
@@ -427,6 +424,22 @@ struct OperationProtoBinding {
     /// converters return `*Native`) or to a value that must be addressed
     /// (generated model converters return `Model`).
     output_returns_pointer: bool,
+    /// Resource construction binding for proto-backed resource-returning
+    /// operations.
+    resource_return: Option<RenderedResourceReturn>,
+}
+
+#[derive(Debug)]
+struct RenderedResourceReturn {
+    resource_type_name: String,
+    local_lines: Vec<String>,
+    field_initializers: Vec<RenderedResourceFieldInitializer>,
+}
+
+#[derive(Debug)]
+struct RenderedResourceFieldInitializer {
+    field_name: String,
+    expr: String,
 }
 
 /// A single parameter in an unpacked convenience wrapper function signature.
@@ -696,7 +709,6 @@ fn resolve_operation<'a>(
         output_transform_expr: go_output_transform.map(|(_, expr)| expr),
         output_transform_type: go_output_transform.map(|(type_name, _)| go_type_expr(type_name)),
         unpacked_input,
-        output_resource_return: operation.output_resource_return.clone(),
         proto_binding: None,
     })
 }
@@ -784,6 +796,28 @@ fn populate_operation_bindings(
                         transform.type_name.for_language(Language::Go).is_some()
                             && transform.transform.for_language(Language::Go).is_some()
                     });
+            let resource_return = if let Some(resource_return) = &planned_op.output_resource_return
+            {
+                let resource = service
+                    .resources
+                    .iter()
+                    .find(|resource| resource.type_name == resource_return.resource_type_name)
+                    .ok_or_else(|| Error::InvalidResource {
+                        service: planned_service.name.clone(),
+                        resource: resource_return.resource_type_name.clone(),
+                        reason: "resource-returning operation references an unknown resource"
+                            .to_string(),
+                    })?;
+                Some(build_rendered_resource_return(
+                    planned_service.name.as_str(),
+                    resource_return,
+                    resource,
+                    api_plan,
+                    imports,
+                )?)
+            } else {
+                None
+            };
 
             let (output_proto_type, output_from_proto, output_returns_pointer) =
                 match &planned_op.output {
@@ -825,10 +859,244 @@ fn populate_operation_bindings(
                 output_proto_type,
                 output_from_proto,
                 output_returns_pointer,
+                resource_return,
             });
         }
     }
     Ok(())
+}
+
+fn build_rendered_resource_return(
+    service_name: &str,
+    resource_return: &PlannedOperationResourceReturn,
+    resource: &PlannedResource,
+    api_plan: &ApiPlan,
+    imports: &mut GoImportCollector,
+) -> Result<RenderedResourceReturn> {
+    let mut local_lines = Vec::new();
+    let mut field_initializers = Vec::new();
+
+    for binding in &resource_return.bindings {
+        let field = resource
+            .fields
+            .iter()
+            .find(|field| field.name == binding.field_name)
+            .ok_or_else(|| Error::InvalidResource {
+                service: service_name.to_string(),
+                resource: resource_return.resource_type_name.clone(),
+                reason: format!(
+                    "resource-returning operation references unknown field `{}`",
+                    binding.field_name
+                ),
+            })?;
+        let expr = match &binding.source {
+            ResolvedResourceBindingSource::RequestField {
+                field_name,
+                proto_field_name,
+                hidden,
+            } => {
+                if *hidden {
+                    let (lines, expr) = resource_return_proto_field_source(
+                        field,
+                        "requestProto",
+                        proto_field_name,
+                        api_plan,
+                        imports,
+                    )
+                    .map_err(|reason| Error::UnsupportedGoProtoConversion {
+                        context: format!(
+                            "resource return field `{}.{}`",
+                            resource_return.resource_type_name, binding.field_name
+                        ),
+                        reason,
+                    })?;
+                    local_lines.extend(lines);
+                    expr
+                } else {
+                    format!("request.{}", go_field_name(field_name))
+                }
+            }
+            ResolvedResourceBindingSource::ResultField {
+                proto_field_name, ..
+            } => {
+                let (lines, expr) = resource_return_proto_field_source(
+                    field,
+                    "result",
+                    proto_field_name,
+                    api_plan,
+                    imports,
+                )
+                .map_err(|reason| Error::UnsupportedGoProtoConversion {
+                    context: format!(
+                        "resource return field `{}.{}`",
+                        resource_return.resource_type_name, binding.field_name
+                    ),
+                    reason,
+                })?;
+                local_lines.extend(lines);
+                expr
+            }
+        };
+
+        field_initializers.push(RenderedResourceFieldInitializer {
+            field_name: go_field_name(&binding.field_name),
+            expr,
+        });
+    }
+
+    Ok(RenderedResourceReturn {
+        resource_type_name: resource_return.resource_type_name.clone(),
+        local_lines,
+        field_initializers,
+    })
+}
+
+fn resource_return_proto_field_source(
+    field: &PlannedResourceField,
+    source: &str,
+    proto_field_name: &str,
+    api_plan: &ApiPlan,
+    imports: &mut GoImportCollector,
+) -> GoConversionResult<(Vec<String>, String)> {
+    let local = resource_return_local_name(&field.name);
+    let proto_field = go_proto_field_name(proto_field_name);
+    let getter = format!("{source}.Get{proto_field}()");
+    let native_type = resolve_resource_field_kind(&field.kind, field.optional);
+
+    match &field.kind {
+        PlannedFieldKind::Singular(value) => {
+            let conversion = go_value_conversion(value, api_plan, imports)?;
+            Ok(resource_return_singular_proto_source(
+                field,
+                value,
+                &conversion,
+                &getter,
+                &local,
+                &native_type,
+            ))
+        }
+        PlannedFieldKind::Repeated(value) => {
+            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let converted = (conversion.from_proto)("item");
+            let mut lines = vec![
+                format!("var {local} {native_type}"),
+                format!("for _, item := range {getter} {{"),
+            ];
+            match conversion.kind {
+                GoConversionKind::OverrideConverter => {
+                    lines.push(format!(
+                        "\tif converted := {converted}; converted != nil {{"
+                    ));
+                    lines.push(format!("\t\t{local} = append({local}, *converted)"));
+                    lines.push("\t}".to_string());
+                }
+                _ => lines.push(format!("\t{local} = append({local}, {converted})")),
+            }
+            lines.push("}".to_string());
+            Ok((lines, local))
+        }
+        PlannedFieldKind::Map { key: _, value } => {
+            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let converted = (conversion.from_proto)("v");
+            let mut lines = vec![
+                format!("var {local} {native_type}"),
+                format!("if len({getter}) > 0 {{"),
+                format!("\t{local} = make({native_type}, len({getter}))"),
+                format!("\tfor k, v := range {getter} {{"),
+            ];
+            match conversion.kind {
+                GoConversionKind::OverrideConverter => {
+                    lines.push(format!(
+                        "\t\tif converted := {converted}; converted != nil {{"
+                    ));
+                    lines.push(format!("\t\t\t{local}[k] = *converted"));
+                    lines.push("\t\t}".to_string());
+                }
+                _ => lines.push(format!("\t\t{local}[k] = {converted}")),
+            }
+            lines.push("\t}".to_string());
+            lines.push("}".to_string());
+            Ok((lines, local))
+        }
+    }
+}
+
+fn resource_return_singular_proto_source(
+    field: &PlannedResourceField,
+    value: &PlannedValueType,
+    conversion: &GoValueConversion,
+    getter: &str,
+    local: &str,
+    native_type: &str,
+) -> (Vec<String>, String) {
+    let converted = (conversion.from_proto)(getter);
+    let uses_pointer = field.optional && native_type.starts_with('*');
+
+    match conversion.kind {
+        GoConversionKind::OverrideConverter => {
+            if uses_pointer {
+                (vec![format!("{local} := {converted}")], local.to_string())
+            } else {
+                (
+                    vec![
+                        format!("var {local} {native_type}"),
+                        format!("if converted := {converted}; converted != nil {{"),
+                        format!("\t{local} = *converted"),
+                        "}".to_string(),
+                    ],
+                    local.to_string(),
+                )
+            }
+        }
+        GoConversionKind::ModelConverter => {
+            if uses_pointer {
+                (
+                    vec![
+                        format!("var {local} {native_type}"),
+                        format!("if {getter} != nil {{"),
+                        format!("\tconverted := {converted}"),
+                        format!("\t{local} = &converted"),
+                        "}".to_string(),
+                    ],
+                    local.to_string(),
+                )
+            } else {
+                (vec![format!("{local} := {converted}")], local.to_string())
+            }
+        }
+        GoConversionKind::Scalar | GoConversionKind::Enum => {
+            if uses_pointer {
+                let value_local = format!("{local}Value");
+                let zero = resource_return_zero_value_expr(value);
+                (
+                    vec![
+                        format!("{value_local} := {converted}"),
+                        format!("var {local} {native_type}"),
+                        format!("if {value_local} != {zero} {{"),
+                        format!("\t{local} = &{value_local}"),
+                        "}".to_string(),
+                    ],
+                    local.to_string(),
+                )
+            } else {
+                (vec![format!("{local} := {converted}")], local.to_string())
+            }
+        }
+    }
+}
+
+fn resource_return_zero_value_expr(value: &PlannedValueType) -> &'static str {
+    match value {
+        PlannedValueType::Scalar(PlannedScalarType::Bool) => "false",
+        PlannedValueType::Scalar(PlannedScalarType::String) => "\"\"",
+        PlannedValueType::Scalar(PlannedScalarType::Bytes) => "nil",
+        PlannedValueType::Scalar(_) | PlannedValueType::Enum(_) => "0",
+        _ => "nil",
+    }
+}
+
+fn resource_return_local_name(field_name: &str) -> String {
+    go_unexported_name(&go_field_name(field_name))
 }
 
 /// Resolves a [`PlannedMessageType`] to its Go type expression, accounting for
@@ -3456,7 +3724,7 @@ fn render_operation_function_proto(
     binding: &OperationProtoBinding,
 ) {
     let op_const = format!("{}Op", go_field_name(operation.name));
-    let resource_return = operation.output_resource_return.as_ref();
+    let resource_return = binding.resource_return.as_ref();
 
     output.push_str("func ");
     output.push_str(&operation.func_name);
@@ -3563,7 +3831,7 @@ fn render_operation_function_proto(
             output.push_str("\treturn &value, nil\n");
         }
     } else if let (Some(resource_return), Some(proto_value_type)) = (
-        resource_return,
+        binding.resource_return.as_ref(),
         binding
             .output_proto_type
             .as_deref()
@@ -3575,19 +3843,19 @@ fn render_operation_function_proto(
         output.push_str("\tif err := fut.Get(ctx, &result); err != nil {\n");
         output.push_str("\t\treturn nil, err\n");
         output.push_str("\t}\n");
-        for line in resource_return_local_lines(resource_return) {
+        for line in &resource_return.local_lines {
             output.push('\t');
-            output.push_str(&line);
+            output.push_str(line);
             output.push('\n');
         }
         output.push_str("\treturn &");
         output.push_str(&resource_return.resource_type_name);
         output.push_str("{\n");
-        for binding in &resource_return.bindings {
+        for initializer in &resource_return.field_initializers {
             output.push_str("\t\t");
-            output.push_str(&go_field_name(&binding.field_name));
+            output.push_str(&initializer.field_name);
             output.push_str(": ");
-            output.push_str(&resource_return_binding_expr_go(binding));
+            output.push_str(&initializer.expr);
             output.push_str(",\n");
         }
         output.push_str("\t}, nil\n");
@@ -3595,67 +3863,6 @@ fn render_operation_function_proto(
         output.push_str("\treturn fut.Get(ctx, nil)\n");
     }
     output.push_str("}\n");
-}
-
-fn resource_return_local_lines(resource_return: &PlannedOperationResourceReturn) -> Vec<String> {
-    resource_return
-        .bindings
-        .iter()
-        .filter_map(|binding| {
-            if !binding.optional {
-                return None;
-            }
-            match &binding.source {
-                ResolvedResourceBindingSource::ResultField {
-                    proto_field_name, ..
-                } => {
-                    let local = resource_return_optional_local_name(binding);
-                    let value_local = format!("{local}Value");
-                    let proto_field = go_proto_field_name(proto_field_name);
-                    Some(vec![
-                        format!("{value_local} := result.Get{proto_field}()"),
-                        format!("var {local} *string"),
-                        format!("if {value_local} != \"\" {{"),
-                        format!("\t{local} = &{value_local}"),
-                        "}".to_string(),
-                    ])
-                }
-                _ => None,
-            }
-        })
-        .flatten()
-        .collect()
-}
-
-fn resource_return_binding_expr_go(binding: &PlannedOperationResourceFieldBinding) -> String {
-    match &binding.source {
-        ResolvedResourceBindingSource::RequestField {
-            field_name,
-            proto_field_name,
-            hidden,
-        } => {
-            if *hidden {
-                let proto_field = go_proto_field_name(proto_field_name);
-                format!("requestProto.Get{proto_field}()")
-            } else {
-                format!("request.{}", go_field_name(field_name))
-            }
-        }
-        ResolvedResourceBindingSource::ResultField {
-            proto_field_name, ..
-        } => {
-            if binding.optional {
-                resource_return_optional_local_name(binding)
-            } else {
-                let proto_field = go_proto_field_name(proto_field_name);
-                format!("result.Get{proto_field}()")
-            }
-        }
-    }
-}
-
-fn resource_return_optional_local_name(binding: &PlannedOperationResourceFieldBinding) -> String {
-    go_unexported_name(&go_field_name(&binding.field_name))
 }
 
 /// Renders an options struct for optional parameters of a convenience wrapper.

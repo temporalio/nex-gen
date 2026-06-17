@@ -611,14 +611,79 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
         "fut := c.ExecuteOperation(ctx, StartWorkflowOp, requestProto, workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains("\tvar result workflowservice.StartWorkflowExecutionResponse\n"));
+    assert!(rendered.contains("\tnamespace := requestProto.GetNamespace()\n"));
     assert!(rendered.contains("\trunIdValue := result.GetRunId()\n"));
     assert!(rendered.contains("\tvar runId *string\n"));
-    assert!(rendered.contains("\t\tNamespace: requestProto.GetNamespace(),\n"));
+    assert!(rendered.contains("\t\tNamespace: namespace,\n"));
     assert!(rendered.contains("\t\tWorkflowId: request.WorkflowId,\n"));
     assert!(rendered.contains("\t\tRunId: runId,\n"));
     assert!(rendered.contains(
         "fut := c.ExecuteOperation(ctx, RestartWorkflowOp, requestProto, workflow.NexusOperationOptions{})"
     ));
+}
+
+#[test]
+fn go_resource_return_binding_handles_optional_proto_scalars() {
+    let root = project_root();
+    let temp_dir = unique_output_path("go-resource-return-scalars");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("resource-return-scalars.wit");
+    fs::write(
+        &wit_path,
+        r#"package temporal:resource-return-scalars@1.0.0;
+
+world system {
+  export workflow-service;
+}
+
+/// @nexus.endpoint "temporal-system"
+interface workflow-service {
+  type placeholder = string;
+
+  resource signal-result {
+    constructor(namespace: string, started: option<bool>);
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest"
+  record cancel-request {
+    /// @nexus.source go="WorkflowNamespace"
+    namespace: string,
+    /// @nexus.omit
+    workflow-execution: placeholder,
+    /// @nexus.omit
+    reason: placeholder,
+    /// @nexus.omit
+    identity: placeholder,
+    /// @nexus.omit
+    request-id: placeholder,
+    /// @nexus.omit
+    first-execution-run-id: placeholder,
+    /// @nexus.omit
+    links: placeholder,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionResponse"
+  type signal-result-response = own<signal-result>;
+
+  signal-with-start: func(request: cancel-request) -> signal-result-response;
+}
+"#,
+    )
+    .unwrap();
+
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &[wit_path],
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
+
+    assert!(rendered.contains("\tnamespace := requestProto.GetNamespace()\n"));
+    assert!(rendered.contains("\tstartedValue := result.GetStarted()\n"));
+    assert!(rendered.contains("\tvar started *bool\n"));
+    assert!(rendered.contains("\tif startedValue != false {\n"));
+    assert!(rendered.contains("\t\tStarted: started,\n"));
+    fs::remove_dir_all(temp_dir).unwrap();
 }
 
 #[test]
