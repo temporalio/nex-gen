@@ -1,0 +1,7 @@
+# build artifacts
+dotnet_runner/bin/
+dotnet_runner/obj/
+*.class
+
+# Node polyfill for the js-temporal runner (reinstall with `npm install`).
+node_modules/

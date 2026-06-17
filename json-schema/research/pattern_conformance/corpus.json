@@ -1,0 +1,102 @@
+{
+  "note": "Shared conformance corpus for the JSON-Schema `pattern` keyword. Each entry has an id, a `pattern`, an `instance` (string to test), and an optional `expect_gate_reject` flag (true = the Rust `regex` gate SHOULD reject the pattern at load time; such patterns are not match-compared across runtimes). Non-ASCII is written as raw UTF-8 (all five runtimes parse the file as UTF-8). Notable instances: U+0663 Arabic-Indic THREE, U+096B Devanagari FIVE, U+FF13 fullwidth THREE, U+00B2 superscript TWO, U+00E9 e-acute, U+0434 Cyrillic de, U+4E2D CJK, U+00A0 no-break space, U+3000 ideographic space, U+1F600 grinning-face emoji (astral).",
+  "pairs": [
+    {"id": "empty-pattern-empty",        "pattern": "",                "instance": ""},
+    {"id": "empty-pattern-nonempty",     "pattern": "",                "instance": "anything"},
+
+    {"id": "literal-substring-hit",      "pattern": "cat",             "instance": "the cat sat"},
+    {"id": "literal-substring-miss",     "pattern": "cat",             "instance": "the dog sat"},
+    {"id": "literal-substring-prefix",   "pattern": "cat",             "instance": "category"},
+    {"id": "literal-empty-instance",     "pattern": "cat",             "instance": ""},
+
+    {"id": "anchor-start-hit",           "pattern": "^cat",            "instance": "cat and dog"},
+    {"id": "anchor-start-miss",          "pattern": "^cat",            "instance": "a cat"},
+    {"id": "anchor-end-hit",             "pattern": "dog$",            "instance": "the dog"},
+    {"id": "anchor-end-miss",            "pattern": "dog$",            "instance": "dogs"},
+    {"id": "anchor-both-hit",            "pattern": "^cat$",           "instance": "cat"},
+    {"id": "anchor-both-miss",           "pattern": "^cat$",           "instance": "cats"},
+    {"id": "anchor-both-newline-tail",   "pattern": "^cat$",           "instance": "cat\n"},
+    {"id": "anchor-start-newline-mid",   "pattern": "^bar",            "instance": "foo\nbar"},
+    {"id": "anchor-end-newline-mid",     "pattern": "foo$",            "instance": "foo\nbar"},
+    {"id": "dollar-before-newline",      "pattern": "foo$",            "instance": "foo\n"},
+
+    {"id": "digit-ascii-hit",            "pattern": "\\d",             "instance": "abc5def"},
+    {"id": "digit-ascii-anchored",       "pattern": "^\\d{3}-\\d{4}$", "instance": "123-4567"},
+    {"id": "digit-arabic-indic-3",       "pattern": "\\d",             "instance": "٣"},
+    {"id": "digit-arabic-indic-word",    "pattern": "\\d",             "instance": "num٣here"},
+    {"id": "digit-fullwidth-3",          "pattern": "\\d",             "instance": "３"},
+    {"id": "digit-superscript-2",        "pattern": "\\d",             "instance": "²"},
+    {"id": "digit-devanagari-5",         "pattern": "\\d",             "instance": "५"},
+    {"id": "notdigit-on-ascii-digit",    "pattern": "\\D",             "instance": "5"},
+    {"id": "notdigit-on-arabic-digit",   "pattern": "\\D",             "instance": "٣"},
+
+    {"id": "word-ascii-hit",             "pattern": "\\w",             "instance": "_"},
+    {"id": "word-ascii-letter",          "pattern": "\\w+",            "instance": "abc"},
+    {"id": "word-accented-e-acute",      "pattern": "\\w",             "instance": "é"},
+    {"id": "word-cyrillic",              "pattern": "\\w",             "instance": "д"},
+    {"id": "word-cjk",                   "pattern": "\\w",             "instance": "中"},
+    {"id": "notword-on-accented",        "pattern": "\\W",             "instance": "é"},
+    {"id": "notword-on-space",           "pattern": "\\W",             "instance": " "},
+
+    {"id": "space-ascii-hit",            "pattern": "\\s",             "instance": "a b"},
+    {"id": "space-tab",                  "pattern": "\\s",             "instance": "a\tb"},
+    {"id": "space-nbsp",                 "pattern": "\\s",             "instance": "a b"},
+    {"id": "space-ideographic",          "pattern": "\\s",             "instance": "a　b"},
+    {"id": "notspace-on-nbsp",           "pattern": "\\S",             "instance": " "},
+
+    {"id": "dot-ascii",                  "pattern": "a.b",             "instance": "axb"},
+    {"id": "dot-astral-emoji",           "pattern": "a.b",             "instance": "a😀b"},
+    {"id": "dot-bmp-cjk",                "pattern": "a.b",             "instance": "a中b"},
+    {"id": "dot-no-newline",             "pattern": "a.b",             "instance": "a\nb"},
+    {"id": "dotstar",                    "pattern": "a.*b",            "instance": "axxxxb"},
+    {"id": "dotstar-empty-mid",          "pattern": "a.*b",            "instance": "ab"},
+    {"id": "dotstar-astral",             "pattern": "^a.$",            "instance": "a😀"},
+
+    {"id": "alt-foo",                    "pattern": "^(foo|bar)-\\w+$","instance": "foo-baz"},
+    {"id": "alt-bar",                    "pattern": "^(foo|bar)-\\w+$","instance": "bar-qux"},
+    {"id": "alt-miss",                   "pattern": "^(foo|bar)-\\w+$","instance": "baz-qux"},
+
+    {"id": "quant-star-zero",            "pattern": "ab*c",            "instance": "ac"},
+    {"id": "quant-star-many",            "pattern": "ab*c",            "instance": "abbbbc"},
+    {"id": "quant-plus-zero",            "pattern": "ab+c",            "instance": "ac"},
+    {"id": "quant-plus-one",             "pattern": "ab+c",            "instance": "abc"},
+    {"id": "quant-opt-present",          "pattern": "colou?r",        "instance": "colour"},
+    {"id": "quant-opt-absent",           "pattern": "colou?r",        "instance": "color"},
+    {"id": "quant-range-inbounds",       "pattern": "^a{2,4}$",        "instance": "aaa"},
+    {"id": "quant-range-over",           "pattern": "^a{2,4}$",        "instance": "aaaaa"},
+    {"id": "quant-range-under",          "pattern": "^a{2,4}$",        "instance": "a"},
+    {"id": "quant-exact",                "pattern": "^a{3}$",          "instance": "aaa"},
+
+    {"id": "class-range-hit",            "pattern": "^[a-z]+$",        "instance": "hello"},
+    {"id": "class-range-miss-upper",     "pattern": "^[a-z]+$",        "instance": "Hello"},
+    {"id": "class-negate-hit",           "pattern": "[^0-9]",          "instance": "abc"},
+    {"id": "class-negate-miss",          "pattern": "^[^0-9]+$",       "instance": "abc123"},
+    {"id": "class-negate-newline",       "pattern": "[^a]",            "instance": "\n"},
+    {"id": "class-negate-unicode",       "pattern": "^[^0-9]+$",       "instance": "é中"},
+
+    {"id": "escaped-dot-hit",            "pattern": "a\\.b",           "instance": "a.b"},
+    {"id": "escaped-dot-miss",           "pattern": "a\\.b",           "instance": "axb"},
+    {"id": "escaped-backslash",          "pattern": "a\\\\b",          "instance": "a\\b"},
+    {"id": "escaped-plus",               "pattern": "1\\+1",          "instance": "1+1=2"},
+    {"id": "escaped-paren",              "pattern": "\\(x\\)",        "instance": "f(x)"},
+
+    {"id": "wordbound-foo-hit",          "pattern": "\\bfoo\\b",       "instance": "a foo b"},
+    {"id": "wordbound-foo-miss",         "pattern": "\\bfoo\\b",       "instance": "foobar"},
+    {"id": "wordbound-start",            "pattern": "\\bfoo",          "instance": "foobar"},
+    {"id": "wordbound-unicode-adjacent", "pattern": "\\bfoo\\b",       "instance": "éfoo"},
+    {"id": "notwordbound",               "pattern": "foo\\B",          "instance": "foobar"},
+
+    {"id": "case-sensitive-miss",        "pattern": "^Cat$",           "instance": "cat"},
+    {"id": "case-inline-flag",           "pattern": "(?i)^cat$",       "instance": "CAT"},
+
+    {"id": "unicode-literal-eacute",     "pattern": "café",       "instance": "café"},
+    {"id": "unicode-literal-emoji",      "pattern": "^😀$",  "instance": "😀"},
+    {"id": "unicode-literal-cjk",        "pattern": "中文",    "instance": "中文字"},
+
+    {"id": "reject-lookahead",           "pattern": "foo(?=bar)",      "instance": "foobar", "expect_gate_reject": true},
+    {"id": "reject-neg-lookahead",       "pattern": "foo(?!bar)",      "instance": "foobaz", "expect_gate_reject": true},
+    {"id": "reject-lookbehind",          "pattern": "(?<=x)y",         "instance": "xy",     "expect_gate_reject": true},
+    {"id": "reject-neg-lookbehind",      "pattern": "(?<!x)y",         "instance": "zy",     "expect_gate_reject": true},
+    {"id": "reject-backreference",       "pattern": "(a)\\1",          "instance": "aa",     "expect_gate_reject": true}
+  ]
+}

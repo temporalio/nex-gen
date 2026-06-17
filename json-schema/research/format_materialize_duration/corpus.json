@@ -1,0 +1,32 @@
+{
+  "note": "Materialization corpus for the `duration` format. Every `wire` is VALID per the pinned duration regex (see format_duration/corpus.json). Rows are grouped by which design option they exercise. `full` = the whole accepted grammar (incl. Y/M/W); the design (B) custom struct must round-trip ALL of these byte-identically. `timeonly` = the narrowed PTnHnMnS-only subset that design (C) would materialize into a native fixed-duration type (Go time.Duration / Python timedelta / Java Duration); a materializing language must re-emit the CANONICAL string for these byte-identically. The CANONICAL form for the custom struct (B) is: reproduce the components verbatim in ISO order (PnYnMnDTnHnMnS, or PnW for the week form), omitting zero-valued components UNLESS the whole duration is zero, in which case emit PT0S. For (C) the canonical of a native fixed-duration is the same PTnHnMnS form derived from the total, so `PT1H` stays `PT1H`, `PT90M` normalizes-away-from-input (see NOTES: this is why native types cannot round-trip byte-identically for non-canonical time inputs).",
+  "full": [
+    {"id": "full-ymdhms",     "wire": "P3Y6M4DT12H30M5S"},
+    {"id": "years-only",      "wire": "P1Y"},
+    {"id": "months-only",     "wire": "P2M"},
+    {"id": "days-only",       "wire": "P10D"},
+    {"id": "weeks-only",      "wire": "P4W"},
+    {"id": "weeks-one",       "wire": "P1W"},
+    {"id": "ym",              "wire": "P1Y6M"},
+    {"id": "ymd",             "wire": "P1Y6M4D"},
+    {"id": "md",              "wire": "P6M4D"},
+    {"id": "year-then-time",  "wire": "P1YT1H"},
+    {"id": "date-and-time",   "wire": "P1DT12H"},
+    {"id": "big-multidigit",  "wire": "P100Y200M300DT400H500M600S"},
+    {"id": "zero-years",      "wire": "P0Y"}
+  ],
+  "timeonly": [
+    {"id": "t-hours",         "wire": "PT1H"},
+    {"id": "t-minutes",       "wire": "PT30M"},
+    {"id": "t-seconds",       "wire": "PT15S"},
+    {"id": "t-hms",           "wire": "PT1H30M15S"},
+    {"id": "t-hm",            "wire": "PT1H30M"},
+    {"id": "t-ms",            "wire": "PT30M15S"},
+    {"id": "t-zero-seconds",  "wire": "PT0S"}
+  ],
+  "timeonly_noncanonical": [
+    {"id": "t-90min",         "wire": "PT90M",     "canonical_native": "PT1H30M", "note": "90 min = 1h30m; a native total-based type CANNOT re-emit PT90M"},
+    {"id": "t-3600s",         "wire": "PT3600S",   "canonical_native": "PT1H",    "note": "3600 s = 1h; native re-emit collapses"},
+    {"id": "t-24h",           "wire": "PT24H",     "canonical_native": "PT24H",   "note": "Go keeps 24h; Java Duration.toString emits PT24H too - but see day boundary"}
+  ]
+}

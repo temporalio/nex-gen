@@ -1,0 +1,287 @@
+# `default`
+
+Source: JSON Schema 2020-12, Validation vocabulary, §9.2
+"A Vocabulary for Basic Meta-Data Annotations → default".
+
+Supplies a fallback value for an absent member. In the spec it is a pure
+**annotation** — it never affects validation pass/fail. We give it the
+**off-the-wire, materialized-on-read** operational semantics: set-ness tracked,
+omit-unset on serialize (no deep-equals), materialized **on read** via a
+generated `<Field>OrDefault()` accessor in Go and native language
+mechanisms elsewhere.
+
+## Spec summary
+
+Verbatim (2020-12 validation, §9.2):
+
+> There are no restrictions placed on the value of this keyword. When
+> multiple occurrences of this keyword are applicable to a single
+> sub-instance, implementations SHOULD remove duplicates.
+
+> This keyword can be used to supply a default JSON value associated with
+> a particular schema. It is RECOMMENDED that a default value be valid
+> against the associated schema.
+
+Distilled:
+- An **annotation**, not an assertion: per spec it **never changes
+  whether an instance validates**. A value that violates the schema is
+  invalid whether or not a `default` is present.
+- Supplies the value to use when the member is **absent**.
+- The default *should* be valid against the schema (we strengthen this
+  to a load-time **MUST** — see Support decision).
+- Only meaningful on an **optional** member (a required member is never
+  absent, so its default never applies).
+- **v1 scope:** scalar values only (`string`/`number`/`integer`/
+  `boolean`); object/array/`null` defaults are rejected for now — a
+  provisional limit (see Support decision).
+
+## Support decision
+
+**Support:** yes — with **off-the-wire, materialized-on-read** semantics, *not* the literal
+"populate on deserialize" reading.
+
+The defining choices (citing [[PRINCIPLES.md]]):
+- **Default off-the-wire, materialized on read**: the default is
+  **never** written into the field on deserialize and **never** emitted
+  on serialize. The generator tracks field *set-ness*; serialize omits
+  any unset field with **no value comparison** (never a deep-equals
+  against the default). The default is surfaced lazily *on read*.
+- **P9 (absent ≠ zero / set)**: tracking set-ness (not value) is what
+  preserves the absent-vs-explicitly-set distinction. Explicitly setting
+  a field to a value *equal to* the default marks it set and **pins it
+  on the wire** — a deep-equals strip would erase that signal, so we
+  don't do one.
+- **P12 (serialize-side)**: omit-unset lives in the encode adapter; it is
+  the serialize mirror of the parse adapter's "wire-absence → use
+  default on read." The shared `Validate` is unaffected — `default`
+  contributes **no** constraint predicate (it is not an assertion).
+- **Scalar values only, for now (P6/P7.1).** v1 supports `default` only
+  when its value is a **scalar primitive** — `string`, `number`,
+  `integer`, or `boolean`. An **object** or **array** default is rejected
+  at load time, and a `null` default is rejected as degenerate (see
+  Loader behavior). The blocker is purely the composite case: a literal
+  object/array default would have to be materialized into a constructed
+  language value (a populated struct/`record`/`BaseModel`, or a typed
+  slice/`List`) on read and woven into the per-field omit-unset machinery
+  — a meaningfully harder problem than emitting a scalar literal in
+  `<Field>OrDefault()` / `?? DEFAULT_X` / a Pydantic field default. **This
+  scope limit is provisional and expected to relax** once composite-value
+  materialization is specified; it mirrors how
+  [[const]] also defers composite values in v1.
+
+Because `default` is an annotation, it has **no runtime validation check
+of its own**. The only load-time obligations are shape checks:
+
+Loader behavior:
+- `default` on a **required** member → **reject**. A required member is
+  always present, so the default is dead metadata; its presence signals
+  author confusion (P7.1). Diagnostic: make the member optional, or drop
+  the `default`.
+- `default` value **not valid against the member's own schema** →
+  **reject**. The spec only *RECOMMENDS* validity; we enforce it (P7.1):
+  a default that can never satisfy the field (`{type:"integer",
+  minimum:5, default:0}`, `{type:"string", default:42}`) is a schema bug,
+  not a runtime concern. Diagnostic names the violated constraint.
+  **Called out, not yet fully specced:** the `type`-mismatch case
+  (`default:42` on a `string`) is enforceable today; validating the
+  default against *constraint* keywords — `pattern`, `minLength`/
+  `maxLength`, `minimum`/`maximum`, `multipleOf`, … (e.g. the
+  `minimum:5, default:0` example) — reuses those keywords' own validators
+  over the literal at load time, and is **deferred to land with those
+  constraint features** (none specced yet). Same cross-cutting obligation
+  as [[const]] and [[enum]].
+- `default` **and** [[const]] both present → reject (see [[const]]):
+  `const` already fixes the value; opposite serialize behavior
+  (always-emit vs omit-unset).
+- `default` whose value is an **object or array** → **reject** (for now).
+  Diagnostic reads "object/array defaults are not yet supported," not
+  "forbidden" — the limit is provisional (see Support decision). The member's
+  *type* may still be an object/array; it just cannot carry a `default`.
+- `default: null` → **reject** as degenerate: on a non-nullable member it
+  is invalid against the schema (caught by the validity check above); on a
+  nullable member it is a no-op, since absence already surfaces as
+  `nil`/`None`/`null`/`undefined` and `<Field>OrDefault()` returning `nil`
+  adds nothing. Mirrors [[const]]'s `const: null` rejection.
+- Multiple `default` occurrences applicable to one sub-instance (via
+  merged schemas) → **last-wins**: identical values dedup per spec; when
+  they differ, the value from the **last-merged** schema survives — a
+  later [[allOf]] branch, or a `$ref` use-site sibling overriding the
+  target (see [[allOf]]/[[ref]]). A differing default is a deterministic
+  override, not a conflict; nothing is rejected.
+
+## Type mapping
+
+**None of its own.** `default` does not change the emitted type — the
+type comes from [[type]] + [[nullability]], and `default` implies the
+member is **optional**, so it takes the optional form (`*T` / `x?: T` /
+`Optional[T]` / boxed-or-`@Nullable`). What `default` *does* add is the
+**read-side surfacing mechanism** and the generated default value itself,
+which differ per language:
+
+| Language | Set-ness signal (omit-unset) | Read-side surfacing of the default |
+|---|---|---|
+| Python | `model_fields_set`, applied by a generated `@model_serializer` | **native** — the Pydantic field `default=<v>` makes the attribute *read* as the default; the generated `@model_serializer(mode='wrap')` omits it on the way out by emitting only `model_fields_set` keys. Omission is baked into the model (the default Temporal converter owns the `to_json` call, so we can't pass `exclude_unset` ourselves). |
+| Java | `null` field + `@JsonInclude(NON_NULL)` | **native** — the generated **getter** returns the default when the backing field is `null` (`return nickname != null ? nickname : "anon";`). Getters already exist in the POJO design (PRINCIPLES Java §1). |
+| TypeScript | `undefined` (the `?` field) | **advisory** — interfaces have no methods (PRINCIPLES TS §2), so the consumer applies the default with the native `?? DEFAULT_X`; the generator emits `export const DEFAULT_X = "anon"`. No accessor needed; `??` is the idiom. |
+| Go | `*T` `nil` + `,omitempty` | **generated accessor** — a `func (m M) <Field>OrDefault() T` returns `*m.Field` when set and the default literal when `nil` (`func (u User) NicknameOrDefault() string { if u.Nickname != nil { return *u.Nickname }; return "anon" }`). The bare field stays `*T` (set-ness intact); the accessor is the materialize-on-read path. Emitted **only** for default-bearing fields. Modeled on proto3's `GetX()` — the same omit-default-on-wire + accessor-materializes-default pattern already familiar to Temporal users. Named `<Field>OrDefault` rather than `Get<Field>` to read as "the value, or its default" and to avoid implying a getter on every field. Alternative approaches considered: (a) advisory constant (`DEFAULT_X` + caller nil-checks) — pushes nil-checks to every call site; (b) populate on deserialize — destroys set-ness, forces deep-equals, breaks P9. |
+
+### Naming and collisions (P15)
+
+The read-side surfacing synthesizes **one new identifier in two targets**
+— names absent from the schema, so they can collide:
+
+| Target | Synthesized identifier | Scope | Collision risk |
+|---|---|---|---|
+| Go | `<Field>OrDefault()` method | struct method-set | a **declared** member whose name maps to `<Field>OrDefault` (Go forbids a field and method of the same name — a **hard compile error**); another `<Field>OrDefault` from a sibling field |
+| TypeScript | `DEFAULT_<FIELD>` const | module | another `DEFAULT_<FIELD>` from a field that case-maps the same ([[const]] synthesizes no TS identifier — the value is an inline literal) |
+| Python | none (native Pydantic field `default=`) | — | — |
+| Java | none (default folds into the existing getter) | — | — |
+
+Per **P15** these participate in the single per-scope collision pass and
+**reject at load** on any coincidence — never auto-mangled (a
+`NicknameOrDefault2` would renumber under schema evolution, a P13 break).
+Python and Java add no name, so they carry no default-specific collision.
+The rename **escape hatch** is the [[properties]] case-mapping override
+(`x-go-name`, …) on the *declaring* field — re-mapping it moves the
+synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` names with it.
+
+Python and Java materialize-on-read for free (attribute default / getter);
+Go does so via the generated `<Field>OrDefault()` accessor. TypeScript has
+no method (interfaces, PRINCIPLES TS §2), so it leans on the native `??` +
+a generated constant — an idiomatic stand-in for the same thing. In every
+language the **bare field still carries set-ness** (`nil` / `undefined` /
+out-of-`model_fields_set` / `null`); the default is layered on read, never
+written back into the field, so omit-on-serialize stays faithful.
+
+## Validator mapping
+
+`default` emits **no validator** — it is an annotation (§9.2), so it
+never appears in the shared `Validate` and never causes a runtime
+pass/fail. Its operational behavior is entirely in the **adapters**:
+
+- **Parse adapter (deserialize-only):** when the member is absent on the
+  wire, leave the set-ness signal "unset" (nil / `undefined` / not in
+  `model_fields_set` / `null`). Do **not** write the default into the
+  field. Required-presence and constraint checks are unaffected (a client
+  sending fewer keys is judged on the wire, before any default — this is
+  why [[minProperties]]/[[maxProperties]] count *before* default
+  population).
+- **Encode adapter (serialize-only), P12:** omit any unset member —
+  declaratively, via the per-language set-ness signal above — with **no
+  deep-equals**. An explicitly-set member (even to the default value)
+  emits.
+
+### Serialize-side (P12)
+
+The whole point of `default` lives here. The encode adapter omits unset
+members so the wire stays minimal and the round-trip is faithful: a value
+that arrived absent leaves absent, never echoed back as a materialized
+default. Mechanisms (all empirically verified):
+
+| Language | Omit-unset mechanism |
+|---|---|
+| Go | `*T` with `,omitempty` → `nil` omitted by the stdlib encoder via the type-alias `MarshalJSON`. Pointer-to-zero-value still emits, so set-ness ≡ pointer-presence. |
+| TypeScript | `toIntermediate` skips keys whose value is `undefined` when building the intermediate value (PRINCIPLES TS §4). |
+| Python | generated `@model_serializer(mode='wrap')` emits only `model_fields_set` keys — omits unset while the attribute still reads the default; explicit-set (incl. set-to-default) pins. No deep-equals. Baked into the model so the **default Temporal `pydantic_data_converter`** (which owns `to_json`, not us) honors it. |
+| Java | `@JsonInclude(NON_NULL)` — `null` (unset) omitted; getter still returns the default to the consumer. |
+
+Three consequences that the count specs already encode:
+- A default-filled key is **never on the wire**, so it does not count
+  toward [[minProperties]]/[[maxProperties]] in either direction.
+- A model that *reads* as fully populated in memory (defaults visible via
+  the read-side mechanism) can legitimately serialize **fewer** keys than
+  it appears to hold — by design.
+- Explicitly setting a member to a value equal to its default **keeps it
+  on the wire** (P9). This is the deliberate non-deep-equals behavior.
+
+## Property-testing matrix
+
+### Accepted (positive)
+
+| Shape | Example |
+|---|---|
+| Optional string default | `{type:"string", default:"anon"}` (member optional) |
+| Optional integer default | `{type:"integer", default:0}` |
+| Optional boolean default | `{type:"boolean", default:false}` |
+| Optional + nullable with scalar default | `{oneOf:[{type:"string"},{type:"null"}], default:"x"}` |
+| Differing merged defaults (last-wins) | `allOf:[{default:"a"},{default:"b"}]` → `"b"`; `{$ref:"#/$defs/X", default:"local"}` overrides X's default (see [[allOf]]/[[ref]]) |
+
+### Rejected at load time (negative)
+
+| Reason | Example |
+|---|---|
+| `default` on a required member | `required:["x"]` with `x:{type:"string", default:"a"}` |
+| Default `type`-mismatch (enforced now, P7.1) | `{type:"string", default:42}` |
+| Default fails a *constraint* (deferred) | `{type:"integer", minimum:5, default:0}` |
+| **Object default (deferred)** | `{type:"object", properties:{…}, default:{a:1}}` |
+| **Array default (deferred)** | `{type:"array", items:{type:"string"}, default:["a"]}` |
+| `default: null` (degenerate) | `{oneOf:[{type:"string"},{type:"null"}], default:null}` |
+| With `const` | `{type:"string", const:"v1", default:"v1"}` |
+| Synthesized-name collision (P15) | a field `nickname` with a `default` **and** a sibling member mapping to `NicknameOrDefault` (Go field/method clash); two `DEFAULT_<FIELD>` consts that case-map the same (TS) |
+
+### Runtime fixtures (validator / adapters)
+
+- Member **absent** on the wire → field unset; re-serialize **omits** it
+  (no echo). Read surfaces the default per the language mechanism.
+- Member **present** with a non-default value → preserved, emitted.
+- Member **explicitly set to the default value** → marked set, **emitted**
+  (no deep-equals strip). Round-trips as present.
+- A default-filled member does **not** count toward
+  [[minProperties]]/[[maxProperties]] (cross-checked in those specs).
+- `default` never causes a validation failure (annotation): an invalid
+  *wire* value still fails its own constraint, default or not.
+
+## Interactions
+
+- **[[required]]**: mutually exclusive in practice — `default` on a
+  required member is a load reject (the default can never apply).
+- **[[const]]**: mutually exclusive (load reject). Opposite serialize
+  behavior: `const` always-emits an auto-populated value; `default`
+  omit-unsets. See [[const]].
+- **[[nullability]]**: composable. For an optional+nullable member with a
+  default, **absence** materializes the default on read while an
+  **explicit `null`** pins `null` (faithful in TS/Python via the
+  presence signal; Go/Java collapse absent-vs-`null` to the conservative
+  omit — see [[nullability]] round-trip tiers). The default applies to
+  *absence*, never overriding an explicit `null`.
+- **[[minProperties]] / [[maxProperties]]**: a default-filled key is
+  never on the wire, so the count (taken before default population on the
+  way in, over to-be-emitted keys on the way out) excludes it. Already
+  documented in both specs.
+- **[[type]]**: the default value must be valid for the declared type
+  (enforced at load, P7.1). In v1 the default value must additionally be
+  a **scalar** (`string`/`number`/`integer`/`boolean`) — a member typed
+  `object`/`array` may not carry a `default` yet (see Support decision).
+- **[[properties]]**: `default` lives on a member subschema; the
+  per-member set-ness machinery is what [[properties]] emits.
+
+## Ecosystem variance
+
+| Source dialect | Action |
+|---|---|
+| JSON Schema 2020-12 | Native annotation (§9.2). |
+| OpenAPI 3.1 | Adopts 2020-12 — `default` native, same semantics. |
+| OpenAPI 3.0 | `default` present; same annotation semantics. Native. |
+| Swagger 2.0 / draft-4 | `default` present (draft-4+); native. |
+
+`default` is universal across dialects; no rewrite is ever needed. The
+only divergence is *our* strengthening of "RECOMMENDED valid" to a
+load-time MUST (P7.1), which is stricter than every source dialect — a
+schema that ships an out-of-range default is accepted upstream but
+rejected here, with a fix-it diagnostic. (The MUST is fully *defined*
+now; its enforcement against constraint keywords like `minimum` lands
+with those features — see Loader behavior.)
+
+## See also
+
+- [[const]] — the opposite serialize behavior (always-emit); mutually
+  exclusive with `default`.
+- [[required]] — mutually exclusive with `default` (a required member is
+  never absent).
+- [[nullability]] — composes; the default applies to absence, never
+  overrides explicit `null`.
+- [[minProperties]] / [[maxProperties]] — default-filled keys never count.
+- [[type]] — the default value must be valid for the declared type.
+- [[properties]] — hosts the member subschema and the set-ness machinery,
+  and owns the case-mapping + collision/escape-hatch policy that governs
+  the synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` names (P15).

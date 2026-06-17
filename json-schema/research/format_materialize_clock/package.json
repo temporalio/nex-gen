@@ -1,0 +1,16 @@
+{
+  "name": "format_materialize_clock",
+  "version": "1.0.0",
+  "description": "Empirical study for a proposed extension of `features/format`: can the three **temporal** formats be **materialized** — emitted as an idiomatic in-memory typed construct in the generated model (Go `time.Time`, Java `OffsetDateTime`/`LocalDate`/`LocalTime`, Python `datetime`/`date`/`time`, TS `Date`) — instead of the current `string` field, while keeping the **wire bytes byte-identical across every materializing language** (PRINCIPLES **P1**)?",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1"
+  }
+}

@@ -1,0 +1,146 @@
+# `dependentRequired`
+
+Source: JSON Schema 2020-12, Validation vocabulary, §6.5.4
+"Validation Keywords for Objects → dependentRequired".
+
+Conditional presence: when a trigger member is present, a set of other
+members becomes required. Pure runtime cross-field assertion — no type
+impact.
+
+## Spec summary
+
+Verbatim (2020-12 validation, §6.5.4):
+
+> The value of this keyword MUST be an object. Properties in this object,
+> if any, MUST be arrays. Elements in each array, if any, MUST be
+> strings, and MUST be unique.
+
+> This keyword specifies properties that are required if a specific other
+> property is present. Their requirement is dependent on the presence of
+> the other property.
+
+> Validation succeeds if, for each name that appears in both the instance
+> and as a name within this keyword's value, every item in the
+> corresponding array is also the name of a property in the instance.
+
+> Omitting this keyword has the same behavior as an empty object.
+
+Distilled:
+- `{"a": ["b","c"]}` means: if `a` is present, `b` and `c` must also be
+  present. If `a` is absent, no constraint.
+- Names dependencies only — it never applies subschemas (contrast
+  [[dependentSchemas]], which does and is rejected per **P6**).
+
+## Support decision
+
+**Support:** yes — runtime assertion.
+
+Lowers to a boundary cross-field check in every language. It does **not**
+change emitted types: every member involved (trigger and dependents)
+stays **optional** at the type level, because the requirement is
+conditional — a member that were unconditionally required would go in
+[[required]] instead.
+
+Rationale (citing [[PRINCIPLES.md]]):
+- **P10 (enforced)**: the conditional requirement is checked at the
+  boundary, aggregated per **P11**.
+- This is the one *conditional* object keyword that lowers cleanly:
+  unlike [[dependentSchemas]] / `if`-`then`-`else` (rejected per **P6**),
+  it only tests name presence, never branches on subschema validation,
+  so no language needs sum-type or conditional-shape machinery.
+
+Loader behavior:
+- Value not an object → reject.
+- Any value not an array of unique strings → reject.
+- A trigger name or any dependent name not declared in [[properties]] →
+  reject per **P7.1** (presence check on an undeclared member is
+  undecidable). Diagnostic names the offender.
+- A dependent name that is **also** in [[required]] → reject as
+  redundant (it is unconditionally required already; the dependency is
+  vacuous). Diagnostic suggests removing it from `dependentRequired`.
+- A trigger name in [[required]] → **reject**: if the trigger is always
+  present, its dependents are always required, so they belong in
+  [[required]] directly. Keeps one canonical spelling.
+- Empty object / empty arrays → accepted (vacuous).
+
+## Type mapping
+
+None. All involved members keep their optional emitted form (see
+[[required]] / [[nullability]]); the constraint is validator-only.
+
+## Validator mapping
+
+Per **P10**/**P11**. For each trigger present in the instance, verify each
+dependent is also present.
+
+| Language | Strategy |
+|---|---|
+| Go | The cross-field check is a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding the shadow: for each present trigger, each dependent's shadow must be non-`nil`; a missing one → `Violation{Path:dependent, Reason: fmt.Sprintf("property %q is required when %q is present", dependent, trigger)}`, collected into one `ValidationError`. |
+| TypeScript | the shared `Validate` predicate: for each present trigger key, each dependent must be `!== undefined`; a missing one → push ``Violation{path, reason: `property "${dependent}" is required when "${trigger}" is present`}``, throw one `ValidationError`. |
+| Python | `model_validator(mode='wrap')` reading the raw dict: for each present trigger, raise `InitErrorDetails` (message `property "<dependent>" is required when "<trigger>" is present`) for each absent dependent, merged into the aggregated `pydantic.ValidationError`. Dependency map stored as a `ClassVar` constant (per the `ClassVar` pattern in [[nullability]]). |
+| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5): over the parsed tree's present-key set, for each present trigger push a `Violation{path:dependent, "property \"" + dependent + "\" is required when \"" + trigger + "\" is present"}` per missing dependent into the single `ValidationException`. |
+
+### Serialize-side (P12)
+
+The cross-field check runs again before emit, over the **to-be-emitted**
+member set (present = will be written, after default omission). If a
+trigger will be emitted but a dependent is unset/omitted, serialize fails
+with the same `ValidationError{path:dependent, reason}` — symmetric with
+deserialize, where "present" means "on the wire." A dependent satisfied
+only by an omitted default does **not** count as present.
+
+## Property-testing matrix
+
+### Accepted (positive)
+
+| Shape | Example |
+|---|---|
+| Single dependency | `{type:object, properties:{a:{…},b:{…}}, dependentRequired:{"a":["b"]}}` |
+| Multiple dependents | `dependentRequired:{"a":["b","c"]}` |
+| Empty (no-op) | `dependentRequired:{}` |
+
+### Rejected at load time (negative)
+
+| Reason | Example |
+|---|---|
+| Not object / not arrays | `dependentRequired:[]`, `{"a":"b"}` |
+| Non-string / non-unique dependents | `{"a":[1]}`, `{"a":["b","b"]}` |
+| Undeclared trigger/dependent (P7.1) | trigger or dependent absent from [[properties]] |
+| Dependent already in `required` | `required:["b"], dependentRequired:{"a":["b"]}` |
+| Trigger in `required` | `required:["a"], dependentRequired:{"a":["b"]}` |
+
+### Runtime fixtures (validator)
+
+- Trigger absent → no constraint (dependents may be absent).
+- Trigger present + all dependents present → OK.
+- Trigger present + a dependent absent → one
+  `ValidationError{path:dependent, reason}`.
+- Multiple triggers each missing dependents → all reported in one shot
+  (P11).
+
+## Interactions
+
+- **[[required]]**: unconditional counterpart. A name can't be in both
+  (`required` wins; the dependency would be vacuous → load error).
+- **[[properties]]**: every trigger and dependent must be declared.
+- **[[dependentSchemas]]**: the subschema-applying sibling — **rejected**
+  per **P6** (conditional shape doesn't lower). `dependentRequired` is
+  the supported subset of conditional object logic.
+- **[[nullability]]**: independent — dependency is about presence, not
+  null-ness.
+
+## Ecosystem variance
+
+| Source dialect | Action |
+|---|---|
+| JSON Schema 2020-12 | Native. |
+| OpenAPI 3.1 | Aligns with 2020-12. Native. |
+| OpenAPI 3.0 / Swagger 2.0 | No `dependentRequired`; draft-4..7 used `dependencies` (array form ≡ this). A `dependencies` array form → accept as `dependentRequired`; the schema form → reject (maps to [[dependentSchemas]]). |
+| draft-4..7 | `dependencies` (merged keyword) — split: array form supported here, schema form rejected. |
+
+## See also
+
+- [[required]] — unconditional presence.
+- [[dependentSchemas]] — conditional *subschema* application (rejected,
+  P6).
+- [[properties]] — declares the members named here.

@@ -1,0 +1,41 @@
+{
+  "note": "Wire strings that are VALID per the pinned materialized-temporal format check (format_conformance, :60-rejecting grammar). Each runner parses into the language's native temporal type and RE-SERIALIZES via the generator-owned serializer (RFC 3339, ORIGINAL OFFSET PRESERVED with +00:00/-00:00 normalized to Z, T/Z uppercased on the parse path, fractional seconds at the value's own precision with trailing zeros trimmed, no fractional part when zero) -- NO TRUNCATION beyond each native type's genuine capacity limit. The compare harness checks the equally-capable materializing set (go, java, py, js-string, js-temporal) emits byte-identical output for each id. Documented divergences: Python truncates sub-microsecond date-time (native us resolution); legacy TS 'Date' (js-date) folds date-time to a UTC instant at millisecond; leap-second ':60' rows (dt-leap/t-leap) are rejected by every native parser (SKIP).",
+  "date-time": [
+    {"id": "dt-z-nofrac",        "wire": "2021-06-15T12:30:45Z"},
+    {"id": "dt-offset-pos",      "wire": "2021-06-15T12:30:45+02:00"},
+    {"id": "dt-offset-neg",      "wire": "2021-06-15T12:30:45-05:00"},
+    {"id": "dt-offset-plus0000", "wire": "2021-06-15T12:30:45+00:00"},
+    {"id": "dt-offset-neg0000",  "wire": "2021-06-15T12:30:45-00:00"},
+    {"id": "dt-frac-3",          "wire": "2021-06-15T12:30:45.123Z"},
+    {"id": "dt-frac-6",          "wire": "2021-06-15T12:30:45.123456Z"},
+    {"id": "dt-frac-9",          "wire": "2021-06-15T12:30:45.123456789Z"},
+    {"id": "dt-frac-9-offset",   "wire": "2021-06-15T12:30:45.123456789+02:00"},
+    {"id": "dt-frac-6-offset",   "wire": "2021-06-15T12:30:45.123456-05:00"},
+    {"id": "dt-frac-1",          "wire": "2021-06-15T12:30:45.5Z"},
+    {"id": "dt-frac-trailzero",  "wire": "2021-06-15T12:30:45.120Z"},
+    {"id": "dt-frac-offset",     "wire": "2021-06-15T12:30:45.250-03:00"},
+    {"id": "dt-lowercase",       "wire": "2021-06-15t12:30:45z"},
+    {"id": "dt-lower-frac-off",  "wire": "2021-06-15t12:30:45.5-03:00"},
+    {"id": "dt-midnight",        "wire": "2021-06-15T00:00:00Z"},
+    {"id": "dt-leap",            "wire": "2021-12-31T23:59:60Z"}
+  ],
+  "date": [
+    {"id": "d-basic",      "wire": "2021-06-15"},
+    {"id": "d-leap-feb29", "wire": "2020-02-29"},
+    {"id": "d-year-min",   "wire": "0001-01-01"},
+    {"id": "d-year-max",   "wire": "9999-12-31"}
+  ],
+  "time": [
+    {"id": "t-local",       "wire": "12:30:45"},
+    {"id": "t-z",           "wire": "12:30:45Z"},
+    {"id": "t-offset-pos",  "wire": "12:30:45+02:00"},
+    {"id": "t-offset-neg",  "wire": "12:30:45-05:00"},
+    {"id": "t-plus0000",    "wire": "12:30:45+00:00"},
+    {"id": "t-neg0000",     "wire": "12:30:45-00:00"},
+    {"id": "t-frac",        "wire": "12:30:45.250"},
+    {"id": "t-frac-z",      "wire": "12:30:45.250Z"},
+    {"id": "t-offset-frac", "wire": "12:30:45.5+02:00"},
+    {"id": "t-lower-z",     "wire": "12:30:45z"},
+    {"id": "t-leap",        "wire": "23:59:60Z"}
+  ]
+}

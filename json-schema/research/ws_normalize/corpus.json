@@ -1,0 +1,150 @@
+{
+  "note": "Whitespace-normalization corpus. Each pair has an id, a raw `pattern` using \\s/\\S, and an `instance`. The driver (agree.py) runs BOTH the original pattern and its normalized form (produced by the Rust rewrite probe) through Go/JS/Python/Java and checks (a) originals may diverge, (b) normalized MUST agree. Instances cover ASCII spaces/tabs, U+000B vertical tab (\\u000b), NBSP U+00A0, ideographic space U+3000, and ordinary letters. Control chars are JSON-escaped; NBSP/U+3000 are raw UTF-8.",
+  "pairs": [
+    {
+      "id": "s-space",
+      "pattern": "\\s",
+      "instance": " "
+    },
+    {
+      "id": "s-tab",
+      "pattern": "\\s",
+      "instance": "\t"
+    },
+    {
+      "id": "s-vtab",
+      "pattern": "\\s",
+      "instance": "\u000b"
+    },
+    {
+      "id": "s-formfeed",
+      "pattern": "\\s",
+      "instance": "\f"
+    },
+    {
+      "id": "s-cr",
+      "pattern": "\\s",
+      "instance": "\r"
+    },
+    {
+      "id": "s-nl",
+      "pattern": "\\s",
+      "instance": "\n"
+    },
+    {
+      "id": "s-nbsp",
+      "pattern": "\\s",
+      "instance": "\u00a0"
+    },
+    {
+      "id": "s-ideographic",
+      "pattern": "\\s",
+      "instance": "\u3000"
+    },
+    {
+      "id": "s-letter",
+      "pattern": "\\s",
+      "instance": "a"
+    },
+    {
+      "id": "S-space",
+      "pattern": "\\S",
+      "instance": " "
+    },
+    {
+      "id": "S-vtab",
+      "pattern": "\\S",
+      "instance": "\u000b"
+    },
+    {
+      "id": "S-nbsp",
+      "pattern": "\\S",
+      "instance": "\u00a0"
+    },
+    {
+      "id": "S-ideographic",
+      "pattern": "\\S",
+      "instance": "\u3000"
+    },
+    {
+      "id": "S-letter",
+      "pattern": "\\S",
+      "instance": "a"
+    },
+    {
+      "id": "s-plus-nbsp",
+      "pattern": "\\s+",
+      "instance": "\u00a0"
+    },
+    {
+      "id": "s-plus-mixed",
+      "pattern": "a\\s+b",
+      "instance": "a \t b"
+    },
+    {
+      "id": "class-s-dot-nbsp",
+      "pattern": "[\\s.]",
+      "instance": "\u00a0"
+    },
+    {
+      "id": "class-s-dot-space",
+      "pattern": "[\\s.]",
+      "instance": " "
+    },
+    {
+      "id": "class-s-dot-vtab",
+      "pattern": "[\\s.]",
+      "instance": "\u000b"
+    },
+    {
+      "id": "class-az-s-space",
+      "pattern": "[a-z\\s]",
+      "instance": " "
+    },
+    {
+      "id": "class-az-s-nbsp",
+      "pattern": "[a-z\\s]",
+      "instance": "\u00a0"
+    },
+    {
+      "id": "neg-class-s-nbsp",
+      "pattern": "[^\\s]",
+      "instance": "\u00a0"
+    },
+    {
+      "id": "neg-class-s-space",
+      "pattern": "[^\\s]",
+      "instance": " "
+    },
+    {
+      "id": "neg-class-s-letter",
+      "pattern": "[^\\s]",
+      "instance": "a"
+    },
+    {
+      "id": "neg-class-S-space",
+      "pattern": "[^\\S]",
+      "instance": " "
+    },
+    {
+      "id": "neg-class-S-nbsp",
+      "pattern": "[^\\S]",
+      "instance": "\u00a0"
+    },
+    {
+      "id": "neg-class-S-letter",
+      "pattern": "[^\\S]",
+      "instance": "a"
+    },
+    {
+      "id": "anchored-s",
+      "pattern": "^\\s+$",
+      "instance": " \t "
+    },
+    {
+      "id": "anchored-s-nbsp",
+      "pattern": "^\\s+$",
+      "instance": "\u00a0"
+    }
+  ]
+}

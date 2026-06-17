@@ -1,0 +1,17 @@
+[package]
+name = "rust_regex_gate"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+regex = "1"
+regex-syntax = "0.8"
+
+[[bin]]
+name = "rust_regex_gate"
+path = "src/main.rs"
+
+[[bin]]
+name = "ast_detect"
+path = "src/ast_detect.rs"

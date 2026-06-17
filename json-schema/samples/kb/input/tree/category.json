@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A node in a self-recursive category tree. The root of this file is itself a type (pure JSON Schema file), named Category from the basename.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "children": {
+      "description": "Sub-categories. A within-file self-cycle via `$ref: '#'`; the possibly-empty array is the terminating edge, so it stays in this module (never hoisted).",
+      "type": "array",
+      "items": { "$ref": "#" }
+    }
+  },
+  "required": ["id", "name"],
+  "$defs": {
+    "Palette": {
+      "description": "A dead $def — defined but never referenced anywhere. Still generated and exported as intended reusable API surface (see the $ref spec).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "swatches": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["swatches"]
+    }
+  }
+}

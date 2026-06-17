@@ -1,0 +1,310 @@
+# `additionalProperties`
+
+Source: JSON Schema 2020-12, Core (Applicator vocabulary),
+§10.3.2.3 "Keywords for Applying Subschemas to Objects →
+additionalProperties".
+
+Controls instance members **not** matched by [[properties]] or
+[[patternProperties]]. This is where the generator's **open-vs-closed
+struct** decision lands.
+
+## Spec summary
+
+Verbatim (2020-12 core, Applicator):
+
+> The value of "additionalProperties" MUST be a valid JSON Schema.
+
+> The behavior of this keyword depends on the presence and annotation
+> results of "properties" and "patternProperties" within the same schema
+> object. Validation with "additionalProperties" applies only to the
+> child values of instance names that do not appear in the annotation
+> results of either "properties" or "patternProperties".
+
+> For all such properties, validation succeeds if the child instance
+> validates against the "additionalProperties" schema.
+
+> The annotation result of this keyword is the set of instance property
+> names validated by this keyword's subschema. This annotation affects
+> the behavior of "unevaluatedProperties" in the Unevaluated vocabulary.
+
+> Omitting this keyword has the same assertion behavior as an empty
+> schema.
+
+Distilled:
+- Applies only to members **not** matched by [[properties]] /
+  [[patternProperties]].
+- The value is a full subschema — `false` (nothing additional allowed),
+  `true`/`{}` (anything allowed), or a typed schema (additional members
+  must match it).
+- **Omitting it = empty schema = everything additional allowed** → the
+  spec default is **open**.
+
+## Support decision
+
+**Support:** partial.
+
+The binding decision:
+
+> **Typed structs are OPEN by default.** Per the JSON Schema spec
+> default (omitted `additionalProperties` = empty schema = allow
+> anything) and **P13** (forward compatibility: accept and preserve
+> unknown fields), a `{type:object, properties:{...}}` with no
+> `additionalProperties` emits an **untyped catch-all** that preserves
+> and round-trips unmatched members. Closed behavior requires an
+> explicit `additionalProperties: false`.
+
+Accepted forms and their meaning:
+
+| Form | With `properties` (struct) | Without `properties` (map) |
+|---|---|---|
+| **omitted** | open struct + untyped catch-all (the default) | **rejected** by [[type]] (`type:object` with no shape) |
+| **`false`** | closed struct (extras rejected) | closed empty object (any member rejected) |
+| **`true`** | open struct + untyped catch-all | open opaque map |
+| **`{type:T}`** (supported subschema) | **supported** — typed catch-all (`T`-valued extras) | typed map (`T`-valued) |
+| **`{}`** (empty-schema spelling) | **rejected** per **P7** | **rejected** per **P7** |
+
+Rationale (citing [[PRINCIPLES.md]]):
+- **P13 (forward compat)**: open-by-default preserves unknown members so
+  a producer adding a field never breaks an older consumer. Verified the
+  preserve+round-trip behavior per language (see Validator mapping).
+- **P7 (strict schema)**: `additionalProperties: {}` is the empty-schema
+  spelling of `true` — ambiguous, so **rejected**; diagnostic says "use
+  `true` for an open object." (Matches PRINCIPLES P7's
+  `additionalProperties: {}` → reject.)
+- **Typed `additionalProperties` is supported in every position**,
+  including *alongside* `properties`. The key that makes it lower
+  coherently is the **named-field representation** below: the typed
+  catch-all is a dedicated `additionalProperties` member, never an inline
+  index signature, so the TS index-signature conformance problem
+  (`[k:string]: T` forcing every declared property to be a subtype of
+  `T`) never arises.
+- The extras schema must be a **supported subschema** (`{type:T}` with a
+  recognized shape). `additionalProperties:{type:object}` with no shape
+  is rejected per **P7.1**, same as anywhere else.
+
+### Catch-all representation: always a named field
+
+The catch-all is emitted as a **dedicated named member in all four
+languages** — never an inline open map — *even with no `properties`*. A
+pure map (`{type:object, additionalProperties:{type:T}}`) emits the same
+named aggregate it would carry with properties, holding the map in the
+catch-all member:
+
+- **Go** — struct with `AdditionalProperties map[string]T`, **not** a
+  bare `map[string]T`.
+- **Java** — class with `Map<String,T> additionalProperties`, **not** a
+  top-level `Map<String,T>`.
+- **Python** — a Pydantic `BaseModel` (`extra='allow'`), extras in
+  `model_extra`, **not** a `dict[str,T]` alias.
+- **TypeScript** — an `interface` with an `additionalProperties:
+  Record<string,T>` member, **not** an inline index signature or a bare
+  `Record<string,T>` alias.
+
+This buys two things:
+
+1. **Shape stability** (**P2**/**P13**): adding `properties` later only
+   *adds fields/attributes* to the same type — it never changes kind
+   ("map alias" → "struct/model"), so downstream call sites keep
+   compiling. Verified the Python instability this avoids
+   (`/tmp/pyd_map_shape.py`): a `dict[str,T]` alias that becomes a
+   `BaseModel` breaks `m["k"]` with `TypeError: not subscriptable`.
+2. **A clean separation of declared keys from extra keys.** Declared
+   members are renamed to canonical language identifiers (the
+   identifier case-mapping in [[properties]]); extra keys are
+   arbitrary and must be preserved **verbatim**. Keeping extras in their
+   own `additionalProperties` member (rather than mingled with declared
+   members via a TS index signature or a flat map) keeps the two
+   namespaces unambiguous — the canonicalizer touches declared members
+   only, extras pass through untouched.
+
+For TS specifically, the named member also sidesteps the index-signature
+conformance limit: a *typed* index signature (`[k: string]: T`) is
+illegal alongside heterogeneous declared props (TS2411 — a declared
+`id: number` is not assignable to a `string` index type, verified
+`/tmp/ts_flatten.ts`), whereas a named `additionalProperties:
+Record<string,T>` member has no such constraint and stays fully typed.
+
+The wire form is unchanged in all cases — extras are always top-level
+JSON members; the in-memory catch-all is bridged by the generated
+(de)serializer (Go custom `(Un)MarshalJSON`, Java the per-POJO collecting
+`@JsonDeserialize`/`@JsonSerialize` — which routes undeclared tree keys
+into the catch-all map and spreads them back on write, **not**
+`@JsonAnySetter`/`@JsonAnyGetter` (a class-level custom (de)serializer
+bypasses those), TS hand-emitted ser/deser that lifts top-level extras
+into `additionalProperties` and spreads them back out, Python
+`model_extra`).
+
+## Type mapping
+
+All four languages emit the named catch-all member when extras are
+allowed (see representation note above). The catch-all element type is
+`T` for `{type:T}`, else the raw type (`json.RawMessage` / `unknown` /
+`Any` / `Object`) so untyped extras survive a round-trip without the
+generator guessing their shape (**P13**).
+
+| Case | Go | TypeScript | Python | Java |
+|---|---|---|---|---|
+| Open struct, untyped extras (default / `true`) | struct + `AdditionalProperties map[string]json.RawMessage` | `interface` + `additionalProperties: Record<string, unknown>` | model `extra='allow'` (extras in `model_extra`) | POJO + `Map<String,Object>`, populated/emitted by the collecting (de)serializer (Java §5) |
+| **Typed extras + `properties` (`{type:T}`)** | struct + `AdditionalProperties map[string]T` | `interface` + `additionalProperties: Record<string, T>` | model `extra='allow'` + per-extra `T` validation (extras in `model_extra`) | POJO + `Map<String,T>`, populated/emitted by the collecting (de)serializer (Java §5) with per-extra `T` validation |
+| Closed struct (`false`) | no catch-all field; unknown → error | exact `interface`, no `additionalProperties`; unknown → error | model `extra='forbid'` | no catch-all field; the collecting deserializer (Java §5) flags each undeclared tree key as a `Violation` |
+| Open opaque map (`true`, no props) | struct + `AdditionalProperties map[string]json.RawMessage` (wrapper) | `interface` + `additionalProperties: Record<string, unknown>` (wrapper) | `BaseModel` `extra='allow'` (extras in `model_extra`) | class + `Map<String,Object> additionalProperties` (wrapper) |
+| Typed map (`{type:T}`, no props) | struct + `AdditionalProperties map[string]T` (wrapper) | `interface` + `additionalProperties: Record<string, T>` (wrapper) | `BaseModel` `extra='allow'` + per-extra `T` validation | class + `Map<String,T> additionalProperties` (wrapper) |
+| Closed empty object (`false`, no props) | empty `struct{}`; any member → error | empty `interface`; any member → error | `extra='forbid'`, no fields | empty POJO; the collecting deserializer (Java §5) flags any tree key as a `Violation` |
+
+The TS `additionalProperties` member is always present when extras are
+allowed (an empty `{}` when none were received), so the surface is
+uniform whether or not a given instance carried extras.
+
+A declared [[properties]] member literally named `additionalProperties`
+collides with the generated catch-all member in **Go**
+(`AdditionalProperties`), **Java** (`additionalProperties`), and **TS**
+(`additionalProperties`) → reject at load time with a diagnostic.
+Python alone is exempt — extras live in Pydantic's `model_extra`, not a
+declared field, so a property named `additionalProperties` is just a
+normal attribute there.
+
+### Why `json.RawMessage`, not `any`, for Go untyped extras
+
+The Go untyped element type is `json.RawMessage` (verbatim bytes),
+**not** `any` (`map[string]interface{}`). This is load-bearing for
+**P13** — `any` corrupts the very data the catch-all exists to preserve,
+because `encoding/json` decodes **every JSON number to `float64`**.
+Empirically, the same opaque object round-trips as:
+
+```
+any : {"big":9007199254740992,"keep":{"a":1,"b":2},"price":1,"sci":100}
+raw : {"big":9007199254740993,"keep":{"b":2,"a":1},"price":1.0,"sci":1e2}
+```
+
+With `any`:
+- **silent precision loss** — `9007199254740993` → `…992` (the same
+  `>2^53` float64 hazard as the [[type]] integer cap, but on data we
+  never modeled, so we can't even detect it);
+- **number reformatting** — `1.0`→`1`, `1e2`→`100`;
+- **key reordering** — Go marshals maps with sorted keys, rewriting
+  nested object structure.
+
+`json.RawMessage` preserves all of it byte-for-byte. It also makes
+on-demand typed decode clean (`json.Unmarshal(extra["foo"], &T)`) and
+reuses the same `*json.RawMessage` shadow machinery the custom
+`UnmarshalJSON` already uses for declared fields — `any` would introduce
+a second, lossy representation. The only cost is that a value must be
+`Unmarshal`'d before use, which is acceptable for a preserve-and-pass-
+through role. (TS `unknown` / Python `Any` / Java `Object` don't share
+the `float64` hazard: their parsers keep an exact numeric/JSON-node
+representation, so no equivalent workaround is needed.)
+
+## Validator mapping
+
+Per **P10**/**P11**: extras are handled at the boundary and any closed-mode
+violation aggregates.
+
+| Language | Open, untyped (preserve) | Open, typed `{type:T}` | Closed (reject extras) |
+|---|---|---|---|
+| Go | `UnmarshalJSON` routes unmatched keys into `AdditionalProperties`; `MarshalJSON` re-emits them | same routing, but each value goes through `T`'s runtime helper; failures → `Violation{Path:key}` | `UnmarshalJSON` emits `Violation{Path:key, Reason: fmt.Sprintf("unknown property %q", key)}` per unmatched key, collected into one `ValidationError` |
+| TypeScript | deser lifts non-declared keys into the `additionalProperties` Record; reser spreads them back to top-level | same, but each value validated as `T` before going into `additionalProperties` (member stays fully typed `Record<string,T>`) | check parsed keys against the known set; push `Violation{path:key}` per extra, throw one `ValidationError` |
+| Python | `extra='allow'` — extras land in `model_extra`, **round-trip via `model_dump_json`** (verified, `/tmp/pyd_extra_probe.py`) | `extra='allow'` + a post-init validator checks each `model_extra` value is `T`, aggregating per-key failures (verified, `/tmp/pyd_typed_extra.py`) | `extra='forbid'` — Pydantic raises `extra_forbidden` per extra key, aggregated (verified) |
+| Java | the per-POJO collecting deserializer (Java §5) routes parsed-tree keys not in the declared set into the `additionalProperties` map; the matching serializer spreads them back | same routing, but each extra value is validated as `T` (bad keys → `Violation{path:key}`) | the collecting deserializer pushes a `Violation{path:key, "unknown property \"" + key + "\""}` per undeclared tree key into the single `ValidationException` — no fail-fast `ignoreUnknown=false`/`UnrecognizedPropertyException` |
+
+Empirical notes (Pydantic 2.13):
+- `extra='allow'` + `strict=True` coexist: declared fields stay strict
+  (`"1"` rejected for an `int`) while extras are preserved.
+- `extra='forbid'` aggregates: `{"id":1,"name":"x","a":1,"b":2}`
+  yields two `extra_forbidden` entries in one `ValidationError`.
+- Typed extras: `{"id":1,"name":"x","a":1,"b":true,"c":"ok"}` against
+  `additionalProperties:{type:string}` yields two `extra_type` entries
+  (`a`, `b`) in one `ValidationError`, while `c` passes and round-trips.
+
+### Serialize-side (P12)
+
+The catch-all is re-emitted by spreading its members back to top-level
+JSON (Go `MarshalJSON` / TS reserializer / Java the per-POJO collecting
+serializer, Java §5 / Python `model_dump`). Symmetry per mode:
+
+- **Open, untyped** — extras pass through **verbatim**; Go's
+  `json.RawMessage` element type guarantees byte-faithful re-emit (no
+  `float64` precision loss / key reordering — the same hazard as on
+  decode, see "Why `json.RawMessage`, not `any`" above).
+- **Open, typed `{type:T}`** — each extra value is re-validated through
+  `T`'s shared checks before emit, so a catch-all mutated to an invalid
+  value fails serialization rather than emitting bad data.
+- **Closed (`false`)** — no catch-all exists in memory, so there is
+  nothing extra to emit; the closed shape is preserved by construction.
+
+Declared members serialize under their original wire names
+([[properties]] case-mapping is reversed on the way out); extras keep
+their verbatim keys — the named-catch-all split keeps the two namespaces
+unambiguous in both directions.
+
+## Property-testing matrix
+
+### Accepted (positive)
+
+| Shape | Example |
+|---|---|
+| Open struct (default) | `{type:object, properties:{id:{type:integer}}}` |
+| Closed struct | `{type:object, properties:{id:{type:integer}}, additionalProperties:false}` |
+| Open struct (explicit) | `…, additionalProperties:true` |
+| Open opaque map | `{type:object, additionalProperties:true}` |
+| Typed map | `{type:object, additionalProperties:{type:string}}` |
+| **Typed extras + `properties`** | `{type:object, properties:{id:{type:integer}}, additionalProperties:{type:string}}` |
+| Closed empty object | `{type:object, additionalProperties:false}` |
+
+### Rejected at load time (negative)
+
+| Reason | Example |
+|---|---|
+| Empty-schema spelling (P7) | `additionalProperties: {}` (use `true`) |
+| Non-schema value | `additionalProperties: "yes"`, `…: 1` |
+| Out-of-subset extras schema (P7.1) | `additionalProperties:{type:object}` with no shape |
+| Catch-all name collision | `{properties:{additionalProperties:{type:string}}, additionalProperties:{type:integer}}` (declared member collides with the generated field) |
+
+### Runtime fixtures (validator)
+
+- Open struct + extra key → preserved, present on re-serialize.
+- Closed struct + extra key → one `ValidationError` per extra,
+  aggregated with declared-field errors.
+- Typed map / typed extras + value of wrong type → rejected with
+  `path = key`; multiple bad extras reported in one shot (P11).
+- Typed extras + good value → validated and round-trips.
+- Open opaque map round-trips arbitrary nested JSON unchanged.
+- Pure map (all four languages) decodes into the wrapper's catch-all
+  (`AdditionalProperties` member / `additionalProperties` Record /
+  `model_extra`), not a bare map/dict.
+
+## Interactions
+
+- **[[properties]] / [[patternProperties]]**: `additionalProperties`
+  only sees members **not** in their matched-name annotations (spec
+  §10.3.2.3). [[patternProperties]] is **temporarily unsupported**
+  (rejected at load time in v1), so in our subset only [[properties]]
+  matches are excluded — every other member is "additional."
+- **[[unevaluatedProperties]]**: strictly more powerful (sees the
+  transitive evaluated set across applicators). We **reject**
+  `unevaluatedProperties` per **P6** (its annotation-dependent semantics
+  don't lower); `additionalProperties` is the supported subset.
+- **[[type]]**: `additionalProperties: true|false` is one of the three
+  explicit resolutions [[type]] requires for `{type:object}` with no
+  `properties`.
+- **[[minProperties]] / [[maxProperties]]**: count constraints apply to
+  the full member set including preserved extras.
+- **[[required]]**: a closed struct still permits required members; it
+  only forbids *unknown* ones.
+
+## Ecosystem variance
+
+| Source dialect | Action |
+|---|---|
+| JSON Schema 2020-12 | Native; open default honored. |
+| OpenAPI 3.1 | Aligns with 2020-12. Native. |
+| OpenAPI 3.0 | `additionalProperties` identical (bool or schema); `{}` → reject as above. |
+| Swagger 2.0 / draft-4 | `additionalProperties` identical; same `{}` rejection. |
+
+## See also
+
+- [[properties]] — declares the matched members this keyword excludes.
+- [[patternProperties]] — temporarily unsupported; typed-map alternative.
+- [[unevaluatedProperties]] — rejected per **P6**; this is the subset.
+- [[type]] — requires an explicit open/closed choice for bare objects.
+- [[minProperties]], [[maxProperties]], [[propertyNames]] — other
+  object-level assertions.
