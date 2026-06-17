@@ -119,22 +119,42 @@ func (u *StartedWorkflow) GetResult(ctx workflow.Context) (*[]any, error) {
 
 func startWorkflow(ctx workflow.Context, request StartWorkflowRequest) (*StartedWorkflow, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, StartWorkflowOp, request, workflow.NexusOperationOptions{})
-	var result StartedWorkflow
+	requestProto := request.ToProto()
+	fut := c.ExecuteOperation(ctx, StartWorkflowOp, requestProto, workflow.NexusOperationOptions{})
+	var result workflowservice.StartWorkflowExecutionResponse
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	runIdValue := result.GetRunId()
+	var runId *string
+	if runIdValue != "" {
+		runId = &runIdValue
+	}
+	return &StartedWorkflow{
+		Namespace:  requestProto.GetNamespace(),
+		WorkflowId: request.WorkflowId,
+		RunId:      runId,
+	}, nil
 }
 
 func restartWorkflow(ctx workflow.Context, request StartWorkflowRequest) (*StartedWorkflow, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, RestartWorkflowOp, request, workflow.NexusOperationOptions{})
-	var result StartedWorkflow
+	requestProto := request.ToProto()
+	fut := c.ExecuteOperation(ctx, RestartWorkflowOp, requestProto, workflow.NexusOperationOptions{})
+	var result workflowservice.StartWorkflowExecutionResponse
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	runIdValue := result.GetRunId()
+	var runId *string
+	if runIdValue != "" {
+		runId = &runIdValue
+	}
+	return &StartedWorkflow{
+		Namespace:  requestProto.GetNamespace(),
+		WorkflowId: request.WorkflowId,
+		RunId:      runId,
+	}, nil
 }
 
 func cancelWorkflow(ctx workflow.Context, request CancelWorkflowRequest) (*CancelWorkflowResponse, error) {

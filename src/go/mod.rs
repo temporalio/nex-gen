@@ -6,7 +6,8 @@ use indexmap::IndexMap;
 
 use crate::api_plan::{
     ApiPlan, PlannedEnumType, PlannedField, PlannedFieldKind, PlannedFlags, PlannedMessageSource,
-    PlannedMessageType, PlannedModel, PlannedOperation, PlannedOperationOutput, PlannedResource,
+    PlannedMessageType, PlannedModel, PlannedOperation, PlannedOperationOutput,
+    PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedResource,
     PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedScalarType,
     PlannedSourcedField, PlannedTypeInfo, PlannedValueType, PlannedVariant, message_model_name,
 };
@@ -15,7 +16,7 @@ use crate::api_plan::PlannedEnum;
 use crate::error::{Error, Result};
 use crate::generator::GeneratedFiles;
 use crate::language::Language;
-use crate::resources::render_request_plan;
+use crate::resources::{ResolvedResourceBindingSource, render_request_plan};
 use crate::spec::{AuthoredFieldTypeSpec, SupportFragmentSpec, TypeReplacementSpec};
 
 /// Header comment inserted at the top of every generated Go file.
@@ -400,6 +401,9 @@ struct RenderedOperation<'a> {
     /// `None` when the input type is an external/replacement type that cannot
     /// be unpacked into individual arguments.
     unpacked_input: Option<Vec<RenderedUnpackedParam>>,
+    /// Resource-return binding, when the operation output is a proto response
+    /// used to construct a native resource handle.
+    output_resource_return: Option<PlannedOperationResourceReturn>,
     /// Proto serialization binding for the request/response, populated in a
     /// second pass when the input/output messages are proto-backed. When
     /// present, the operation function converts native values to/from proto and
@@ -692,6 +696,7 @@ fn resolve_operation<'a>(
         output_transform_expr: go_output_transform.map(|(_, expr)| expr),
         output_transform_type: go_output_transform.map(|(type_name, _)| go_type_expr(type_name)),
         unpacked_input,
+        output_resource_return: operation.output_resource_return.clone(),
         proto_binding: None,
     })
 }
@@ -754,10 +759,6 @@ fn populate_operation_bindings(
             .iter_mut()
             .zip(planned_service.operations.iter())
         {
-            // Resource-returning operations keep native passthrough for now.
-            if planned_op.output_resource_return.is_some() {
-                continue;
-            }
             let Some((_input_proto_type, input_conv)) = operation_message_binding(
                 &planned_op.input,
                 &planned_op.name,
@@ -787,7 +788,13 @@ fn populate_operation_bindings(
             let (output_proto_type, output_from_proto, output_returns_pointer) =
                 match &planned_op.output {
                     PlannedOperationOutput::Message(output) => {
-                        if has_go_output_transform {
+                        if planned_op.output_resource_return.is_some() {
+                            let Some(proto_type) = operation_message_proto_type(output, imports)
+                            else {
+                                continue;
+                            };
+                            (Some(proto_type), None, false)
+                        } else if has_go_output_transform {
                             (operation_message_proto_type(output, imports), None, false)
                         } else {
                             match operation_message_binding(
@@ -3449,6 +3456,7 @@ fn render_operation_function_proto(
     binding: &OperationProtoBinding,
 ) {
     let op_const = format!("{}Op", go_field_name(operation.name));
+    let resource_return = operation.output_resource_return.as_ref();
 
     output.push_str("func ");
     output.push_str(&operation.func_name);
@@ -3456,6 +3464,7 @@ fn render_operation_function_proto(
     output.push_str(&operation.input_type);
     output.push_str(") ");
 
+    let returns_resource = resource_return.is_some() && binding.output_proto_type.is_some();
     let returns_value = operation.output_type.is_some() && binding.output_from_proto.is_some();
 
     if let (Some(_transform_expr), Some(transform_type)) = (
@@ -3466,7 +3475,7 @@ fn render_operation_function_proto(
         output.push_str(transform_type);
         output.push_str(", error)");
     } else if let Some(result_type) = &operation.output_type {
-        if returns_value {
+        if returns_resource || returns_value {
             output.push_str("(*");
             output.push_str(result_type);
             output.push_str(", error)");
@@ -3481,10 +3490,19 @@ fn render_operation_function_proto(
     output.push_str(" {\n");
 
     output.push_str("\tc := workflow.NewNexusClient(Endpoint, ServiceName)\n");
+    if returns_resource {
+        output.push_str("\trequestProto := ");
+        output.push_str(&binding.input_to_proto);
+        output.push('\n');
+    }
     output.push_str("\tfut := c.ExecuteOperation(ctx, ");
     output.push_str(&op_const);
     output.push_str(", ");
-    output.push_str(&binding.input_to_proto);
+    if returns_resource {
+        output.push_str("requestProto");
+    } else {
+        output.push_str(&binding.input_to_proto);
+    }
     output.push_str(", workflow.NexusOperationOptions{})\n");
 
     if let (Some(transform_expr), Some(transform_type)) = (
@@ -3544,10 +3562,100 @@ fn render_operation_function_proto(
             output.push('\n');
             output.push_str("\treturn &value, nil\n");
         }
+    } else if let (Some(resource_return), Some(proto_value_type)) = (
+        resource_return,
+        binding
+            .output_proto_type
+            .as_deref()
+            .map(|value| value.trim_start_matches('*')),
+    ) {
+        output.push_str("\tvar result ");
+        output.push_str(proto_value_type);
+        output.push('\n');
+        output.push_str("\tif err := fut.Get(ctx, &result); err != nil {\n");
+        output.push_str("\t\treturn nil, err\n");
+        output.push_str("\t}\n");
+        for line in resource_return_local_lines(resource_return) {
+            output.push('\t');
+            output.push_str(&line);
+            output.push('\n');
+        }
+        output.push_str("\treturn &");
+        output.push_str(&resource_return.resource_type_name);
+        output.push_str("{\n");
+        for binding in &resource_return.bindings {
+            output.push_str("\t\t");
+            output.push_str(&go_field_name(&binding.field_name));
+            output.push_str(": ");
+            output.push_str(&resource_return_binding_expr_go(binding));
+            output.push_str(",\n");
+        }
+        output.push_str("\t}, nil\n");
     } else {
         output.push_str("\treturn fut.Get(ctx, nil)\n");
     }
     output.push_str("}\n");
+}
+
+fn resource_return_local_lines(resource_return: &PlannedOperationResourceReturn) -> Vec<String> {
+    resource_return
+        .bindings
+        .iter()
+        .filter_map(|binding| {
+            if !binding.optional {
+                return None;
+            }
+            match &binding.source {
+                ResolvedResourceBindingSource::ResultField {
+                    proto_field_name, ..
+                } => {
+                    let local = resource_return_optional_local_name(binding);
+                    let value_local = format!("{local}Value");
+                    let proto_field = go_proto_field_name(proto_field_name);
+                    Some(vec![
+                        format!("{value_local} := result.Get{proto_field}()"),
+                        format!("var {local} *string"),
+                        format!("if {value_local} != \"\" {{"),
+                        format!("\t{local} = &{value_local}"),
+                        "}".to_string(),
+                    ])
+                }
+                _ => None,
+            }
+        })
+        .flatten()
+        .collect()
+}
+
+fn resource_return_binding_expr_go(binding: &PlannedOperationResourceFieldBinding) -> String {
+    match &binding.source {
+        ResolvedResourceBindingSource::RequestField {
+            field_name,
+            proto_field_name,
+            hidden,
+        } => {
+            if *hidden {
+                let proto_field = go_proto_field_name(proto_field_name);
+                format!("requestProto.Get{proto_field}()")
+            } else {
+                format!("request.{}", go_field_name(field_name))
+            }
+        }
+        ResolvedResourceBindingSource::ResultField {
+            proto_field_name, ..
+        } => {
+            if binding.optional {
+                resource_return_optional_local_name(binding)
+            } else {
+                let proto_field = go_proto_field_name(proto_field_name);
+                format!("result.Get{proto_field}()")
+            }
+        }
+    }
+}
+
+fn resource_return_optional_local_name(binding: &PlannedOperationResourceFieldBinding) -> String {
+    go_unexported_name(&go_field_name(&binding.field_name))
 }
 
 /// Renders an options struct for optional parameters of a convenience wrapper.

@@ -597,6 +597,31 @@ fn go_type_roundtrip_generates_proto_conversions() {
 }
 
 #[test]
+fn go_proto_resource_return_converts_request_and_constructs_resource() {
+    let root = project_root();
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &example_input_paths(&root, "start-workflow"),
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
+
+    assert!(rendered.contains("\trequestProto := request.ToProto()\n"));
+    assert!(rendered.contains(
+        "fut := c.ExecuteOperation(ctx, StartWorkflowOp, requestProto, workflow.NexusOperationOptions{})"
+    ));
+    assert!(rendered.contains("\tvar result workflowservice.StartWorkflowExecutionResponse\n"));
+    assert!(rendered.contains("\trunIdValue := result.GetRunId()\n"));
+    assert!(rendered.contains("\tvar runId *string\n"));
+    assert!(rendered.contains("\t\tNamespace: requestProto.GetNamespace(),\n"));
+    assert!(rendered.contains("\t\tWorkflowId: request.WorkflowId,\n"));
+    assert!(rendered.contains("\t\tRunId: runId,\n"));
+    assert!(rendered.contains(
+        "fut := c.ExecuteOperation(ctx, RestartWorkflowOp, requestProto, workflow.NexusOperationOptions{})"
+    ));
+}
+
+#[test]
 fn go_flatten_in_api_embeds_options_value() {
     let root = project_root();
     let rendered = generate_to_string_with_inputs(
