@@ -413,6 +413,8 @@ pub fn load_linked_wit_metadata_from_inputs(input_paths: &[PathBuf]) -> Result<L
 pub struct ServiceSpec {
     pub name: String,
     pub wire_name: String,
+    pub namespace: LanguageStringSpec,
+    pub operations_class: LanguageStringSpec,
     pub endpoint: Option<String>,
     pub experimental: bool,
     pub delay_load_temporalio_workflow: bool,
@@ -3780,6 +3782,12 @@ fn build_service(
     let endpoint = directive_value(&directives, "endpoint", path, &context, "value")?;
     let service_name = interface_name.to_upper_camel_case();
     let wire_service_name = build_wire_service_name(&directives, path, &context, &service_name)?;
+    let namespace = directive(&directives, "namespace", path, &context)?
+        .map(directive_language_string)
+        .unwrap_or_default();
+    let operations_class = directive(&directives, "operations-class", path, &context)?
+        .map(directive_language_string)
+        .unwrap_or_default();
     let experimental = experimental_directive(&directives, path, &context)?;
     let delay_load_temporalio_workflow =
         delay_load_temporalio_workflow_directive(&directives, path, &context)?;
@@ -3811,6 +3819,8 @@ fn build_service(
     Ok(ServiceSpec {
         name: service_name,
         wire_name: wire_service_name,
+        namespace,
+        operations_class,
         endpoint,
         experimental,
         delay_load_temporalio_workflow,

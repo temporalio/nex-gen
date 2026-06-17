@@ -16,7 +16,7 @@ using Temporalio.Workflows;
 namespace NexGen.FunctionExecution
 {
 
-    public static class FunctionExecutionOperations
+    public static partial class FunctionExecutionOperations
     {
         public static async Task<ExecuteFunctionResult> ExecuteFunctionAsync(ExecuteFunctionRequest request)
         {

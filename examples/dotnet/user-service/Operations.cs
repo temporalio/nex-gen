@@ -38,7 +38,7 @@ namespace NexGen.UserService
         public string Email { get; set; }
     }
 
-    public static class UserServiceOperations
+    public static partial class UserServiceOperations
     {
         private static async Task<User> GetUserAsync(GetUserRequest request)
         {

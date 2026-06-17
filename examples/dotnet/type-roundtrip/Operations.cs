@@ -29,7 +29,7 @@ namespace NexGen.TypeRoundtripService
         public Temporalio.Common.Priority? Priority { get; set; }
     }
 
-    public static class TypeRoundtripServiceOperations
+    public static partial class TypeRoundtripServiceOperations
     {
         public static async Task<Temporalio.Common.RetryPolicy> RetryPolicyOperationAsync(Temporalio.Common.RetryPolicy request)
         {

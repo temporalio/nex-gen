@@ -1,8 +1,6 @@
 using System;
 using System.Threading.Tasks;
-using Temporalio.Common;
 using Temporalio.Workflows;
-using WorkflowExample = NexGen.WorkflowService;
 using StartWorkflowExample = NexGen.StartWorkflowService;
 
 namespace NexGen.DotNetExamples.Tests
@@ -20,16 +18,6 @@ namespace NexGen.DotNetExamples.Tests
 
     internal static class GeneratedApiCompileChecks
     {
-        internal static Task<ExternalWorkflowHandle> SignalWithStartAsync() =>
-            WorkflowExample.WorkflowServiceOperations.SignalWithStartWorkflowAsync<ExampleWorkflow, string>(
-                workflow => workflow.RunAsync("workflow-input"),
-                signal: workflow => workflow.NotifyAsync("signal-input"),
-                options: new WorkflowExample.SignalWithStartWorkflowOptions("workflow-id", "task-queue")
-                {
-                    ExecutionTimeout = TimeSpan.FromMinutes(5),
-                    RetryPolicy = new RetryPolicy { MaximumAttempts = 3 },
-                });
-
         internal static Task<StartWorkflowExample.StartedWorkflow> StartWorkflowAsync() =>
             StartWorkflowExample.StartWorkflowServiceOperations.StartWorkflowAsync<ExampleWorkflow, string>(
                 workflow => workflow.RunAsync("workflow-input"),

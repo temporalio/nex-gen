@@ -33,6 +33,8 @@ pub(crate) struct ApiPlan {
 pub(crate) struct PlannedService {
     pub(crate) name: String,
     pub(crate) wire_name: String,
+    pub(crate) namespace: LanguageStringSpec,
+    pub(crate) operations_class: LanguageStringSpec,
     pub(crate) endpoint: String,
     pub(crate) experimental: bool,
     pub(crate) delay_load_temporalio_workflow: bool,
@@ -549,6 +551,8 @@ fn plan_service(
     Ok(PlannedService {
         name: service.name.clone(),
         wire_name: service.wire_name.clone(),
+        namespace: service.namespace.clone(),
+        operations_class: service.operations_class.clone(),
         endpoint,
         experimental: service.experimental,
         delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,

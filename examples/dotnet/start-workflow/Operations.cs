@@ -53,7 +53,7 @@ namespace NexGen.StartWorkflowService
         public string? Reason { get; set; }
     }
 
-    public static class StartWorkflowServiceOperations
+    public static partial class StartWorkflowServiceOperations
     {
         private static async Task<StartedWorkflow> StartWorkflowAsync(StartWorkflowRequest request)
         {

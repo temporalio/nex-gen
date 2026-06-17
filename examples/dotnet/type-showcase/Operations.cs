@@ -86,7 +86,7 @@ namespace NexGen.TypeShowcase
         public string? Reason { get; set; }
     }
 
-    public static class TypeShowcaseOperations
+    public static partial class TypeShowcaseOperations
     {
         private static async Task<User> GetUserAsync(GetUserRequest request)
         {

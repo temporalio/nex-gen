@@ -504,8 +504,8 @@ fn render_operations_class(
     for operation in &service.operations {
         render_operation_options_type(output, operation, api_plan);
     }
-    output.push_str("public static class ");
-    output.push_str(&csharp_type_name(&format!("{}Operations", service.name)));
+    output.push_str("public static partial class ");
+    output.push_str(&dotnet_operations_class_name(service));
     output.push_str("\n{\n");
     for operation in &service.operations {
         render_operation_extension(
@@ -2433,8 +2433,23 @@ fn dotnet_namespace(api_plan: &ApiPlan) -> String {
     api_plan
         .services
         .first()
-        .map(|service| format!("NexGen.{}", csharp_type_name(&service.name)))
+        .and_then(|service| service.namespace.for_language(Language::Dotnet))
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            api_plan
+                .services
+                .first()
+                .map(|service| format!("NexGen.{}", csharp_type_name(&service.name)))
+        })
         .unwrap_or_else(|| "NexGen.Generated".to_string())
+}
+
+fn dotnet_operations_class_name(service: &PlannedService) -> String {
+    service
+        .operations_class
+        .for_language(Language::Dotnet)
+        .map(csharp_type_name)
+        .unwrap_or_else(|| csharp_type_name(&format!("{}Operations", service.name)))
 }
 
 fn field_property_name(field: &PlannedField) -> String {

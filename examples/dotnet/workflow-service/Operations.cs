@@ -13,7 +13,7 @@ using Google.Protobuf.WellKnownTypes;
 using Temporalio.Converters;
 using Temporalio.Workflows;
 
-namespace NexGen.WorkflowService
+namespace Temporalio.Workflows
 {
 
     /// <summary>
@@ -97,7 +97,7 @@ namespace NexGen.WorkflowService
         public string? StaticDetails { get; set; }
     }
 
-    public static class WorkflowServiceOperations
+    public static partial class Workflow
     {
         /// <summary>
         /// Signal a workflow, starting it first if needed.

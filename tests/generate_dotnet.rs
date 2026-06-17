@@ -278,10 +278,10 @@ fn dotnet_renders_proto_backed_temporal_types() {
     .unwrap();
 
     assert!(rendered.contains("internal interface IWorkflowService"));
-    assert!(rendered.contains("namespace NexGen.WorkflowService\n{"));
+    assert!(rendered.contains("namespace Temporalio.Workflows\n{"));
     assert!(rendered.contains("namespace NexGen.Support\n{"));
     assert!(!rendered.contains("namespace NexusApiGen."));
-    assert!(!rendered.contains("namespace NexGen.WorkflowService;"));
+    assert!(!rendered.contains("namespace Temporalio.Workflows;"));
     assert!(!rendered.contains("namespace NexGen.Support;"));
     assert!(rendered.contains("Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse SignalWithStartWorkflow(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest request);"));
     assert!(rendered.contains(
@@ -317,6 +317,8 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("/// <summary>\n        /// Arguments for the workflow.\n        /// </summary>\n        public IReadOnlyCollection<object?>? Args"));
     assert!(rendered.contains("/// <summary>\n        /// Arguments for the signal.\n        /// </summary>\n        public IReadOnlyCollection<object?>? SignalArgs"));
     assert!(rendered.contains("Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow, TResult>"));
+    assert!(rendered.contains("public static partial class Workflow"));
+    assert!(!rendered.contains("WorkflowServiceOperations"));
     assert!(!rendered.contains("this NexusWorkflowClient<"));
     assert!(
         rendered
@@ -421,4 +423,48 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("Temporalio.Common.RetryPolicy? RetryPolicy"));
     assert!(rendered.contains("Temporalio.Api.Enums.V1.WorkflowIdReusePolicy? IdReusePolicy"));
     assert!(rendered.contains("System.TimeSpan? ExecutionTimeout"));
+}
+
+#[test]
+fn dotnet_uses_annotated_namespace_and_operations_class() {
+    let temp_dir = unique_output_path("dotnet-annotated-namespace");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("main.wit");
+    fs::write(
+        &input_path,
+        r#"
+package example:nexus@1.0.0;
+
+world system {
+  export workflow-service;
+}
+
+/// @nexus.endpoint "temporal-system"
+/// @nexus.namespace dotnet="Temporalio.Workflows"
+/// @nexus.operations-class dotnet="Workflow"
+interface workflow-service {
+  record signal-request {
+    id: string,
+  }
+
+  record signal-response {
+    run-id: option<string>,
+  }
+
+  /// @nexus.operation name="SignalWithStartWorkflowExecution"
+  signal-with-start-workflow: func(request: signal-request) -> signal-response;
+}
+"#,
+    )
+    .unwrap();
+
+    let input_paths = vec![input_path];
+    let rendered =
+        generate_to_string_with_inputs(nex_gen::language::Language::Dotnet, &input_paths, &[])
+            .unwrap();
+
+    assert!(rendered.contains("namespace Temporalio.Workflows\n{"));
+    assert!(rendered.contains("public static partial class Workflow"));
+    assert!(!rendered.contains("WorkflowServiceOperations"));
+    fs::remove_dir_all(temp_dir).unwrap();
 }
