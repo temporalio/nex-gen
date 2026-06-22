@@ -163,7 +163,8 @@ Input WIT files can add support code with `@nexus.support`. Python support fragm
 Support code can also be supplied outside WIT with repeatable `--support-file`
 arguments on `generate`. Explicit support files apply to the selected
 `--lang`, are appended after WIT-declared support, and use the same generated
-layout as `@nexus.support` fragments:
+layout as `@nexus.support` fragments. .NET support files infer their support
+namespace from the C# `namespace` declaration in the file:
 
 ```bash
 cargo run -- generate \

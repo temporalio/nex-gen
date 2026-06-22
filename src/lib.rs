@@ -337,13 +337,14 @@ fn load_support_files(
     support_paths: &[PathBuf],
 ) -> Result<SupportFiles> {
     let mut support_fragments = spec.support.fragments_for_language(language).to_vec();
-    support_fragments.extend(load_support_fragments_from_paths(support_paths)?);
+    support_fragments.extend(load_support_fragments_from_paths(language, support_paths)?);
     Ok(SupportFiles {
         fragments: support_fragments,
     })
 }
 
 fn load_support_fragments_from_paths(
+    language: Language,
     support_paths: &[PathBuf],
 ) -> Result<Vec<SupportFragmentSpec>> {
     support_paths
@@ -355,11 +356,39 @@ fn load_support_fragments_from_paths(
             })?;
             Ok(SupportFragmentSpec {
                 path: path.to_string_lossy().replace('\\', "/"),
+                namespace: infer_support_namespace(language, &contents),
                 contents,
-                namespace: None,
             })
         })
         .collect()
+}
+
+fn infer_support_namespace(language: Language, contents: &str) -> Option<String> {
+    match language {
+        Language::Dotnet => infer_dotnet_namespace(contents),
+        _ => None,
+    }
+}
+
+fn infer_dotnet_namespace(contents: &str) -> Option<String> {
+    for line in contents.lines() {
+        let line = line.trim_start();
+        if line.starts_with("//") {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        if parts.next() != Some("namespace") {
+            continue;
+        }
+        let namespace = parts
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(|character| character == '{' || character == ';');
+        if !namespace.is_empty() {
+            return Some(namespace.to_string());
+        }
+    }
+    None
 }
 
 fn discover_example_ids(repo_root: &Path, language: Language) -> Result<Vec<String>> {
@@ -592,7 +621,7 @@ fn format_command(program: &str, args: &[String]) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{format_formatter_command, formatter_command};
+    use super::{format_formatter_command, formatter_command, infer_dotnet_namespace};
     use crate::language::Language;
 
     #[test]
@@ -614,6 +643,29 @@ mod tests {
         assert_eq!(
             format_formatter_command(program, &args),
             "prettier --write --print-width 88 output"
+        );
+    }
+
+    #[test]
+    fn infers_dotnet_support_namespace_from_file() {
+        assert_eq!(
+            infer_dotnet_namespace(
+                r#"
+using System;
+
+namespace NexGen.Support
+{
+    internal static class TemporalSupport { }
+}
+"#
+            )
+            .as_deref(),
+            Some("NexGen.Support")
+        );
+        assert_eq!(
+            infer_dotnet_namespace("namespace NexGen.Support;\ninternal static class Support { }")
+                .as_deref(),
+            Some("NexGen.Support")
         );
     }
 }
