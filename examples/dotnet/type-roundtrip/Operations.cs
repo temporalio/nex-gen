@@ -31,23 +31,25 @@ namespace NexGen.TypeRoundtripService
 
     public static partial class TypeRoundtripServiceOperations
     {
+        private const string TypeRoundtripServiceEndpoint = "temporal-system";
+
         public static async Task<Temporalio.Common.RetryPolicy> RetryPolicyOperationAsync(Temporalio.Common.RetryPolicy request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>("temporal-system");
+            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
             var result = await client.ExecuteNexusOperationAsync<Temporalio.Common.RetryPolicy>(svc => svc.RetryPolicyOperation(request)).ConfigureAwait(true);
             return result;
         }
 
         public static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(Temporalio.Api.Activity.V1.ActivityOptions request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>("temporal-system");
+            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
             var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(request)).ConfigureAwait(true);
             return result;
         }
 
         private static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptions request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>("temporal-system");
+            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
             var protoRequest = request.ToProto();
             var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(protoRequest)).ConfigureAwait(true);
             return result;

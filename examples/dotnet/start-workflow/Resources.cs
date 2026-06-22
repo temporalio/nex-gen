@@ -26,7 +26,7 @@ namespace NexGen.StartWorkflowService
 
         public StartedWorkflow RestartWorkflow(string workflow, string taskQueue) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
 
-        public IReadOnlyList<object?> GetResult() => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+        public IReadOnlyCollection<object?> GetResult() => throw new NotSupportedException("Resource methods require a bound Nexus client.");
 
     }
 

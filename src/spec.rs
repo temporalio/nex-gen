@@ -1777,6 +1777,7 @@ pub struct FunctionFieldSpec {
     pub alternate_type: Option<AuthoredFieldTypeSpec>,
     pub converter: Option<String>,
     pub name_extractor: Option<String>,
+    pub call_extractor: Option<String>,
     pub result_type_parameter: Option<String>,
 }
 
@@ -2940,6 +2941,7 @@ fn build_function_field(
             .map(|field_type| authored_field_type_for_language(field_type, language)),
         converter: directive_converter(directive, language),
         name_extractor: directive_function_name_extractor(directive, language, path, context)?,
+        call_extractor: directive_function_call_extractor(directive, language, path, context)?,
         result_type_parameter: directive_result_type_parameter(directive),
     }))
 }
@@ -3017,6 +3019,12 @@ fn build_function_field_for_type_alias(
                 .map(|field_type| authored_field_type_for_language(field_type, language)),
                 converter,
                 name_extractor: directive_function_name_extractor(
+                    function_directive,
+                    language,
+                    path,
+                    context,
+                )?,
+                call_extractor: directive_function_call_extractor(
                     function_directive,
                     language,
                     path,
@@ -4350,6 +4358,31 @@ fn directive_function_name_extractor(
     Ok(Some(extractor.to_string()))
 }
 
+fn directive_function_call_extractor(
+    directive: &Directive,
+    language: Language,
+    path: &Path,
+    context: &str,
+) -> Result<Option<String>> {
+    let mut spec = directive_prefixed_language_string(directive, "call-extractor");
+    spec.default = directive.value("call-extractor").map(ToOwned::to_owned);
+    let Some(extractor) = spec.for_language(language) else {
+        return Ok(None);
+    };
+    if !is_valid_support_helper_path(extractor) {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.function".to_string(),
+            reason: format!(
+                "invalid `{}` call-extractor `{extractor}`",
+                language_key(language)
+            ),
+        });
+    }
+    Ok(Some(extractor.to_string()))
+}
+
 fn directive_result_type_parameter(directive: &Directive) -> Option<String> {
     directive
         .value("result-type-parameter")
@@ -4901,12 +4934,14 @@ interface workflow-service {
                 .replacement
                 .is_none()
         );
-        assert!(
+        assert_eq!(
             dotnet
                 .type_override("temporal.api.common.v1.Payloads")
                 .unwrap()
                 .replacement
-                .is_none()
+                .as_ref()
+                .and_then(|replacement| replacement.to_proto.for_language(Language::Dotnet)),
+            Some("ProtoExtensions.ToPayloads")
         );
 
         let request = python
@@ -4970,6 +5005,30 @@ interface workflow-service {
         assert_eq!(
             model.field_source("namespace"),
             Some("workflow_namespace()")
+        );
+
+        let dotnet_model = dotnet
+            .type_override(
+                "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest",
+            )
+            .unwrap()
+            .generated_model()
+            .unwrap();
+        assert_eq!(
+            dotnet_model
+                .function("workflow_type")
+                .unwrap()
+                .call_extractor
+                .as_deref(),
+            Some("TemporalFunctionNames.ExtractCall")
+        );
+        assert_eq!(
+            dotnet_model
+                .function("signal_name")
+                .unwrap()
+                .call_extractor
+                .as_deref(),
+            Some("TemporalFunctionNames.ExtractCall")
         );
 
         let typescript_model = typescript

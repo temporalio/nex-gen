@@ -16,7 +16,7 @@ namespace NexGen.UserService
             UserId = userId;
         }
 
-        public string UserId { get; init; }
+        public string UserId { get; }
     }
 
     internal class UpdateEmailRequest
@@ -27,8 +27,8 @@ namespace NexGen.UserService
             Email = email;
         }
 
-        public string UserId { get; init; }
-        public string Email { get; init; }
+        public string UserId { get; }
+        public string Email { get; }
     }
 
 }

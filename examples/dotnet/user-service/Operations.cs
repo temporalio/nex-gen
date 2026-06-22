@@ -40,9 +40,11 @@ namespace NexGen.UserService
 
     public static partial class UserServiceOperations
     {
+        private const string UserServiceEndpoint = "user-service";
+
         private static async Task<User> GetUserAsync(GetUserRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IUserService>("user-service");
+            var client = Workflow.CreateNexusWorkflowClient<IUserService>(UserServiceEndpoint);
             var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.GetUser(request)).ConfigureAwait(true);
             return result;
         }
@@ -56,7 +58,7 @@ namespace NexGen.UserService
 
         private static async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IUserService>("user-service");
+            var client = Workflow.CreateNexusWorkflowClient<IUserService>(UserServiceEndpoint);
             var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
             return result;
         }

@@ -99,6 +99,8 @@ namespace Temporalio.Workflows
 
     public static partial class Workflow
     {
+        private const string WorkflowServiceEndpoint = "temporal-system";
+
         /// <summary>
         /// Signal a workflow, starting it first if needed.
         /// </summary>
@@ -106,7 +108,7 @@ namespace Temporalio.Workflows
         /// <returns>A workflow handle to the started workflow.</returns>
         private static async Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IWorkflowService>("temporal-system");
+            var client = Workflow.CreateNexusWorkflowClient<IWorkflowService>(WorkflowServiceEndpoint);
             var protoRequest = request.ToProto();
             var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse>(svc => svc.SignalWithStartWorkflow(protoRequest)).ConfigureAwait(true);
             return Temporalio.Workflows.Workflow.GetExternalWorkflowHandle(request.Id, result.RunId);
@@ -155,7 +157,7 @@ namespace Temporalio.Workflows
         /// <returns>A workflow handle to the started workflow.</returns>
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)
         {
-            var (workflowMethod, workflowArgs) = ExtractCall(workflow);
+            var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);
             var request = new SignalWithStartWorkflowRequest(NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.Id, options.TaskQueue, signal)
             {
                 Args = workflowArgs,
@@ -188,7 +190,7 @@ namespace Temporalio.Workflows
         /// <returns>A workflow handle to the started workflow.</returns>
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow>(string workflow, IReadOnlyCollection<object?>? args, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)
         {
-            var (signalMethod, signalArgs) = ExtractCall(signal);
+            var (signalMethod, signalArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(signal);
             var request = new SignalWithStartWorkflowRequest(workflow, options.Id, options.TaskQueue, NexGen.Support.TemporalFunctionNames.SignalName(signalMethod))
             {
                 Args = args,
@@ -220,8 +222,8 @@ namespace Temporalio.Workflows
         /// <returns>A workflow handle to the started workflow.</returns>
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)
         {
-            var (workflowMethod, workflowArgs) = ExtractCall(workflow);
-            var (signalMethod, signalArgs) = ExtractCall(signal);
+            var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);
+            var (signalMethod, signalArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(signal);
             var request = new SignalWithStartWorkflowRequest(NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.Id, options.TaskQueue, NexGen.Support.TemporalFunctionNames.SignalName(signalMethod))
             {
                 Args = workflowArgs,
@@ -242,17 +244,6 @@ namespace Temporalio.Workflows
                 UserMetadata = options.StaticSummary != null || options.StaticDetails != null ? new UserMetadata() { StaticSummary = options.StaticSummary, StaticDetails = options.StaticDetails } : null,
             };
             return SignalWithStartWorkflowAsync(request);
-        }
-
-        private static (MethodInfo Method, IReadOnlyCollection<object?> Args) ExtractCall<TDelegate>(Expression<TDelegate> expression)
-        {
-            if (expression.Body is not MethodCallExpression call)
-            {
-                throw new ArgumentException("Expression must be a single method call", nameof(expression));
-            }
-            var method = call.Method;
-            var args = call.Arguments.Select(arg => Expression.Lambda<Func<object?>>(Expression.Convert(arg, typeof(object))).Compile()()).ToArray();
-            return (method, args);
         }
 
     }

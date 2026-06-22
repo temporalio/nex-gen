@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using Google.Protobuf.WellKnownTypes;
 using Temporalio.Common;
@@ -23,6 +24,17 @@ namespace NexGen.Support
 
     internal static class TemporalFunctionNames
     {
+        internal static (MethodInfo Method, IReadOnlyCollection<object?> Args) ExtractCall<TDelegate>(Expression<TDelegate> expression)
+        {
+            if (expression.Body is not MethodCallExpression call)
+            {
+                throw new ArgumentException("Expression must be a single method call", nameof(expression));
+            }
+            var method = call.Method;
+            var args = call.Arguments.Select(arg => Expression.Lambda<Func<object?>>(Expression.Convert(arg, typeof(object))).Compile()()).ToArray();
+            return (method, args);
+        }
+
         internal static string WorkflowName(MethodInfo method)
         {
             if (method.GetCustomAttribute<WorkflowRunAttribute>() == null)
@@ -47,17 +59,21 @@ namespace NexGen.Support
 
     internal static class ProtoExtensions
     {
-        internal static ApiCommon.WorkflowType ToProto(this string value, ApiCommon.WorkflowType _) =>
+        internal static ApiCommon.WorkflowType ToWorkflowTypeProto(this string value) =>
             new() { Name = value };
 
-        internal static ApiTaskQueue.TaskQueue ToProto(this string value, ApiTaskQueue.TaskQueue _) =>
+        internal static ApiTaskQueue.TaskQueue ToTaskQueueProto(this string value) =>
             new() { Name = value };
 
-        internal static ApiCommon.Payload ToProto(this object? value) =>
+        internal static ApiCommon.Payload ToPayload(object? value) =>
             Workflow.PayloadConverter.ToPayload(value);
 
-        internal static ApiCommon.Payloads ToProto(this IEnumerable<object?> value) =>
-            ToPayloads(value);
+        internal static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values)
+        {
+            var payloads = new ApiCommon.Payloads();
+            payloads.Payloads_.AddRange(Workflow.PayloadConverter.ToPayloads(values as IReadOnlyCollection<object?> ?? new List<object?>(values)));
+            return payloads;
+        }
 
         internal static Duration ToProto(this TimeSpan value) =>
             Duration.FromTimeSpan(value);
@@ -67,9 +83,6 @@ namespace NexGen.Support
 
         internal static ApiCommon.Memo ToProto(this IReadOnlyDictionary<string, object?> value) =>
             ToMemo(value);
-
-        internal static ApiCommon.SearchAttributes ToProto(this SearchAttributeCollection value) =>
-            value.ToProto();
 
         internal static ApiCommon.Priority ToProto(this Temporalio.Common.Priority value) =>
             ToPriority(value);
@@ -179,13 +192,6 @@ namespace NexGen.Support
             }
 
             throw new NotSupportedException("Unsupported versioning override proto");
-        }
-
-        private static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values)
-        {
-            var payloads = new ApiCommon.Payloads();
-            payloads.Payloads_.AddRange(Workflow.PayloadConverter.ToPayloads(values as IReadOnlyCollection<object?> ?? new List<object?>(values)));
-            return payloads;
         }
 
         private static IReadOnlyCollection<object?> PayloadsToValues(ApiCommon.Payloads payloads) =>

@@ -112,6 +112,7 @@ fn validate_dotnet_support_references(
             if let Some(reference) = sourced_field.source_expr.strip_suffix("()") {
                 validate_dotnet_support_reference(reference, support_namespace)?;
             }
+            validate_dotnet_field_kind_support_references(&sourced_field.kind, support_namespace)?;
         }
         for field in &model.fields {
             if let Some(extractor) = field
@@ -121,7 +122,64 @@ fn validate_dotnet_support_references(
             {
                 validate_dotnet_support_reference(extractor, support_namespace)?;
             }
+            if let Some(extractor) = field
+                .function
+                .as_ref()
+                .and_then(|function| function.call_extractor.as_deref())
+            {
+                validate_dotnet_support_reference(extractor, support_namespace)?;
+            }
+            if let Some(reference) = function_args_to_proto_converter(field) {
+                validate_dotnet_support_reference(reference, support_namespace)?;
+            }
+            validate_dotnet_field_kind_support_references(&field.kind, support_namespace)?;
         }
+    }
+    Ok(())
+}
+
+fn validate_dotnet_field_kind_support_references(
+    kind: &PlannedFieldKind,
+    support_namespace: Option<&str>,
+) -> Result<()> {
+    match kind {
+        PlannedFieldKind::Singular(value) | PlannedFieldKind::Repeated(value) => {
+            validate_dotnet_value_support_references(value, support_namespace)
+        }
+        PlannedFieldKind::Map { key, value } => {
+            validate_dotnet_value_support_references(key, support_namespace)?;
+            validate_dotnet_value_support_references(value, support_namespace)
+        }
+    }
+}
+
+fn validate_dotnet_value_support_references(
+    value: &PlannedValueType,
+    support_namespace: Option<&str>,
+) -> Result<()> {
+    match value {
+        PlannedValueType::Message(message) => {
+            if let Some(reference) = dotnet_to_proto_converter(message) {
+                validate_dotnet_support_reference(reference, support_namespace)?;
+            }
+        }
+        PlannedValueType::External { fallback, .. } => {
+            validate_dotnet_value_support_references(fallback, support_namespace)?;
+        }
+        PlannedValueType::Tuple(items) => {
+            for item in items {
+                validate_dotnet_value_support_references(item, support_namespace)?;
+            }
+        }
+        PlannedValueType::Result { ok, err } => {
+            if let Some(ok) = ok {
+                validate_dotnet_value_support_references(ok, support_namespace)?;
+            }
+            if let Some(err) = err {
+                validate_dotnet_value_support_references(err, support_namespace)?;
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -457,7 +515,7 @@ fn render_service_operation(output: &mut String, operation: &PlannedOperation, a
 }
 
 fn render_operation_registry(output: &mut String, api_plan: &ApiPlan) {
-    output.push_str("public static class NexGenOperationRegistry\n{\n");
+    output.push_str("internal static class NexGenOperationRegistry\n{\n");
     output.push_str(
         "    internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =\n",
     );
@@ -507,17 +565,21 @@ fn render_operations_class(
     output.push_str("public static partial class ");
     output.push_str(&dotnet_operations_class_name(service));
     output.push_str("\n{\n");
+    output.push_str("    private const string ");
+    output.push_str(&service_endpoint_constant_name(service));
+    output.push_str(" = ");
+    output.push_str(&csharp_string_literal(&service.endpoint));
+    output.push_str(";\n\n");
     for operation in &service.operations {
         render_operation_extension(
             output,
             operation,
             api_plan,
             &service_type,
-            &service.endpoint,
+            &service_endpoint_constant_name(service),
             support_namespace,
         );
     }
-    render_expression_helpers_if_needed(output, service, api_plan);
     output.push_str("}\n\n");
 }
 
@@ -526,7 +588,7 @@ fn render_operation_extension(
     operation: &PlannedOperation,
     api_plan: &ApiPlan,
     service_type: &str,
-    endpoint: &str,
+    endpoint_constant_name: &str,
     support_namespace: Option<&str>,
 ) {
     let method_name = format!("{}Async", csharp_type_name(&operation.name));
@@ -548,7 +610,7 @@ fn render_operation_extension(
             &raw_return,
             &high_level_return,
             RequestArgumentKind::Raw,
-            endpoint,
+            endpoint_constant_name,
             api_plan,
         );
     }
@@ -564,7 +626,7 @@ fn render_operation_extension(
             &raw_return,
             &high_level_return,
             RequestArgumentKind::HighLevel,
-            endpoint,
+            endpoint_constant_name,
             api_plan,
         );
     }
@@ -601,7 +663,7 @@ fn render_operation_request_extension(
     raw_return: &str,
     high_level_return: &str,
     request_kind: RequestArgumentKind,
-    endpoint: &str,
+    endpoint_constant_name: &str,
     api_plan: &ApiPlan,
 ) {
     render_operation_xml_doc(output, "    ", operation, api_plan);
@@ -629,7 +691,7 @@ fn render_operation_request_extension(
     output.push_str("        var client = Workflow.CreateNexusWorkflowClient<");
     output.push_str(service_type);
     output.push_str(">(");
-    output.push_str(&csharp_string_literal(endpoint));
+    output.push_str(endpoint_constant_name);
     output.push_str(");\n");
     if matches!(request_kind, RequestArgumentKind::HighLevel) {
         output.push_str("        var protoRequest = request.ToProto();\n");
@@ -709,7 +771,7 @@ fn model_function_fields_flattenable(model: &PlannedModel) -> bool {
     for field in &model.fields {
         if let Some(function) = &field.function {
             has_function_fields = true;
-            if function.name_extractor.is_none() {
+            if function.name_extractor.is_none() || function.call_extractor.is_none() {
                 return false;
             }
         }
@@ -1068,7 +1130,15 @@ fn render_flattened_method_body(
                 "{}Args",
                 field.authored_name
             )));
-            output.push_str(") = ExtractCall(");
+            output.push_str(") = ");
+            let extractor = field
+                .function
+                .as_ref()
+                .and_then(|function| function.call_extractor.as_deref())
+                .expect("expression overloads require function call extractors");
+            let extractor = qualify_dotnet_support_reference(extractor, support_namespace);
+            output.push_str(&extractor);
+            output.push('(');
             output.push_str(&csharp_parameter_name(&field.authored_name));
             output.push_str(");\n");
         }
@@ -1533,7 +1603,11 @@ fn render_model(
         output.push_str(&model_field_type(model, field, api_plan));
         output.push(' ');
         output.push_str(&field_property_name(field));
-        output.push_str(" { get; init; }\n");
+        if field.required {
+            output.push_str(" { get; }\n");
+        } else {
+            output.push_str(" { get; init; }\n");
+        }
     }
     if model_needs_to_proto_method(model) {
         if !model.fields.is_empty() {
@@ -2078,11 +2152,12 @@ fn render_model_to_proto_method(
             &source_expr,
             false,
             api_plan,
+            support_namespace,
         ));
         output.push_str(";\n");
     }
     for field in &model.fields {
-        render_field_to_proto_assignment(output, model, field, api_plan);
+        render_field_to_proto_assignment(output, model, field, api_plan, support_namespace);
     }
     output.push_str("        return proto;\n");
     output.push_str("    }\n\n");
@@ -2093,6 +2168,7 @@ fn render_field_to_proto_assignment(
     model: &PlannedModel,
     field: &PlannedField,
     api_plan: &ApiPlan,
+    support_namespace: Option<&str>,
 ) {
     let property_name = field_property_name(field);
     let source_expr = property_name.to_string();
@@ -2101,7 +2177,13 @@ fn render_field_to_proto_assignment(
         output.push_str("        ");
         output.push_str(&target);
         output.push_str(" = ");
-        output.push_str(&field_to_proto_expr(model, field, &source_expr, api_plan));
+        output.push_str(&field_to_proto_expr(
+            model,
+            field,
+            &source_expr,
+            api_plan,
+            support_namespace,
+        ));
         output.push_str(";\n");
     } else {
         output.push_str("        if (");
@@ -2117,6 +2199,7 @@ fn render_field_to_proto_assignment(
             field,
             &csharp_parameter_name(&field.authored_name),
             api_plan,
+            support_namespace,
         ));
         output.push_str(";\n");
         output.push_str("        }\n");
@@ -2128,11 +2211,26 @@ fn field_to_proto_expr(
     field: &PlannedField,
     source_expr: &str,
     api_plan: &ApiPlan,
+    support_namespace: Option<&str>,
 ) -> String {
     if function_args_field_uses_logical_storage(model, field) {
-        return format!("{source_expr}.ToProto()");
+        let converter = function_args_to_proto_converter(field)
+            .map(|converter| qualify_dotnet_support_reference(converter, support_namespace))
+            .unwrap_or_else(|| {
+                panic!(
+                    "function args field `{}` missing .NET to-proto converter",
+                    field.proto_name
+                )
+            });
+        return format!("{converter}({source_expr})");
     }
-    field_kind_to_proto_expr(&field.kind, source_expr, !field.required, api_plan)
+    field_kind_to_proto_expr(
+        &field.kind,
+        source_expr,
+        !field.required,
+        api_plan,
+        support_namespace,
+    )
 }
 
 fn field_kind_to_proto_expr(
@@ -2140,10 +2238,11 @@ fn field_kind_to_proto_expr(
     source_expr: &str,
     optional: bool,
     api_plan: &ApiPlan,
+    support_namespace: Option<&str>,
 ) -> String {
     match kind {
         PlannedFieldKind::Singular(value) => {
-            value_to_proto_expr(value, source_expr, optional, api_plan)
+            value_to_proto_expr(value, source_expr, optional, api_plan, support_namespace)
         }
         _ => source_expr.to_string(),
     }
@@ -2154,6 +2253,7 @@ fn value_to_proto_expr(
     source_expr: &str,
     optional: bool,
     api_plan: &ApiPlan,
+    support_namespace: Option<&str>,
 ) -> String {
     match value {
         PlannedValueType::Message(message) => {
@@ -2164,31 +2264,39 @@ fn value_to_proto_expr(
             {
                 format!("{source_expr}.ToProto()")
             } else {
-                message_to_proto_expr(message, source_expr)
+                message_to_proto_expr(message, source_expr, support_namespace)
             }
         }
         PlannedValueType::External { fallback, .. } => {
-            value_to_proto_expr(fallback, source_expr, optional, api_plan)
+            value_to_proto_expr(fallback, source_expr, optional, api_plan, support_namespace)
         }
         _ => source_expr.to_string(),
     }
 }
 
-fn message_to_proto_expr(message: &PlannedMessageType, source_expr: &str) -> String {
+fn message_to_proto_expr(
+    message: &PlannedMessageType,
+    source_expr: &str,
+    support_namespace: Option<&str>,
+) -> String {
     if matches!(message.source, PlannedMessageSource::Proto)
         && dotnet_message_type(message) != dotnet_proto_type_name_for_message(message)
     {
-        if dotnet_message_type(message) == "string" {
-            format!(
-                "{source_expr}.ToProto(default({})!)",
-                dotnet_proto_type_name_for_message(message),
-            )
-        } else {
-            format!("{source_expr}.ToProto()")
+        if let Some(converter) = dotnet_to_proto_converter(message) {
+            let converter = qualify_dotnet_support_reference(converter, support_namespace);
+            return format!("{converter}({source_expr})");
         }
+        format!("{source_expr}.ToProto()")
     } else {
         source_expr.to_string()
     }
+}
+
+fn dotnet_to_proto_converter(message: &PlannedMessageType) -> Option<&str> {
+    message
+        .replacement
+        .as_ref()
+        .and_then(|replacement| replacement.to_proto.for_language(Language::Dotnet))
 }
 
 fn model_uses_proto_extensions(model: &PlannedModel, api_plan: &ApiPlan) -> bool {
@@ -2238,31 +2346,6 @@ fn value_uses_proto_extensions(value: &PlannedValueType, api_plan: &ApiPlan) -> 
             .any(|item| value_uses_proto_extensions(item, api_plan)),
         _ => false,
     }
-}
-
-fn render_expression_helpers_if_needed(
-    output: &mut String,
-    service: &PlannedService,
-    api_plan: &ApiPlan,
-) {
-    let needs_helpers = service.operations.iter().any(|operation| {
-        api_plan
-            .models
-            .get(&operation.input.info.full_name)
-            .is_some_and(|model| {
-                operation_has_flattened_convenience(operation, model, api_plan)
-                    && model_has_extractable_function_fields(model)
-            })
-    });
-    if !needs_helpers {
-        return;
-    }
-    output.push_str("    private static (MethodInfo Method, IReadOnlyCollection<object?> Args) ExtractCall<TDelegate>(Expression<TDelegate> expression)\n    {\n");
-    output.push_str("        if (expression.Body is not MethodCallExpression call)\n        {\n            throw new ArgumentException(\"Expression must be a single method call\", nameof(expression));\n        }\n");
-    output.push_str("        var method = call.Method;\n");
-    output.push_str("        var args = call.Arguments.Select(arg => Expression.Lambda<Func<object?>>(Expression.Convert(arg, typeof(object))).Compile()()).ToArray();\n");
-    output.push_str("        return (method, args);\n");
-    output.push_str("    }\n\n");
 }
 
 fn field_type(field: &PlannedField, api_plan: &ApiPlan) -> String {
@@ -2424,6 +2507,15 @@ fn function_args_field_uses_logical_storage(model: &PlannedModel, field: &Planne
     field.function_args
         && function_args_field_stores_proto(field)
         && function_args_parameter_type(model, field).is_some()
+}
+
+fn function_args_to_proto_converter(field: &PlannedField) -> Option<&str> {
+    match &field.kind {
+        PlannedFieldKind::Singular(PlannedValueType::Message(message)) => {
+            dotnet_to_proto_converter(message)
+        }
+        _ => None,
+    }
 }
 
 fn function_expression_type(function: &FunctionFieldSpec) -> String {
@@ -2671,6 +2763,10 @@ fn dotnet_operations_class_name(service: &PlannedService) -> String {
         .for_language(Language::Dotnet)
         .map(csharp_type_name)
         .unwrap_or_else(|| csharp_type_name(&format!("{}Operations", service.name)))
+}
+
+fn service_endpoint_constant_name(service: &PlannedService) -> String {
+    csharp_type_name(&format!("{}-endpoint", service.name))
 }
 
 fn field_property_name(field: &PlannedField) -> String {

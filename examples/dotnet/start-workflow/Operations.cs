@@ -55,9 +55,11 @@ namespace NexGen.StartWorkflowService
 
     public static partial class StartWorkflowServiceOperations
     {
+        private const string StartWorkflowServiceEndpoint = "temporal-system";
+
         private static async Task<StartedWorkflow> StartWorkflowAsync(StartWorkflowRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>("temporal-system");
+            var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
             var protoRequest = request.ToProto();
             var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse>(svc => svc.StartWorkflow(protoRequest)).ConfigureAwait(true);
             return new StartedWorkflow(protoRequest.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
@@ -80,7 +82,7 @@ namespace NexGen.StartWorkflowService
         /// <param name="options">Options for the operation.</param>
         public static Task<StartedWorkflow> StartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, StartWorkflowOptions options)
         {
-            var (workflowMethod, workflowArgs) = ExtractCall(workflow);
+            var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);
             var request = new StartWorkflowRequest(NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.WorkflowId, options.TaskQueue)
             {
                 Args = workflowArgs,
@@ -91,7 +93,7 @@ namespace NexGen.StartWorkflowService
 
         private static async Task<StartedWorkflow> RestartWorkflowAsync(StartWorkflowRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>("temporal-system");
+            var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
             var protoRequest = request.ToProto();
             var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse>(svc => svc.RestartWorkflow(protoRequest)).ConfigureAwait(true);
             return new StartedWorkflow(protoRequest.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
@@ -114,7 +116,7 @@ namespace NexGen.StartWorkflowService
         /// <param name="options">Options for the operation.</param>
         public static Task<StartedWorkflow> RestartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, RestartWorkflowOptions options)
         {
-            var (workflowMethod, workflowArgs) = ExtractCall(workflow);
+            var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);
             var request = new StartWorkflowRequest(NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.WorkflowId, options.TaskQueue)
             {
                 Args = workflowArgs,
@@ -125,14 +127,14 @@ namespace NexGen.StartWorkflowService
 
         public static async Task<Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse> CancelWorkflowAsync(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>("temporal-system");
+            var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
             var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse>(svc => svc.CancelWorkflow(request)).ConfigureAwait(true);
             return result;
         }
 
         private static async Task<Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse> CancelWorkflowAsync(CancelWorkflowRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>("temporal-system");
+            var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
             var protoRequest = request.ToProto();
             var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse>(svc => svc.CancelWorkflow(protoRequest)).ConfigureAwait(true);
             return result;
@@ -146,17 +148,6 @@ namespace NexGen.StartWorkflowService
                 Reason = options.Reason,
             };
             return CancelWorkflowAsync(request);
-        }
-
-        private static (MethodInfo Method, IReadOnlyCollection<object?> Args) ExtractCall<TDelegate>(Expression<TDelegate> expression)
-        {
-            if (expression.Body is not MethodCallExpression call)
-            {
-                throw new ArgumentException("Expression must be a single method call", nameof(expression));
-            }
-            var method = call.Method;
-            var args = call.Arguments.Select(arg => Expression.Lambda<Func<object?>>(Expression.Convert(arg, typeof(object))).Compile()()).ToArray();
-            return (method, args);
         }
 
     }

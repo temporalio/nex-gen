@@ -18,37 +18,39 @@ namespace NexGen.FunctionExecution
 
     public static partial class FunctionExecutionOperations
     {
+        private const string FunctionExecutionEndpoint = "function-execution";
+
         public static async Task<ExecuteFunctionResult> ExecuteFunctionAsync(ExecuteFunctionRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>("function-execution");
+            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);
             var result = await client.ExecuteNexusOperationAsync<ExecuteFunctionResult>(svc => svc.ExecuteFunction(request)).ConfigureAwait(true);
             return result;
         }
 
         public static async Task<ExecuteCountedFunctionResult> ExecuteCountedFunctionAsync(ExecuteCountedFunctionRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>("function-execution");
+            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);
             var result = await client.ExecuteNexusOperationAsync<ExecuteCountedFunctionResult>(svc => svc.ExecuteCountedFunction(request)).ConfigureAwait(true);
             return result;
         }
 
         public static async Task<ExecuteNamedFunctionResult> ExecuteNamedFunctionAsync(ExecuteNamedFunctionRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>("function-execution");
+            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);
             var result = await client.ExecuteNexusOperationAsync<ExecuteNamedFunctionResult>(svc => svc.ExecuteNamedFunction(request)).ConfigureAwait(true);
             return result;
         }
 
         public static async Task<ExecuteVarargsFunctionResult> ExecuteVarargsFunctionAsync(ExecuteVarargsFunctionRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>("function-execution");
+            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);
             var result = await client.ExecuteNexusOperationAsync<ExecuteVarargsFunctionResult>(svc => svc.ExecuteVarargsFunction(request)).ConfigureAwait(true);
             return result;
         }
 
         public static async Task<ExecuteNamedVarargsFunctionResult> ExecuteNamedVarargsFunctionAsync(ExecuteNamedVarargsFunctionRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>("function-execution");
+            var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);
             var result = await client.ExecuteNexusOperationAsync<ExecuteNamedVarargsFunctionResult>(svc => svc.ExecuteNamedVarargsFunction(request)).ConfigureAwait(true);
             return result;
         }

@@ -237,7 +237,7 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
     assert!(rendered.contains("[NexusOperation(\"SetProfile\")]"));
     assert!(rendered.contains("User SetProfile(SetProfileRequest request);"));
     assert!(!rendered.contains("public sealed class NexGenNexusOperation"));
-    assert!(rendered.contains("public static class NexGenOperationRegistry"));
+    assert!(rendered.contains("internal static class NexGenOperationRegistry"));
     assert!(
         rendered
             .contains("internal static IReadOnlyDictionary<string, ServiceDefinition> Services")
@@ -321,7 +321,15 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("WorkflowServiceOperations"));
     assert!(!rendered.contains("this NexusWorkflowClient<"));
     assert!(
-        rendered
+        rendered.contains("private const string WorkflowServiceEndpoint = \"temporal-system\";")
+    );
+    assert!(
+        rendered.contains(
+            "Workflow.CreateNexusWorkflowClient<IWorkflowService>(WorkflowServiceEndpoint)"
+        )
+    );
+    assert!(
+        !rendered
             .contains("Workflow.CreateNexusWorkflowClient<IWorkflowService>(\"temporal-system\")")
     );
     assert!(rendered.contains("Expression<Func<TWorkflow, Task<TResult>>> workflow"));
@@ -332,10 +340,10 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("internal SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal)"));
     assert!(rendered.contains("public string Id { get; set; }\n"));
     assert!(rendered.contains("public string TaskQueue { get; set; }\n"));
-    assert!(rendered.contains("public string Workflow { get; init; }\n"));
-    assert!(rendered.contains("public string Id { get; init; }\n"));
-    assert!(rendered.contains("public string TaskQueue { get; init; }\n"));
-    assert!(rendered.contains("public string Signal { get; init; }\n"));
+    assert!(rendered.contains("public string Workflow { get; }\n"));
+    assert!(rendered.contains("public string Id { get; }\n"));
+    assert!(rendered.contains("public string TaskQueue { get; }\n"));
+    assert!(rendered.contains("public string Signal { get; }\n"));
     assert!(!rendered.contains("default!"));
     assert!(!rendered.contains("required "));
     assert!(rendered.contains("internal class SignalWithStartWorkflowRequest"));
@@ -348,6 +356,11 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("SignalWithStartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)"));
     assert!(rendered.contains("SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)"));
     assert!(rendered.contains("SignalWithStartWorkflowAsync<TWorkflow>(string workflow, IReadOnlyCollection<object?>? args, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)"));
+    assert!(rendered.contains("NexGen.Support.TemporalFunctionNames.ExtractCall(workflow)"));
+    assert!(rendered.contains("NexGen.Support.TemporalFunctionNames.ExtractCall(signal)"));
+    assert!(!rendered.contains(
+        "private static (MethodInfo Method, IReadOnlyCollection<object?> Args) ExtractCall"
+    ));
     assert!(rendered.contains("private static async Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request)"));
     assert!(!rendered.contains("public static async Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request)"));
     assert!(!rendered.contains("NexusWorkflowOperationOptions"));
@@ -376,10 +389,8 @@ fn dotnet_renders_proto_backed_temporal_types() {
     ));
     assert!(rendered.contains("public Temporalio.Api.Sdk.V1.UserMetadata ToProto()"));
     assert!(rendered.contains("using NexGen.Support;"));
-    assert!(rendered.contains("Workflow.ToProto(default(Temporalio.Api.Common.V1.WorkflowType)!)"));
-    assert!(
-        rendered.contains("TaskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!)")
-    );
+    assert!(rendered.contains("NexGen.Support.ProtoExtensions.ToWorkflowTypeProto(Workflow)"));
+    assert!(rendered.contains("NexGen.Support.ProtoExtensions.ToTaskQueueProto(TaskQueue)"));
     assert!(rendered.contains("proto.UserMetadata = userMetadata.ToProto();"));
     assert!(!rendered.contains("var protoRequest = ToProto(request);"));
     assert!(!rendered.contains("private static Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest ToProto(SignalWithStartWorkflowRequest request)"));
@@ -389,14 +400,19 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("proto.RetryPolicy = retryPolicy.ToProto();"));
     assert!(rendered.contains("proto.WorkflowExecutionTimeout = executionTimeout.ToProto();"));
     assert!(rendered.contains("public IReadOnlyCollection<object?>? Args { get; init; }"));
-    assert!(rendered.contains("proto.Input = args.ToProto();"));
+    assert!(rendered.contains("proto.Input = NexGen.Support.ProtoExtensions.ToPayloads(args);"));
     assert!(rendered.contains("Args = args,"));
-    assert!(rendered.contains("proto.Summary = staticSummary.ToProto();"));
     assert!(
-        rendered.contains(
-            "internal static ApiCommon.Payloads ToProto(this IEnumerable<object?> value)"
-        )
+        rendered
+            .contains("proto.Summary = NexGen.Support.ProtoExtensions.ToPayload(staticSummary);")
     );
+    assert!(rendered.contains("internal static ApiCommon.Payload ToPayload(object? value)"));
+    assert!(
+        rendered
+            .contains("internal static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values)")
+    );
+    assert!(!rendered.contains("ToProto(this object? value)"));
+    assert!(!rendered.contains("ToProto(this IEnumerable<object?> value)"));
     assert!(rendered.contains("internal static Duration ToProto(this TimeSpan value)"));
     assert!(rendered.contains(
         "internal static Temporalio.Common.RetryPolicy FromProto(this ApiCommon.RetryPolicy proto)"
@@ -404,12 +420,16 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("internal static class TemporalWorkflowContext"));
     assert!(rendered.contains("internal static class TemporalFunctionNames"));
     assert!(rendered.contains("internal static class ProtoExtensions"));
-    assert!(rendered.contains(
-        "internal static ApiCommon.WorkflowType ToProto(this string value, ApiCommon.WorkflowType _)"
-    ));
-    assert!(rendered.contains(
-        "internal static ApiTaskQueue.TaskQueue ToProto(this string value, ApiTaskQueue.TaskQueue _)"
-    ));
+    assert!(
+        rendered.contains(
+            "internal static ApiCommon.WorkflowType ToWorkflowTypeProto(this string value)"
+        )
+    );
+    assert!(
+        rendered
+            .contains("internal static ApiTaskQueue.TaskQueue ToTaskQueueProto(this string value)")
+    );
+    assert!(!rendered.contains("ToProto(default("));
     assert!(!rendered.contains("internal static TProto ToProto<TProto>(this string value)"));
     assert!(!rendered.contains("targetType == typeof"));
     assert!(!rendered.contains("public static class TemporalWorkflowContext"));

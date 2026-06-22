@@ -18,7 +18,7 @@ namespace NexGen.TypeRoundtripService
         }
 
         public string? TaskQueue { get; init; }
-        public Temporalio.Common.RetryPolicy RetryPolicy { get; init; }
+        public Temporalio.Common.RetryPolicy RetryPolicy { get; }
         public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
         public Temporalio.Common.Priority? Priority { get; init; }
 
@@ -27,7 +27,7 @@ namespace NexGen.TypeRoundtripService
             var proto = new Temporalio.Api.Activity.V1.ActivityOptions();
             if (TaskQueue is { } taskQueue)
             {
-                proto.TaskQueue = taskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);
+                proto.TaskQueue = NexGen.Support.ProtoExtensions.ToTaskQueueProto(taskQueue);
             }
             proto.RetryPolicy = RetryPolicy.ToProto();
             if (ScheduleToCloseTimeout is { } scheduleToCloseTimeout)

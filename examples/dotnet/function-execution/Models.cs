@@ -18,15 +18,15 @@ namespace NexGen.FunctionExecution
             Enabled = enabled;
         }
 
-        public string Function { get; init; }
+        public string Function { get; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; init; }
+        public string Name { get; }
         /// <summary>
         /// The enabled argument for the function.
         /// </summary>
-        public bool Enabled { get; init; }
+        public bool Enabled { get; }
     }
 
     public class ExecuteFunctionResult
@@ -36,7 +36,7 @@ namespace NexGen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; init; }
+        public string Value { get; }
     }
 
     public class ExecuteCountedFunctionRequest
@@ -48,15 +48,15 @@ namespace NexGen.FunctionExecution
             Count = count;
         }
 
-        public string Function { get; init; }
+        public string Function { get; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; init; }
+        public string Name { get; }
         /// <summary>
         /// The count argument for the function.
         /// </summary>
-        public int Count { get; init; }
+        public int Count { get; }
     }
 
     public class ExecuteCountedFunctionResult
@@ -66,7 +66,7 @@ namespace NexGen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; init; }
+        public string Value { get; }
     }
 
     public class ExecuteNamedFunctionRequest
@@ -78,15 +78,15 @@ namespace NexGen.FunctionExecution
             Enabled = enabled;
         }
 
-        public string Function { get; init; }
+        public string Function { get; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; init; }
+        public string Name { get; }
         /// <summary>
         /// The enabled argument for the function.
         /// </summary>
-        public bool Enabled { get; init; }
+        public bool Enabled { get; }
     }
 
     public class ExecuteNamedFunctionResult
@@ -96,7 +96,7 @@ namespace NexGen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; init; }
+        public string Value { get; }
     }
 
     public class ExecuteVarargsFunctionRequest
@@ -106,7 +106,7 @@ namespace NexGen.FunctionExecution
             Function = function;
         }
 
-        public string Function { get; init; }
+        public string Function { get; }
         /// <summary>
         /// Arguments for the function.
         /// </summary>
@@ -120,7 +120,7 @@ namespace NexGen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; init; }
+        public string Value { get; }
     }
 
     public class ExecuteNamedVarargsFunctionRequest
@@ -130,7 +130,7 @@ namespace NexGen.FunctionExecution
             Function = function;
         }
 
-        public string Function { get; init; }
+        public string Function { get; }
         /// <summary>
         /// Arguments for the function.
         /// </summary>
@@ -144,7 +144,7 @@ namespace NexGen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; init; }
+        public string Value { get; }
     }
 
 }

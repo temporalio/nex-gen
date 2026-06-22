@@ -88,9 +88,11 @@ namespace NexGen.TypeShowcase
 
     public static partial class TypeShowcaseOperations
     {
+        private const string TypeShowcaseEndpoint = "type-showcase";
+
         private static async Task<User> GetUserAsync(GetUserRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
             var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.GetUser(request)).ConfigureAwait(true);
             return result;
         }
@@ -107,7 +109,7 @@ namespace NexGen.TypeShowcase
 
         private static async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
             var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
             return result;
         }
@@ -121,7 +123,7 @@ namespace NexGen.TypeShowcase
 
         private static async Task<User> RenameAsync(RenameRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
             var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.Rename(request)).ConfigureAwait(true);
             return result;
         }
@@ -135,7 +137,7 @@ namespace NexGen.TypeShowcase
 
         private static async Task<User> SetProfileAsync(SetProfileRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
             var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.SetProfile(request)).ConfigureAwait(true);
             return result;
         }
@@ -149,7 +151,7 @@ namespace NexGen.TypeShowcase
 
         private static async Task RecordSyncAsync(RecordSyncRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
             await client.ExecuteNexusOperationAsync(svc => svc.RecordSync(request)).ConfigureAwait(true);
         }
 
@@ -162,7 +164,7 @@ namespace NexGen.TypeShowcase
 
         private static async Task DeactivateAsync(DeactivateRequest request)
         {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>("type-showcase");
+            var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
             await client.ExecuteNexusOperationAsync(svc => svc.Deactivate(request)).ConfigureAwait(true);
         }
 

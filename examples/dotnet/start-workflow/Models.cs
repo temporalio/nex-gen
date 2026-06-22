@@ -19,26 +19,26 @@ namespace NexGen.StartWorkflowService
             TaskQueue = taskQueue;
         }
 
-        public string Workflow { get; init; }
+        public string Workflow { get; }
         /// <summary>
         /// Arguments for the workflow.
         /// </summary>
         public IReadOnlyCollection<object?>? Args { get; init; }
-        public string WorkflowId { get; init; }
-        public string TaskQueue { get; init; }
+        public string WorkflowId { get; }
+        public string TaskQueue { get; }
         public System.TimeSpan? WorkflowStartDelay { get; init; }
 
         public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest ToProto()
         {
             var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest();
             proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
-            proto.WorkflowType = Workflow.ToProto(default(Temporalio.Api.Common.V1.WorkflowType)!);
+            proto.WorkflowType = NexGen.Support.ProtoExtensions.ToWorkflowTypeProto(Workflow);
             if (Args is { } args)
             {
-                proto.Input = args.ToProto();
+                proto.Input = NexGen.Support.ProtoExtensions.ToPayloads(args);
             }
             proto.WorkflowId = WorkflowId;
-            proto.TaskQueue = TaskQueue.ToProto(default(Temporalio.Api.TaskQueue.V1.TaskQueue)!);
+            proto.TaskQueue = NexGen.Support.ProtoExtensions.ToTaskQueueProto(TaskQueue);
             if (WorkflowStartDelay is { } workflowStartDelay)
             {
                 proto.WorkflowStartDelay = workflowStartDelay.ToProto();
@@ -55,7 +55,7 @@ namespace NexGen.StartWorkflowService
             WorkflowExecution = workflowExecution;
         }
 
-        public WorkflowExecution WorkflowExecution { get; init; }
+        public WorkflowExecution WorkflowExecution { get; }
         public string? Reason { get; init; }
 
         public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest ToProto()
@@ -79,7 +79,7 @@ namespace NexGen.StartWorkflowService
             WorkflowId = workflowId;
         }
 
-        public string WorkflowId { get; init; }
+        public string WorkflowId { get; }
         public string? RunId { get; init; }
 
         public Temporalio.Api.Common.V1.WorkflowExecution ToProto()

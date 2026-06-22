@@ -30,7 +30,7 @@ namespace NexGen.FunctionExecution
 
     }
 
-    public static class NexGenOperationRegistry
+    internal static class NexGenOperationRegistry
     {
         internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =
             new Dictionary<string, ServiceDefinition>

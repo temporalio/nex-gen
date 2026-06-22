@@ -74,7 +74,7 @@ namespace NexGen.TypeShowcase
             UserId = userId;
         }
 
-        public string UserId { get; init; }
+        public string UserId { get; }
         public string? ConsistencyToken { get; init; }
     }
 
@@ -86,8 +86,8 @@ namespace NexGen.TypeShowcase
             Email = email;
         }
 
-        public string UserId { get; init; }
-        public string Email { get; init; }
+        public string UserId { get; }
+        public string Email { get; }
     }
 
     internal class RenameRequest
@@ -98,8 +98,8 @@ namespace NexGen.TypeShowcase
             DisplayName = displayName;
         }
 
-        public string UserId { get; init; }
-        public string DisplayName { get; init; }
+        public string UserId { get; }
+        public string DisplayName { get; }
     }
 
     internal class SetProfileRequest
@@ -110,8 +110,8 @@ namespace NexGen.TypeShowcase
             Profile = profile;
         }
 
-        public string UserId { get; init; }
-        public UserProfile Profile { get; init; }
+        public string UserId { get; }
+        public UserProfile Profile { get; }
     }
 
     public class UserProfile
@@ -125,11 +125,11 @@ namespace NexGen.TypeShowcase
             NotificationTarget = notificationTarget;
         }
 
-        public IReadOnlyList<string> Tags { get; init; }
-        public IReadOnlyDictionary<string, string> Metadata { get; init; }
-        public UserCapability Capabilities { get; init; }
-        public NexusResult<string, string> SyncState { get; init; }
-        public NotificationTarget NotificationTarget { get; init; }
+        public IReadOnlyList<string> Tags { get; }
+        public IReadOnlyDictionary<string, string> Metadata { get; }
+        public UserCapability Capabilities { get; }
+        public NexusResult<string, string> SyncState { get; }
+        public NotificationTarget NotificationTarget { get; }
         public PostalAddress? Address { get; init; }
     }
 
@@ -142,9 +142,9 @@ namespace NexGen.TypeShowcase
             Country = country;
         }
 
-        public string Street { get; init; }
-        public string City { get; init; }
-        public string Country { get; init; }
+        public string Street { get; }
+        public string City { get; }
+        public string Country { get; }
         public (double, double)? Coordinates { get; init; }
     }
 
@@ -156,8 +156,8 @@ namespace NexGen.TypeShowcase
             Report = report;
         }
 
-        public string UserId { get; init; }
-        public SyncReport Report { get; init; }
+        public string UserId { get; }
+        public SyncReport Report { get; }
     }
 
     public class SyncReport
@@ -169,9 +169,9 @@ namespace NexGen.TypeShowcase
             RegionStatus = regionStatus;
         }
 
-        public IReadOnlyList<(double, double)> Route { get; init; }
-        public IReadOnlyList<NexusResult<string, string>> Attempts { get; init; }
-        public IReadOnlyDictionary<string, NexusResult<string, string>> RegionStatus { get; init; }
+        public IReadOnlyList<(double, double)> Route { get; }
+        public IReadOnlyList<NexusResult<string, string>> Attempts { get; }
+        public IReadOnlyDictionary<string, NexusResult<string, string>> RegionStatus { get; }
     }
 
     internal class DeactivateRequest
@@ -181,7 +181,7 @@ namespace NexGen.TypeShowcase
             UserId = userId;
         }
 
-        public string UserId { get; init; }
+        public string UserId { get; }
         public string? Reason { get; init; }
     }
 
