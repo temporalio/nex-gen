@@ -237,17 +237,9 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
     assert!(rendered.contains("[NexusOperation(\"SetProfile\")]"));
     assert!(rendered.contains("User SetProfile(SetProfileRequest request);"));
     assert!(!rendered.contains("public sealed class NexGenNexusOperation"));
-    assert!(rendered.contains("internal static class NexGenOperationRegistry"));
-    assert!(
-        rendered
-            .contains("internal static IReadOnlyDictionary<string, ServiceDefinition> Services")
-    );
-    assert!(rendered.contains("[\"TypeShowcase\"] = ServiceDefinition.FromType<ITypeShowcase>()"));
-    assert!(rendered.contains(
-        "public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations"
-    ));
-    assert!(rendered.contains("[(\"TypeShowcase\", \"SetProfile\")]"));
-    assert!(rendered.contains("Services[\"TypeShowcase\"].Operations[\"SetProfile\"]"));
+    assert!(!rendered.contains("NexGenOperationRegistry"));
+    assert!(!rendered.contains("ServiceDefinition.FromType"));
+    assert!(!rendered.contains("OperationDefinition"));
     assert!(!rendered.contains("OperationDefinition.FromMethod"));
     assert!(!rendered.contains("endpoint: \"type-showcase\""));
     assert!(!rendered.contains("requestType: typeof(SetProfileRequest)"));
@@ -284,15 +276,9 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("namespace Temporalio.Workflows;"));
     assert!(!rendered.contains("namespace NexGen.Support;"));
     assert!(rendered.contains("Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse SignalWithStartWorkflow(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest request);"));
-    assert!(rendered.contains(
-        "[(\"temporal.api.workflowservice.v1.WorkflowService\", \"SignalWithStartWorkflowExecution\")]"
-    ));
-    assert!(rendered.contains(
-        "[\"temporal.api.workflowservice.v1.WorkflowService\"] = ServiceDefinition.FromType<IWorkflowService>()"
-    ));
-    assert!(rendered.contains(
-        "Services[\"temporal.api.workflowservice.v1.WorkflowService\"].Operations[\"SignalWithStartWorkflowExecution\"]"
-    ));
+    assert!(!rendered.contains("NexGenOperationRegistry"));
+    assert!(!rendered.contains("ServiceDefinition.FromType"));
+    assert!(!rendered.contains("OperationDefinition"));
     assert!(!rendered.contains("endpoint: \"temporal-system\""));
     assert!(!rendered.contains(
         "requestType: typeof(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest)"

@@ -4,7 +4,6 @@
 #pragma warning disable CS1591
 
 using System;
-using System.Collections.Generic;
 using NexusRpc;
 
 namespace NexGen.TypeRoundtripService
@@ -19,22 +18,6 @@ namespace NexGen.TypeRoundtripService
         [NexusOperation("ActivityOptionsOperation")]
         Temporalio.Api.Activity.V1.ActivityOptions ActivityOptionsOperation(Temporalio.Api.Activity.V1.ActivityOptions request);
 
-    }
-
-    internal static class NexGenOperationRegistry
-    {
-        internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =
-            new Dictionary<string, ServiceDefinition>
-            {
-                ["TypeRoundtripService"] = ServiceDefinition.FromType<ITypeRoundtripService>(),
-            };
-
-        public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =
-            new Dictionary<(string Service, string Operation), OperationDefinition>
-            {
-                [("TypeRoundtripService", "RetryPolicyOperation")] = Services["TypeRoundtripService"].Operations["RetryPolicyOperation"],
-                [("TypeRoundtripService", "ActivityOptionsOperation")] = Services["TypeRoundtripService"].Operations["ActivityOptionsOperation"],
-            };
     }
 
 }

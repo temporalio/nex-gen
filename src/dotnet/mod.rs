@@ -279,10 +279,7 @@ fn render_models_file(
 }
 
 fn render_service_file(namespace: &str, api_plan: &ApiPlan) -> String {
-    let mut output = generated_file_prelude(
-        namespace,
-        &["System", "System.Collections.Generic", "NexusRpc"],
-    );
+    let mut output = generated_file_prelude(namespace, &["System", "NexusRpc"]);
     for service in &api_plan.services {
         output.push_str("[NexusService(");
         output.push_str(&csharp_string_literal(&service.wire_name));
@@ -294,13 +291,6 @@ fn render_service_file(namespace: &str, api_plan: &ApiPlan) -> String {
             render_service_operation(&mut output, operation, api_plan);
         }
         output.push_str("}\n\n");
-    }
-    if api_plan
-        .services
-        .iter()
-        .any(|service| !service.operations.is_empty())
-    {
-        render_operation_registry(&mut output, api_plan);
     }
     close_namespace(&mut output);
     output
@@ -512,44 +502,6 @@ fn render_service_operation(output: &mut String, operation: &PlannedOperation, a
         output.push_str(" request");
     }
     output.push_str(");\n\n");
-}
-
-fn render_operation_registry(output: &mut String, api_plan: &ApiPlan) {
-    output.push_str("internal static class NexGenOperationRegistry\n{\n");
-    output.push_str(
-        "    internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =\n",
-    );
-    output.push_str("        new Dictionary<string, ServiceDefinition>\n");
-    output.push_str("        {\n");
-    for service in &api_plan.services {
-        let service_type = format!("I{}", csharp_type_name(&service.name));
-        output.push_str("            [");
-        output.push_str(&csharp_string_literal(&service.wire_name));
-        output.push_str("] = ServiceDefinition.FromType<");
-        output.push_str(&service_type);
-        output.push_str(">(),\n");
-    }
-    output.push_str("        };\n\n");
-    output.push_str("    public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =\n");
-    output.push_str(
-        "        new Dictionary<(string Service, string Operation), OperationDefinition>\n",
-    );
-    output.push_str("        {\n");
-    for service in &api_plan.services {
-        for operation in &service.operations {
-            output.push_str("            [(");
-            output.push_str(&csharp_string_literal(&service.wire_name));
-            output.push_str(", ");
-            output.push_str(&csharp_string_literal(&operation.wire_name));
-            output.push_str(")] = Services[");
-            output.push_str(&csharp_string_literal(&service.wire_name));
-            output.push_str("].Operations[");
-            output.push_str(&csharp_string_literal(&operation.wire_name));
-            output.push_str("],\n");
-        }
-    }
-    output.push_str("        };\n");
-    output.push_str("}\n\n");
 }
 
 fn render_operations_class(

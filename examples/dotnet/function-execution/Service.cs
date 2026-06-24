@@ -4,7 +4,6 @@
 #pragma warning disable CS1591
 
 using System;
-using System.Collections.Generic;
 using NexusRpc;
 
 namespace NexGen.FunctionExecution
@@ -28,25 +27,6 @@ namespace NexGen.FunctionExecution
         [NexusOperation("ExecuteNamedVarargsFunction")]
         ExecuteNamedVarargsFunctionResult ExecuteNamedVarargsFunction(ExecuteNamedVarargsFunctionRequest request);
 
-    }
-
-    internal static class NexGenOperationRegistry
-    {
-        internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =
-            new Dictionary<string, ServiceDefinition>
-            {
-                ["FunctionExecution"] = ServiceDefinition.FromType<IFunctionExecution>(),
-            };
-
-        public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =
-            new Dictionary<(string Service, string Operation), OperationDefinition>
-            {
-                [("FunctionExecution", "ExecuteFunction")] = Services["FunctionExecution"].Operations["ExecuteFunction"],
-                [("FunctionExecution", "ExecuteCountedFunction")] = Services["FunctionExecution"].Operations["ExecuteCountedFunction"],
-                [("FunctionExecution", "ExecuteNamedFunction")] = Services["FunctionExecution"].Operations["ExecuteNamedFunction"],
-                [("FunctionExecution", "ExecuteVarargsFunction")] = Services["FunctionExecution"].Operations["ExecuteVarargsFunction"],
-                [("FunctionExecution", "ExecuteNamedVarargsFunction")] = Services["FunctionExecution"].Operations["ExecuteNamedVarargsFunction"],
-            };
     }
 
 }

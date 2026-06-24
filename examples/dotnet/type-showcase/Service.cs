@@ -4,7 +4,6 @@
 #pragma warning disable CS1591
 
 using System;
-using System.Collections.Generic;
 using NexusRpc;
 
 namespace NexGen.TypeShowcase
@@ -31,26 +30,6 @@ namespace NexGen.TypeShowcase
         [NexusOperation("Deactivate")]
         void Deactivate(DeactivateRequest request);
 
-    }
-
-    internal static class NexGenOperationRegistry
-    {
-        internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =
-            new Dictionary<string, ServiceDefinition>
-            {
-                ["TypeShowcase"] = ServiceDefinition.FromType<ITypeShowcase>(),
-            };
-
-        public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =
-            new Dictionary<(string Service, string Operation), OperationDefinition>
-            {
-                [("TypeShowcase", "GetUser")] = Services["TypeShowcase"].Operations["GetUser"],
-                [("TypeShowcase", "UpdateEmail")] = Services["TypeShowcase"].Operations["UpdateEmail"],
-                [("TypeShowcase", "Rename")] = Services["TypeShowcase"].Operations["Rename"],
-                [("TypeShowcase", "SetProfile")] = Services["TypeShowcase"].Operations["SetProfile"],
-                [("TypeShowcase", "RecordSync")] = Services["TypeShowcase"].Operations["RecordSync"],
-                [("TypeShowcase", "Deactivate")] = Services["TypeShowcase"].Operations["Deactivate"],
-            };
     }
 
 }

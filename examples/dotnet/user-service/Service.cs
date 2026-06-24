@@ -4,7 +4,6 @@
 #pragma warning disable CS1591
 
 using System;
-using System.Collections.Generic;
 using NexusRpc;
 
 namespace NexGen.UserService
@@ -19,22 +18,6 @@ namespace NexGen.UserService
         [NexusOperation("UpdateEmail")]
         User UpdateEmail(UpdateEmailRequest request);
 
-    }
-
-    internal static class NexGenOperationRegistry
-    {
-        internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =
-            new Dictionary<string, ServiceDefinition>
-            {
-                ["UserService"] = ServiceDefinition.FromType<IUserService>(),
-            };
-
-        public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =
-            new Dictionary<(string Service, string Operation), OperationDefinition>
-            {
-                [("UserService", "GetUser")] = Services["UserService"].Operations["GetUser"],
-                [("UserService", "UpdateEmail")] = Services["UserService"].Operations["UpdateEmail"],
-            };
     }
 
 }

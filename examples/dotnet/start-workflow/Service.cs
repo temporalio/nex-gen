@@ -4,7 +4,6 @@
 #pragma warning disable CS1591
 
 using System;
-using System.Collections.Generic;
 using NexusRpc;
 
 namespace NexGen.StartWorkflowService
@@ -22,23 +21,6 @@ namespace NexGen.StartWorkflowService
         [NexusOperation("CancelWorkflow")]
         Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse CancelWorkflow(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest request);
 
-    }
-
-    internal static class NexGenOperationRegistry
-    {
-        internal static IReadOnlyDictionary<string, ServiceDefinition> Services { get; } =
-            new Dictionary<string, ServiceDefinition>
-            {
-                ["StartWorkflowService"] = ServiceDefinition.FromType<IStartWorkflowService>(),
-            };
-
-        public static IReadOnlyDictionary<(string Service, string Operation), OperationDefinition> Operations { get; } =
-            new Dictionary<(string Service, string Operation), OperationDefinition>
-            {
-                [("StartWorkflowService", "StartWorkflow")] = Services["StartWorkflowService"].Operations["StartWorkflow"],
-                [("StartWorkflowService", "RestartWorkflow")] = Services["StartWorkflowService"].Operations["RestartWorkflow"],
-                [("StartWorkflowService", "CancelWorkflow")] = Services["StartWorkflowService"].Operations["CancelWorkflow"],
-            };
     }
 
 }
