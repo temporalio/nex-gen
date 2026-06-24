@@ -66,6 +66,7 @@ pub(crate) fn generate(
 
             Ok(RenderedService {
                 name: &service.name,
+                wire_name: &service.wire_name,
                 endpoint: service.endpoint.clone(),
                 operations,
                 resources: service.resources.clone(),
@@ -354,8 +355,16 @@ impl GoImportCollector {
 /// implemented.
 #[derive(Debug)]
 struct RenderedService<'a> {
-    /// UpperCamelCase service name (e.g. `"TypeShowcase"`).
+    /// UpperCamelCase service name (e.g. `"TypeShowcase"`). Retained for
+    /// diagnostics and potential future service-level generation; the wire name
+    /// is used for the emitted `ServiceName` constant.
+    #[allow(dead_code)]
     name: &'a str,
+    /// Wire-format service name from `@nexus.service-name`, defaulting to the
+    /// UpperCamelCase service name. This is the value sent on the wire (e.g.
+    /// `"temporal.api.workflowservice.v1.WorkflowService"`), so the generated
+    /// `ServiceName` constant must use it rather than `name`.
+    wire_name: &'a str,
     /// Nexus endpoint identifier (e.g. `"type-showcase"`).
     endpoint: String,
     /// Operations belonging to this service.
@@ -3301,8 +3310,11 @@ fn render_model_proto_methods(
 /// const UpdateEmailOp = "UpdateEmail"
 /// ```
 fn render_service_constants(output: &mut String, service: &RenderedService<'_>) {
+    // ServiceName is the wire-format service name sent on the Nexus request, so
+    // it must use the `@nexus.service-name` value (which defaults to the
+    // UpperCamelCase service name when unspecified).
     output.push_str("const ServiceName = \"");
-    output.push_str(service.name);
+    output.push_str(service.wire_name);
     output.push_str("\"\n");
     output.push_str("const Endpoint = \"");
     output.push_str(&service.endpoint);
