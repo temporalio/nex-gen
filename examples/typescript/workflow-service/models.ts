@@ -18,7 +18,7 @@ import {
   versioningOverrideToProto,
   workflowIdReusePolicyToProto,
   workflowIdConflictPolicyToProto,
-} from "./support.ts";
+} from "./support";
 
 export function requiredField<T>(
   value: T | null | undefined,

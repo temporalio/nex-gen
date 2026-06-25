@@ -7,7 +7,7 @@ import {
   taskQueueToProto,
   workflowNamespace,
   durationToProto,
-} from "./support.ts";
+} from "./support";
 
 export function requiredField<T>(
   value: T | null | undefined,

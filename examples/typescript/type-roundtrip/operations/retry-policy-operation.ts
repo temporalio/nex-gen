@@ -3,8 +3,8 @@
 import type * as common from "@temporalio/common";
 import * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
-import { TypeRoundtripService } from "../service.ts";
-import { retryPolicyToProto } from "../support.ts";
+import { TypeRoundtripService } from "../service";
+import { retryPolicyToProto } from "../support";
 
 /**
  * @param request - Request for the operation.

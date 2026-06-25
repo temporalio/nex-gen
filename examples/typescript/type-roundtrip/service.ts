@@ -2,7 +2,7 @@
 
 import * as nexus from "nexus-rpc";
 import type { temporal } from "@temporalio/proto";
-import type { ActivityOptions } from "./models.ts";
+import type { ActivityOptions } from "./models";
 
 export const TypeRoundtripService = nexus.service("TypeRoundtripService", {
   retryPolicyOperation: nexus.operation<

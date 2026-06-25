@@ -11,7 +11,7 @@ import {
   durationToProto,
   priorityFromProto,
   priorityToProto,
-} from "./support.ts";
+} from "./support";
 
 export function requiredField<T>(
   value: T | null | undefined,

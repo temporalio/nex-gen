@@ -2,9 +2,9 @@
 
 import * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
-import { TypeRoundtripService } from "../service.ts";
-import { activityOptionsToProto } from "../models.ts";
-import type { ActivityOptions } from "../models.ts";
+import { TypeRoundtripService } from "../service";
+import { activityOptionsToProto } from "../models";
+import type { ActivityOptions } from "../models";
 
 /**
  * @param request - Request for the operation.

@@ -373,7 +373,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains("result.runId ?? undefined"));
     assert!(rendered.contains("export async function signalWithStartWorkflow<"));
     assert!(rendered.contains(
-        "export { signalWithStartWorkflow } from './operations/signal-with-start-workflow.ts';"
+        "export { signalWithStartWorkflow } from './operations/signal-with-start-workflow';"
     ));
     assert!(rendered.contains("export const operationRegistry = ["));
     assert!(rendered.contains("service: \"temporal.api.workflowservice.v1.WorkflowService\""));
@@ -384,10 +384,8 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains(
         "outputType: \"temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionResponse\""
     ));
-    assert!(
-        rendered.contains("export type { SignalWithStartWorkflowRequest } from './models.ts';")
-    );
-    assert!(!rendered.contains("export { WorkflowService } from './service.ts';"));
+    assert!(rendered.contains("export type { SignalWithStartWorkflowRequest } from './models';"));
+    assert!(!rendered.contains("export { WorkflowService } from './service';"));
     assert!(!rendered.contains("export type { SignalWithStartWorkflowResponse"));
     assert!(rendered.contains("request: SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>,"));
     assert!(rendered.contains("const client = workflow.createNexusServiceClient({"));

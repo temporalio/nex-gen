@@ -2478,7 +2478,7 @@ fn render_index_module(services: &[RenderedService<'_>]) -> String {
             output.push_str(&operation.attr_name);
             output.push_str(" } from './operations/");
             output.push_str(&operation_file_name(operation));
-            output.push_str(".ts';\n");
+            output.push_str("';\n");
         }
     }
     let mut input_model_names = services
@@ -2495,7 +2495,7 @@ fn render_index_module(services: &[RenderedService<'_>]) -> String {
     if !input_model_names.is_empty() {
         output.push_str("export type { ");
         output.push_str(&input_model_names.join(", "));
-        output.push_str(" } from './models.ts';\n");
+        output.push_str(" } from './models';\n");
     }
     output
 }
@@ -2599,10 +2599,10 @@ fn render_models_module(
     render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
     render_value_imports(
         &mut imports,
-        "../nex-gen-runtime.ts",
+        "../nex-gen-runtime",
         &used_import_names(&body, &["registerNexusType".to_string()]),
     );
-    render_support_imports(&mut imports, support_exports, "./support.ts", &body);
+    render_support_imports(&mut imports, support_exports, "./support", &body);
     render_generated_module(imports, body)
 }
 
@@ -2628,7 +2628,7 @@ fn render_service_module(
         // Side-effect import: model interfaces are imported `type`-only
         // elsewhere, so without this the `registerNexusType` calls in
         // models.ts would never run at runtime.
-        imports.push_str("import \"./models.ts\";\n");
+        imports.push_str("import \"./models\";\n");
     }
     render_typescript_namespace_imports(
         &mut imports,
@@ -2639,12 +2639,12 @@ fn render_service_module(
     render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
     render_type_imports(
         &mut imports,
-        "./models.ts",
+        "./models",
         &used_import_names(&body, &model_type_names(enums, flags, variants, models)),
     );
     render_type_imports(
         &mut imports,
-        "./resources.ts",
+        "./resources",
         &used_import_names(&body, &resource_type_names(services)),
     );
     render_generated_module(imports, body)
@@ -2675,7 +2675,7 @@ fn render_resources_module(
     render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
     render_value_imports(
         &mut imports,
-        "../nex-gen-runtime.ts",
+        "../nex-gen-runtime",
         &used_import_names(
             &body,
             &[
@@ -2686,16 +2686,16 @@ fn render_resources_module(
     );
     render_type_imports(
         &mut imports,
-        "./models.ts",
+        "./models",
         &used_import_names(&body, &model_type_names(enums, flags, variants, models)),
     );
-    render_support_imports(&mut imports, support_exports, "./support.ts", &body);
+    render_support_imports(&mut imports, support_exports, "./support", &body);
     for service in services {
         for operation in &service.operations {
             if contains_identifier(&body, &operation.attr_name) {
                 render_value_imports(
                     &mut imports,
-                    &format!("./operations/{}.ts", operation_file_name(operation)),
+                    &format!("./operations/{}", operation_file_name(operation)),
                     std::slice::from_ref(&operation.attr_name),
                 );
             }
@@ -2726,22 +2726,22 @@ fn render_operation_module(
         &[("workflow", "@temporalio/workflow")],
     );
     render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
-    render_value_imports(&mut imports, "../service.ts", &[service.name.to_string()]);
+    render_value_imports(&mut imports, "../service", &[service.name.to_string()]);
     let mut model_values = model_to_proto_function_names(models);
     model_values.push("requiredField".to_string());
     model_values.sort();
     model_values.dedup();
     render_value_imports(
         &mut imports,
-        "../models.ts",
+        "../models",
         &used_import_names(&body, &model_values),
     );
     render_type_imports(
         &mut imports,
-        "../models.ts",
+        "../models",
         &used_import_names(&body, &model_type_names(enums, flags, variants, models)),
     );
-    render_support_imports(&mut imports, support_exports, "../support.ts", &body);
+    render_support_imports(&mut imports, support_exports, "../support", &body);
     let resources = used_import_names(&body, &resource_type_names(services));
     let value_resources = resources
         .iter()
@@ -2754,14 +2754,14 @@ fn render_operation_module(
         .cloned()
         .collect::<Vec<_>>();
     if !type_resources.is_empty() {
-        imports.push_str("import '../resources.ts';\n");
+        imports.push_str("import '../resources';\n");
     }
-    render_value_imports(&mut imports, "../resources.ts", &value_resources);
-    render_type_imports(&mut imports, "../resources.ts", &type_resources);
+    render_value_imports(&mut imports, "../resources", &value_resources);
+    render_type_imports(&mut imports, "../resources", &type_resources);
     if operation.input_nexus_type_id.is_some() {
         render_value_imports(
             &mut imports,
-            "../../nex-gen-runtime.ts",
+            "../../nex-gen-runtime",
             &["nexusValue".to_string()],
         );
     }

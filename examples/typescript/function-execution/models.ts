@@ -2,7 +2,7 @@
 
 import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
-import { registerNexusType } from "../nex-gen-runtime.ts";
+import { registerNexusType } from "../nex-gen-runtime";
 
 export function requiredField<T>(
   value: T | null | undefined,

@@ -2,9 +2,9 @@
 
 import * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
-import { WorkflowService } from "../service.ts";
-import { cancelWorkflowRequestToProto } from "../models.ts";
-import type { CancelWorkflowRequest } from "../models.ts";
+import { WorkflowService } from "../service";
+import { cancelWorkflowRequestToProto } from "../models";
+import type { CancelWorkflowRequest } from "../models";
 
 /**
  * @param request - Request for the operation.
