@@ -4,11 +4,13 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 
 namespace NexGen.UserService
 {
 
+    [GeneratedCode("nex-gen", null)]
     internal class GetUserRequest
     {
         internal GetUserRequest(string userId)
@@ -19,6 +21,7 @@ namespace NexGen.UserService
         public string UserId { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     internal class UpdateEmailRequest
     {
         internal UpdateEmailRequest(string userId, string email)

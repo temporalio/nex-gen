@@ -4,6 +4,7 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -16,6 +17,7 @@ using Temporalio.Workflows;
 namespace NexGen.UserService
 {
 
+    [GeneratedCode("nex-gen", null)]
     public class GetUserOptions
     {
         public GetUserOptions(string userId)
@@ -26,6 +28,7 @@ namespace NexGen.UserService
         public string UserId { get; set; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class UpdateEmailOptions
     {
         public UpdateEmailOptions(string userId, string email)
@@ -40,8 +43,10 @@ namespace NexGen.UserService
 
     public static partial class UserServiceOperations
     {
+        [GeneratedCode("nex-gen", null)]
         private const string UserServiceEndpoint = "user-service";
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<User> GetUserAsync(GetUserRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IUserService>(UserServiceEndpoint);
@@ -50,12 +55,14 @@ namespace NexGen.UserService
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<User> GetUserAsync(GetUserOptions options)
         {
             var request = new GetUserRequest(options.UserId);
             return GetUserAsync(request);
         }
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IUserService>(UserServiceEndpoint);
@@ -64,6 +71,7 @@ namespace NexGen.UserService
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<User> UpdateEmailAsync(UpdateEmailOptions options)
         {
             var request = new UpdateEmailRequest(options.UserId, options.Email);

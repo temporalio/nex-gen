@@ -4,6 +4,7 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -19,6 +20,8 @@ namespace Temporalio.Workflows
     /// <summary>
     /// Signal a workflow, starting it first if needed.
     /// </summary>
+    /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
+    [GeneratedCode("nex-gen", null)]
     public class SignalWithStartWorkflowOptions
     {
         public SignalWithStartWorkflowOptions(string id, string taskQueue)
@@ -99,6 +102,7 @@ namespace Temporalio.Workflows
 
     public static partial class Workflow
     {
+        [GeneratedCode("nex-gen", null)]
         private const string WorkflowServiceEndpoint = "temporal-system";
 
         /// <summary>
@@ -106,6 +110,8 @@ namespace Temporalio.Workflows
         /// </summary>
         /// <param name="request">Request fields for signaling a workflow, starting it first if needed.</param>
         /// <returns>A workflow handle to the started workflow.</returns>
+        /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
+        [GeneratedCode("nex-gen", null)]
         private static async Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IWorkflowService>(WorkflowServiceEndpoint);
@@ -123,6 +129,8 @@ namespace Temporalio.Workflows
         /// <param name="signalArgs">Arguments for the signal.</param>
         /// <param name="options">Request fields for signaling a workflow, starting it first if needed.</param>
         /// <returns>A workflow handle to the started workflow.</returns>
+        /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
+        [GeneratedCode("nex-gen", null)]
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)
         {
             var request = new SignalWithStartWorkflowRequest(workflow, options.Id, options.TaskQueue, signal)
@@ -155,6 +163,8 @@ namespace Temporalio.Workflows
         /// <param name="signalArgs">Arguments for the signal.</param>
         /// <param name="options">Request fields for signaling a workflow, starting it first if needed.</param>
         /// <returns>A workflow handle to the started workflow.</returns>
+        /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
+        [GeneratedCode("nex-gen", null)]
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)
         {
             var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);
@@ -188,6 +198,8 @@ namespace Temporalio.Workflows
         /// <param name="signal">Signal name or signal expression to send with the start request.</param>
         /// <param name="options">Request fields for signaling a workflow, starting it first if needed.</param>
         /// <returns>A workflow handle to the started workflow.</returns>
+        /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
+        [GeneratedCode("nex-gen", null)]
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow>(string workflow, IReadOnlyCollection<object?>? args, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)
         {
             var (signalMethod, signalArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(signal);
@@ -220,6 +232,8 @@ namespace Temporalio.Workflows
         /// <param name="signal">Signal name or signal expression to send with the start request.</param>
         /// <param name="options">Request fields for signaling a workflow, starting it first if needed.</param>
         /// <returns>A workflow handle to the started workflow.</returns>
+        /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
+        [GeneratedCode("nex-gen", null)]
         public static Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)
         {
             var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);

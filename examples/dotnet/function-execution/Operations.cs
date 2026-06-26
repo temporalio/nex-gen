@@ -4,6 +4,7 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -18,8 +19,10 @@ namespace NexGen.FunctionExecution
 
     public static partial class FunctionExecutionOperations
     {
+        [GeneratedCode("nex-gen", null)]
         private const string FunctionExecutionEndpoint = "function-execution";
 
+        [GeneratedCode("nex-gen", null)]
         public static async Task<ExecuteFunctionResult> ExecuteFunctionAsync(ExecuteFunctionRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);
@@ -27,6 +30,7 @@ namespace NexGen.FunctionExecution
             return result;
         }
 
+        [GeneratedCode("nex-gen", null)]
         public static async Task<ExecuteCountedFunctionResult> ExecuteCountedFunctionAsync(ExecuteCountedFunctionRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);
@@ -34,6 +38,7 @@ namespace NexGen.FunctionExecution
             return result;
         }
 
+        [GeneratedCode("nex-gen", null)]
         public static async Task<ExecuteNamedFunctionResult> ExecuteNamedFunctionAsync(ExecuteNamedFunctionRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);
@@ -41,6 +46,7 @@ namespace NexGen.FunctionExecution
             return result;
         }
 
+        [GeneratedCode("nex-gen", null)]
         public static async Task<ExecuteVarargsFunctionResult> ExecuteVarargsFunctionAsync(ExecuteVarargsFunctionRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);
@@ -48,6 +54,7 @@ namespace NexGen.FunctionExecution
             return result;
         }
 
+        [GeneratedCode("nex-gen", null)]
         public static async Task<ExecuteNamedVarargsFunctionResult> ExecuteNamedVarargsFunctionAsync(ExecuteNamedVarargsFunctionRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IFunctionExecution>(FunctionExecutionEndpoint);

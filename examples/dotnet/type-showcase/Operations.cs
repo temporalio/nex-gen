@@ -4,6 +4,7 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -16,6 +17,7 @@ using Temporalio.Workflows;
 namespace NexGen.TypeShowcase
 {
 
+    [GeneratedCode("nex-gen", null)]
     public class GetUserOptions
     {
         public GetUserOptions(string userId)
@@ -27,6 +29,7 @@ namespace NexGen.TypeShowcase
         public string? ConsistencyToken { get; set; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class UpdateEmailOptions
     {
         public UpdateEmailOptions(string userId, string email)
@@ -39,6 +42,7 @@ namespace NexGen.TypeShowcase
         public string Email { get; set; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class RenameOptions
     {
         public RenameOptions(string userId, string displayName)
@@ -51,6 +55,7 @@ namespace NexGen.TypeShowcase
         public string DisplayName { get; set; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class SetProfileOptions
     {
         public SetProfileOptions(string userId, UserProfile profile)
@@ -63,6 +68,7 @@ namespace NexGen.TypeShowcase
         public UserProfile Profile { get; set; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class RecordSyncOptions
     {
         public RecordSyncOptions(string userId, SyncReport report)
@@ -75,6 +81,7 @@ namespace NexGen.TypeShowcase
         public SyncReport Report { get; set; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class DeactivateOptions
     {
         public DeactivateOptions(string userId)
@@ -88,8 +95,10 @@ namespace NexGen.TypeShowcase
 
     public static partial class TypeShowcaseOperations
     {
+        [GeneratedCode("nex-gen", null)]
         private const string TypeShowcaseEndpoint = "type-showcase";
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<User> GetUserAsync(GetUserRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
@@ -98,6 +107,7 @@ namespace NexGen.TypeShowcase
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<User> GetUserAsync(GetUserOptions options)
         {
             var request = new GetUserRequest(options.UserId)
@@ -107,6 +117,7 @@ namespace NexGen.TypeShowcase
             return GetUserAsync(request);
         }
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
@@ -115,12 +126,14 @@ namespace NexGen.TypeShowcase
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<User> UpdateEmailAsync(UpdateEmailOptions options)
         {
             var request = new UpdateEmailRequest(options.UserId, options.Email);
             return UpdateEmailAsync(request);
         }
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<User> RenameAsync(RenameRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
@@ -129,12 +142,14 @@ namespace NexGen.TypeShowcase
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<User> RenameAsync(RenameOptions options)
         {
             var request = new RenameRequest(options.UserId, options.DisplayName);
             return RenameAsync(request);
         }
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<User> SetProfileAsync(SetProfileRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
@@ -143,12 +158,14 @@ namespace NexGen.TypeShowcase
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<User> SetProfileAsync(SetProfileOptions options)
         {
             var request = new SetProfileRequest(options.UserId, options.Profile);
             return SetProfileAsync(request);
         }
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task RecordSyncAsync(RecordSyncRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
@@ -156,12 +173,14 @@ namespace NexGen.TypeShowcase
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task RecordSyncAsync(RecordSyncOptions options)
         {
             var request = new RecordSyncRequest(options.UserId, options.Report);
             return RecordSyncAsync(request);
         }
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task DeactivateAsync(DeactivateRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeShowcase>(TypeShowcaseEndpoint);
@@ -169,6 +188,7 @@ namespace NexGen.TypeShowcase
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task DeactivateAsync(DeactivateOptions options)
         {
             var request = new DeactivateRequest(options.UserId)

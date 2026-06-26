@@ -4,12 +4,14 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using NexGen.Support;
 
 namespace NexGen.TypeRoundtripService
 {
 
+    [GeneratedCode("nex-gen", null)]
     internal class ActivityOptions
     {
         internal ActivityOptions(Temporalio.Common.RetryPolicy retryPolicy)

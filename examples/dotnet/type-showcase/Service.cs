@@ -4,29 +4,37 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using NexusRpc;
 
 namespace NexGen.TypeShowcase
 {
 
+    [GeneratedCode("nex-gen", null)]
     [NexusService("TypeShowcase")]
     internal interface ITypeShowcase
     {
+        [GeneratedCode("nex-gen", null)]
         [NexusOperation("GetUser")]
         User GetUser(GetUserRequest request);
 
+        [GeneratedCode("nex-gen", null)]
         [NexusOperation("UpdateEmail")]
         User UpdateEmail(UpdateEmailRequest request);
 
+        [GeneratedCode("nex-gen", null)]
         [NexusOperation("Rename")]
         User Rename(RenameRequest request);
 
+        [GeneratedCode("nex-gen", null)]
         [NexusOperation("SetProfile")]
         User SetProfile(SetProfileRequest request);
 
+        [GeneratedCode("nex-gen", null)]
         [NexusOperation("RecordSync")]
         void RecordSync(RecordSyncRequest request);
 
+        [GeneratedCode("nex-gen", null)]
         [NexusOperation("Deactivate")]
         void Deactivate(DeactivateRequest request);
 

@@ -4,6 +4,7 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -16,6 +17,7 @@ using Temporalio.Workflows;
 namespace NexGen.TypeRoundtripService
 {
 
+    [GeneratedCode("nex-gen", null)]
     public class ActivityOptionsOperationOptions
     {
         public ActivityOptionsOperationOptions(Temporalio.Common.RetryPolicy retryPolicy)
@@ -31,8 +33,10 @@ namespace NexGen.TypeRoundtripService
 
     public static partial class TypeRoundtripServiceOperations
     {
+        [GeneratedCode("nex-gen", null)]
         private const string TypeRoundtripServiceEndpoint = "temporal-system";
 
+        [GeneratedCode("nex-gen", null)]
         public static async Task<Temporalio.Common.RetryPolicy> RetryPolicyOperationAsync(Temporalio.Common.RetryPolicy request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
@@ -40,6 +44,7 @@ namespace NexGen.TypeRoundtripService
             return result;
         }
 
+        [GeneratedCode("nex-gen", null)]
         public static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(Temporalio.Api.Activity.V1.ActivityOptions request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
@@ -47,6 +52,7 @@ namespace NexGen.TypeRoundtripService
             return result;
         }
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptions request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
@@ -56,6 +62,7 @@ namespace NexGen.TypeRoundtripService
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptionsOperationOptions options)
         {
             var request = new ActivityOptions(options.RetryPolicy)

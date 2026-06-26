@@ -4,11 +4,13 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 
 namespace NexGen.TypeShowcase
 {
 
+    [GeneratedCode("nex-gen", null)]
     public sealed class NexusResult<TOk, TErr>
     {
         private NexusResult(bool isOk, TOk? ok, TErr? err)
@@ -26,6 +28,7 @@ namespace NexGen.TypeShowcase
         public static NexusResult<TOk, TErr> FromErr(TErr value) => new(false, default, value);
     }
 
+    [GeneratedCode("nex-gen", null)]
     public enum UserStatus
     {
         Active = 0,
@@ -33,6 +36,7 @@ namespace NexGen.TypeShowcase
         Deleted = 2,
     }
 
+    [GeneratedCode("nex-gen", null)]
     [Flags]
     public enum UserCapability
     {
@@ -42,10 +46,12 @@ namespace NexGen.TypeShowcase
         Deactivate = 1 << 2,
     }
 
+    [GeneratedCode("nex-gen", null)]
     public abstract class NotificationTarget
     {
         private NotificationTarget() { }
 
+        [GeneratedCode("nex-gen", null)]
         public sealed class Email : NotificationTarget
         {
             public Email(string value) => Value = value;
@@ -53,6 +59,7 @@ namespace NexGen.TypeShowcase
             public string Value { get; }
         }
 
+        [GeneratedCode("nex-gen", null)]
         public sealed class Sms : NotificationTarget
         {
             public Sms(string value) => Value = value;
@@ -60,6 +67,7 @@ namespace NexGen.TypeShowcase
             public string Value { get; }
         }
 
+        [GeneratedCode("nex-gen", null)]
         public sealed class None : NotificationTarget
         {
             public None() { }
@@ -67,6 +75,7 @@ namespace NexGen.TypeShowcase
 
     }
 
+    [GeneratedCode("nex-gen", null)]
     internal class GetUserRequest
     {
         internal GetUserRequest(string userId)
@@ -78,6 +87,7 @@ namespace NexGen.TypeShowcase
         public string? ConsistencyToken { get; init; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     internal class UpdateEmailRequest
     {
         internal UpdateEmailRequest(string userId, string email)
@@ -90,6 +100,7 @@ namespace NexGen.TypeShowcase
         public string Email { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     internal class RenameRequest
     {
         internal RenameRequest(string userId, string displayName)
@@ -102,6 +113,7 @@ namespace NexGen.TypeShowcase
         public string DisplayName { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     internal class SetProfileRequest
     {
         internal SetProfileRequest(string userId, UserProfile profile)
@@ -114,6 +126,7 @@ namespace NexGen.TypeShowcase
         public UserProfile Profile { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class UserProfile
     {
         public UserProfile(IReadOnlyList<string> tags, IReadOnlyDictionary<string, string> metadata, UserCapability capabilities, NexusResult<string, string> syncState, NotificationTarget notificationTarget)
@@ -133,6 +146,7 @@ namespace NexGen.TypeShowcase
         public PostalAddress? Address { get; init; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class PostalAddress
     {
         public PostalAddress(string street, string city, string country)
@@ -148,6 +162,7 @@ namespace NexGen.TypeShowcase
         public (double, double)? Coordinates { get; init; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     internal class RecordSyncRequest
     {
         internal RecordSyncRequest(string userId, SyncReport report)
@@ -160,6 +175,7 @@ namespace NexGen.TypeShowcase
         public SyncReport Report { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class SyncReport
     {
         public SyncReport(IReadOnlyList<(double, double)> route, IReadOnlyList<NexusResult<string, string>> attempts, IReadOnlyDictionary<string, NexusResult<string, string>> regionStatus)
@@ -174,6 +190,7 @@ namespace NexGen.TypeShowcase
         public IReadOnlyDictionary<string, NexusResult<string, string>> RegionStatus { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     internal class DeactivateRequest
     {
         internal DeactivateRequest(string userId)

@@ -4,11 +4,13 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 
 namespace NexGen.TypeShowcase
 {
 
+    [GeneratedCode("nex-gen", null)]
     public class User
     {
         public User(string userId, string email, string displayName, UserStatus status, UserProfile profile)

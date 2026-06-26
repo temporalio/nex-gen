@@ -319,6 +319,18 @@ fn dotnet_renders_proto_backed_temporal_types() {
             .contains("Workflow.CreateNexusWorkflowClient<IWorkflowService>(\"temporal-system\")")
     );
     assert!(rendered.contains("Expression<Func<TWorkflow, Task<TResult>>> workflow"));
+    assert!(rendered.contains("using System.CodeDom.Compiler;"));
+    assert!(rendered.contains("[GeneratedCode(\"nex-gen\", null)]\n    [NexusService(\"temporal.api.workflowservice.v1.WorkflowService\")]\n    internal interface IWorkflowService"));
+    assert!(rendered.contains(
+        "[GeneratedCode(\"nex-gen\", null)]\n    internal class SignalWithStartWorkflowRequest"
+    ));
+    assert!(rendered.contains(
+        "[GeneratedCode(\"nex-gen\", null)]\n    public class SignalWithStartWorkflowOptions"
+    ));
+    assert!(rendered.contains("public static partial class Workflow\n    {\n        [GeneratedCode(\"nex-gen\", null)]\n        private const string WorkflowServiceEndpoint"));
+    assert!(rendered.contains(
+        "/// <remarks>WARNING: This API is experimental and may change in the future.</remarks>"
+    ));
     assert!(rendered.contains("public class SignalWithStartWorkflowOptions"));
     assert!(
         rendered.contains("public SignalWithStartWorkflowOptions(string id, string taskQueue)")

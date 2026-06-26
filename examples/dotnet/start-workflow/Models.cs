@@ -4,12 +4,14 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using NexGen.Support;
 
 namespace NexGen.StartWorkflowService
 {
 
+    [GeneratedCode("nex-gen", null)]
     internal class StartWorkflowRequest
     {
         internal StartWorkflowRequest(string workflow, string workflowId, string taskQueue)
@@ -48,6 +50,7 @@ namespace NexGen.StartWorkflowService
 
     }
 
+    [GeneratedCode("nex-gen", null)]
     internal class CancelWorkflowRequest
     {
         internal CancelWorkflowRequest(WorkflowExecution workflowExecution)
@@ -72,6 +75,7 @@ namespace NexGen.StartWorkflowService
 
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class WorkflowExecution
     {
         public WorkflowExecution(string workflowId)
@@ -95,6 +99,7 @@ namespace NexGen.StartWorkflowService
 
     }
 
+    [GeneratedCode("nex-gen", null)]
     internal class CancelWorkflowResponse
     {
         public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse ToProto()

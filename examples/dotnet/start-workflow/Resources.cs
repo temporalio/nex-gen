@@ -4,11 +4,13 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 
 namespace NexGen.StartWorkflowService
 {
 
+    [GeneratedCode("nex-gen", null)]
     public class StartedWorkflow
     {
         public StartedWorkflow(string @namespace, string workflowId, string? runId)

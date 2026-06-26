@@ -4,11 +4,13 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 
 namespace NexGen.FunctionExecution
 {
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteFunctionRequest
     {
         public ExecuteFunctionRequest(string function, string name, bool enabled)
@@ -29,6 +31,7 @@ namespace NexGen.FunctionExecution
         public bool Enabled { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteFunctionResult
     {
         public ExecuteFunctionResult(string value)
@@ -39,6 +42,7 @@ namespace NexGen.FunctionExecution
         public string Value { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteCountedFunctionRequest
     {
         public ExecuteCountedFunctionRequest(string function, string name, int count)
@@ -59,6 +63,7 @@ namespace NexGen.FunctionExecution
         public int Count { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteCountedFunctionResult
     {
         public ExecuteCountedFunctionResult(string value)
@@ -69,6 +74,7 @@ namespace NexGen.FunctionExecution
         public string Value { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteNamedFunctionRequest
     {
         public ExecuteNamedFunctionRequest(string function, string name, bool enabled)
@@ -89,6 +95,7 @@ namespace NexGen.FunctionExecution
         public bool Enabled { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteNamedFunctionResult
     {
         public ExecuteNamedFunctionResult(string value)
@@ -99,6 +106,7 @@ namespace NexGen.FunctionExecution
         public string Value { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteVarargsFunctionRequest
     {
         public ExecuteVarargsFunctionRequest(string function)
@@ -113,6 +121,7 @@ namespace NexGen.FunctionExecution
         public IReadOnlyCollection<string>? Args { get; init; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteVarargsFunctionResult
     {
         public ExecuteVarargsFunctionResult(string value)
@@ -123,6 +132,7 @@ namespace NexGen.FunctionExecution
         public string Value { get; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteNamedVarargsFunctionRequest
     {
         public ExecuteNamedVarargsFunctionRequest(string function)
@@ -137,6 +147,7 @@ namespace NexGen.FunctionExecution
         public IReadOnlyCollection<string>? Args { get; init; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class ExecuteNamedVarargsFunctionResult
     {
         public ExecuteNamedVarargsFunctionResult(string value)

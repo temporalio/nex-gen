@@ -4,6 +4,7 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -16,6 +17,7 @@ using Temporalio.Workflows;
 namespace NexGen.StartWorkflowService
 {
 
+    [GeneratedCode("nex-gen", null)]
     public class StartWorkflowOptions
     {
         public StartWorkflowOptions(string workflowId, string taskQueue)
@@ -29,6 +31,7 @@ namespace NexGen.StartWorkflowService
         public System.TimeSpan? WorkflowStartDelay { get; set; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class RestartWorkflowOptions
     {
         public RestartWorkflowOptions(string workflowId, string taskQueue)
@@ -42,6 +45,7 @@ namespace NexGen.StartWorkflowService
         public System.TimeSpan? WorkflowStartDelay { get; set; }
     }
 
+    [GeneratedCode("nex-gen", null)]
     public class CancelWorkflowOptions
     {
         public CancelWorkflowOptions(WorkflowExecution workflowExecution)
@@ -55,8 +59,10 @@ namespace NexGen.StartWorkflowService
 
     public static partial class StartWorkflowServiceOperations
     {
+        [GeneratedCode("nex-gen", null)]
         private const string StartWorkflowServiceEndpoint = "temporal-system";
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<StartedWorkflow> StartWorkflowAsync(StartWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
@@ -68,6 +74,7 @@ namespace NexGen.StartWorkflowService
         /// <param name="workflow">The workflow value.</param>
         /// <param name="args">Arguments for the workflow.</param>
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<StartedWorkflow> StartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, StartWorkflowOptions options)
         {
             var request = new StartWorkflowRequest(workflow, options.WorkflowId, options.TaskQueue)
@@ -80,6 +87,7 @@ namespace NexGen.StartWorkflowService
 
         /// <param name="workflow">The workflow value.</param>
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<StartedWorkflow> StartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, StartWorkflowOptions options)
         {
             var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);
@@ -91,6 +99,7 @@ namespace NexGen.StartWorkflowService
             return StartWorkflowAsync(request);
         }
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<StartedWorkflow> RestartWorkflowAsync(StartWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
@@ -102,6 +111,7 @@ namespace NexGen.StartWorkflowService
         /// <param name="workflow">The workflow value.</param>
         /// <param name="args">Arguments for the workflow.</param>
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<StartedWorkflow> RestartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, RestartWorkflowOptions options)
         {
             var request = new StartWorkflowRequest(workflow, options.WorkflowId, options.TaskQueue)
@@ -114,6 +124,7 @@ namespace NexGen.StartWorkflowService
 
         /// <param name="workflow">The workflow value.</param>
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<StartedWorkflow> RestartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, RestartWorkflowOptions options)
         {
             var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);
@@ -125,6 +136,7 @@ namespace NexGen.StartWorkflowService
             return RestartWorkflowAsync(request);
         }
 
+        [GeneratedCode("nex-gen", null)]
         public static async Task<Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse> CancelWorkflowAsync(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
@@ -132,6 +144,7 @@ namespace NexGen.StartWorkflowService
             return result;
         }
 
+        [GeneratedCode("nex-gen", null)]
         private static async Task<Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse> CancelWorkflowAsync(CancelWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
@@ -141,6 +154,7 @@ namespace NexGen.StartWorkflowService
         }
 
         /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
         public static Task<Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse> CancelWorkflowAsync(CancelWorkflowOptions options)
         {
             var request = new CancelWorkflowRequest(options.WorkflowExecution)

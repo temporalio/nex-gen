@@ -4,17 +4,21 @@
 #pragma warning disable CS1591
 
 using System;
+using System.CodeDom.Compiler;
 using NexusRpc;
 
 namespace NexGen.UserService
 {
 
+    [GeneratedCode("nex-gen", null)]
     [NexusService("UserService")]
     internal interface IUserService
     {
+        [GeneratedCode("nex-gen", null)]
         [NexusOperation("GetUser")]
         User GetUser(GetUserRequest request);
 
+        [GeneratedCode("nex-gen", null)]
         [NexusOperation("UpdateEmail")]
         User UpdateEmail(UpdateEmailRequest request);
 
