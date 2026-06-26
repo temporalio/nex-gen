@@ -412,9 +412,7 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("ToProto(this object? value)"));
     assert!(!rendered.contains("ToProto(this IEnumerable<object?> value)"));
     assert!(rendered.contains("internal static Duration ToProto(this TimeSpan value)"));
-    assert!(rendered.contains(
-        "internal static Temporalio.Common.RetryPolicy FromProto(this ApiCommon.RetryPolicy proto)"
-    ));
+    assert!(!rendered.contains(" FromProto("));
     assert!(rendered.contains("internal static class TemporalWorkflowContext"));
     assert!(rendered.contains("internal static class TemporalFunctionNames"));
     assert!(rendered.contains("internal static class ProtoExtensions"));

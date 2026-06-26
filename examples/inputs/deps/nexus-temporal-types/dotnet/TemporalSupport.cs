@@ -87,113 +87,6 @@ namespace NexGen.Support
         internal static ApiWorkflow.VersioningOverride ToProto(this Temporalio.Common.VersioningOverride value) =>
             ToVersioningOverride(value);
 
-        internal static string FromProto(this ApiCommon.WorkflowType proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            return proto.Name;
-        }
-
-        internal static string FromProto(this ApiTaskQueue.TaskQueue proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            return proto.Name;
-        }
-
-        internal static TimeSpan FromProto(this Duration proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            return proto.ToTimeSpan();
-        }
-
-        internal static object? FromProto(this ApiCommon.Payload proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            return Workflow.PayloadConverter.ToValue<object?>(proto);
-        }
-
-        internal static IReadOnlyCollection<object?> FromProto(this ApiCommon.Payloads proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            return PayloadsToValues(proto);
-        }
-
-        internal static Temporalio.Common.RetryPolicy FromProto(this ApiCommon.RetryPolicy proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            return FromRetryPolicy(proto);
-        }
-
-        internal static IReadOnlyDictionary<string, object?> FromProto(this ApiCommon.Memo proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            return proto.Fields.ToDictionary(item => item.Key, item => Workflow.PayloadConverter.ToValue<object?>(item.Value));
-        }
-
-        internal static SearchAttributeCollection FromProto(this ApiCommon.SearchAttributes proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            return SearchAttributeCollection.FromProto(proto);
-        }
-
-        internal static Temporalio.Common.Priority FromProto(this ApiCommon.Priority proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            return new Temporalio.Common.Priority(
-                proto.PriorityKey == 0 ? null : proto.PriorityKey,
-                string.IsNullOrEmpty(proto.FairnessKey) ? null : proto.FairnessKey,
-                proto.FairnessWeight == 0f ? null : proto.FairnessWeight);
-        }
-
-        internal static Temporalio.Common.VersioningOverride FromProto(this ApiWorkflow.VersioningOverride proto)
-        {
-            if (proto is null)
-            {
-                throw new ArgumentNullException(nameof(proto));
-            }
-            if (proto.Pinned is { } pinned)
-            {
-                return new Temporalio.Common.VersioningOverride.Pinned(
-                    new WorkerDeploymentVersion(pinned.Version.DeploymentName, pinned.Version.BuildId),
-                    (Temporalio.Common.VersioningOverride.PinnedOverrideBehavior)pinned.Behavior);
-            }
-            if (proto.AutoUpgrade)
-            {
-                return new Temporalio.Common.VersioningOverride.AutoUpgrade();
-            }
-
-            throw new NotSupportedException("Unsupported versioning override proto");
-        }
-
-        private static IReadOnlyCollection<object?> PayloadsToValues(ApiCommon.Payloads payloads) =>
-            payloads.Payloads_.Select(payload => Workflow.PayloadConverter.ToValue<object?>(payload)).ToArray();
-
         private static ApiCommon.RetryPolicy ToRetryPolicy(Temporalio.Common.RetryPolicy policy)
         {
             var proto = new ApiCommon.RetryPolicy
@@ -211,25 +104,6 @@ namespace NexGen.Support
                 proto.NonRetryableErrorTypes.AddRange(nonRetryableErrorTypes);
             }
             return proto;
-        }
-
-        private static Temporalio.Common.RetryPolicy FromRetryPolicy(ApiCommon.RetryPolicy proto)
-        {
-            var retryPolicy = new Temporalio.Common.RetryPolicy
-            {
-                BackoffCoefficient = (float)proto.BackoffCoefficient,
-                MaximumAttempts = proto.MaximumAttempts,
-                NonRetryableErrorTypes = proto.NonRetryableErrorTypes.ToArray(),
-            };
-            if (proto.InitialInterval is { } initialInterval)
-            {
-                retryPolicy.InitialInterval = initialInterval.ToTimeSpan();
-            }
-            if (proto.MaximumInterval is { } maximumInterval)
-            {
-                retryPolicy.MaximumInterval = maximumInterval.ToTimeSpan();
-            }
-            return retryPolicy;
         }
 
         private static ApiCommon.Memo ToMemo(IReadOnlyDictionary<string, object?> memo)
