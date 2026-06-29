@@ -2,7 +2,7 @@
 
 import * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
-import { TypeRoundtripService } from "../service";
+import { typeRoundtripService } from "../service";
 import { activityOptionsToProto } from "../models";
 import type { ActivityOptions } from "../models";
 
@@ -13,11 +13,11 @@ export async function activityOptionsOperation(
   request: ActivityOptions,
 ): Promise<workflow.NexusOperationHandle<temporal.api.activity.v1.IActivityOptions>> {
   const client = workflow.createNexusServiceClient({
-    service: TypeRoundtripService,
+    service: typeRoundtripService,
     endpoint: "temporal-system",
   });
   return await client.startOperation(
-    TypeRoundtripService.operations.activityOptionsOperation,
+    typeRoundtripService.operations.activityOptionsOperation,
     activityOptionsToProto(request) ?? {},
   );
 }

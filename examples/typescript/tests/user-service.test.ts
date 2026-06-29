@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
 
 import { User } from "../user-service/resources.ts";
-import { UserService } from "../user-service/service.ts";
+import { userService } from "../user-service/service.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(
@@ -12,15 +12,15 @@ const workflowsPath = fileURLToPath(
 
 describe("user-service generated output", () => {
   test("exposes basic WIT-native service metadata", () => {
-    expect(UserService.name).toBe("UserService");
-    expect(UserService.operations.getUser.name).toBe("GetUser");
-    expect(UserService.operations.updateEmail.name).toBe("UpdateEmail");
+    expect(userService.name).toBe("UserService");
+    expect(userService.operations.getUser.name).toBe("GetUser");
+    expect(userService.operations.updateEmail.name).toBe("UpdateEmail");
   });
 
   test("passes WIT records through a real Nexus client", async () => {
     await withWorkflowEnvironment(async (env) => {
       const calls: Array<[string, unknown]> = [];
-      const handler = nexus.serviceHandler(UserService, {
+      const handler = nexus.serviceHandler(userService, {
         async getUser(_ctx, input) {
           calls.push(["GetUser", input]);
           return new User(input.userId, "old@example.com");

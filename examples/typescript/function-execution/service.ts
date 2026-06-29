@@ -15,7 +15,7 @@ import type {
   ExecuteNamedVarargsFunctionResult,
 } from "./models";
 
-export const FunctionExecution = nexus.service("FunctionExecution", {
+export const functionExecution = nexus.service("FunctionExecution", {
   executeFunction: nexus.operation<ExecuteFunctionRequest, ExecuteFunctionResult>({
     name: "ExecuteFunction",
   }),

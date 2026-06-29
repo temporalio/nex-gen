@@ -61,6 +61,7 @@ pub(crate) fn generate(
 
             Ok(RenderedService {
                 name: service.name.as_str(),
+                attr_name: typescript_ident(&service.name.to_lower_camel_case()),
                 wire_name: service.wire_name.as_str(),
                 endpoint: service.endpoint.clone(),
                 experimental: service.experimental,
@@ -789,6 +790,7 @@ fn generic_model_annotation(model_name: &str, type_parameters: &[RenderedTypePar
 #[derive(Debug)]
 struct RenderedService<'a> {
     name: &'a str,
+    attr_name: String,
     wire_name: &'a str,
     endpoint: String,
     experimental: bool,
@@ -3074,7 +3076,7 @@ fn render_operation_module(
         &[("workflow", "@temporalio/workflow")],
     );
     render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
-    render_value_imports(&mut imports, "../service", &[service.name.to_string()]);
+    render_value_imports(&mut imports, "../service", &[service.attr_name.clone()]);
     let mut model_values = model_to_proto_function_names(models);
     model_values.push("requiredField".to_string());
     model_values.sort();
@@ -4251,7 +4253,7 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
     let service_doc_tags = experimental_doc_tag(service.experimental);
     render_typescript_doc_comment(output, "", None, &service_doc_tags);
     output.push_str("export const ");
-    output.push_str(service.name);
+    output.push_str(&service.attr_name);
     output.push_str(" = nexus.service('");
     output.push_str(service.wire_name);
     output.push_str("', {\n");
@@ -4750,7 +4752,7 @@ fn render_operation_function(
         output.push_str(">> {\n");
         output.push_str("  const client = workflow.createNexusServiceClient({\n");
         output.push_str("    service: ");
-        output.push_str(service.name);
+        output.push_str(&service.attr_name);
         output.push_str(",\n");
         output.push_str("    endpoint: ");
         output.push_str(&typescript_string_literal(&service.endpoint));
@@ -4758,7 +4760,7 @@ fn render_operation_function(
         output.push_str("  });\n");
         output.push_str("  return await client.startOperation(\n");
         output.push_str("    ");
-        output.push_str(service.name);
+        output.push_str(&service.attr_name);
         output.push_str(".operations.");
         output.push_str(&operation.attr_name);
         output.push_str(",\n");
@@ -4771,7 +4773,7 @@ fn render_operation_function(
     }
     output.push_str("  const client = workflow.createNexusServiceClient({\n");
     output.push_str("    service: ");
-    output.push_str(service.name);
+    output.push_str(&service.attr_name);
     output.push_str(",\n");
     output.push_str("    endpoint: ");
     output.push_str(&typescript_string_literal(&service.endpoint));
@@ -4782,7 +4784,7 @@ fn render_operation_function(
     output.push_str(";\n");
     output.push_str("  const handle = await client.startOperation(\n");
     output.push_str("    ");
-    output.push_str(service.name);
+    output.push_str(&service.attr_name);
     output.push_str(".operations.");
     output.push_str(&operation.attr_name);
     output.push_str(",\n");
@@ -5354,7 +5356,7 @@ interface example-service {
             "/**\n * @experimental This API is experimental and subject to change.\n */\nexport interface Request"
         ));
         assert!(output.contains(
-            "/**\n * @experimental This API is experimental and subject to change.\n */\nexport const ExampleService"
+            "/**\n * @experimental This API is experimental and subject to change.\n */\nexport const exampleService"
         ));
         assert!(output.contains(
             "  /**\n   * @experimental This API is experimental and subject to change.\n   */\n  requestOp:"

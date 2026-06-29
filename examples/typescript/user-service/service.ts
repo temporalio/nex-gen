@@ -5,7 +5,7 @@ import * as nexus from "nexus-rpc";
 import type { GetUserRequest, UpdateEmailRequest } from "./models";
 import type { User } from "./resources";
 
-export const UserService = nexus.service("UserService", {
+export const userService = nexus.service("UserService", {
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
 });

@@ -12,7 +12,7 @@ import type {
 } from "./models";
 import type { User } from "./resources";
 
-export const TypeShowcase = nexus.service("TypeShowcase", {
+export const typeShowcase = nexus.service("TypeShowcase", {
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
   rename: nexus.operation<RenameRequest, User>({ name: "Rename" }),
