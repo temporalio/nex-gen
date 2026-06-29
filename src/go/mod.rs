@@ -66,6 +66,7 @@ pub(crate) fn generate(
 
             Ok(RenderedService {
                 name: &service.name,
+                wire_name: &service.wire_name,
                 endpoint: service.endpoint.clone(),
                 operations,
                 resources: service.resources.clone(),
@@ -354,8 +355,16 @@ impl GoImportCollector {
 /// implemented.
 #[derive(Debug)]
 struct RenderedService<'a> {
-    /// UpperCamelCase service name (e.g. `"TypeShowcase"`).
+    /// UpperCamelCase service name (e.g. `"TypeShowcase"`). Retained for
+    /// diagnostics and potential future service-level generation; the wire name
+    /// is used for the emitted `ServiceName` constant.
+    #[allow(dead_code)]
     name: &'a str,
+    /// Wire-format service name from `@nexus.service-name`, defaulting to the
+    /// UpperCamelCase service name. This is the value sent on the wire (e.g.
+    /// `"temporal.api.workflowservice.v1.WorkflowService"`), so the generated
+    /// `ServiceName` constant must use it rather than `name`.
+    wire_name: &'a str,
     /// Nexus endpoint identifier (e.g. `"type-showcase"`).
     endpoint: String,
     /// Operations belonging to this service.
@@ -819,40 +828,40 @@ fn populate_operation_bindings(
                 None
             };
 
-            let (output_proto_type, output_from_proto, output_returns_pointer) =
-                match &planned_op.output {
-                    PlannedOperationOutput::Message(output) => {
-                        if planned_op.output_resource_return.is_some() {
-                            let Some(proto_type) = operation_message_proto_type(output, imports)
-                            else {
-                                continue;
-                            };
-                            (Some(proto_type), None, false)
-                        } else if has_go_output_transform {
-                            (operation_message_proto_type(output, imports), None, false)
-                        } else {
-                            match operation_message_binding(
-                                output,
-                                &planned_op.name,
-                                "output",
-                                api_plan,
-                                imports,
-                            )? {
-                                Some((proto_type, conv)) => {
-                                    // `result` is declared as a proto value;
-                                    // converters take a pointer to the proto message.
-                                    let from = (conv.from_proto)("&result");
-                                    let returns_pointer =
-                                        conv.kind == GoConversionKind::OverrideConverter;
-                                    (Some(proto_type), Some(from), returns_pointer)
-                                }
-                                None => continue,
+            let (output_proto_type, output_from_proto, output_returns_pointer) = match &planned_op
+                .output
+            {
+                PlannedOperationOutput::Message(output) => {
+                    if planned_op.output_resource_return.is_some() {
+                        let Some(proto_type) = operation_message_proto_type(output, imports) else {
+                            continue;
+                        };
+                        (Some(proto_type), None, false)
+                    } else if has_go_output_transform {
+                        (operation_message_proto_type(output, imports), None, false)
+                    } else {
+                        match operation_message_binding(
+                            output,
+                            &planned_op.name,
+                            "output",
+                            api_plan,
+                            imports,
+                        )? {
+                            Some((proto_type, conv)) => {
+                                // `result` is declared as a proto value;
+                                // converters take a pointer to the proto message.
+                                let from = (conv.from_proto)("&result");
+                                let returns_pointer =
+                                    conv.kind == GoConversionKind::OverrideConverter;
+                                (Some(proto_type), Some(from), returns_pointer)
                             }
+                            None => continue,
                         }
                     }
-                    PlannedOperationOutput::Resource { .. } => continue,
-                    PlannedOperationOutput::None => (None, None, false),
-                };
+                }
+                PlannedOperationOutput::Resource { .. } => continue,
+                PlannedOperationOutput::None => (None, None, false),
+            };
 
             rendered_op.proto_binding = Some(OperationProtoBinding {
                 input_to_proto,
@@ -1210,14 +1219,7 @@ fn resolve_planned_value_type(
         }
         PlannedValueType::Variant(variant_type) => {
             if let Some(planned_variant) = api_plan.variants.get(&variant_type.info.full_name) {
-                ensure_rendered_variant(
-                    planned_variant,
-                    api_plan,
-                    enums,
-                    flags,
-                    variants,
-                    models,
-                )?;
+                ensure_rendered_variant(planned_variant, api_plan, enums, flags, variants, models)?;
             }
             // Interfaces have nil zero value, so no pointer needed for optional fields.
             Ok(ResolvedGoType {
@@ -1563,15 +1565,8 @@ fn build_field(
             format!("[]{}", element_type.type_expr)
         }
         PlannedFieldKind::Singular(PlannedValueType::Tuple(items)) => {
-            let struct_name = build_tuple_struct(
-                &field_name,
-                items,
-                api_plan,
-                enums,
-                flags,
-                variants,
-                models,
-            )?;
+            let struct_name =
+                build_tuple_struct(&field_name, items, api_plan, enums, flags, variants, models)?;
             if !field.required {
                 format!("*{struct_name}")
             } else {
@@ -1627,7 +1622,10 @@ fn build_field(
 /// "set to the zero value". Types whose zero value is already `nil` need no
 /// pointer: variants (interfaces) and any `any`-typed value.
 fn type_needs_pointer_when_optional(value: &PlannedValueType, type_expr: &str) -> bool {
-    if matches!(value, PlannedValueType::Variant(_) | PlannedValueType::Unknown) {
+    if matches!(
+        value,
+        PlannedValueType::Variant(_) | PlannedValueType::Unknown
+    ) {
         return false;
     }
     // Already-nilable Go types (`any`, slices, maps) represent absence directly.
@@ -1766,7 +1764,8 @@ fn build_tuple_struct(
 
     // Check for conflicts: same name but different field types.
     if let Some(existing) = models.get(&struct_name) {
-        let existing_types: Vec<&str> = existing.fields.iter().map(|f| f.go_type.as_str()).collect();
+        let existing_types: Vec<&str> =
+            existing.fields.iter().map(|f| f.go_type.as_str()).collect();
         let new_types: Vec<&str> = fields.iter().map(|f| f.go_type.as_str()).collect();
         if existing_types != new_types {
             return Err(Error::UnsupportedGoType {
@@ -1826,8 +1825,7 @@ fn build_result_struct(
     }
 
     let error_type = if let Some(err_type) = err {
-        resolve_planned_value_type(err_type, api_plan, enums, flags, variants, models)?
-            .type_expr
+        resolve_planned_value_type(err_type, api_plan, enums, flags, variants, models)?.type_expr
     } else {
         "error".to_string()
     };
@@ -2021,7 +2019,10 @@ fn collect_imports_from_value_type(kind: &PlannedFieldKind, imports: &mut BTreeS
 /// Recursively collects Go imports from a planned value type.
 fn collect_imports_from_planned_value(value: &PlannedValueType, imports: &mut BTreeSet<String>) {
     match value {
-        PlannedValueType::External { type_name, fallback } => {
+        PlannedValueType::External {
+            type_name,
+            fallback,
+        } => {
             if let Some(annotation) = type_name.for_language(Language::Go) {
                 let (import_path, _) = parse_go_import(annotation);
                 if let Some(path) = import_path {
@@ -2216,10 +2217,9 @@ fn go_value_conversion(
         PlannedValueType::Result { .. } => {
             Err("result values have no Go proto conversion".to_string())
         }
-        PlannedValueType::External { .. } => {
-            Err("externally-typed values (via `@nexus.type`) have no Go proto conversion"
-                .to_string())
-        }
+        PlannedValueType::External { .. } => Err(
+            "externally-typed values (via `@nexus.type`) have no Go proto conversion".to_string(),
+        ),
         PlannedValueType::Unknown => {
             Err("the proto type could not be resolved from the provided descriptors".to_string())
         }
@@ -2841,10 +2841,7 @@ fn render_file(
 
     if !imports.is_empty() || !proto_imports.is_empty() {
         // Separate stdlib imports (no '.') from third-party imports (contain '.')
-        let stdlib: Vec<_> = imports
-            .iter()
-            .filter(|p| !p.contains('.'))
-            .collect();
+        let stdlib: Vec<_> = imports.iter().filter(|p| !p.contains('.')).collect();
         // Exclude any third-party path that is also emitted (aliased) by the
         // proto import collector to avoid duplicate import declarations.
         let third_party: Vec<_> = imports
@@ -3301,8 +3298,11 @@ fn render_model_proto_methods(
 /// const UpdateEmailOp = "UpdateEmail"
 /// ```
 fn render_service_constants(output: &mut String, service: &RenderedService<'_>) {
+    // ServiceName is the wire-format service name sent on the Nexus request, so
+    // it must use the `@nexus.service-name` value (which defaults to the
+    // UpperCamelCase service name when unspecified).
     output.push_str("const ServiceName = \"");
-    output.push_str(service.name);
+    output.push_str(service.wire_name);
     output.push_str("\"\n");
     output.push_str("const Endpoint = \"");
     output.push_str(&service.endpoint);
@@ -3403,7 +3403,10 @@ fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (St
                 return (type_name, false);
             }
             (
-                enum_type.name.clone().unwrap_or_else(|| "int32".to_string()),
+                enum_type
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "int32".to_string()),
                 false,
             )
         }
@@ -3591,9 +3594,7 @@ fn render_resource_methods(
 
 /// Resolves the Go return type for a resource method from its
 /// [`PlannedResourceMethodResult`].
-fn resolve_method_result_type(
-    method: &crate::api_plan::PlannedResourceMethod,
-) -> Option<String> {
+fn resolve_method_result_type(method: &crate::api_plan::PlannedResourceMethod) -> Option<String> {
     method.result.as_ref().map(|result| match &result.kind {
         PlannedResourceMethodResultKind::Resource { type_name } => type_name.clone(),
         PlannedResourceMethodResultKind::Value(kind) => resolve_resource_field_kind(kind, false),

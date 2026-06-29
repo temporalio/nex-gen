@@ -12,7 +12,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const ServiceName = "WorkflowService"
+const ServiceName = "temporal.api.workflowservice.v1.WorkflowService"
 const Endpoint = "temporal-system"
 
 const SignalWithStartWorkflowOp = "SignalWithStartWorkflowExecution"

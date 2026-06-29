@@ -466,9 +466,7 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("type SyncReport struct"));
     assert!(rendered.contains("\t// Required.\n\tRoute []Tuple2[float64, float64]"));
     assert!(rendered.contains("\t// Required.\n\tAttempts []Result[string, string]"));
-    assert!(
-        rendered.contains("\t// Required.\n\tRegionStatus map[string]Result[string, string]")
-    );
+    assert!(rendered.contains("\t// Required.\n\tRegionStatus map[string]Result[string, string]"));
     assert!(rendered.contains("type Tuple2[T1, T2 any] struct {"));
     assert!(rendered.contains("First T1"));
     assert!(rendered.contains("Second T2"));
@@ -483,8 +481,11 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("\t// Required.\n\tProfile UserProfile"));
 
     // Resource methods
-    assert!(rendered
-        .contains("func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error)"));
+    assert!(
+        rendered.contains(
+            "func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error)"
+        )
+    );
     assert!(rendered.contains("UpdateEmailRequest{UserId: u.UserId, Email: email}"));
     assert!(rendered.contains(
         "func (u *User) Rename(ctx workflow.Context, displayName string) (*User, error)"
@@ -497,28 +498,45 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("DeactivateRequest{UserId: u.UserId, Reason: reason}"));
 
     // Unexported operation wrapper functions
-    assert!(rendered.contains("func getUser(ctx workflow.Context, request GetUserRequest) (*User, error)"));
-    assert!(rendered.contains("func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error)"));
+    assert!(
+        rendered
+            .contains("func getUser(ctx workflow.Context, request GetUserRequest) (*User, error)")
+    );
+    assert!(rendered.contains(
+        "func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error)"
+    ));
     assert!(rendered.contains("workflow.NewNexusClient(Endpoint, ServiceName)"));
-    assert!(rendered.contains("c.ExecuteOperation(ctx, GetUserOp, request, workflow.NexusOperationOptions{})"));
+    assert!(
+        rendered.contains(
+            "c.ExecuteOperation(ctx, GetUserOp, request, workflow.NexusOperationOptions{})"
+        )
+    );
     // Void operation
-    assert!(rendered.contains("func deactivate(ctx workflow.Context, request DeactivateRequest) error"));
+    assert!(
+        rendered.contains("func deactivate(ctx workflow.Context, request DeactivateRequest) error")
+    );
     assert!(rendered.contains("return fut.Get(ctx, nil)"));
 
     // Exported convenience wrappers -- all required fields become positional args
-    assert!(rendered.contains("func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error)"));
+    assert!(rendered.contains(
+        "func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error)"
+    ));
     // The request struct is always constructed across multiple lines.
     assert!(rendered.contains("UpdateEmailRequest{\n\t\tUserId: userId,\n\t\tEmail: email,\n\t}"));
     // Optional fields produce an options struct (pointer-typed)
     assert!(rendered.contains("type GetUserOptions struct"));
     assert!(rendered.contains("ConsistencyToken *string"));
-    assert!(rendered.contains("func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) (*User, error)"));
-    assert!(
-        rendered.contains("GetUserRequest{\n\t\tUserId: userId,\n\t\tConsistencyToken: opts.ConsistencyToken,\n\t}")
-    );
+    assert!(rendered.contains(
+        "func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) (*User, error)"
+    ));
+    assert!(rendered.contains(
+        "GetUserRequest{\n\t\tUserId: userId,\n\t\tConsistencyToken: opts.ConsistencyToken,\n\t}"
+    ));
     // Void convenience wrapper with options
     assert!(rendered.contains("type DeactivateOptions struct"));
-    assert!(rendered.contains("func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) error"));
+    assert!(rendered.contains(
+        "func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) error"
+    ));
 }
 
 #[test]
@@ -552,16 +570,17 @@ fn go_type_roundtrip_generates_proto_conversions() {
     assert!(rendered.contains("message.TaskQueue = TaskQueueToProto(m.TaskQueue)"));
     assert!(rendered.contains("message.Priority = PriorityToProto(m.Priority)"));
     assert!(
-        rendered.contains("message.ScheduleToCloseTimeout = DurationToProto(m.ScheduleToCloseTimeout)")
+        rendered
+            .contains("message.ScheduleToCloseTimeout = DurationToProto(m.ScheduleToCloseTimeout)")
     );
     assert!(rendered.contains("return message"));
 
     // Generated model gets a FromProto constructor. Optional override fields
     // assign the converter's pointer result directly; the required field is
     // dereferenced with a nil guard.
-    assert!(
-        rendered.contains("func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {")
-    );
+    assert!(rendered.contains(
+        "func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {"
+    ));
     assert!(rendered.contains("value.TaskQueue = TaskQueueFromProto(proto.GetTaskQueue())"));
     assert!(rendered.contains(
         "if converted := RetryPolicyFromProto(proto.GetRetryPolicy()); converted != nil {"
@@ -592,7 +611,8 @@ fn go_type_roundtrip_generates_proto_conversions() {
         rendered.contains("func RetryPolicyToProto(p *temporal.RetryPolicy) *common.RetryPolicy {")
     );
     assert!(
-        rendered.contains("func RetryPolicyFromProto(p *common.RetryPolicy) *temporal.RetryPolicy {")
+        rendered
+            .contains("func RetryPolicyFromProto(p *common.RetryPolicy) *temporal.RetryPolicy {")
     );
 }
 
