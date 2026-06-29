@@ -19,6 +19,7 @@ The WIT definition is the source of truth for the public API. Protobuf descripto
 
 Current status:
 
+- .NET generation is implemented
 - Python generation is implemented
 - TypeScript generation is implemented
 - WIT records, enums, flags, variants, results, resources, resource methods, and no-result operations are supported without proto backing
@@ -30,8 +31,9 @@ Current status:
 
 Each example starts with authored WIT under `examples/inputs/`. Checked-in
 generated output lives under `examples/python/<example_name>/` and
-`examples/typescript/<example-name>/`, with language-specific tests under each
-language's `tests/` directory. See [`examples/README.md`](examples/README.md)
+`examples/typescript/<example-name>/`; .NET output lives under
+`examples/dotnet/<example-name>/`. Language-specific tests live under each
+language's `tests/` directory where present. See [`examples/README.md`](examples/README.md)
 for links to each example's WIT, generated code, and tests.
 
 - [`user-service`](examples/inputs/user-service.wit): a small WIT-direct API showing the basic shape of an operation returning a resource and a resource method that calls another operation.
@@ -50,6 +52,7 @@ Rebuild one language or one example only:
 
 ```bash
 cargo build-examples --lang python
+cargo build-examples --lang dotnet
 cargo build-examples user-service
 cargo build-examples --lang typescript user-service
 ```
@@ -121,6 +124,15 @@ cargo run -- generate \
   --output /tmp/user-service
 ```
 
+Generate .NET:
+
+```bash
+cargo run -- generate \
+  --lang dotnet \
+  --input examples/inputs/user-service.wit \
+  --output /tmp/user-service-dotnet
+```
+
 Add `--format` to run a formatter after generation:
 
 - Python: `ruff format`
@@ -146,12 +158,13 @@ The WIT file defines the public surface. `@nexus` directives carry the parts WIT
 
 Resource methods bind to operations only when the method and operation have the same generated operation name. When they intentionally differ, mark the method with `@nexus.operation`, for example `/// @nexus.operation "cancel-workflow"` on `cancel: func(...)` to bind it to `cancel-workflow: func(...)`.
 
-Input WIT files can add support code with `@nexus.support`. Python support fragments are copied into the generated private `_support` package, and TypeScript support fragments are emitted as `support.ts` next to the generated `index.ts`.
+Input WIT files can add support code with `@nexus.support`. Python support fragments are copied into the generated private `_support` package, TypeScript support fragments are emitted as `support.ts` next to the generated `index.ts`, and .NET support fragments are copied under `Support/`.
 
 Support code can also be supplied outside WIT with repeatable `--support-file`
 arguments on `generate`. Explicit support files apply to the selected
 `--lang`, are appended after WIT-declared support, and use the same generated
-layout as `@nexus.support` fragments:
+layout as `@nexus.support` fragments. .NET support files infer their support
+namespace from the C# `namespace` declaration in the file:
 
 ```bash
 cargo run -- generate \

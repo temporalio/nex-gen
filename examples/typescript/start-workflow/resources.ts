@@ -44,7 +44,7 @@ export class StartedWorkflow {
   }
 }
 
-registerNexusType("WorkflowService::resource::started-workflow", {
+registerNexusType("StartWorkflowService::resource::started-workflow", {
   fields: {
     namespace: { wire: "namespace", schema: { kind: "scalar" } },
     workflowId: { wire: "workflow-id", schema: { kind: "scalar" } },
@@ -58,4 +58,4 @@ registerNexusType("WorkflowService::resource::started-workflow", {
     );
   },
 });
-markNexusResource(StartedWorkflow, "WorkflowService::resource::started-workflow");
+markNexusResource(StartedWorkflow, "StartWorkflowService::resource::started-workflow");

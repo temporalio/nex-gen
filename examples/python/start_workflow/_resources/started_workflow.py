@@ -66,7 +66,7 @@ async def _cancel_workflow(
     temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
 ]:
     nexus_client = temporalio.workflow.create_nexus_client(
-        service="WorkflowService",
+        service="StartWorkflowService",
         endpoint="temporal-system",
     )
     return await nexus_client.start_operation(
@@ -95,7 +95,7 @@ async def _restart_workflow(
 ) -> StartedWorkflow:
     request_proto = request.to_proto()
     nexus_client = temporalio.workflow.create_nexus_client(
-        service="WorkflowService",
+        service="StartWorkflowService",
         endpoint="temporal-system",
     )
     handle = await nexus_client.start_operation(
@@ -196,5 +196,5 @@ async def restart_workflow(
 
 
 nex_gen_runtime.register_nexus_type(
-    StartedWorkflow, "WorkflowService::resource::started-workflow"
+    StartedWorkflow, "StartWorkflowService::resource::started-workflow"
 )

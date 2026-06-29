@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use nex_gen::SupportFiles;
 use nex_gen::generate_to_string_with_inputs;
+use nex_gen::generator::generate_files;
+use nex_gen::spec::SupportFragmentSpec;
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const START_WORKFLOW_EXAMPLE_ID: &str = "start-workflow";
@@ -207,6 +210,31 @@ fn cli_generates_typescript_support_file_from_parameter() {
             .contains("export function customSupportHook()")
     );
     fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_rejects_support_namespace() {
+    let root = project_root();
+    let spec = nex_gen::spec::ApiSpec::load_for_language_with_inputs(
+        nex_gen::language::Language::TypeScript,
+        &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
+    )
+    .unwrap();
+    let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let err = generate_files(
+        nex_gen::language::Language::TypeScript,
+        &spec,
+        &descriptors,
+        &SupportFiles {
+            fragments: vec![SupportFragmentSpec {
+                path: "support.ts".to_string(),
+                contents: String::new(),
+                namespace: Some("example.support".to_string()),
+            }],
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("support namespace"));
 }
 
 #[test]

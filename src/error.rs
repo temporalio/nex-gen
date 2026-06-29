@@ -99,6 +99,19 @@ pub enum Error {
     #[error("language `{language}` is not implemented yet")]
     UnsupportedLanguage { language: Language },
 
+    #[error("{language} support namespace `{namespace}` is not supported")]
+    UnsupportedSupportNamespace {
+        language: Language,
+        namespace: String,
+    },
+
+    #[error("invalid {language} support namespace `{namespace}`: {reason}")]
+    InvalidSupportNamespace {
+        language: Language,
+        namespace: String,
+        reason: String,
+    },
+
     #[error("RPC `{name}` was not found in the descriptor set")]
     UnknownRpcName { name: String },
 
