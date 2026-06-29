@@ -4,8 +4,8 @@ pub mod add_rpc;
 pub mod descriptors;
 pub mod error;
 pub mod generator;
-pub mod language;
 pub mod go;
+pub mod language;
 pub mod python;
 pub mod resources;
 pub mod spec;
@@ -528,10 +528,7 @@ fn format_example_output(repo_root: &Path, language: Language, output_path: &Pat
         Language::Go => (
             example_language_root(repo_root, language),
             "gofmt",
-            vec![
-                "-w".to_string(),
-                output_path.to_string_lossy().into_owned(),
-            ],
+            vec!["-w".to_string(), output_path.to_string_lossy().into_owned()],
         ),
         Language::Python => (
             example_language_root(repo_root, language),

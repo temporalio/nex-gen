@@ -2934,7 +2934,9 @@ fn render_model_schema_registrations(
                 &field.authored_name,
             )));
             output.push_str(": { wire: ");
-            output.push_str(&typescript_string_literal(&field.authored_name.to_kebab_case()));
+            output.push_str(&typescript_string_literal(
+                &field.authored_name.to_kebab_case(),
+            ));
             output.push_str(", schema: ");
             output.push_str(&typescript_field_kind_schema(&field.kind, api_plan));
             output.push_str(" },\n");
