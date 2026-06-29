@@ -31,7 +31,8 @@ namespace NexGen.TypeRoundtripService
         public Temporalio.Common.Priority? Priority { get; set; }
     }
 
-    public static partial class TypeRoundtripServiceOperations
+    [GeneratedCode("nex-gen", null)]
+    public static class Operations
     {
         [GeneratedCode("nex-gen", null)]
         private const string TypeRoundtripServiceEndpoint = "temporal-system";

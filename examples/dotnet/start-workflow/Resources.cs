@@ -6,6 +6,7 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace NexGen.StartWorkflowService
 {
@@ -24,11 +25,21 @@ namespace NexGen.StartWorkflowService
         public string WorkflowId { get; }
         public string? RunId { get; }
 
-        public void Cancel(string? reason) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+        [GeneratedCode("nex-gen", null)]
+        public Task CancelAsync(string? reason)
+        {
+            var request = new CancelWorkflowOptions(new WorkflowExecution(WorkflowId) { RunId = RunId }) { Reason = reason };
+            return Operations.CancelWorkflowAsync(request);
+        }
 
-        public StartedWorkflow RestartWorkflow(string workflow, string taskQueue) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+        [GeneratedCode("nex-gen", null)]
+        public Task<StartedWorkflow> RestartWorkflowAsync(string workflow, string taskQueue)
+        {
+            return Operations.RestartWorkflowAsync(workflow, null, new RestartWorkflowOptions(WorkflowId, taskQueue));
+        }
 
-        public IReadOnlyCollection<object?> GetResult() => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+        [GeneratedCode("nex-gen", null)]
+        public Task<IReadOnlyCollection<object?>> GetResultAsync() => throw new NotSupportedException("Resource method is not bound to a Nexus operation.");
 
     }
 

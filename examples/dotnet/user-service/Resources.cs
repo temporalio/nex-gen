@@ -6,6 +6,7 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace NexGen.UserService
 {
@@ -22,7 +23,12 @@ namespace NexGen.UserService
         public string UserId { get; }
         public string Email { get; }
 
-        public User UpdateEmail(string email) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+        [GeneratedCode("nex-gen", null)]
+        public Task<User> UpdateEmailAsync(string email)
+        {
+            var request = new UpdateEmailOptions(UserId, email);
+            return Operations.UpdateEmailAsync(request);
+        }
 
     }
 

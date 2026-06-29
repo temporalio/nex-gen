@@ -17,7 +17,8 @@ using Temporalio.Workflows;
 namespace NexGen.FunctionExecution
 {
 
-    public static partial class FunctionExecutionOperations
+    [GeneratedCode("nex-gen", null)]
+    public static class Operations
     {
         [GeneratedCode("nex-gen", null)]
         private const string FunctionExecutionEndpoint = "function-execution";

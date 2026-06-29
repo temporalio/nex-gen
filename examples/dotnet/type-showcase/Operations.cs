@@ -93,7 +93,8 @@ namespace NexGen.TypeShowcase
         public string? Reason { get; set; }
     }
 
-    public static partial class TypeShowcaseOperations
+    [GeneratedCode("nex-gen", null)]
+    public static class Operations
     {
         [GeneratedCode("nex-gen", null)]
         private const string TypeShowcaseEndpoint = "type-showcase";

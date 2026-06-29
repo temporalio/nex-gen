@@ -7,13 +7,13 @@ use crate::api_plan::{
     ApiPlan, PlannedEnum, PlannedField, PlannedFieldKind, PlannedFlags, PlannedMessageSource,
     PlannedMessageType, PlannedModel, PlannedOperation, PlannedOperationOutput,
     PlannedOperationResourceFieldBinding, PlannedResource, PlannedResourceMethod,
-    PlannedResourceMethodResultKind, PlannedScalarType, PlannedService, PlannedTypeInfo,
-    PlannedValueType,
+    PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedScalarType,
+    PlannedService, PlannedTypeInfo, PlannedValueType,
 };
 use crate::error::{Error, Result};
 use crate::generator::GeneratedFiles;
 use crate::language::Language;
-use crate::resources::ResolvedResourceBindingSource;
+use crate::resources::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{
     AuthoredFieldTypeSpec, FunctionFieldSpec, LanguageImportSpec, SupportFragmentSpec,
     TypeReplacementSpec,
@@ -341,11 +341,12 @@ fn render_resources_file(namespace: &str, api_plan: &ApiPlan) -> String {
             "System",
             "System.CodeDom.Compiler",
             "System.Collections.Generic",
+            "System.Threading.Tasks",
         ],
     );
     for service in &api_plan.services {
         for resource in &service.resources {
-            render_resource(&mut output, resource);
+            render_resource(&mut output, service, resource, api_plan);
         }
     }
     close_namespace(&mut output);
@@ -557,7 +558,19 @@ fn render_operations_class(
     for operation in &service.operations {
         render_operation_options_type(output, operation, api_plan);
     }
-    output.push_str("public static partial class ");
+    let explicit_operations_class = service
+        .operations_class
+        .for_language(Language::Dotnet)
+        .is_some();
+    if !explicit_operations_class {
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push('\n');
+    }
+    output.push_str("public static ");
+    if explicit_operations_class {
+        output.push_str("partial ");
+    }
+    output.push_str("class ");
     output.push_str(&dotnet_operations_class_name(service));
     output.push_str("\n{\n");
     output.push_str("    ");
@@ -1568,38 +1581,32 @@ fn render_flags(output: &mut String, flag_set: &PlannedFlags) {
 fn render_variant(output: &mut String, variant: &crate::api_plan::PlannedVariant) {
     output.push_str(GENERATED_CODE_ATTRIBUTE);
     output.push('\n');
-    output.push_str("public abstract class ");
+    output.push_str("public abstract record ");
     output.push_str(&csharp_type_name(&variant.name));
     output.push_str("\n{\n");
     output.push_str("    private ");
     output.push_str(&csharp_type_name(&variant.name));
     output.push_str("() { }\n\n");
-    for case in &variant.cases {
+    for (index, case) in variant.cases.iter().enumerate() {
         let case_name = csharp_type_name(&case.name);
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
-        output.push_str("    public sealed class ");
+        output.push_str("    public sealed record ");
         output.push_str(&case_name);
-        output.push_str(" : ");
-        output.push_str(&csharp_type_name(&variant.name));
-        output.push_str("\n    {\n");
         if let Some(payload) = &case.payload {
             let payload_type = dotnet_value_type(payload);
-            output.push_str("        public ");
-            output.push_str(&case_name);
             output.push('(');
             output.push_str(&payload_type);
-            output.push_str(" value) => Value = value;\n\n");
-            output.push_str("        public ");
-            output.push_str(&payload_type);
-            output.push_str(" Value { get; }\n");
+            output.push_str(" Value) : ");
         } else {
-            output.push_str("        public ");
-            output.push_str(&case_name);
-            output.push_str("() { }\n");
+            output.push_str(" : ");
         }
-        output.push_str("    }\n\n");
+        output.push_str(&csharp_type_name(&variant.name));
+        output.push_str(";\n");
+        if index + 1 < variant.cases.len() {
+            output.push('\n');
+        }
     }
     output.push_str("}\n\n");
 }
@@ -1919,7 +1926,12 @@ fn collect_public_operation_input_models(
     }
 }
 
-fn render_resource(output: &mut String, resource: &PlannedResource) {
+fn render_resource(
+    output: &mut String,
+    service: &PlannedService,
+    resource: &PlannedResource,
+    api_plan: &ApiPlan,
+) {
     let type_name = csharp_type_name(&resource.type_name);
     output.push_str(GENERATED_CODE_ATTRIBUTE);
     output.push('\n');
@@ -1957,17 +1969,26 @@ fn render_resource(output: &mut String, resource: &PlannedResource) {
         output.push('\n');
     }
     for method in &resource.methods {
-        render_resource_method(output, method);
+        render_resource_method(output, service, method, api_plan);
     }
     output.push_str("}\n\n");
 }
 
-fn render_resource_method(output: &mut String, method: &PlannedResourceMethod) {
-    let return_type = resource_method_return_type(method);
+fn render_resource_method(
+    output: &mut String,
+    service: &PlannedService,
+    method: &PlannedResourceMethod,
+    api_plan: &ApiPlan,
+) {
+    let return_type = resource_method_task_return_type(method);
+    output.push_str("    ");
+    output.push_str(GENERATED_CODE_ATTRIBUTE);
+    output.push('\n');
     output.push_str("    public ");
     output.push_str(&return_type);
     output.push(' ');
     output.push_str(&csharp_type_name(&method.name));
+    output.push_str("Async");
     output.push('(');
     for (index, param) in method.params.iter().enumerate() {
         if index > 0 {
@@ -1978,7 +1999,230 @@ fn render_resource_method(output: &mut String, method: &PlannedResourceMethod) {
         output.push_str(&csharp_parameter_name(&param.name));
     }
     output.push(')');
-    output.push_str(" => throw new NotSupportedException(\"Resource methods require a bound Nexus client.\");\n\n");
+    match &method.binding {
+        PlannedResourceMethodBindingSpec::Operation {
+            operation_name,
+            request_plan,
+            ..
+        } => {
+            let operation = service
+                .operations
+                .iter()
+                .find(|operation| operation.name == *operation_name)
+                .expect("bound resource operation should exist on the service");
+            output.push_str("\n    {\n");
+            render_resource_method_operation_body(
+                output,
+                service,
+                operation,
+                request_plan,
+                api_plan,
+            );
+            output.push_str("    }\n\n");
+        }
+        PlannedResourceMethodBindingSpec::Stub => {
+            output.push_str(" => throw new NotSupportedException(\"Resource method is not bound to a Nexus operation.\");\n\n");
+        }
+    }
+}
+
+fn render_resource_method_operation_body(
+    output: &mut String,
+    service: &PlannedService,
+    operation: &PlannedOperation,
+    request_plan: &RequestPlan,
+    api_plan: &ApiPlan,
+) {
+    let operation_method_name = format!("{}Async", csharp_type_name(&operation.name));
+    let operation_class_name = dotnet_operations_class_name(service);
+    let args = resource_method_operation_call_args(operation, request_plan, api_plan)
+        .expect("bound resource operation should have a renderable request plan");
+    if args.len() == 1 {
+        output.push_str("        var request = ");
+        output.push_str(&args[0]);
+        output.push_str(";\n");
+    }
+    output.push_str("        return ");
+    output.push_str(&operation_class_name);
+    output.push('.');
+    output.push_str(&operation_method_name);
+    output.push('(');
+    if args.len() == 1 {
+        output.push_str("request");
+    } else {
+        output.push_str(&args.join(", "));
+    }
+    output.push_str(");\n");
+}
+
+fn resource_method_operation_call_args(
+    operation: &PlannedOperation,
+    request_plan: &RequestPlan,
+    api_plan: &ApiPlan,
+) -> Option<Vec<String>> {
+    let model = api_plan.models.get(&operation.input.info.full_name)?;
+    if operation_has_flattened_convenience(operation, model, api_plan) {
+        if model.fields.iter().any(|field| field.function.is_some()) {
+            return resource_method_flattened_operation_call_args(
+                operation,
+                request_plan,
+                model,
+                api_plan,
+            );
+        }
+        if model_has_options_fields(model, api_plan)
+            && let Some(expr) = resource_method_request_model_init_expr(
+                request_plan,
+                api_plan,
+                Some(&operation_options_type_name(operation)),
+                ResourceMethodRequestInitKind::OptionsFields,
+            )
+        {
+            return Some(vec![expr]);
+        }
+    }
+
+    resource_method_request_model_init_expr(
+        request_plan,
+        api_plan,
+        None,
+        ResourceMethodRequestInitKind::AllFields,
+    )
+    .map(|expr| vec![expr])
+}
+
+fn resource_method_flattened_operation_call_args(
+    operation: &PlannedOperation,
+    request_plan: &RequestPlan,
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+) -> Option<Vec<String>> {
+    let source_exprs = resource_method_request_field_exprs(request_plan, model, api_plan)?;
+    let overload = flattened_overloads(model)
+        .into_iter()
+        .find(|overload| !overload.has_expression_functions())?;
+    let mut args = Vec::new();
+    for field in &model.fields {
+        if field.function.is_none() {
+            continue;
+        }
+        if flattened_nested_model(field, api_plan).is_some() {
+            return None;
+        }
+        args.push(resource_method_request_source_expr(&source_exprs, field)?);
+        if matches!(overload.function_mode(field), FlattenedFunctionMode::String)
+            && let Some(function) = &field.function
+        {
+            for arg_field_name in &function.arg_fields {
+                let arg_field = model
+                    .fields
+                    .iter()
+                    .find(|candidate| &candidate.proto_name == arg_field_name)?;
+                args.push(
+                    resource_method_request_source_expr(&source_exprs, arg_field)
+                        .or_else(|| (!arg_field.required).then(|| "null".to_string()))?,
+                );
+            }
+        }
+    }
+    if model_has_options_fields(model, api_plan) {
+        args.push(resource_method_request_model_init_expr(
+            request_plan,
+            api_plan,
+            Some(&operation_options_type_name(operation)),
+            ResourceMethodRequestInitKind::OptionsFields,
+        )?);
+    }
+    Some(args)
+}
+
+#[derive(Clone, Copy)]
+enum ResourceMethodRequestInitKind {
+    AllFields,
+    OptionsFields,
+}
+
+fn resource_method_request_model_init_expr(
+    request_plan: &RequestPlan,
+    api_plan: &ApiPlan,
+    type_name_override: Option<&str>,
+    init_kind: ResourceMethodRequestInitKind,
+) -> Option<String> {
+    let RequestPlan::Construct {
+        message_name,
+        fields,
+    } = request_plan
+    else {
+        return None;
+    };
+    let model = api_plan.models.get(message_name)?;
+    let mut field_exprs = Vec::new();
+    for field in fields {
+        let model_field = model.fields.iter().find(|candidate| {
+            candidate.authored_name == field.field_name || candidate.proto_name == field.field_name
+        })?;
+        if matches!(init_kind, ResourceMethodRequestInitKind::OptionsFields)
+            && !field_is_options_field(model_field)
+        {
+            continue;
+        }
+        field_exprs.push((
+            model_field,
+            resource_method_request_value_expr(&field.value, api_plan)?,
+        ));
+    }
+    Some(model_init_expr(
+        type_name_override.unwrap_or(&csharp_type_name(&model.name)),
+        field_exprs,
+    ))
+}
+
+fn resource_method_request_field_exprs(
+    request_plan: &RequestPlan,
+    model: &PlannedModel,
+    api_plan: &ApiPlan,
+) -> Option<BTreeMap<String, String>> {
+    let RequestPlan::Construct { fields, .. } = request_plan else {
+        return None;
+    };
+    let mut source_exprs = BTreeMap::new();
+    for field in fields {
+        let model_field = model.fields.iter().find(|candidate| {
+            candidate.authored_name == field.field_name || candidate.proto_name == field.field_name
+        })?;
+        let expr = resource_method_request_value_expr(&field.value, api_plan)?;
+        source_exprs.insert(model_field.authored_name.clone(), expr.clone());
+        source_exprs.insert(model_field.proto_name.clone(), expr);
+    }
+    Some(source_exprs)
+}
+
+fn resource_method_request_source_expr(
+    source_exprs: &BTreeMap<String, String>,
+    field: &PlannedField,
+) -> Option<String> {
+    source_exprs
+        .get(&field.authored_name)
+        .or_else(|| source_exprs.get(&field.proto_name))
+        .cloned()
+}
+
+fn resource_method_request_value_expr(
+    request_plan: &RequestPlan,
+    api_plan: &ApiPlan,
+) -> Option<String> {
+    match request_plan {
+        RequestPlan::Source(RequestPlanSource::ResourceField(name)) => Some(csharp_type_name(name)),
+        RequestPlan::Source(RequestPlanSource::MethodParam(name)) => {
+            Some(csharp_parameter_name(name))
+        }
+        RequestPlan::Construct { .. } => resource_method_request_model_init_expr(
+            request_plan,
+            api_plan,
+            None,
+            ResourceMethodRequestInitKind::AllFields,
+        ),
+    }
 }
 
 fn render_result_helper(output: &mut String) {
@@ -2598,6 +2842,15 @@ fn resource_method_return_type(method: &PlannedResourceMethod) -> String {
     }
 }
 
+fn resource_method_task_return_type(method: &PlannedResourceMethod) -> String {
+    let return_type = resource_method_return_type(method);
+    if return_type == "void" {
+        "Task".to_string()
+    } else {
+        format!("Task<{return_type}>")
+    }
+}
+
 fn dotnet_field_kind_type(kind: &PlannedFieldKind) -> String {
     match kind {
         PlannedFieldKind::Singular(value) => dotnet_value_type(value),
@@ -2794,7 +3047,7 @@ fn dotnet_operations_class_name(service: &PlannedService) -> String {
         .operations_class
         .for_language(Language::Dotnet)
         .map(csharp_type_name)
-        .unwrap_or_else(|| csharp_type_name(&format!("{}Operations", service.name)))
+        .unwrap_or_else(|| "Operations".to_string())
 }
 
 fn service_endpoint_constant_name(service: &PlannedService) -> String {

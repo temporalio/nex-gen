@@ -41,7 +41,8 @@ namespace NexGen.UserService
         public string Email { get; set; }
     }
 
-    public static partial class UserServiceOperations
+    [GeneratedCode("nex-gen", null)]
+    public static class Operations
     {
         [GeneratedCode("nex-gen", null)]
         private const string UserServiceEndpoint = "user-service";

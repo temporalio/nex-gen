@@ -47,32 +47,18 @@ namespace NexGen.TypeShowcase
     }
 
     [GeneratedCode("nex-gen", null)]
-    public abstract class NotificationTarget
+    public abstract record NotificationTarget
     {
         private NotificationTarget() { }
 
         [GeneratedCode("nex-gen", null)]
-        public sealed class Email : NotificationTarget
-        {
-            public Email(string value) => Value = value;
-
-            public string Value { get; }
-        }
+        public sealed record Email(string Value) : NotificationTarget;
 
         [GeneratedCode("nex-gen", null)]
-        public sealed class Sms : NotificationTarget
-        {
-            public Sms(string value) => Value = value;
-
-            public string Value { get; }
-        }
+        public sealed record Sms(string Value) : NotificationTarget;
 
         [GeneratedCode("nex-gen", null)]
-        public sealed class None : NotificationTarget
-        {
-            public None() { }
-        }
-
+        public sealed record None : NotificationTarget;
     }
 
     [GeneratedCode("nex-gen", null)]

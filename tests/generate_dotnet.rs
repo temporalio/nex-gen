@@ -246,17 +246,29 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
     assert!(!rendered.contains("responseType: typeof(User)"));
     assert!(!rendered.contains("responseType: typeof(void)"));
     assert!(rendered.contains("[Flags]\n    public enum UserCapability"));
-    assert!(rendered.contains("public abstract class NotificationTarget"));
+    assert!(rendered.contains("public abstract record NotificationTarget"));
+    assert!(rendered.contains("public sealed record Email(string Value) : NotificationTarget;"));
+    assert!(rendered.contains("public sealed record None : NotificationTarget;"));
     assert!(rendered.contains("public class User"));
     assert!(rendered.contains("public class GetUserOptions"));
     assert!(rendered.contains("internal class GetUserRequest"));
+    assert!(rendered.contains("using System.Threading.Tasks;"));
     assert!(
         rendered.contains("private static async Task<User> GetUserAsync(GetUserRequest request)")
     );
     assert!(rendered.contains("public static Task<User> GetUserAsync(GetUserOptions options)"));
     assert!(
+        rendered.contains("[GeneratedCode(\"nex-gen\", null)]\n    public static class Operations")
+    );
+    assert!(!rendered.contains("public static partial class Operations"));
+    assert!(!rendered.contains("TypeShowcaseOperations"));
+    assert!(
         !rendered.contains("public static async Task<User> GetUserAsync(GetUserRequest request)")
     );
+    assert!(rendered.contains("public Task<User> UpdateEmailAsync(string email)\n        {\n            var request = new UpdateEmailOptions(UserId, email);\n            return Operations.UpdateEmailAsync(request);\n        }"));
+    assert!(rendered.contains("public Task<User> RenameAsync(string displayName)\n        {\n            var request = new RenameOptions(UserId, displayName);\n            return Operations.RenameAsync(request);\n        }"));
+    assert!(rendered.contains("public Task DeactivateAsync(string? reason)\n        {\n            var request = new DeactivateOptions(UserId) { Reason = reason };\n            return Operations.DeactivateAsync(request);\n        }"));
+    assert!(!rendered.contains("Resource methods require a bound Nexus client."));
 }
 
 #[test]
@@ -327,6 +339,11 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains(
         "[GeneratedCode(\"nex-gen\", null)]\n    public class SignalWithStartWorkflowOptions"
     ));
+    assert!(
+        !rendered.contains(
+            "[GeneratedCode(\"nex-gen\", null)]\n    public static partial class Workflow"
+        )
+    );
     assert!(rendered.contains("public static partial class Workflow\n    {\n        [GeneratedCode(\"nex-gen\", null)]\n        private const string WorkflowServiceEndpoint"));
     assert!(rendered.contains(
         "/// <remarks>WARNING: This API is experimental and may change in the future.</remarks>"

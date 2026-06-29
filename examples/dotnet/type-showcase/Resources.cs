@@ -6,6 +6,7 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace NexGen.TypeShowcase
 {
@@ -28,11 +29,26 @@ namespace NexGen.TypeShowcase
         public UserStatus Status { get; }
         public UserProfile Profile { get; }
 
-        public User UpdateEmail(string email) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+        [GeneratedCode("nex-gen", null)]
+        public Task<User> UpdateEmailAsync(string email)
+        {
+            var request = new UpdateEmailOptions(UserId, email);
+            return Operations.UpdateEmailAsync(request);
+        }
 
-        public User Rename(string displayName) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+        [GeneratedCode("nex-gen", null)]
+        public Task<User> RenameAsync(string displayName)
+        {
+            var request = new RenameOptions(UserId, displayName);
+            return Operations.RenameAsync(request);
+        }
 
-        public void Deactivate(string? reason) => throw new NotSupportedException("Resource methods require a bound Nexus client.");
+        [GeneratedCode("nex-gen", null)]
+        public Task DeactivateAsync(string? reason)
+        {
+            var request = new DeactivateOptions(UserId) { Reason = reason };
+            return Operations.DeactivateAsync(request);
+        }
 
     }
 

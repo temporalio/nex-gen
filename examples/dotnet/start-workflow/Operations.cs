@@ -57,7 +57,8 @@ namespace NexGen.StartWorkflowService
         public string? Reason { get; set; }
     }
 
-    public static partial class StartWorkflowServiceOperations
+    [GeneratedCode("nex-gen", null)]
+    public static class Operations
     {
         [GeneratedCode("nex-gen", null)]
         private const string StartWorkflowServiceEndpoint = "temporal-system";
