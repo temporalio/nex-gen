@@ -4,8 +4,8 @@ import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import * as nexus from "nexus-rpc";
 
-import { TypeRoundtripService } from "../type-roundtrip/index.ts";
 import type { ActivityOptions } from "../type-roundtrip/index.ts";
+import { typeRoundtripService } from "../type-roundtrip/service.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(
@@ -14,11 +14,11 @@ const workflowsPath = fileURLToPath(
 
 describe("type-roundtrip generated output", () => {
   test("exposes type roundtrip service metadata", () => {
-    expect(TypeRoundtripService.name).toBe("TypeRoundtripService");
-    expect(TypeRoundtripService.operations.retryPolicyOperation.name).toBe(
+    expect(typeRoundtripService.name).toBe("TypeRoundtripService");
+    expect(typeRoundtripService.operations.retryPolicyOperation.name).toBe(
       "RetryPolicyOperation",
     );
-    expect(TypeRoundtripService.operations.activityOptionsOperation.name).toBe(
+    expect(typeRoundtripService.operations.activityOptionsOperation.name).toBe(
       "ActivityOptionsOperation",
     );
   });
@@ -43,7 +43,7 @@ describe("type-roundtrip generated output", () => {
   test("round-trips proto-backed types through a real Nexus client", async () => {
     await withWorkflowEnvironment(async (env) => {
       const calls: Array<[string, unknown]> = [];
-      const handler = nexus.serviceHandler(TypeRoundtripService, {
+      const handler = nexus.serviceHandler(typeRoundtripService, {
         async retryPolicyOperation(_ctx, input) {
           calls.push(["RetryPolicyOperation", input]);
           return input;

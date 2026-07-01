@@ -487,7 +487,7 @@ async def test_signal_with_start_rejects_positional_args_and_args() -> None:
     with pytest.raises(
         TypeError, match="cannot specify both positional arguments and args"
     ):
-        _ = await workflow_service.signal_with_start_workflow(
+        await workflow_service.signal_with_start_workflow(  # pyright: ignore[reportCallIssue]
             "SingleArgWorkflow",
             "positional",
             args=["tuple-one"],
@@ -511,7 +511,9 @@ if typing.TYPE_CHECKING:
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
-        _ = assert_type(positional_handle, workflow.ExternalWorkflowHandle[str])
+        _ = assert_type(
+            positional_handle, workflow.ExternalWorkflowHandle[SingleArgWorkflow]
+        )
 
         list_args_handle = await workflow_service.signal_with_start_workflow(
             workflow=ExampleWorkflow.run,
@@ -522,7 +524,9 @@ if typing.TYPE_CHECKING:
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
-        _ = assert_type(list_args_handle, workflow.ExternalWorkflowHandle[str])
+        _ = assert_type(
+            list_args_handle, workflow.ExternalWorkflowHandle[ExampleWorkflow]
+        )
 
         string_workflow_handle = await workflow_service.signal_with_start_workflow(
             workflow="ExampleWorkflow",
@@ -534,7 +538,7 @@ if typing.TYPE_CHECKING:
         )
         _ = assert_type(
             string_workflow_handle,
-            workflow.ExternalWorkflowHandle[typing.Any],
+            workflow.ExternalWorkflowHandle[object],
         )
 
     _ = _typecheck_signal_with_start_return_types
@@ -610,7 +614,18 @@ if typing.TYPE_CHECKING:
     )
 
     workflow_service.signal_with_start_workflow(  # pyright: ignore[reportCallIssue]
-        SingleArgWorkflow.run,  # pyright: ignore[reportArgumentType]
+        "ExampleWorkflow",
+        "positional",
+        args=["keyword"],
+        id="conflicting-string-workflow-input",
+        task_queue=TASK_QUEUE,
+        request_id=REQUEST_ID,
+        signal="wake_up",
+        cron_schedule=CRON_SCHEDULE,
+    )
+
+    workflow_service.signal_with_start_workflow(  # pyright: ignore[reportCallIssue]
+        SingleArgWorkflow.run,
         "positional",
         args=["tuple-one"],
         id="conflicting-typed-callable-workflow-input",
@@ -622,7 +637,7 @@ if typing.TYPE_CHECKING:
 
     workflow_service.signal_with_start_workflow(  # pyright: ignore[reportCallIssue]
         workflow=SingleArgWorkflow.run,
-        args="scalar",  # pyright: ignore[reportArgumentType]
+        args="im a sequence here's my spout",  # pyright: ignore[reportArgumentType]
         id="typed-scalar-keyword-workflow-input",
         task_queue=TASK_QUEUE,
         request_id=REQUEST_ID,

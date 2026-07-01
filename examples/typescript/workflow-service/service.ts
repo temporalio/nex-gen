@@ -6,7 +6,7 @@ import type { temporal } from "@temporalio/proto";
 /**
  * @experimental This API is experimental and subject to change.
  */
-export const WorkflowService = nexus.service(
+export const workflowService = nexus.service(
   "temporal.api.workflowservice.v1.WorkflowService",
   {
     /**
@@ -18,3 +18,14 @@ export const WorkflowService = nexus.service(
     >({ name: "SignalWithStartWorkflowExecution" }),
   },
 );
+
+export const operationRegistry = [
+  {
+    service: "temporal.api.workflowservice.v1.WorkflowService",
+    operation: "SignalWithStartWorkflowExecution",
+    inputType:
+      "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest",
+    outputType:
+      "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionResponse",
+  },
+] as const;

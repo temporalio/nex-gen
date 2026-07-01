@@ -19,9 +19,9 @@ const ExecuteNamedVarargsFunctionOp = "ExecuteNamedVarargsFunction"
 type ExecuteFunctionRequest struct {
 	// Required.
 	Function string
-	// Required.
+	// Required. The name argument for the function.
 	Name string
-	// Required.
+	// Required. The enabled argument for the function.
 	Enabled bool
 }
 
@@ -33,9 +33,9 @@ type ExecuteFunctionResult struct {
 type ExecuteCountedFunctionRequest struct {
 	// Required.
 	Function string
-	// Required.
+	// Required. The name argument for the function.
 	Name string
-	// Required.
+	// Required. The count argument for the function.
 	Count int32
 }
 
@@ -47,9 +47,9 @@ type ExecuteCountedFunctionResult struct {
 type ExecuteNamedFunctionRequest struct {
 	// Required.
 	Function string
-	// Required.
+	// Required. The name argument for the function.
 	Name string
-	// Required.
+	// Required. The enabled argument for the function.
 	Enabled bool
 }
 
@@ -61,7 +61,8 @@ type ExecuteNamedFunctionResult struct {
 type ExecuteVarargsFunctionRequest struct {
 	// Required.
 	Function string
-	Args     []string
+	// Arguments for the function.
+	Args []string
 }
 
 type ExecuteVarargsFunctionResult struct {
@@ -72,7 +73,8 @@ type ExecuteVarargsFunctionResult struct {
 type ExecuteNamedVarargsFunctionRequest struct {
 	// Required.
 	Function string
-	Args     []string
+	// Arguments for the function.
+	Args []string
 }
 
 type ExecuteNamedVarargsFunctionResult struct {
@@ -174,6 +176,7 @@ func ExecuteNamedFunction(
 }
 
 type ExecuteVarargsFunctionOptions struct {
+	// Arguments for the function.
 	Args []string
 }
 
@@ -185,6 +188,7 @@ func ExecuteVarargsFunction(ctx workflow.Context, function string, opts ExecuteV
 }
 
 type ExecuteNamedVarargsFunctionOptions struct {
+	// Arguments for the function.
 	Args []string
 }
 

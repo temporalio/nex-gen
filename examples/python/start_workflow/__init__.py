@@ -16,15 +16,15 @@ __all__ = [
 
 __nexus_operation_registry__ = {
     (
-        "WorkflowService",
+        "StartWorkflowService",
         "StartWorkflow",
-    ): _service.WorkflowService.start_workflow,
+    ): _service.StartWorkflowService.start_workflow,
     (
-        "WorkflowService",
+        "StartWorkflowService",
         "RestartWorkflow",
-    ): _service.WorkflowService.restart_workflow,
+    ): _service.StartWorkflowService.restart_workflow,
     (
-        "WorkflowService",
+        "StartWorkflowService",
         "CancelWorkflow",
-    ): _service.WorkflowService.cancel_workflow,
+    ): _service.StartWorkflowService.cancel_workflow,
 }

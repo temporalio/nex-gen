@@ -20,24 +20,26 @@ The WIT definition is the source of truth for the public API. Protobuf descripto
 
 ## Current Status
 
-| Feature | What it covers | Python | TypeScript | Go |
-| --- | --- | :-: | :-: | :-: |
-| Core API generation | WIT types become native data types; WIT functions and resources become wrappers that invoke Nexus operations from Temporal workflows | ✅ | ✅ | ✅ |
-| Service definitions | Generated service and operation descriptors, used to register operation handlers and to mock operations in tests | ✅ | ✅ | ❌ |
-| Proto backing | Generated models convert to and from Temporal's protobuf messages at the Nexus boundary (`@nexus.proto` and related directives) | ✅ | ✅ | ✅ |
-| Ergonomics directives | `@nexus` directives that polish the generated API: transforming raw responses into workflow handles, flattening nested parameters, accepting typed workflow/signal functions, doc comments | ✅ | ✅ | ❌ |
-| `json/nexus` runtime | Serialization shim that lets non-proto (WIT-direct) values round-trip through a Temporal server using a wire format shared across languages | ✅ | ✅ | ❌ |
+| Feature | What it covers | Python | TypeScript | Go | .NET |
+| --- | --- | :-: | :-: | :-: | :-: |
+| Core API generation | WIT types become native data types; WIT functions and resources become wrappers that invoke Nexus operations from Temporal workflows | ✅ | ✅ | ✅ | ✅ |
+| Service definitions | Generated service and operation descriptors, used to register operation handlers and to mock operations in tests | ✅ | ✅ | ❌ | ✅ |
+| Proto backing | Generated models convert to and from Temporal's protobuf messages at the Nexus boundary (`@nexus.proto` and related directives) | ✅ | ✅ | ✅ | ✅ |
+| Ergonomics directives | `@nexus` directives that polish the generated API: transforming raw responses into workflow handles, flattening nested parameters, accepting typed workflow/signal functions, doc comments | ✅ | ✅ | ❌ | ✅ |
+| `json/nexus` runtime | Serialization shim that lets non-proto (WIT-direct) values round-trip through a Temporal server using a wire format shared across languages | ✅ | ✅ | ❌ | ❌ |
 
-Because Go has no `json/nexus` runtime, only the proto-backed Go examples share
-a wire format with the Python and TypeScript bindings; WIT-direct Go models
-serialize with the Temporal Go SDK's default converter.
+Because Go and .NET have no `json/nexus` runtime, only the proto-backed Go and
+.NET examples share a wire format with the Python and TypeScript bindings;
+WIT-direct Go and .NET models serialize with each SDK's default converter.
 
 ## Examples
 
 Each example starts with authored WIT under `examples/inputs/`. Checked-in
 generated output lives under `examples/python/<example_name>/` and
-`examples/typescript/<example-name>/`, with language-specific tests under each
-language's `tests/` directory. See [`examples/README.md`](examples/README.md)
+`examples/typescript/<example-name>/`; Go output lives under
+`examples/go/<example-name>/` and .NET output lives under
+`examples/dotnet/<example-name>/`. Language-specific tests live under each
+language's `tests/` directory where present. See [`examples/README.md`](examples/README.md)
 for links to each example's WIT, generated code, and tests.
 
 - [`user-service`](examples/inputs/user-service.wit): a small WIT-direct API showing the basic shape of an operation returning a resource and a resource method that calls another operation.
@@ -56,6 +58,7 @@ Rebuild one language or one example only:
 
 ```bash
 cargo build-examples --lang python
+cargo build-examples --lang dotnet
 cargo build-examples user-service
 cargo build-examples --lang typescript user-service
 ```
@@ -136,11 +139,21 @@ cargo run -- generate \
   --output /tmp/userservice
 ```
 
+Generate .NET:
+
+```bash
+cargo run -- generate \
+  --lang dotnet \
+  --input examples/inputs/user-service.wit \
+  --output /tmp/user-service-dotnet
+```
+
 Add `--format` to run a formatter after generation:
 
 - Python: `ruff format`
 - TypeScript: `prettier --write`
 - Go: `gofmt -w`
+- .NET: no formatter is run
 
 The `user-service` example is intentionally small and WIT-native. The `type-showcase` example demonstrates broader WIT type coverage: records, enums, flags, variants, results, maps, tuples, resources, resource methods, and an operation with no return value without proto annotations.
 
@@ -162,12 +175,13 @@ The WIT file defines the public surface. `@nexus` directives carry the parts WIT
 
 Resource methods bind to operations only when the method and operation have the same generated operation name. When they intentionally differ, mark the method with `@nexus.operation`, for example `/// @nexus.operation "cancel-workflow"` on `cancel: func(...)` to bind it to `cancel-workflow: func(...)`.
 
-Input WIT files can add support code with `@nexus.support`. Python support fragments are copied into the generated private `_support` package, and TypeScript support fragments are emitted as `support.ts` next to the generated `index.ts`.
+Input WIT files can add support code with `@nexus.support`. Python support fragments are copied into the generated private `_support` package, TypeScript support fragments are emitted as `support.ts` next to the generated `index.ts`, and .NET support fragments are copied under `Support/`.
 
 Support code can also be supplied outside WIT with repeatable `--support-file`
 arguments on `generate`. Explicit support files apply to the selected
 `--lang`, are appended after WIT-declared support, and use the same generated
-layout as `@nexus.support` fragments:
+layout as `@nexus.support` fragments. .NET support files infer their support
+namespace from the C# `namespace` declaration in the file:
 
 ```bash
 cargo run -- generate \

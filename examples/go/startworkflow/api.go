@@ -9,7 +9,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const ServiceName = "WorkflowService"
+const ServiceName = "StartWorkflowService"
 const Endpoint = "temporal-system"
 
 const StartWorkflowOp = "StartWorkflow"
@@ -21,7 +21,8 @@ const CancelWorkflowOp = "CancelWorkflow"
 type StartWorkflowRequest struct {
 	// Required.
 	Workflow string
-	Args     []any
+	// Arguments for the workflow.
+	Args []any
 	// Required.
 	WorkflowId string
 	// Required.
@@ -173,6 +174,7 @@ func cancelWorkflow(ctx workflow.Context, request CancelWorkflowRequest) (*Cance
 // --- Operations (public API) ---
 
 type StartWorkflowOptions struct {
+	// Arguments for the workflow.
 	Args               []any
 	WorkflowStartDelay *time.Duration
 }
@@ -194,6 +196,7 @@ func StartWorkflow(
 }
 
 type RestartWorkflowOptions struct {
+	// Arguments for the workflow.
 	Args               []any
 	WorkflowStartDelay *time.Duration
 }

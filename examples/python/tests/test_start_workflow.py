@@ -22,13 +22,13 @@ import start_workflow.service
 from start_workflow._resources import StartedWorkflow
 
 START_WORKFLOW_OPERATION = start_workflow.__nexus_operation_registry__[
-    ("WorkflowService", "StartWorkflow")
+    ("StartWorkflowService", "StartWorkflow")
 ]
 RESTART_WORKFLOW_OPERATION = start_workflow.__nexus_operation_registry__[
-    ("WorkflowService", "RestartWorkflow")
+    ("StartWorkflowService", "RestartWorkflow")
 ]
 CANCEL_WORKFLOW_OPERATION = start_workflow.__nexus_operation_registry__[
-    ("WorkflowService", "CancelWorkflow")
+    ("StartWorkflowService", "CancelWorkflow")
 ]
 
 
@@ -39,7 +39,7 @@ class ExampleWorkflow:
         return customer_id
 
 
-@service_handler(service=start_workflow.service.WorkflowService)
+@service_handler(service=start_workflow.service.StartWorkflowService)
 class StartWorkflowServiceHandler:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
@@ -133,13 +133,13 @@ def test_generated_metadata() -> None:
 
     assert isinstance(start_operation, Operation)
     assert start_operation.name == "StartWorkflow"
-    assert registry[("WorkflowService", "StartWorkflow")] is start_operation
+    assert registry[("StartWorkflowService", "StartWorkflow")] is start_operation
     assert isinstance(cancel_operation, Operation)
     assert cancel_operation.name == "CancelWorkflow"
-    assert registry[("WorkflowService", "CancelWorkflow")] is cancel_operation
+    assert registry[("StartWorkflowService", "CancelWorkflow")] is cancel_operation
     assert isinstance(restart_operation, Operation)
     assert restart_operation.name == "RestartWorkflow"
-    assert registry[("WorkflowService", "RestartWorkflow")] is restart_operation
+    assert registry[("StartWorkflowService", "RestartWorkflow")] is restart_operation
     assert not hasattr(start_workflow, "WorkflowService")
     assert not hasattr(start_workflow, "StartWorkflowExecutionRequest")
     assert not hasattr(start_workflow, "StartedWorkflow")
@@ -219,8 +219,8 @@ if typing.TYPE_CHECKING:
         task_queue=TASK_QUEUE,
     )
 
-    _ = start_workflow.start_workflow(
-        ExampleWorkflow.run,  # pyright: ignore[reportArgumentType]
+    start_workflow.start_workflow(  # pyright: ignore[reportCallIssue]
+        ExampleWorkflow.run,
         "customer-123",
         args=["customer-456"],
         workflow_id="conflicting-typed-workflow-input",
@@ -231,6 +231,14 @@ if typing.TYPE_CHECKING:
         workflow=ExampleWorkflow.run,
         args=["customer-123"],
         workflow_id="typed-list-workflow-input-fallback",
+        task_queue=TASK_QUEUE,
+    )
+
+    start_workflow.start_workflow(  # pyright: ignore[reportCallIssue]
+        "ExampleWorkflow",
+        "customer-123",
+        args=["customer-456"],
+        workflow_id="conflicting-string-workflow-input",
         task_queue=TASK_QUEUE,
     )
 

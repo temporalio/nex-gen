@@ -2,9 +2,9 @@
 
 import * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
-import { WorkflowService } from "../service.ts";
-import { cancelWorkflowRequestToProto } from "../models.ts";
-import type { CancelWorkflowRequest } from "../models.ts";
+import { startWorkflowService } from "../service";
+import { cancelWorkflowRequestToProto } from "../models";
+import type { CancelWorkflowRequest } from "../models";
 
 /**
  * @param request - Request for the operation.
@@ -15,11 +15,11 @@ export async function cancelWorkflow(
   workflow.NexusOperationHandle<temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse>
 > {
   const client = workflow.createNexusServiceClient({
-    service: WorkflowService,
+    service: startWorkflowService,
     endpoint: "temporal-system",
   });
   return await client.startOperation(
-    WorkflowService.operations.cancelWorkflow,
+    startWorkflowService.operations.cancelWorkflow,
     cancelWorkflowRequestToProto(request) ?? {},
   );
 }

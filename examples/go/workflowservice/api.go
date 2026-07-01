@@ -22,13 +22,15 @@ const SignalWithStartWorkflowOp = "SignalWithStartWorkflowExecution"
 type SignalWithStartWorkflowRequest struct {
 	// Required.
 	Workflow string
-	Args     []any
+	// Arguments for the workflow.
+	Args []any
 	// Required. Unique identifier for the workflow execution.
 	Id string
 	// Required. Task queue to run the workflow on.
 	TaskQueue string
 	// Required.
-	Signal     string
+	Signal string
+	// Arguments for the signal.
 	SignalArgs []any
 	// Total workflow execution timeout, including retries and continue-as-new.
 	ExecutionTimeout *time.Duration
@@ -152,7 +154,9 @@ func signalWithStartWorkflow(ctx workflow.Context, request SignalWithStartWorkfl
 // --- Operations (public API) ---
 
 type SignalWithStartWorkflowOptions struct {
-	Args       []any
+	// Arguments for the workflow.
+	Args []any
+	// Arguments for the signal.
 	SignalArgs []any
 	// Total workflow execution timeout, including retries and continue-as-new.
 	ExecutionTimeout *time.Duration

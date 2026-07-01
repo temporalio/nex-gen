@@ -221,7 +221,7 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
     );
     assert!(
         generated_typescript_request
-            .with_arguments("signal_name")
+            .function("signal_name")
             .is_none()
     );
     assert_ne!(
@@ -233,8 +233,8 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
         handwritten_typescript_request.field_name_override("signal_name")
     );
     assert_ne!(
-        generated_typescript_request.with_arguments("signal_name"),
-        handwritten_typescript_request.with_arguments("signal_name")
+        generated_typescript_request.function("signal_name"),
+        handwritten_typescript_request.function("signal_name")
     );
 
     assert!(generated.contains("user-metadata: option<user-metadata>,"));

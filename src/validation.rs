@@ -139,7 +139,6 @@ fn validate_message_type_override(
             message,
             descriptors,
             usage,
-            language,
         )?;
     }
     for field_name in type_override
@@ -272,9 +271,7 @@ fn validate_authored_field_types(
     descriptors: &DescriptorIndex,
 ) -> Result<()> {
     for (field_name, authored_type) in &generated_model.field_wit_types {
-        if generated_model.function(field_name).is_some()
-            || generated_model.with_arguments(field_name).is_some()
-        {
+        if generated_model.function(field_name).is_some() {
             continue;
         }
 
@@ -296,9 +293,8 @@ fn validate_invocation_fields(
     message: &MessageMetadata,
     descriptors: &DescriptorIndex,
     usage: MessageUsage,
-    language: Language,
 ) -> Result<()> {
-    if generated_model.functions.is_empty() && generated_model.with_arguments.is_empty() {
+    if generated_model.functions.is_empty() {
         return Ok(());
     }
 
@@ -309,15 +305,6 @@ fn validate_invocation_fields(
                 field: field.clone(),
                 property: "function",
                 reason: "function fields are only supported on input-only generated models"
-                    .to_string(),
-            });
-        }
-        if let Some(field) = generated_model.with_arguments.keys().next() {
-            return Err(Error::InvalidTypeOverrideField {
-                message: message_name.to_string(),
-                field: field.clone(),
-                property: "withArguments",
-                reason: "withArguments fields are only supported on input-only generated models"
                     .to_string(),
             });
         }
@@ -353,28 +340,6 @@ fn validate_invocation_fields(
                     function.args_field
                 ),
             });
-        }
-    }
-
-    if language == Language::TypeScript {
-        for (field_name, with_arguments) in &generated_model.with_arguments {
-            if let Some((existing, _)) = seen_args_fields.insert(
-                with_arguments.args_field.as_str(),
-                (field_name, "withArguments"),
-            ) {
-                if existing == field_name {
-                    continue;
-                }
-                return Err(Error::InvalidTypeOverrideField {
-                    message: message_name.to_string(),
-                    field: field_name.clone(),
-                    property: "withArguments",
-                    reason: format!(
-                        "argsField `{}` is already used by field `{existing}`",
-                        with_arguments.args_field
-                    ),
-                });
-            }
         }
     }
 
@@ -436,77 +401,6 @@ fn validate_invocation_fields(
             args_field,
             descriptors,
             "function",
-        )?;
-    }
-
-    if language != Language::TypeScript {
-        return Ok(());
-    }
-
-    for (field_name, with_arguments) in &generated_model.with_arguments {
-        let value_field = validate_model_override_field(message_name, field_name, message)?;
-        if type_override.omitted_fields.contains(field_name) {
-            return Err(Error::OmittedCustomizedTypeOverrideField {
-                message: message_name.to_string(),
-                field: field_name.clone(),
-            });
-        }
-        if with_arguments.args_field == *field_name {
-            return Err(Error::InvalidTypeOverrideField {
-                message: message_name.to_string(),
-                field: field_name.clone(),
-                property: "withArguments",
-                reason: "argsField must point to a different field".to_string(),
-            });
-        }
-
-        validate_named_invocation_field(
-            message_name,
-            field_name,
-            value_field,
-            descriptors,
-            "withArguments",
-        )?;
-
-        let args_field =
-            validate_model_override_field(message_name, &with_arguments.args_field, message)?;
-        if type_override
-            .omitted_fields
-            .contains(&with_arguments.args_field)
-        {
-            return Err(Error::OmittedCustomizedTypeOverrideField {
-                message: message_name.to_string(),
-                field: with_arguments.args_field.clone(),
-            });
-        }
-        if type_override
-            .required_fields
-            .contains(&with_arguments.args_field)
-        {
-            return Err(Error::ConflictingTypeOverrideFieldProperties {
-                message: message_name.to_string(),
-                field: with_arguments.args_field.clone(),
-                property: "withArguments",
-                conflicting_property: "required",
-            });
-        }
-        if generated_model
-            .field_sources
-            .contains_key(&with_arguments.args_field)
-        {
-            return Err(Error::ConflictingTypeOverrideFieldProperties {
-                message: message_name.to_string(),
-                field: with_arguments.args_field.clone(),
-                property: "withArguments",
-                conflicting_property: "source",
-            });
-        }
-        validate_invocation_args_field(
-            message_name,
-            &with_arguments.args_field,
-            args_field,
-            descriptors,
-            "withArguments",
         )?;
     }
 
@@ -834,7 +728,6 @@ fn validate_enum_type_override(
             || !generated_model.field_wit_types.is_empty()
             || !generated_model.field_sources.is_empty()
             || !generated_model.functions.is_empty()
-            || !generated_model.with_arguments.is_empty()
         {
             return Err(Error::UnsupportedTypeOverrideProperty {
                 type_name: enumeration_name.to_string(),

@@ -5,8 +5,10 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use heck::ToSnakeCase;
+use nex_gen::SupportFiles;
 use nex_gen::generate_to_string_with_inputs;
 use nex_gen::generator::{GeneratedOutputLayout, generate_files};
+use nex_gen::spec::SupportFragmentSpec;
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
@@ -315,7 +317,7 @@ fn python_request_models_are_write_only() {
     ));
     assert!(rendered.contains("class SignalWithStartWorkflowRequest:"));
     assert!(rendered.contains(
-        "@dataclasses.dataclass(slots=True, kw_only=True)\nclass SignalWithStartWorkflowRequest:\n    \"\"\"\n    .. warning::\n        This API is experimental and subject to change.\n    \"\"\"\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]]\n    args: list[typing.Any] | None = None\n    id: str\n    task_queue: str\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]\n    signal_args: list[typing.Any] | None = None\n    execution_timeout: datetime.timedelta | None = None"
+        "@dataclasses.dataclass(slots=True, kw_only=True)\nclass SignalWithStartWorkflowRequest:\n    \"\"\"\n    .. warning::\n        This API is experimental and subject to change.\n    \"\"\"\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]]\n    args: list[typing.Any] | None = None\n    id: str\n    task_queue: str\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]\n    signal_args: list[typing.Any] | None = None\n    execution_timeout: datetime.timedelta | None = None"
     ));
     assert!(rendered.contains("temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE"));
     assert!(rendered.contains("args: list[typing.Any] | None = None"));
@@ -338,31 +340,32 @@ fn python_request_models_are_write_only() {
     assert!(rendered.contains(
         "if typing.TYPE_CHECKING:\n    from temporalio.workflow import ExternalWorkflowHandle"
     ));
-    assert!(rendered.contains(") -> ExternalWorkflowHandle[typing.Any]:"));
+    assert!(rendered.contains(") -> ExternalWorkflowHandle[object]:"));
     assert!(rendered.contains("    nexus_client = create_nexus_client("));
     assert!(rendered.contains("async def signal_with_start_workflow("));
     assert!(rendered.contains("@typing.overload"));
     assert!(rendered.contains("workflow: str,"));
-    assert!(rendered.contains("*positional_args: object,"));
+    assert!(rendered.contains("*args: object,"));
     assert!(rendered.contains("id: str,"));
     assert!(rendered.contains("args: list[typing.Any] | None = ...,"));
     assert!(rendered.contains(
-        "workflow: collections.abc.Callable[[typing.Any, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[WorkflowResult]],"
+        "workflow: collections.abc.Callable[[SelfType, typing_extensions.Unpack[WorkflowArgs]], collections.abc.Awaitable[WorkflowResult]],"
     ));
     assert!(rendered.contains("WorkflowArgs = typing_extensions.TypeVarTuple(\"WorkflowArgs\")"));
     assert!(rendered.contains("WorkflowResult = typing.TypeVar(\"WorkflowResult\")"));
-    assert!(rendered.contains(") -> ExternalWorkflowHandle[WorkflowResult]:"));
-    assert!(rendered.contains("*positional_args: typing_extensions.Unpack[WorkflowArgs],"));
+    assert!(rendered.contains("SelfType = typing.TypeVar(\"SelfType\")"));
+    assert!(rendered.contains(") -> ExternalWorkflowHandle[SelfType]:"));
+    assert!(rendered.contains("*args: typing_extensions.Unpack[WorkflowArgs],"));
     assert!(rendered.contains("args: list[typing.Any],"));
     assert!(!rendered.contains("tuple[FirstWorkflowArg"));
     assert!(rendered.contains(
-        "signal: collections.abc.Callable[[typing.Any, SignalArg], None | collections.abc.Awaitable[None]],"
+        "signal: collections.abc.Callable[[SelfType, SignalArg], None | collections.abc.Awaitable[None]],"
     ));
     assert!(rendered.contains("SignalArg = typing.TypeVar(\"SignalArg\")"));
     assert!(rendered.contains("signal_args: SignalArg,"));
     assert!(rendered.contains("signal_args: list[typing.Any],"));
     assert!(rendered.contains(
-        "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[typing.Any]],\n    *positional_args: object,\n    args: list[typing.Any] | None = None,\n    id: str,\n    task_queue: str,\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],\n    signal_args: object | list[typing.Any] | None = None,"
+        "async def signal_with_start_workflow(\n    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],\n    *positional_args: object,\n    args: list[typing.Any] | None = None,\n    id: str,\n    task_queue: str,\n    signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],\n    signal_args: object | list[typing.Any] | None = None,"
     ));
     assert!(rendered.contains(
         "signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]],"
@@ -437,4 +440,29 @@ fn python_request_models_are_write_only() {
     assert!(type_roundtrip_rendered.contains("task_queue: str | None = None,"));
     assert!(type_roundtrip_rendered.contains("retry_policy: temporalio.common.RetryPolicy,"));
     assert!(type_roundtrip_rendered.contains("request = ActivityOptions("));
+}
+
+#[test]
+fn python_rejects_support_namespace() {
+    let root = project_root();
+    let spec = nex_gen::spec::ApiSpec::load_for_language_with_inputs(
+        nex_gen::language::Language::Python,
+        &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
+    )
+    .unwrap();
+    let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let err = generate_files(
+        nex_gen::language::Language::Python,
+        &spec,
+        &descriptors,
+        &SupportFiles {
+            fragments: vec![SupportFragmentSpec {
+                path: "support.py".to_string(),
+                contents: String::new(),
+                namespace: Some("example.support".to_string()),
+            }],
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("support namespace"));
 }

@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use nex_gen::SupportFiles;
 use nex_gen::generate_to_string_with_inputs;
+use nex_gen::generator::generate_files;
+use nex_gen::spec::SupportFragmentSpec;
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const START_WORKFLOW_EXAMPLE_ID: &str = "start-workflow";
@@ -210,6 +213,31 @@ fn cli_generates_typescript_support_file_from_parameter() {
 }
 
 #[test]
+fn typescript_rejects_support_namespace() {
+    let root = project_root();
+    let spec = nex_gen::spec::ApiSpec::load_for_language_with_inputs(
+        nex_gen::language::Language::TypeScript,
+        &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
+    )
+    .unwrap();
+    let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let err = generate_files(
+        nex_gen::language::Language::TypeScript,
+        &spec,
+        &descriptors,
+        &SupportFiles {
+            fragments: vec![SupportFragmentSpec {
+                path: "support.ts".to_string(),
+                contents: String::new(),
+                namespace: Some("example.support".to_string()),
+            }],
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("support namespace"));
+}
+
+#[test]
 fn typescript_example_suite_typechecks_and_tests() {
     let root = project_root();
     let example_dir = typescript_root(&root);
@@ -331,7 +359,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(input_index < workflow_id_index);
     assert!(workflow_id_index < task_queue_index);
     assert!(task_queue_index < signal_name_index);
-    assert!(rendered.contains("signalName: signalFunctionToProto("));
+    assert!(rendered.contains("signalName: signalFunctionName("));
     assert!(!rendered.contains("signalName: ((value) =>"));
     assert!(rendered.contains("workflowType: workflowTypeToProto("));
     assert!(rendered.contains("taskQueue: taskQueueToProto("));
@@ -372,6 +400,21 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains("request.id"));
     assert!(rendered.contains("result.runId ?? undefined"));
     assert!(rendered.contains("export async function signalWithStartWorkflow<"));
+    assert!(rendered.contains(
+        "export { signalWithStartWorkflow } from './operations/signal-with-start-workflow';"
+    ));
+    assert!(rendered.contains("export const operationRegistry = ["));
+    assert!(rendered.contains("service: \"temporal.api.workflowservice.v1.WorkflowService\""));
+    assert!(rendered.contains("operation: \"SignalWithStartWorkflowExecution\""));
+    assert!(rendered.contains(
+        "inputType: \"temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest\""
+    ));
+    assert!(rendered.contains(
+        "outputType: \"temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionResponse\""
+    ));
+    assert!(rendered.contains("export type { SignalWithStartWorkflowRequest } from './models';"));
+    assert!(!rendered.contains("export { WorkflowService } from './service';"));
+    assert!(!rendered.contains("export type { SignalWithStartWorkflowResponse"));
     assert!(rendered.contains("request: SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>,"));
     assert!(rendered.contains("const client = workflow.createNexusServiceClient({"));
     assert!(!rendered.contains("export class WorkflowServiceClient"));

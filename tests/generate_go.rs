@@ -247,14 +247,14 @@ interface namespace-service {
 }
 
 #[test]
-fn go_unconvertible_proto_field_fails_generation() {
+fn go_proto_enum_field_infers_descriptor_go_package() {
     let root = project_root();
     let temp_dir = unique_output_path("go-unconvertible-input");
     fs::create_dir_all(&temp_dir).unwrap();
     let wit_path = temp_dir.join("unconvertible.wit");
-    // The `namespace-state` alias is type-replaced for Python only; Go has no
-    // native type or converter for it, so generation must fail loudly instead
-    // of silently omitting the field from `ToProto`/`FromProto`.
+    // The `namespace-state` alias is type-replaced for Python only. Go should
+    // still infer the proto enum import and conversion from descriptor
+    // `go_package` metadata.
     fs::write(
         &wit_path,
         r#"package temporal:unconvertible@1.0.0;
@@ -298,22 +298,18 @@ interface namespace-service {
     )
     .unwrap();
 
-    let error = generate_to_string_with_inputs(
+    let rendered = generate_to_string_with_inputs(
         nex_gen::language::Language::Go,
         &[wit_path],
         &[descriptor_path(&root)],
     )
-    .unwrap_err()
-    .to_string();
+    .unwrap();
 
-    assert!(
-        error.contains("NamespaceInfo.state"),
-        "error should name the field: {error}"
-    );
-    assert!(
-        error.contains("`go=`"),
-        "error should mention the missing go= annotation: {error}"
-    );
+    assert!(rendered.contains("namespace \"go.temporal.io/api/namespace/v1\""));
+    assert!(rendered.contains("enums \"go.temporal.io/api/enums/v1\""));
+    assert!(rendered.contains("type NamespaceState int32"));
+    assert!(rendered.contains("State *NamespaceState"));
+    assert!(rendered.contains("message.State = enums.NamespaceState((*m.State))"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

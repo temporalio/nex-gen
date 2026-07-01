@@ -30,21 +30,36 @@ async def _execute_named_varargs_function(
     )
 
 
+# Overload case:
+# - function name with positional function arguments
 @typing.overload
 async def execute_named_varargs_function(
     function: str,
-    *positional_args: object,
+    *args: object,
+) -> temporalio.workflow.NexusOperationHandle[ExecuteNamedVarargsFunctionResult]: ...
+
+
+# Overload case:
+# - function name with optional list-form function arguments
+@typing.overload
+async def execute_named_varargs_function(
+    function: str,
+    *,
     args: list[typing.Any] | None = ...,
 ) -> temporalio.workflow.NexusOperationHandle[ExecuteNamedVarargsFunctionResult]: ...
 
 
+# Overload case:
+# - function callable with typed positional function arguments
 @typing.overload
 async def execute_named_varargs_function(
     function: collections.abc.Callable[[typing_extensions.Unpack[FunctionArgs]], str],
-    *positional_args: typing_extensions.Unpack[FunctionArgs],
+    *args: typing_extensions.Unpack[FunctionArgs],
 ) -> temporalio.workflow.NexusOperationHandle[ExecuteNamedVarargsFunctionResult]: ...
 
 
+# Overload case:
+# - function callable with list-form function arguments
 @typing.overload
 async def execute_named_varargs_function(
     function: collections.abc.Callable[..., str],

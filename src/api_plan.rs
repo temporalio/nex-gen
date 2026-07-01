@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use heck::ToUpperCamelCase;
 use indexmap::IndexMap;
 use prost_types::FieldDescriptorProto;
+use prost_types::FileOptions;
 use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata};
@@ -16,7 +17,6 @@ use crate::spec::{
     ApiSpec, AuthoredFieldTypeSpec, FunctionFieldSpec, GeneratedModelSpec, LanguageStringSpec,
     OperationOutputTransformSpec, OperationSpec, ResourceFieldSpec, ServiceSpec,
     TypeReplacementSpec, WitEnumSpec, WitFlagsSpec, WitRecordSpec, WitVariantSpec,
-    WithArgumentsFieldSpec,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -32,6 +32,8 @@ pub(crate) struct ApiPlan {
 pub(crate) struct PlannedService {
     pub(crate) name: String,
     pub(crate) wire_name: String,
+    pub(crate) namespace: LanguageStringSpec,
+    pub(crate) operations_class: LanguageStringSpec,
     pub(crate) endpoint: String,
     pub(crate) experimental: bool,
     pub(crate) delay_load_temporalio_workflow: bool,
@@ -125,24 +127,45 @@ pub(crate) struct PlannedTypeInfo {
     pub(crate) package: String,
     pub(crate) file_name: Option<String>,
     pub(crate) go_package: Option<String>,
+    pub(crate) file_options: Option<FileOptions>,
+    pub(crate) proto_reference: crate::spec::LanguageStringSpec,
+    pub(crate) proto_type_name: crate::spec::LanguageStringSpec,
 }
 
 impl PlannedTypeInfo {
-    fn from_message(message: &MessageMetadata) -> Self {
+    fn from_message(message: &MessageMetadata, spec: &ApiSpec) -> Self {
         Self {
             full_name: message.full_name.clone(),
             package: message.package.clone(),
             file_name: message.file_name.clone(),
             go_package: message.go_package.clone(),
+            file_options: message.file_options.clone(),
+            proto_reference: spec
+                .type_override(&message.full_name)
+                .map(|type_override| type_override.proto_reference().clone())
+                .unwrap_or_default(),
+            proto_type_name: spec
+                .type_override(&message.full_name)
+                .map(|type_override| type_override.proto_type_name().clone())
+                .unwrap_or_default(),
         }
     }
 
-    fn from_enum(enumeration: &EnumMetadata) -> Self {
+    fn from_enum(enumeration: &EnumMetadata, spec: &ApiSpec) -> Self {
         Self {
             full_name: enumeration.full_name.clone(),
             package: enumeration.package.clone(),
             file_name: enumeration.file_name.clone(),
             go_package: enumeration.go_package.clone(),
+            file_options: enumeration.file_options.clone(),
+            proto_reference: spec
+                .type_override(&enumeration.full_name)
+                .map(|type_override| type_override.proto_reference().clone())
+                .unwrap_or_default(),
+            proto_type_name: spec
+                .type_override(&enumeration.full_name)
+                .map(|type_override| type_override.proto_type_name().clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -152,6 +175,9 @@ impl PlannedTypeInfo {
             package: String::new(),
             file_name: None,
             go_package: None,
+            file_options: None,
+            proto_reference: crate::spec::LanguageStringSpec::default(),
+            proto_type_name: crate::spec::LanguageStringSpec::default(),
         }
     }
 
@@ -161,6 +187,9 @@ impl PlannedTypeInfo {
             package: String::new(),
             file_name: None,
             go_package: None,
+            file_options: None,
+            proto_reference: crate::spec::LanguageStringSpec::default(),
+            proto_type_name: crate::spec::LanguageStringSpec::default(),
         }
     }
 
@@ -170,6 +199,9 @@ impl PlannedTypeInfo {
             package: String::new(),
             file_name: None,
             go_package: None,
+            file_options: None,
+            proto_reference: crate::spec::LanguageStringSpec::default(),
+            proto_type_name: crate::spec::LanguageStringSpec::default(),
         }
     }
 
@@ -179,6 +211,9 @@ impl PlannedTypeInfo {
             package: String::new(),
             file_name: None,
             go_package: None,
+            file_options: None,
+            proto_reference: crate::spec::LanguageStringSpec::default(),
+            proto_type_name: crate::spec::LanguageStringSpec::default(),
         }
     }
 }
@@ -247,8 +282,6 @@ pub(crate) struct PlannedField {
     pub(crate) role: PlannedFieldRole,
     pub(crate) function: Option<FunctionFieldSpec>,
     pub(crate) function_args: bool,
-    pub(crate) with_arguments: Option<WithArgumentsFieldSpec>,
-    pub(crate) with_arguments_args: bool,
     pub(crate) kind: PlannedFieldKind,
 }
 
@@ -269,8 +302,6 @@ pub(crate) enum PlannedFieldRole {
     Plain,
     Function(FunctionFieldSpec),
     FunctionArgs(FunctionFieldSpec),
-    WithArguments,
-    WithArgumentsArgs,
 }
 
 #[derive(Debug, Clone)]
@@ -535,6 +566,8 @@ fn plan_service(
     Ok(PlannedService {
         name: service.name.clone(),
         wire_name: service.wire_name.clone(),
+        namespace: service.namespace.clone(),
+        operations_class: service.operations_class.clone(),
         endpoint,
         experimental: service.experimental,
         delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
@@ -830,7 +863,7 @@ fn planned_resource_field(
 fn planned_message_reference(message: &MessageMetadata, spec: &ApiSpec) -> PlannedMessageType {
     let type_override = spec.type_override(&message.full_name);
     PlannedMessageType {
-        info: PlannedTypeInfo::from_message(message),
+        info: PlannedTypeInfo::from_message(message, spec),
         model_name: planned_proto_model_name(message, spec),
         replacement: type_override
             .and_then(|type_override| type_override.replacement())
@@ -935,7 +968,7 @@ fn ensure_model_plan(
     plan.models.insert(
         message.full_name.clone(),
         PlannedModel {
-            info: PlannedTypeInfo::from_message(message),
+            info: PlannedTypeInfo::from_message(message, spec),
             name: planned_proto_model_name(message, spec),
             capabilities: requested_capabilities,
             flatten_in_api,
@@ -1010,11 +1043,11 @@ fn descriptor_field_by_name<'a>(
         .expect("declared generated model field should exist in descriptor")
 }
 
-fn ensure_enum_plan(enumeration: &EnumMetadata, plan: &mut ApiPlan) {
+fn ensure_enum_plan(enumeration: &EnumMetadata, spec: &ApiSpec, plan: &mut ApiPlan) {
     plan.enums
         .entry(enumeration.full_name.clone())
         .or_insert_with(|| PlannedEnum {
-            info: PlannedTypeInfo::from_enum(enumeration),
+            info: PlannedTypeInfo::from_enum(enumeration, spec),
             name: enum_name(&enumeration.full_name),
             values: enumeration
                 .descriptor
@@ -1139,12 +1172,6 @@ fn plan_field(
         function_args: generated_model
             .and_then(|generated_model| generated_model.function_for_args_field(&proto_name))
             .is_some(),
-        with_arguments: generated_model
-            .and_then(|generated_model| generated_model.with_arguments(&proto_name))
-            .cloned(),
-        with_arguments_args: generated_model
-            .and_then(|generated_model| generated_model.with_arguments_for_args_field(&proto_name))
-            .is_some(),
         kind: planned_field_kind(field, spec, descriptors, plan),
         proto_name,
     }
@@ -1184,11 +1211,6 @@ fn plan_wit_field(
         function_args: record
             .generated_model
             .function_for_args_field(field_name)
-            .is_some(),
-        with_arguments: record.generated_model.with_arguments(field_name).cloned(),
-        with_arguments_args: record
-            .generated_model
-            .with_arguments_for_args_field(field_name)
             .is_some(),
         kind: planned_field_kind_from_authored(wit_type, spec, descriptors, plan),
     }
@@ -1267,10 +1289,10 @@ fn planned_value_type_from_authored(
                     .and_then(|type_override| type_override.replacement())
                     .cloned();
                 if replacement.is_none() {
-                    ensure_enum_plan(enumeration, plan);
+                    ensure_enum_plan(enumeration, spec, plan);
                 }
                 PlannedValueType::Enum(PlannedEnumType {
-                    info: Some(PlannedTypeInfo::from_enum(enumeration)),
+                    info: Some(PlannedTypeInfo::from_enum(enumeration, spec)),
                     name: Some(enum_name(&enumeration.full_name)),
                     replacement,
                 })
@@ -1402,18 +1424,6 @@ fn planned_field_role(
     {
         return PlannedFieldRole::FunctionArgs(function.clone());
     }
-    if generated_model
-        .and_then(|generated_model| generated_model.with_arguments(proto_name))
-        .is_some()
-    {
-        return PlannedFieldRole::WithArguments;
-    }
-    if generated_model
-        .and_then(|generated_model| generated_model.with_arguments_for_args_field(proto_name))
-        .is_some()
-    {
-        return PlannedFieldRole::WithArgumentsArgs;
-    }
     PlannedFieldRole::Plain
 }
 
@@ -1536,11 +1546,11 @@ fn plan_enum_type(
         .and_then(|type_override| type_override.replacement())
         .cloned();
     if replacement.is_none() {
-        ensure_enum_plan(enumeration, plan);
+        ensure_enum_plan(enumeration, spec, plan);
     }
 
     PlannedEnumType {
-        info: Some(PlannedTypeInfo::from_enum(enumeration)),
+        info: Some(PlannedTypeInfo::from_enum(enumeration, spec)),
         name: Some(enum_name(&enumeration.full_name)),
         replacement,
     }

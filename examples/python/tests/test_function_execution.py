@@ -82,6 +82,12 @@ if typing.TYPE_CHECKING:
         args=["one", "two"],
     )
 
+    function_execution.execute_named_varargs_function(  # pyright: ignore[reportCallIssue]
+        "named-varargs-function",
+        "one",
+        args=["two"],
+    )
+
     _ = function_execution.execute_function(
         wrong_name_function,  # pyright: ignore[reportArgumentType]
         "one",

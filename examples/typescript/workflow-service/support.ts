@@ -21,7 +21,11 @@ function int64ToNumber(
     return value.toNumber();
   }
   if ("low" in value && "high" in value) {
-    const longValue = value as { low: number; high: number; unsigned?: boolean };
+    const longValue = value as {
+      low: number;
+      high: number;
+      unsigned?: boolean;
+    };
     const low = longValue.low >>> 0;
     return longValue.high * 4_294_967_296 + low;
   }
@@ -73,7 +77,7 @@ export function workflowFunctionName(value: string | common.Workflow): string {
   return typeof value === "string" ? value : common.extractWorkflowType(value);
 }
 
-export function signalFunctionToProto(
+export function signalFunctionName(
   value: string | workflow.SignalDefinition<any[]>,
 ): string {
   return typeof value === "string" ? value : value.name;
