@@ -28,21 +28,21 @@ type ActivityOptions struct {
 
 func (m ActivityOptions) ToProto() *activity.ActivityOptions {
 	message := &activity.ActivityOptions{}
-	message.TaskQueue = TaskQueueToProto(m.TaskQueue)
-	message.RetryPolicy = RetryPolicyToProto(&m.RetryPolicy)
-	message.ScheduleToCloseTimeout = DurationToProto(m.ScheduleToCloseTimeout)
-	message.Priority = PriorityToProto(m.Priority)
+	message.TaskQueue = taskQueueToProto(m.TaskQueue)
+	message.RetryPolicy = retryPolicyToProto(&m.RetryPolicy)
+	message.ScheduleToCloseTimeout = durationToProto(m.ScheduleToCloseTimeout)
+	message.Priority = priorityToProto(m.Priority)
 	return message
 }
 
 func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
 	value := ActivityOptions{}
-	value.TaskQueue = TaskQueueFromProto(proto.GetTaskQueue())
-	if converted := RetryPolicyFromProto(proto.GetRetryPolicy()); converted != nil {
+	value.TaskQueue = taskQueueFromProto(proto.GetTaskQueue())
+	if converted := retryPolicyFromProto(proto.GetRetryPolicy()); converted != nil {
 		value.RetryPolicy = *converted
 	}
-	value.ScheduleToCloseTimeout = DurationFromProto(proto.GetScheduleToCloseTimeout())
-	value.Priority = PriorityFromProto(proto.GetPriority())
+	value.ScheduleToCloseTimeout = durationFromProto(proto.GetScheduleToCloseTimeout())
+	value.Priority = priorityFromProto(proto.GetPriority())
 	return value
 }
 
@@ -50,12 +50,12 @@ func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
 
 func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
 	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, RetryPolicyToProto(&request), workflow.NexusOperationOptions{})
+	fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, retryPolicyToProto(&request), workflow.NexusOperationOptions{})
 	var result common.RetryPolicy
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	return RetryPolicyFromProto(&result), nil
+	return retryPolicyFromProto(&result), nil
 }
 
 func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*ActivityOptions, error) {

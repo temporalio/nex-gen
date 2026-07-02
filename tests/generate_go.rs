@@ -599,12 +599,12 @@ fn go_type_roundtrip_generates_proto_conversions() {
     assert!(rendered.contains("message := &activity.ActivityOptions{}"));
     // Optional override fields pass the pointer straight to the nil-safe
     // converter; the required field passes its address.
-    assert!(rendered.contains("message.RetryPolicy = RetryPolicyToProto(&m.RetryPolicy)"));
-    assert!(rendered.contains("message.TaskQueue = TaskQueueToProto(m.TaskQueue)"));
-    assert!(rendered.contains("message.Priority = PriorityToProto(m.Priority)"));
+    assert!(rendered.contains("message.RetryPolicy = retryPolicyToProto(&m.RetryPolicy)"));
+    assert!(rendered.contains("message.TaskQueue = taskQueueToProto(m.TaskQueue)"));
+    assert!(rendered.contains("message.Priority = priorityToProto(m.Priority)"));
     assert!(
         rendered
-            .contains("message.ScheduleToCloseTimeout = DurationToProto(m.ScheduleToCloseTimeout)")
+            .contains("message.ScheduleToCloseTimeout = durationToProto(m.ScheduleToCloseTimeout)")
     );
     assert!(rendered.contains("return message"));
 
@@ -614,9 +614,9 @@ fn go_type_roundtrip_generates_proto_conversions() {
     assert!(rendered.contains(
         "func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {"
     ));
-    assert!(rendered.contains("value.TaskQueue = TaskQueueFromProto(proto.GetTaskQueue())"));
+    assert!(rendered.contains("value.TaskQueue = taskQueueFromProto(proto.GetTaskQueue())"));
     assert!(rendered.contains(
-        "if converted := RetryPolicyFromProto(proto.GetRetryPolicy()); converted != nil {"
+        "if converted := retryPolicyFromProto(proto.GetRetryPolicy()); converted != nil {"
     ));
     assert!(rendered.contains("value.RetryPolicy = *converted"));
 
@@ -632,20 +632,20 @@ fn go_type_roundtrip_generates_proto_conversions() {
     // the hand-written converter (passing the address) and return the proto
     // response converted to a pointer directly.
     assert!(rendered.contains(
-        "fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, RetryPolicyToProto(&request), workflow.NexusOperationOptions{})"
+        "fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, retryPolicyToProto(&request), workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains("var result common.RetryPolicy"));
-    assert!(rendered.contains("return RetryPolicyFromProto(&result), nil"));
+    assert!(rendered.contains("return retryPolicyFromProto(&result), nil"));
 
     // The hand-written support fragment is emitted alongside the generated
     // service file with the pointer-in/pointer-out converter contract.
     assert!(rendered.contains("### model_overrides.go"));
     assert!(
-        rendered.contains("func RetryPolicyToProto(p *temporal.RetryPolicy) *common.RetryPolicy {")
+        rendered.contains("func retryPolicyToProto(p *temporal.RetryPolicy) *common.RetryPolicy {")
     );
     assert!(
         rendered
-            .contains("func RetryPolicyFromProto(p *common.RetryPolicy) *temporal.RetryPolicy {")
+            .contains("func retryPolicyFromProto(p *common.RetryPolicy) *temporal.RetryPolicy {")
     );
 }
 
@@ -699,7 +699,7 @@ interface workflow-service {
 
   /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest"
   record cancel-request {
-    /// @nexus.source go="WorkflowNamespace"
+    /// @nexus.source go="workflowNamespace"
     namespace: string,
     /// @nexus.omit
     workflow-execution: placeholder,

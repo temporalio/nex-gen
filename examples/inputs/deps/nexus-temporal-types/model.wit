@@ -15,6 +15,8 @@ interface model {
   ///   python="typing.Any"
   ///   typescript="common.Payload"
   ///   go="any"
+  ///   go-from="payloadFromProto"
+  ///   go-to="payloadToProto"
   ///   dotnet="object?"
   ///   dotnet-to="ProtoExtensions.ToPayload"
   ///   typescript-import="@temporalio/common"
@@ -22,7 +24,12 @@ interface model {
 
   /// @nexus.proto "temporal.api.common.v1.Payloads"
   ///   typescript-import="@temporalio/proto"
-  /// @nexus.type dotnet="IReadOnlyCollection<object?>" dotnet-to="ProtoExtensions.ToPayloads"
+  /// @nexus.type
+  ///   go="[]any"
+  ///   go-from="payloadsFromProto"
+  ///   go-to="payloadsToProto"
+  ///   dotnet="IReadOnlyCollection<object?>"
+  ///   dotnet-to="ProtoExtensions.ToPayloads"
   type payloads = list<payload>;
 
   /// Callable result annotation for workflow functions.
@@ -58,6 +65,8 @@ interface model {
   ///   python="str"
   ///   typescript="string"
   ///   go="string"
+  ///   go-from="workflowTypeFromProto"
+  ///   go-to="workflowTypeToProto"
   ///   dotnet="string"
   ///   dotnet-to="ProtoExtensions.ToWorkflowTypeProto"
   type workflow-type = placeholder;
@@ -92,6 +101,8 @@ interface model {
   ///   python="temporalio.common.RetryPolicy"
   ///   typescript="common.RetryPolicy"
   ///   go="go.temporal.io/sdk/temporal.RetryPolicy"
+  ///   go-from="retryPolicyFromProto"
+  ///   go-to="retryPolicyToProto"
   ///   dotnet="Temporalio.Common.RetryPolicy"
   ///   typescript-import="@temporalio/common"
   type retry-policy = placeholder;
@@ -101,18 +112,28 @@ interface model {
   ///   python="str"
   ///   typescript="string"
   ///   go="string"
+  ///   go-from="taskQueueFromProto"
+  ///   go-to="taskQueueToProto"
   ///   dotnet="string"
   ///   dotnet-to="ProtoExtensions.ToTaskQueueProto"
   type task-queue = placeholder;
 
   /// @nexus.proto "temporal.api.common.v1.Memo" typescript-import="@temporalio/proto"
-  /// @nexus.type python="collections.abc.Mapping[str, typing.Any]" typescript="Record<string, unknown>" go="map[string]any" dotnet="IReadOnlyDictionary<string, object?>"
+  /// @nexus.type
+  ///   python="collections.abc.Mapping[str, typing.Any]"
+  ///   typescript="Record<string, unknown>"
+  ///   go="map[string]any"
+  ///   go-from="memoFromProto"
+  ///   go-to="memoToProto"
+  ///   dotnet="IReadOnlyDictionary<string, object?>"
   type memo = placeholder;
 
   /// @nexus.proto "temporal.api.common.v1.SearchAttributes" typescript-import="@temporalio/proto"
   /// @nexus.type
   ///   python="temporalio.common.TypedSearchAttributes"
   ///   typescript="common.TypedSearchAttributes"
+  ///   go="string"
+  ///   go-to="searchAttributesToProto"
   ///   dotnet="Temporalio.Common.SearchAttributeCollection"
   ///   typescript-import="@temporalio/common"
   type search-attributes = placeholder;
@@ -122,6 +143,8 @@ interface model {
   ///   python="temporalio.common.Priority"
   ///   typescript="common.Priority"
   ///   go="go.temporal.io/sdk/temporal.Priority"
+  ///   go-from="priorityFromProto"
+  ///   go-to="priorityToProto"
   ///   dotnet="Temporalio.Common.Priority"
   ///   typescript-import="@temporalio/common"
   type priority = placeholder;
@@ -131,6 +154,7 @@ interface model {
   ///   python="temporalio.common.VersioningOverride"
   ///   typescript="common.VersioningOverride"
   ///   go="go.temporal.io/sdk/client.VersioningOverride"
+  ///   go-to="versioningOverrideToProto"
   ///   dotnet="Temporalio.Common.VersioningOverride"
   ///   typescript-import="@temporalio/common"
   type versioning-override = placeholder;
@@ -140,6 +164,8 @@ interface model {
   ///   python="datetime.timedelta"
   ///   typescript="common.Duration"
   ///   go="time.Duration"
+  ///   go-from="durationFromProto"
+  ///   go-to="durationToProto"
   ///   dotnet="System.TimeSpan"
   ///   typescript-import="@temporalio/common"
   type duration = placeholder;

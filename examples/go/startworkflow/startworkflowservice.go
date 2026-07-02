@@ -32,12 +32,12 @@ type StartWorkflowRequest struct {
 
 func (m StartWorkflowRequest) ToProto() *workflowservice.StartWorkflowExecutionRequest {
 	message := &workflowservice.StartWorkflowExecutionRequest{}
-	message.WorkflowType = WorkflowTypeToProto(&m.Workflow)
-	message.Input = PayloadsToProto(m.Args)
+	message.WorkflowType = workflowTypeToProto(&m.Workflow)
+	message.Input = payloadsToProto(m.Args)
 	message.WorkflowId = m.WorkflowId
-	message.TaskQueue = TaskQueueToProto(&m.TaskQueue)
-	message.WorkflowStartDelay = DurationToProto(m.WorkflowStartDelay)
-	message.Namespace = WorkflowNamespace()
+	message.TaskQueue = taskQueueToProto(&m.TaskQueue)
+	message.WorkflowStartDelay = durationToProto(m.WorkflowStartDelay)
+	message.Namespace = workflowNamespace()
 	return message
 }
 
@@ -53,7 +53,7 @@ func (m CancelWorkflowRequest) ToProto() *workflowservice.RequestCancelWorkflowE
 	if m.Reason != nil {
 		message.Reason = (*m.Reason)
 	}
-	message.Namespace = WorkflowNamespace()
+	message.Namespace = workflowNamespace()
 	return message
 }
 

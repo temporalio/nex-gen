@@ -102,7 +102,7 @@ func TestRetryPolicyWireFieldNames(t *testing.T) {
 		NonRetryableErrorTypes: []string{"FatalError"},
 	}
 
-	protoMsg := tr.RetryPolicyToProto(&policy)
+	protoMsg := tr.ActivityOptions{RetryPolicy: policy}.ToProto().GetRetryPolicy()
 	bytes, err := proto.Marshal(protoMsg)
 	require.NoError(t, err)
 
