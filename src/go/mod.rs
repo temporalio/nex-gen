@@ -118,8 +118,9 @@ impl GoPackageContext {
 /// Entry point for the Go code generator.
 ///
 /// Walks the [`ApiPlan`] to collect all referenced enums, flags, variants, and
-/// models, then renders them into a single `types.go` file inside a directory
-/// output. The Go package name is derived from the first service endpoint.
+/// models, then renders them into a single service-named `.go` file inside a
+/// directory output. The Go package name is derived from the first service
+/// endpoint unless an explicit package import path is provided.
 pub(crate) fn generate(
     api_plan: &ApiPlan,
     support_fragments: &[SupportFragmentSpec],
@@ -209,7 +210,7 @@ pub(crate) fn generate(
     );
 
     let mut files = BTreeMap::new();
-    files.insert(PathBuf::from("api.go"), output);
+    files.insert(go_api_file_name(api_plan), output);
 
     // Emit hand-written support fragments (e.g. proto converter functions) as
     // additional Go files in the same package. Like the Python and TypeScript
@@ -222,6 +223,26 @@ pub(crate) fn generate(
     }
 
     Ok(GeneratedFiles::directory(files))
+}
+
+/// Derives the primary Go output filename from the first service name
+/// (`WorkflowService` -> `workflowservice.go`). Most WIT inputs export a single
+/// service; for empty plans, keep the historical `api.go` fallback.
+fn go_api_file_name(api_plan: &ApiPlan) -> PathBuf {
+    let stem = api_plan
+        .services
+        .first()
+        .map(|service| {
+            service
+                .name
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect::<String>()
+                .to_lowercase()
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "api".to_string());
+    PathBuf::from(format!("{stem}.go"))
 }
 
 /// Derives the output file name for a Go support fragment from its source path

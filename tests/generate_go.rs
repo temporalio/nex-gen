@@ -180,6 +180,8 @@ fn cli_generates_go_support_file_from_parameter() {
     let support_contents = fs::read_to_string(output_path.join("custom_support.go")).unwrap();
     assert!(support_contents.starts_with("package userservice\n"));
     assert!(support_contents.contains("func CustomSupportHook() string"));
+    assert!(output_path.join("userservice.go").is_file());
+    assert!(!output_path.join("api.go").exists());
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
@@ -209,7 +211,7 @@ fn cli_generates_go_with_package_self_imports_removed() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let api = fs::read_to_string(output_path.join("api.go")).unwrap();
+    let api = fs::read_to_string(output_path.join("userservice.go")).unwrap();
     assert!(api.contains("package workflow\n"));
     assert!(!api.contains("\"go.temporal.io/sdk/workflow\""));
     assert!(api.contains("func getUser(ctx Context, request GetUserRequest) (*User, error)"));
@@ -635,8 +637,8 @@ fn go_type_roundtrip_generates_proto_conversions() {
     assert!(rendered.contains("var result common.RetryPolicy"));
     assert!(rendered.contains("return RetryPolicyFromProto(&result), nil"));
 
-    // The hand-written support fragment is emitted alongside api.go with the
-    // pointer-in/pointer-out converter contract.
+    // The hand-written support fragment is emitted alongside the generated
+    // service file with the pointer-in/pointer-out converter contract.
     assert!(rendered.contains("### model_overrides.go"));
     assert!(
         rendered.contains("func RetryPolicyToProto(p *temporal.RetryPolicy) *common.RetryPolicy {")
