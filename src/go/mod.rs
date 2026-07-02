@@ -32,6 +32,89 @@ const TUPLE_FIELD_NAMES: &[&str] = &[
 /// width used by the Python and TypeScript backends.
 const GO_DOC_COMMENT_LINE_LENGTH: usize = 88;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GoOptions {
+    pub package_import_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct GoPackageContext {
+    package_name: String,
+    import_path: Option<String>,
+}
+
+impl GoPackageContext {
+    fn new(api_plan: &ApiPlan, options: &GoOptions) -> Self {
+        let package_name = options.package_import_path.as_ref().map_or_else(
+            || {
+                api_plan
+                    .services
+                    .first()
+                    .map(|service| go_package_name(&service.endpoint))
+                    .unwrap_or_else(|| "api".to_string())
+            },
+            |import_path| {
+                import_path
+                    .rsplit('/')
+                    .next()
+                    .filter(|segment| !segment.is_empty())
+                    .map(go_package_name)
+                    .unwrap_or_else(|| "api".to_string())
+            },
+        );
+
+        Self {
+            package_name,
+            import_path: options.package_import_path.clone(),
+        }
+    }
+
+    fn is_self_import(&self, import_path: &str) -> bool {
+        self.import_path
+            .as_deref()
+            .is_some_and(|self_import| self_import == import_path)
+    }
+
+    fn go_type_expr(&self, type_expr: &str) -> String {
+        let (import_path, code_expr) = parse_go_import(type_expr);
+        if import_path
+            .as_deref()
+            .is_some_and(|import_path| self.is_self_import(import_path))
+        {
+            return self.unqualify_self_expr(&code_expr);
+        }
+        code_expr
+    }
+
+    fn workflow_context_type(&self) -> String {
+        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Context")
+    }
+
+    fn new_nexus_client(&self) -> String {
+        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.NewNexusClient")
+    }
+
+    fn nexus_operation_options(&self) -> String {
+        self.qualified_expr(
+            "go.temporal.io/sdk/workflow",
+            "workflow.NexusOperationOptions{}",
+        )
+    }
+
+    fn qualified_expr(&self, import_path: &str, code_expr: &str) -> String {
+        if self.is_self_import(import_path) {
+            self.unqualify_self_expr(code_expr)
+        } else {
+            code_expr.to_string()
+        }
+    }
+
+    fn unqualify_self_expr(&self, code_expr: &str) -> String {
+        let qualifier = format!("{}.", self.package_name);
+        code_expr.replace(&qualifier, "")
+    }
+}
+
 /// Entry point for the Go code generator.
 ///
 /// Walks the [`ApiPlan`] to collect all referenced enums, flags, variants, and
@@ -40,7 +123,9 @@ const GO_DOC_COMMENT_LINE_LENGTH: usize = 88;
 pub(crate) fn generate(
     api_plan: &ApiPlan,
     support_fragments: &[SupportFragmentSpec],
+    options: &GoOptions,
 ) -> Result<GeneratedFiles> {
+    let package = GoPackageContext::new(api_plan, options);
     let mut enums = IndexMap::new();
     let mut flags = IndexMap::new();
     let mut variants = IndexMap::new();
@@ -60,6 +145,7 @@ pub(crate) fn generate(
                         &mut flags,
                         &mut variants,
                         &mut models,
+                        &package,
                     )
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -83,15 +169,10 @@ pub(crate) fn generate(
                 &mut flags,
                 &mut variants,
                 &mut models,
+                &package,
             )?;
         }
     }
-
-    let package_name = api_plan
-        .services
-        .first()
-        .map(|service| go_package_name(&service.endpoint))
-        .unwrap_or_else(|| "api".to_string());
 
     let mut imports = BTreeSet::new();
 
@@ -101,21 +182,22 @@ pub(crate) fn generate(
     // we need to recover the imports from the original annotations.
     // We do this by re-parsing annotations from the ApiPlan.
     collect_imports_from_plan(api_plan, &mut imports);
+    imports.retain(|import_path| !package.is_self_import(import_path));
 
     // Second pass: compute proto conversion metadata for proto-backed models
     // and collect the aliased proto imports they require.
     let mut proto_imports = GoImportCollector::default();
-    populate_proto_conversions(api_plan, &mut models, &mut proto_imports)?;
-    populate_operation_bindings(api_plan, &mut services, &mut proto_imports)?;
+    populate_proto_conversions(api_plan, &mut models, &mut proto_imports, &package)?;
+    populate_operation_bindings(api_plan, &mut services, &mut proto_imports, &package)?;
 
     // Operation wrapper functions require the workflow package.
     let has_operations = services.iter().any(|s| !s.operations.is_empty());
-    if has_operations {
+    if has_operations && !package.is_self_import("go.temporal.io/sdk/workflow") {
         imports.insert("go.temporal.io/sdk/workflow".to_string());
     }
 
     let output = render_file(
-        &package_name,
+        &package,
         &imports,
         &proto_imports,
         enums.values().collect::<Vec<_>>().as_slice(),
@@ -135,7 +217,7 @@ pub(crate) fn generate(
     // in the generated code references them.
     for fragment in support_fragments {
         let file_name = support_file_name(fragment)?;
-        let contents = rewrite_support_package(&fragment.contents, &package_name);
+        let contents = rewrite_support_package(&fragment.contents, &package.package_name);
         files.insert(PathBuf::from(file_name), contents);
     }
 
@@ -183,13 +265,30 @@ fn ensure_resource_field_types(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<()> {
     for field in &resource.fields {
-        ensure_resource_field_type(&field.kind, api_plan, enums, flags, variants, models)?;
+        ensure_resource_field_type(
+            &field.kind,
+            api_plan,
+            enums,
+            flags,
+            variants,
+            models,
+            package,
+        )?;
     }
     for method in &resource.methods {
         for param in &method.params {
-            ensure_resource_field_type(&param.kind, api_plan, enums, flags, variants, models)?;
+            ensure_resource_field_type(
+                &param.kind,
+                api_plan,
+                enums,
+                flags,
+                variants,
+                models,
+                package,
+            )?;
         }
     }
     Ok(())
@@ -204,14 +303,15 @@ fn ensure_resource_field_type(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<()> {
     match kind {
         PlannedFieldKind::Singular(value) | PlannedFieldKind::Repeated(value) => {
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models)?;
+            resolve_planned_value_type(value, api_plan, enums, flags, variants, models, package)?;
         }
         PlannedFieldKind::Map { key, value } => {
-            resolve_planned_value_type(key, api_plan, enums, flags, variants, models)?;
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models)?;
+            resolve_planned_value_type(key, api_plan, enums, flags, variants, models, package)?;
+            resolve_planned_value_type(value, api_plan, enums, flags, variants, models, package)?;
         }
     }
     Ok(())
@@ -632,9 +732,18 @@ fn resolve_operation<'a>(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<RenderedOperation<'a>> {
-    resolve_message_types(&operation.input, api_plan, enums, flags, variants, models)?;
-    let input_type = resolve_message_go_type(&operation.input);
+    resolve_message_types(
+        &operation.input,
+        api_plan,
+        enums,
+        flags,
+        variants,
+        models,
+        package,
+    )?;
+    let input_type = resolve_message_go_type(&operation.input, package);
     let go_output_transform = operation.output_transform.as_ref().and_then(|transform| {
         Some((
             transform.type_name.for_language(Language::Go)?,
@@ -647,8 +756,10 @@ fn resolve_operation<'a>(
                 if go_proto_ref(&output.info).is_some() {
                     None
                 } else {
-                    resolve_message_types(output, api_plan, enums, flags, variants, models)?;
-                    Some(resolve_message_go_type(output))
+                    resolve_message_types(
+                        output, api_plan, enums, flags, variants, models, package,
+                    )?;
+                    Some(resolve_message_go_type(output, package))
                 }
             }
             PlannedOperationOutput::Resource { type_name } => Some(type_name.clone()),
@@ -668,10 +779,10 @@ fn resolve_operation<'a>(
                 // Output transforms expose their transformed type to callers,
                 // while the raw operation output is still resolved below for
                 // result decoding.
-                Some(go_type_expr(transform_type))
+                Some(package.go_type_expr(transform_type))
             } else {
-                resolve_message_types(output, api_plan, enums, flags, variants, models)?;
-                Some(resolve_message_go_type(output))
+                resolve_message_types(output, api_plan, enums, flags, variants, models, package)?;
+                Some(resolve_message_go_type(output, package))
             }
         }
         PlannedOperationOutput::Resource { type_name } => Some(type_name.clone()),
@@ -716,7 +827,8 @@ fn resolve_operation<'a>(
         output_type,
         raw_output_type,
         output_transform_expr: go_output_transform.map(|(_, expr)| expr),
-        output_transform_type: go_output_transform.map(|(type_name, _)| go_type_expr(type_name)),
+        output_transform_type: go_output_transform
+            .map(|(type_name, _)| package.go_type_expr(type_name)),
         unpacked_input,
         proto_binding: None,
     })
@@ -741,6 +853,7 @@ fn operation_message_binding(
     direction: &str,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> Result<Option<(String, GoValueConversion)>> {
     // Messages without proto descriptor info (WIT-native records) are sent
     // natively rather than through proto -- not a proto binding at all.
@@ -749,12 +862,13 @@ fn operation_message_binding(
     };
     let alias = imports.register(&proto_ref);
     let proto_type = format!("*{}", proto_ref.qualified(&alias));
-    let conversion = go_message_conversion(message, api_plan, imports).map_err(|reason| {
-        Error::UnsupportedGoProtoConversion {
-            context: format!("operation `{operation_name}` {direction}"),
-            reason,
-        }
-    })?;
+    let conversion =
+        go_message_conversion(message, api_plan, imports, package).map_err(|reason| {
+            Error::UnsupportedGoProtoConversion {
+                context: format!("operation `{operation_name}` {direction}"),
+                reason,
+            }
+        })?;
     Ok(Some((proto_type, conversion)))
 }
 
@@ -773,6 +887,7 @@ fn populate_operation_bindings(
     api_plan: &ApiPlan,
     services: &mut [RenderedService<'_>],
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> Result<()> {
     for (service, planned_service) in services.iter_mut().zip(api_plan.services.iter()) {
         for (rendered_op, planned_op) in service
@@ -786,6 +901,7 @@ fn populate_operation_bindings(
                 "input",
                 api_plan,
                 imports,
+                package,
             )?
             else {
                 continue;
@@ -823,6 +939,7 @@ fn populate_operation_bindings(
                     resource,
                     api_plan,
                     imports,
+                    package,
                 )?)
             } else {
                 None
@@ -846,6 +963,7 @@ fn populate_operation_bindings(
                             "output",
                             api_plan,
                             imports,
+                            package,
                         )? {
                             Some((proto_type, conv)) => {
                                 // `result` is declared as a proto value;
@@ -881,6 +999,7 @@ fn build_rendered_resource_return(
     resource: &PlannedResource,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> Result<RenderedResourceReturn> {
     let mut local_lines = Vec::new();
     let mut field_initializers = Vec::new();
@@ -911,6 +1030,7 @@ fn build_rendered_resource_return(
                         proto_field_name,
                         api_plan,
                         imports,
+                        package,
                     )
                     .map_err(|reason| Error::UnsupportedGoProtoConversion {
                         context: format!(
@@ -934,6 +1054,7 @@ fn build_rendered_resource_return(
                     proto_field_name,
                     api_plan,
                     imports,
+                    package,
                 )
                 .map_err(|reason| Error::UnsupportedGoProtoConversion {
                     context: format!(
@@ -966,15 +1087,16 @@ fn resource_return_proto_field_source(
     proto_field_name: &str,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> GoConversionResult<(Vec<String>, String)> {
     let local = resource_return_local_name(&field.name);
     let proto_field = go_proto_field_name(proto_field_name);
     let getter = format!("{source}.Get{proto_field}()");
-    let native_type = resolve_resource_field_kind(&field.kind, field.optional);
+    let native_type = resolve_resource_field_kind(&field.kind, field.optional, package);
 
     match &field.kind {
         PlannedFieldKind::Singular(value) => {
-            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let conversion = go_value_conversion(value, api_plan, imports, package)?;
             Ok(resource_return_singular_proto_source(
                 field,
                 value,
@@ -985,7 +1107,7 @@ fn resource_return_proto_field_source(
             ))
         }
         PlannedFieldKind::Repeated(value) => {
-            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let conversion = go_value_conversion(value, api_plan, imports, package)?;
             let converted = (conversion.from_proto)("item");
             let mut lines = vec![
                 format!("var {local} {native_type}"),
@@ -1005,7 +1127,7 @@ fn resource_return_proto_field_source(
             Ok((lines, local))
         }
         PlannedFieldKind::Map { key: _, value } => {
-            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let conversion = go_value_conversion(value, api_plan, imports, package)?;
             let converted = (conversion.from_proto)("v");
             let mut lines = vec![
                 format!("var {local} {native_type}"),
@@ -1110,9 +1232,9 @@ fn resource_return_local_name(field_name: &str) -> String {
 
 /// Resolves a [`PlannedMessageType`] to its Go type expression, accounting for
 /// type replacements and authored types. Used for operation input/output types.
-fn resolve_message_go_type(message: &PlannedMessageType) -> String {
+fn resolve_message_go_type(message: &PlannedMessageType, package: &GoPackageContext) -> String {
     if let Some(replacement) = &message.replacement {
-        if let Some(type_name) = go_replacement_type_name(replacement) {
+        if let Some(type_name) = go_replacement_type_name(replacement, package) {
             return type_name;
         }
     }
@@ -1132,12 +1254,13 @@ fn resolve_message_types(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<()> {
     if message.replacement.is_some() || message.authored_type.is_some() {
         return Ok(());
     }
 
-    ensure_rendered_model(message, api_plan, enums, flags, variants, models)
+    ensure_rendered_model(message, api_plan, enums, flags, variants, models, package)
 }
 
 // ---------------------------------------------------------------------------
@@ -1158,6 +1281,7 @@ fn resolve_planned_value_type(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<ResolvedGoType> {
     match value_type {
         PlannedValueType::Scalar(PlannedScalarType::Float) => Ok(ResolvedGoType {
@@ -1186,7 +1310,7 @@ fn resolve_planned_value_type(
         }),
         PlannedValueType::Enum(enum_type) => {
             if let Some(replacement) = &enum_type.replacement
-                && let Some(type_name) = go_replacement_type_name(replacement)
+                && let Some(type_name) = go_replacement_type_name(replacement, package)
             {
                 return Ok(ResolvedGoType {
                     type_expr: type_name,
@@ -1219,7 +1343,15 @@ fn resolve_planned_value_type(
         }
         PlannedValueType::Variant(variant_type) => {
             if let Some(planned_variant) = api_plan.variants.get(&variant_type.info.full_name) {
-                ensure_rendered_variant(planned_variant, api_plan, enums, flags, variants, models)?;
+                ensure_rendered_variant(
+                    planned_variant,
+                    api_plan,
+                    enums,
+                    flags,
+                    variants,
+                    models,
+                    package,
+                )?;
             }
             // Interfaces have nil zero value, so no pointer needed for optional fields.
             Ok(ResolvedGoType {
@@ -1229,7 +1361,7 @@ fn resolve_planned_value_type(
         }
         PlannedValueType::Message(message_type) => {
             if let Some(replacement) = &message_type.replacement
-                && let Some(type_name) = go_replacement_type_name(replacement)
+                && let Some(type_name) = go_replacement_type_name(replacement, package)
             {
                 return Ok(ResolvedGoType {
                     type_expr: type_name,
@@ -1242,7 +1374,15 @@ fn resolve_planned_value_type(
                     is_struct: false,
                 });
             }
-            ensure_rendered_model(message_type, api_plan, enums, flags, variants, models)?;
+            ensure_rendered_model(
+                message_type,
+                api_plan,
+                enums,
+                flags,
+                variants,
+                models,
+                package,
+            )?;
             Ok(ResolvedGoType {
                 type_expr: message_type.model_name.clone(),
                 is_struct: true,
@@ -1256,8 +1396,10 @@ fn resolve_planned_value_type(
             let args = items
                 .iter()
                 .map(|item| {
-                    resolve_planned_value_type(item, api_plan, enums, flags, variants, models)
-                        .map(|resolved| resolved.type_expr)
+                    resolve_planned_value_type(
+                        item, api_plan, enums, flags, variants, models, package,
+                    )
+                    .map(|resolved| resolved.type_expr)
                 })
                 .collect::<Result<Vec<_>>>()?;
             Ok(ResolvedGoType {
@@ -1269,15 +1411,19 @@ fn resolve_planned_value_type(
             ensure_generic_result(models);
             let ok_type = match ok {
                 Some(ok) => {
-                    resolve_planned_value_type(ok, api_plan, enums, flags, variants, models)?
-                        .type_expr
+                    resolve_planned_value_type(
+                        ok, api_plan, enums, flags, variants, models, package,
+                    )?
+                    .type_expr
                 }
                 None => "struct{}".to_string(),
             };
             let err_type = match err {
                 Some(err) => {
-                    resolve_planned_value_type(err, api_plan, enums, flags, variants, models)?
-                        .type_expr
+                    resolve_planned_value_type(
+                        err, api_plan, enums, flags, variants, models, package,
+                    )?
+                    .type_expr
                 }
                 None => "error".to_string(),
             };
@@ -1291,13 +1437,14 @@ fn resolve_planned_value_type(
             fallback,
         } => {
             if let Some(annotation) = type_name.for_language(Language::Go) {
-                let (_import_path, code_expr) = parse_go_import(annotation);
                 Ok(ResolvedGoType {
-                    type_expr: code_expr,
+                    type_expr: package.go_type_expr(annotation),
                     is_struct: false,
                 })
             } else {
-                resolve_planned_value_type(fallback, api_plan, enums, flags, variants, models)
+                resolve_planned_value_type(
+                    fallback, api_plan, enums, flags, variants, models, package,
+                )
             }
         }
         PlannedValueType::Unknown => Ok(ResolvedGoType {
@@ -1311,14 +1458,14 @@ fn resolve_planned_value_type(
 /// was specified for the Go language. The import path (if embedded in the
 /// annotation) is stripped and will be collected separately by
 /// [`collect_imports`].
-fn go_replacement_type_name(replacement: &TypeReplacementSpec) -> Option<String> {
+fn go_replacement_type_name(
+    replacement: &TypeReplacementSpec,
+    package: &GoPackageContext,
+) -> Option<String> {
     replacement
         .type_name
         .for_language(Language::Go)
-        .map(|annotation| {
-            let (_import_path, code_expr) = parse_go_import(annotation);
-            code_expr
-        })
+        .map(|annotation| package.go_type_expr(annotation))
 }
 
 /// Translates a WIT authored field type (used in `@nexus.type` directives)
@@ -1420,6 +1567,7 @@ fn ensure_rendered_variant(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<()> {
     if variants.contains_key(&planned_variant.info.full_name) {
         return Ok(());
@@ -1433,8 +1581,10 @@ fn ensure_rendered_variant(
             .payload
             .as_ref()
             .map(|payload| {
-                resolve_planned_value_type(payload, api_plan, enums, flags, variants, models)
-                    .map(|resolved| resolved.type_expr)
+                resolve_planned_value_type(
+                    payload, api_plan, enums, flags, variants, models, package,
+                )
+                .map(|resolved| resolved.type_expr)
             })
             .transpose()?;
         cases.push(RenderedVariantCase {
@@ -1481,6 +1631,7 @@ fn ensure_rendered_model(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<()> {
     let Some(planned_model) = api_plan.models.get(&message.info.full_name) else {
         // The planner may skip models for output types with transforms or
@@ -1519,7 +1670,7 @@ fn ensure_rendered_model(
     let fields = planned_model
         .fields
         .iter()
-        .map(|field| build_field(field, api_plan, enums, flags, variants, models))
+        .map(|field| build_field(field, api_plan, enums, flags, variants, models, package))
         .collect::<Result<Vec<_>>>()?;
 
     models
@@ -1548,25 +1699,36 @@ fn build_field(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<RenderedField> {
     let field_name = go_field_name(&field.authored_name);
 
     let go_type = match &field.kind {
         PlannedFieldKind::Map { key, value } => {
             let key_type =
-                resolve_planned_value_type(key, api_plan, enums, flags, variants, models)?;
-            let value_type =
-                resolve_planned_value_type(value, api_plan, enums, flags, variants, models)?;
+                resolve_planned_value_type(key, api_plan, enums, flags, variants, models, package)?;
+            let value_type = resolve_planned_value_type(
+                value, api_plan, enums, flags, variants, models, package,
+            )?;
             format!("map[{}]{}", key_type.type_expr, value_type.type_expr)
         }
         PlannedFieldKind::Repeated(value) => {
-            let element_type =
-                resolve_planned_value_type(value, api_plan, enums, flags, variants, models)?;
+            let element_type = resolve_planned_value_type(
+                value, api_plan, enums, flags, variants, models, package,
+            )?;
             format!("[]{}", element_type.type_expr)
         }
         PlannedFieldKind::Singular(PlannedValueType::Tuple(items)) => {
-            let struct_name =
-                build_tuple_struct(&field_name, items, api_plan, enums, flags, variants, models)?;
+            let struct_name = build_tuple_struct(
+                &field_name,
+                items,
+                api_plan,
+                enums,
+                flags,
+                variants,
+                models,
+                package,
+            )?;
             if !field.required {
                 format!("*{struct_name}")
             } else {
@@ -1583,6 +1745,7 @@ fn build_field(
                 flags,
                 variants,
                 models,
+                package,
             )?;
             if !field.required {
                 format!("*{struct_name}")
@@ -1591,8 +1754,9 @@ fn build_field(
             }
         }
         PlannedFieldKind::Singular(value) => {
-            let resolved =
-                resolve_planned_value_type(value, api_plan, enums, flags, variants, models)?;
+            let resolved = resolve_planned_value_type(
+                value, api_plan, enums, flags, variants, models, package,
+            )?;
             if !field.required && type_needs_pointer_when_optional(value, &resolved.type_expr) {
                 format!("*{}", resolved.type_expr)
             } else {
@@ -1733,6 +1897,7 @@ fn build_tuple_struct(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<String> {
     if items.len() > TUPLE_FIELD_NAMES.len() {
         return Err(Error::UnsupportedGoType {
@@ -1750,8 +1915,9 @@ fn build_tuple_struct(
         .iter()
         .zip(TUPLE_FIELD_NAMES.iter())
         .map(|(item, &ordinal_name)| {
-            let resolved =
-                resolve_planned_value_type(item, api_plan, enums, flags, variants, models)?;
+            let resolved = resolve_planned_value_type(
+                item, api_plan, enums, flags, variants, models, package,
+            )?;
             Ok(RenderedField {
                 name: ordinal_name.to_string(),
                 doc: None,
@@ -1807,6 +1973,7 @@ fn build_result_struct(
     flags: &mut IndexMap<String, RenderedFlags>,
     variants: &mut IndexMap<String, RenderedVariant>,
     models: &mut IndexMap<String, RenderedModel>,
+    package: &GoPackageContext,
 ) -> Result<String> {
     let struct_name = field_name.to_string();
 
@@ -1814,7 +1981,7 @@ fn build_result_struct(
 
     if let Some(ok_type) = ok {
         let resolved =
-            resolve_planned_value_type(ok_type, api_plan, enums, flags, variants, models)?;
+            resolve_planned_value_type(ok_type, api_plan, enums, flags, variants, models, package)?;
         fields.push(RenderedField {
             name: "Result".to_string(),
             doc: None,
@@ -1825,7 +1992,8 @@ fn build_result_struct(
     }
 
     let error_type = if let Some(err_type) = err {
-        resolve_planned_value_type(err_type, api_plan, enums, flags, variants, models)?.type_expr
+        resolve_planned_value_type(err_type, api_plan, enums, flags, variants, models, package)?
+            .type_expr
     } else {
         "error".to_string()
     };
@@ -1955,11 +2123,6 @@ fn parse_go_import(type_expr: &str) -> (Option<String>, String) {
 
     // Case 3: no import needed (builtins, map[K]V, any, etc.)
     (None, type_expr.to_string())
-}
-
-fn go_type_expr(type_expr: &str) -> String {
-    let (_import_path, code_expr) = parse_go_import(type_expr);
-    code_expr
 }
 
 /// Walks the [`ApiPlan`] and collects Go import paths from any `@nexus.type`
@@ -2196,6 +2359,7 @@ fn go_value_conversion(
     value: &PlannedValueType,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> GoConversionResult<GoValueConversion> {
     match value {
         PlannedValueType::Scalar(_) => Ok(GoValueConversion {
@@ -2203,9 +2367,9 @@ fn go_value_conversion(
             from_proto: Box::new(|expr| expr.to_string()),
             to_proto: Box::new(|expr| expr.to_string()),
         }),
-        PlannedValueType::Enum(enum_type) => go_enum_conversion(enum_type, imports),
+        PlannedValueType::Enum(enum_type) => go_enum_conversion(enum_type, imports, package),
         PlannedValueType::Message(message_type) => {
-            go_message_conversion(message_type, api_plan, imports)
+            go_message_conversion(message_type, api_plan, imports, package)
         }
         // The planner never produces these inside proto-backed models today;
         // if it ever does, fail loudly instead of dropping data.
@@ -2281,10 +2445,11 @@ fn go_proto_value_type(
 fn go_enum_conversion(
     enum_type: &PlannedEnumType,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> GoConversionResult<GoValueConversion> {
     // Native Go enum type expression (replacement type or generated name).
     let native_type = if let Some(replacement) = &enum_type.replacement {
-        go_replacement_type_name(replacement).ok_or_else(|| {
+        go_replacement_type_name(replacement, package).ok_or_else(|| {
             "the type-replaced enum has no `go=` annotation in its `@nexus.type` directive"
                 .to_string()
         })?
@@ -2324,11 +2489,12 @@ fn go_message_conversion(
     message: &PlannedMessageType,
     _api_plan: &ApiPlan,
     _imports: &mut GoImportCollector,
+    _package: &GoPackageContext,
 ) -> GoConversionResult<GoValueConversion> {
     // Replacement type: use override converter functions (hand-written in the
     // support file).
     if let Some(replacement) = &message.replacement {
-        if go_replacement_type_name(replacement).is_some() {
+        if replacement.type_name.for_language(Language::Go).is_some() {
             let from = go_from_proto_converter(&message.info.full_name, replacement);
             let to = go_to_proto_converter(&message.info.full_name, replacement);
             return Ok(GoValueConversion {
@@ -2395,6 +2561,7 @@ fn populate_proto_conversions(
     api_plan: &ApiPlan,
     models: &mut IndexMap<String, RenderedModel>,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> Result<()> {
     // Process every rendered model that carries proto type info. Empty response
     // models (skipped by the planner) still get trivial conversions so that
@@ -2434,8 +2601,14 @@ fn populate_proto_conversions(
             .unwrap_or_default();
         let (field_conversions, sourced) = match api_plan.models.get(&full_name) {
             Some(planned_model) => (
-                build_field_conversions(planned_model, &native_field_types, api_plan, imports)?,
-                build_sourced_conversions(planned_model, api_plan, imports)?,
+                build_field_conversions(
+                    planned_model,
+                    &native_field_types,
+                    api_plan,
+                    imports,
+                    package,
+                )?,
+                build_sourced_conversions(planned_model, api_plan, imports, package)?,
             ),
             None => (Vec::new(), Vec::new()),
         };
@@ -2467,6 +2640,7 @@ fn build_field_conversions(
     native_field_types: &[String],
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> Result<Vec<RenderedFieldConversion>> {
     planned_model
         .fields
@@ -2477,12 +2651,12 @@ fn build_field_conversions(
                 .get(index)
                 .map(String::as_str)
                 .unwrap_or("");
-            build_field_conversion(field, native_go_type, api_plan, imports).map_err(|reason| {
-                Error::UnsupportedGoProtoConversion {
+            build_field_conversion(field, native_go_type, api_plan, imports, package).map_err(
+                |reason| Error::UnsupportedGoProtoConversion {
                     context: format!("field `{}.{}`", field.owner_name, field.authored_name),
                     reason,
-                }
-            })
+                },
+            )
         })
         .collect()
 }
@@ -2495,6 +2669,7 @@ fn build_field_conversion(
     native_go_type: &str,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> GoConversionResult<RenderedFieldConversion> {
     let proto_field = go_proto_field_name(&field.proto_name);
     let go_field = go_field_name(&field.authored_name);
@@ -2502,7 +2677,7 @@ fn build_field_conversion(
 
     match &field.kind {
         PlannedFieldKind::Singular(value) => {
-            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let conversion = go_value_conversion(value, api_plan, imports, package)?;
             // Any value with a conversion (scalar, enum, message, override) is
             // rendered as a pointer when optional, matching `build_field`.
             let field_is_pointer = !field.required;
@@ -2516,7 +2691,7 @@ fn build_field_conversion(
             })
         }
         PlannedFieldKind::Repeated(value) => {
-            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let conversion = go_value_conversion(value, api_plan, imports, package)?;
             let to_lines = repeated_to_proto_lines(&conversion, &receiver, &proto_field);
             let from_lines = repeated_from_proto_lines(&conversion, &proto_field, &go_field);
             Ok(RenderedFieldConversion {
@@ -2526,7 +2701,7 @@ fn build_field_conversion(
         }
         PlannedFieldKind::Map { key, value } => {
             // Map keys are always scalars; only the value may need conversion.
-            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let conversion = go_value_conversion(value, api_plan, imports, package)?;
             let key_type =
                 go_proto_value_type(key, imports).map_err(|reason| format!("map key: {reason}"))?;
             let value_type = go_proto_value_type(value, imports)
@@ -2732,12 +2907,13 @@ fn build_sourced_conversions(
     planned_model: &PlannedModel,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> Result<Vec<RenderedSourcedField>> {
     planned_model
         .sourced_fields
         .iter()
         .map(|sourced| {
-            build_sourced_conversion(sourced, api_plan, imports).map_err(|reason| {
+            build_sourced_conversion(sourced, api_plan, imports, package).map_err(|reason| {
                 Error::UnsupportedGoProtoConversion {
                     context: format!(
                         "sourced field `{}.{}`",
@@ -2754,12 +2930,13 @@ fn build_sourced_conversion(
     sourced: &PlannedSourcedField,
     api_plan: &ApiPlan,
     imports: &mut GoImportCollector,
+    package: &GoPackageContext,
 ) -> GoConversionResult<RenderedSourcedField> {
     let proto_field = go_proto_field_name(&sourced.proto_name);
     let source_expr = &sourced.source_expr;
     match &sourced.kind {
         PlannedFieldKind::Singular(value) => {
-            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let conversion = go_value_conversion(value, api_plan, imports, package)?;
             match conversion.kind {
                 // Override converters need the address of the sourced value, so
                 // bind it to a local first (Go forbids taking the address of a
@@ -2782,7 +2959,7 @@ fn build_sourced_conversion(
             }
         }
         PlannedFieldKind::Repeated(value) => {
-            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let conversion = go_value_conversion(value, api_plan, imports, package)?;
             let converted = (conversion.to_proto)("item");
             Ok(RenderedSourcedField {
                 to_proto_lines: vec![
@@ -2793,7 +2970,7 @@ fn build_sourced_conversion(
             })
         }
         PlannedFieldKind::Map { key, value } => {
-            let conversion = go_value_conversion(value, api_plan, imports)?;
+            let conversion = go_value_conversion(value, api_plan, imports, package)?;
             let key_type =
                 go_proto_value_type(key, imports).map_err(|reason| format!("map key: {reason}"))?;
             let value_type = go_proto_value_type(value, imports)
@@ -2822,7 +2999,7 @@ fn build_sourced_conversion(
 /// Renders all collected types into a complete Go source file with a package
 /// declaration, import block, and the generated-code header comment.
 fn render_file(
-    package_name: &str,
+    package: &GoPackageContext,
     imports: &BTreeSet<String>,
     proto_imports: &GoImportCollector,
     enums: &[&RenderedEnum],
@@ -2836,7 +3013,7 @@ fn render_file(
     output.push_str(GENERATED_HEADER);
     output.push('\n');
     output.push_str("package ");
-    output.push_str(package_name);
+    output.push_str(&package.package_name);
     output.push('\n');
 
     if !imports.is_empty() || !proto_imports.is_empty() {
@@ -2924,8 +3101,14 @@ fn render_file(
         for service in services {
             for resource in &service.resources {
                 output.push('\n');
-                render_resource(&mut output, resource);
-                render_resource_methods(&mut output, resource, &service.operations, api_plan);
+                render_resource(&mut output, resource, package);
+                render_resource_methods(
+                    &mut output,
+                    resource,
+                    &service.operations,
+                    api_plan,
+                    package,
+                );
             }
         }
     }
@@ -2937,7 +3120,7 @@ fn render_file(
         for service in services {
             for operation in &service.operations {
                 output.push('\n');
-                render_operation_function(&mut output, operation);
+                render_operation_function(&mut output, operation, package);
             }
         }
     }
@@ -2954,11 +3137,11 @@ fn render_file(
                         render_options_struct(&mut output, operation, params);
                     }
                     output.push('\n');
-                    render_convenience_wrapper(&mut output, operation, params);
+                    render_convenience_wrapper(&mut output, operation, params, package);
                 } else {
                     // External input type — generate a simple forwarding wrapper
                     output.push('\n');
-                    render_forwarding_wrapper(&mut output, operation);
+                    render_forwarding_wrapper(&mut output, operation, package);
                 }
             }
         }
@@ -3330,7 +3513,7 @@ fn render_service_constants(output: &mut String, service: &RenderedService<'_>) 
 ///     Email  string
 /// }
 /// ```
-fn render_resource(output: &mut String, resource: &PlannedResource) {
+fn render_resource(output: &mut String, resource: &PlannedResource, package: &GoPackageContext) {
     output.push_str("type ");
     output.push_str(&resource.type_name);
     output.push_str(" struct {\n");
@@ -3342,7 +3525,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource) {
 
     for field in &resource.fields {
         let field_name = go_field_name(&field.name);
-        let go_type = resolve_resource_field_kind(&field.kind, field.optional);
+        let go_type = resolve_resource_field_kind(&field.kind, field.optional, package);
         render_field_doc_comment(output, "\t", None, !field.optional);
         output.push('\t');
         output.push_str(&field_name);
@@ -3356,19 +3539,24 @@ fn render_resource(output: &mut String, resource: &PlannedResource) {
 /// Resolves a resource field's [`PlannedFieldKind`] to a Go type expression,
 /// applying the same optionality rules as record fields: pointer for optional
 /// struct types, plain type for optional scalars/interfaces.
-fn resolve_resource_field_kind(kind: &PlannedFieldKind, optional: bool) -> String {
+fn resolve_resource_field_kind(
+    kind: &PlannedFieldKind,
+    optional: bool,
+    package: &GoPackageContext,
+) -> String {
     match kind {
         PlannedFieldKind::Map { key, value } => {
-            let key_type = resolve_resource_value_type(key);
-            let value_type = resolve_resource_value_type(value);
+            let key_type = resolve_resource_value_type(key, package);
+            let value_type = resolve_resource_value_type(value, package);
             format!("map[{key_type}]{value_type}")
         }
         PlannedFieldKind::Repeated(value) => {
-            let element_type = resolve_resource_value_type(value);
+            let element_type = resolve_resource_value_type(value, package);
             format!("[]{element_type}")
         }
         PlannedFieldKind::Singular(value) => {
-            let (base_type, _is_struct) = resolve_resource_value_type_with_struct_flag(value);
+            let (base_type, _is_struct) =
+                resolve_resource_value_type_with_struct_flag(value, package);
             if optional && type_needs_pointer_when_optional(value, &base_type) {
                 format!("*{base_type}")
             } else {
@@ -3382,13 +3570,16 @@ fn resolve_resource_field_kind(kind: &PlannedFieldKind, optional: bool) -> Strin
 /// field declarations. This is a simplified version of
 /// [`resolve_planned_value_type`] that doesn't register types into collections
 /// (that's already done by [`ensure_resource_field_types`]).
-fn resolve_resource_value_type(value: &PlannedValueType) -> String {
-    resolve_resource_value_type_with_struct_flag(value).0
+fn resolve_resource_value_type(value: &PlannedValueType, package: &GoPackageContext) -> String {
+    resolve_resource_value_type_with_struct_flag(value, package).0
 }
 
 /// Like [`resolve_resource_value_type`] but also returns whether the type is a
 /// struct (for optionality/pointer decisions).
-fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (String, bool) {
+fn resolve_resource_value_type_with_struct_flag(
+    value: &PlannedValueType,
+    package: &GoPackageContext,
+) -> (String, bool) {
     match value {
         PlannedValueType::Scalar(PlannedScalarType::Float) => ("float64".to_string(), false),
         PlannedValueType::Scalar(PlannedScalarType::Int32) => ("int32".to_string(), false),
@@ -3398,7 +3589,7 @@ fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (St
         PlannedValueType::Scalar(PlannedScalarType::Bytes) => ("[]byte".to_string(), false),
         PlannedValueType::Enum(enum_type) => {
             if let Some(replacement) = &enum_type.replacement
-                && let Some(type_name) = go_replacement_type_name(replacement)
+                && let Some(type_name) = go_replacement_type_name(replacement, package)
             {
                 return (type_name, false);
             }
@@ -3414,7 +3605,7 @@ fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (St
         PlannedValueType::Variant(variant_type) => (variant_type.name.clone(), false),
         PlannedValueType::Message(message_type) => {
             if let Some(replacement) = &message_type.replacement
-                && let Some(type_name) = go_replacement_type_name(replacement)
+                && let Some(type_name) = go_replacement_type_name(replacement, package)
             {
                 return (type_name, false);
             }
@@ -3429,7 +3620,7 @@ fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (St
         PlannedValueType::Tuple(items) => {
             let args = items
                 .iter()
-                .map(resolve_resource_value_type)
+                .map(|value| resolve_resource_value_type(value, package))
                 .collect::<Vec<_>>()
                 .join(", ");
             (format!("Tuple{}[{args}]", items.len()), true)
@@ -3437,11 +3628,11 @@ fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (St
         PlannedValueType::Result { ok, err } => {
             let ok_type = ok
                 .as_deref()
-                .map(resolve_resource_value_type)
+                .map(|value| resolve_resource_value_type(value, package))
                 .unwrap_or_else(|| "struct{}".to_string());
             let err_type = err
                 .as_deref()
-                .map(resolve_resource_value_type)
+                .map(|value| resolve_resource_value_type(value, package))
                 .unwrap_or_else(|| "error".to_string());
             (format!("Result[{ok_type}, {err_type}]"), true)
         }
@@ -3450,10 +3641,9 @@ fn resolve_resource_value_type_with_struct_flag(value: &PlannedValueType) -> (St
             fallback,
         } => {
             if let Some(annotation) = type_name.for_language(Language::Go) {
-                let (_import, code_expr) = parse_go_import(annotation);
-                (code_expr, false)
+                (package.go_type_expr(annotation), false)
             } else {
-                resolve_resource_value_type_with_struct_flag(fallback)
+                resolve_resource_value_type_with_struct_flag(fallback, package)
             }
         }
         PlannedValueType::Unknown => ("any".to_string(), false),
@@ -3476,6 +3666,7 @@ fn render_resource_methods(
     resource: &PlannedResource,
     operations: &[RenderedOperation<'_>],
     api_plan: &ApiPlan,
+    package: &GoPackageContext,
 ) {
     for method in &resource.methods {
         output.push('\n');
@@ -3497,17 +3688,22 @@ fn render_resource_methods(
                 output.push_str(&resource.type_name);
                 output.push_str(") ");
                 output.push_str(&method_name);
-                output.push_str("(ctx workflow.Context");
+                output.push_str("(ctx ");
+                output.push_str(&package.workflow_context_type());
                 for param in &method.params {
                     output.push_str(", ");
                     output.push_str(&go_unexported_name(&go_field_name(&param.name)));
                     output.push(' ');
-                    output.push_str(&resolve_resource_field_kind(&param.kind, param.optional));
+                    output.push_str(&resolve_resource_field_kind(
+                        &param.kind,
+                        param.optional,
+                        package,
+                    ));
                 }
                 output.push_str(") ");
 
                 // Return type
-                let result_type = resolve_method_result_type(method);
+                let result_type = resolve_method_result_type(method, package);
                 if let Some(ref rtype) = result_type {
                     output.push_str("(*");
                     output.push_str(rtype);
@@ -3564,15 +3760,20 @@ fn render_resource_methods(
                 output.push_str(&resource.type_name);
                 output.push_str(") ");
                 output.push_str(&method_name);
-                output.push_str("(ctx workflow.Context");
+                output.push_str("(ctx ");
+                output.push_str(&package.workflow_context_type());
                 for param in &method.params {
                     output.push_str(", ");
                     output.push_str(&go_unexported_name(&go_field_name(&param.name)));
                     output.push(' ');
-                    output.push_str(&resolve_resource_field_kind(&param.kind, param.optional));
+                    output.push_str(&resolve_resource_field_kind(
+                        &param.kind,
+                        param.optional,
+                        package,
+                    ));
                 }
                 output.push_str(") ");
-                let result_type = resolve_method_result_type(method);
+                let result_type = resolve_method_result_type(method, package);
                 if let Some(ref rtype) = result_type {
                     output.push_str("(*");
                     output.push_str(rtype);
@@ -3594,10 +3795,15 @@ fn render_resource_methods(
 
 /// Resolves the Go return type for a resource method from its
 /// [`PlannedResourceMethodResult`].
-fn resolve_method_result_type(method: &crate::api_plan::PlannedResourceMethod) -> Option<String> {
+fn resolve_method_result_type(
+    method: &crate::api_plan::PlannedResourceMethod,
+    package: &GoPackageContext,
+) -> Option<String> {
     method.result.as_ref().map(|result| match &result.kind {
         PlannedResourceMethodResultKind::Resource { type_name } => type_name.clone(),
-        PlannedResourceMethodResultKind::Value(kind) => resolve_resource_field_kind(kind, false),
+        PlannedResourceMethodResultKind::Value(kind) => {
+            resolve_resource_field_kind(kind, false, package)
+        }
     })
 }
 
@@ -3625,9 +3831,13 @@ fn resolve_method_result_type(method: &crate::api_plan::PlannedResourceMethod) -
 ///     return fut.Get(ctx, nil)
 /// }
 /// ```
-fn render_operation_function(output: &mut String, operation: &RenderedOperation<'_>) {
+fn render_operation_function(
+    output: &mut String,
+    operation: &RenderedOperation<'_>,
+    package: &GoPackageContext,
+) {
     if let Some(binding) = &operation.proto_binding {
-        render_operation_function_proto(output, operation, binding);
+        render_operation_function_proto(output, operation, binding, package);
         return;
     }
 
@@ -3639,15 +3849,21 @@ fn render_operation_function(output: &mut String, operation: &RenderedOperation<
     ) {
         output.push_str("func ");
         output.push_str(&operation.func_name);
-        output.push_str("(ctx workflow.Context, request ");
+        output.push_str("(ctx ");
+        output.push_str(&package.workflow_context_type());
+        output.push_str(", request ");
         output.push_str(&operation.input_type);
         output.push_str(") (");
         output.push_str(transform_type);
         output.push_str(", error) {\n");
-        output.push_str("\tc := workflow.NewNexusClient(Endpoint, ServiceName)\n");
+        output.push_str("\tc := ");
+        output.push_str(&package.new_nexus_client());
+        output.push_str("(Endpoint, ServiceName)\n");
         output.push_str("\tfut := c.ExecuteOperation(ctx, ");
         output.push_str(&op_const);
-        output.push_str(", request, workflow.NexusOperationOptions{})\n");
+        output.push_str(", request, ");
+        output.push_str(&package.nexus_operation_options());
+        output.push_str(")\n");
         if let Some(raw_result_type) = &operation.raw_output_type {
             output.push_str("\tvar result ");
             output.push_str(raw_result_type);
@@ -3669,15 +3885,21 @@ fn render_operation_function(output: &mut String, operation: &RenderedOperation<
         // Operation with a return value
         output.push_str("func ");
         output.push_str(&operation.func_name);
-        output.push_str("(ctx workflow.Context, request ");
+        output.push_str("(ctx ");
+        output.push_str(&package.workflow_context_type());
+        output.push_str(", request ");
         output.push_str(&operation.input_type);
         output.push_str(") (*");
         output.push_str(result_type);
         output.push_str(", error) {\n");
-        output.push_str("\tc := workflow.NewNexusClient(Endpoint, ServiceName)\n");
+        output.push_str("\tc := ");
+        output.push_str(&package.new_nexus_client());
+        output.push_str("(Endpoint, ServiceName)\n");
         output.push_str("\tfut := c.ExecuteOperation(ctx, ");
         output.push_str(&op_const);
-        output.push_str(", request, workflow.NexusOperationOptions{})\n");
+        output.push_str(", request, ");
+        output.push_str(&package.nexus_operation_options());
+        output.push_str(")\n");
         output.push_str("\tvar result ");
         output.push_str(result_type);
         output.push('\n');
@@ -3690,13 +3912,19 @@ fn render_operation_function(output: &mut String, operation: &RenderedOperation<
         // Void operation
         output.push_str("func ");
         output.push_str(&operation.func_name);
-        output.push_str("(ctx workflow.Context, request ");
+        output.push_str("(ctx ");
+        output.push_str(&package.workflow_context_type());
+        output.push_str(", request ");
         output.push_str(&operation.input_type);
         output.push_str(") error {\n");
-        output.push_str("\tc := workflow.NewNexusClient(Endpoint, ServiceName)\n");
+        output.push_str("\tc := ");
+        output.push_str(&package.new_nexus_client());
+        output.push_str("(Endpoint, ServiceName)\n");
         output.push_str("\tfut := c.ExecuteOperation(ctx, ");
         output.push_str(&op_const);
-        output.push_str(", request, workflow.NexusOperationOptions{})\n");
+        output.push_str(", request, ");
+        output.push_str(&package.nexus_operation_options());
+        output.push_str(")\n");
         output.push_str("\treturn fut.Get(ctx, nil)\n");
         output.push_str("}\n");
     }
@@ -3723,13 +3951,16 @@ fn render_operation_function_proto(
     output: &mut String,
     operation: &RenderedOperation<'_>,
     binding: &OperationProtoBinding,
+    package: &GoPackageContext,
 ) {
     let op_const = format!("{}Op", go_field_name(operation.name));
     let resource_return = binding.resource_return.as_ref();
 
     output.push_str("func ");
     output.push_str(&operation.func_name);
-    output.push_str("(ctx workflow.Context, request ");
+    output.push_str("(ctx ");
+    output.push_str(&package.workflow_context_type());
+    output.push_str(", request ");
     output.push_str(&operation.input_type);
     output.push_str(") ");
 
@@ -3758,7 +3989,9 @@ fn render_operation_function_proto(
     }
     output.push_str(" {\n");
 
-    output.push_str("\tc := workflow.NewNexusClient(Endpoint, ServiceName)\n");
+    output.push_str("\tc := ");
+    output.push_str(&package.new_nexus_client());
+    output.push_str("(Endpoint, ServiceName)\n");
     if returns_resource {
         output.push_str("\trequestProto := ");
         output.push_str(&binding.input_to_proto);
@@ -3772,7 +4005,9 @@ fn render_operation_function_proto(
     } else {
         output.push_str(&binding.input_to_proto);
     }
-    output.push_str(", workflow.NexusOperationOptions{})\n");
+    output.push_str(", ");
+    output.push_str(&package.nexus_operation_options());
+    output.push_str(")\n");
 
     if let (Some(transform_expr), Some(transform_type)) = (
         operation.output_transform_expr,
@@ -3936,6 +4171,7 @@ fn render_convenience_wrapper(
     output: &mut String,
     operation: &RenderedOperation<'_>,
     params: &[RenderedUnpackedParam],
+    package: &GoPackageContext,
 ) {
     let exported_name = go_field_name(operation.name);
     let has_optional = params.iter().any(|p| !p.required);
@@ -3961,7 +4197,9 @@ fn render_convenience_wrapper(
     output.push_str("func ");
     output.push_str(&exported_name);
     if multiline_signature {
-        output.push_str("(\n\tctx workflow.Context,\n");
+        output.push_str("(\n\tctx ");
+        output.push_str(&package.workflow_context_type());
+        output.push_str(",\n");
         for (name, ty) in &signature_params {
             output.push('\t');
             output.push_str(name);
@@ -3971,7 +4209,8 @@ fn render_convenience_wrapper(
         }
         output.push(')');
     } else {
-        output.push_str("(ctx workflow.Context");
+        output.push_str("(ctx ");
+        output.push_str(&package.workflow_context_type());
         for (name, ty) in &signature_params {
             output.push_str(", ");
             output.push_str(name);
@@ -4034,13 +4273,19 @@ fn render_convenience_wrapper(
 ///     return retryPolicyOperation(ctx, request)
 /// }
 /// ```
-fn render_forwarding_wrapper(output: &mut String, operation: &RenderedOperation<'_>) {
+fn render_forwarding_wrapper(
+    output: &mut String,
+    operation: &RenderedOperation<'_>,
+    package: &GoPackageContext,
+) {
     let exported_name = go_field_name(operation.name);
 
     render_operation_doc_comment(output, operation);
     output.push_str("func ");
     output.push_str(&exported_name);
-    output.push_str("(ctx workflow.Context, request ");
+    output.push_str("(ctx ");
+    output.push_str(&package.workflow_context_type());
+    output.push_str(", request ");
     output.push_str(&operation.input_type);
     output.push_str(") ");
 

@@ -184,6 +184,41 @@ fn cli_generates_go_support_file_from_parameter() {
 }
 
 #[test]
+fn cli_generates_go_with_package_self_imports_removed() {
+    let root = project_root();
+    let temp_dir = unique_output_path("go-package");
+    let output_path = temp_dir.join("output");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args([
+            "generate",
+            "--lang",
+            "go",
+            "--input",
+            input_path(&root, "user-service").to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+            "--go-package",
+            "go.temporal.io/sdk/workflow",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let api = fs::read_to_string(output_path.join("api.go")).unwrap();
+    assert!(api.contains("package workflow\n"));
+    assert!(!api.contains("\"go.temporal.io/sdk/workflow\""));
+    assert!(api.contains("func getUser(ctx Context, request GetUserRequest) (*User, error)"));
+    assert!(api.contains("c := NewNexusClient(Endpoint, ServiceName)"));
+    assert!(api.contains("NexusOperationOptions{}"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn go_sourced_map_field_converts_to_proto() {
     let root = project_root();
     let temp_dir = unique_output_path("go-sourced-map-input");

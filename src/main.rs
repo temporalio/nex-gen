@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use nex_gen::go::GoOptions;
 use nex_gen::language::Language;
 use nex_gen::{
     AddRpcRequest, BuildExamplesRequest, DebugWitDirRequest, GenerateRequest, add_rpc_to_file,
@@ -43,6 +44,8 @@ struct GenerateArgs {
     output: PathBuf,
     #[arg(long)]
     format: bool,
+    #[arg(long = "go-package")]
+    go_package: Option<String>,
 }
 
 #[derive(Args)]
@@ -122,6 +125,9 @@ fn main() -> ExitCode {
             descriptor_paths: args.descriptors,
             output_path: args.output,
             format: args.format,
+            go_options: GoOptions {
+                package_import_path: args.go_package,
+            },
         }),
         Commands::BuildExamples(args) => build_examples(&BuildExamplesRequest {
             languages: args.langs.into_iter().map(Language::from).collect(),

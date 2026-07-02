@@ -20,7 +20,10 @@ use std::process::Command;
 use add_rpc::generate_add_rpc_wit;
 use descriptors::DescriptorIndex;
 use error::Result;
-use generator::{GeneratedFiles, GeneratedOutputLayout, generate_files};
+use generator::{
+    GeneratedFiles, GeneratedOutputLayout, GenerationOptions, generate_files,
+    generate_files_with_options,
+};
 use heck::ToSnakeCase;
 use language::Language;
 use spec::{ApiSpec, SupportFragmentSpec, write_prepared_wit_directory};
@@ -37,6 +40,7 @@ pub struct GenerateRequest {
     pub descriptor_paths: Vec<PathBuf>,
     pub output_path: PathBuf,
     pub format: bool,
+    pub go_options: go::GoOptions,
 }
 
 pub struct AddRpcRequest {
@@ -100,7 +104,15 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
     let spec = ApiSpec::load_for_language_with_inputs(request.language, &request.input_paths)?;
     let descriptors = DescriptorIndex::load_many(&request.descriptor_paths)?;
     let support = load_support_files(request.language, &spec, &request.support_paths)?;
-    let generated = generate_files(request.language, &spec, &descriptors, &support)?;
+    let generated = generate_files_with_options(
+        request.language,
+        &spec,
+        &descriptors,
+        &support,
+        &GenerationOptions {
+            go: request.go_options.clone(),
+        },
+    )?;
     print_warnings(&generated);
 
     write_generated_files(&request.output_path, &generated)?;
@@ -500,6 +512,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         descriptor_paths: vec![descriptor_path],
         output_path: output_path.clone(),
         format: false,
+        go_options: go::GoOptions::default(),
     })?;
     format_example_output(repo_root, language, &output_path)?;
 
