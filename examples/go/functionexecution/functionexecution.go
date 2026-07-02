@@ -5,18 +5,9 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const ServiceName = "FunctionExecution"
-const Endpoint = "function-execution"
-
-const ExecuteFunctionOp = "ExecuteFunction"
-const ExecuteCountedFunctionOp = "ExecuteCountedFunction"
-const ExecuteNamedFunctionOp = "ExecuteNamedFunction"
-const ExecuteVarargsFunctionOp = "ExecuteVarargsFunction"
-const ExecuteNamedVarargsFunctionOp = "ExecuteNamedVarargsFunction"
-
 // --- Datatypes ---
 
-type ExecuteFunctionRequest struct {
+type executeFunctionRequest struct {
 	// Required.
 	Function string
 	// Required. The name argument for the function.
@@ -25,12 +16,7 @@ type ExecuteFunctionRequest struct {
 	Enabled bool
 }
 
-type ExecuteFunctionResult struct {
-	// Required.
-	Value string
-}
-
-type ExecuteCountedFunctionRequest struct {
+type executeCountedFunctionRequest struct {
 	// Required.
 	Function string
 	// Required. The name argument for the function.
@@ -39,12 +25,7 @@ type ExecuteCountedFunctionRequest struct {
 	Count int32
 }
 
-type ExecuteCountedFunctionResult struct {
-	// Required.
-	Value string
-}
-
-type ExecuteNamedFunctionRequest struct {
+type executeNamedFunctionRequest struct {
 	// Required.
 	Function string
 	// Required. The name argument for the function.
@@ -53,40 +34,25 @@ type ExecuteNamedFunctionRequest struct {
 	Enabled bool
 }
 
-type ExecuteNamedFunctionResult struct {
-	// Required.
-	Value string
-}
-
-type ExecuteVarargsFunctionRequest struct {
+type executeVarargsFunctionRequest struct {
 	// Required.
 	Function string
 	// Arguments for the function.
 	Args []string
 }
 
-type ExecuteVarargsFunctionResult struct {
-	// Required.
-	Value string
-}
-
-type ExecuteNamedVarargsFunctionRequest struct {
+type executeNamedVarargsFunctionRequest struct {
 	// Required.
 	Function string
 	// Arguments for the function.
 	Args []string
-}
-
-type ExecuteNamedVarargsFunctionResult struct {
-	// Required.
-	Value string
 }
 
 // --- Operations (internal) ---
 
-func executeFunction(ctx workflow.Context, request ExecuteFunctionRequest) (*ExecuteFunctionResult, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, ExecuteFunctionOp, request, workflow.NexusOperationOptions{})
+func executeFunction(ctx workflow.Context, request executeFunctionRequest) (*ExecuteFunctionResult, error) {
+	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
+	fut := c.ExecuteOperation(ctx, "ExecuteFunction", request, workflow.NexusOperationOptions{})
 	var result ExecuteFunctionResult
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
@@ -94,9 +60,9 @@ func executeFunction(ctx workflow.Context, request ExecuteFunctionRequest) (*Exe
 	return &result, nil
 }
 
-func executeCountedFunction(ctx workflow.Context, request ExecuteCountedFunctionRequest) (*ExecuteCountedFunctionResult, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, ExecuteCountedFunctionOp, request, workflow.NexusOperationOptions{})
+func executeCountedFunction(ctx workflow.Context, request executeCountedFunctionRequest) (*ExecuteCountedFunctionResult, error) {
+	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
+	fut := c.ExecuteOperation(ctx, "ExecuteCountedFunction", request, workflow.NexusOperationOptions{})
 	var result ExecuteCountedFunctionResult
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
@@ -104,9 +70,9 @@ func executeCountedFunction(ctx workflow.Context, request ExecuteCountedFunction
 	return &result, nil
 }
 
-func executeNamedFunction(ctx workflow.Context, request ExecuteNamedFunctionRequest) (*ExecuteNamedFunctionResult, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, ExecuteNamedFunctionOp, request, workflow.NexusOperationOptions{})
+func executeNamedFunction(ctx workflow.Context, request executeNamedFunctionRequest) (*ExecuteNamedFunctionResult, error) {
+	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
+	fut := c.ExecuteOperation(ctx, "ExecuteNamedFunction", request, workflow.NexusOperationOptions{})
 	var result ExecuteNamedFunctionResult
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
@@ -114,9 +80,9 @@ func executeNamedFunction(ctx workflow.Context, request ExecuteNamedFunctionRequ
 	return &result, nil
 }
 
-func executeVarargsFunction(ctx workflow.Context, request ExecuteVarargsFunctionRequest) (*ExecuteVarargsFunctionResult, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, ExecuteVarargsFunctionOp, request, workflow.NexusOperationOptions{})
+func executeVarargsFunction(ctx workflow.Context, request executeVarargsFunctionRequest) (*ExecuteVarargsFunctionResult, error) {
+	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
+	fut := c.ExecuteOperation(ctx, "ExecuteVarargsFunction", request, workflow.NexusOperationOptions{})
 	var result ExecuteVarargsFunctionResult
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
@@ -124,9 +90,9 @@ func executeVarargsFunction(ctx workflow.Context, request ExecuteVarargsFunction
 	return &result, nil
 }
 
-func executeNamedVarargsFunction(ctx workflow.Context, request ExecuteNamedVarargsFunctionRequest) (*ExecuteNamedVarargsFunctionResult, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, ExecuteNamedVarargsFunctionOp, request, workflow.NexusOperationOptions{})
+func executeNamedVarargsFunction(ctx workflow.Context, request executeNamedVarargsFunctionRequest) (*ExecuteNamedVarargsFunctionResult, error) {
+	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
+	fut := c.ExecuteOperation(ctx, "ExecuteNamedVarargsFunction", request, workflow.NexusOperationOptions{})
 	var result ExecuteNamedVarargsFunctionResult
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
@@ -136,13 +102,38 @@ func executeNamedVarargsFunction(ctx workflow.Context, request ExecuteNamedVarar
 
 // --- Operations (public API) ---
 
+type ExecuteFunctionResult struct {
+	// Required.
+	Value string
+}
+
+type ExecuteCountedFunctionResult struct {
+	// Required.
+	Value string
+}
+
+type ExecuteNamedFunctionResult struct {
+	// Required.
+	Value string
+}
+
+type ExecuteVarargsFunctionResult struct {
+	// Required.
+	Value string
+}
+
+type ExecuteNamedVarargsFunctionResult struct {
+	// Required.
+	Value string
+}
+
 func ExecuteFunction(
 	ctx workflow.Context,
 	function string,
 	name string,
 	enabled bool,
 ) (*ExecuteFunctionResult, error) {
-	return executeFunction(ctx, ExecuteFunctionRequest{
+	return executeFunction(ctx, executeFunctionRequest{
 		Function: function,
 		Name:     name,
 		Enabled:  enabled,
@@ -155,7 +146,7 @@ func ExecuteCountedFunction(
 	name string,
 	count int32,
 ) (*ExecuteCountedFunctionResult, error) {
-	return executeCountedFunction(ctx, ExecuteCountedFunctionRequest{
+	return executeCountedFunction(ctx, executeCountedFunctionRequest{
 		Function: function,
 		Name:     name,
 		Count:    count,
@@ -168,7 +159,7 @@ func ExecuteNamedFunction(
 	name string,
 	enabled bool,
 ) (*ExecuteNamedFunctionResult, error) {
-	return executeNamedFunction(ctx, ExecuteNamedFunctionRequest{
+	return executeNamedFunction(ctx, executeNamedFunctionRequest{
 		Function: function,
 		Name:     name,
 		Enabled:  enabled,
@@ -181,7 +172,7 @@ type ExecuteVarargsFunctionOptions struct {
 }
 
 func ExecuteVarargsFunction(ctx workflow.Context, function string, opts ExecuteVarargsFunctionOptions) (*ExecuteVarargsFunctionResult, error) {
-	return executeVarargsFunction(ctx, ExecuteVarargsFunctionRequest{
+	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
 		Function: function,
 		Args:     opts.Args,
 	})
@@ -193,7 +184,7 @@ type ExecuteNamedVarargsFunctionOptions struct {
 }
 
 func ExecuteNamedVarargsFunction(ctx workflow.Context, function string, opts ExecuteNamedVarargsFunctionOptions) (*ExecuteNamedVarargsFunctionResult, error) {
-	return executeNamedVarargsFunction(ctx, ExecuteNamedVarargsFunctionRequest{
+	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
 		Function: function,
 		Args:     opts.Args,
 	})

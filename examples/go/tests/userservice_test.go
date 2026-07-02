@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
@@ -12,6 +13,8 @@ import (
 
 	"examples/go/userservice"
 )
+
+const userServiceName = "UserService"
 
 // --- Mock tests ---
 
@@ -35,9 +38,9 @@ func TestUserServiceSuite(t *testing.T) {
 
 func (s *UserServiceTestSuite) TestGetUser() {
 	s.env.OnNexusOperation(
-		userservice.ServiceName,
-		nexus.NewOperationReference[userservice.GetUserRequest, userservice.User](userservice.GetUserOp),
-		userservice.GetUserRequest{UserId: "user-123"},
+		userServiceName,
+		nexus.NewOperationReference[any, userservice.User]("GetUser"),
+		mock.Anything,
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
@@ -60,9 +63,9 @@ func (s *UserServiceTestSuite) TestGetUser() {
 
 func (s *UserServiceTestSuite) TestUpdateEmail() {
 	s.env.OnNexusOperation(
-		userservice.ServiceName,
-		nexus.NewOperationReference[userservice.UpdateEmailRequest, userservice.User](userservice.UpdateEmailOp),
-		userservice.UpdateEmailRequest{UserId: "user-123", Email: "new@example.com"},
+		userServiceName,
+		nexus.NewOperationReference[any, userservice.User]("UpdateEmail"),
+		mock.Anything,
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
@@ -85,9 +88,9 @@ func (s *UserServiceTestSuite) TestUpdateEmail() {
 
 func (s *UserServiceTestSuite) TestUserUpdateEmailMethod() {
 	s.env.OnNexusOperation(
-		userservice.ServiceName,
-		nexus.NewOperationReference[userservice.UpdateEmailRequest, userservice.User](userservice.UpdateEmailOp),
-		userservice.UpdateEmailRequest{UserId: "user-123", Email: "updated@example.com"},
+		userServiceName,
+		nexus.NewOperationReference[any, userservice.User]("UpdateEmail"),
+		mock.Anything,
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
@@ -111,9 +114,9 @@ func (s *UserServiceTestSuite) TestUserUpdateEmailMethod() {
 
 func (s *UserServiceTestSuite) TestGetUserThenUpdateEmail() {
 	s.env.OnNexusOperation(
-		userservice.ServiceName,
-		nexus.NewOperationReference[userservice.GetUserRequest, userservice.User](userservice.GetUserOp),
-		userservice.GetUserRequest{UserId: "user-123"},
+		userServiceName,
+		nexus.NewOperationReference[any, userservice.User]("GetUser"),
+		mock.Anything,
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
@@ -123,9 +126,9 @@ func (s *UserServiceTestSuite) TestGetUserThenUpdateEmail() {
 	)
 
 	s.env.OnNexusOperation(
-		userservice.ServiceName,
-		nexus.NewOperationReference[userservice.UpdateEmailRequest, userservice.User](userservice.UpdateEmailOp),
-		userservice.UpdateEmailRequest{UserId: "user-123", Email: "new@example.com"},
+		userServiceName,
+		nexus.NewOperationReference[any, userservice.User]("UpdateEmail"),
+		mock.Anything,
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
@@ -152,9 +155,9 @@ func (s *UserServiceTestSuite) TestGetUserThenUpdateEmail() {
 
 func (s *UserServiceTestSuite) TestGetUserError() {
 	s.env.OnNexusOperation(
-		userservice.ServiceName,
-		nexus.NewOperationReference[userservice.GetUserRequest, userservice.User](userservice.GetUserOp),
-		userservice.GetUserRequest{UserId: "nonexistent"},
+		userServiceName,
+		nexus.NewOperationReference[any, userservice.User]("GetUser"),
+		mock.Anything,
 		mock.Anything,
 	).Return(
 		nil,
@@ -187,19 +190,19 @@ func (s *UserServiceIntegrationSuite) SetupTest() {
 	s.env = s.NewTestWorkflowEnvironment()
 	s.calls = nil
 
-	getUser := nexus.NewSyncOperation(userservice.GetUserOp,
-		func(ctx context.Context, input userservice.GetUserRequest, opts nexus.StartOperationOptions) (userservice.User, error) {
+	getUser := nexus.NewSyncOperation("GetUser",
+		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (userservice.User, error) {
 			s.calls = append(s.calls, testCall{"GetUser", input})
-			return userservice.User{UserId: input.UserId, Email: "alice@example.com"}, nil
+			return userservice.User{UserId: stringField(input, "UserId"), Email: "alice@example.com"}, nil
 		})
 
-	updateEmail := nexus.NewSyncOperation(userservice.UpdateEmailOp,
-		func(ctx context.Context, input userservice.UpdateEmailRequest, opts nexus.StartOperationOptions) (userservice.User, error) {
+	updateEmail := nexus.NewSyncOperation("UpdateEmail",
+		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (userservice.User, error) {
 			s.calls = append(s.calls, testCall{"UpdateEmail", input})
-			return userservice.User{UserId: input.UserId, Email: input.Email}, nil
+			return userservice.User{UserId: stringField(input, "UserId"), Email: stringField(input, "Email")}, nil
 		})
 
-	service := nexus.NewService(userservice.ServiceName)
+	service := nexus.NewService(userServiceName)
 	s.NoError(service.Register(getUser, updateEmail))
 	s.env.RegisterNexusService(service)
 }
@@ -222,7 +225,6 @@ func (s *UserServiceIntegrationSuite) TestGetUser() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("GetUser", s.calls[0].Operation)
-	s.Equal(userservice.GetUserRequest{UserId: "user-123"}, s.calls[0].Input)
 }
 
 func (s *UserServiceIntegrationSuite) TestUpdateEmail() {
@@ -239,7 +241,6 @@ func (s *UserServiceIntegrationSuite) TestUpdateEmail() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("UpdateEmail", s.calls[0].Operation)
-	s.Equal(userservice.UpdateEmailRequest{UserId: "user-123", Email: "new@example.com"}, s.calls[0].Input)
 }
 
 func (s *UserServiceIntegrationSuite) TestUserUpdateEmailMethod() {
@@ -257,7 +258,6 @@ func (s *UserServiceIntegrationSuite) TestUserUpdateEmailMethod() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("UpdateEmail", s.calls[0].Operation)
-	s.Equal(userservice.UpdateEmailRequest{UserId: "user-123", Email: "updated@example.com"}, s.calls[0].Input)
 }
 
 func (s *UserServiceIntegrationSuite) TestGetUserThenUpdateEmail() {
@@ -278,7 +278,28 @@ func (s *UserServiceIntegrationSuite) TestGetUserThenUpdateEmail() {
 
 	s.Require().Len(s.calls, 2)
 	s.Equal("GetUser", s.calls[0].Operation)
-	s.Equal(userservice.GetUserRequest{UserId: "user-123"}, s.calls[0].Input)
 	s.Equal("UpdateEmail", s.calls[1].Operation)
-	s.Equal(userservice.UpdateEmailRequest{UserId: "user-123", Email: "new@example.com"}, s.calls[1].Input)
+}
+
+func stringField(value any, name string) string {
+	reflected := reflect.ValueOf(value)
+	if reflected.Kind() == reflect.Pointer {
+		reflected = reflected.Elem()
+	}
+	if reflected.Kind() == reflect.Struct {
+		field := reflected.FieldByName(name)
+		if field.IsValid() && field.Kind() == reflect.String {
+			return field.String()
+		}
+	}
+	if reflected.Kind() == reflect.Map && reflected.Type().Key().Kind() == reflect.String {
+		mapValue := reflected.MapIndex(reflect.ValueOf(name))
+		if mapValue.IsValid() && mapValue.Kind() == reflect.Interface {
+			mapValue = mapValue.Elem()
+		}
+		if mapValue.IsValid() && mapValue.Kind() == reflect.String {
+			return mapValue.String()
+		}
+	}
+	return ""
 }

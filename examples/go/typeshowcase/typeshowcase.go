@@ -5,17 +5,130 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const ServiceName = "TypeShowcase"
-const Endpoint = "type-showcase"
-
-const GetUserOp = "GetUser"
-const UpdateEmailOp = "UpdateEmail"
-const RenameOp = "Rename"
-const SetProfileOp = "SetProfile"
-const RecordSyncOp = "RecordSync"
-const DeactivateOp = "Deactivate"
-
 // --- Datatypes ---
+
+type getUserRequest struct {
+	// Required.
+	UserId           string
+	ConsistencyToken *string
+}
+
+type updateEmailRequest struct {
+	// Required.
+	UserId string
+	// Required.
+	Email string
+}
+
+type renameRequest struct {
+	// Required.
+	UserId string
+	// Required.
+	DisplayName string
+}
+
+type setProfileRequest struct {
+	// Required.
+	UserId string
+	// Required.
+	Profile UserProfile
+}
+
+type recordSyncRequest struct {
+	// Required.
+	UserId string
+	// Required.
+	Report SyncReport
+}
+
+type deactivateRequest struct {
+	// Required.
+	UserId string
+	Reason *string
+}
+
+// --- Resources ---
+
+type User struct {
+	// Required.
+	UserId string
+	// Required.
+	Email string
+	// Required.
+	DisplayName string
+	// Required.
+	Status UserStatus
+	// Required.
+	Profile UserProfile
+}
+
+func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error) {
+	return updateEmail(ctx, updateEmailRequest{UserId: u.UserId, Email: email})
+}
+
+func (u *User) Rename(ctx workflow.Context, displayName string) (*User, error) {
+	return rename(ctx, renameRequest{UserId: u.UserId, DisplayName: displayName})
+}
+
+func (u *User) Deactivate(ctx workflow.Context, reason *string) error {
+	return deactivate(ctx, deactivateRequest{UserId: u.UserId, Reason: reason})
+}
+
+// --- Operations (internal) ---
+
+func getUser(ctx workflow.Context, request getUserRequest) (*User, error) {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "GetUser", request, workflow.NexusOperationOptions{})
+	var result User
+	if err := fut.Get(ctx, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func updateEmail(ctx workflow.Context, request updateEmailRequest) (*User, error) {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
+	var result User
+	if err := fut.Get(ctx, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func rename(ctx workflow.Context, request renameRequest) (*User, error) {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "Rename", request, workflow.NexusOperationOptions{})
+	var result User
+	if err := fut.Get(ctx, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func setProfile(ctx workflow.Context, request setProfileRequest) (*User, error) {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "SetProfile", request, workflow.NexusOperationOptions{})
+	var result User
+	if err := fut.Get(ctx, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func recordSync(ctx workflow.Context, request recordSyncRequest) error {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "RecordSync", request, workflow.NexusOperationOptions{})
+	return fut.Get(ctx, nil)
+}
+
+func deactivate(ctx workflow.Context, request deactivateRequest) error {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "Deactivate", request, workflow.NexusOperationOptions{})
+	return fut.Get(ctx, nil)
+}
+
+// --- Operations (public API) ---
 
 type UserStatus int32
 
@@ -52,33 +165,6 @@ func (NotificationTargetSms) isNotificationTarget() {}
 type NotificationTargetNone struct{}
 
 func (NotificationTargetNone) isNotificationTarget() {}
-
-type GetUserRequest struct {
-	// Required.
-	UserId           string
-	ConsistencyToken *string
-}
-
-type UpdateEmailRequest struct {
-	// Required.
-	UserId string
-	// Required.
-	Email string
-}
-
-type RenameRequest struct {
-	// Required.
-	UserId string
-	// Required.
-	DisplayName string
-}
-
-type SetProfileRequest struct {
-	// Required.
-	UserId string
-	// Required.
-	Profile UserProfile
-}
 
 type UserProfile struct {
 	// Required.
@@ -118,13 +204,6 @@ type Coordinates struct {
 	Second float64
 }
 
-type RecordSyncRequest struct {
-	// Required.
-	UserId string
-	// Required.
-	Report SyncReport
-}
-
 type SyncReport struct {
 	// Required.
 	Route []Tuple2[float64, float64]
@@ -144,129 +223,40 @@ type Result[T, E any] struct {
 	Error  E
 }
 
-type DeactivateRequest struct {
-	// Required.
-	UserId string
-	Reason *string
-}
-
-// --- Resources ---
-
-type User struct {
-	// Required.
-	UserId string
-	// Required.
-	Email string
-	// Required.
-	DisplayName string
-	// Required.
-	Status UserStatus
-	// Required.
-	Profile UserProfile
-}
-
-func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error) {
-	return updateEmail(ctx, UpdateEmailRequest{UserId: u.UserId, Email: email})
-}
-
-func (u *User) Rename(ctx workflow.Context, displayName string) (*User, error) {
-	return rename(ctx, RenameRequest{UserId: u.UserId, DisplayName: displayName})
-}
-
-func (u *User) Deactivate(ctx workflow.Context, reason *string) error {
-	return deactivate(ctx, DeactivateRequest{UserId: u.UserId, Reason: reason})
-}
-
-// --- Operations (internal) ---
-
-func getUser(ctx workflow.Context, request GetUserRequest) (*User, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, GetUserOp, request, workflow.NexusOperationOptions{})
-	var result User
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, UpdateEmailOp, request, workflow.NexusOperationOptions{})
-	var result User
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func rename(ctx workflow.Context, request RenameRequest) (*User, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, RenameOp, request, workflow.NexusOperationOptions{})
-	var result User
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func setProfile(ctx workflow.Context, request SetProfileRequest) (*User, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, SetProfileOp, request, workflow.NexusOperationOptions{})
-	var result User
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func recordSync(ctx workflow.Context, request RecordSyncRequest) error {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, RecordSyncOp, request, workflow.NexusOperationOptions{})
-	return fut.Get(ctx, nil)
-}
-
-func deactivate(ctx workflow.Context, request DeactivateRequest) error {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, DeactivateOp, request, workflow.NexusOperationOptions{})
-	return fut.Get(ctx, nil)
-}
-
-// --- Operations (public API) ---
-
 type GetUserOptions struct {
 	ConsistencyToken *string
 }
 
 func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) (*User, error) {
-	return getUser(ctx, GetUserRequest{
+	return getUser(ctx, getUserRequest{
 		UserId:           userId,
 		ConsistencyToken: opts.ConsistencyToken,
 	})
 }
 
 func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error) {
-	return updateEmail(ctx, UpdateEmailRequest{
+	return updateEmail(ctx, updateEmailRequest{
 		UserId: userId,
 		Email:  email,
 	})
 }
 
 func Rename(ctx workflow.Context, userId string, displayName string) (*User, error) {
-	return rename(ctx, RenameRequest{
+	return rename(ctx, renameRequest{
 		UserId:      userId,
 		DisplayName: displayName,
 	})
 }
 
 func SetProfile(ctx workflow.Context, userId string, profile UserProfile) (*User, error) {
-	return setProfile(ctx, SetProfileRequest{
+	return setProfile(ctx, setProfileRequest{
 		UserId:  userId,
 		Profile: profile,
 	})
 }
 
 func RecordSync(ctx workflow.Context, userId string, report SyncReport) error {
-	return recordSync(ctx, RecordSyncRequest{
+	return recordSync(ctx, recordSyncRequest{
 		UserId: userId,
 		Report: report,
 	})
@@ -277,7 +267,7 @@ type DeactivateOptions struct {
 }
 
 func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) error {
-	return deactivate(ctx, DeactivateRequest{
+	return deactivate(ctx, deactivateRequest{
 		UserId: userId,
 		Reason: opts.Reason,
 	})

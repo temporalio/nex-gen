@@ -191,6 +191,16 @@ pub(crate) fn generate(
     populate_proto_conversions(api_plan, &mut models, &mut proto_imports, &package)?;
     populate_operation_bindings(api_plan, &mut services, &mut proto_imports, &package)?;
 
+    let visibility = compute_go_visibility(api_plan, &enums, &flags, &variants, &models);
+    apply_go_visibility(
+        &visibility,
+        &mut enums,
+        &mut flags,
+        &mut variants,
+        &mut models,
+        &mut services,
+    );
+
     // Operation wrapper functions require the workflow package.
     let has_operations = services.iter().any(|s| !s.operations.is_empty());
     if has_operations && !package.is_self_import("go.temporal.io/sdk/workflow") {
@@ -207,6 +217,7 @@ pub(crate) fn generate(
         models.values().collect::<Vec<_>>().as_slice(),
         &services,
         api_plan,
+        &visibility,
     );
 
     let mut files = BTreeMap::new();
@@ -737,6 +748,426 @@ struct ResolvedGoType {
     /// descriptive completeness of the resolved type.
     #[allow(dead_code)]
     is_struct: bool,
+}
+
+/// Visibility decisions for local generated Go datatypes.
+#[derive(Debug, Clone, Default)]
+struct GoVisibility {
+    public_keys: BTreeSet<String>,
+    type_name_replacements: BTreeMap<String, String>,
+}
+
+impl GoVisibility {
+    fn is_public(&self, key: &str) -> bool {
+        self.public_keys.contains(key)
+    }
+
+    fn adjusted_model_name(&self, key: &str, fallback: &str) -> String {
+        self.type_name_replacements
+            .get(fallback)
+            .cloned()
+            .unwrap_or_else(|| {
+                if self.is_public(key) {
+                    fallback.to_string()
+                } else {
+                    go_unexported_name(fallback)
+                }
+            })
+    }
+
+    fn rewrite_go_expr(&self, expr: &str) -> String {
+        if self.type_name_replacements.is_empty() && !expr.contains(".ToProto()") {
+            return expr.to_string();
+        }
+
+        let expr = expr.replace(".ToProto()", ".toProto()");
+        let bytes = expr.as_bytes();
+        let mut output = String::with_capacity(expr.len());
+        let mut index = 0;
+
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if is_go_ident_start(byte) {
+                let start = index;
+                index += 1;
+                while index < bytes.len() && is_go_ident_continue(bytes[index]) {
+                    index += 1;
+                }
+                let ident = &expr[start..index];
+                let prev = previous_non_whitespace(bytes, start);
+                let next = next_non_whitespace(bytes, index);
+                if prev == Some(b'.') || next == Some(b':') {
+                    output.push_str(ident);
+                } else if let Some(replacement) = self.type_name_replacements.get(ident) {
+                    output.push_str(replacement);
+                } else {
+                    output.push_str(ident);
+                }
+            } else {
+                output.push(byte as char);
+                index += 1;
+            }
+        }
+
+        output
+    }
+}
+
+fn is_go_ident_start(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphabetic()
+}
+
+fn is_go_ident_continue(byte: u8) -> bool {
+    is_go_ident_start(byte) || byte.is_ascii_digit()
+}
+
+fn previous_non_whitespace(bytes: &[u8], start: usize) -> Option<u8> {
+    bytes[..start]
+        .iter()
+        .rev()
+        .copied()
+        .find(|byte| !byte.is_ascii_whitespace())
+}
+
+fn next_non_whitespace(bytes: &[u8], start: usize) -> Option<u8> {
+    bytes[start..]
+        .iter()
+        .copied()
+        .find(|byte| !byte.is_ascii_whitespace())
+}
+
+fn compute_go_visibility(
+    api_plan: &ApiPlan,
+    enums: &IndexMap<String, RenderedEnum>,
+    flags: &IndexMap<String, RenderedFlags>,
+    variants: &IndexMap<String, RenderedVariant>,
+    models: &IndexMap<String, RenderedModel>,
+) -> GoVisibility {
+    let mut marker = GoVisibilityMarker {
+        api_plan,
+        public_keys: BTreeSet::new(),
+    };
+
+    for service in &api_plan.services {
+        for operation in &service.operations {
+            marker.mark_operation_public_surface(operation);
+        }
+        for resource in &service.resources {
+            marker.mark_resource_public_surface(resource);
+        }
+    }
+
+    let mut visibility = GoVisibility {
+        public_keys: marker.public_keys,
+        type_name_replacements: BTreeMap::new(),
+    };
+
+    for (key, enumeration) in enums {
+        if !visibility.is_public(key) {
+            visibility.type_name_replacements.insert(
+                enumeration.name.clone(),
+                go_unexported_name(&enumeration.name),
+            );
+        }
+    }
+    for (key, flag_set) in flags {
+        if !visibility.is_public(key) {
+            visibility
+                .type_name_replacements
+                .insert(flag_set.name.clone(), go_unexported_name(&flag_set.name));
+        }
+    }
+    for (key, variant) in variants {
+        if !visibility.is_public(key) {
+            visibility
+                .type_name_replacements
+                .insert(variant.name.clone(), go_unexported_name(&variant.name));
+            for case in &variant.cases {
+                visibility.type_name_replacements.insert(
+                    case.struct_name.clone(),
+                    go_unexported_name(&case.struct_name),
+                );
+            }
+        }
+    }
+    for (key, model) in models {
+        if !visibility.is_public(key) {
+            let (ident, _) = split_go_type_decl_name(&model.name);
+            visibility
+                .type_name_replacements
+                .insert(ident.to_string(), go_unexported_name(ident));
+        }
+    }
+
+    visibility
+}
+
+struct GoVisibilityMarker<'a> {
+    api_plan: &'a ApiPlan,
+    public_keys: BTreeSet<String>,
+}
+
+impl GoVisibilityMarker<'_> {
+    fn mark_operation_public_surface(&mut self, operation: &PlannedOperation) {
+        if let Some(planned_model) = self.api_plan.models.get(&operation.input.info.full_name) {
+            for field in &planned_model.fields {
+                self.mark_operation_field_kind(&field.kind, &field.authored_name);
+            }
+        }
+
+        if operation
+            .output_transform
+            .as_ref()
+            .is_some_and(|transform| {
+                transform.type_name.for_language(Language::Go).is_some()
+                    && transform.transform.for_language(Language::Go).is_some()
+            })
+        {
+            return;
+        }
+
+        match &operation.output {
+            PlannedOperationOutput::Message(output) => {
+                if operation.output_resource_return.is_none() {
+                    self.mark_message_type(output);
+                }
+            }
+            PlannedOperationOutput::Resource { .. } | PlannedOperationOutput::None => {}
+        }
+    }
+
+    fn mark_resource_public_surface(&mut self, resource: &PlannedResource) {
+        for field in &resource.fields {
+            self.mark_resource_field_kind(&field.kind);
+        }
+        for method in &resource.methods {
+            for param in &method.params {
+                self.mark_resource_field_kind(&param.kind);
+            }
+            if let Some(result) = &method.result
+                && let PlannedResourceMethodResultKind::Value(kind) = &result.kind
+            {
+                self.mark_resource_field_kind(kind);
+            }
+        }
+    }
+
+    fn mark_message_type(&mut self, message: &PlannedMessageType) {
+        if message.replacement.is_some() || message.authored_type.is_some() {
+            return;
+        }
+        if !self.public_keys.insert(message.info.full_name.clone()) {
+            return;
+        }
+        if let Some(model) = self.api_plan.models.get(&message.info.full_name) {
+            for field in &model.fields {
+                self.mark_operation_field_kind(&field.kind, &field.authored_name);
+            }
+        }
+    }
+
+    fn mark_operation_field_kind(&mut self, kind: &PlannedFieldKind, field_name: &str) {
+        match kind {
+            PlannedFieldKind::Singular(PlannedValueType::Tuple(items)) => {
+                self.public_keys.insert(go_field_name(field_name));
+                for item in items {
+                    self.mark_value_type(item);
+                }
+            }
+            PlannedFieldKind::Singular(PlannedValueType::Result { ok, err }) => {
+                self.public_keys.insert(go_field_name(field_name));
+                if let Some(ok) = ok.as_deref() {
+                    self.mark_value_type(ok);
+                }
+                if let Some(err) = err.as_deref() {
+                    self.mark_value_type(err);
+                }
+            }
+            PlannedFieldKind::Singular(value) | PlannedFieldKind::Repeated(value) => {
+                self.mark_value_type(value);
+            }
+            PlannedFieldKind::Map { key, value } => {
+                self.mark_value_type(key);
+                self.mark_value_type(value);
+            }
+        }
+    }
+
+    fn mark_resource_field_kind(&mut self, kind: &PlannedFieldKind) {
+        match kind {
+            PlannedFieldKind::Singular(value) | PlannedFieldKind::Repeated(value) => {
+                self.mark_value_type(value);
+            }
+            PlannedFieldKind::Map { key, value } => {
+                self.mark_value_type(key);
+                self.mark_value_type(value);
+            }
+        }
+    }
+
+    fn mark_value_type(&mut self, value: &PlannedValueType) {
+        match value {
+            PlannedValueType::Scalar(_) | PlannedValueType::Unknown => {}
+            PlannedValueType::External {
+                type_name,
+                fallback,
+            } => {
+                if type_name.for_language(Language::Go).is_none() {
+                    self.mark_value_type(fallback);
+                }
+            }
+            PlannedValueType::Enum(enum_type) => {
+                if enum_type.replacement.is_some() {
+                    return;
+                }
+                if let Some(info) = &enum_type.info {
+                    self.public_keys.insert(info.full_name.clone());
+                }
+            }
+            PlannedValueType::Flags(flags_type) => {
+                self.public_keys.insert(flags_type.info.full_name.clone());
+            }
+            PlannedValueType::Variant(variant_type) => {
+                if !self.public_keys.insert(variant_type.info.full_name.clone()) {
+                    return;
+                }
+                if let Some(variant) = self.api_plan.variants.get(&variant_type.info.full_name) {
+                    for case in &variant.cases {
+                        if let Some(payload) = &case.payload {
+                            self.mark_value_type(payload);
+                        }
+                    }
+                }
+            }
+            PlannedValueType::Message(message_type) => self.mark_message_type(message_type),
+            PlannedValueType::Tuple(items) => {
+                self.public_keys
+                    .insert(format!("{GENERIC_MODEL_KEY_PREFIX}Tuple{}", items.len()));
+                for item in items {
+                    self.mark_value_type(item);
+                }
+            }
+            PlannedValueType::Result { ok, err } => {
+                self.public_keys
+                    .insert(format!("{GENERIC_MODEL_KEY_PREFIX}Result"));
+                if let Some(ok) = ok.as_deref() {
+                    self.mark_value_type(ok);
+                }
+                if let Some(err) = err.as_deref() {
+                    self.mark_value_type(err);
+                }
+            }
+        }
+    }
+}
+
+fn apply_go_visibility(
+    visibility: &GoVisibility,
+    enums: &mut IndexMap<String, RenderedEnum>,
+    flags: &mut IndexMap<String, RenderedFlags>,
+    variants: &mut IndexMap<String, RenderedVariant>,
+    models: &mut IndexMap<String, RenderedModel>,
+    services: &mut [RenderedService<'_>],
+) {
+    for enumeration in enums.values_mut() {
+        enumeration.name = visibility.rewrite_go_expr(&enumeration.name);
+    }
+    for flag_set in flags.values_mut() {
+        flag_set.name = visibility.rewrite_go_expr(&flag_set.name);
+    }
+    for variant in variants.values_mut() {
+        variant.name = visibility.rewrite_go_expr(&variant.name);
+        for case in &mut variant.cases {
+            case.struct_name = visibility.rewrite_go_expr(&case.struct_name);
+            if let Some(payload_type) = &mut case.payload_type {
+                *payload_type = visibility.rewrite_go_expr(payload_type);
+            }
+        }
+    }
+    for model in models.values_mut() {
+        model.name = visibility.rewrite_go_type_decl(&model.name);
+        for field in &mut model.fields {
+            field.go_type = visibility.rewrite_go_expr(&field.go_type);
+            if let Some(conversion) = &mut field.conversion {
+                rewrite_lines(visibility, &mut conversion.to_proto_lines);
+                rewrite_lines(visibility, &mut conversion.from_proto_lines);
+            }
+        }
+        for sourced in &mut model.sourced_fields {
+            rewrite_lines(visibility, &mut sourced.to_proto_lines);
+        }
+    }
+
+    for service in services {
+        for operation in &mut service.operations {
+            operation.input_type = visibility.rewrite_go_expr(&operation.input_type);
+            if let Some(output_type) = &mut operation.output_type {
+                *output_type = visibility.rewrite_go_expr(output_type);
+            }
+            if let Some(raw_output_type) = &mut operation.raw_output_type {
+                *raw_output_type = visibility.rewrite_go_expr(raw_output_type);
+            }
+            if let Some(output_transform_type) = &mut operation.output_transform_type {
+                *output_transform_type = visibility.rewrite_go_expr(output_transform_type);
+            }
+            if let Some(params) = &mut operation.unpacked_input {
+                for param in params {
+                    param.go_type = visibility.rewrite_go_expr(&param.go_type);
+                }
+            }
+            if let Some(binding) = &mut operation.proto_binding {
+                binding.input_to_proto = visibility.rewrite_go_expr(&binding.input_to_proto);
+                if let Some(output_from_proto) = &mut binding.output_from_proto {
+                    *output_from_proto = visibility.rewrite_go_expr(output_from_proto);
+                }
+                if let Some(resource_return) = &mut binding.resource_return {
+                    resource_return.resource_type_name =
+                        visibility.rewrite_go_expr(&resource_return.resource_type_name);
+                    rewrite_lines(visibility, &mut resource_return.local_lines);
+                    for initializer in &mut resource_return.field_initializers {
+                        initializer.expr = visibility.rewrite_go_expr(&initializer.expr);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl GoVisibility {
+    fn rewrite_go_type_decl(&self, decl: &str) -> String {
+        let (ident, suffix) = split_go_type_decl_name(decl);
+        match self.type_name_replacements.get(ident) {
+            Some(replacement) => format!("{replacement}{suffix}"),
+            None => decl.to_string(),
+        }
+    }
+}
+
+fn split_go_type_decl_name(decl: &str) -> (&str, &str) {
+    decl.find('[')
+        .map(|index| (&decl[..index], &decl[index..]))
+        .unwrap_or((decl, ""))
+}
+
+fn rewrite_lines(visibility: &GoVisibility, lines: &mut [String]) {
+    for line in lines {
+        *line = visibility.rewrite_go_expr(line);
+    }
+}
+
+fn is_go_exported_type_decl(decl: &str) -> bool {
+    let (ident, _) = split_go_type_decl_name(decl);
+    is_go_exported_decl(ident)
+}
+
+fn is_go_exported_decl(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_uppercase())
+}
+
+fn go_string_literal(value: &str) -> String {
+    format!("{value:?}")
 }
 
 // ---------------------------------------------------------------------------
@@ -2548,15 +2979,16 @@ fn go_message_conversion(
         ));
     }
 
-    // Generated proto-backed model: use its own ToProto/FromProto. Generated
-    // models keep value-based `FromProto(*Proto) Model` / `(Model) ToProto()`
-    // shapes, so they behave like a pointer converter only on the proto side.
+    // Generated proto-backed model: use its own unexported toProto/fromProto
+    // helpers. Generated models keep value-based `fromProto(*Proto) Model` /
+    // `(Model) toProto()` shapes, so they behave like a pointer converter only
+    // on the proto side.
     if message.source == PlannedMessageSource::Proto {
-        let model_name = message.model_name.clone();
+        let from_proto = format!("{}FromProto", go_unexported_name(&message.model_name));
         return Ok(GoValueConversion {
             kind: GoConversionKind::ModelConverter,
-            from_proto: Box::new(move |expr| format!("{model_name}FromProto({expr})")),
-            to_proto: Box::new(|expr| format!("{expr}.ToProto()")),
+            from_proto: Box::new(move |expr| format!("{from_proto}({expr})")),
+            to_proto: Box::new(|expr| format!("{expr}.toProto()")),
         });
     }
 
@@ -3029,6 +3461,7 @@ fn render_file(
     models: &[&RenderedModel],
     services: &[RenderedService<'_>],
     api_plan: &ApiPlan,
+    visibility: &GoVisibility,
 ) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
@@ -3083,33 +3516,47 @@ fn render_file(
         output.push_str(")\n");
     }
 
-    // --- Service constants ---
-    let has_services = !services.is_empty();
-    if has_services {
-        output.push('\n');
-        for service in services {
-            render_service_constants(&mut output, service);
-        }
-    }
-
     // --- Datatypes ---
-    let has_datatypes =
-        !enums.is_empty() || !flags.is_empty() || !variants.is_empty() || !models.is_empty();
-    if has_datatypes {
+    let private_enums = enums
+        .iter()
+        .copied()
+        .filter(|enumeration| !is_go_exported_decl(&enumeration.name))
+        .collect::<Vec<_>>();
+    let private_flags = flags
+        .iter()
+        .copied()
+        .filter(|flag_set| !is_go_exported_decl(&flag_set.name))
+        .collect::<Vec<_>>();
+    let private_variants = variants
+        .iter()
+        .copied()
+        .filter(|variant| !is_go_exported_decl(&variant.name))
+        .collect::<Vec<_>>();
+    let private_models = models
+        .iter()
+        .copied()
+        .filter(|model| !is_go_exported_type_decl(&model.name))
+        .collect::<Vec<_>>();
+
+    let has_private_datatypes = !private_enums.is_empty()
+        || !private_flags.is_empty()
+        || !private_variants.is_empty()
+        || !private_models.is_empty();
+    if has_private_datatypes {
         output.push_str("\n// --- Datatypes ---\n");
-        for enumeration in enums {
+        for enumeration in private_enums {
             output.push('\n');
             render_enum(&mut output, enumeration);
         }
-        for flag_set in flags {
+        for flag_set in private_flags {
             output.push('\n');
             render_flags(&mut output, flag_set);
         }
-        for variant in variants {
+        for variant in private_variants {
             output.push('\n');
             render_variant(&mut output, variant);
         }
-        for model in models {
+        for model in private_models {
             output.push('\n');
             render_model(&mut output, model);
         }
@@ -3122,13 +3569,14 @@ fn render_file(
         for service in services {
             for resource in &service.resources {
                 output.push('\n');
-                render_resource(&mut output, resource, package);
+                render_resource(&mut output, resource, package, visibility);
                 render_resource_methods(
                     &mut output,
                     resource,
                     &service.operations,
                     api_plan,
                     package,
+                    visibility,
                 );
             }
         }
@@ -3141,14 +3589,55 @@ fn render_file(
         for service in services {
             for operation in &service.operations {
                 output.push('\n');
-                render_operation_function(&mut output, operation, package);
+                render_operation_function(&mut output, service, operation, package);
             }
         }
     }
 
     // --- Operations (public API) ---
-    if has_operations {
+    let public_enums = enums
+        .iter()
+        .copied()
+        .filter(|enumeration| is_go_exported_decl(&enumeration.name))
+        .collect::<Vec<_>>();
+    let public_flags = flags
+        .iter()
+        .copied()
+        .filter(|flag_set| is_go_exported_decl(&flag_set.name))
+        .collect::<Vec<_>>();
+    let public_variants = variants
+        .iter()
+        .copied()
+        .filter(|variant| is_go_exported_decl(&variant.name))
+        .collect::<Vec<_>>();
+    let public_models = models
+        .iter()
+        .copied()
+        .filter(|model| is_go_exported_type_decl(&model.name))
+        .collect::<Vec<_>>();
+    let has_public_datatypes = !public_enums.is_empty()
+        || !public_flags.is_empty()
+        || !public_variants.is_empty()
+        || !public_models.is_empty();
+
+    if has_operations || has_public_datatypes {
         output.push_str("\n// --- Operations (public API) ---\n");
+        for enumeration in public_enums {
+            output.push('\n');
+            render_enum(&mut output, enumeration);
+        }
+        for flag_set in public_flags {
+            output.push('\n');
+            render_flags(&mut output, flag_set);
+        }
+        for variant in public_variants {
+            output.push('\n');
+            render_variant(&mut output, variant);
+        }
+        for model in public_models {
+            output.push('\n');
+            render_model(&mut output, model);
+        }
         for service in services {
             for operation in &service.operations {
                 if let Some(params) = &operation.unpacked_input {
@@ -3411,17 +3900,17 @@ fn render_model(output: &mut String, model: &RenderedModel) {
     }
 }
 
-/// Renders the `ToProto` method and `FromProto` constructor for a proto-backed
+/// Renders the `toProto` method and unexported from-proto constructor for a proto-backed
 /// model.
 ///
 /// ```go
-/// func (m ActivityOptions) ToProto() *activity.ActivityOptions {
+/// func (m ActivityOptions) toProto() *activity.ActivityOptions {
 ///     message := &activity.ActivityOptions{}
 ///     ...
 ///     return message
 /// }
 ///
-/// func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
+/// func activityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
 ///     value := ActivityOptions{}
 ///     ...
 ///     return value
@@ -3440,7 +3929,7 @@ fn render_model_proto_methods(
         output.push('\n');
         output.push_str("func (m ");
         output.push_str(&model.name);
-        output.push_str(") ToProto() ");
+        output.push_str(") toProto() ");
         output.push_str(&proto.proto_type);
         output.push_str(" {\n");
         output.push_str("\tmessage := &");
@@ -3469,7 +3958,8 @@ fn render_model_proto_methods(
     if proto.from_proto {
         output.push('\n');
         output.push_str("func ");
-        output.push_str(&model.name);
+        let (model_ident, _) = split_go_type_decl_name(&model.name);
+        output.push_str(&go_unexported_name(model_ident));
         output.push_str("FromProto(proto ");
         output.push_str(&proto.proto_type);
         output.push_str(") ");
@@ -3492,38 +3982,6 @@ fn render_model_proto_methods(
     }
 }
 
-/// Renders service and operation name constants.
-///
-/// ```go
-/// const ServiceName = "UserService"
-/// const Endpoint = "user-service"
-///
-/// const GetUserOp = "GetUser"
-/// const UpdateEmailOp = "UpdateEmail"
-/// ```
-fn render_service_constants(output: &mut String, service: &RenderedService<'_>) {
-    // ServiceName is the wire-format service name sent on the Nexus request, so
-    // it must use the `@nexus.service-name` value (which defaults to the
-    // UpperCamelCase service name when unspecified).
-    output.push_str("const ServiceName = \"");
-    output.push_str(service.wire_name);
-    output.push_str("\"\n");
-    output.push_str("const Endpoint = \"");
-    output.push_str(&service.endpoint);
-    output.push_str("\"\n");
-
-    if !service.operations.is_empty() {
-        output.push('\n');
-        for operation in &service.operations {
-            output.push_str("const ");
-            output.push_str(&go_field_name(operation.name));
-            output.push_str("Op = \"");
-            output.push_str(operation.wire_name);
-            output.push_str("\"\n");
-        }
-    }
-}
-
 /// Renders a WIT resource as a Go struct with its constructor fields.
 ///
 /// ```go
@@ -3534,7 +3992,12 @@ fn render_service_constants(output: &mut String, service: &RenderedService<'_>) 
 ///     Email  string
 /// }
 /// ```
-fn render_resource(output: &mut String, resource: &PlannedResource, package: &GoPackageContext) {
+fn render_resource(
+    output: &mut String,
+    resource: &PlannedResource,
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+) {
     output.push_str("type ");
     output.push_str(&resource.type_name);
     output.push_str(" struct {\n");
@@ -3546,7 +4009,11 @@ fn render_resource(output: &mut String, resource: &PlannedResource, package: &Go
 
     for field in &resource.fields {
         let field_name = go_field_name(&field.name);
-        let go_type = resolve_resource_field_kind(&field.kind, field.optional, package);
+        let go_type = visibility.rewrite_go_expr(&resolve_resource_field_kind(
+            &field.kind,
+            field.optional,
+            package,
+        ));
         render_field_doc_comment(output, "\t", None, !field.optional);
         output.push('\t');
         output.push_str(&field_name);
@@ -3688,6 +4155,7 @@ fn render_resource_methods(
     operations: &[RenderedOperation<'_>],
     api_plan: &ApiPlan,
     package: &GoPackageContext,
+    visibility: &GoVisibility,
 ) {
     for method in &resource.methods {
         output.push('\n');
@@ -3715,16 +4183,15 @@ fn render_resource_methods(
                     output.push_str(", ");
                     output.push_str(&go_unexported_name(&go_field_name(&param.name)));
                     output.push(' ');
-                    output.push_str(&resolve_resource_field_kind(
-                        &param.kind,
-                        param.optional,
-                        package,
-                    ));
+                    let param_type =
+                        resolve_resource_field_kind(&param.kind, param.optional, package);
+                    output.push_str(&visibility.rewrite_go_expr(&param_type));
                 }
                 output.push_str(") ");
 
                 // Return type
-                let result_type = resolve_method_result_type(method, package);
+                let result_type = resolve_method_result_type(method, package)
+                    .map(|rtype| visibility.rewrite_go_expr(&rtype));
                 if let Some(ref rtype) = result_type {
                     output.push_str("(*");
                     output.push_str(rtype);
@@ -3745,7 +4212,7 @@ fn render_resource_methods(
                         let type_name = api_plan
                             .models
                             .get(msg_name)
-                            .map(|m| m.name.clone())
+                            .map(|m| visibility.adjusted_model_name(&m.info.full_name, &m.name))
                             .unwrap_or_else(|| message_model_name(msg_name));
                         if fields.is_empty() {
                             format!("{type_name}{{}}")
@@ -3787,14 +4254,13 @@ fn render_resource_methods(
                     output.push_str(", ");
                     output.push_str(&go_unexported_name(&go_field_name(&param.name)));
                     output.push(' ');
-                    output.push_str(&resolve_resource_field_kind(
-                        &param.kind,
-                        param.optional,
-                        package,
-                    ));
+                    let param_type =
+                        resolve_resource_field_kind(&param.kind, param.optional, package);
+                    output.push_str(&visibility.rewrite_go_expr(&param_type));
                 }
                 output.push_str(") ");
-                let result_type = resolve_method_result_type(method, package);
+                let result_type = resolve_method_result_type(method, package)
+                    .map(|rtype| visibility.rewrite_go_expr(&rtype));
                 if let Some(ref rtype) = result_type {
                     output.push_str("(*");
                     output.push_str(rtype);
@@ -3854,15 +4320,18 @@ fn resolve_method_result_type(
 /// ```
 fn render_operation_function(
     output: &mut String,
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     package: &GoPackageContext,
 ) {
     if let Some(binding) = &operation.proto_binding {
-        render_operation_function_proto(output, operation, binding, package);
+        render_operation_function_proto(output, service, operation, binding, package);
         return;
     }
 
-    let op_const = format!("{}Op", go_field_name(operation.name));
+    let endpoint = go_string_literal(&service.endpoint);
+    let service_name = go_string_literal(service.wire_name);
+    let operation_name = go_string_literal(operation.wire_name);
 
     if let (Some(transform_expr), Some(transform_type)) = (
         operation.output_transform_expr,
@@ -3879,9 +4348,13 @@ fn render_operation_function(
         output.push_str(", error) {\n");
         output.push_str("\tc := ");
         output.push_str(&package.new_nexus_client());
-        output.push_str("(Endpoint, ServiceName)\n");
+        output.push('(');
+        output.push_str(&endpoint);
+        output.push_str(", ");
+        output.push_str(&service_name);
+        output.push_str(")\n");
         output.push_str("\tfut := c.ExecuteOperation(ctx, ");
-        output.push_str(&op_const);
+        output.push_str(&operation_name);
         output.push_str(", request, ");
         output.push_str(&package.nexus_operation_options());
         output.push_str(")\n");
@@ -3915,9 +4388,13 @@ fn render_operation_function(
         output.push_str(", error) {\n");
         output.push_str("\tc := ");
         output.push_str(&package.new_nexus_client());
-        output.push_str("(Endpoint, ServiceName)\n");
+        output.push('(');
+        output.push_str(&endpoint);
+        output.push_str(", ");
+        output.push_str(&service_name);
+        output.push_str(")\n");
         output.push_str("\tfut := c.ExecuteOperation(ctx, ");
-        output.push_str(&op_const);
+        output.push_str(&operation_name);
         output.push_str(", request, ");
         output.push_str(&package.nexus_operation_options());
         output.push_str(")\n");
@@ -3940,9 +4417,13 @@ fn render_operation_function(
         output.push_str(") error {\n");
         output.push_str("\tc := ");
         output.push_str(&package.new_nexus_client());
-        output.push_str("(Endpoint, ServiceName)\n");
+        output.push('(');
+        output.push_str(&endpoint);
+        output.push_str(", ");
+        output.push_str(&service_name);
+        output.push_str(")\n");
         output.push_str("\tfut := c.ExecuteOperation(ctx, ");
-        output.push_str(&op_const);
+        output.push_str(&operation_name);
         output.push_str(", request, ");
         output.push_str(&package.nexus_operation_options());
         output.push_str(")\n");
@@ -3970,11 +4451,14 @@ fn render_operation_function(
 /// ```
 fn render_operation_function_proto(
     output: &mut String,
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     binding: &OperationProtoBinding,
     package: &GoPackageContext,
 ) {
-    let op_const = format!("{}Op", go_field_name(operation.name));
+    let endpoint = go_string_literal(&service.endpoint);
+    let service_name = go_string_literal(service.wire_name);
+    let operation_name = go_string_literal(operation.wire_name);
     let resource_return = binding.resource_return.as_ref();
 
     output.push_str("func ");
@@ -4012,14 +4496,18 @@ fn render_operation_function_proto(
 
     output.push_str("\tc := ");
     output.push_str(&package.new_nexus_client());
-    output.push_str("(Endpoint, ServiceName)\n");
+    output.push('(');
+    output.push_str(&endpoint);
+    output.push_str(", ");
+    output.push_str(&service_name);
+    output.push_str(")\n");
     if returns_resource {
         output.push_str("\trequestProto := ");
         output.push_str(&binding.input_to_proto);
         output.push('\n');
     }
     output.push_str("\tfut := c.ExecuteOperation(ctx, ");
-    output.push_str(&op_const);
+    output.push_str(&operation_name);
     output.push_str(", ");
     if returns_resource {
         output.push_str("requestProto");

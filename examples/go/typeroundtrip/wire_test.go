@@ -1,4 +1,4 @@
-package tests
+package temporalsystem
 
 import (
 	"testing"
@@ -9,18 +9,16 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/temporal"
 	"google.golang.org/protobuf/proto"
-
-	tr "examples/go/typeroundtrip"
 )
 
 // TestActivityOptionsWireRoundtrip verifies that a native value survives a full
-// protobuf wire round-trip: native -> ToProto -> Marshal -> Unmarshal ->
-// FromProto -> native. This guards the wire compatibility of the generated
+// protobuf wire round-trip: native -> toProto -> Marshal -> Unmarshal ->
+// fromProto -> native. This guards the wire compatibility of the generated
 // proto conversions against the binary format shared with the Python and
 // TypeScript bindings.
 func TestActivityOptionsWireRoundtrip(t *testing.T) {
 	scheduleToClose := 7 * time.Second
-	original := tr.ActivityOptions{
+	original := ActivityOptions{
 		TaskQueue:              ptr("demo-task-queue"),
 		RetryPolicy:            temporal.RetryPolicy{MaximumAttempts: 3, BackoffCoefficient: 2.0},
 		ScheduleToCloseTimeout: &scheduleToClose,
@@ -32,7 +30,7 @@ func TestActivityOptionsWireRoundtrip(t *testing.T) {
 	}
 
 	// native -> proto
-	protoMsg := original.ToProto()
+	protoMsg := original.toProto()
 
 	// proto -> wire bytes -> proto
 	bytes, err := proto.Marshal(protoMsg)
@@ -41,7 +39,7 @@ func TestActivityOptionsWireRoundtrip(t *testing.T) {
 	require.NoError(t, proto.Unmarshal(bytes, &decoded))
 
 	// proto -> native
-	roundtripped := tr.ActivityOptionsFromProto(&decoded)
+	roundtripped := activityOptionsFromProto(&decoded)
 
 	require.NotNil(t, roundtripped.TaskQueue)
 	require.Equal(t, *original.TaskQueue, *roundtripped.TaskQueue)
@@ -61,29 +59,29 @@ func TestActivityOptionsWireRoundtrip(t *testing.T) {
 // set to its zero value.
 func TestActivityOptionsUnsetVsZero(t *testing.T) {
 	// Unset optional fields.
-	unset := tr.ActivityOptions{
+	unset := ActivityOptions{
 		RetryPolicy: temporal.RetryPolicy{MaximumAttempts: 1},
 	}
-	unsetBytes, err := proto.Marshal(unset.ToProto())
+	unsetBytes, err := proto.Marshal(unset.toProto())
 	require.NoError(t, err)
 	var unsetDecoded activitypb.ActivityOptions
 	require.NoError(t, proto.Unmarshal(unsetBytes, &unsetDecoded))
-	unsetBack := tr.ActivityOptionsFromProto(&unsetDecoded)
+	unsetBack := activityOptionsFromProto(&unsetDecoded)
 	require.Nil(t, unsetBack.ScheduleToCloseTimeout, "unset optional must round-trip as nil")
 	require.Nil(t, unsetBack.Priority, "unset optional must round-trip as nil")
 
 	// Present-but-zero optional fields.
 	zeroDuration := time.Duration(0)
-	present := tr.ActivityOptions{
+	present := ActivityOptions{
 		RetryPolicy:            temporal.RetryPolicy{MaximumAttempts: 1},
 		ScheduleToCloseTimeout: &zeroDuration,
 		Priority:               &temporal.Priority{},
 	}
-	presentBytes, err := proto.Marshal(present.ToProto())
+	presentBytes, err := proto.Marshal(present.toProto())
 	require.NoError(t, err)
 	var presentDecoded activitypb.ActivityOptions
 	require.NoError(t, proto.Unmarshal(presentBytes, &presentDecoded))
-	presentBack := tr.ActivityOptionsFromProto(&presentDecoded)
+	presentBack := activityOptionsFromProto(&presentDecoded)
 	require.NotNil(t, presentBack.ScheduleToCloseTimeout, "present zero optional must stay non-nil")
 	require.Equal(t, time.Duration(0), *presentBack.ScheduleToCloseTimeout)
 	require.NotNil(t, presentBack.Priority, "present zero optional must stay non-nil")
@@ -102,7 +100,7 @@ func TestRetryPolicyWireFieldNames(t *testing.T) {
 		NonRetryableErrorTypes: []string{"FatalError"},
 	}
 
-	protoMsg := tr.ActivityOptions{RetryPolicy: policy}.ToProto().GetRetryPolicy()
+	protoMsg := ActivityOptions{RetryPolicy: policy}.toProto().GetRetryPolicy()
 	bytes, err := proto.Marshal(protoMsg)
 	require.NoError(t, err)
 
@@ -114,4 +112,10 @@ func TestRetryPolicyWireFieldNames(t *testing.T) {
 	require.Equal(t, 10*time.Second, decoded.GetMaximumInterval().AsDuration())
 	require.Equal(t, int32(5), decoded.GetMaximumAttempts())
 	require.Equal(t, []string{"FatalError"}, decoded.GetNonRetryableErrorTypes())
+}
+
+// ptr returns a pointer to v, used to populate optional pointer fields in the
+// generated structs.
+func ptr[T any](v T) *T {
+	return &v
 }

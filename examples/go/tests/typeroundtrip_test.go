@@ -10,12 +10,16 @@ import (
 	"github.com/stretchr/testify/suite"
 	activitypb "go.temporal.io/api/activity/v1"
 	commonpb "go.temporal.io/api/common/v1"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	tr "examples/go/typeroundtrip"
 )
+
+const typeRoundtripServiceName = "TypeRoundtripService"
 
 // --- Mock tests ---
 
@@ -42,8 +46,8 @@ func (s *TypeRoundtripTestSuite) TestRetryPolicyOperation() {
 	protoPolicy := &commonpb.RetryPolicy{MaximumAttempts: 3}
 
 	s.env.OnNexusOperation(
-		tr.ServiceName,
-		nexus.NewOperationReference[*commonpb.RetryPolicy, *commonpb.RetryPolicy](tr.RetryPolicyOperationOp),
+		typeRoundtripServiceName,
+		nexus.NewOperationReference[*commonpb.RetryPolicy, *commonpb.RetryPolicy]("RetryPolicyOperation"),
 		mock.Anything,
 		mock.Anything,
 	).Return(
@@ -71,16 +75,20 @@ func (s *TypeRoundtripTestSuite) TestActivityOptionsOperation() {
 		FairnessKey:    "tenant-a",
 		FairnessWeight: 2.5,
 	}
-	protoResult := tr.ActivityOptions{
-		TaskQueue:              ptr("demo-task-queue"),
-		RetryPolicy:            policy,
-		ScheduleToCloseTimeout: ptr(7 * time.Second),
-		Priority:               &priority,
-	}.ToProto()
+	protoResult := &activitypb.ActivityOptions{
+		TaskQueue:              &taskqueuepb.TaskQueue{Name: "demo-task-queue"},
+		RetryPolicy:            &commonpb.RetryPolicy{MaximumAttempts: 3},
+		ScheduleToCloseTimeout: durationpb.New(7 * time.Second),
+		Priority: &commonpb.Priority{
+			PriorityKey:    int32(priority.PriorityKey),
+			FairnessKey:    priority.FairnessKey,
+			FairnessWeight: priority.FairnessWeight,
+		},
+	}
 
 	s.env.OnNexusOperation(
-		tr.ServiceName,
-		nexus.NewOperationReference[*activitypb.ActivityOptions, *activitypb.ActivityOptions](tr.ActivityOptionsOperationOp),
+		typeRoundtripServiceName,
+		nexus.NewOperationReference[*activitypb.ActivityOptions, *activitypb.ActivityOptions]("ActivityOptionsOperation"),
 		mock.Anything,
 		mock.Anything,
 	).Return(
@@ -126,19 +134,19 @@ func (s *TypeRoundtripIntegrationSuite) SetupTest() {
 	s.env = s.NewTestWorkflowEnvironment()
 	s.calls = nil
 
-	retryPolicyOp := nexus.NewSyncOperation(tr.RetryPolicyOperationOp,
+	retryPolicyOp := nexus.NewSyncOperation("RetryPolicyOperation",
 		func(ctx context.Context, input *commonpb.RetryPolicy, opts nexus.StartOperationOptions) (*commonpb.RetryPolicy, error) {
 			s.calls = append(s.calls, testCall{"RetryPolicyOperation", input})
 			return input, nil
 		})
 
-	activityOptionsOp := nexus.NewSyncOperation(tr.ActivityOptionsOperationOp,
+	activityOptionsOp := nexus.NewSyncOperation("ActivityOptionsOperation",
 		func(ctx context.Context, input *activitypb.ActivityOptions, opts nexus.StartOperationOptions) (*activitypb.ActivityOptions, error) {
 			s.calls = append(s.calls, testCall{"ActivityOptionsOperation", input})
 			return input, nil
 		})
 
-	service := nexus.NewService(tr.ServiceName)
+	service := nexus.NewService(typeRoundtripServiceName)
 	s.NoError(service.Register(retryPolicyOp, activityOptionsOp))
 	s.env.RegisterNexusService(service)
 }

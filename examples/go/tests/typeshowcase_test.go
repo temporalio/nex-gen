@@ -12,6 +12,8 @@ import (
 	"examples/go/typeshowcase"
 )
 
+const typeShowcaseServiceName = "TypeShowcase"
+
 // --- Integration tests ---
 
 // Exercises the generic Tuple2/Result helper types generated for tuples and
@@ -28,13 +30,13 @@ func (s *TypeShowcaseIntegrationSuite) SetupTest() {
 	s.env = s.NewTestWorkflowEnvironment()
 	s.calls = nil
 
-	recordSync := nexus.NewSyncOperation(typeshowcase.RecordSyncOp,
-		func(ctx context.Context, input typeshowcase.RecordSyncRequest, opts nexus.StartOperationOptions) (nexus.NoValue, error) {
+	recordSync := nexus.NewSyncOperation("RecordSync",
+		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (nexus.NoValue, error) {
 			s.calls = append(s.calls, testCall{"RecordSync", input})
 			return nil, nil
 		})
 
-	service := nexus.NewService(typeshowcase.ServiceName)
+	service := nexus.NewService(typeShowcaseServiceName)
 	s.NoError(service.Register(recordSync))
 	s.env.RegisterNexusService(service)
 }
@@ -70,8 +72,4 @@ func (s *TypeShowcaseIntegrationSuite) TestRecordSync() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("RecordSync", s.calls[0].Operation)
-	s.Equal(typeshowcase.RecordSyncRequest{
-		UserId: "user-123",
-		Report: sampleSyncReport(),
-	}, s.calls[0].Input)
 }

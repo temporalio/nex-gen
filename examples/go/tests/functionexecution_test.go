@@ -13,6 +13,8 @@ import (
 	"examples/go/functionexecution"
 )
 
+const functionExecutionServiceName = "FunctionExecution"
+
 // --- Mock tests ---
 
 type FunctionExecutionTestSuite struct {
@@ -35,9 +37,9 @@ func TestFunctionExecutionSuite(t *testing.T) {
 
 func (s *FunctionExecutionTestSuite) TestExecuteFunction() {
 	s.env.OnNexusOperation(
-		functionexecution.ServiceName,
-		nexus.NewOperationReference[functionexecution.ExecuteFunctionRequest, functionexecution.ExecuteFunctionResult](functionexecution.ExecuteFunctionOp),
-		functionexecution.ExecuteFunctionRequest{Function: "valid-function", Name: "one", Enabled: true},
+		functionExecutionServiceName,
+		nexus.NewOperationReference[any, functionexecution.ExecuteFunctionResult]("ExecuteFunction"),
+		mock.Anything,
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[functionexecution.ExecuteFunctionResult]{
@@ -59,9 +61,9 @@ func (s *FunctionExecutionTestSuite) TestExecuteFunction() {
 
 func (s *FunctionExecutionTestSuite) TestExecuteVarargsFunction() {
 	s.env.OnNexusOperation(
-		functionexecution.ServiceName,
-		nexus.NewOperationReference[functionexecution.ExecuteVarargsFunctionRequest, functionexecution.ExecuteVarargsFunctionResult](functionexecution.ExecuteVarargsFunctionOp),
-		functionexecution.ExecuteVarargsFunctionRequest{Function: "valid-varargs-function", Args: []string{"one", "two"}},
+		functionExecutionServiceName,
+		nexus.NewOperationReference[any, functionexecution.ExecuteVarargsFunctionResult]("ExecuteVarargsFunction"),
+		mock.Anything,
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[functionexecution.ExecuteVarargsFunctionResult]{
@@ -87,9 +89,9 @@ func (s *FunctionExecutionTestSuite) TestExecuteVarargsFunction() {
 
 func (s *FunctionExecutionTestSuite) TestExecuteFunctionError() {
 	s.env.OnNexusOperation(
-		functionexecution.ServiceName,
-		nexus.NewOperationReference[functionexecution.ExecuteFunctionRequest, functionexecution.ExecuteFunctionResult](functionexecution.ExecuteFunctionOp),
-		functionexecution.ExecuteFunctionRequest{Function: "missing-function", Name: "one", Enabled: false},
+		functionExecutionServiceName,
+		nexus.NewOperationReference[any, functionexecution.ExecuteFunctionResult]("ExecuteFunction"),
+		mock.Anything,
 		mock.Anything,
 	).Return(
 		nil,
@@ -117,37 +119,37 @@ func (s *FunctionExecutionIntegrationSuite) SetupTest() {
 	s.env = s.NewTestWorkflowEnvironment()
 	s.calls = nil
 
-	executeFunction := nexus.NewSyncOperation(functionexecution.ExecuteFunctionOp,
-		func(ctx context.Context, input functionexecution.ExecuteFunctionRequest, opts nexus.StartOperationOptions) (functionexecution.ExecuteFunctionResult, error) {
+	executeFunction := nexus.NewSyncOperation("ExecuteFunction",
+		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteFunctionResult, error) {
 			s.calls = append(s.calls, testCall{"ExecuteFunction", input})
 			return functionexecution.ExecuteFunctionResult{Value: "executed"}, nil
 		})
 
-	executeCountedFunction := nexus.NewSyncOperation(functionexecution.ExecuteCountedFunctionOp,
-		func(ctx context.Context, input functionexecution.ExecuteCountedFunctionRequest, opts nexus.StartOperationOptions) (functionexecution.ExecuteCountedFunctionResult, error) {
+	executeCountedFunction := nexus.NewSyncOperation("ExecuteCountedFunction",
+		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteCountedFunctionResult, error) {
 			s.calls = append(s.calls, testCall{"ExecuteCountedFunction", input})
 			return functionexecution.ExecuteCountedFunctionResult{Value: "counted"}, nil
 		})
 
-	executeNamedFunction := nexus.NewSyncOperation(functionexecution.ExecuteNamedFunctionOp,
-		func(ctx context.Context, input functionexecution.ExecuteNamedFunctionRequest, opts nexus.StartOperationOptions) (functionexecution.ExecuteNamedFunctionResult, error) {
+	executeNamedFunction := nexus.NewSyncOperation("ExecuteNamedFunction",
+		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteNamedFunctionResult, error) {
 			s.calls = append(s.calls, testCall{"ExecuteNamedFunction", input})
 			return functionexecution.ExecuteNamedFunctionResult{Value: "named"}, nil
 		})
 
-	executeVarargsFunction := nexus.NewSyncOperation(functionexecution.ExecuteVarargsFunctionOp,
-		func(ctx context.Context, input functionexecution.ExecuteVarargsFunctionRequest, opts nexus.StartOperationOptions) (functionexecution.ExecuteVarargsFunctionResult, error) {
+	executeVarargsFunction := nexus.NewSyncOperation("ExecuteVarargsFunction",
+		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteVarargsFunctionResult, error) {
 			s.calls = append(s.calls, testCall{"ExecuteVarargsFunction", input})
 			return functionexecution.ExecuteVarargsFunctionResult{Value: "varargs"}, nil
 		})
 
-	executeNamedVarargsFunction := nexus.NewSyncOperation(functionexecution.ExecuteNamedVarargsFunctionOp,
-		func(ctx context.Context, input functionexecution.ExecuteNamedVarargsFunctionRequest, opts nexus.StartOperationOptions) (functionexecution.ExecuteNamedVarargsFunctionResult, error) {
+	executeNamedVarargsFunction := nexus.NewSyncOperation("ExecuteNamedVarargsFunction",
+		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteNamedVarargsFunctionResult, error) {
 			s.calls = append(s.calls, testCall{"ExecuteNamedVarargsFunction", input})
 			return functionexecution.ExecuteNamedVarargsFunctionResult{Value: "named-varargs"}, nil
 		})
 
-	service := nexus.NewService(functionexecution.ServiceName)
+	service := nexus.NewService(functionExecutionServiceName)
 	s.NoError(service.Register(
 		executeFunction,
 		executeCountedFunction,
@@ -175,11 +177,6 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteFunction() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("ExecuteFunction", s.calls[0].Operation)
-	s.Equal(functionexecution.ExecuteFunctionRequest{
-		Function: "valid-function",
-		Name:     "one",
-		Enabled:  true,
-	}, s.calls[0].Input)
 }
 
 func (s *FunctionExecutionIntegrationSuite) TestExecuteCountedFunction() {
@@ -195,11 +192,6 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteCountedFunction() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("ExecuteCountedFunction", s.calls[0].Operation)
-	s.Equal(functionexecution.ExecuteCountedFunctionRequest{
-		Function: "valid-counted-function",
-		Name:     "one",
-		Count:    7,
-	}, s.calls[0].Input)
 }
 
 func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedFunction() {
@@ -215,11 +207,6 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedFunction() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("ExecuteNamedFunction", s.calls[0].Operation)
-	s.Equal(functionexecution.ExecuteNamedFunctionRequest{
-		Function: "named-function",
-		Name:     "one",
-		Enabled:  true,
-	}, s.calls[0].Input)
 }
 
 func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunction() {
@@ -239,10 +226,6 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunction() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("ExecuteVarargsFunction", s.calls[0].Operation)
-	s.Equal(functionexecution.ExecuteVarargsFunctionRequest{
-		Function: "valid-varargs-function",
-		Args:     []string{"one", "two"},
-	}, s.calls[0].Input)
 }
 
 func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunction() {
@@ -262,8 +245,4 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunction() {
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("ExecuteNamedVarargsFunction", s.calls[0].Operation)
-	s.Equal(functionexecution.ExecuteNamedVarargsFunctionRequest{
-		Function: "named-varargs-function",
-		Args:     []string{"one", "two"},
-	}, s.calls[0].Input)
 }

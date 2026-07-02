@@ -5,20 +5,14 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const ServiceName = "UserService"
-const Endpoint = "user-service"
-
-const GetUserOp = "GetUser"
-const UpdateEmailOp = "UpdateEmail"
-
 // --- Datatypes ---
 
-type GetUserRequest struct {
+type getUserRequest struct {
 	// Required.
 	UserId string
 }
 
-type UpdateEmailRequest struct {
+type updateEmailRequest struct {
 	// Required.
 	UserId string
 	// Required.
@@ -35,14 +29,14 @@ type User struct {
 }
 
 func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error) {
-	return updateEmail(ctx, UpdateEmailRequest{UserId: u.UserId, Email: email})
+	return updateEmail(ctx, updateEmailRequest{UserId: u.UserId, Email: email})
 }
 
 // --- Operations (internal) ---
 
-func getUser(ctx workflow.Context, request GetUserRequest) (*User, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, GetUserOp, request, workflow.NexusOperationOptions{})
+func getUser(ctx workflow.Context, request getUserRequest) (*User, error) {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "GetUser", request, workflow.NexusOperationOptions{})
 	var result User
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
@@ -50,9 +44,9 @@ func getUser(ctx workflow.Context, request GetUserRequest) (*User, error) {
 	return &result, nil
 }
 
-func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, UpdateEmailOp, request, workflow.NexusOperationOptions{})
+func updateEmail(ctx workflow.Context, request updateEmailRequest) (*User, error) {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
 	var result User
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
@@ -63,13 +57,13 @@ func updateEmail(ctx workflow.Context, request UpdateEmailRequest) (*User, error
 // --- Operations (public API) ---
 
 func GetUser(ctx workflow.Context, userId string) (*User, error) {
-	return getUser(ctx, GetUserRequest{
+	return getUser(ctx, getUserRequest{
 		UserId: userId,
 	})
 }
 
 func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error) {
-	return updateEmail(ctx, UpdateEmailRequest{
+	return updateEmail(ctx, updateEmailRequest{
 		UserId: userId,
 		Email:  email,
 	})

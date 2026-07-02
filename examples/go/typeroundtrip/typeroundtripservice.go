@@ -10,13 +10,30 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const ServiceName = "TypeRoundtripService"
-const Endpoint = "temporal-system"
+// --- Operations (internal) ---
 
-const RetryPolicyOperationOp = "RetryPolicyOperation"
-const ActivityOptionsOperationOp = "ActivityOptionsOperation"
+func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
+	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
+	fut := c.ExecuteOperation(ctx, "RetryPolicyOperation", retryPolicyToProto(&request), workflow.NexusOperationOptions{})
+	var result common.RetryPolicy
+	if err := fut.Get(ctx, &result); err != nil {
+		return nil, err
+	}
+	return retryPolicyFromProto(&result), nil
+}
 
-// --- Datatypes ---
+func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*ActivityOptions, error) {
+	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
+	fut := c.ExecuteOperation(ctx, "ActivityOptionsOperation", request.toProto(), workflow.NexusOperationOptions{})
+	var result activity.ActivityOptions
+	if err := fut.Get(ctx, &result); err != nil {
+		return nil, err
+	}
+	value := activityOptionsFromProto(&result)
+	return &value, nil
+}
+
+// --- Operations (public API) ---
 
 type ActivityOptions struct {
 	TaskQueue *string
@@ -26,7 +43,7 @@ type ActivityOptions struct {
 	Priority               *temporal.Priority
 }
 
-func (m ActivityOptions) ToProto() *activity.ActivityOptions {
+func (m ActivityOptions) toProto() *activity.ActivityOptions {
 	message := &activity.ActivityOptions{}
 	message.TaskQueue = taskQueueToProto(m.TaskQueue)
 	message.RetryPolicy = retryPolicyToProto(&m.RetryPolicy)
@@ -35,7 +52,7 @@ func (m ActivityOptions) ToProto() *activity.ActivityOptions {
 	return message
 }
 
-func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
+func activityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
 	value := ActivityOptions{}
 	value.TaskQueue = taskQueueFromProto(proto.GetTaskQueue())
 	if converted := retryPolicyFromProto(proto.GetRetryPolicy()); converted != nil {
@@ -45,31 +62,6 @@ func ActivityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
 	value.Priority = priorityFromProto(proto.GetPriority())
 	return value
 }
-
-// --- Operations (internal) ---
-
-func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, RetryPolicyOperationOp, retryPolicyToProto(&request), workflow.NexusOperationOptions{})
-	var result common.RetryPolicy
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	return retryPolicyFromProto(&result), nil
-}
-
-func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*ActivityOptions, error) {
-	c := workflow.NewNexusClient(Endpoint, ServiceName)
-	fut := c.ExecuteOperation(ctx, ActivityOptionsOperationOp, request.ToProto(), workflow.NexusOperationOptions{})
-	var result activity.ActivityOptions
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	value := ActivityOptionsFromProto(&result)
-	return &value, nil
-}
-
-// --- Operations (public API) ---
 
 func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
 	return retryPolicyOperation(ctx, request)
