@@ -1,0 +1,79 @@
+nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+description: A small chat service demonstrating nex-gen.
+services:
+  ChatService:
+    fqn: example.chat.v1.ChatService
+    description: Send messages and look up rooms.
+    operations:
+      sendMessage:
+        description: Post a message to a room.
+        input: { $ref: "#/$defs/SendMessageInput" }
+        output: { $ref: "#/$defs/SendMessageOutput" }
+      getRoom:
+        description: Look up a room by id.
+        input:
+          type: object
+          additionalProperties: false
+          properties:
+            roomId: { type: string }
+          required: [roomId]
+        output: { $ref: "#/$defs/Room" }
+      ping:
+        description: Liveness probe.
+$defs:
+  SendMessageInput:
+    description: Request to post a message.
+    type: object
+    additionalProperties: false
+    properties:
+      roomId: { type: string }
+      message: { $ref: "#/$defs/Message" }
+    required: [roomId, message]
+  SendMessageOutput:
+    type: object
+    additionalProperties: false
+    properties:
+      messageId: { type: string }
+    required: [messageId]
+  Message:
+    description: A chat message.
+    type: object
+    additionalProperties: false
+    properties:
+      kind:
+        description: Discriminator; always "text".
+        type: string
+        const: text
+      body: { type: string }
+      replyToId:
+        description: Id of the message this replies to, if any.
+        oneOf:
+          - { type: string }
+          - { type: "null" }
+      priority:
+        description: Delivery priority.
+        type: integer
+        default: 0
+    required: [kind, body]
+  Room:
+    description: A chat room. Open to forward-compatible extension.
+    type: object
+    properties:
+      roomId: { type: string }
+      displayName: { type: string }
+      topic:
+        description: Room topic; may be explicitly cleared to null.
+        oneOf:
+          - { type: string }
+          - { type: "null" }
+      members:
+        type: array
+        items: { type: string }
+      labels: { $ref: "#/$defs/Labels" }
+    required: [roomId, displayName, topic]
+  Labels:
+    description: Arbitrary string key/value labels.
+    type: object
+    additionalProperties: { type: string }
+    maxProperties: 50

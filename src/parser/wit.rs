@@ -2698,6 +2698,7 @@ fn build_service(
     Ok(ServiceSpec {
         name: service_name,
         wire_name: wire_service_name,
+        doc: LanguageStringSpec::default(),
         namespace,
         operations_class,
         endpoint,
@@ -3019,7 +3020,7 @@ fn build_operation(
         return_doc: directive(&directives, "doc", path, &context)?
             .map(directive_returns_language_string)
             .unwrap_or_default(),
-        input,
+        input: Some(input),
         output,
         output_resource_type,
         output_transform,
@@ -3842,7 +3843,9 @@ interface workflow-service {
             )
             .unwrap();
         assert_eq!(
-            python.services[0].operations[0].input_type().reference(),
+            python.services[0].operations[0]
+                .input_type()
+                .and_then(TypeSpec::reference),
             Some("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
         );
         assert_eq!(
@@ -4219,9 +4222,9 @@ interface user-service {
         let proto_to_resource = service.operation("ProtoToResource").unwrap();
         assert_eq!(
             proto_to_resource.input,
-            TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(
+            Some(TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(
                 "acme.users.v1.ProtoRequest"
-            )))
+            ))))
         );
         assert_eq!(
             proto_to_resource.output,
@@ -4245,7 +4248,7 @@ interface user-service {
         let json_echo = service.operation("JsonEcho").unwrap();
         assert_eq!(
             json_echo.input,
-            TypeSpec::Record(ApiRef::new("user-service.json-request"))
+            Some(TypeSpec::Record(ApiRef::new("user-service.json-request")))
         );
         assert_eq!(
             json_echo.output,
@@ -4255,7 +4258,7 @@ interface user-service {
         let resource_input = service.operation("ResourceInput").unwrap();
         assert_eq!(
             resource_input.input,
-            TypeSpec::Resource(ApiRef::new("user"))
+            Some(TypeSpec::Resource(ApiRef::new("user")))
         );
     }
 
@@ -4672,7 +4675,9 @@ interface workflow-service {
         )
         .unwrap();
         assert_eq!(
-            spec.services[0].operations[0].input_type().reference(),
+            spec.services[0].operations[0]
+                .input_type()
+                .and_then(TypeSpec::reference),
             Some("acme.foo.v1.LocalRetryPolicy")
         );
 
@@ -4721,7 +4726,9 @@ interface workflow-service {
         )
         .unwrap();
         assert_eq!(
-            spec.services[0].operations[0].input_type().reference(),
+            spec.services[0].operations[0]
+                .input_type()
+                .and_then(TypeSpec::reference),
             Some("temporal.api.common.v1.RetryPolicy")
         );
 

@@ -78,6 +78,24 @@ pub enum Error {
     #[error("invalid WIT in `{path}`: {reason}")]
     InvalidWit { path: PathBuf, reason: String },
 
+    #[error("failed to parse JSON schema from `{path}`: {message}")]
+    JsonSchemaParse { path: PathBuf, message: String },
+
+    #[error("invalid JSON schema in `{path}`: {reason}")]
+    InvalidJsonSchema { path: PathBuf, reason: String },
+
+    #[error("unsupported input format for `{path}`; expected `.wit`, `.json`, `.yaml`, or `.yml`")]
+    UnsupportedInputFormat { path: PathBuf },
+
+    #[error(
+        "mixed input formats are not supported: first input is `{first}`, but `{path}` is `{found}`"
+    )]
+    MixedInputFormats {
+        first: &'static str,
+        path: PathBuf,
+        found: &'static str,
+    },
+
     #[error("invalid WIT directive `{directive}` on {context} in `{path}`: {reason}")]
     InvalidWitDirective {
         path: PathBuf,

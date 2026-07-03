@@ -414,9 +414,9 @@ fn synthesize_operation_request_plan(
     operation: &OperationSpec,
     environment: &BTreeMap<String, RequestPlanSource>,
 ) -> Result<Option<RequestPlan>> {
-    if let TypeSpec::External(ExternalTypeSpec::Proto(input_ref)) = operation.input_type() {
+    if let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_ref))) = operation.input_type() {
         synthesize_request_plan(spec, descriptors, input_ref.as_str(), environment)
-    } else if let TypeSpec::Record(input_ref) = operation.input_type() {
+    } else if let Some(TypeSpec::Record(input_ref)) = operation.input_type() {
         synthesize_record_request_plan(spec, descriptors, input_ref.as_str(), environment)
     } else {
         Ok(None)
@@ -696,7 +696,8 @@ fn operation_input_message_name<'a>(
     operation: &'a OperationSpec,
     descriptors: &DescriptorIndex,
 ) -> Option<&'a str> {
-    let TypeSpec::External(ExternalTypeSpec::Proto(input_ref)) = operation.input_type() else {
+    let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_ref))) = operation.input_type()
+    else {
         return None;
     };
     descriptors

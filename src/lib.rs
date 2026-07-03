@@ -16,7 +16,7 @@ use std::process::Command;
 
 use descriptors::DescriptorIndex;
 use error::Result;
-use generator::{GeneratedFiles, GeneratedOutputLayout, generate_files};
+use generator::{GeneratedFiles, GeneratedOutputLayout, GenerationMode, generate_files};
 use heck::ToSnakeCase;
 use language::Language;
 use spec::{ApiSpec, SupportFragmentSpec};
@@ -35,6 +35,7 @@ pub struct GenerateRequest {
     pub descriptor_paths: Vec<PathBuf>,
     pub output_path: PathBuf,
     pub format: bool,
+    pub generate_native_api: bool,
 }
 
 pub struct BuildExamplesRequest {
@@ -68,8 +69,7 @@ pub fn generate_to_string_with_inputs_and_support(
     descriptor_paths: &[PathBuf],
     support_paths: &[PathBuf],
 ) -> Result<String> {
-    let spec =
-        crate::parser::load_api_spec_from_wit_for_language_with_inputs(language, input_paths)?;
+    let spec = crate::parser::load_api_spec_for_language_with_inputs(language, input_paths)?;
     let descriptors = DescriptorIndex::load_many(descriptor_paths)?;
     let support = load_support_files(language, &spec, support_paths)?;
     let generated = generate_files(language, spec, &descriptors, &support)?;
@@ -84,13 +84,23 @@ pub fn generate_to_string_with_inputs_and_support(
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
-    let spec = crate::parser::load_api_spec_from_wit_for_language_with_inputs(
+    let spec = crate::parser::load_api_spec_for_language_with_inputs(
         request.language,
         &request.input_paths,
     )?;
     let descriptors = DescriptorIndex::load_many(&request.descriptor_paths)?;
     let support = load_support_files(request.language, &spec, &request.support_paths)?;
-    let generated = generate_files(request.language, spec, &descriptors, &support)?;
+    let generated = generator::generate_files_with_mode(
+        request.language,
+        spec,
+        &descriptors,
+        &support,
+        if request.generate_native_api {
+            GenerationMode::NativeApi
+        } else {
+            GenerationMode::DefinitionsOnly
+        },
+    )?;
     print_warnings(&generated);
 
     write_generated_files(&request.output_path, &generated)?;
@@ -129,6 +139,32 @@ pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
 
         for example_id in example_ids {
             build_example(&repo_root, language, &example_id)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let languages = if request.languages.is_empty() {
+        vec![Language::Python]
+    } else {
+        request.languages.clone()
+    };
+
+    for language in languages {
+        if language != Language::Python {
+            return Err(error::Error::UnsupportedLanguage { language });
+        }
+
+        let example_ids = if request.example_ids.is_empty() {
+            discover_json_example_ids(&repo_root)?
+        } else {
+            validate_json_example_ids(&repo_root, &request.example_ids)?
+        };
+        for example_id in example_ids {
+            build_json_example(&repo_root, language, &example_id)?;
         }
     }
 
@@ -389,6 +425,41 @@ fn filter_available_example_ids(
         .collect())
 }
 
+fn discover_json_example_ids(repo_root: &Path) -> Result<Vec<String>> {
+    let input_root = repo_root.join("examples/json-inputs");
+    let mut ids = fs::read_dir(&input_root)
+        .map_err(|source| error::Error::ReadFile {
+            path: input_root.clone(),
+            source,
+        })?
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let extension = path.extension()?.to_str()?;
+            if !matches!(extension, "json" | "yaml" | "yml") {
+                return None;
+            }
+            Some(path.file_stem()?.to_string_lossy().into_owned())
+        })
+        .collect::<Vec<_>>();
+    ids.sort();
+    Ok(ids)
+}
+
+fn validate_json_example_ids(repo_root: &Path, example_ids: &[String]) -> Result<Vec<String>> {
+    let available = discover_json_example_ids(repo_root)?
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    for example_id in example_ids {
+        if !available.contains(example_id) {
+            return Err(error::Error::UnknownExampleId {
+                language: Language::Python,
+                example_id: example_id.clone(),
+            });
+        }
+    }
+    Ok(example_ids.to_vec())
+}
+
 fn ensure_typescript_dependencies(repo_root: &Path) -> Result<()> {
     let cwd = example_language_root(repo_root, Language::TypeScript);
     if cwd.join("node_modules").exists() {
@@ -431,6 +502,26 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         descriptor_paths: vec![descriptor_path],
         output_path: output_path.clone(),
         format: false,
+        generate_native_api: true,
+    })?;
+    format_example_output(repo_root, language, &output_path)?;
+
+    println!("Built {} with nex-gen", output_path.display());
+    Ok(())
+}
+
+fn build_json_example(repo_root: &Path, language: Language, example_id: &str) -> Result<()> {
+    let input_path = json_example_input_path(repo_root, example_id);
+    let output_path = example_output_path(repo_root, language, example_id);
+
+    generate_to_file(&GenerateRequest {
+        language,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
     })?;
     format_example_output(repo_root, language, &output_path)?;
 
@@ -458,6 +549,20 @@ fn example_input_path(repo_root: &Path, example_id: &str) -> PathBuf {
             .join(example_id)
             .join("main.wit")
     }
+}
+
+fn json_example_input_path(repo_root: &Path, example_id: &str) -> PathBuf {
+    for extension in ["yaml", "yml", "json"] {
+        let path = repo_root
+            .join("examples/json-inputs")
+            .join(format!("{example_id}.{extension}"));
+        if path.is_file() {
+            return path;
+        }
+    }
+    repo_root
+        .join("examples/json-inputs")
+        .join(format!("{example_id}.yaml"))
 }
 
 fn example_linked_input_paths(repo_root: &Path) -> Vec<PathBuf> {

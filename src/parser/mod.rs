@@ -1,5 +1,13 @@
+mod json_schema;
 mod wit;
 
+use std::path::{Path, PathBuf};
+
+use crate::error::{Error, Result};
+use crate::language::Language;
+use crate::spec::ApiSpec;
+
+pub use json_schema::load_api_spec_from_json_schema_for_language_with_inputs;
 pub use wit::{load_api_spec_from_wit_for_language_with_inputs, write_prepared_wit_directory};
 
 pub(crate) use wit::{
@@ -12,3 +20,112 @@ pub(crate) use wit::{
 pub(crate) use wit::{
     parse_api_spec_from_wit_for_language, parse_api_spec_from_wit_for_language_with_inputs,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputFormat {
+    Wit,
+    JsonSchema,
+}
+
+pub fn load_api_spec_for_language_with_inputs(
+    language: Language,
+    input_paths: &[PathBuf],
+) -> Result<ApiSpec> {
+    let format = detect_input_format(input_paths)?;
+    match format {
+        InputFormat::Wit => load_api_spec_from_wit_for_language_with_inputs(language, input_paths),
+        InputFormat::JsonSchema => {
+            load_api_spec_from_json_schema_for_language_with_inputs(language, input_paths)
+        }
+    }
+}
+
+fn detect_input_format(input_paths: &[PathBuf]) -> Result<InputFormat> {
+    let Some((first, rest)) = input_paths.split_first() else {
+        return Err(Error::InvalidWit {
+            path: PathBuf::from("<input>"),
+            reason: "at least one input path is required".to_string(),
+        });
+    };
+    let format = input_format(first)?;
+    if format == InputFormat::Wit {
+        return Ok(format);
+    }
+    for path in rest {
+        let found = input_format(path)?;
+        if found != format {
+            return Err(Error::MixedInputFormats {
+                first: input_format_name(format),
+                path: path.clone(),
+                found: input_format_name(found),
+            });
+        }
+    }
+    Ok(format)
+}
+
+fn input_format(path: &Path) -> Result<InputFormat> {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("wit") => Ok(InputFormat::Wit),
+        Some("json" | "yaml" | "yml") => Ok(InputFormat::JsonSchema),
+        _ => Err(Error::UnsupportedInputFormat {
+            path: path.to_path_buf(),
+        }),
+    }
+}
+
+fn input_format_name(format: InputFormat) -> &'static str {
+    match format {
+        InputFormat::Wit => "wit",
+        InputFormat::JsonSchema => "json-schema",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn generic_loader_detects_json_schema_inputs() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("api.yaml");
+        fs::write(
+            &path,
+            r##"
+nexusrpc: "1.0.0"
+services:
+  ChatService:
+    operations:
+      getRoom:
+        input:
+          type: object
+          properties: {}
+"##,
+        )
+        .unwrap();
+
+        let spec =
+            load_api_spec_for_language_with_inputs(Language::Python, std::slice::from_ref(&path))
+                .unwrap();
+
+        assert_eq!(spec.services[0].name, "ChatService");
+        assert!(spec.records.is_empty());
+    }
+
+    #[test]
+    fn generic_loader_rejects_mixed_input_formats() {
+        let temp_dir = TempDir::new().unwrap();
+        let json_path = temp_dir.path().join("api.json");
+        let wit_path = temp_dir.path().join("api.wit");
+
+        let error =
+            load_api_spec_for_language_with_inputs(Language::Python, &[json_path, wit_path])
+                .unwrap_err();
+
+        assert!(error.to_string().contains("mixed input formats"));
+    }
+}

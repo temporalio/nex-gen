@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use heck::{ToLowerCamelCase, ToUpperCamelCase};
 
 use crate::error::{Error, Result};
-use crate::generator::GeneratedFiles;
 use crate::generator::proto::dotnet::{
     dotnet_message_type, dotnet_planned_record_proto_type_name, dotnet_proto_or_local_type,
     dotnet_proto_type_name_fallback, dotnet_proto_type_name_for_info,
     dotnet_proto_type_name_for_message, dotnet_replacement_type_name, dotnet_to_proto_converter,
 };
+use crate::generator::{GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
     PlannedOperationResourceFieldBinding, PlannedProtoType, PlannedResource, PlannedResourceMethod,
@@ -38,13 +38,14 @@ trait PlannedOperationExt {
 
 impl PlannedOperationExt for PlannedOperation {
     fn input_model(&self) -> &PlannedType {
-        operation_input_model(self)
+        operation_input_model(self).expect("dotnet operation input should be present")
     }
 }
 
 pub(crate) fn generate(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
+    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     let support_namespace = dotnet_support_namespace(support_fragments)?;
     validate_dotnet_support_references(api_plan, support_namespace.as_deref())?;
@@ -66,10 +67,11 @@ pub(crate) fn generate(
         "Service.cs".into(),
         render_service_file(&namespace, api_plan),
     );
-    if api_plan
-        .services
-        .iter()
-        .any(|service| !service.operations.is_empty())
+    if mode == GenerationMode::NativeApi
+        && api_plan
+            .services
+            .iter()
+            .any(|service| !service.operations.is_empty())
     {
         files.insert(
             "Operations.cs".into(),
@@ -2984,6 +2986,9 @@ fn dotnet_authored_type(wit_type: &PlannedType) -> String {
         TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) => {
             dotnet_proto_type_name_fallback(proto_name.full_name())
         }
+        TypeSpec::External(ExternalTypeSpec::Json(json_type)) => {
+            csharp_type_name(&json_type.model_name)
+        }
         TypeSpec::Record(name) => csharp_type_name(&name.full_name),
         TypeSpec::Enum(name) => csharp_type_name(&name.full_name),
         TypeSpec::Flags(name) => csharp_type_name(&name.full_name),
@@ -3117,6 +3122,9 @@ fn dotnet_value_type(value: &PlannedType) -> String {
             PlannedProtoType::Message(_),
         ))
         | PlannedType::Record(_)) => dotnet_message_type(model_type),
+        PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
+            csharp_type_name(&json_type.model_name)
+        }
         PlannedType::Resource(resource) => csharp_type_name(&resource.type_name),
         PlannedType::Option(inner) => nullable_type(&dotnet_value_type(inner)),
         PlannedType::List(inner) => format!("IReadOnlyList<{}>", dotnet_value_type(inner)),

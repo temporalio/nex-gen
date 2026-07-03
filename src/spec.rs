@@ -48,6 +48,7 @@ pub trait TypeNameFamily {
     type Variant: std::fmt::Debug + Clone + PartialEq;
     type Resource: std::fmt::Debug + Clone + PartialEq;
     type Proto: std::fmt::Debug + Clone + PartialEq;
+    type Json: std::fmt::Debug + Clone + PartialEq;
     type Alias: std::fmt::Debug + Clone + PartialEq;
     type ServiceData: std::fmt::Debug + Clone + PartialEq;
     type RecordData: std::fmt::Debug + Clone + PartialEq;
@@ -66,6 +67,7 @@ impl TypeNameFamily for AuthoredNames {
     type Variant = ApiRef;
     type Resource = ApiRef;
     type Proto = ApiRef;
+    type Json = JsonModelSpec<ApiRef>;
     type Alias = ApiRef;
     type ServiceData = ();
     type RecordData = ();
@@ -81,6 +83,7 @@ pub trait TypeNameMapper<From: TypeNameFamily, To: TypeNameFamily> {
     fn map_variant(&mut self, name: From::Variant) -> To::Variant;
     fn map_resource(&mut self, name: From::Resource) -> To::Resource;
     fn map_proto(&mut self, name: From::Proto) -> To::Proto;
+    fn map_json(&mut self, name: From::Json) -> To::Json;
     fn map_alias(&mut self, name: From::Alias) -> To::Alias;
     fn map_service_data(&mut self, name: &str, data: From::ServiceData) -> To::ServiceData;
     fn map_record_data(&mut self, full_name: &str, data: From::RecordData) -> To::RecordData;
@@ -178,6 +181,7 @@ impl ApiSpec<AuthoredNames> {
 pub struct ServiceSpec<F: TypeNameFamily = AuthoredNames> {
     pub name: String,
     pub wire_name: String,
+    pub doc: LanguageStringSpec,
     pub namespace: LanguageStringSpec,
     pub operations_class: LanguageStringSpec,
     pub endpoint: Option<String>,
@@ -208,6 +212,7 @@ impl<F: TypeNameFamily> ServiceSpec<F> {
         ServiceSpec {
             name: self.name,
             wire_name: self.wire_name,
+            doc: self.doc,
             namespace: self.namespace,
             operations_class: self.operations_class,
             endpoint: self.endpoint,
@@ -256,7 +261,7 @@ pub struct OperationSpec<F: TypeNameFamily = AuthoredNames> {
     pub experimental: bool,
     pub doc: LanguageStringSpec,
     pub return_doc: LanguageStringSpec,
-    pub input: TypeSpec<F>,
+    pub input: Option<TypeSpec<F>>,
     pub output: Option<TypeSpec<F>>,
     pub output_resource_type: Option<ExternalTypeSpec<F>>,
     pub output_transform: Option<OperationOutputTransformSpec>,
@@ -264,8 +269,8 @@ pub struct OperationSpec<F: TypeNameFamily = AuthoredNames> {
 }
 
 impl<F: TypeNameFamily> OperationSpec<F> {
-    pub fn input_type(&self) -> &TypeSpec<F> {
-        &self.input
+    pub fn input_type(&self) -> Option<&TypeSpec<F>> {
+        self.input.as_ref()
     }
 
     pub fn output_type(&self) -> Option<&TypeSpec<F>> {
@@ -288,7 +293,7 @@ impl<F: TypeNameFamily> OperationSpec<F> {
             experimental: self.experimental,
             doc: self.doc,
             return_doc: self.return_doc,
-            input: self.input.map_names_with(map),
+            input: self.input.map(|input| input.map_names_with(map)),
             output: self.output.map(|output| output.map_names_with(map)),
             output_resource_type: self
                 .output_resource_type
@@ -757,6 +762,19 @@ pub struct TypeReplacementSpec {
     pub to_proto: LanguageStringSpec,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct JsonModelSpec<N> {
+    pub name: N,
+    pub model_name: String,
+    pub schema: serde_json::Value,
+}
+
+impl<N: AsRef<str>> AsRef<str> for JsonModelSpec<N> {
+    fn as_ref(&self) -> &str {
+        self.name.as_ref()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldDefaultSpec {
     pub enum_case: String,
@@ -795,6 +813,7 @@ pub enum IntSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExternalTypeSpec<F: TypeNameFamily = AuthoredNames> {
     Proto(F::Proto),
+    Json(F::Json),
     Alias {
         name: F::Alias,
         target: Box<TypeSpec<F>>,
@@ -871,6 +890,7 @@ where
     F::Variant: AsRef<str>,
     F::Resource: AsRef<str>,
     F::Proto: AsRef<str>,
+    F::Json: AsRef<str>,
     F::Alias: AsRef<str>,
 {
     pub fn reference(&self) -> Option<&str> {
@@ -934,6 +954,7 @@ impl<F: TypeNameFamily> ExternalTypeSpec<F> {
     {
         match self {
             ExternalTypeSpec::Proto(type_name) => ExternalTypeSpec::Proto(map.map_proto(type_name)),
+            ExternalTypeSpec::Json(type_name) => ExternalTypeSpec::Json(map.map_json(type_name)),
             ExternalTypeSpec::Alias {
                 name,
                 target,
@@ -951,11 +972,13 @@ impl<F> ExternalTypeSpec<F>
 where
     F: TypeNameFamily,
     F::Proto: AsRef<str>,
+    F::Json: AsRef<str>,
     F::Alias: AsRef<str>,
 {
     pub fn reference(&self) -> Option<&str> {
         match self {
             ExternalTypeSpec::Proto(type_name) => Some(type_name.as_ref()),
+            ExternalTypeSpec::Json(type_name) => Some(type_name.as_ref()),
             ExternalTypeSpec::Alias { name, .. } => Some(name.as_ref()),
         }
     }

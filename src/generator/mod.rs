@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub(crate) mod dotnet;
+pub(crate) mod json;
 pub(crate) mod proto;
 pub(crate) mod python;
 pub(crate) mod typescript;
@@ -10,7 +11,7 @@ use crate::SupportFiles;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
-use crate::planning::{PlannedSpec, build_api_plan};
+use crate::planning::{PlannedSpec, PlanningMode, build_api_plan_with_mode};
 use crate::resources::ensure_unique_resource_names;
 use crate::spec::ApiSpec;
 use crate::validation::validate_external_type_bindings;
@@ -76,11 +77,34 @@ impl ModelCapabilities {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GenerationMode {
+    #[default]
+    NativeApi,
+    DefinitionsOnly,
+}
+
 pub fn generate_files(
     language: Language,
     spec: ApiSpec,
     descriptors: &DescriptorIndex,
     support: &SupportFiles,
+) -> Result<GeneratedFiles> {
+    generate_files_with_mode(
+        language,
+        spec,
+        descriptors,
+        support,
+        GenerationMode::NativeApi,
+    )
+}
+
+pub fn generate_files_with_mode(
+    language: Language,
+    spec: ApiSpec,
+    descriptors: &DescriptorIndex,
+    support: &SupportFiles,
+    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     validate_external_type_bindings(&spec, descriptors, language)?;
     ensure_unique_resource_names(&spec)?;
@@ -89,17 +113,28 @@ pub fn generate_files(
     } else {
         support.fragments.clone()
     };
-    let plan = build_api_plan(spec, descriptors)?;
-    let warnings = generation_warnings(&plan);
+    let plan = build_api_plan_with_mode(spec, descriptors, planning_mode(mode))?;
+    let warnings = if mode == GenerationMode::NativeApi {
+        generation_warnings(&plan)
+    } else {
+        Vec::new()
+    };
 
     let mut generated = match language {
-        Language::Dotnet => dotnet::generate(&plan, &support_fragments),
-        Language::Python => python::generate(&plan, &support_fragments),
-        Language::TypeScript => typescript::generate(&plan, &support_fragments),
+        Language::Dotnet => dotnet::generate(&plan, &support_fragments, mode),
+        Language::Python => python::generate(&plan, &support_fragments, mode),
+        Language::TypeScript => typescript::generate(&plan, &support_fragments, mode),
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = warnings;
     Ok(generated)
+}
+
+fn planning_mode(mode: GenerationMode) -> PlanningMode {
+    match mode {
+        GenerationMode::NativeApi => PlanningMode::NativeApi,
+        GenerationMode::DefinitionsOnly => PlanningMode::DefinitionsOnly,
+    }
 }
 
 pub fn generate_source(
@@ -108,7 +143,23 @@ pub fn generate_source(
     descriptors: &DescriptorIndex,
     support: &SupportFiles,
 ) -> Result<String> {
-    let generated = generate_files(language, spec, descriptors, support)?;
+    generate_source_with_mode(
+        language,
+        spec,
+        descriptors,
+        support,
+        GenerationMode::NativeApi,
+    )
+}
+
+pub fn generate_source_with_mode(
+    language: Language,
+    spec: ApiSpec,
+    descriptors: &DescriptorIndex,
+    support: &SupportFiles,
+    mode: GenerationMode,
+) -> Result<String> {
+    let generated = generate_files_with_mode(language, spec, descriptors, support, mode)?;
     Ok(match generated.layout {
         GeneratedOutputLayout::SingleFile => generated
             .single_file_contents()
@@ -155,7 +206,7 @@ mod tests {
     use crate::descriptors::DescriptorIndex;
     use crate::language::Language;
 
-    use super::generate_files;
+    use super::{GenerationMode, generate_files, generate_files_with_mode};
 
     #[test]
     fn warns_when_resource_method_generates_as_stub() {
@@ -207,5 +258,54 @@ interface user-service {
                     .to_string()
             ]
         );
+    }
+
+    #[test]
+    fn definitions_only_generation_does_not_require_endpoint() {
+        let wit = r#"
+package temporal:example@1.0.0;
+
+world system {
+  export example-service;
+}
+
+interface example-service {
+  record request {
+    name: string,
+  }
+
+  record response {
+    message: string,
+  }
+
+  example-operation: func(request: request) -> response;
+}
+"#;
+        let spec = crate::parser::parse_api_spec_from_wit_for_language(
+            Language::Python,
+            wit,
+            PathBuf::from("inline.wit"),
+        )
+        .unwrap();
+        let descriptors =
+            DescriptorIndex::from_descriptor_set(FileDescriptorSet { file: Vec::new() }).unwrap();
+
+        let generated = generate_files_with_mode(
+            Language::Python,
+            spec,
+            &descriptors,
+            &SupportFiles::default(),
+            GenerationMode::DefinitionsOnly,
+        )
+        .unwrap();
+
+        assert!(generated.files.contains_key(&PathBuf::from("models.py")));
+        assert!(generated.files.contains_key(&PathBuf::from("service.py")));
+        assert!(
+            !generated
+                .files
+                .contains_key(&PathBuf::from("operations/example_operation.py"))
+        );
+        assert!(generated.files[&PathBuf::from("service.py")].contains("class ExampleService"));
     }
 }

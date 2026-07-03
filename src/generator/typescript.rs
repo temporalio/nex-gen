@@ -13,7 +13,7 @@ use crate::generator::proto::typescript::{
     typescript_from_proto_converter, typescript_replacement_type_name,
     typescript_to_proto_converter,
 };
-use crate::generator::{GeneratedFiles, ModelCapabilities};
+use crate::generator::{GeneratedFiles, GenerationMode, ModelCapabilities};
 use crate::language::Language;
 use crate::planning::{
     PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedProtoType,
@@ -49,7 +49,7 @@ trait PlannedOperationExt {
 
 impl PlannedOperationExt for PlannedOperation {
     fn input_model(&self) -> &PlannedType {
-        operation_input_model(self)
+        operation_input_model(self).expect("typescript operation input should be present")
     }
 
     fn output_direct_result(&self) -> bool {
@@ -60,6 +60,7 @@ impl PlannedOperationExt for PlannedOperation {
 pub(crate) fn generate(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
+    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     reject_support_namespaces(Language::TypeScript, support_fragments)?;
     let language_imports = collect_typescript_language_imports(api_plan);
@@ -148,6 +149,7 @@ pub(crate) fn generate(
         support_source.as_deref(),
         &model_registrations,
         api_plan,
+        mode,
     ))
 }
 
@@ -184,7 +186,9 @@ fn collect_typescript_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageIm
     }
     for service in &api_plan.services {
         for operation in &service.operations {
-            collect_model_type_imports(operation_input_model(operation), &mut imports);
+            if let Some(input) = operation_input_model(operation) {
+                collect_model_type_imports(input, &mut imports);
+            }
             if let Some(output) = operation.output_type()
                 && let Some(model_type) = output.operation_model()
             {
@@ -266,6 +270,7 @@ fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<Langua
         }
         PlannedType::Flags(_) | PlannedType::Variant(_) => {}
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
+        | PlannedType::External(ExternalTypeSpec::Json(_))
         | PlannedType::Record(_) => {
             collect_model_type_imports(value, imports);
         }
@@ -377,6 +382,7 @@ fn collect_authored_type_imports(
         | TypeSpec::String
         | TypeSpec::Bytes
         | TypeSpec::External(ExternalTypeSpec::Proto(_))
+        | TypeSpec::External(ExternalTypeSpec::Json(_))
         | TypeSpec::Record(_)
         | TypeSpec::Enum(_)
         | TypeSpec::Flags(_)
@@ -659,6 +665,7 @@ fn typescript_authored_type_annotation(authored_type: &PlannedType) -> String {
             .next()
             .unwrap_or(proto_name.full_name())
             .to_string(),
+        TypeSpec::External(ExternalTypeSpec::Json(json_type)) => json_type.model_name.clone(),
         TypeSpec::Record(name) => name
             .full_name
             .as_str()
@@ -2134,6 +2141,13 @@ fn resolve_planned_value_type(
                 enum_conversion: None,
             }
         }
+        PlannedType::External(ExternalTypeSpec::Json(json_type)) => ResolvedFieldType {
+            annotation: json_type.model_name.clone(),
+            kind: ResolvedFieldKind::Scalar,
+            requirements: TypeScriptRequirements::default(),
+            message_conversion: None,
+            enum_conversion: None,
+        },
         PlannedType::Resource(resource) => ResolvedFieldType {
             annotation: resource.type_name.clone(),
             kind: ResolvedFieldKind::Scalar,
@@ -2593,11 +2607,19 @@ fn render_module_files(
     support_source: Option<&str>,
     model_registrations: &str,
     api_plan: &PlannedSpec,
+    mode: GenerationMode,
 ) -> GeneratedFiles {
     let support_source = support_source.filter(|source| !source.trim().is_empty());
     let support_exports = support_source.map(support_exports);
     let mut files = BTreeMap::<PathBuf, String>::new();
-    files.insert("index.ts".into(), render_index_module(services));
+    files.insert(
+        "index.ts".into(),
+        if mode == GenerationMode::NativeApi {
+            render_index_module(services)
+        } else {
+            render_definitions_only_index_module(services)
+        },
+    );
     files.insert(
         "models.ts".into(),
         render_models_module(
@@ -2639,23 +2661,25 @@ fn render_module_files(
             ),
         );
     }
-    for service in services {
-        for operation in &service.operations {
-            files.insert(
-                format!("operations/{}.ts", operation_file_name(operation)).into(),
-                render_operation_module(
-                    enums,
-                    flags,
-                    variants,
-                    models,
-                    services,
-                    service,
-                    operation,
-                    requirements,
-                    language_imports,
-                    support_exports.as_ref(),
-                ),
-            );
+    if mode == GenerationMode::NativeApi {
+        for service in services {
+            for operation in &service.operations {
+                files.insert(
+                    format!("operations/{}.ts", operation_file_name(operation)).into(),
+                    render_operation_module(
+                        enums,
+                        flags,
+                        variants,
+                        models,
+                        services,
+                        service,
+                        operation,
+                        requirements,
+                        language_imports,
+                        support_exports.as_ref(),
+                    ),
+                );
+            }
         }
     }
     if let Some(support_source) = support_source {
@@ -2904,6 +2928,18 @@ fn render_generated_module(imports: String, body: String) -> String {
     output.push_str(&body);
     if !body.ends_with('\n') {
         output.push('\n');
+    }
+    output
+}
+
+fn render_definitions_only_index_module(services: &[RenderedService<'_>]) -> String {
+    let mut output = String::new();
+    output.push_str(GENERATED_HEADER);
+    output.push_str("\n\n");
+    output.push_str("export * from './service';\n");
+    output.push_str("export type * from './models';\n");
+    if services.iter().any(|service| !service.resources.is_empty()) {
+        output.push_str("export * from './resources';\n");
     }
     output
 }
@@ -3473,6 +3509,12 @@ fn typescript_wire_schema(value: &PlannedType, api_plan: &PlannedSpec) -> String
         }
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(_))) => {
             "{ kind: \"scalar\" }".to_string()
+        }
+        PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
+            format!(
+                "{{ kind: \"ref\", typeId: {} }}",
+                typescript_string_literal(&json_type.full_name)
+            )
         }
         PlannedType::Record(record) => {
             format!(
@@ -4581,6 +4623,7 @@ fn typescript_resource_value_annotation(value: &PlannedType) -> String {
             .as_ref()
             .and_then(typescript_replacement_type_name)
             .unwrap_or_else(|| proto.model_name.clone()),
+        PlannedType::External(ExternalTypeSpec::Json(json_type)) => json_type.model_name.clone(),
         PlannedType::Record(record) => record.model_name.clone(),
         PlannedType::Resource(resource) => resource.type_name.clone(),
         PlannedType::Option(inner) => {

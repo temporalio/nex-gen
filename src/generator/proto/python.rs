@@ -1,8 +1,12 @@
+use std::collections::BTreeSet;
+
 use heck::ToSnakeCase;
 
 use crate::generator::python::{
-    EnumValueConversion, PythonImports, RenderedModel, RenderedWireRead, RenderedWireWrite,
-    ResolvedFieldKind, ResolvedFieldType, WireReadPolicy,
+    EnumValueConversion, PythonImports, RenderedModel, RenderedModelFragments, RenderedWireRead,
+    RenderedWireWrite, ResolvedFieldKind, ResolvedFieldType, WireReadPolicy,
+    python_parameter_annotation, python_string_literal, render_python_default_expr,
+    render_python_docstring,
 };
 use crate::language::Language;
 use crate::planning::{
@@ -633,6 +637,96 @@ pub(in crate::generator) fn render_model_proto_methods(
         wrote_method = true;
     }
     wrote_method
+}
+
+pub(in crate::generator) fn render_models(models: &[&RenderedModel]) -> RenderedModelFragments {
+    let mut body = String::new();
+    for (index, model) in models.iter().enumerate() {
+        render_model(&mut body, model);
+        if index + 1 != models.len() {
+            body.push_str("\n\n");
+        }
+    }
+
+    let mut registrations = String::new();
+    render_nexus_type_registrations(&mut registrations, models);
+
+    let mut module_imports = BTreeSet::new();
+    if models.iter().any(|model| model.native) {
+        module_imports.insert("nex_gen_runtime".to_string());
+    }
+    for model in models {
+        if let Some(proto_module_path) = &model.proto_module_path {
+            module_imports.insert(proto_module_path.clone());
+        }
+        for field in &model.fields {
+            module_imports.extend(field.imports.module_imports.iter().cloned());
+        }
+    }
+
+    RenderedModelFragments {
+        body,
+        registrations,
+        module_imports,
+        exported_names: models.iter().map(|model| model.name.clone()).collect(),
+    }
+}
+
+fn render_model(output: &mut String, model: &RenderedModel) {
+    if model_needs_keyword_only_dataclass(model) {
+        output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
+    } else {
+        output.push_str("@dataclasses.dataclass(slots=True)\n");
+    }
+    output.push_str("class ");
+    output.push_str(&model.name);
+    output.push_str(":\n");
+    render_python_docstring(output, "    ", None, &[], None, model.experimental);
+
+    if model.fields.is_empty() {
+        if !render_model_proto_methods(output, model) {
+            output.push_str("    pass\n");
+        }
+        return;
+    }
+
+    for field in &model.fields {
+        output.push_str("    ");
+        output.push_str(&field.attr_name);
+        output.push_str(": ");
+        output.push_str(&python_parameter_annotation(
+            &field.annotation,
+            &field.default_kind,
+        ));
+        if let Some(default_expr) = &field.default_expr {
+            render_python_default_expr(output, default_expr, "    ");
+        }
+        output.push('\n');
+    }
+
+    render_model_proto_methods(output, model);
+}
+
+fn model_needs_keyword_only_dataclass(model: &RenderedModel) -> bool {
+    let mut saw_defaulted_field = false;
+    for field in &model.fields {
+        if field.default_expr.is_some() {
+            saw_defaulted_field = true;
+        } else if saw_defaulted_field {
+            return true;
+        }
+    }
+    false
+}
+
+fn render_nexus_type_registrations(output: &mut String, models: &[&RenderedModel]) {
+    for model in models.iter().filter(|model| model.native) {
+        output.push_str("nex_gen_runtime.register_nexus_type(");
+        output.push_str(&model.name);
+        output.push_str(", ");
+        output.push_str(&python_string_literal(&model.full_name));
+        output.push_str(")\n");
+    }
 }
 
 fn python_module_path_for_file_name(file_name: Option<&str>, package: &str) -> Option<String> {

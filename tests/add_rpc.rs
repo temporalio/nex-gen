@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use nex_gen::add_rpc_to_string;
 use nex_gen::language::Language;
-use nex_gen::spec::ApiSpec;
+use nex_gen::spec::{ApiSpec, TypeSpec};
 
 const PRIMARY_EXAMPLE_PATH: &str = "examples/inputs/workflow-service.wit";
 
@@ -130,10 +130,10 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
     assert_eq!(
         generated_python_service.operations[0]
             .input_type()
-            .reference(),
+            .and_then(TypeSpec::reference),
         handwritten_python_service.operations[0]
             .input_type()
-            .reference()
+            .and_then(TypeSpec::reference)
     );
     assert_eq!(
         generated_python_service.operations[0]

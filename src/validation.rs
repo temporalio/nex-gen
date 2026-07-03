@@ -86,7 +86,8 @@ fn language_message_usages(
 
     for service in &spec.services {
         for operation in &service.operations {
-            let TypeSpec::External(ExternalTypeSpec::Proto(input_proto)) = operation.input_type()
+            let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_proto))) =
+                operation.input_type()
             else {
                 continue;
             };

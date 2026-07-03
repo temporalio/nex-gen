@@ -5,8 +5,9 @@ use heck::{ToShoutySnakeCase, ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
 use crate::error::{Error, Result};
+use crate::generator::json::python as python_json;
 use crate::generator::proto::python as python_proto;
-use crate::generator::{GeneratedFiles, ModelCapabilities};
+use crate::generator::{GeneratedFiles, GenerationMode, ModelCapabilities};
 use crate::language::Language;
 use crate::planning::{
     PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedProtoType,
@@ -28,6 +29,7 @@ const EXPERIMENTAL_WARNING: &str = "This API is experimental and subject to chan
 pub(crate) fn generate(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
+    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     reject_support_namespaces(Language::Python, support_fragments)?;
     let language_imports = collect_python_language_imports(api_plan);
@@ -57,6 +59,10 @@ pub(crate) fn generate(
             Ok(RenderedService {
                 name: &service.name,
                 wire_name: &service.wire_name,
+                doc: service
+                    .doc
+                    .for_language(Language::Python)
+                    .map(str::to_string),
                 endpoint: service.data.endpoint.clone(),
                 experimental: service.experimental,
                 delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
@@ -97,15 +103,18 @@ pub(crate) fn generate(
             &mut models,
         );
     }
+    let model_refs = models.values().collect::<Vec<_>>();
+    let model_fragments = render_model_fragments(model_refs.as_slice(), api_plan)?;
 
     render_package(
         enums.values().collect::<Vec<_>>().as_slice(),
         flags.values().collect::<Vec<_>>().as_slice(),
         variants.values().collect::<Vec<_>>().as_slice(),
-        models.values().collect::<Vec<_>>().as_slice(),
+        &model_fragments,
         &services,
         support_fragments,
         &language_imports,
+        mode,
     )
 }
 
@@ -142,7 +151,9 @@ fn collect_python_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageImport
     }
     for service in &api_plan.services {
         for operation in &service.operations {
-            collect_model_type_imports(operation_input_model(operation), &mut imports);
+            if let Some(input) = operation_input_model(operation) {
+                collect_model_type_imports(input, &mut imports);
+            }
             if let Some(output) = operation.output_type()
                 && let Some(model_type) = output.operation_model()
             {
@@ -219,6 +230,7 @@ fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<Langua
             }
         }
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
+        | PlannedType::External(ExternalTypeSpec::Json(_))
         | PlannedType::Record(_) => {
             collect_model_type_imports(value, imports);
         }
@@ -328,6 +340,7 @@ fn collect_authored_type_imports(
         | TypeSpec::String
         | TypeSpec::Bytes
         | TypeSpec::External(ExternalTypeSpec::Proto(_))
+        | TypeSpec::External(ExternalTypeSpec::Json(_))
         | TypeSpec::Record(_)
         | TypeSpec::Enum(_)
         | TypeSpec::Flags(_)
@@ -486,6 +499,7 @@ pub(crate) fn python_field_name(name: &str) -> String {
 struct RenderedService<'a> {
     name: &'a str,
     wire_name: &'a str,
+    doc: Option<String>,
     endpoint: String,
     experimental: bool,
     delay_load_temporalio_workflow: bool,
@@ -575,12 +589,12 @@ pub(in crate::generator) struct RenderedModel {
 #[derive(Debug)]
 pub(in crate::generator) struct RenderedField {
     pub(in crate::generator) attr_name: String,
-    annotation: String,
-    default_kind: PythonFieldDefaultKind,
-    default_expr: Option<String>,
+    pub(in crate::generator) annotation: String,
+    pub(in crate::generator) default_kind: PythonFieldDefaultKind,
+    pub(in crate::generator) default_expr: Option<String>,
     pub(in crate::generator) from_wire: RenderedWireRead,
     pub(in crate::generator) to_wire: RenderedWireWrite,
-    imports: PythonImports,
+    pub(in crate::generator) imports: PythonImports,
 }
 
 #[derive(Debug)]
@@ -606,7 +620,7 @@ pub(in crate::generator) enum WireReadPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum PythonFieldDefaultKind {
+pub(in crate::generator) enum PythonFieldDefaultKind {
     Required,
     None,
     EmptyList,
@@ -703,21 +717,50 @@ pub(in crate::generator) struct ResolvedFieldType {
 #[derive(Debug, Clone)]
 pub(in crate::generator) struct WireValueConversion {
     annotation: String,
-    proto: python_proto::PythonProtoMessageConversion,
+    message: WireMessageConversion,
     imports: PythonImports,
 }
 
 impl WireValueConversion {
-    pub(in crate::generator) fn from_wire_expr(&self, proto_expr: &str) -> String {
-        self.proto.from_proto_expr(proto_expr)
+    pub(in crate::generator) fn from_wire_expr(&self, wire_expr: &str) -> String {
+        self.message.from_wire_expr(wire_expr)
     }
 
     pub(in crate::generator) fn to_wire_expr(&self, value_expr: &str) -> String {
-        self.proto.to_proto_expr(value_expr)
+        self.message.to_wire_expr(value_expr)
     }
 
     fn supports_unpacked_input(&self) -> bool {
-        self.proto.supports_unpacked_input()
+        self.message.supports_unpacked_input()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::generator) enum WireMessageConversion {
+    Proto(python_proto::PythonProtoMessageConversion),
+    Identity,
+}
+
+impl WireMessageConversion {
+    fn from_wire_expr(&self, wire_expr: &str) -> String {
+        match self {
+            WireMessageConversion::Proto(proto) => proto.from_proto_expr(wire_expr),
+            WireMessageConversion::Identity => wire_expr.to_string(),
+        }
+    }
+
+    fn to_wire_expr(&self, value_expr: &str) -> String {
+        match self {
+            WireMessageConversion::Proto(proto) => proto.to_proto_expr(value_expr),
+            WireMessageConversion::Identity => value_expr.to_string(),
+        }
+    }
+
+    fn supports_unpacked_input(&self) -> bool {
+        match self {
+            WireMessageConversion::Proto(proto) => proto.supports_unpacked_input(),
+            WireMessageConversion::Identity => false,
+        }
     }
 }
 
@@ -747,6 +790,43 @@ impl PythonImports {
         self.module_imports
             .extend(other.module_imports.iter().cloned());
     }
+}
+
+#[derive(Debug, Default)]
+pub(in crate::generator) struct RenderedModelFragments {
+    pub(in crate::generator) body: String,
+    pub(in crate::generator) registrations: String,
+    pub(in crate::generator) module_imports: BTreeSet<String>,
+    pub(in crate::generator) exported_names: BTreeSet<String>,
+}
+
+impl RenderedModelFragments {
+    pub(in crate::generator) fn extend(&mut self, other: Self) {
+        if !other.body.is_empty() {
+            if !self.body.is_empty() {
+                self.body.push_str("\n\n");
+            }
+            self.body.push_str(&other.body);
+        }
+        if !other.registrations.is_empty() {
+            if !self.registrations.is_empty() {
+                self.registrations.push_str("\n\n");
+            }
+            self.registrations.push_str(&other.registrations);
+        }
+        self.module_imports.extend(other.module_imports);
+        self.exported_names.extend(other.exported_names);
+    }
+}
+
+fn render_model_fragments(
+    models: &[&RenderedModel],
+    api_plan: &PlannedSpec,
+) -> Result<RenderedModelFragments> {
+    let mut fragments = RenderedModelFragments::default();
+    fragments.extend(python_proto::render_models(models));
+    fragments.extend(python_json::render_external_models(api_plan)?);
+    Ok(fragments)
 }
 
 fn python_function_result_annotation(result: &FunctionResultSpec<PlannedTypeFamily>) -> String {
@@ -808,6 +888,7 @@ fn python_authored_type_annotation(authored_type: &PlannedType) -> String {
             .next()
             .unwrap_or(proto_name.full_name())
             .to_string(),
+        TypeSpec::External(ExternalTypeSpec::Json(json_type)) => json_type.model_name.clone(),
         TypeSpec::Record(name) => name
             .full_name
             .as_str()
@@ -931,9 +1012,16 @@ fn resolve_operation<'a>(
 ) -> Result<RenderedOperation<'a>> {
     let output_resource_return = operation.data.output_resource_return.clone();
     let input = operation_input_model(operation);
-    let (input_ref, input_module_path) = operation_service_ref(input, "models", api_plan);
-    let input_conversion =
-        resolve_message_value_conversion(input, None, api_plan, enums, flags, variants, models);
+    let (input_ref, input_module_path, input_conversion) = match input {
+        Some(input) => {
+            let (input_ref, input_module_path) = operation_service_ref(input, "models", api_plan);
+            let input_conversion = resolve_message_value_conversion(
+                input, None, api_plan, enums, flags, variants, models,
+            );
+            (input_ref, input_module_path, Some(input_conversion))
+        }
+        None => ("None".to_string(), None, None),
+    };
     let output_transform = operation.output_transform.as_ref();
     let output_direct_result = operation_output_direct_result(operation);
     let (output_ref, output_module_path, output_annotation_default) = match operation.output_type()
@@ -994,17 +1082,22 @@ fn resolve_operation<'a>(
                 .map(|resource| resource.resource_type_name.clone())
         })
         .unwrap_or(output_annotation_default);
-    let unpacked_input = if input_conversion.supports_unpacked_input() {
-        Some(build_unpacked_input(
-            input
-                .model_full_name()
-                .expect("operation input should be a model"),
-            models,
-            api_plan,
-        )?)
-    } else {
-        None
-    };
+    let unpacked_input =
+        if let Some((input, input_conversion)) = input.zip(input_conversion.as_ref()) {
+            if input_conversion.supports_unpacked_input() {
+                Some(build_unpacked_input(
+                    input
+                        .model_full_name()
+                        .expect("operation input should be a model"),
+                    models,
+                    api_plan,
+                )?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
     let output_type_parameters = unpacked_input
         .iter()
         .flat_map(|unpacked_input| &unpacked_input.functions)
@@ -1035,8 +1128,14 @@ fn resolve_operation<'a>(
         input_module_path,
         output_ref,
         output_module_path,
-        input_annotation: input_conversion.annotation.clone(),
-        input_wire_expr: input_conversion.to_wire_expr("request"),
+        input_annotation: input_conversion
+            .as_ref()
+            .map(|conversion| conversion.annotation.clone())
+            .unwrap_or_else(|| "None".to_string()),
+        input_wire_expr: input_conversion
+            .as_ref()
+            .map(|conversion| conversion.to_wire_expr("request"))
+            .unwrap_or_else(|| "None".to_string()),
         output_annotation,
         overload_output_annotation,
         output_type_parameters,
@@ -1063,6 +1162,13 @@ fn operation_service_ref(
         return (reference.type_ref, Some(reference.module_path));
     }
     match model_type {
+        PlannedType::External(ExternalTypeSpec::Json(json_type)) => (
+            format!(
+                "{_native_module}.{}",
+                python_json::model_type_ref(json_type)
+            ),
+            Some(format!(".{_native_module}")),
+        ),
         PlannedType::Record(record) => (
             format!("{_native_module}.{}", record.model_name),
             Some(format!(".{_native_module}")),
@@ -1083,6 +1189,9 @@ fn resolve_output_annotation(
         return reference.type_ref;
     }
     match model_type {
+        PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
+            python_json::model_type_ref(json_type)
+        }
         PlannedType::Record(_) => {
             let conversion = resolve_message_value_conversion(
                 model_type, None, api_plan, enums, flags, variants, models,
@@ -1315,10 +1424,12 @@ fn resolve_message_value_conversion(
             } => {
                 return WireValueConversion {
                     annotation,
-                    proto: python_proto::PythonProtoMessageConversion::Override {
-                        from_proto,
-                        to_proto,
-                    },
+                    message: WireMessageConversion::Proto(
+                        python_proto::PythonProtoMessageConversion::Override {
+                            from_proto,
+                            to_proto,
+                        },
+                    ),
                     imports: PythonImports::default(),
                 };
             }
@@ -1329,14 +1440,24 @@ fn resolve_message_value_conversion(
             } => {
                 return WireValueConversion {
                     annotation: python_authored_type_annotation(authored_type),
-                    proto: python_proto::PythonProtoMessageConversion::Override {
-                        from_proto,
-                        to_proto,
-                    },
+                    message: WireMessageConversion::Proto(
+                        python_proto::PythonProtoMessageConversion::Override {
+                            from_proto,
+                            to_proto,
+                        },
+                    ),
                     imports: PythonImports::default(),
                 };
             }
         }
+    }
+
+    if let PlannedType::External(ExternalTypeSpec::Json(json_type)) = model_type {
+        return WireValueConversion {
+            annotation: python_json::model_type_ref(json_type),
+            message: WireMessageConversion::Identity,
+            imports: PythonImports::default(),
+        };
     }
 
     ensure_rendered_model(
@@ -1369,7 +1490,7 @@ fn resolve_message_value_conversion(
             .expect("planned model should be rendered")
             .name
             .clone(),
-        proto: kind,
+        message: WireMessageConversion::Proto(kind),
         imports: PythonImports::default(),
     }
 }
@@ -1983,6 +2104,13 @@ fn resolve_planned_value_type(
                 enum_conversion: None,
             }
         }
+        PlannedType::External(ExternalTypeSpec::Json(json_type)) => ResolvedFieldType {
+            annotation: json_type.model_name.clone(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            message_conversion: None,
+            enum_conversion: None,
+        },
         PlannedType::Resource(resource) => ResolvedFieldType {
             annotation: resource.type_name.clone(),
             imports: PythonImports::default(),
@@ -2081,10 +2209,11 @@ fn render_package(
     enums: &[&RenderedEnum],
     flags: &[&RenderedFlags],
     variants: &[&RenderedVariant],
-    models: &[&RenderedModel],
+    model_fragments: &RenderedModelFragments,
     services: &[RenderedService<'_>],
     support_fragments: &[SupportFragmentSpec],
     language_imports: &[LanguageImportSpec],
+    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     let mut files = BTreeMap::new();
     render_support_package(&mut files, support_fragments)?;
@@ -2093,7 +2222,7 @@ fn render_package(
         .map(|enumeration| enumeration.name.clone())
         .chain(flags.iter().map(|flag_set| flag_set.name.clone()))
         .chain(variants.iter().map(|variant| variant.name.clone()))
-        .chain(models.iter().map(|model| model.name.clone()))
+        .chain(model_fragments.exported_names.iter().cloned())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -2114,7 +2243,11 @@ fn render_package(
     insert_generated_file(
         &mut files,
         "__init__.py",
-        render_package_init(services, &resource_names, &resource_operation_owners),
+        if mode == GenerationMode::NativeApi {
+            render_package_init(services, &resource_names, &resource_operation_owners)
+        } else {
+            render_definitions_only_package_init(services, &model_names)
+        },
     )?;
     insert_generated_file(
         &mut files,
@@ -2123,7 +2256,7 @@ fn render_package(
             enums,
             flags,
             variants,
-            models,
+            model_fragments,
             &support_names,
             language_imports,
         ),
@@ -2134,15 +2267,21 @@ fn render_package(
         render_resources_package_init(services),
     )?;
     insert_generated_file(&mut files, "service.py", render_service_module(services))?;
-    insert_generated_file(
-        &mut files,
-        "operations/__init__.py",
-        render_operations_package_init(),
-    )?;
+    if mode == GenerationMode::NativeApi {
+        insert_generated_file(
+            &mut files,
+            "operations/__init__.py",
+            render_operations_package_init(),
+        )?;
+    }
 
     for service in services {
         for resource in &service.resources {
-            let bound_operations = resource_bound_operations(service, resource);
+            let bound_operations = if mode == GenerationMode::NativeApi {
+                resource_bound_operations(service, resource)
+            } else {
+                Vec::new()
+            };
             insert_generated_file(
                 &mut files,
                 format!("_resources/{}.py", resource_module_name(resource)),
@@ -2157,27 +2296,58 @@ fn render_package(
                 ),
             )?;
         }
-        for operation in &service.operations {
-            if resource_operation_owners.contains_key(&operation_key(service.name, operation.name))
-            {
-                continue;
+        if mode == GenerationMode::NativeApi {
+            for operation in &service.operations {
+                if resource_operation_owners
+                    .contains_key(&operation_key(service.name, operation.name))
+                {
+                    continue;
+                }
+                insert_generated_file(
+                    &mut files,
+                    format!("operations/{}.py", operation.attr_name),
+                    render_operation_module(
+                        service,
+                        operation,
+                        &model_names,
+                        &resource_names,
+                        &support_names,
+                        language_imports,
+                    ),
+                )?;
             }
-            insert_generated_file(
-                &mut files,
-                format!("operations/{}.py", operation.attr_name),
-                render_operation_module(
-                    service,
-                    operation,
-                    &model_names,
-                    &resource_names,
-                    &support_names,
-                    language_imports,
-                ),
-            )?;
         }
     }
 
     Ok(GeneratedFiles::directory(files))
+}
+
+fn render_definitions_only_package_init(
+    services: &[RenderedService<'_>],
+    model_names: &[String],
+) -> String {
+    let mut output = String::new();
+    render_generated_file_header(&mut output);
+    output.push('\n');
+    let service_names = services
+        .iter()
+        .map(|service| service.name.to_string())
+        .collect::<Vec<_>>();
+    if !model_names.is_empty() {
+        render_named_python_import(&mut output, ".models", model_names);
+    }
+    if !service_names.is_empty() {
+        render_named_python_import(&mut output, ".service", &service_names);
+    }
+
+    output.push_str("\n__all__ = [\n");
+    for name in model_names.iter().chain(service_names.iter()) {
+        output.push_str("    ");
+        output.push_str(&python_string_literal(name));
+        output.push_str(",\n");
+    }
+    output.push_str("]\n");
+    output
 }
 
 fn operation_key(service_name: &str, operation_name: &str) -> String {
@@ -2689,22 +2859,12 @@ fn render_models_module(
     enums: &[&RenderedEnum],
     flags: &[&RenderedFlags],
     variants: &[&RenderedVariant],
-    models: &[&RenderedModel],
+    model_fragments: &RenderedModelFragments,
     support_names: &[String],
     language_imports: &[LanguageImportSpec],
 ) -> String {
     let mut module_imports = BTreeSet::new();
-    if models.iter().any(|model| model.native) {
-        module_imports.insert("nex_gen_runtime".to_string());
-    }
-    for model in models {
-        if let Some(proto_module_path) = &model.proto_module_path {
-            module_imports.insert(proto_module_path.clone());
-        }
-        for field in &model.fields {
-            module_imports.extend(field.imports.module_imports.iter().cloned());
-        }
-    }
+    module_imports.extend(model_fragments.module_imports.iter().cloned());
     let mut body = String::new();
     if !enums.is_empty() {
         if !body.is_empty() {
@@ -2730,16 +2890,11 @@ fn render_models_module(
         }
     }
 
-    if !models.is_empty() {
+    if !model_fragments.body.is_empty() {
         if !body.is_empty() {
             body.push_str("\n\n");
         }
-        for (index, model) in models.iter().enumerate() {
-            render_model(&mut body, model);
-            if index + 1 != models.len() {
-                body.push_str("\n\n");
-            }
-        }
+        body.push_str(&model_fragments.body);
     }
 
     if !variants.is_empty() {
@@ -2754,7 +2909,12 @@ fn render_models_module(
         }
     }
 
-    render_nexus_type_registrations(&mut body, models);
+    if !model_fragments.registrations.is_empty() {
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str(&model_fragments.registrations);
+    }
 
     let mut output = String::new();
     render_generated_file_header(&mut output);
@@ -2775,22 +2935,6 @@ fn render_models_module(
     }
 
     output
-}
-
-fn render_nexus_type_registrations(output: &mut String, models: &[&RenderedModel]) {
-    if !models.iter().any(|model| model.native) {
-        return;
-    }
-    if !output.is_empty() {
-        output.push_str("\n\n");
-    }
-    for model in models.iter().filter(|model| model.native) {
-        output.push_str("nex_gen_runtime.register_nexus_type(");
-        output.push_str(&model.name);
-        output.push_str(", ");
-        output.push_str(&python_string_literal(&model.full_name));
-        output.push_str(")\n");
-    }
 }
 
 fn render_resources_package_init(services: &[RenderedService<'_>]) -> String {
@@ -3233,7 +3377,14 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
     output.push_str("class ");
     output.push_str(service.name);
     output.push_str(":\n");
-    render_python_docstring(output, "    ", None, &[], None, service.experimental);
+    render_python_docstring(
+        output,
+        "    ",
+        service.doc.as_deref(),
+        &[],
+        None,
+        service.experimental,
+    );
 
     if service.operations.is_empty() {
         if !service.experimental {
@@ -3261,6 +3412,9 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
         output.push_str("    ] = Operation(name=");
         output.push_str(&python_string_literal(operation.wire_name));
         output.push_str(")\n");
+        if service.doc.is_some() {
+            render_python_docstring(output, "    ", operation.doc.as_deref(), &[], None, false);
+        }
 
         if operation_index + 1 != service.operations.len() {
             output.push('\n');
@@ -3340,53 +3494,6 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
         output.push_str("\n)");
     }
     output.push('\n');
-}
-
-fn render_model(output: &mut String, model: &RenderedModel) {
-    if model_needs_keyword_only_dataclass(model) {
-        output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
-    } else {
-        output.push_str("@dataclasses.dataclass(slots=True)\n");
-    }
-    output.push_str("class ");
-    output.push_str(&model.name);
-    output.push_str(":\n");
-    render_python_docstring(output, "    ", None, &[], None, model.experimental);
-
-    if model.fields.is_empty() {
-        if !python_proto::render_model_proto_methods(output, model) {
-            output.push_str("    pass\n");
-        }
-        return;
-    }
-
-    for field in &model.fields {
-        output.push_str("    ");
-        output.push_str(&field.attr_name);
-        output.push_str(": ");
-        output.push_str(&python_parameter_annotation(
-            &field.annotation,
-            &field.default_kind,
-        ));
-        if let Some(default_expr) = &field.default_expr {
-            render_python_default_expr(output, default_expr, "    ");
-        }
-        output.push('\n');
-    }
-
-    python_proto::render_model_proto_methods(output, model);
-}
-
-fn model_needs_keyword_only_dataclass(model: &RenderedModel) -> bool {
-    let mut saw_defaulted_field = false;
-    for field in &model.fields {
-        if field.default_expr.is_some() {
-            saw_defaulted_field = true;
-        } else if saw_defaulted_field {
-            return true;
-        }
-    }
-    false
 }
 
 fn render_resource(
@@ -3609,6 +3716,7 @@ fn python_resource_value_annotation(value: &PlannedType) -> String {
             .as_ref()
             .and_then(python_proto::python_replacement_type_name)
             .unwrap_or_else(|| proto.model_name.clone()),
+        PlannedType::External(ExternalTypeSpec::Json(json_type)) => json_type.model_name.clone(),
         PlannedType::Record(record) => record.model_name.clone(),
         PlannedType::Resource(resource) => resource.type_name.clone(),
         PlannedType::Option(inner) | PlannedType::List(inner) => {
@@ -4931,7 +5039,7 @@ fn render_operation_docstring(
     );
 }
 
-fn render_python_docstring(
+pub(in crate::generator) fn render_python_docstring(
     output: &mut String,
     indent: &str,
     summary: Option<&str>,
@@ -5476,7 +5584,11 @@ fn python_parameter_default_expr(default_kind: &PythonFieldDefaultKind) -> Optio
     }
 }
 
-fn render_python_default_expr(output: &mut String, default_expr: &str, indent: &str) {
+pub(in crate::generator) fn render_python_default_expr(
+    output: &mut String,
+    default_expr: &str,
+    indent: &str,
+) {
     if default_expr.chars().count() <= 48 {
         output.push_str(" = ");
         output.push_str(default_expr);
@@ -5492,7 +5604,10 @@ fn render_python_default_expr(output: &mut String, default_expr: &str, indent: &
     output.push(')');
 }
 
-fn python_parameter_annotation(annotation: &str, default_kind: &PythonFieldDefaultKind) -> String {
+pub(in crate::generator) fn python_parameter_annotation(
+    annotation: &str,
+    default_kind: &PythonFieldDefaultKind,
+) -> String {
     if matches!(
         default_kind,
         PythonFieldDefaultKind::EmptyList | PythonFieldDefaultKind::EmptyDict
@@ -5522,7 +5637,7 @@ fn python_ident(name: &str) -> String {
     }
 }
 
-fn python_string_literal(value: &str) -> String {
+pub(in crate::generator) fn python_string_literal(value: &str) -> String {
     format!("{value:?}")
 }
 

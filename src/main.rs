@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use nex_gen::language::Language;
 use nex_gen::parser::write_prepared_wit_directory;
 use nex_gen::{
     AddRpcRequest, BuildExamplesRequest, GenerateRequest, add_rpc_to_file, build_examples,
-    generate_to_file,
+    build_json_examples, generate_to_file,
 };
 
 #[derive(Parser)]
@@ -22,6 +22,8 @@ enum Commands {
     Generate(GenerateArgs),
     #[command(about = "Rebuild the checked-in Python and TypeScript example outputs")]
     BuildExamples(BuildExamplesArgs),
+    #[command(about = "Rebuild the checked-in JSON schema example outputs")]
+    BuildJsonExamples(BuildExamplesArgs),
     #[command(
         about = "Add an RPC scaffold to an existing WIT file, or generate standalone WIT for one RPC"
     )]
@@ -44,6 +46,8 @@ struct GenerateArgs {
     output: PathBuf,
     #[arg(long)]
     format: bool,
+    #[arg(long = "no-native-api", action = ArgAction::SetFalse, default_value_t = true)]
+    generate_native_api: bool,
 }
 
 #[derive(Args)]
@@ -119,8 +123,13 @@ fn main() -> ExitCode {
             descriptor_paths: args.descriptors,
             output_path: args.output,
             format: args.format,
+            generate_native_api: args.generate_native_api,
         }),
         Commands::BuildExamples(args) => build_examples(&BuildExamplesRequest {
+            languages: args.langs.into_iter().map(Language::from).collect(),
+            example_ids: args.example_ids,
+        }),
+        Commands::BuildJsonExamples(args) => build_json_examples(&BuildExamplesRequest {
             languages: args.langs.into_iter().map(Language::from).collect(),
             example_ids: args.example_ids,
         }),

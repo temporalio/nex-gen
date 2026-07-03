@@ -142,6 +142,42 @@ fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: 
     assert!(format_status.success());
 }
 
+fn generate_formatted_json_python_output(root: &Path, example_id: &str, output_path: &Path) {
+    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args([
+            "generate",
+            "--lang",
+            "python",
+            "--input",
+            root.join("examples/json-inputs")
+                .join(format!("{example_id}.yaml"))
+                .to_str()
+                .unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+            "--no-native-api",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let format_status = Command::new("uv")
+        .current_dir(python_root(root))
+        .args([
+            "run",
+            "ruff",
+            "format",
+            "--line-length",
+            "88",
+            "--config",
+            "pyproject.toml",
+            output_path.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+}
+
 fn assert_python_310_syntax_compatible(package_dir: &Path) {
     let checker = r#"
 import ast
@@ -192,6 +228,18 @@ fn python_examples_generation_matches_checked_in_output() {
 }
 
 #[test]
+fn python_json_example_generation_matches_checked_in_output() {
+    let root = project_root();
+    let output_path = unique_output_path("python-json-chat");
+    generate_formatted_json_python_output(&root, "chat", &output_path);
+    assert_python_310_syntax_compatible(&output_path);
+    let rendered = read_python_package_files(&output_path);
+    let expected = read_python_package_files(&python_output_path(&root, "chat"));
+    assert_eq!(rendered, expected);
+    fs::remove_dir_all(output_path).unwrap();
+}
+
+#[test]
 fn cli_generates_wit_direct_example_without_descriptors() {
     let root = project_root();
     let output_path = unique_output_path("python-user-service-no-descriptors");
@@ -216,6 +264,63 @@ fn cli_generates_wit_direct_example_without_descriptors() {
     assert!(output_path.join("__init__.py").is_file());
     assert!(output_path.join("models.py").is_file());
     fs::remove_dir_all(output_path).unwrap();
+}
+
+#[test]
+fn cli_generates_definitions_without_native_api_or_endpoint() {
+    let temp_dir = unique_output_path("python-definitions-only");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("input.wit");
+    let output_path = temp_dir.join("output");
+    fs::write(
+        &input_path,
+        r#"
+package temporal:example@1.0.0;
+
+world system {
+  export example-service;
+}
+
+interface example-service {
+  record request {
+    name: string,
+  }
+
+  record response {
+    message: string,
+  }
+
+  example-operation: func(request: request) -> response;
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args([
+            "generate",
+            "--lang",
+            "python",
+            "--input",
+            input_path.to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+            "--no-native-api",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output_path.join("__init__.py").is_file());
+    assert!(output_path.join("models.py").is_file());
+    assert!(output_path.join("service.py").is_file());
+    assert!(!output_path.join("operations/example_operation.py").exists());
+
+    fs::remove_dir_all(temp_dir).unwrap();
 }
 
 #[test]
