@@ -58,7 +58,7 @@ func (s *TypeRoundtripTestSuite) TestRetryPolicyOperation() {
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*temporal.RetryPolicy, error) {
-		return tr.RetryPolicyOperation(ctx, policy)
+		return getFutureResult[temporal.RetryPolicy](ctx, tr.RetryPolicyOperation(ctx, policy))
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -99,11 +99,14 @@ func (s *TypeRoundtripTestSuite) TestActivityOptionsOperation() {
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*tr.ActivityOptions, error) {
-		return tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{
-			TaskQueue:              ptr("demo-task-queue"),
-			ScheduleToCloseTimeout: ptr(7 * time.Second),
-			Priority:               &priority,
-		})
+		return getFutureResult[tr.ActivityOptions](
+			ctx,
+			tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{
+				TaskQueue:              ptr("demo-task-queue"),
+				ScheduleToCloseTimeout: ptr(7 * time.Second),
+				Priority:               &priority,
+			}),
+		)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -159,7 +162,7 @@ func (s *TypeRoundtripIntegrationSuite) TestRetryPolicyOperation() {
 	policy := temporal.RetryPolicy{MaximumAttempts: 3}
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*temporal.RetryPolicy, error) {
-		return tr.RetryPolicyOperation(ctx, policy)
+		return getFutureResult[temporal.RetryPolicy](ctx, tr.RetryPolicyOperation(ctx, policy))
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -183,11 +186,14 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperation() {
 	}
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*tr.ActivityOptions, error) {
-		return tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{
-			TaskQueue:              ptr("demo-task-queue"),
-			ScheduleToCloseTimeout: ptr(7 * time.Second),
-			Priority:               &priority,
-		})
+		return getFutureResult[tr.ActivityOptions](
+			ctx,
+			tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{
+				TaskQueue:              ptr("demo-task-queue"),
+				ScheduleToCloseTimeout: ptr(7 * time.Second),
+				Priority:               &priority,
+			}),
+		)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -217,7 +223,10 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperationRequiredOnly
 	policy := temporal.RetryPolicy{MaximumAttempts: 5}
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*tr.ActivityOptions, error) {
-		return tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{})
+		return getFutureResult[tr.ActivityOptions](
+			ctx,
+			tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{}),
+		)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())

@@ -18,6 +18,7 @@
 package functionexecution
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -309,4 +310,44 @@ func versioningOverrideToProto(_ workflow.Context, versioningOverride *client.Ve
 
 func workflowNamespace() string {
 	return ""
+}
+
+type nexGenNexusOperationFuture struct {
+	operation workflow.NexusOperationFuture
+	result    workflow.Future
+	execution workflow.Future
+	get       func(workflow.Context, any) error
+}
+
+func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
+	if f.get != nil {
+		return f.get(ctx, valuePtr)
+	}
+	return f.result.Get(ctx, valuePtr)
+}
+
+func (f *nexGenNexusOperationFuture) IsReady() bool {
+	if f.operation != nil {
+		return f.operation.IsReady()
+	}
+	return f.result.IsReady()
+}
+
+func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
+	if f.operation != nil {
+		return f.operation.GetNexusOperationExecution()
+	}
+	return f.execution
+}
+
+func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
+	result, resultSettable := workflow.NewFuture(ctx)
+	resultSettable.SetError(err)
+	execution, executionSettable := workflow.NewFuture(ctx)
+	executionSettable.SetError(err)
+	return &nexGenNexusOperationFuture{result: result, execution: execution}
+}
+
+func nexGenFutureResultTypeError() error {
+	return errors.New("nex-gen future result pointer has unexpected type")
 }

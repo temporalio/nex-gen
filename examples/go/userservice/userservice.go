@@ -28,41 +28,33 @@ type User struct {
 	Email string
 }
 
-func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error) {
+func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.NexusOperationFuture {
 	return updateEmail(ctx, updateEmailRequest{UserId: u.UserId, Email: email})
 }
 
 // --- Operations (internal) ---
 
-func getUser(ctx workflow.Context, request getUserRequest) (*User, error) {
+func getUser(ctx workflow.Context, request getUserRequest) workflow.NexusOperationFuture {
 	c := workflow.NewNexusClient("user-service", "UserService")
 	fut := c.ExecuteOperation(ctx, "GetUser", request, workflow.NexusOperationOptions{})
-	var result User
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	return fut
 }
 
-func updateEmail(ctx workflow.Context, request updateEmailRequest) (*User, error) {
+func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.NexusOperationFuture {
 	c := workflow.NewNexusClient("user-service", "UserService")
 	fut := c.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
-	var result User
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	return fut
 }
 
 // --- Operations (public API) ---
 
-func GetUser(ctx workflow.Context, userId string) (*User, error) {
+func GetUser(ctx workflow.Context, userId string) workflow.NexusOperationFuture {
 	return getUser(ctx, getUserRequest{
 		UserId: userId,
 	})
 }
 
-func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error) {
+func UpdateEmail(ctx workflow.Context, userId string, email string) workflow.NexusOperationFuture {
 	return updateEmail(ctx, updateEmailRequest{
 		UserId: userId,
 		Email:  email,

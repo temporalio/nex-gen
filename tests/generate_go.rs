@@ -214,7 +214,7 @@ fn cli_generates_go_with_package_self_imports_removed() {
     let api = fs::read_to_string(output_path.join("userservice.go")).unwrap();
     assert!(api.contains("package workflow\n"));
     assert!(!api.contains("\"go.temporal.io/sdk/workflow\""));
-    assert!(api.contains("func getUser(ctx Context, request getUserRequest) (*User, error)"));
+    assert!(api.contains("func getUser(ctx Context, request getUserRequest) NexusOperationFuture"));
     assert!(api.contains("c := NewNexusClient(\"user-service\", \"UserService\")"));
     assert!(!api.contains("const ServiceName"));
     assert!(!api.contains("const Endpoint"));
@@ -390,14 +390,17 @@ interface sample-service {
 
     assert!(rendered.contains("\"example.com/nexgen/handles\""));
     assert!(rendered.contains(
-        "func getHandle(ctx workflow.Context, request transformRequest) (handles.ValueHandle, error) {"
+        "func getHandle(ctx workflow.Context, request transformRequest) workflow.NexusOperationFuture {"
     ));
+    assert!(rendered.contains("return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {"));
     assert!(rendered.contains("\tvar result transformResponse\n"));
-    assert!(rendered.contains("\tif err := fut.Get(ctx, &result); err != nil {\n"));
-    assert!(rendered.contains("\t\tvar zero handles.ValueHandle\n\t\treturn zero, err\n"));
-    assert!(rendered.contains("\treturn handles.NewValueHandle(request.Id, result.Value)\n"));
+    assert!(rendered.contains("\t\tif err := fut.Get(ctx, &result); err != nil {\n"));
+    assert!(
+        rendered.contains("\t\tvalue, err := handles.NewValueHandle(request.Id, result.Value)\n")
+    );
+    assert!(rendered.contains("\t\t*typedValue = value\n"));
     assert!(rendered.contains(
-        "func GetHandle(ctx workflow.Context, id string) (handles.ValueHandle, error) {"
+        "func GetHandle(ctx workflow.Context, id string) workflow.NexusOperationFuture {"
     ));
     fs::remove_dir_all(temp_dir).unwrap();
 }
@@ -440,11 +443,15 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!service_rendered.contains("\"strings\""));
     assert!(service_rendered.contains("\"errors\""));
     assert!(!service_rendered.contains("func nexGenFunctionName[F any](value F) string"));
+    assert!(!service_rendered.contains("type nexGenNexusOperationFuture struct"));
     assert!(support_rendered.contains("\"reflect\""));
     assert!(support_rendered.contains("\"runtime\""));
     assert!(support_rendered.contains("\"strings\""));
+    assert!(support_rendered.contains("\"errors\""));
     assert!(support_rendered.contains("func nexGenFunctionName[F any](value F) string"));
     assert!(support_rendered.contains("return strings.TrimSuffix(shortName, \"-fm\")"));
+    assert!(support_rendered.contains("type nexGenNexusOperationFuture struct"));
+    assert!(support_rendered.contains("func nexGenFailedNexusOperationFuture"));
 
     // Internal request structs remain wire-shaped.
     assert!(
@@ -478,7 +485,7 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     // normal wire-compatible type.
     assert!(rendered.contains("type ExecuteVarargsFunctionOptions struct {\n\t// Arguments for the function.\n\tArgs []string\n}"));
     assert!(rendered.contains(
-        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }](ctx workflow.Context, function FunctionF, opts ExecuteVarargsFunctionOptions) (*ExecuteVarargsFunctionResult, error) {"
+        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }](ctx workflow.Context, function FunctionF, opts ExecuteVarargsFunctionOptions) workflow.NexusOperationFuture {"
     ));
     assert!(rendered.contains("\t\tArgs: opts.Args,\n"));
 
@@ -492,10 +499,16 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     ));
     assert!(rendered.contains("\targs ...string,\n"));
     assert!(rendered.contains(
-        "\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nil, errors.New(\"cannot specify both positional arguments and args\")\n\t}\n"
+        "\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nexGenFailedNexusOperationFuture(ctx, errors.New(\"cannot specify both positional arguments and args\"))\n\t}\n"
     ));
     assert!(rendered.contains("\tif len(args) == 0 {\n\t\targs = opts.Args\n\t}\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
+    assert!(rendered.contains(
+        "// Input name: The name argument for the function.\n// Input enabled: The enabled argument for the function.\nfunc ExecuteFunction"
+    ));
+    assert!(rendered.contains(
+        "// Input args: Arguments for the function.\nfunc ExecuteVarargsFunctionWithArgs"
+    ));
 
     let user_rendered = generate_to_string_with_inputs(
         nex_gen::language::Language::Go,
@@ -641,27 +654,26 @@ fn go_type_showcase_generates_expected_types() {
     // Resource methods
     assert!(
         rendered.contains(
-            "func (u *User) UpdateEmail(ctx workflow.Context, email string) (*User, error)"
+            "func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.NexusOperationFuture"
         )
     );
     assert!(rendered.contains("updateEmailRequest{UserId: u.UserId, Email: email}"));
     assert!(rendered.contains(
-        "func (u *User) Rename(ctx workflow.Context, displayName string) (*User, error)"
+        "func (u *User) Rename(ctx workflow.Context, displayName string) workflow.NexusOperationFuture"
     ));
     assert!(rendered.contains("renameRequest{UserId: u.UserId, DisplayName: displayName}"));
     // Void resource method -- optional param is a pointer.
     assert!(
-        rendered.contains("func (u *User) Deactivate(ctx workflow.Context, reason *string) error")
+        rendered.contains("func (u *User) Deactivate(ctx workflow.Context, reason *string) workflow.NexusOperationFuture")
     );
     assert!(rendered.contains("deactivateRequest{UserId: u.UserId, Reason: reason}"));
 
     // Unexported operation wrapper functions
-    assert!(
-        rendered
-            .contains("func getUser(ctx workflow.Context, request getUserRequest) (*User, error)")
-    );
     assert!(rendered.contains(
-        "func updateEmail(ctx workflow.Context, request updateEmailRequest) (*User, error)"
+        "func getUser(ctx workflow.Context, request getUserRequest) workflow.NexusOperationFuture"
+    ));
+    assert!(rendered.contains(
+        "func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.NexusOperationFuture"
     ));
     assert!(rendered.contains("workflow.NewNexusClient(\"type-showcase\", \"TypeShowcase\")"));
     assert!(rendered.contains(
@@ -669,13 +681,13 @@ fn go_type_showcase_generates_expected_types() {
     ));
     // Void operation
     assert!(
-        rendered.contains("func deactivate(ctx workflow.Context, request deactivateRequest) error")
+        rendered.contains("func deactivate(ctx workflow.Context, request deactivateRequest) workflow.NexusOperationFuture")
     );
-    assert!(rendered.contains("return fut.Get(ctx, nil)"));
+    assert!(rendered.contains("\treturn fut\n"));
 
     // Exported convenience wrappers -- all required fields become positional args
     assert!(rendered.contains(
-        "func UpdateEmail(ctx workflow.Context, userId string, email string) (*User, error)"
+        "func UpdateEmail(ctx workflow.Context, userId string, email string) workflow.NexusOperationFuture"
     ));
     // The request struct is always constructed across multiple lines.
     assert!(rendered.contains("updateEmailRequest{\n\t\tUserId: userId,\n\t\tEmail: email,\n\t}"));
@@ -683,7 +695,7 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("type GetUserOptions struct"));
     assert!(rendered.contains("ConsistencyToken *string"));
     assert!(rendered.contains(
-        "func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) (*User, error)"
+        "func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) workflow.NexusOperationFuture"
     ));
     assert!(rendered.contains(
         "getUserRequest{\n\t\tUserId: userId,\n\t\tConsistencyToken: opts.ConsistencyToken,\n\t}"
@@ -691,7 +703,7 @@ fn go_type_showcase_generates_expected_types() {
     // Void convenience wrapper with options
     assert!(rendered.contains("type DeactivateOptions struct"));
     assert!(rendered.contains(
-        "func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) error"
+        "func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) workflow.NexusOperationFuture"
     ));
 }
 
@@ -741,7 +753,7 @@ fn go_type_roundtrip_generates_proto_conversions() {
         rendered.contains("converted, err := retryPolicyFromProto(ctx, proto.GetRetryPolicy())")
     );
     assert!(rendered.contains("value.RetryPolicy = *converted"));
-    assert!(rendered.contains("return value, nil"));
+    assert!(rendered.contains("\t\t*typedValue = *value\n"));
 
     // Operation functions convert the request to proto before the SDK call and
     // decode the proto response afterwards.
@@ -786,7 +798,9 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     .unwrap();
 
     assert!(rendered.contains("\trequestProto, err := request.toProto(ctx)\n"));
-    assert!(rendered.contains("\tif err != nil {\n\t\treturn nil, err\n\t}\n"));
+    assert!(rendered.contains(
+        "\tif err != nil {\n\t\treturn nexGenFailedNexusOperationFuture(ctx, err)\n\t}\n"
+    ));
     assert!(rendered.contains(
         "fut := c.ExecuteOperation(ctx, \"StartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
@@ -806,7 +820,7 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     assert!(rendered.contains(
         "func RestartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }]("
     ));
-    assert!(rendered.contains("\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nil, errors.New(\"cannot specify both positional arguments and args\")\n\t}\n"));
+    assert!(rendered.contains("\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nexGenFailedNexusOperationFuture(ctx, errors.New(\"cannot specify both positional arguments and args\"))\n\t}\n"));
     assert!(rendered.contains("\tif len(args) == 0 {\n\t\targs = opts.Args\n\t}\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
 }
@@ -960,7 +974,7 @@ interface doc-service {
     // Operation docs render on the exported convenience wrapper, with the
     // `returns=` text in a separate paragraph.
     assert!(rendered.contains(
-        "// Greets the given person.\n//\n// Returns: The rendered greeting.\nfunc Greet("
+        "// Greets the given person.\n//\n// Input name: Name of the person to greet.\n//\n// Returns: The rendered greeting.\nfunc Greet("
     ));
 
     fs::remove_dir_all(temp_dir).unwrap();

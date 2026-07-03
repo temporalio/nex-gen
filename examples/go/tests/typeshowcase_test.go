@@ -64,7 +64,7 @@ func sampleSyncReport() typeshowcase.SyncReport {
 
 func (s *TypeShowcaseIntegrationSuite) TestRecordSync() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
-		return typeshowcase.RecordSync(ctx, "user-123", sampleSyncReport())
+		return typeshowcase.RecordSync(ctx, "user-123", sampleSyncReport()).Get(ctx, nil)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())

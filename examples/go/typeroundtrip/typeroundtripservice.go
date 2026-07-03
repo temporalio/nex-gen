@@ -12,40 +12,62 @@ import (
 
 // --- Operations (internal) ---
 
-func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
+func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) workflow.NexusOperationFuture {
 	requestProto, err := retryPolicyToProto(ctx, &request)
 	if err != nil {
-		return nil, err
+		return nexGenFailedNexusOperationFuture(ctx, err)
 	}
 	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
 	fut := c.ExecuteOperation(ctx, "RetryPolicyOperation", requestProto, workflow.NexusOperationOptions{})
-	var result common.RetryPolicy
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	value, err := retryPolicyFromProto(ctx, &result)
-	if err != nil {
-		return nil, err
-	}
-	return value, nil
+	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+		if valuePtr == nil {
+			return fut.Get(ctx, nil)
+		}
+		var result common.RetryPolicy
+		if err := fut.Get(ctx, &result); err != nil {
+			return err
+		}
+		value, err := retryPolicyFromProto(ctx, &result)
+		if err != nil {
+			return err
+		}
+		typedValue, ok := valuePtr.(*temporal.RetryPolicy)
+		if !ok {
+			return nexGenFutureResultTypeError()
+		}
+		if value != nil {
+			*typedValue = *value
+		}
+		return nil
+	}}
 }
 
-func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*ActivityOptions, error) {
+func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) workflow.NexusOperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nil, err
+		return nexGenFailedNexusOperationFuture(ctx, err)
 	}
 	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
 	fut := c.ExecuteOperation(ctx, "ActivityOptionsOperation", requestProto, workflow.NexusOperationOptions{})
-	var result activity.ActivityOptions
-	if err := fut.Get(ctx, &result); err != nil {
-		return nil, err
-	}
-	value, err := activityOptionsFromProto(ctx, &result)
-	if err != nil {
-		return nil, err
-	}
-	return &value, nil
+	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+		if valuePtr == nil {
+			return fut.Get(ctx, nil)
+		}
+		var result activity.ActivityOptions
+		if err := fut.Get(ctx, &result); err != nil {
+			return err
+		}
+		value, err := activityOptionsFromProto(ctx, &result)
+		if err != nil {
+			return err
+		}
+		typedValue, ok := valuePtr.(*ActivityOptions)
+		if !ok {
+			return nexGenFutureResultTypeError()
+		}
+		*typedValue = value
+		return nil
+	}}
 }
 
 // --- Operations (public API) ---
@@ -126,7 +148,7 @@ func activityOptionsFromProto(ctx workflow.Context, proto *activity.ActivityOpti
 	return value, nil
 }
 
-func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
+func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) workflow.NexusOperationFuture {
 	return retryPolicyOperation(ctx, request)
 }
 
@@ -136,7 +158,7 @@ type ActivityOptionsOperationOptions struct {
 	Priority               *temporal.Priority
 }
 
-func ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ActivityOptionsOperationOptions) (*ActivityOptions, error) {
+func ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ActivityOptionsOperationOptions) workflow.NexusOperationFuture {
 	return activityOptionsOperation(ctx, ActivityOptions{
 		TaskQueue:              opts.TaskQueue,
 		RetryPolicy:            retryPolicy,
