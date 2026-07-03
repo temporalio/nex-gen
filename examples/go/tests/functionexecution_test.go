@@ -15,6 +15,21 @@ import (
 
 const functionExecutionServiceName = "FunctionExecution"
 
+func validFunction(name string, enabled bool) string {
+	return name
+}
+
+func validCountedFunction(name string, count int32) string {
+	return name
+}
+
+func validVarargsFunction(args ...string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return args[0]
+}
+
 // --- Mock tests ---
 
 type FunctionExecutionTestSuite struct {
@@ -49,7 +64,7 @@ func (s *FunctionExecutionTestSuite) TestExecuteFunction() {
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
-		return functionexecution.ExecuteFunction(ctx, "valid-function", "one", true)
+		return functionexecution.ExecuteFunction(ctx, validFunction, "one", true)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -181,7 +196,7 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteFunction() {
 
 func (s *FunctionExecutionIntegrationSuite) TestExecuteCountedFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteCountedFunctionResult, error) {
-		return functionexecution.ExecuteCountedFunction(ctx, "valid-counted-function", "one", 7)
+		return functionexecution.ExecuteCountedFunction(ctx, validCountedFunction, "one", 7)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -196,7 +211,7 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteCountedFunction() {
 
 func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteNamedFunctionResult, error) {
-		return functionexecution.ExecuteNamedFunction(ctx, "named-function", "one", true)
+		return functionexecution.ExecuteNamedFunction(ctx, validFunction, "one", true)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -213,7 +228,7 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteVarargsFunctionResult, error) {
 		return functionexecution.ExecuteVarargsFunction(
 			ctx,
-			"valid-varargs-function",
+			validVarargsFunction,
 			functionexecution.ExecuteVarargsFunctionOptions{Args: []string{"one", "two"}},
 		)
 	})

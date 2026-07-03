@@ -416,6 +416,96 @@ fn go_examples_generation_matches_checked_in_output() {
 }
 
 #[test]
+fn go_function_fields_accept_strings_or_exact_function_pointers() {
+    let root = project_root();
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &example_input_paths(&root, "function-execution"),
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
+
+    let service_rendered = rendered
+        .split("### functionexecution.go")
+        .nth(1)
+        .and_then(|contents| contents.split("### model_overrides.go").next())
+        .expect("functionexecution.go should be rendered");
+    let support_rendered = rendered
+        .split("### model_overrides.go")
+        .nth(1)
+        .expect("model_overrides.go should be rendered");
+
+    assert!(!service_rendered.contains("\"reflect\""));
+    assert!(!service_rendered.contains("\"runtime\""));
+    assert!(!service_rendered.contains("\"strings\""));
+    assert!(!service_rendered.contains("func nexGenFunctionName[F any](value F) string"));
+    assert!(support_rendered.contains("\"reflect\""));
+    assert!(support_rendered.contains("\"runtime\""));
+    assert!(support_rendered.contains("\"strings\""));
+    assert!(support_rendered.contains("func nexGenFunctionName[F any](value F) string"));
+    assert!(support_rendered.contains("return strings.TrimSuffix(shortName, \"-fm\")"));
+
+    // Internal request structs remain wire-shaped.
+    assert!(
+        rendered
+            .contains("type executeFunctionRequest struct {\n\t// Required.\n\tFunction string")
+    );
+    assert!(
+        rendered.contains(
+            "type executeNamedFunctionRequest struct {\n\t// Required.\n\tFunction string"
+        )
+    );
+
+    // Required public function fields accept either a string name or the exact
+    // WIT-derived Go function signature.
+    assert!(rendered.contains(
+        "func ExecuteFunction[FunctionF interface{ ~string | func(string, bool) string }]("
+    ));
+    assert!(rendered.contains(
+        "func ExecuteCountedFunction[FunctionF interface{ ~string | func(string, int32) string }]("
+    ));
+    assert!(rendered.contains(
+        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }]"
+    ));
+    assert!(rendered.contains("\tfunction FunctionF,\n"));
+    assert!(rendered.contains("\t\tFunction: nexGenFunctionName(function),\n"));
+
+    // Optional function-adjacent args stay in the options struct with their
+    // normal wire-compatible type.
+    assert!(rendered.contains("type ExecuteVarargsFunctionOptions struct {\n\t// Arguments for the function.\n\tArgs []string\n}"));
+
+    let user_rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &[input_path(&root, "user-service")],
+        &[],
+    )
+    .unwrap();
+    assert!(!user_rendered.contains("nexGenFunctionName"));
+    assert!(!user_rendered.contains("\"reflect\""));
+    assert!(!user_rendered.contains("\"runtime\""));
+    assert!(!user_rendered.contains("\"strings\""));
+}
+
+#[test]
+fn go_temporal_function_constraints_use_workflow_context_prefix() {
+    let root = project_root();
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &example_input_paths(&root, "workflow-service"),
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
+
+    assert!(rendered.contains(
+        "func SignalWithStartWorkflow[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }, SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
+    ));
+    assert!(rendered.contains("\tworkflow WorkflowF,\n"));
+    assert!(rendered.contains("\tsignal SignalF,\n"));
+    assert!(rendered.contains("\t\tWorkflow: nexGenFunctionName(workflow),\n"));
+    assert!(rendered.contains("\t\tSignal: nexGenFunctionName(signal),\n"));
+}
+
+#[test]
 fn go_type_showcase_generates_expected_types() {
     let root = project_root();
     let rendered = generate_to_string_with_inputs(

@@ -215,15 +215,17 @@ type StartWorkflowOptions struct {
 	WorkflowStartDelay *time.Duration
 }
 
-func StartWorkflow(
+func StartWorkflow[WorkflowF interface {
+	~string | func(workflow.Context, ...any) any
+}](
 	ctx workflow.Context,
-	workflow string,
+	workflow WorkflowF,
 	workflowId string,
 	taskQueue string,
 	opts StartWorkflowOptions,
 ) (*StartedWorkflow, error) {
 	return startWorkflow(ctx, startWorkflowRequest{
-		Workflow:           workflow,
+		Workflow:           nexGenFunctionName(workflow),
 		Args:               opts.Args,
 		WorkflowId:         workflowId,
 		TaskQueue:          taskQueue,
@@ -237,15 +239,17 @@ type RestartWorkflowOptions struct {
 	WorkflowStartDelay *time.Duration
 }
 
-func RestartWorkflow(
+func RestartWorkflow[WorkflowF interface {
+	~string | func(workflow.Context, ...any) any
+}](
 	ctx workflow.Context,
-	workflow string,
+	workflow WorkflowF,
 	workflowId string,
 	taskQueue string,
 	opts RestartWorkflowOptions,
 ) (*StartedWorkflow, error) {
 	return restartWorkflow(ctx, startWorkflowRequest{
-		Workflow:           workflow,
+		Workflow:           nexGenFunctionName(workflow),
 		Args:               opts.Args,
 		WorkflowId:         workflowId,
 		TaskQueue:          taskQueue,

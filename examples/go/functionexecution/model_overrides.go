@@ -19,6 +19,9 @@ package functionexecution
 
 import (
 	"fmt"
+	"reflect"
+	"runtime"
+	"strings"
 	"time"
 
 	common "go.temporal.io/api/common/v1"
@@ -32,6 +35,21 @@ import (
 	"go.temporal.io/sdk/workflow"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
+
+func nexGenFunctionName[F any](value F) string {
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.String:
+		return rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		return strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
+}
 
 // --- Duration (google.protobuf.Duration) ---
 

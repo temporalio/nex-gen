@@ -302,20 +302,24 @@ type SignalWithStartWorkflowOptions struct {
 // Signal a workflow, starting it first if needed.
 //
 // Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflow(
+func SignalWithStartWorkflow[WorkflowF interface {
+	~string | func(workflow.Context, ...any) any
+}, SignalF interface {
+	~string | func(workflow.Context, ...any) any
+}](
 	ctx workflow.Context,
-	workflow string,
+	workflow WorkflowF,
 	id string,
 	taskQueue string,
-	signal string,
+	signal SignalF,
 	opts SignalWithStartWorkflowOptions,
 ) (*SignalWithStartWorkflowResponse, error) {
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
-		Workflow:           workflow,
+		Workflow:           nexGenFunctionName(workflow),
 		Args:               opts.Args,
 		Id:                 id,
 		TaskQueue:          taskQueue,
-		Signal:             signal,
+		Signal:             nexGenFunctionName(signal),
 		SignalArgs:         opts.SignalArgs,
 		ExecutionTimeout:   opts.ExecutionTimeout,
 		RunTimeout:         opts.RunTimeout,

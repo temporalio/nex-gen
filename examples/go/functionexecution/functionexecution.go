@@ -127,40 +127,46 @@ type ExecuteNamedVarargsFunctionResult struct {
 	Value string
 }
 
-func ExecuteFunction(
+func ExecuteFunction[FunctionF interface {
+	~string | func(string, bool) string
+}](
 	ctx workflow.Context,
-	function string,
+	function FunctionF,
 	name string,
 	enabled bool,
 ) (*ExecuteFunctionResult, error) {
 	return executeFunction(ctx, executeFunctionRequest{
-		Function: function,
+		Function: nexGenFunctionName(function),
 		Name:     name,
 		Enabled:  enabled,
 	})
 }
 
-func ExecuteCountedFunction(
+func ExecuteCountedFunction[FunctionF interface {
+	~string | func(string, int32) string
+}](
 	ctx workflow.Context,
-	function string,
+	function FunctionF,
 	name string,
 	count int32,
 ) (*ExecuteCountedFunctionResult, error) {
 	return executeCountedFunction(ctx, executeCountedFunctionRequest{
-		Function: function,
+		Function: nexGenFunctionName(function),
 		Name:     name,
 		Count:    count,
 	})
 }
 
-func ExecuteNamedFunction(
+func ExecuteNamedFunction[FunctionF interface {
+	~string | func(string, bool) string
+}](
 	ctx workflow.Context,
-	function string,
+	function FunctionF,
 	name string,
 	enabled bool,
 ) (*ExecuteNamedFunctionResult, error) {
 	return executeNamedFunction(ctx, executeNamedFunctionRequest{
-		Function: function,
+		Function: nexGenFunctionName(function),
 		Name:     name,
 		Enabled:  enabled,
 	})
@@ -171,9 +177,11 @@ type ExecuteVarargsFunctionOptions struct {
 	Args []string
 }
 
-func ExecuteVarargsFunction(ctx workflow.Context, function string, opts ExecuteVarargsFunctionOptions) (*ExecuteVarargsFunctionResult, error) {
+func ExecuteVarargsFunction[FunctionF interface {
+	~string | func(...string) string
+}](ctx workflow.Context, function FunctionF, opts ExecuteVarargsFunctionOptions) (*ExecuteVarargsFunctionResult, error) {
 	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
-		Function: function,
+		Function: nexGenFunctionName(function),
 		Args:     opts.Args,
 	})
 }
@@ -183,9 +191,11 @@ type ExecuteNamedVarargsFunctionOptions struct {
 	Args []string
 }
 
-func ExecuteNamedVarargsFunction(ctx workflow.Context, function string, opts ExecuteNamedVarargsFunctionOptions) (*ExecuteNamedVarargsFunctionResult, error) {
+func ExecuteNamedVarargsFunction[FunctionF interface {
+	~string | func(...string) string
+}](ctx workflow.Context, function FunctionF, opts ExecuteNamedVarargsFunctionOptions) (*ExecuteNamedVarargsFunctionResult, error) {
 	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
-		Function: function,
+		Function: nexGenFunctionName(function),
 		Args:     opts.Args,
 	})
 }

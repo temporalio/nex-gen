@@ -1,13 +1,14 @@
 # Examples
 
 Each example starts from an authored WIT file in `inputs/`. Generated output is
-checked in for .NET, Python, and TypeScript, with focused tests for the examples
-that exercise runtime or typechecking behavior.
+checked in for .NET, Go, Python, and TypeScript, with focused tests for the
+examples that exercise runtime or typechecking behavior.
 
 ## `function-execution`
 
 - WIT: [`inputs/function-execution.wit`](inputs/function-execution.wit)
 - .NET: [`dotnet/function-execution/`](dotnet/function-execution/)
+- Go: [`go/functionexecution/`](go/functionexecution/)
 - Python: [`python/function_execution/`](python/function_execution/)
 - TypeScript: [`typescript/function-execution/`](typescript/function-execution/)
 
@@ -15,6 +16,7 @@ that exercise runtime or typechecking behavior.
 
 - WIT: [`inputs/user-service.wit`](inputs/user-service.wit)
 - .NET: [`dotnet/user-service/`](dotnet/user-service/)
+- Go: [`go/userservice/`](go/userservice/), [`go/tests/userservice_test.go`](go/tests/userservice_test.go)
 - Python: [`python/user_service/`](python/user_service/), [`python/tests/test_user_service.py`](python/tests/test_user_service.py)
 - TypeScript: [`typescript/user-service/`](typescript/user-service/), [`typescript/tests/user-service.test.ts`](typescript/tests/user-service.test.ts)
 
@@ -22,6 +24,7 @@ that exercise runtime or typechecking behavior.
 
 - WIT: [`inputs/type-showcase.wit`](inputs/type-showcase.wit)
 - .NET: [`dotnet/type-showcase/`](dotnet/type-showcase/)
+- Go: [`go/typeshowcase/`](go/typeshowcase/), [`go/tests/typeshowcase_test.go`](go/tests/typeshowcase_test.go)
 - Python: [`python/type_showcase/`](python/type_showcase/), [`python/tests/test_type_showcase.py`](python/tests/test_type_showcase.py)
 - TypeScript: [`typescript/type-showcase/`](typescript/type-showcase/), [`typescript/tests/type-showcase.test.ts`](typescript/tests/type-showcase.test.ts)
 
@@ -29,6 +32,7 @@ that exercise runtime or typechecking behavior.
 
 - WIT: [`inputs/start-workflow.wit`](inputs/start-workflow.wit)
 - .NET: [`dotnet/start-workflow/`](dotnet/start-workflow/)
+- Go: [`go/startworkflow/`](go/startworkflow/)
 - Python: [`python/start_workflow/`](python/start_workflow/), [`python/tests/test_start_workflow.py`](python/tests/test_start_workflow.py)
 - TypeScript: [`typescript/start-workflow/`](typescript/start-workflow/), [`typescript/tests/start-workflow.test.ts`](typescript/tests/start-workflow.test.ts)
 
@@ -36,6 +40,7 @@ that exercise runtime or typechecking behavior.
 
 - WIT: [`inputs/workflow-service.wit`](inputs/workflow-service.wit)
 - .NET: [`dotnet/workflow-service/`](dotnet/workflow-service/)
+- Go: [`go/workflowservice/`](go/workflowservice/)
 - Python: [`python/workflow_service/`](python/workflow_service/), [`python/tests/test_workflow_service.py`](python/tests/test_workflow_service.py)
 - TypeScript: [`typescript/workflow-service/`](typescript/workflow-service/), [`typescript/tests/workflow-service.test.ts`](typescript/tests/workflow-service.test.ts)
 
@@ -43,6 +48,7 @@ that exercise runtime or typechecking behavior.
 
 - WIT: [`inputs/type-roundtrip.wit`](inputs/type-roundtrip.wit)
 - .NET: [`dotnet/type-roundtrip/`](dotnet/type-roundtrip/)
+- Go: [`go/typeroundtrip/`](go/typeroundtrip/), [`go/tests/typeroundtrip_test.go`](go/tests/typeroundtrip_test.go)
 - Python: [`python/type_roundtrip/`](python/type_roundtrip/), [`python/tests/test_type_roundtrip.py`](python/tests/test_type_roundtrip.py)
 - TypeScript: [`typescript/type-roundtrip/`](typescript/type-roundtrip/), [`typescript/tests/type-roundtrip.test.ts`](typescript/tests/type-roundtrip.test.ts)
 
