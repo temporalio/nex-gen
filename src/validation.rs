@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::generator::{python, typescript};
 use crate::language::Language;
 use crate::spec::{
-    ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, GeneratedModelSpec, RecordSpec,
+    ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, RecordFieldVisibility, RecordSpec,
     ServiceSpec, TypeSpec,
 };
 
@@ -20,29 +20,20 @@ struct MessageUsage {
 
 #[derive(Clone, Copy)]
 struct ModelConfig<'a> {
-    required_fields: &'a BTreeSet<String>,
-    omitted_fields: &'a BTreeSet<String>,
-    flatten_in_api: bool,
-    generated_model: &'a GeneratedModelSpec,
+    record: &'a RecordSpec,
 }
 
 impl<'a> ModelConfig<'a> {
     fn from_record(record: &'a RecordSpec) -> Self {
-        Self {
-            required_fields: &record.required_fields,
-            omitted_fields: &record.omitted_fields,
-            flatten_in_api: record.flatten_in_api,
-            generated_model: &record.generated_model,
-        }
+        Self { record }
     }
 
     fn is_field_omitted(&self, field_name: &str) -> bool {
-        self.omitted_fields.contains(field_name)
+        self.record.field_omitted(field_name)
     }
 
     fn is_field_hidden(&self, field_name: &str) -> bool {
-        self.omitted_fields.contains(field_name)
-            || self.generated_model.field_source(field_name).is_some()
+        self.record.field_omitted(field_name) || self.record.field_source(field_name).is_some()
     }
 }
 
@@ -151,42 +142,61 @@ fn validate_message_model_config(
     usage: MessageUsage,
     language: Language,
 ) -> Result<()> {
-    for field_name in model_config.required_fields {
+    for field_name in model_config
+        .record
+        .fields
+        .iter()
+        .filter(|(_, field)| field.required)
+        .map(|(field_name, _)| field_name)
+    {
         validate_model_required_field(message_name, field_name, message, descriptors)?;
     }
-    for field_name in model_config.omitted_fields {
+    for field_name in model_config
+        .record
+        .fields
+        .iter()
+        .filter(|(_, field)| field.visibility == RecordFieldVisibility::Omitted)
+        .map(|(field_name, _)| field_name)
+    {
         validate_model_override_field(message_name, field_name, message)?;
     }
-    for field_name in &model_config.generated_model.declared_fields {
+    for field_name in model_config.record.fields.keys() {
         validate_model_override_field(message_name, field_name, message)?;
     }
-    validate_generated_model_fields(message_name, model_config, message, usage, language)?;
+    validate_record_fields(message_name, model_config, message, usage, language)?;
     validate_authored_field_types(message_name, model_config, message, descriptors)?;
     validate_invocation_fields(message_name, model_config, message, descriptors, usage)?;
-    for field_name in model_config
-        .required_fields
-        .intersection(model_config.omitted_fields)
+    for (field_name, _) in
+        model_config.record.fields.iter().filter(|(_, field)| {
+            field.required && field.visibility == RecordFieldVisibility::Omitted
+        })
     {
         return Err(Error::ConflictingTypeOverrideField {
             message: message_name.to_string(),
-            field: (*field_name).clone(),
+            field: field_name.clone(),
         });
     }
 
     Ok(())
 }
 
-fn validate_generated_model_fields(
+fn validate_record_fields(
     message_name: &str,
     model_config: ModelConfig<'_>,
     message: &MessageMetadata,
     usage: MessageUsage,
     language: Language,
 ) -> Result<()> {
-    let generated_model = model_config.generated_model;
-    for field_name in generated_model.field_names.keys() {
+    for (field_name, field) in &model_config.record.fields {
         validate_model_override_field(message_name, field_name, message)?;
-        if model_config.omitted_fields.contains(field_name) {
+        if field.visibility == RecordFieldVisibility::Omitted
+            && (field.doc.is_some()
+                || field.annotation.is_some()
+                || field.flattened_annotation.is_some()
+                || field.default_value.is_some()
+                || field.function.is_some()
+                || matches!(field.visibility, RecordFieldVisibility::Sourced { .. }))
+        {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
@@ -194,9 +204,14 @@ fn validate_generated_model_fields(
         }
     }
 
-    for field_name in generated_model.field_annotations.keys() {
+    for (field_name, _) in model_config
+        .record
+        .fields
+        .iter()
+        .filter(|(_, field)| field.annotation.is_some())
+    {
         validate_model_override_field(message_name, field_name, message)?;
-        if model_config.omitted_fields.contains(field_name) {
+        if model_config.is_field_omitted(field_name) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
@@ -204,15 +219,20 @@ fn validate_generated_model_fields(
         }
     }
 
-    for field_name in generated_model.field_flattened_annotations.keys() {
+    for (field_name, _) in model_config
+        .record
+        .fields
+        .iter()
+        .filter(|(_, field)| field.flattened_annotation.is_some())
+    {
         validate_model_override_field(message_name, field_name, message)?;
-        if model_config.omitted_fields.contains(field_name) {
+        if model_config.is_field_omitted(field_name) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
             });
         }
-        if !model_config.flatten_in_api {
+        if !model_config.record.flatten_in_api {
             return Err(Error::InvalidTypeOverrideField {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
@@ -224,9 +244,9 @@ fn validate_generated_model_fields(
         }
     }
 
-    for field_name in generated_model.field_sources.keys() {
+    for (field_name, _, _) in model_config.record.sourced_fields() {
         validate_model_override_field(message_name, field_name, message)?;
-        if model_config.omitted_fields.contains(field_name) {
+        if model_config.is_field_omitted(field_name) {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
@@ -251,7 +271,7 @@ fn validate_generated_model_fields(
             .as_deref()
             .expect("descriptor fields should be named");
         if !model_config.is_field_omitted(proto_name)
-            && !generated_model.field_names.contains_key(proto_name)
+            && !model_config.record.fields.contains_key(proto_name)
         {
             return Err(Error::UndeclaredTypeOverrideField {
                 message: message_name.to_string(),
@@ -265,10 +285,7 @@ fn validate_generated_model_fields(
         let generated_name = field_name_for_language(
             language,
             field,
-            generated_model
-                .field_names
-                .get(proto_name)
-                .map(String::as_str),
+            model_config.record.field_name_override(proto_name),
         );
         if let Some(existing) =
             seen_generated_names.insert(generated_name.clone(), proto_name.to_string())
@@ -293,18 +310,23 @@ fn validate_authored_field_types(
     message: &MessageMetadata,
     descriptors: &DescriptorIndex,
 ) -> Result<()> {
-    let generated_model = model_config.generated_model;
-    for (field_name, authored_type) in &generated_model.field_types {
-        if generated_model.function(field_name).is_some() {
+    for (field_name, field_spec) in &model_config.record.fields {
+        if field_spec.function.is_some() {
             continue;
         }
 
         let field = validate_model_override_field(message_name, field_name, message)?;
-        if model_config.omitted_fields.contains(field_name) {
+        if model_config.is_field_omitted(field_name) {
             continue;
         }
 
-        validate_authored_field_type(message_name, field_name, authored_type, field, descriptors)?;
+        validate_authored_field_type(
+            message_name,
+            field_name,
+            &field_spec.field_type,
+            field,
+            descriptors,
+        )?;
     }
 
     Ok(())
@@ -317,16 +339,15 @@ fn validate_invocation_fields(
     descriptors: &DescriptorIndex,
     usage: MessageUsage,
 ) -> Result<()> {
-    let generated_model = model_config.generated_model;
-    if generated_model.functions.is_empty() {
+    if model_config.record.functions().next().is_none() {
         return Ok(());
     }
 
     if usage.output {
-        if let Some(field) = generated_model.functions.keys().next() {
+        if let Some((field, _)) = model_config.record.functions().next() {
             return Err(Error::InvalidTypeOverrideField {
                 message: message_name.to_string(),
-                field: field.clone(),
+                field: field.to_string(),
                 property: "function",
                 reason: "function fields are only supported on input-only generated models"
                     .to_string(),
@@ -337,12 +358,12 @@ fn validate_invocation_fields(
     let mut primary_field_name: Option<&str> = None;
     let mut seen_args_fields = BTreeMap::new();
 
-    for (field_name, function) in &generated_model.functions {
+    for (field_name, function) in model_config.record.functions() {
         if function.primary {
             if let Some(existing) = primary_field_name {
                 return Err(Error::InvalidTypeOverrideField {
                     message: message_name.to_string(),
-                    field: field_name.clone(),
+                    field: field_name.to_string(),
                     property: "function",
                     reason: format!(
                         "only one primary function field is supported; `{existing}` is already primary"
@@ -357,7 +378,7 @@ fn validate_invocation_fields(
         {
             return Err(Error::InvalidTypeOverrideField {
                 message: message_name.to_string(),
-                field: field_name.clone(),
+                field: field_name.to_string(),
                 property: "function",
                 reason: format!(
                     "argsField `{}` is already used by function field `{existing}`",
@@ -367,18 +388,18 @@ fn validate_invocation_fields(
         }
     }
 
-    for (field_name, function) in &generated_model.functions {
+    for (field_name, function) in model_config.record.functions() {
         let callable_field = validate_model_override_field(message_name, field_name, message)?;
-        if model_config.omitted_fields.contains(field_name) {
+        if model_config.is_field_omitted(field_name) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
-                field: field_name.clone(),
+                field: field_name.to_string(),
             });
         }
         if function.args_field == *field_name {
             return Err(Error::InvalidTypeOverrideField {
                 message: message_name.to_string(),
-                field: field_name.clone(),
+                field: field_name.to_string(),
                 property: "function",
                 reason: "argsField must point to a different field".to_string(),
             });
@@ -394,13 +415,13 @@ fn validate_invocation_fields(
 
         let args_field =
             validate_model_override_field(message_name, &function.args_field, message)?;
-        if model_config.omitted_fields.contains(&function.args_field) {
+        if model_config.is_field_omitted(&function.args_field) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
                 field: function.args_field.clone(),
             });
         }
-        if model_config.required_fields.contains(&function.args_field) {
+        if model_config.record.field_required(&function.args_field) {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
                 message: message_name.to_string(),
                 field: function.args_field.clone(),
@@ -408,9 +429,10 @@ fn validate_invocation_fields(
                 conflicting_property: "required",
             });
         }
-        if generated_model
-            .field_sources
-            .contains_key(&function.args_field)
+        if model_config
+            .record
+            .field_source(&function.args_field)
+            .is_some()
         {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
                 message: message_name.to_string(),

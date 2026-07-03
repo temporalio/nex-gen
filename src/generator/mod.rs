@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub(crate) mod dotnet;
+pub(crate) mod proto;
 pub(crate) mod python;
 pub(crate) mod typescript;
 

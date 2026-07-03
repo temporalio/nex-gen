@@ -7,8 +7,8 @@ use prost_types::field_descriptor_proto::Type;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ExternalTypeSpec, GeneratedModelSpec, OperationSpec, ResourceFieldSpec,
-    ResourceMethodSpec, ResourceResultSpec, ServiceSpec, TypeSpec,
+    ApiSpec, ExternalTypeSpec, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
+    ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec, ServiceSpec, TypeSpec,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -598,14 +598,13 @@ fn all_message_fields(
         .ok_or_else(|| Error::UnknownTypeOverride {
             type_name: message_name.to_string(),
         })?;
-    let record = spec.record_for_proto(message_name);
-    let generated_model = record.map(|record| &record.generated_model);
-
     message
         .descriptor
         .field
         .iter()
-        .map(|field| build_message_field_info(field, record, generated_model, descriptors))
+        .map(|field| {
+            build_message_field_info(field, spec.record_for_proto(message_name), descriptors)
+        })
         .collect()
 }
 
@@ -617,30 +616,22 @@ fn all_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<MessageFie
             type_name: record_name.to_string(),
         })?;
     record
-        .generated_model
-        .declared_fields
+        .fields
         .iter()
-        .map(|field_name| build_record_field_info(field_name, spec, &record.generated_model))
+        .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+        .map(|(field_name, field)| build_record_field_info(field_name, field, spec))
         .collect()
 }
 
 fn build_record_field_info(
     field_name: &str,
+    field: &RecordFieldSpec,
     spec: &ApiSpec,
-    generated_model: &GeneratedModelSpec,
 ) -> Result<MessageFieldInfo> {
-    let api_name = generated_model
-        .field_name_override(field_name)
-        .map(str::to_string)
-        .unwrap_or_else(|| field_name.to_kebab_case());
-    let required = generated_model
-        .field_type(field_name)
-        .is_some_and(|field_type| !matches!(field_type, TypeSpec::Option(_)))
-        && generated_model.field_default(field_name).is_none();
-    let hidden = generated_model.field_source(field_name).is_some();
-    let message_name = generated_model
-        .field_type(field_name)
-        .and_then(|field_type| api_field_message_name(field_type, spec));
+    let api_name = field.name.clone();
+    let required = field.required;
+    let hidden = matches!(field.visibility, RecordFieldVisibility::Sourced { .. });
+    let message_name = api_field_message_name(&field.field_type, spec);
     Ok(MessageFieldInfo {
         proto_name: field_name.to_string(),
         api_name,
@@ -665,21 +656,19 @@ fn api_field_message_name(field_type: &TypeSpec, spec: &ApiSpec) -> Option<Strin
 fn build_message_field_info(
     field: &FieldDescriptorProto,
     record: Option<&crate::spec::RecordSpec>,
-    generated_model: Option<&crate::spec::GeneratedModelSpec>,
     descriptors: &DescriptorIndex,
 ) -> Result<MessageFieldInfo> {
     let proto_name = field
         .name
         .as_deref()
         .expect("descriptor fields should be named");
-    let api_name = generated_model
-        .and_then(|generated_model| generated_model.field_name_override(proto_name))
+    let api_name = record
+        .and_then(|record| record.field_name_override(proto_name))
         .map(str::to_string)
         .unwrap_or_else(|| proto_name.to_kebab_case());
-    let required = record.is_some_and(|record| record.required_fields.contains(proto_name));
+    let required = record.is_some_and(|record| record.field_required(proto_name));
     let hidden = record.is_some_and(|record| {
-        record.omitted_fields.contains(proto_name)
-            || record.generated_model.field_source(proto_name).is_some()
+        record.field_omitted(proto_name) || record.field_source(proto_name).is_some()
     });
     let message_name = field_message_name(field, descriptors);
     Ok(MessageFieldInfo {

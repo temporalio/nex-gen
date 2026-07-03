@@ -13,9 +13,8 @@ use crate::resources::{
 };
 use crate::spec::{
     ApiSpec, AuthoredNames, ExternalTypeSpec, FunctionArgSpec, FunctionArgsSpec, FunctionFieldSpec,
-    FunctionResultSpec, GeneratedModelSpec, LanguageStringSpec, OperationSpec, RecordSpec,
-    ResourceFieldSpec, ServiceSpec, TypeNameFamily, TypeNameMapper, TypeReplacementSpec, TypeSpec,
-    VariantSpec,
+    FunctionResultSpec, LanguageStringSpec, OperationSpec, RecordSpec, ResourceFieldSpec,
+    ServiceSpec, TypeNameFamily, TypeNameMapper, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 
 mod proto;
@@ -37,17 +36,26 @@ impl TypeNameFamily for PlannedTypeFamily {
     type RecordData = PlannedRecordData;
     type ResourceData = PlannedResource;
     type OperationData = PlannedOperationData;
+    type FieldData = PlannedFieldData;
 }
 
 pub(crate) type PlannedSpec = ApiSpec<PlannedTypeFamily>;
 pub(crate) type PlannedType = TypeSpec<PlannedTypeFamily>;
 
 pub(crate) fn operation_input_model(operation: &OperationSpec<PlannedTypeFamily>) -> &PlannedType {
-    match operation.input_type() {
-        TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
-        | TypeSpec::Record(_) => operation.input_type(),
-        _ => panic!("planned operation inputs are model-shaped"),
+    if planned_type_is_model_shaped(operation.input_type()) {
+        operation.input_type()
+    } else {
+        panic!("planned operation inputs are model-shaped")
     }
+}
+
+pub(crate) fn planned_type_is_model_shaped(planned_type: &PlannedType) -> bool {
+    matches!(
+        planned_type,
+        TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
+            | TypeSpec::Record(_)
+    )
 }
 
 pub(crate) fn operation_output_direct_result(operation: &OperationSpec<PlannedTypeFamily>) -> bool {
@@ -204,6 +212,22 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
     fn map_operation_data(&mut self, _name: &str, _data: ()) -> PlannedOperationData {
         PlannedOperationData::default()
     }
+
+    fn map_field_data(
+        &mut self,
+        record_full_name: &str,
+        field_name: &str,
+        _data: (),
+    ) -> PlannedFieldData {
+        let has_presence = self
+            .source_spec
+            .records
+            .get(record_full_name)
+            .and_then(|record| {
+                proto::record_field_has_presence(record, field_name, self.planner.descriptors)
+            });
+        PlannedFieldData { has_presence }
+    }
 }
 
 pub(crate) fn build_api_plan(spec: ApiSpec, descriptors: &DescriptorIndex) -> Result<PlannedSpec> {
@@ -278,10 +302,38 @@ impl<'a> ApiPlanner<'a> {
 
     fn plan_spec(&mut self, spec: ApiSpec) -> PlannedSpec {
         let source_spec = spec.clone();
-        spec.map_names(PlannedTypeMapper {
+        let mut planned_spec = spec.map_names(PlannedTypeMapper {
             source_spec: &source_spec,
             planner: self,
-        })
+        });
+        self.resolve_planned_record_field_types(&source_spec, &mut planned_spec);
+        planned_spec
+    }
+
+    fn resolve_planned_record_field_types(
+        &mut self,
+        source_spec: &ApiSpec,
+        planned_spec: &mut PlannedSpec,
+    ) {
+        for (record_name, planned_record) in &mut planned_spec.records {
+            let Some(source_record) = source_spec.records.get(record_name) else {
+                continue;
+            };
+            let capabilities = planned_record.data.capabilities;
+            for (field_name, field) in &mut planned_record.fields {
+                let source_field = source_record
+                    .fields
+                    .get(field_name)
+                    .expect("planned record field should exist in source record");
+                field.field_type =
+                    proto::planned_record_field_type(source_record, field_name, capabilities, self)
+                        .unwrap_or_else(|| {
+                            self.planned_type_from_authored(
+                                source_field.field_type.without_option(),
+                            )
+                        });
+            }
+        }
     }
 
     pub(super) fn insert_enum(&mut self, enumeration: PlannedEnum) {
@@ -667,23 +719,8 @@ impl<'a> ApiPlanner<'a> {
             let previous_capabilities = existing.capabilities;
             existing.capabilities.merge(requested_capabilities);
             let merged_capabilities = existing.capabilities;
-            let field_kinds = (previous_capabilities != merged_capabilities).then(|| {
-                existing
-                    .fields
-                    .iter()
-                    .map(|field| field.kind.clone())
-                    .chain(
-                        existing
-                            .sourced_fields
-                            .iter()
-                            .map(|field| field.kind.clone()),
-                    )
-                    .collect::<Vec<_>>()
-            });
-            if let Some(field_kinds) = field_kinds {
-                for kind in field_kinds {
-                    self.ensure_planned_type_capabilities(&kind, merged_capabilities);
-                }
+            if previous_capabilities != merged_capabilities {
+                self.ensure_record_field_capabilities(record, merged_capabilities);
             }
             return;
         }
@@ -693,56 +730,33 @@ impl<'a> ApiPlanner<'a> {
             PlannedRecordData {
                 proto: proto::record_proto_info(record, &self.spec, self.descriptors),
                 capabilities: requested_capabilities,
-                fields: Vec::new(),
-                sourced_fields: Vec::new(),
             },
         );
 
-        let fields = record
-            .generated_model
-            .declared_fields
-            .iter()
-            .filter(|field_name| {
-                !record.omitted_fields.contains(*field_name)
-                    && !record
-                        .generated_model
-                        .field_sources
-                        .contains_key(*field_name)
-            })
-            .map(|field_name| self.plan_record_field(record, field_name, requested_capabilities))
-            .collect();
+        self.ensure_record_field_capabilities(record, requested_capabilities);
+    }
 
-        let sourced_fields = record
-            .generated_model
-            .field_sources
-            .iter()
-            .filter(|(field_name, _)| !record.omitted_fields.contains(*field_name))
-            .map(|(field_name, source_expr)| {
-                let field_type = record
-                    .generated_model
-                    .field_type(field_name)
-                    .expect("sourced record field should have a type");
-                let kind = proto::planned_record_field_type(
-                    record,
-                    field_name,
-                    requested_capabilities,
-                    self,
-                )
-                .unwrap_or_else(|| self.planned_type_from_authored(field_type));
-                PlannedSourcedField {
-                    proto_name: field_name.clone(),
-                    source_expr: source_expr.clone(),
-                    kind,
-                }
+    fn ensure_record_field_capabilities(
+        &mut self,
+        record: &RecordSpec,
+        requested_capabilities: ModelCapabilities,
+    ) {
+        let field_types = record
+            .public_fields()
+            .map(|(field_name, field)| (field_name, &field.field_type))
+            .chain(
+                record
+                    .sourced_fields()
+                    .map(|(field_name, field, _)| (field_name, &field.field_type)),
+            )
+            .map(|(field_name, field_type)| {
+                proto::planned_record_field_type(record, field_name, requested_capabilities, self)
+                    .unwrap_or_else(|| self.planned_type_from_authored(field_type))
             })
-            .collect();
-
-        let model = self
-            .record_plans
-            .get_mut(&record.full_name)
-            .expect("record model should be inserted before recursive field planning");
-        model.fields = fields;
-        model.sourced_fields = sourced_fields;
+            .collect::<Vec<_>>();
+        for field_type in field_types {
+            self.ensure_planned_type_capabilities(&field_type, requested_capabilities);
+        }
     }
 
     fn ensure_planned_type_capabilities(
@@ -790,51 +804,6 @@ impl<'a> ApiPlanner<'a> {
                 }
             }
             _ => {}
-        }
-    }
-
-    fn plan_record_field(
-        &mut self,
-        record: &RecordSpec,
-        field_name: &str,
-        requested_capabilities: ModelCapabilities,
-    ) -> PlannedField {
-        let field_type = record
-            .generated_model
-            .field_type(field_name)
-            .expect("declared record field should have a type");
-        let kind =
-            proto::planned_record_field_type(record, field_name, requested_capabilities, self)
-                .unwrap_or_else(|| self.planned_type_from_authored(field_type));
-        PlannedField {
-            owner_name: record.name.clone(),
-            proto_name: field_name.to_string(),
-            authored_name: record
-                .generated_model
-                .field_name_override(field_name)
-                .unwrap_or(field_name)
-                .to_string(),
-            doc: record.generated_model.field_doc(field_name).cloned(),
-            annotation_override: record.generated_model.field_annotation(field_name).cloned(),
-            default_value: record
-                .generated_model
-                .field_default(field_name)
-                .map(|field_default| PlannedFieldDefault {
-                    enum_case: field_default.enum_case.clone(),
-                }),
-            required: record.required_fields.contains(field_name),
-            has_presence: proto::record_field_has_presence(record, field_name, self.descriptors)
-                .unwrap_or_else(|| !record.required_fields.contains(field_name)),
-            role: self.planned_field_role(Some(&record.generated_model), field_name),
-            function: record
-                .generated_model
-                .function(field_name)
-                .map(|function| self.planned_function_from_authored(function)),
-            function_args: record
-                .generated_model
-                .function_for_args_field(field_name)
-                .is_some(),
-            kind,
         }
     }
 
@@ -897,24 +866,6 @@ impl<'a> ApiPlanner<'a> {
             name: arg.name.clone(),
             field_type: self.planned_authored_type_override_from_authored(&arg.field_type),
         }
-    }
-
-    fn planned_field_role(
-        &mut self,
-        generated_model: Option<&GeneratedModelSpec>,
-        proto_name: &str,
-    ) -> PlannedFieldRole {
-        if let Some(function) =
-            generated_model.and_then(|generated_model| generated_model.function(proto_name))
-        {
-            return PlannedFieldRole::Function(self.planned_function_from_authored(function));
-        }
-        if let Some(function) = generated_model
-            .and_then(|generated_model| generated_model.function_for_args_field(proto_name))
-        {
-            return PlannedFieldRole::FunctionArgs(self.planned_function_from_authored(function));
-        }
-        PlannedFieldRole::Plain
     }
 
     pub(super) fn planned_type_from_authored(&mut self, authored_type: &TypeSpec) -> PlannedType {
@@ -1187,48 +1138,16 @@ pub(crate) struct PlannedEnumValue {
 pub(crate) struct PlannedRecordData {
     pub(crate) proto: Option<PlannedProtoTypeInfo>,
     pub(crate) capabilities: ModelCapabilities,
-    pub(crate) fields: Vec<PlannedField>,
-    pub(crate) sourced_fields: Vec<PlannedSourcedField>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PlannedFieldData {
+    pub(crate) has_presence: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PlannedOperationData {
     pub(crate) output_resource_return: Option<PlannedOperationResourceReturn>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PlannedField {
-    pub(crate) owner_name: String,
-    pub(crate) proto_name: String,
-    pub(crate) authored_name: String,
-    pub(crate) doc: Option<LanguageStringSpec>,
-    pub(crate) annotation_override: Option<crate::spec::LanguageStringSpec>,
-    pub(crate) default_value: Option<PlannedFieldDefault>,
-    pub(crate) required: bool,
-    pub(crate) has_presence: bool,
-    pub(crate) role: PlannedFieldRole,
-    pub(crate) function: Option<FunctionFieldSpec<PlannedTypeFamily>>,
-    pub(crate) function_args: bool,
-    pub(crate) kind: PlannedType,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PlannedFieldDefault {
-    pub(crate) enum_case: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PlannedSourcedField {
-    pub(crate) proto_name: String,
-    pub(crate) source_expr: String,
-    pub(crate) kind: PlannedType,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PlannedFieldRole {
-    Plain,
-    Function(FunctionFieldSpec<PlannedTypeFamily>),
-    FunctionArgs(FunctionFieldSpec<PlannedTypeFamily>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

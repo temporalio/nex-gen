@@ -5,7 +5,8 @@ use prost_types::field_descriptor_proto::{Label, Type};
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata};
 use crate::generator::ModelCapabilities;
 use crate::spec::{
-    ApiRef, ApiSpec, ExternalTypeSpec, GeneratedModelSpec, IntSpec, RecordSpec, TypeSpec,
+    ApiRef, ApiSpec, ExternalTypeSpec, IntSpec, LanguageStringSpec, RecordFieldSpec,
+    RecordFieldVisibility, RecordSpec, TypeSpec,
 };
 
 use super::{
@@ -64,19 +65,10 @@ fn planned_proto_model_name(message: &MessageMetadata, spec: &ApiSpec) -> String
         .unwrap_or_else(|| message_model_name(&message.full_name))
 }
 
-fn generated_model_for_message<'a>(
-    message: &MessageMetadata,
-    spec: &'a ApiSpec,
-) -> Option<&'a GeneratedModelSpec> {
-    spec.record_for_proto(&message.full_name)
-        .map(|record| &record.generated_model)
-}
-
 fn field_hidden(message: &MessageMetadata, proto_name: &str, spec: &ApiSpec) -> bool {
     spec.record_for_proto(&message.full_name)
         .is_some_and(|record| {
-            record.omitted_fields.contains(proto_name)
-                || record.generated_model.field_source(proto_name).is_some()
+            record.field_omitted(proto_name) || record.field_source(proto_name).is_some()
         })
 }
 
@@ -216,6 +208,18 @@ fn record_proto_name(record: &RecordSpec) -> Option<&str> {
     Some(proto_name.as_str())
 }
 
+fn descriptor_field_by_name<'a>(
+    message: &'a MessageMetadata,
+    field_name: &str,
+) -> &'a FieldDescriptorProto {
+    message
+        .descriptor
+        .field
+        .iter()
+        .find(|field| field.name.as_deref() == Some(field_name))
+        .expect("planned record field should exist in descriptor")
+}
+
 pub(super) fn planned_type_from_authored_proto(
     authored_type: &TypeSpec,
     planner: &mut ApiPlanner<'_>,
@@ -278,58 +282,58 @@ fn ensure_model_record(message: &MessageMetadata, planner: &mut ApiPlanner<'_>) 
         return;
     }
 
-    let generated_model = generated_model_spec_for_message(message, &planner.spec, planner);
+    let fields = record_fields_for_message(message, &planner.spec, planner);
     planner.spec.records.insert(
         message.full_name.clone(),
         RecordSpec {
             name: planned_proto_model_name(message, &planner.spec),
             full_name: message.full_name.clone(),
+            doc: LanguageStringSpec::default(),
             source_type: Some(TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(
                 message.full_name.clone(),
             )))),
             experimental: false,
-            required_fields: Default::default(),
-            omitted_fields: Default::default(),
             flatten_in_api: false,
-            generated_model,
+            fields,
             data: (),
         },
     );
 }
 
-fn generated_model_spec_for_message(
+fn record_fields_for_message(
     message: &MessageMetadata,
     spec: &ApiSpec,
     planner: &ApiPlanner<'_>,
-) -> GeneratedModelSpec {
-    let mut generated_model = generated_model_for_message(message, spec)
-        .cloned()
-        .unwrap_or_default();
-
-    if generated_model.declared_fields.is_empty() {
-        generated_model.declared_fields = message
-            .descriptor
-            .field
-            .iter()
-            .filter_map(|field| field.name.clone())
-            .collect();
-    }
-
-    for field in planned_message_fields(message, &generated_model) {
-        let proto_name = field
-            .name
-            .as_deref()
-            .expect("descriptor fields should be named");
-        if field_hidden(message, proto_name, spec) {
-            continue;
-        }
-        generated_model
-            .field_types
-            .entry(proto_name.to_string())
-            .or_insert_with(|| authored_field_type(field, planner));
-    }
-
-    generated_model
+) -> indexmap::IndexMap<String, RecordFieldSpec> {
+    message
+        .descriptor
+        .field
+        .iter()
+        .filter_map(|field| {
+            let proto_name = field
+                .name
+                .as_deref()
+                .expect("descriptor fields should be named");
+            if field_hidden(message, proto_name, spec) {
+                return None;
+            }
+            Some((
+                proto_name.to_string(),
+                RecordFieldSpec {
+                    name: proto_name.to_string(),
+                    doc: None,
+                    annotation: None,
+                    flattened_annotation: None,
+                    field_type: authored_field_type(field, planner),
+                    default_value: None,
+                    required: false,
+                    visibility: RecordFieldVisibility::Public,
+                    function: None,
+                    data: (),
+                },
+            ))
+        })
+        .collect()
 }
 
 fn authored_field_type(field: &FieldDescriptorProto, planner: &ApiPlanner<'_>) -> TypeSpec {
@@ -405,33 +409,6 @@ fn authored_value_type(field: &FieldDescriptorProto) -> TypeSpec {
             .unwrap_or(TypeSpec::String),
         None => TypeSpec::String,
     }
-}
-
-fn planned_message_fields<'a>(
-    message: &'a MessageMetadata,
-    generated_model: &GeneratedModelSpec,
-) -> Vec<&'a FieldDescriptorProto> {
-    if generated_model.declared_fields.is_empty() {
-        return message.descriptor.field.iter().collect();
-    }
-
-    generated_model
-        .declared_fields
-        .iter()
-        .map(|field_name| descriptor_field_by_name(message, field_name))
-        .collect()
-}
-
-fn descriptor_field_by_name<'a>(
-    message: &'a MessageMetadata,
-    field_name: &str,
-) -> &'a FieldDescriptorProto {
-    message
-        .descriptor
-        .field
-        .iter()
-        .find(|field| field.name.as_deref() == Some(field_name))
-        .expect("declared generated model field should exist in descriptor")
 }
 
 fn ensure_enum_plan(enumeration: &EnumMetadata, planner: &mut ApiPlanner<'_>) {

@@ -156,12 +156,10 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
 
     let generated_python_request = &generated_python
         .record_for_proto("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
-        .unwrap()
-        .generated_model;
+        .unwrap();
     let handwritten_python_request = &handwritten_python
         .record_for_proto("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
-        .unwrap()
-        .generated_model;
+        .unwrap();
     assert_eq!(
         generated_python_request.field_name_override("workflow_type"),
         Some("workflow-type")
@@ -195,12 +193,10 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
 
     let generated_typescript_request = &generated_typescript
         .record_for_proto("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
-        .unwrap()
-        .generated_model;
+        .unwrap();
     let handwritten_typescript_request = &handwritten_typescript
         .record_for_proto("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
-        .unwrap()
-        .generated_model;
+        .unwrap();
     assert_eq!(
         generated_typescript_request.field_name_override("workflow_type"),
         Some("workflow-type")
@@ -342,8 +338,7 @@ fn add_rpc_adds_missing_field_to_existing_operation_request() {
     let parsed = parse(Language::Python, &generated, input_path.to_str().unwrap());
     let request = &parsed
         .record_for_proto("temporal.api.workflowservice.v1.SignalWorkflowExecutionRequest")
-        .unwrap()
-        .generated_model;
+        .unwrap();
     assert_eq!(request.field_name_override("input"), Some("input"));
 
     fs::remove_dir_all(input_path.parent().unwrap()).unwrap();
@@ -375,8 +370,7 @@ fn add_rpc_allows_existing_required_field_when_descriptor_field_is_optional() {
     let parsed = parse(Language::Python, &generated, input_path.to_str().unwrap());
     let request = &parsed
         .record_for_proto("temporal.api.workflowservice.v1.SignalWorkflowExecutionRequest")
-        .unwrap()
-        .generated_model;
+        .unwrap();
     assert_eq!(request.field_name_override("input"), Some("input"));
 
     fs::remove_dir_all(input_path.parent().unwrap()).unwrap();
@@ -408,8 +402,7 @@ fn add_rpc_allows_existing_optional_field_when_descriptor_field_is_required() {
     let parsed = parse(Language::Python, &generated, input_path.to_str().unwrap());
     let request = &parsed
         .record_for_proto("temporal.api.workflowservice.v1.SignalWorkflowExecutionRequest")
-        .unwrap()
-        .generated_model;
+        .unwrap();
     assert_eq!(request.field_name_override("identity"), Some("identity"));
 
     fs::remove_dir_all(input_path.parent().unwrap()).unwrap();

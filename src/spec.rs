@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+
+use indexmap::IndexMap;
 
 use crate::language::Language;
 
@@ -51,6 +53,7 @@ pub trait TypeNameFamily {
     type RecordData: std::fmt::Debug + Clone + PartialEq;
     type ResourceData: std::fmt::Debug + Clone + PartialEq;
     type OperationData: std::fmt::Debug + Clone + PartialEq;
+    type FieldData: std::fmt::Debug + Clone + PartialEq;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +71,7 @@ impl TypeNameFamily for AuthoredNames {
     type RecordData = ();
     type ResourceData = ();
     type OperationData = ();
+    type FieldData = ();
 }
 
 pub trait TypeNameMapper<From: TypeNameFamily, To: TypeNameFamily> {
@@ -82,6 +86,12 @@ pub trait TypeNameMapper<From: TypeNameFamily, To: TypeNameFamily> {
     fn map_record_data(&mut self, full_name: &str, data: From::RecordData) -> To::RecordData;
     fn map_resource_data(&mut self, name: &str, data: From::ResourceData) -> To::ResourceData;
     fn map_operation_data(&mut self, name: &str, data: From::OperationData) -> To::OperationData;
+    fn map_field_data(
+        &mut self,
+        record_full_name: &str,
+        field_name: &str,
+        data: From::FieldData,
+    ) -> To::FieldData;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -392,13 +402,33 @@ impl<F: TypeNameFamily> ResourceResultSpec<F> {
 pub struct RecordSpec<F: TypeNameFamily = AuthoredNames> {
     pub name: String,
     pub full_name: String,
+    pub doc: LanguageStringSpec,
     pub source_type: Option<TypeSpec<F>>,
     pub experimental: bool,
-    pub required_fields: BTreeSet<String>,
-    pub omitted_fields: BTreeSet<String>,
     pub flatten_in_api: bool,
-    pub generated_model: GeneratedModelSpec<F>,
+    pub fields: IndexMap<String, RecordFieldSpec<F>>,
     pub data: F::RecordData,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordFieldSpec<F: TypeNameFamily = AuthoredNames> {
+    pub name: String,
+    pub doc: Option<LanguageStringSpec>,
+    pub annotation: Option<LanguageStringSpec>,
+    pub flattened_annotation: Option<LanguageStringSpec>,
+    pub field_type: TypeSpec<F>,
+    pub default_value: Option<FieldDefaultSpec>,
+    pub required: bool,
+    pub visibility: RecordFieldVisibility,
+    pub function: Option<FunctionFieldSpec<F>>,
+    pub data: F::FieldData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordFieldVisibility {
+    Public,
+    Omitted,
+    Sourced { source_expr: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -447,20 +477,172 @@ impl<F: TypeNameFamily> RecordSpec<F> {
         G: TypeNameFamily,
         M: TypeNameMapper<F, G>,
     {
-        let data = map.map_record_data(&self.full_name, self.data);
+        let full_name = self.full_name;
+        let data = map.map_record_data(&full_name, self.data);
         RecordSpec {
             name: self.name,
-            full_name: self.full_name,
+            full_name: full_name.clone(),
+            doc: self.doc,
             source_type: self
                 .source_type
                 .map(|source_type| source_type.map_names_with(map)),
             experimental: self.experimental,
-            required_fields: self.required_fields,
-            omitted_fields: self.omitted_fields,
             flatten_in_api: self.flatten_in_api,
-            generated_model: self.generated_model.map_names_with(map),
+            fields: self
+                .fields
+                .into_iter()
+                .map(|(name, field)| {
+                    let field = field.map_names_with(&full_name, &name, map);
+                    (name, field)
+                })
+                .collect(),
             data,
         }
+    }
+
+    pub fn doc(&self) -> &LanguageStringSpec {
+        &self.doc
+    }
+
+    pub fn public_fields(&self) -> impl Iterator<Item = (&str, &RecordFieldSpec<F>)> {
+        self.fields
+            .iter()
+            .filter(|(_, field)| field.visibility == RecordFieldVisibility::Public)
+            .map(|(name, field)| (name.as_str(), field))
+    }
+
+    pub fn sourced_fields(&self) -> impl Iterator<Item = (&str, &RecordFieldSpec<F>, &str)> {
+        self.fields.iter().filter_map(|(name, field)| {
+            let RecordFieldVisibility::Sourced { source_expr } = &field.visibility else {
+                return None;
+            };
+            Some((name.as_str(), field, source_expr.as_str()))
+        })
+    }
+
+    pub fn functions(&self) -> impl Iterator<Item = (&str, &FunctionFieldSpec<F>)> {
+        self.fields.iter().filter_map(|(name, field)| {
+            field
+                .function
+                .as_ref()
+                .map(|function| (name.as_str(), function))
+        })
+    }
+
+    pub fn is_empty_model(&self) -> bool {
+        self.doc.is_empty()
+            && self
+                .fields
+                .values()
+                .all(|field| field.is_empty_model_field())
+    }
+
+    pub fn field_name_override(&self, field_name: &str) -> Option<&str> {
+        self.fields.get(field_name).map(|field| field.name.as_str())
+    }
+
+    pub fn field_doc(&self, field_name: &str) -> Option<&LanguageStringSpec> {
+        self.fields
+            .get(field_name)
+            .and_then(|field| field.doc.as_ref())
+    }
+
+    pub fn field_annotation(&self, field_name: &str) -> Option<&LanguageStringSpec> {
+        self.fields
+            .get(field_name)
+            .and_then(|field| field.annotation.as_ref())
+    }
+
+    pub fn field_flattened_annotation(&self, field_name: &str) -> Option<&LanguageStringSpec> {
+        self.fields
+            .get(field_name)
+            .and_then(|field| field.flattened_annotation.as_ref())
+    }
+
+    pub fn field_type(&self, field_name: &str) -> Option<&TypeSpec<F>> {
+        self.fields.get(field_name).map(|field| &field.field_type)
+    }
+
+    pub fn field_default(&self, field_name: &str) -> Option<&FieldDefaultSpec> {
+        self.fields
+            .get(field_name)
+            .and_then(|field| field.default_value.as_ref())
+    }
+
+    pub fn field_source(&self, field_name: &str) -> Option<&str> {
+        self.fields.get(field_name).and_then(|field| {
+            let RecordFieldVisibility::Sourced { source_expr } = &field.visibility else {
+                return None;
+            };
+            Some(source_expr.as_str())
+        })
+    }
+
+    pub fn field_required(&self, field_name: &str) -> bool {
+        self.fields
+            .get(field_name)
+            .is_some_and(|field| field.required)
+    }
+
+    pub fn field_omitted(&self, field_name: &str) -> bool {
+        self.fields
+            .get(field_name)
+            .is_some_and(|field| field.visibility == RecordFieldVisibility::Omitted)
+    }
+
+    pub fn function(&self, field_name: &str) -> Option<&FunctionFieldSpec<F>> {
+        self.fields
+            .get(field_name)
+            .and_then(|field| field.function.as_ref())
+    }
+
+    pub fn function_for_args_field(&self, field_name: &str) -> Option<&FunctionFieldSpec<F>> {
+        self.fields.values().find_map(|field| {
+            field.function.as_ref().filter(|function| {
+                function
+                    .arg_fields
+                    .iter()
+                    .any(|arg_field| arg_field == field_name)
+            })
+        })
+    }
+}
+
+impl<F: TypeNameFamily> RecordFieldSpec<F> {
+    fn map_names_with<G, M>(
+        self,
+        record_full_name: &str,
+        field_name: &str,
+        map: &mut M,
+    ) -> RecordFieldSpec<G>
+    where
+        G: TypeNameFamily,
+        M: TypeNameMapper<F, G>,
+    {
+        let data = map.map_field_data(record_full_name, field_name, self.data);
+        RecordFieldSpec {
+            name: self.name,
+            doc: self.doc,
+            annotation: self.annotation,
+            flattened_annotation: self.flattened_annotation,
+            field_type: self.field_type.map_names_with(map),
+            default_value: self.default_value,
+            required: self.required,
+            visibility: self.visibility,
+            function: self.function.map(|function| function.map_names_with(map)),
+            data,
+        }
+    }
+
+    fn is_empty_model_field(&self) -> bool {
+        self.name.is_empty()
+            && self.doc.is_none()
+            && self.annotation.is_none()
+            && self.flattened_annotation.is_none()
+            && self.default_value.is_none()
+            && !self.required
+            && self.visibility == RecordFieldVisibility::Public
+            && self.function.is_none()
     }
 }
 
@@ -573,124 +755,6 @@ pub struct TypeReplacementSpec {
     pub type_name: LanguageStringSpec,
     pub from_proto: LanguageStringSpec,
     pub to_proto: LanguageStringSpec,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct GeneratedModelSpec<F: TypeNameFamily = AuthoredNames> {
-    pub doc: LanguageStringSpec,
-    pub declared_fields: Vec<String>,
-    pub field_names: BTreeMap<String, String>,
-    pub field_docs: BTreeMap<String, LanguageStringSpec>,
-    pub field_annotations: BTreeMap<String, LanguageStringSpec>,
-    pub field_flattened_annotations: BTreeMap<String, LanguageStringSpec>,
-    pub field_types: BTreeMap<String, TypeSpec<F>>,
-    pub field_defaults: BTreeMap<String, FieldDefaultSpec>,
-    pub field_sources: BTreeMap<String, String>,
-    pub functions: BTreeMap<String, FunctionFieldSpec<F>>,
-}
-
-impl<F: TypeNameFamily> Default for GeneratedModelSpec<F> {
-    fn default() -> Self {
-        Self {
-            doc: LanguageStringSpec::default(),
-            declared_fields: Vec::new(),
-            field_names: BTreeMap::new(),
-            field_docs: BTreeMap::new(),
-            field_annotations: BTreeMap::new(),
-            field_flattened_annotations: BTreeMap::new(),
-            field_types: BTreeMap::new(),
-            field_defaults: BTreeMap::new(),
-            field_sources: BTreeMap::new(),
-            functions: BTreeMap::new(),
-        }
-    }
-}
-
-impl<F: TypeNameFamily> GeneratedModelSpec<F> {
-    pub fn is_empty(&self) -> bool {
-        self.doc.is_empty()
-            && self.declared_fields.is_empty()
-            && self.field_names.is_empty()
-            && self.field_docs.is_empty()
-            && self.field_annotations.is_empty()
-            && self.field_flattened_annotations.is_empty()
-            && self.field_types.is_empty()
-            && self.field_defaults.is_empty()
-            && self.field_sources.is_empty()
-            && self.functions.is_empty()
-    }
-
-    pub fn field_name_override(&self, field_name: &str) -> Option<&str> {
-        self.field_names.get(field_name).map(String::as_str)
-    }
-
-    pub fn doc(&self) -> &LanguageStringSpec {
-        &self.doc
-    }
-
-    pub fn field_doc(&self, field_name: &str) -> Option<&LanguageStringSpec> {
-        self.field_docs.get(field_name)
-    }
-
-    pub fn field_annotation(&self, field_name: &str) -> Option<&LanguageStringSpec> {
-        self.field_annotations.get(field_name)
-    }
-
-    pub fn field_flattened_annotation(&self, field_name: &str) -> Option<&LanguageStringSpec> {
-        self.field_flattened_annotations.get(field_name)
-    }
-
-    pub fn field_type(&self, field_name: &str) -> Option<&TypeSpec<F>> {
-        self.field_types.get(field_name)
-    }
-
-    pub fn field_default(&self, field_name: &str) -> Option<&FieldDefaultSpec> {
-        self.field_defaults.get(field_name)
-    }
-
-    pub fn field_source(&self, field_name: &str) -> Option<&str> {
-        self.field_sources.get(field_name).map(String::as_str)
-    }
-
-    pub fn function(&self, field_name: &str) -> Option<&FunctionFieldSpec<F>> {
-        self.functions.get(field_name)
-    }
-
-    pub fn function_for_args_field(&self, field_name: &str) -> Option<&FunctionFieldSpec<F>> {
-        self.functions.values().find(|function| {
-            function
-                .arg_fields
-                .iter()
-                .any(|arg_field| arg_field == field_name)
-        })
-    }
-
-    fn map_names_with<G, M>(self, map: &mut M) -> GeneratedModelSpec<G>
-    where
-        G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
-    {
-        GeneratedModelSpec {
-            doc: self.doc,
-            declared_fields: self.declared_fields,
-            field_names: self.field_names,
-            field_docs: self.field_docs,
-            field_annotations: self.field_annotations,
-            field_flattened_annotations: self.field_flattened_annotations,
-            field_types: self
-                .field_types
-                .into_iter()
-                .map(|(name, field_type)| (name, field_type.map_names_with(map)))
-                .collect(),
-            field_defaults: self.field_defaults,
-            field_sources: self.field_sources,
-            functions: self
-                .functions
-                .into_iter()
-                .map(|(name, function)| (name, function.map_names_with(map)))
-                .collect(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

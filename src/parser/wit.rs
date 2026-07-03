@@ -1187,7 +1187,7 @@ fn build_wit_record_spec(
     let model_doc = directive(&directives, "doc", path, &context)?
         .map(directive_language_string)
         .unwrap_or_default();
-    let (required_fields, omitted_fields, generated_model) = build_generated_model_from_record(
+    let (doc, fields) = build_fields_from_record(
         resolve,
         type_def.owner,
         record,
@@ -1200,12 +1200,11 @@ fn build_wit_record_spec(
     Ok(Some(RecordSpec {
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
+        doc,
         source_type,
         experimental,
-        required_fields,
-        omitted_fields,
         flatten_in_api,
-        generated_model,
+        fields,
         data: (),
     }))
 }
@@ -1291,7 +1290,7 @@ fn build_external_type_binding(
     Ok(Some((proto_name, external_type)))
 }
 
-fn build_generated_model_from_record(
+fn build_fields_from_record(
     resolve: &Resolve,
     owner: TypeOwner,
     record: &Record,
@@ -1299,19 +1298,12 @@ fn build_generated_model_from_record(
     path: &Path,
     context: &str,
     language: Language,
-) -> Result<(BTreeSet<String>, BTreeSet<String>, GeneratedModelSpec)> {
-    let mut required_fields = BTreeSet::new();
-    let mut omitted_fields = BTreeSet::new();
+) -> Result<(
+    LanguageStringSpec,
+    indexmap::IndexMap<String, RecordFieldSpec>,
+)> {
     let mut authored_proto_fields = BTreeSet::new();
-    let mut declared_fields = Vec::new();
-    let mut field_names = BTreeMap::new();
-    let mut field_docs = BTreeMap::new();
-    let mut field_annotations = BTreeMap::new();
-    let mut field_flattened_annotations = BTreeMap::new();
-    let mut field_types = BTreeMap::new();
-    let mut field_defaults = BTreeMap::new();
-    let mut field_sources = BTreeMap::new();
-    let mut functions = BTreeMap::new();
+    let mut fields = indexmap::IndexMap::new();
     for field in &record.fields {
         let field_context = format!("{context} field `{}`", field.name);
         let directives = parse_directives(field.docs.contents.as_deref(), path, &field_context)?;
@@ -1377,64 +1369,47 @@ fn build_generated_model_from_record(
                 });
             }
 
-            omitted_fields.insert(proto_field_name);
+            let field_type = authored_field_type_for_language(
+                resolve_authored_field_type_spec(resolve, &field.ty, path, &field_context)?,
+                language,
+            );
+            fields.insert(
+                proto_field_name,
+                RecordFieldSpec {
+                    name: field.name.clone(),
+                    doc: None,
+                    annotation: None,
+                    flattened_annotation: None,
+                    field_type,
+                    default_value: None,
+                    required: false,
+                    visibility: RecordFieldVisibility::Omitted,
+                    function: None,
+                    data: (),
+                },
+            );
             continue;
         }
 
-        declared_fields.push(proto_field_name.clone());
-
-        field_names.insert(proto_field_name.clone(), field.name.clone());
-        if let Some(doc_directive) = directive(&directives, "doc", path, &field_context)? {
-            let doc = directive_language_string(doc_directive);
-            if !doc.is_empty() {
-                field_docs.insert(proto_field_name.clone(), doc);
-            }
-        }
+        let field_doc = directive(&directives, "doc", path, &field_context)?
+            .map(directive_language_string)
+            .filter(|doc| !doc.is_empty());
         let field_type = authored_field_type_for_language(
             resolve_authored_field_type_spec(resolve, &field.ty, path, &field_context)?,
             language,
         );
         let field_default =
             build_field_default(resolve, &field.ty, default_directive, path, &field_context)?;
-        field_types.insert(proto_field_name.clone(), field_type);
+        let required = !is_optional_type(resolve, &field.ty) && field_default.is_none();
+        let source = build_source_call(&directives, path, &field_context, language)?;
+        let annotation =
+            directive(&directives, "type", path, &field_context)?.map(directive_language_string);
+        let flattened_annotation = directive(&directives, "flattened-type", path, &field_context)?
+            .map(directive_language_string);
+        let function =
+            build_function_field(resolve, owner, &directives, path, &field_context, language)?;
 
-        if !is_optional_type(resolve, &field.ty) && field_default.is_none() {
-            required_fields.insert(proto_field_name.clone());
-        }
-
-        if let Some(source) = build_source_call(&directives, path, &field_context, language)? {
-            field_sources.insert(proto_field_name.clone(), source);
-        }
-
-        if let Some(field_default) = field_default {
-            field_defaults.insert(proto_field_name.clone(), field_default);
-        }
-
-        if let Some(type_directive) = directive(&directives, "type", path, &field_context)? {
-            field_annotations.insert(
-                proto_field_name.clone(),
-                directive_language_string(type_directive),
-            );
-        }
-
-        if let Some(flattened_type_directive) =
-            directive(&directives, "flattened-type", path, &field_context)?
-        {
-            field_flattened_annotations.insert(
-                proto_field_name.clone(),
-                directive_language_string(flattened_type_directive),
-            );
-        }
-
-        if let Some(function) =
-            build_function_field(resolve, owner, &directives, path, &field_context, language)?
-        {
-            functions.insert(proto_field_name.clone(), function);
-        }
-
-        if field_sources.contains_key(&proto_field_name)
-            && functions.contains_key(&proto_field_name)
-        {
+        if source.is_some() && function.is_some() {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
                 message: context.to_string(),
                 field: proto_field_name,
@@ -1442,6 +1417,24 @@ fn build_generated_model_from_record(
                 conflicting_property: "function",
             });
         }
+
+        fields.insert(
+            proto_field_name.clone(),
+            RecordFieldSpec {
+                name: field.name.clone(),
+                doc: field_doc,
+                annotation,
+                flattened_annotation,
+                field_type,
+                default_value: field_default,
+                required,
+                visibility: source
+                    .map(|source_expr| RecordFieldVisibility::Sourced { source_expr })
+                    .unwrap_or(RecordFieldVisibility::Public),
+                function,
+                data: (),
+            },
+        );
 
         if let Some(flattened_function_type) = flattened_function_type {
             let arg_field_count = flattened_function_type.arg_fields.len();
@@ -1455,43 +1448,36 @@ fn build_generated_model_from_record(
                         ),
                     });
                 }
-                declared_fields.push(arg_field.field_name.clone());
-                field_names.insert(arg_field.field_name.clone(), arg_field.args_name.clone());
-                field_docs
-                    .entry(arg_field.field_name.clone())
-                    .or_insert_with(|| {
-                        generated_function_arg_doc(&field.name, &arg_field, arg_field_count)
-                    });
-                if arg_field.required {
-                    required_fields.insert(arg_field.field_name.clone());
-                }
-                field_types.insert(
+                let arg_doc = generated_function_arg_doc(&field.name, &arg_field, arg_field_count);
+                fields.insert(
                     arg_field.field_name,
-                    authored_field_type_for_language(arg_field.field_type, language),
+                    RecordFieldSpec {
+                        name: arg_field.args_name,
+                        doc: Some(arg_doc),
+                        annotation: None,
+                        flattened_annotation: None,
+                        field_type: authored_field_type_for_language(
+                            arg_field.field_type,
+                            language,
+                        ),
+                        default_value: None,
+                        required: arg_field.required,
+                        visibility: RecordFieldVisibility::Public,
+                        function: None,
+                        data: (),
+                    },
                 );
             }
             if let Some(function) = flattened_function_type.function {
-                functions.insert(proto_field_name.clone(), function);
+                fields
+                    .get_mut(&proto_field_name)
+                    .expect("flattened function owner field should be inserted")
+                    .function = Some(function);
             }
         }
     }
 
-    Ok((
-        required_fields,
-        omitted_fields,
-        GeneratedModelSpec {
-            doc,
-            declared_fields,
-            field_names,
-            field_docs,
-            field_annotations,
-            field_flattened_annotations,
-            field_types,
-            field_defaults,
-            field_sources,
-            functions,
-        },
-    ))
+    Ok((doc, fields))
 }
 
 fn generated_function_arg_doc(
@@ -3626,10 +3612,9 @@ interface workflow-service {
                 "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest",
             )
             .unwrap();
-        assert!(!request.required_fields.contains("workflow_id_reuse_policy"));
+        assert!(!request.field_required("workflow_id_reuse_policy"));
         assert_eq!(
             request
-                .generated_model
                 .field_default("workflow_id_reuse_policy")
                 .map(|default| default.enum_value),
             Some(0)
@@ -3866,9 +3851,9 @@ interface workflow-service {
                 .and_then(TypeSpec::reference),
             Some("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionResponse")
         );
-        assert!(request.required_fields.contains("workflow_type"));
-        assert!(request.omitted_fields.contains("header"));
-        let model = &request.generated_model;
+        assert!(request.field_required("workflow_type"));
+        assert!(request.field_omitted("header"));
+        let model = request;
         assert!(model.field_source("header").is_none());
         assert_eq!(model.field_name_override("workflow_type"), Some("workflow"));
         assert_eq!(model.field_name_override("input"), Some("args"));
@@ -3921,7 +3906,6 @@ interface workflow-service {
                 "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest",
             )
             .unwrap()
-            .generated_model
             .clone();
         assert_eq!(
             dotnet_model
@@ -3945,7 +3929,6 @@ interface workflow-service {
                 "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest",
             )
             .unwrap()
-            .generated_model
             .clone();
         assert!(
             python
@@ -4033,7 +4016,6 @@ interface workflow-service {
                     "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
                 )
                 .unwrap()
-                .generated_model
                 .field_source("namespace"),
             Some("workflow_namespace()")
         );
@@ -4043,7 +4025,6 @@ interface workflow-service {
                     "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
                 )
                 .unwrap()
-                .generated_model
                 .field_source("namespace"),
             Some("workflowNamespace()")
         );
@@ -4053,7 +4034,6 @@ interface workflow-service {
                     "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
                 )
                 .unwrap()
-                .generated_model
                 .field_source("namespace"),
             Some("TemporalWorkflowContext.WorkflowNamespace()")
         );
@@ -4126,7 +4106,6 @@ interface workflow-service {
                     "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
                 )
                 .unwrap()
-                .generated_model
                 .field_doc("id")
                 .and_then(|doc| doc.for_language(Language::Python)),
             Some("Python field doc")
@@ -4403,7 +4382,7 @@ interface function-execution {
             .records
             .get("function-execution.execute-function-request")
             .unwrap();
-        let model = &request.generated_model;
+        let model = request;
         assert_eq!(model.field_name_override("name"), Some("name"));
         assert_eq!(model.field_name_override("enabled"), Some("enabled"));
         assert_eq!(model.field_type("name").unwrap().to_type_string(), "string");
@@ -4486,7 +4465,7 @@ interface function-execution {
             .records
             .get("function-execution.execute-function-request")
             .unwrap();
-        let model = &request.generated_model;
+        let model = request;
         assert_eq!(
             model.field_type("args").unwrap().to_type_string(),
             "list<string>"
@@ -4542,7 +4521,6 @@ interface workflow-service {
                 "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest",
             )
             .unwrap()
-            .generated_model
             .clone();
         assert_eq!(
             python_model.field_type("memo").unwrap().to_type_string(),
