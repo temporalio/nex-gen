@@ -1421,8 +1421,7 @@ fn populate_operation_bindings(
                                 // `result` is declared as a proto value;
                                 // converters take a pointer to the proto message.
                                 let from = (conv.from_proto)("&result");
-                                let returns_pointer =
-                                    conv.kind == GoConversionKind::OverrideConverter;
+                                let returns_pointer = conv.from_proto_returns_pointer;
                                 (Some(proto_type), Some(from), returns_pointer)
                             }
                             None => continue,
@@ -1556,6 +1555,7 @@ fn resource_return_proto_field_source(
                 &getter,
                 &local,
                 &native_type,
+                "return nil, err",
             ))
         }
         PlannedFieldKind::Repeated(value) => {
@@ -1567,13 +1567,43 @@ fn resource_return_proto_field_source(
             ];
             match conversion.kind {
                 GoConversionKind::OverrideConverter => {
-                    lines.push(format!(
-                        "\tif converted := {converted}; converted != nil {{"
-                    ));
-                    lines.push(format!("\t\t{local} = append({local}, *converted)"));
-                    lines.push("\t}".to_string());
+                    if !conversion.from_proto_returns_pointer {
+                        if conversion.fallible {
+                            lines.push(format!("\tconverted, err := {converted}"));
+                            lines.push("\tif err != nil {".to_string());
+                            lines.push("\t\treturn nil, err".to_string());
+                            lines.push("\t}".to_string());
+                            lines.push(format!("\t{local} = append({local}, converted)"));
+                        } else {
+                            lines.push(format!("\t{local} = append({local}, {converted})"));
+                        }
+                    } else {
+                        if conversion.fallible {
+                            lines.push(format!("\tconverted, err := {converted}"));
+                            lines.push("\tif err != nil {".to_string());
+                            lines.push("\t\treturn nil, err".to_string());
+                            lines.push("\t}".to_string());
+                            lines.push("\tif converted != nil {".to_string());
+                        } else {
+                            lines.push(format!(
+                                "\tif converted := {converted}; converted != nil {{"
+                            ));
+                        }
+                        lines.push(format!("\t\t{local} = append({local}, *converted)"));
+                        lines.push("\t}".to_string());
+                    }
                 }
-                _ => lines.push(format!("\t{local} = append({local}, {converted})")),
+                _ => {
+                    if conversion.fallible {
+                        lines.push(format!("\tconverted, err := {converted}"));
+                        lines.push("\tif err != nil {".to_string());
+                        lines.push("\t\treturn nil, err".to_string());
+                        lines.push("\t}".to_string());
+                        lines.push(format!("\t{local} = append({local}, converted)"));
+                    } else {
+                        lines.push(format!("\t{local} = append({local}, {converted})"));
+                    }
+                }
             }
             lines.push("}".to_string());
             Ok((lines, local))
@@ -1589,13 +1619,43 @@ fn resource_return_proto_field_source(
             ];
             match conversion.kind {
                 GoConversionKind::OverrideConverter => {
-                    lines.push(format!(
-                        "\t\tif converted := {converted}; converted != nil {{"
-                    ));
-                    lines.push(format!("\t\t\t{local}[k] = *converted"));
-                    lines.push("\t\t}".to_string());
+                    if !conversion.from_proto_returns_pointer {
+                        if conversion.fallible {
+                            lines.push(format!("\t\tconverted, err := {converted}"));
+                            lines.push("\t\tif err != nil {".to_string());
+                            lines.push("\t\t\treturn nil, err".to_string());
+                            lines.push("\t\t}".to_string());
+                            lines.push(format!("\t\t{local}[k] = converted"));
+                        } else {
+                            lines.push(format!("\t\t{local}[k] = {converted}"));
+                        }
+                    } else {
+                        if conversion.fallible {
+                            lines.push(format!("\t\tconverted, err := {converted}"));
+                            lines.push("\t\tif err != nil {".to_string());
+                            lines.push("\t\t\treturn nil, err".to_string());
+                            lines.push("\t\t}".to_string());
+                            lines.push("\t\tif converted != nil {".to_string());
+                        } else {
+                            lines.push(format!(
+                                "\t\tif converted := {converted}; converted != nil {{"
+                            ));
+                        }
+                        lines.push(format!("\t\t\t{local}[k] = *converted"));
+                        lines.push("\t\t}".to_string());
+                    }
                 }
-                _ => lines.push(format!("\t\t{local}[k] = {converted}")),
+                _ => {
+                    if conversion.fallible {
+                        lines.push(format!("\t\tconverted, err := {converted}"));
+                        lines.push("\t\tif err != nil {".to_string());
+                        lines.push("\t\t\treturn nil, err".to_string());
+                        lines.push("\t\t}".to_string());
+                        lines.push(format!("\t\t{local}[k] = converted"));
+                    } else {
+                        lines.push(format!("\t\t{local}[k] = {converted}"));
+                    }
+                }
             }
             lines.push("\t}".to_string());
             lines.push("}".to_string());
@@ -1611,40 +1671,109 @@ fn resource_return_singular_proto_source(
     getter: &str,
     local: &str,
     native_type: &str,
+    error_return: &str,
 ) -> (Vec<String>, String) {
     let converted = (conversion.from_proto)(getter);
     let uses_pointer = field.optional && native_type.starts_with('*');
 
     match conversion.kind {
         GoConversionKind::OverrideConverter => {
-            if uses_pointer {
-                (vec![format!("{local} := {converted}")], local.to_string())
+            if !conversion.from_proto_returns_pointer {
+                if uses_pointer {
+                    if conversion.fallible {
+                        (
+                            vec![
+                                format!("converted, err := {converted}"),
+                                "if err != nil {".to_string(),
+                                format!("\t{error_return}"),
+                                "}".to_string(),
+                                format!("{local} := &converted"),
+                            ],
+                            local.to_string(),
+                        )
+                    } else {
+                        (
+                            vec![
+                                format!("converted := {converted}"),
+                                format!("{local} := &converted"),
+                            ],
+                            local.to_string(),
+                        )
+                    }
+                } else if conversion.fallible {
+                    (
+                        vec![
+                            format!("{local}, err := {converted}"),
+                            "if err != nil {".to_string(),
+                            format!("\t{error_return}"),
+                            "}".to_string(),
+                        ],
+                        local.to_string(),
+                    )
+                } else {
+                    (vec![format!("{local} := {converted}")], local.to_string())
+                }
+            } else if uses_pointer {
+                if conversion.fallible {
+                    (
+                        vec![
+                            format!("{local}, err := {converted}"),
+                            "if err != nil {".to_string(),
+                            format!("\t{error_return}"),
+                            "}".to_string(),
+                        ],
+                        local.to_string(),
+                    )
+                } else {
+                    (vec![format!("{local} := {converted}")], local.to_string())
+                }
             } else {
-                (
-                    vec![
-                        format!("var {local} {native_type}"),
-                        format!("if converted := {converted}; converted != nil {{"),
-                        format!("\t{local} = *converted"),
-                        "}".to_string(),
-                    ],
-                    local.to_string(),
-                )
+                let mut lines = vec![format!("var {local} {native_type}")];
+                if conversion.fallible {
+                    lines.push(format!("converted, err := {converted}"));
+                    lines.push("if err != nil {".to_string());
+                    lines.push(format!("\t{error_return}"));
+                    lines.push("}".to_string());
+                    lines.push("if converted != nil {".to_string());
+                } else {
+                    lines.push(format!("if converted := {converted}; converted != nil {{"));
+                }
+                lines.push(format!("\t{local} = *converted"));
+                lines.push("}".to_string());
+                (lines, local.to_string())
             }
         }
         GoConversionKind::ModelConverter => {
             if uses_pointer {
-                (
-                    vec![
-                        format!("var {local} {native_type}"),
-                        format!("if {getter} != nil {{"),
-                        format!("\tconverted := {converted}"),
-                        format!("\t{local} = &converted"),
-                        "}".to_string(),
-                    ],
-                    local.to_string(),
-                )
+                let mut lines = vec![
+                    format!("var {local} {native_type}"),
+                    format!("if {getter} != nil {{"),
+                ];
+                if conversion.fallible {
+                    lines.push(format!("\tconverted, err := {converted}"));
+                    lines.push("\tif err != nil {".to_string());
+                    lines.push(format!("\t\t{error_return}"));
+                    lines.push("\t}".to_string());
+                } else {
+                    lines.push(format!("\tconverted := {converted}"));
+                }
+                lines.push(format!("\t{local} = &converted"));
+                lines.push("}".to_string());
+                (lines, local.to_string())
             } else {
-                (vec![format!("{local} := {converted}")], local.to_string())
+                if conversion.fallible {
+                    (
+                        vec![
+                            format!("{local}, err := {converted}"),
+                            "if err != nil {".to_string(),
+                            format!("\t{error_return}"),
+                            "}".to_string(),
+                        ],
+                        local.to_string(),
+                    )
+                } else {
+                    (vec![format!("{local} := {converted}")], local.to_string())
+                }
             }
         }
         GoConversionKind::Scalar | GoConversionKind::Enum => {
@@ -2244,6 +2373,12 @@ fn type_needs_pointer_when_optional(value: &PlannedValueType, type_expr: &str) -
     ) {
         return false;
     }
+    if matches!(
+        type_expr,
+        "client.VersioningOverride" | "temporal.SearchAttributes"
+    ) {
+        return false;
+    }
     // Already-nilable Go types (`any`, slices, maps) represent absence directly.
     if type_expr == "any" || type_expr.starts_with("[]") || type_expr.starts_with("map[") {
         return false;
@@ -2735,6 +2870,12 @@ struct GoValueConversion {
     from_proto: Box<dyn Fn(&str) -> String>,
     /// Produces the proto expression from a native expression.
     to_proto: Box<dyn Fn(&str) -> String>,
+    /// Whether the conversion expression returns `(value, error)`.
+    fallible: bool,
+    /// Whether the native argument to `to_proto` is pointer-shaped.
+    to_proto_takes_pointer: bool,
+    /// Whether the native result from `from_proto` is pointer-shaped.
+    from_proto_returns_pointer: bool,
 }
 
 /// Classifies a value conversion so the line builders know how to bridge
@@ -2818,6 +2959,9 @@ fn go_value_conversion(
             kind: GoConversionKind::Scalar,
             from_proto: Box::new(|expr| expr.to_string()),
             to_proto: Box::new(|expr| expr.to_string()),
+            fallible: false,
+            to_proto_takes_pointer: false,
+            from_proto_returns_pointer: false,
         }),
         PlannedValueType::Enum(enum_type) => go_enum_conversion(enum_type, imports, package),
         PlannedValueType::Message(message_type) => {
@@ -2931,6 +3075,9 @@ fn go_enum_conversion(
         kind: GoConversionKind::Enum,
         from_proto: Box::new(move |expr| format!("{native_for_cast}(int32({expr}))")),
         to_proto: Box::new(move |expr| format!("{proto_type}({expr})")),
+        fallible: false,
+        to_proto_takes_pointer: false,
+        from_proto_returns_pointer: false,
     })
 }
 
@@ -2941,18 +3088,23 @@ fn go_message_conversion(
     message: &PlannedMessageType,
     _api_plan: &ApiPlan,
     _imports: &mut GoImportCollector,
-    _package: &GoPackageContext,
+    package: &GoPackageContext,
 ) -> GoConversionResult<GoValueConversion> {
     // Replacement type: use override converter functions (hand-written in the
     // support file).
     if let Some(replacement) = &message.replacement {
-        if replacement.type_name.for_language(Language::Go).is_some() {
+        if let Some(type_name) = go_replacement_type_name(replacement, package) {
             let from = go_from_proto_converter(&message.info.full_name, replacement);
             let to = go_to_proto_converter(&message.info.full_name, replacement);
+            let native_is_nilable_value =
+                type_name == "any" || type_name.starts_with("[]") || type_name.starts_with("map[");
             return Ok(GoValueConversion {
                 kind: GoConversionKind::OverrideConverter,
-                from_proto: Box::new(move |expr| format!("{from}({expr})")),
-                to_proto: Box::new(move |expr| format!("{to}({expr})")),
+                from_proto: Box::new(move |expr| format!("{from}(ctx, {expr})")),
+                to_proto: Box::new(move |expr| format!("{to}(ctx, {expr})")),
+                fallible: true,
+                to_proto_takes_pointer: !native_is_nilable_value,
+                from_proto_returns_pointer: !native_is_nilable_value,
             });
         }
     }
@@ -2963,8 +3115,11 @@ fn go_message_conversion(
         let to = go_default_to_proto_name(&message.info.full_name);
         return Ok(GoValueConversion {
             kind: GoConversionKind::OverrideConverter,
-            from_proto: Box::new(move |expr| format!("{from}({expr})")),
-            to_proto: Box::new(move |expr| format!("{to}({expr})")),
+            from_proto: Box::new(move |expr| format!("{from}(ctx, {expr})")),
+            to_proto: Box::new(move |expr| format!("{to}(ctx, {expr})")),
+            fallible: true,
+            to_proto_takes_pointer: true,
+            from_proto_returns_pointer: true,
         });
     }
 
@@ -2987,8 +3142,11 @@ fn go_message_conversion(
         let from_proto = format!("{}FromProto", go_unexported_name(&message.model_name));
         return Ok(GoValueConversion {
             kind: GoConversionKind::ModelConverter,
-            from_proto: Box::new(move |expr| format!("{from_proto}({expr})")),
-            to_proto: Box::new(|expr| format!("{expr}.toProto()")),
+            from_proto: Box::new(move |expr| format!("{from_proto}(ctx, {expr})")),
+            to_proto: Box::new(|expr| format!("{expr}.toProto(ctx)")),
+            fallible: true,
+            to_proto_takes_pointer: false,
+            from_proto_returns_pointer: false,
         });
     }
 
@@ -3131,13 +3289,24 @@ fn build_field_conversion(
     match &field.kind {
         PlannedFieldKind::Singular(value) => {
             let conversion = go_value_conversion(value, api_plan, imports, package)?;
-            // Any value with a conversion (scalar, enum, message, override) is
-            // rendered as a pointer when optional, matching `build_field`.
-            let field_is_pointer = !field.required;
-            let to_lines =
-                singular_to_proto_lines(&conversion, &receiver, &proto_field, field_is_pointer);
-            let from_lines =
-                singular_from_proto_lines(&conversion, &proto_field, &go_field, field_is_pointer);
+            // Match the rendered field type. Optional nilable values such as
+            // interfaces, maps, slices, and selected SDK structs are not
+            // rendered as pointers.
+            let field_is_pointer = native_go_type.starts_with('*');
+            let to_lines = singular_to_proto_lines(
+                &conversion,
+                &receiver,
+                &proto_field,
+                field_is_pointer,
+                "return nil, err",
+            );
+            let from_lines = singular_from_proto_lines(
+                &conversion,
+                &proto_field,
+                &go_field,
+                field_is_pointer,
+                "return value, err",
+            );
             Ok(RenderedFieldConversion {
                 to_proto_lines: to_lines,
                 from_proto_lines: from_lines,
@@ -3145,8 +3314,14 @@ fn build_field_conversion(
         }
         PlannedFieldKind::Repeated(value) => {
             let conversion = go_value_conversion(value, api_plan, imports, package)?;
-            let to_lines = repeated_to_proto_lines(&conversion, &receiver, &proto_field);
-            let from_lines = repeated_from_proto_lines(&conversion, &proto_field, &go_field);
+            let to_lines =
+                repeated_to_proto_lines(&conversion, &receiver, &proto_field, "return nil, err");
+            let from_lines = repeated_from_proto_lines(
+                &conversion,
+                &proto_field,
+                &go_field,
+                "return value, err",
+            );
             Ok(RenderedFieldConversion {
                 to_proto_lines: to_lines,
                 from_proto_lines: from_lines,
@@ -3160,10 +3335,20 @@ fn build_field_conversion(
             let value_type = go_proto_value_type(value, imports)
                 .map_err(|reason| format!("map value: {reason}"))?;
             let proto_map_type = format!("map[{key_type}]{value_type}");
-            let to_lines =
-                map_to_proto_lines(&conversion, &proto_map_type, &receiver, &proto_field);
-            let from_lines =
-                map_from_proto_lines(&conversion, native_go_type, &proto_field, &go_field);
+            let to_lines = map_to_proto_lines(
+                &conversion,
+                &proto_map_type,
+                &receiver,
+                &proto_field,
+                "return nil, err",
+            );
+            let from_lines = map_from_proto_lines(
+                &conversion,
+                native_go_type,
+                &proto_field,
+                &go_field,
+                "return value, err",
+            );
             Ok(RenderedFieldConversion {
                 to_proto_lines: to_lines,
                 from_proto_lines: from_lines,
@@ -3183,32 +3368,70 @@ fn singular_to_proto_lines(
     receiver: &str,
     proto_field: &str,
     field_is_pointer: bool,
+    error_return: &str,
 ) -> Vec<String> {
     let assign = |converted: &str| format!("message.{proto_field} = {converted}");
+    let checked_assign = |call: String| {
+        vec![
+            "{".to_string(),
+            format!("\tconverted, err := {call}"),
+            "\tif err != nil {".to_string(),
+            format!("\t\t{error_return}"),
+            "\t}".to_string(),
+            format!("\t{}", assign("converted")),
+            "}".to_string(),
+        ]
+    };
     match conversion.kind {
         // Override converters are nil-safe and pointer-based on the native
         // side, so they need no guard: pass the pointer (optional) or the
         // address of the value (required) straight through.
         GoConversionKind::OverrideConverter => {
-            let arg = if field_is_pointer {
-                receiver.to_string()
+            let arg = if conversion.to_proto_takes_pointer {
+                if field_is_pointer {
+                    receiver.to_string()
+                } else {
+                    format!("&{receiver}")
+                }
             } else {
-                format!("&{receiver}")
+                receiver.to_string()
             };
-            vec![assign(&(conversion.to_proto)(&arg))]
+            let converted = (conversion.to_proto)(&arg);
+            if conversion.fallible {
+                checked_assign(converted)
+            } else {
+                vec![assign(&converted)]
+            }
         }
         // Scalars, enums, and generated models convert a value. For optional
         // (pointer) fields, guard against nil and dereference.
         GoConversionKind::Scalar | GoConversionKind::Enum | GoConversionKind::ModelConverter => {
             if field_is_pointer {
                 let converted = (conversion.to_proto)(&format!("(*{receiver})"));
-                vec![
-                    format!("if {receiver} != nil {{"),
-                    format!("\t{}", assign(&converted)),
-                    "}".to_string(),
-                ]
+                if conversion.fallible {
+                    vec![
+                        format!("if {receiver} != nil {{"),
+                        format!("\tconverted, err := {converted}"),
+                        "\tif err != nil {".to_string(),
+                        format!("\t\t{error_return}"),
+                        "\t}".to_string(),
+                        format!("\t{}", assign("converted")),
+                        "}".to_string(),
+                    ]
+                } else {
+                    vec![
+                        format!("if {receiver} != nil {{"),
+                        format!("\t{}", assign(&converted)),
+                        "}".to_string(),
+                    ]
+                }
             } else {
-                vec![assign(&(conversion.to_proto)(receiver))]
+                let converted = (conversion.to_proto)(receiver);
+                if conversion.fallible {
+                    checked_assign(converted)
+                } else {
+                    vec![assign(&converted)]
+                }
             }
         }
     }
@@ -3220,6 +3443,7 @@ fn singular_from_proto_lines(
     proto_field: &str,
     go_field: &str,
     field_is_pointer: bool,
+    error_return: &str,
 ) -> Vec<String> {
     let getter = format!("proto.Get{proto_field}()");
     match conversion.kind {
@@ -3228,14 +3452,62 @@ fn singular_from_proto_lines(
         // dereference with a zero fallback when present.
         GoConversionKind::OverrideConverter => {
             let converted = (conversion.from_proto)(&getter);
-            if field_is_pointer {
-                vec![format!("value.{go_field} = {converted}")]
+            if !conversion.from_proto_returns_pointer {
+                if conversion.fallible {
+                    vec![
+                        "{".to_string(),
+                        format!("\tconverted, err := {converted}"),
+                        "\tif err != nil {".to_string(),
+                        format!("\t\t{error_return}"),
+                        "\t}".to_string(),
+                        if field_is_pointer {
+                            format!("\tvalue.{go_field} = &converted")
+                        } else {
+                            format!("\tvalue.{go_field} = converted")
+                        },
+                        "}".to_string(),
+                    ]
+                } else {
+                    vec![if field_is_pointer {
+                        format!("converted := {converted}\nvalue.{go_field} = &converted")
+                    } else {
+                        format!("value.{go_field} = {converted}")
+                    }]
+                }
+            } else if field_is_pointer {
+                if conversion.fallible {
+                    vec![
+                        "{".to_string(),
+                        format!("\tconverted, err := {converted}"),
+                        "\tif err != nil {".to_string(),
+                        format!("\t\t{error_return}"),
+                        "\t}".to_string(),
+                        format!("\tvalue.{go_field} = converted"),
+                        "}".to_string(),
+                    ]
+                } else {
+                    vec![format!("value.{go_field} = {converted}")]
+                }
             } else {
-                vec![
-                    format!("if converted := {converted}; converted != nil {{"),
-                    format!("\tvalue.{go_field} = *converted"),
-                    "}".to_string(),
-                ]
+                if conversion.fallible {
+                    vec![
+                        "{".to_string(),
+                        format!("\tconverted, err := {converted}"),
+                        "\tif err != nil {".to_string(),
+                        format!("\t\t{error_return}"),
+                        "\t}".to_string(),
+                        "\tif converted != nil {".to_string(),
+                        format!("\t\tvalue.{go_field} = *converted"),
+                        "\t}".to_string(),
+                        "}".to_string(),
+                    ]
+                } else {
+                    vec![
+                        format!("if converted := {converted}; converted != nil {{"),
+                        format!("\tvalue.{go_field} = *converted"),
+                        "}".to_string(),
+                    ]
+                }
             }
         }
         // Generated models return a value, but only construct it when the proto
@@ -3243,14 +3515,38 @@ fn singular_from_proto_lines(
         GoConversionKind::ModelConverter => {
             let converted = (conversion.from_proto)(&getter);
             if field_is_pointer {
-                vec![
-                    format!("if {getter} != nil {{"),
-                    format!("\tconverted := {converted}"),
-                    format!("\tvalue.{go_field} = &converted"),
-                    "}".to_string(),
-                ]
+                if conversion.fallible {
+                    vec![
+                        format!("if {getter} != nil {{"),
+                        format!("\tconverted, err := {converted}"),
+                        "\tif err != nil {".to_string(),
+                        format!("\t\t{error_return}"),
+                        "\t}".to_string(),
+                        format!("\tvalue.{go_field} = &converted"),
+                        "}".to_string(),
+                    ]
+                } else {
+                    vec![
+                        format!("if {getter} != nil {{"),
+                        format!("\tconverted := {converted}"),
+                        format!("\tvalue.{go_field} = &converted"),
+                        "}".to_string(),
+                    ]
+                }
             } else {
-                vec![format!("value.{go_field} = {converted}")]
+                if conversion.fallible {
+                    vec![
+                        "{".to_string(),
+                        format!("\tconverted, err := {converted}"),
+                        "\tif err != nil {".to_string(),
+                        format!("\t\t{error_return}"),
+                        "\t}".to_string(),
+                        format!("\tvalue.{go_field} = converted"),
+                        "}".to_string(),
+                    ]
+                } else {
+                    vec![format!("value.{go_field} = {converted}")]
+                }
             }
         }
         // Scalars and enums convert a value directly. Proto scalar fields carry
@@ -3274,13 +3570,30 @@ fn repeated_to_proto_lines(
     conversion: &GoValueConversion,
     receiver: &str,
     proto_field: &str,
+    error_return: &str,
 ) -> Vec<String> {
-    let converted = (conversion.to_proto)("item");
-    vec![
-        format!("for _, item := range {receiver} {{"),
-        format!("\tmessage.{proto_field} = append(message.{proto_field}, {converted})"),
-        "}".to_string(),
-    ]
+    let converted = match conversion.kind {
+        GoConversionKind::OverrideConverter if conversion.to_proto_takes_pointer => {
+            (conversion.to_proto)("&item")
+        }
+        _ => (conversion.to_proto)("item"),
+    };
+    let mut lines = vec![format!("for _, item := range {receiver} {{")];
+    if conversion.fallible {
+        lines.push(format!("\tconverted, err := {converted}"));
+        lines.push("\tif err != nil {".to_string());
+        lines.push(format!("\t\t{error_return}"));
+        lines.push("\t}".to_string());
+        lines.push(format!(
+            "\tmessage.{proto_field} = append(message.{proto_field}, converted)"
+        ));
+    } else {
+        lines.push(format!(
+            "\tmessage.{proto_field} = append(message.{proto_field}, {converted})"
+        ));
+    }
+    lines.push("}".to_string());
+    lines
 }
 
 /// `FromProto` lines for a repeated field.
@@ -3288,13 +3601,48 @@ fn repeated_from_proto_lines(
     conversion: &GoValueConversion,
     proto_field: &str,
     go_field: &str,
+    error_return: &str,
 ) -> Vec<String> {
     let converted = (conversion.from_proto)("item");
-    vec![
-        format!("for _, item := range proto.Get{proto_field}() {{"),
-        format!("\tvalue.{go_field} = append(value.{go_field}, {converted})"),
-        "}".to_string(),
-    ]
+    let mut lines = vec![format!("for _, item := range proto.Get{proto_field}() {{")];
+    if conversion.kind == GoConversionKind::OverrideConverter
+        && conversion.from_proto_returns_pointer
+        && conversion.fallible
+    {
+        lines.push(format!("\tconverted, err := {converted}"));
+        lines.push("\tif err != nil {".to_string());
+        lines.push(format!("\t\t{error_return}"));
+        lines.push("\t}".to_string());
+        lines.push("\tif converted != nil {".to_string());
+        lines.push(format!(
+            "\t\tvalue.{go_field} = append(value.{go_field}, *converted)"
+        ));
+        lines.push("\t}".to_string());
+    } else if conversion.kind == GoConversionKind::OverrideConverter
+        && conversion.from_proto_returns_pointer
+    {
+        lines.push(format!(
+            "\tif converted := {converted}; converted != nil {{"
+        ));
+        lines.push(format!(
+            "\t\tvalue.{go_field} = append(value.{go_field}, *converted)"
+        ));
+        lines.push("\t}".to_string());
+    } else if conversion.fallible {
+        lines.push(format!("\tconverted, err := {converted}"));
+        lines.push("\tif err != nil {".to_string());
+        lines.push(format!("\t\t{error_return}"));
+        lines.push("\t}".to_string());
+        lines.push(format!(
+            "\tvalue.{go_field} = append(value.{go_field}, converted)"
+        ));
+    } else {
+        lines.push(format!(
+            "\tvalue.{go_field} = append(value.{go_field}, {converted})"
+        ));
+    }
+    lines.push("}".to_string());
+    lines
 }
 
 /// `ToProto` lines for a map field. `proto_map_type` is the Go type expression
@@ -3304,21 +3652,33 @@ fn map_to_proto_lines(
     proto_map_type: &str,
     receiver: &str,
     proto_field: &str,
+    error_return: &str,
 ) -> Vec<String> {
     // Override converters are pointer-based on the native side; the range
     // value variable is addressable, so pass its address.
     let converted = match conversion.kind {
-        GoConversionKind::OverrideConverter => (conversion.to_proto)("&v"),
+        GoConversionKind::OverrideConverter if conversion.to_proto_takes_pointer => {
+            (conversion.to_proto)("&v")
+        }
         _ => (conversion.to_proto)("v"),
     };
-    vec![
+    let mut lines = vec![
         format!("if len({receiver}) > 0 {{"),
         format!("\tmessage.{proto_field} = make({proto_map_type}, len({receiver}))"),
         format!("\tfor k, v := range {receiver} {{"),
-        format!("\t\tmessage.{proto_field}[k] = {converted}"),
-        "\t}".to_string(),
-        "}".to_string(),
-    ]
+    ];
+    if conversion.fallible {
+        lines.push(format!("\t\tconverted, err := {converted}"));
+        lines.push("\t\tif err != nil {".to_string());
+        lines.push(format!("\t\t\t{error_return}"));
+        lines.push("\t\t}".to_string());
+        lines.push(format!("\t\tmessage.{proto_field}[k] = converted"));
+    } else {
+        lines.push(format!("\t\tmessage.{proto_field}[k] = {converted}"));
+    }
+    lines.push("\t}".to_string());
+    lines.push("}".to_string());
+    lines
 }
 
 /// `FromProto` lines for a map field. `native_map_type` is the Go type
@@ -3328,6 +3688,7 @@ fn map_from_proto_lines(
     native_map_type: &str,
     proto_field: &str,
     go_field: &str,
+    error_return: &str,
 ) -> Vec<String> {
     let getter = format!("proto.Get{proto_field}()");
     let converted = (conversion.from_proto)("v");
@@ -3340,14 +3701,42 @@ fn map_from_proto_lines(
         // Override converters return a pointer and pass nil through; only
         // present values land in the native map.
         GoConversionKind::OverrideConverter => {
-            lines.push(format!(
-                "\t\tif converted := {converted}; converted != nil {{"
-            ));
-            lines.push(format!("\t\t\tvalue.{go_field}[k] = *converted"));
-            lines.push("\t\t}".to_string());
+            if !conversion.from_proto_returns_pointer {
+                if conversion.fallible {
+                    lines.push(format!("\t\tconverted, err := {converted}"));
+                    lines.push("\t\tif err != nil {".to_string());
+                    lines.push(format!("\t\t\t{error_return}"));
+                    lines.push("\t\t}".to_string());
+                    lines.push(format!("\t\tvalue.{go_field}[k] = converted"));
+                } else {
+                    lines.push(format!("\t\tvalue.{go_field}[k] = {converted}"));
+                }
+            } else {
+                if conversion.fallible {
+                    lines.push(format!("\t\tconverted, err := {converted}"));
+                    lines.push("\t\tif err != nil {".to_string());
+                    lines.push(format!("\t\t\t{error_return}"));
+                    lines.push("\t\t}".to_string());
+                    lines.push("\t\tif converted != nil {".to_string());
+                } else {
+                    lines.push(format!(
+                        "\t\tif converted := {converted}; converted != nil {{"
+                    ));
+                }
+                lines.push(format!("\t\t\tvalue.{go_field}[k] = *converted"));
+                lines.push("\t\t}".to_string());
+            }
         }
         _ => {
-            lines.push(format!("\t\tvalue.{go_field}[k] = {converted}"));
+            if conversion.fallible {
+                lines.push(format!("\t\tconverted, err := {converted}"));
+                lines.push("\t\tif err != nil {".to_string());
+                lines.push(format!("\t\t\t{error_return}"));
+                lines.push("\t\t}".to_string());
+                lines.push(format!("\t\tvalue.{go_field}[k] = converted"));
+            } else {
+                lines.push(format!("\t\tvalue.{go_field}[k] = {converted}"));
+            }
         }
     }
     lines.push("\t}".to_string());
@@ -3395,32 +3784,70 @@ fn build_sourced_conversion(
                 // bind it to a local first (Go forbids taking the address of a
                 // call expression).
                 GoConversionKind::OverrideConverter => {
-                    let converted = (conversion.to_proto)("&sourced");
-                    Ok(RenderedSourcedField {
-                        to_proto_lines: vec![
-                            format!("sourced := {source_expr}"),
-                            format!("message.{proto_field} = {converted}"),
-                        ],
-                    })
+                    let arg = if conversion.to_proto_takes_pointer {
+                        "&sourced"
+                    } else {
+                        "sourced"
+                    };
+                    let converted = (conversion.to_proto)(arg);
+                    let mut to_proto_lines = vec![format!("sourced := {source_expr}")];
+                    if conversion.fallible {
+                        to_proto_lines.extend([
+                            format!("converted, err := {converted}"),
+                            "if err != nil {".to_string(),
+                            "\treturn nil, err".to_string(),
+                            "}".to_string(),
+                            format!("message.{proto_field} = converted"),
+                        ]);
+                    } else {
+                        to_proto_lines.push(format!("message.{proto_field} = {converted}"));
+                    }
+                    Ok(RenderedSourcedField { to_proto_lines })
                 }
                 _ => {
                     let converted = (conversion.to_proto)(source_expr);
-                    Ok(RenderedSourcedField {
-                        to_proto_lines: vec![format!("message.{proto_field} = {converted}")],
-                    })
+                    if conversion.fallible {
+                        Ok(RenderedSourcedField {
+                            to_proto_lines: vec![
+                                format!("converted, err := {converted}"),
+                                "if err != nil {".to_string(),
+                                "\treturn nil, err".to_string(),
+                                "}".to_string(),
+                                format!("message.{proto_field} = converted"),
+                            ],
+                        })
+                    } else {
+                        Ok(RenderedSourcedField {
+                            to_proto_lines: vec![format!("message.{proto_field} = {converted}")],
+                        })
+                    }
                 }
             }
         }
         PlannedFieldKind::Repeated(value) => {
             let conversion = go_value_conversion(value, api_plan, imports, package)?;
-            let converted = (conversion.to_proto)("item");
-            Ok(RenderedSourcedField {
-                to_proto_lines: vec![
-                    format!("for _, item := range {source_expr} {{"),
-                    format!("\tmessage.{proto_field} = append(message.{proto_field}, {converted})"),
-                    "}".to_string(),
-                ],
-            })
+            let converted = match conversion.kind {
+                GoConversionKind::OverrideConverter if conversion.to_proto_takes_pointer => {
+                    (conversion.to_proto)("&item")
+                }
+                _ => (conversion.to_proto)("item"),
+            };
+            let mut to_proto_lines = vec![format!("for _, item := range {source_expr} {{")];
+            if conversion.fallible {
+                to_proto_lines.push(format!("\tconverted, err := {converted}"));
+                to_proto_lines.push("\tif err != nil {".to_string());
+                to_proto_lines.push("\t\treturn nil, err".to_string());
+                to_proto_lines.push("\t}".to_string());
+                to_proto_lines.push(format!(
+                    "\tmessage.{proto_field} = append(message.{proto_field}, converted)"
+                ));
+            } else {
+                to_proto_lines.push(format!(
+                    "\tmessage.{proto_field} = append(message.{proto_field}, {converted})"
+                ));
+            }
+            to_proto_lines.push("}".to_string());
+            Ok(RenderedSourcedField { to_proto_lines })
         }
         PlannedFieldKind::Map { key, value } => {
             let conversion = go_value_conversion(value, api_plan, imports, package)?;
@@ -3439,6 +3866,7 @@ fn build_sourced_conversion(
                 &proto_map_type,
                 &local,
                 &proto_field,
+                "return nil, err",
             ));
             Ok(RenderedSourcedField { to_proto_lines })
         }
@@ -3558,7 +3986,7 @@ fn render_file(
         }
         for model in private_models {
             output.push('\n');
-            render_model(&mut output, model);
+            render_model(&mut output, model, package);
         }
     }
 
@@ -3636,7 +4064,7 @@ fn render_file(
         }
         for model in public_models {
             output.push('\n');
-            render_model(&mut output, model);
+            render_model(&mut output, model, package);
         }
         for service in services {
             for operation in &service.operations {
@@ -3876,7 +4304,7 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
 ///     Reason string
 /// }
 /// ```
-fn render_model(output: &mut String, model: &RenderedModel) {
+fn render_model(output: &mut String, model: &RenderedModel, package: &GoPackageContext) {
     output.push_str("type ");
     output.push_str(&model.name);
     output.push_str(" struct {\n");
@@ -3896,7 +4324,7 @@ fn render_model(output: &mut String, model: &RenderedModel) {
     }
 
     if let Some(proto) = &model.proto {
-        render_model_proto_methods(output, model, proto);
+        render_model_proto_methods(output, model, proto, package);
     }
 }
 
@@ -3904,22 +4332,23 @@ fn render_model(output: &mut String, model: &RenderedModel) {
 /// model.
 ///
 /// ```go
-/// func (m ActivityOptions) toProto() *activity.ActivityOptions {
+/// func (m ActivityOptions) toProto(ctx workflow.Context) (*activity.ActivityOptions, error) {
 ///     message := &activity.ActivityOptions{}
 ///     ...
-///     return message
+///     return message, nil
 /// }
 ///
-/// func activityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
+/// func activityOptionsFromProto(ctx workflow.Context, proto *activity.ActivityOptions) (ActivityOptions, error) {
 ///     value := ActivityOptions{}
 ///     ...
-///     return value
+///     return value, nil
 /// }
 /// ```
 fn render_model_proto_methods(
     output: &mut String,
     model: &RenderedModel,
     proto: &RenderedModelProto,
+    package: &GoPackageContext,
 ) {
     // proto.proto_type is like "*activity.ActivityOptions"; the constructor
     // form drops the leading '*'.
@@ -3929,9 +4358,11 @@ fn render_model_proto_methods(
         output.push('\n');
         output.push_str("func (m ");
         output.push_str(&model.name);
-        output.push_str(") toProto() ");
+        output.push_str(") toProto(ctx ");
+        output.push_str(&package.workflow_context_type());
+        output.push_str(") (");
         output.push_str(&proto.proto_type);
-        output.push_str(" {\n");
+        output.push_str(", error) {\n");
         output.push_str("\tmessage := &");
         output.push_str(proto_value_type);
         output.push_str("{}\n");
@@ -3951,7 +4382,7 @@ fn render_model_proto_methods(
                 output.push('\n');
             }
         }
-        output.push_str("\treturn message\n");
+        output.push_str("\treturn message, nil\n");
         output.push_str("}\n");
     }
 
@@ -3960,11 +4391,13 @@ fn render_model_proto_methods(
         output.push_str("func ");
         let (model_ident, _) = split_go_type_decl_name(&model.name);
         output.push_str(&go_unexported_name(model_ident));
-        output.push_str("FromProto(proto ");
+        output.push_str("FromProto(ctx ");
+        output.push_str(&package.workflow_context_type());
+        output.push_str(", proto ");
         output.push_str(&proto.proto_type);
-        output.push_str(") ");
+        output.push_str(") (");
         output.push_str(&model.name);
-        output.push_str(" {\n");
+        output.push_str(", error) {\n");
         output.push_str("\tvalue := ");
         output.push_str(&model.name);
         output.push_str("{}\n");
@@ -3977,7 +4410,7 @@ fn render_model_proto_methods(
                 }
             }
         }
-        output.push_str("\treturn value\n");
+        output.push_str("\treturn value, nil\n");
         output.push_str("}\n");
     }
 }
@@ -4471,6 +4904,16 @@ fn render_operation_function_proto(
 
     let returns_resource = resource_return.is_some() && binding.output_proto_type.is_some();
     let returns_value = operation.output_type.is_some() && binding.output_from_proto.is_some();
+    let conversion_error_return = if let (Some(_transform_expr), Some(transform_type)) = (
+        operation.output_transform_expr,
+        operation.output_transform_type.as_ref(),
+    ) {
+        format!("var zero {transform_type}\n\t\treturn zero, err")
+    } else if operation.output_type.is_some() && (returns_resource || returns_value) {
+        "return nil, err".to_string()
+    } else {
+        "return err".to_string()
+    };
 
     if let (Some(_transform_expr), Some(transform_type)) = (
         operation.output_transform_expr,
@@ -4494,6 +4937,14 @@ fn render_operation_function_proto(
     }
     output.push_str(" {\n");
 
+    output.push_str("\trequestProto, err := ");
+    output.push_str(&binding.input_to_proto);
+    output.push('\n');
+    output.push_str("\tif err != nil {\n");
+    output.push_str("\t\t");
+    output.push_str(&conversion_error_return);
+    output.push('\n');
+    output.push_str("\t}\n");
     output.push_str("\tc := ");
     output.push_str(&package.new_nexus_client());
     output.push('(');
@@ -4501,19 +4952,9 @@ fn render_operation_function_proto(
     output.push_str(", ");
     output.push_str(&service_name);
     output.push_str(")\n");
-    if returns_resource {
-        output.push_str("\trequestProto := ");
-        output.push_str(&binding.input_to_proto);
-        output.push('\n');
-    }
     output.push_str("\tfut := c.ExecuteOperation(ctx, ");
     output.push_str(&operation_name);
-    output.push_str(", ");
-    if returns_resource {
-        output.push_str("requestProto");
-    } else {
-        output.push_str(&binding.input_to_proto);
-    }
+    output.push_str(", requestProto");
     output.push_str(", ");
     output.push_str(&package.nexus_operation_options());
     output.push_str(")\n");
@@ -4565,14 +5006,21 @@ fn render_operation_function_proto(
         output.push_str("\t}\n");
         if binding.output_returns_pointer {
             // The converter already yields `*Native`; return it directly.
-            output.push_str("\treturn ");
-            output.push_str(from_proto);
-            output.push_str(", nil\n");
-        } else {
-            // The converter yields a `Model` value; return its address.
-            output.push_str("\tvalue := ");
+            output.push_str("\tvalue, err := ");
             output.push_str(from_proto);
             output.push('\n');
+            output.push_str("\tif err != nil {\n");
+            output.push_str("\t\treturn nil, err\n");
+            output.push_str("\t}\n");
+            output.push_str("\treturn value, nil\n");
+        } else {
+            // The converter yields a `Model` value; return its address.
+            output.push_str("\tvalue, err := ");
+            output.push_str(from_proto);
+            output.push('\n');
+            output.push_str("\tif err != nil {\n");
+            output.push_str("\t\treturn nil, err\n");
+            output.push_str("\t}\n");
             output.push_str("\treturn &value, nil\n");
         }
     } else if let (Some(resource_return), Some(proto_value_type)) = (

@@ -132,7 +132,7 @@ interface model {
   /// @nexus.type
   ///   python="temporalio.common.TypedSearchAttributes"
   ///   typescript="common.TypedSearchAttributes"
-  ///   go="string"
+  ///   go="go.temporal.io/sdk/temporal.SearchAttributes"
   ///   go-to="searchAttributesToProto"
   ///   dotnet="Temporalio.Common.SearchAttributeCollection"
   ///   typescript-import="@temporalio/common"

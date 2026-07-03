@@ -8,6 +8,7 @@ import (
 	activitypb "go.temporal.io/api/activity/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/sdk/workflow"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -17,6 +18,7 @@ import (
 // proto conversions against the binary format shared with the Python and
 // TypeScript bindings.
 func TestActivityOptionsWireRoundtrip(t *testing.T) {
+	var ctx workflow.Context
 	scheduleToClose := 7 * time.Second
 	original := ActivityOptions{
 		TaskQueue:              ptr("demo-task-queue"),
@@ -30,7 +32,8 @@ func TestActivityOptionsWireRoundtrip(t *testing.T) {
 	}
 
 	// native -> proto
-	protoMsg := original.toProto()
+	protoMsg, err := original.toProto(ctx)
+	require.NoError(t, err)
 
 	// proto -> wire bytes -> proto
 	bytes, err := proto.Marshal(protoMsg)
@@ -39,7 +42,8 @@ func TestActivityOptionsWireRoundtrip(t *testing.T) {
 	require.NoError(t, proto.Unmarshal(bytes, &decoded))
 
 	// proto -> native
-	roundtripped := activityOptionsFromProto(&decoded)
+	roundtripped, err := activityOptionsFromProto(ctx, &decoded)
+	require.NoError(t, err)
 
 	require.NotNil(t, roundtripped.TaskQueue)
 	require.Equal(t, *original.TaskQueue, *roundtripped.TaskQueue)
@@ -58,15 +62,20 @@ func TestActivityOptionsWireRoundtrip(t *testing.T) {
 // a full wire round-trip, and stays distinct from a field that is present but
 // set to its zero value.
 func TestActivityOptionsUnsetVsZero(t *testing.T) {
+	var ctx workflow.Context
+
 	// Unset optional fields.
 	unset := ActivityOptions{
 		RetryPolicy: temporal.RetryPolicy{MaximumAttempts: 1},
 	}
-	unsetBytes, err := proto.Marshal(unset.toProto())
+	unsetProto, err := unset.toProto(ctx)
+	require.NoError(t, err)
+	unsetBytes, err := proto.Marshal(unsetProto)
 	require.NoError(t, err)
 	var unsetDecoded activitypb.ActivityOptions
 	require.NoError(t, proto.Unmarshal(unsetBytes, &unsetDecoded))
-	unsetBack := activityOptionsFromProto(&unsetDecoded)
+	unsetBack, err := activityOptionsFromProto(ctx, &unsetDecoded)
+	require.NoError(t, err)
 	require.Nil(t, unsetBack.ScheduleToCloseTimeout, "unset optional must round-trip as nil")
 	require.Nil(t, unsetBack.Priority, "unset optional must round-trip as nil")
 
@@ -77,11 +86,14 @@ func TestActivityOptionsUnsetVsZero(t *testing.T) {
 		ScheduleToCloseTimeout: &zeroDuration,
 		Priority:               &temporal.Priority{},
 	}
-	presentBytes, err := proto.Marshal(present.toProto())
+	presentProto, err := present.toProto(ctx)
+	require.NoError(t, err)
+	presentBytes, err := proto.Marshal(presentProto)
 	require.NoError(t, err)
 	var presentDecoded activitypb.ActivityOptions
 	require.NoError(t, proto.Unmarshal(presentBytes, &presentDecoded))
-	presentBack := activityOptionsFromProto(&presentDecoded)
+	presentBack, err := activityOptionsFromProto(ctx, &presentDecoded)
+	require.NoError(t, err)
 	require.NotNil(t, presentBack.ScheduleToCloseTimeout, "present zero optional must stay non-nil")
 	require.Equal(t, time.Duration(0), *presentBack.ScheduleToCloseTimeout)
 	require.NotNil(t, presentBack.Priority, "present zero optional must stay non-nil")
@@ -92,6 +104,7 @@ func TestActivityOptionsUnsetVsZero(t *testing.T) {
 // into the upstream proto type and checking field values), which is what makes
 // the payload interoperable with the other language bindings.
 func TestRetryPolicyWireFieldNames(t *testing.T) {
+	var ctx workflow.Context
 	policy := temporal.RetryPolicy{
 		InitialInterval:        time.Second,
 		BackoffCoefficient:     1.5,
@@ -100,7 +113,9 @@ func TestRetryPolicyWireFieldNames(t *testing.T) {
 		NonRetryableErrorTypes: []string{"FatalError"},
 	}
 
-	protoMsg := ActivityOptions{RetryPolicy: policy}.toProto().GetRetryPolicy()
+	activityOptionsProto, err := ActivityOptions{RetryPolicy: policy}.toProto(ctx)
+	require.NoError(t, err)
+	protoMsg := activityOptionsProto.GetRetryPolicy()
 	bytes, err := proto.Marshal(protoMsg)
 	require.NoError(t, err)
 

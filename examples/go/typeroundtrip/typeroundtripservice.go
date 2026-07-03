@@ -13,23 +13,38 @@ import (
 // --- Operations (internal) ---
 
 func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
+	requestProto, err := retryPolicyToProto(ctx, &request)
+	if err != nil {
+		return nil, err
+	}
 	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
-	fut := c.ExecuteOperation(ctx, "RetryPolicyOperation", retryPolicyToProto(&request), workflow.NexusOperationOptions{})
+	fut := c.ExecuteOperation(ctx, "RetryPolicyOperation", requestProto, workflow.NexusOperationOptions{})
 	var result common.RetryPolicy
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	return retryPolicyFromProto(&result), nil
+	value, err := retryPolicyFromProto(ctx, &result)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
 }
 
 func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) (*ActivityOptions, error) {
+	requestProto, err := request.toProto(ctx)
+	if err != nil {
+		return nil, err
+	}
 	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
-	fut := c.ExecuteOperation(ctx, "ActivityOptionsOperation", request.toProto(), workflow.NexusOperationOptions{})
+	fut := c.ExecuteOperation(ctx, "ActivityOptionsOperation", requestProto, workflow.NexusOperationOptions{})
 	var result activity.ActivityOptions
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	value := activityOptionsFromProto(&result)
+	value, err := activityOptionsFromProto(ctx, &result)
+	if err != nil {
+		return nil, err
+	}
 	return &value, nil
 }
 
@@ -43,24 +58,72 @@ type ActivityOptions struct {
 	Priority               *temporal.Priority
 }
 
-func (m ActivityOptions) toProto() *activity.ActivityOptions {
+func (m ActivityOptions) toProto(ctx workflow.Context) (*activity.ActivityOptions, error) {
 	message := &activity.ActivityOptions{}
-	message.TaskQueue = taskQueueToProto(m.TaskQueue)
-	message.RetryPolicy = retryPolicyToProto(&m.RetryPolicy)
-	message.ScheduleToCloseTimeout = durationToProto(m.ScheduleToCloseTimeout)
-	message.Priority = priorityToProto(m.Priority)
-	return message
+	{
+		converted, err := taskQueueToProto(ctx, m.TaskQueue)
+		if err != nil {
+			return nil, err
+		}
+		message.TaskQueue = converted
+	}
+	{
+		converted, err := retryPolicyToProto(ctx, &m.RetryPolicy)
+		if err != nil {
+			return nil, err
+		}
+		message.RetryPolicy = converted
+	}
+	{
+		converted, err := durationToProto(ctx, m.ScheduleToCloseTimeout)
+		if err != nil {
+			return nil, err
+		}
+		message.ScheduleToCloseTimeout = converted
+	}
+	{
+		converted, err := priorityToProto(ctx, m.Priority)
+		if err != nil {
+			return nil, err
+		}
+		message.Priority = converted
+	}
+	return message, nil
 }
 
-func activityOptionsFromProto(proto *activity.ActivityOptions) ActivityOptions {
+func activityOptionsFromProto(ctx workflow.Context, proto *activity.ActivityOptions) (ActivityOptions, error) {
 	value := ActivityOptions{}
-	value.TaskQueue = taskQueueFromProto(proto.GetTaskQueue())
-	if converted := retryPolicyFromProto(proto.GetRetryPolicy()); converted != nil {
-		value.RetryPolicy = *converted
+	{
+		converted, err := taskQueueFromProto(ctx, proto.GetTaskQueue())
+		if err != nil {
+			return value, err
+		}
+		value.TaskQueue = converted
 	}
-	value.ScheduleToCloseTimeout = durationFromProto(proto.GetScheduleToCloseTimeout())
-	value.Priority = priorityFromProto(proto.GetPriority())
-	return value
+	{
+		converted, err := retryPolicyFromProto(ctx, proto.GetRetryPolicy())
+		if err != nil {
+			return value, err
+		}
+		if converted != nil {
+			value.RetryPolicy = *converted
+		}
+	}
+	{
+		converted, err := durationFromProto(ctx, proto.GetScheduleToCloseTimeout())
+		if err != nil {
+			return value, err
+		}
+		value.ScheduleToCloseTimeout = converted
+	}
+	{
+		converted, err := priorityFromProto(ctx, proto.GetPriority())
+		if err != nil {
+			return value, err
+		}
+		value.Priority = converted
+	}
+	return value, nil
 }
 
 func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {

@@ -23,15 +23,39 @@ type startWorkflowRequest struct {
 	WorkflowStartDelay *time.Duration
 }
 
-func (m startWorkflowRequest) toProto() *workflowservice.StartWorkflowExecutionRequest {
+func (m startWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.StartWorkflowExecutionRequest, error) {
 	message := &workflowservice.StartWorkflowExecutionRequest{}
-	message.WorkflowType = workflowTypeToProto(&m.Workflow)
-	message.Input = payloadsToProto(m.Args)
+	{
+		converted, err := workflowTypeToProto(ctx, &m.Workflow)
+		if err != nil {
+			return nil, err
+		}
+		message.WorkflowType = converted
+	}
+	{
+		converted, err := payloadsToProto(ctx, m.Args)
+		if err != nil {
+			return nil, err
+		}
+		message.Input = converted
+	}
 	message.WorkflowId = m.WorkflowId
-	message.TaskQueue = taskQueueToProto(&m.TaskQueue)
-	message.WorkflowStartDelay = durationToProto(m.WorkflowStartDelay)
+	{
+		converted, err := taskQueueToProto(ctx, &m.TaskQueue)
+		if err != nil {
+			return nil, err
+		}
+		message.TaskQueue = converted
+	}
+	{
+		converted, err := durationToProto(ctx, m.WorkflowStartDelay)
+		if err != nil {
+			return nil, err
+		}
+		message.WorkflowStartDelay = converted
+	}
 	message.Namespace = workflowNamespace()
-	return message
+	return message, nil
 }
 
 type cancelWorkflowRequest struct {
@@ -40,14 +64,20 @@ type cancelWorkflowRequest struct {
 	Reason            *string
 }
 
-func (m cancelWorkflowRequest) toProto() *workflowservice.RequestCancelWorkflowExecutionRequest {
+func (m cancelWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.RequestCancelWorkflowExecutionRequest, error) {
 	message := &workflowservice.RequestCancelWorkflowExecutionRequest{}
-	message.WorkflowExecution = m.WorkflowExecution.toProto()
+	{
+		converted, err := m.WorkflowExecution.toProto(ctx)
+		if err != nil {
+			return nil, err
+		}
+		message.WorkflowExecution = converted
+	}
 	if m.Reason != nil {
 		message.Reason = (*m.Reason)
 	}
 	message.Namespace = workflowNamespace()
-	return message
+	return message, nil
 }
 
 // --- Resources ---
@@ -76,8 +106,11 @@ func (u *StartedWorkflow) GetResult(ctx workflow.Context) (*[]any, error) {
 // --- Operations (internal) ---
 
 func startWorkflow(ctx workflow.Context, request startWorkflowRequest) (*StartedWorkflow, error) {
+	requestProto, err := request.toProto(ctx)
+	if err != nil {
+		return nil, err
+	}
 	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
-	requestProto := request.toProto()
 	fut := c.ExecuteOperation(ctx, "StartWorkflow", requestProto, workflow.NexusOperationOptions{})
 	var result workflowservice.StartWorkflowExecutionResponse
 	if err := fut.Get(ctx, &result); err != nil {
@@ -97,8 +130,11 @@ func startWorkflow(ctx workflow.Context, request startWorkflowRequest) (*Started
 }
 
 func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) (*StartedWorkflow, error) {
+	requestProto, err := request.toProto(ctx)
+	if err != nil {
+		return nil, err
+	}
 	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
-	requestProto := request.toProto()
 	fut := c.ExecuteOperation(ctx, "RestartWorkflow", requestProto, workflow.NexusOperationOptions{})
 	var result workflowservice.StartWorkflowExecutionResponse
 	if err := fut.Get(ctx, &result); err != nil {
@@ -118,13 +154,20 @@ func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) (*Start
 }
 
 func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) (*CancelWorkflowResponse, error) {
+	requestProto, err := request.toProto(ctx)
+	if err != nil {
+		return nil, err
+	}
 	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
-	fut := c.ExecuteOperation(ctx, "CancelWorkflow", request.toProto(), workflow.NexusOperationOptions{})
+	fut := c.ExecuteOperation(ctx, "CancelWorkflow", requestProto, workflow.NexusOperationOptions{})
 	var result workflowservice.RequestCancelWorkflowExecutionResponse
 	if err := fut.Get(ctx, &result); err != nil {
 		return nil, err
 	}
-	value := cancelWorkflowResponseFromProto(&result)
+	value, err := cancelWorkflowResponseFromProto(ctx, &result)
+	if err != nil {
+		return nil, err
+	}
 	return &value, nil
 }
 
@@ -136,34 +179,34 @@ type WorkflowExecution struct {
 	RunId      *string
 }
 
-func (m WorkflowExecution) toProto() *common.WorkflowExecution {
+func (m WorkflowExecution) toProto(ctx workflow.Context) (*common.WorkflowExecution, error) {
 	message := &common.WorkflowExecution{}
 	message.WorkflowId = m.WorkflowId
 	if m.RunId != nil {
 		message.RunId = (*m.RunId)
 	}
-	return message
+	return message, nil
 }
 
-func workflowExecutionFromProto(proto *common.WorkflowExecution) WorkflowExecution {
+func workflowExecutionFromProto(ctx workflow.Context, proto *common.WorkflowExecution) (WorkflowExecution, error) {
 	value := WorkflowExecution{}
 	value.WorkflowId = proto.GetWorkflowId()
 	converted := proto.GetRunId()
 	value.RunId = &converted
-	return value
+	return value, nil
 }
 
 type CancelWorkflowResponse struct {
 }
 
-func (m CancelWorkflowResponse) toProto() *workflowservice.RequestCancelWorkflowExecutionResponse {
+func (m CancelWorkflowResponse) toProto(ctx workflow.Context) (*workflowservice.RequestCancelWorkflowExecutionResponse, error) {
 	message := &workflowservice.RequestCancelWorkflowExecutionResponse{}
-	return message
+	return message, nil
 }
 
-func cancelWorkflowResponseFromProto(proto *workflowservice.RequestCancelWorkflowExecutionResponse) CancelWorkflowResponse {
+func cancelWorkflowResponseFromProto(ctx workflow.Context, proto *workflowservice.RequestCancelWorkflowExecutionResponse) (CancelWorkflowResponse, error) {
 	value := CancelWorkflowResponse{}
-	return value
+	return value, nil
 }
 
 type StartWorkflowOptions struct {
