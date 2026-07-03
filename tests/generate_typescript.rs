@@ -215,7 +215,7 @@ fn cli_generates_typescript_support_file_from_parameter() {
 #[test]
 fn typescript_rejects_support_namespace() {
     let root = project_root();
-    let spec = nex_gen::spec::ApiSpec::load_for_language_with_inputs(
+    let spec = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
         nex_gen::language::Language::TypeScript,
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
     )
@@ -223,7 +223,7 @@ fn typescript_rejects_support_namespace() {
     let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
     let err = generate_files(
         nex_gen::language::Language::TypeScript,
-        &spec,
+        spec.clone(),
         &descriptors,
         &SupportFiles {
             fragments: vec![SupportFragmentSpec {

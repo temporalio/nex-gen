@@ -47,11 +47,10 @@ fn write_temp_wit(name: &str, contents: &str) -> PathBuf {
 
 fn parse(language: Language, wit: &str, path: &str) -> ApiSpec {
     let root = project_root();
-    ApiSpec::parse_for_language_with_inputs(
+    let input_path = write_temp_wit(path, wit);
+    nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
         language,
-        wit,
-        PathBuf::from(path),
-        &[linked_inputs_path(&root)],
+        &merge_inputs(&root, input_path),
     )
     .unwrap()
 }
@@ -102,13 +101,13 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
     .unwrap();
 
     let generated_python = parse(Language::Python, &generated, "generated-add-rpc.wit");
-    let handwritten_python = ApiSpec::load_for_language_with_inputs(
+    let handwritten_python = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
         Language::Python,
         &[root.join(PRIMARY_EXAMPLE_PATH), linked_inputs_path(&root)],
     )
     .unwrap();
     let generated_typescript = parse(Language::TypeScript, &generated, "generated-add-rpc.wit");
-    let handwritten_typescript = ApiSpec::load_for_language_with_inputs(
+    let handwritten_typescript = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
         Language::TypeScript,
         &[root.join(PRIMARY_EXAMPLE_PATH), linked_inputs_path(&root)],
     )
@@ -129,12 +128,20 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
         handwritten_python_service.operations[0].wire_name
     );
     assert_eq!(
-        generated_python_service.operations[0].input_proto,
-        handwritten_python_service.operations[0].input_proto
+        generated_python_service.operations[0]
+            .input_type()
+            .reference(),
+        handwritten_python_service.operations[0]
+            .input_type()
+            .reference()
     );
     assert_eq!(
-        generated_python_service.operations[0].output_proto,
-        handwritten_python_service.operations[0].output_proto
+        generated_python_service.operations[0]
+            .output_type()
+            .and_then(|output| output.reference()),
+        handwritten_python_service.operations[0]
+            .output_type()
+            .and_then(|output| output.reference())
     );
     assert!(
         generated_python_service.operations[0]
@@ -147,16 +154,14 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
             .is_some()
     );
 
-    let generated_python_request = generated_python
-        .type_override("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
+    let generated_python_request = &generated_python
+        .record_for_proto("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
         .unwrap()
-        .generated_model()
-        .unwrap();
-    let handwritten_python_request = handwritten_python
-        .type_override("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
+        .generated_model;
+    let handwritten_python_request = &handwritten_python
+        .record_for_proto("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
         .unwrap()
-        .generated_model()
-        .unwrap();
+        .generated_model;
     assert_eq!(
         generated_python_request.field_name_override("workflow_type"),
         Some("workflow-type")
@@ -188,16 +193,14 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
         handwritten_python_request.function("workflow_type")
     );
 
-    let generated_typescript_request = generated_typescript
-        .type_override("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
+    let generated_typescript_request = &generated_typescript
+        .record_for_proto("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
         .unwrap()
-        .generated_model()
-        .unwrap();
-    let handwritten_typescript_request = handwritten_typescript
-        .type_override("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
+        .generated_model;
+    let handwritten_typescript_request = &handwritten_typescript
+        .record_for_proto("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
         .unwrap()
-        .generated_model()
-        .unwrap();
+        .generated_model;
     assert_eq!(
         generated_typescript_request.field_name_override("workflow_type"),
         Some("workflow-type")
@@ -337,11 +340,10 @@ fn add_rpc_adds_missing_field_to_existing_operation_request() {
     assert_eq!(generated.matches("input: option<payloads>,").count(), 1);
 
     let parsed = parse(Language::Python, &generated, input_path.to_str().unwrap());
-    let request = parsed
-        .type_override("temporal.api.workflowservice.v1.SignalWorkflowExecutionRequest")
+    let request = &parsed
+        .record_for_proto("temporal.api.workflowservice.v1.SignalWorkflowExecutionRequest")
         .unwrap()
-        .generated_model()
-        .unwrap();
+        .generated_model;
     assert_eq!(request.field_name_override("input"), Some("input"));
 
     fs::remove_dir_all(input_path.parent().unwrap()).unwrap();
@@ -371,11 +373,10 @@ fn add_rpc_allows_existing_required_field_when_descriptor_field_is_optional() {
     assert!(!generated.contains("input: option<payloads>,"));
 
     let parsed = parse(Language::Python, &generated, input_path.to_str().unwrap());
-    let request = parsed
-        .type_override("temporal.api.workflowservice.v1.SignalWorkflowExecutionRequest")
+    let request = &parsed
+        .record_for_proto("temporal.api.workflowservice.v1.SignalWorkflowExecutionRequest")
         .unwrap()
-        .generated_model()
-        .unwrap();
+        .generated_model;
     assert_eq!(request.field_name_override("input"), Some("input"));
 
     fs::remove_dir_all(input_path.parent().unwrap()).unwrap();
@@ -405,11 +406,10 @@ fn add_rpc_allows_existing_optional_field_when_descriptor_field_is_required() {
     assert!(!generated.contains("identity: string,"));
 
     let parsed = parse(Language::Python, &generated, input_path.to_str().unwrap());
-    let request = parsed
-        .type_override("temporal.api.workflowservice.v1.SignalWorkflowExecutionRequest")
+    let request = &parsed
+        .record_for_proto("temporal.api.workflowservice.v1.SignalWorkflowExecutionRequest")
         .unwrap()
-        .generated_model()
-        .unwrap();
+        .generated_model;
     assert_eq!(request.field_name_override("identity"), Some("identity"));
 
     fs::remove_dir_all(input_path.parent().unwrap()).unwrap();

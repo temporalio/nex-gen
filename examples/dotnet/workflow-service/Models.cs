@@ -11,6 +11,34 @@ using NexGen.Support;
 namespace Temporalio.Workflows
 {
 
+    [GeneratedCode("nex-gen", null)]
+    internal class UserMetadata
+    {
+        /// <summary>
+        /// Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format.
+        /// </summary>
+        public object? StaticSummary { get; init; }
+        /// <summary>
+        /// General fixed details for the workflow execution that may appear in UI and CLI. This can be in Temporal Markdown format and can span multiple lines. This value is fixed on the workflow execution and cannot be updated.
+        /// </summary>
+        public object? StaticDetails { get; init; }
+
+        public Temporalio.Api.Sdk.V1.UserMetadata ToProto()
+        {
+            var proto = new Temporalio.Api.Sdk.V1.UserMetadata();
+            if (StaticSummary is { } staticSummary)
+            {
+                proto.Summary = NexGen.Support.ProtoExtensions.ToPayload(staticSummary);
+            }
+            if (StaticDetails is { } staticDetails)
+            {
+                proto.Details = NexGen.Support.ProtoExtensions.ToPayload(staticDetails);
+            }
+            return proto;
+        }
+
+    }
+
     /// <summary>
     /// Request fields for signaling a workflow, starting it first if needed.
     /// </summary>
@@ -175,34 +203,6 @@ namespace Temporalio.Workflows
             if (UserMetadata is { } userMetadata)
             {
                 proto.UserMetadata = userMetadata.ToProto();
-            }
-            return proto;
-        }
-
-    }
-
-    [GeneratedCode("nex-gen", null)]
-    internal class UserMetadata
-    {
-        /// <summary>
-        /// Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format.
-        /// </summary>
-        public object? StaticSummary { get; init; }
-        /// <summary>
-        /// General fixed details for the workflow execution that may appear in UI and CLI. This can be in Temporal Markdown format and can span multiple lines. This value is fixed on the workflow execution and cannot be updated.
-        /// </summary>
-        public object? StaticDetails { get; init; }
-
-        public Temporalio.Api.Sdk.V1.UserMetadata ToProto()
-        {
-            var proto = new Temporalio.Api.Sdk.V1.UserMetadata();
-            if (StaticSummary is { } staticSummary)
-            {
-                proto.Summary = NexGen.Support.ProtoExtensions.ToPayload(staticSummary);
-            }
-            if (StaticDetails is { } staticDetails)
-            {
-                proto.Details = NexGen.Support.ProtoExtensions.ToPayload(staticDetails);
             }
             return proto;
         }

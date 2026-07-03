@@ -1,17 +1,18 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+pub(crate) mod dotnet;
+pub(crate) mod python;
+pub(crate) mod typescript;
+
 use crate::SupportFiles;
-use crate::api_plan::build_api_plan;
 use crate::descriptors::DescriptorIndex;
-use crate::dotnet;
 use crate::error::{Error, Result};
 use crate::language::Language;
-use crate::python;
+use crate::planning::{PlannedSpec, build_api_plan};
 use crate::resources::ensure_unique_resource_names;
 use crate::spec::ApiSpec;
-use crate::typescript;
-use crate::validation::validate_type_overrides;
+use crate::validation::validate_external_type_bindings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedOutputLayout {
@@ -52,7 +53,7 @@ impl GeneratedFiles {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ModelCapabilities {
     pub(crate) from_proto: bool,
     pub(crate) to_proto: bool,
@@ -76,24 +77,24 @@ impl ModelCapabilities {
 
 pub fn generate_files(
     language: Language,
-    spec: &ApiSpec,
+    spec: ApiSpec,
     descriptors: &DescriptorIndex,
     support: &SupportFiles,
 ) -> Result<GeneratedFiles> {
-    validate_type_overrides(spec, descriptors, language)?;
-    ensure_unique_resource_names(spec)?;
+    validate_external_type_bindings(&spec, descriptors, language)?;
+    ensure_unique_resource_names(&spec)?;
+    let support_fragments = if support.fragments.is_empty() {
+        spec.support.fragments_for_language(language).to_vec()
+    } else {
+        support.fragments.clone()
+    };
     let plan = build_api_plan(spec, descriptors)?;
     let warnings = generation_warnings(&plan);
-    let support_fragments = if support.fragments.is_empty() {
-        spec.support.fragments_for_language(language)
-    } else {
-        &support.fragments
-    };
 
     let mut generated = match language {
-        Language::Dotnet => dotnet::generate(&plan, support_fragments),
-        Language::Python => python::generate(&plan, support_fragments),
-        Language::TypeScript => typescript::generate(&plan, support_fragments),
+        Language::Dotnet => dotnet::generate(&plan, &support_fragments),
+        Language::Python => python::generate(&plan, &support_fragments),
+        Language::TypeScript => typescript::generate(&plan, &support_fragments),
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = warnings;
@@ -102,7 +103,7 @@ pub fn generate_files(
 
 pub fn generate_source(
     language: Language,
-    spec: &ApiSpec,
+    spec: ApiSpec,
     descriptors: &DescriptorIndex,
     support: &SupportFiles,
 ) -> Result<String> {
@@ -121,20 +122,20 @@ pub fn generate_source(
     })
 }
 
-fn generation_warnings(plan: &crate::api_plan::ApiPlan) -> Vec<String> {
+fn generation_warnings(plan: &PlannedSpec) -> Vec<String> {
     plan.services
         .iter()
         .flat_map(|service| {
             service.resources.iter().flat_map(|resource| {
-                resource.methods.iter().filter_map(|method| {
+                resource.data.methods.iter().filter_map(|method| {
                     matches!(
                         method.binding,
-                        crate::api_plan::PlannedResourceMethodBindingSpec::Stub
+                        crate::planning::PlannedResourceMethodBindingSpec::Stub
                     )
                     .then(|| {
                         format!(
                             "resource method `{}.{}` generated as a stub because no operation could be bound",
-                            resource.type_name, method.name
+                            resource.data.type_name, method.name
                         )
                     })
                 })
@@ -152,7 +153,6 @@ mod tests {
     use crate::SupportFiles;
     use crate::descriptors::DescriptorIndex;
     use crate::language::Language;
-    use crate::spec::ApiSpec;
 
     use super::generate_files;
 
@@ -183,13 +183,17 @@ interface user-service {
   update-email: func(request: update-email-request) -> user-result;
 }
 "#;
-        let spec = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
-            .unwrap();
+        let spec = crate::parser::parse_api_spec_from_wit_for_language(
+            Language::Python,
+            wit,
+            PathBuf::from("inline.wit"),
+        )
+        .unwrap();
         let descriptors =
             DescriptorIndex::from_descriptor_set(FileDescriptorSet { file: Vec::new() }).unwrap();
         let generated = generate_files(
             Language::Python,
-            &spec,
+            spec,
             &descriptors,
             &SupportFiles::default(),
         )

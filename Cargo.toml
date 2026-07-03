@@ -22,4 +22,4 @@ prost = "0.14"
 prost-types = "0.14"
 tempfile = "3.23"
 thiserror = "2.0"
-wit-parser = "0.252"
+wit_parser_crate = { package = "wit-parser", version = "0.252" }

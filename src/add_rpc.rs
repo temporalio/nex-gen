@@ -1,16 +1,18 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use heck::{ToKebabCase, ToUpperCamelCase};
 use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
-use wit_parser::{
-    FunctionKind, Interface, Resolve, Type as WitType, TypeDefKind, TypeId, WorldItem, WorldKey,
+use wit_parser_crate::{
+    Function, FunctionKind, Interface, Record, Resolve, Type as WitType, TypeDefKind, TypeId,
+    WorldItem, WorldKey,
 };
 
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata, RpcMetadata};
 use crate::error::{Error, Result};
-use crate::spec::{
+use crate::parser::{
     LinkedWitMetadata, find_proto_name_for_type, find_proto_name_for_type_def,
     load_linked_wit_metadata_from_inputs, parse_wit_with_inputs, select_world,
     wire_operation_name_from_docs,
@@ -19,6 +21,66 @@ use crate::spec::{
 const DEFAULT_PACKAGE_NAME: &str = "temporal:nexus@1.0.0";
 const DEFAULT_WORLD_NAME: &str = "system";
 const DEFAULT_ENDPOINT_PLACEHOLDER: &str = "__REPLACE_ME__";
+
+pub struct AddRpcRequest {
+    pub descriptor_paths: Vec<PathBuf>,
+    pub rpc_name: String,
+    pub input_paths: Vec<PathBuf>,
+    pub output_path: Option<PathBuf>,
+}
+
+pub fn add_rpc_to_string(
+    descriptor_paths: &[PathBuf],
+    rpc_name: &str,
+    input_paths: &[PathBuf],
+) -> Result<String> {
+    let descriptors = DescriptorIndex::load_many(descriptor_paths)?;
+    let (input_path, linked_input_paths) = add_rpc_input_parts(input_paths);
+    if let Some(input_path) = input_path {
+        let input = fs::read_to_string(input_path).map_err(|source| Error::ReadFile {
+            path: input_path.to_path_buf(),
+            source,
+        })?;
+        generate_add_rpc_wit_with_input(
+            &descriptors,
+            rpc_name,
+            input_path,
+            &input,
+            linked_input_paths,
+        )
+    } else {
+        generate_add_rpc_wit(&descriptors, rpc_name, input_paths)
+    }
+}
+
+pub fn add_rpc_to_file(request: &AddRpcRequest) -> Result<()> {
+    let output = add_rpc_to_string(
+        &request.descriptor_paths,
+        &request.rpc_name,
+        &request.input_paths,
+    )?;
+    if let Some(path) = &request.output_path {
+        fs::write(path, output).map_err(|source| Error::WriteFile {
+            path: path.clone(),
+            source,
+        })?;
+    } else {
+        print!("{output}");
+    }
+    Ok(())
+}
+
+fn add_rpc_input_parts(input_paths: &[PathBuf]) -> (Option<&Path>, &[PathBuf]) {
+    if let Some((first, rest)) = input_paths.split_first()
+        && (first.is_file()
+            || first
+                .extension()
+                .is_some_and(|extension| extension == "wit"))
+    {
+        return (Some(first.as_path()), rest);
+    }
+    (None, input_paths)
+}
 
 pub fn generate_add_rpc_wit(
     descriptors: &DescriptorIndex,
@@ -191,7 +253,7 @@ struct ExistingFunction {
 impl ExistingFunction {
     fn from_resolve(
         resolve: &Resolve,
-        function: &wit_parser::Function,
+        function: &Function,
         path: &Path,
         context: &str,
     ) -> Result<Self> {
@@ -244,7 +306,7 @@ struct ExistingRecord {
 }
 
 impl ExistingRecord {
-    fn from_resolve(resolve: &Resolve, wit_name: &str, record: &wit_parser::Record) -> Self {
+    fn from_resolve(resolve: &Resolve, wit_name: &str, record: &Record) -> Self {
         let mut fields = BTreeMap::new();
         for field in &record.fields {
             let docs = field.docs.contents.as_deref();

@@ -11,38 +11,6 @@ namespace NexGen.FunctionExecution
 {
 
     [GeneratedCode("nex-gen", null)]
-    public class ExecuteFunctionRequest
-    {
-        public ExecuteFunctionRequest(string function, string name, bool enabled)
-        {
-            Function = function;
-            Name = name;
-            Enabled = enabled;
-        }
-
-        public string Function { get; }
-        /// <summary>
-        /// The name argument for the function.
-        /// </summary>
-        public string Name { get; }
-        /// <summary>
-        /// The enabled argument for the function.
-        /// </summary>
-        public bool Enabled { get; }
-    }
-
-    [GeneratedCode("nex-gen", null)]
-    public class ExecuteFunctionResult
-    {
-        public ExecuteFunctionResult(string value)
-        {
-            Value = value;
-        }
-
-        public string Value { get; }
-    }
-
-    [GeneratedCode("nex-gen", null)]
     public class ExecuteCountedFunctionRequest
     {
         public ExecuteCountedFunctionRequest(string function, string name, int count)
@@ -67,6 +35,38 @@ namespace NexGen.FunctionExecution
     public class ExecuteCountedFunctionResult
     {
         public ExecuteCountedFunctionResult(string value)
+        {
+            Value = value;
+        }
+
+        public string Value { get; }
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    public class ExecuteFunctionRequest
+    {
+        public ExecuteFunctionRequest(string function, string name, bool enabled)
+        {
+            Function = function;
+            Name = name;
+            Enabled = enabled;
+        }
+
+        public string Function { get; }
+        /// <summary>
+        /// The name argument for the function.
+        /// </summary>
+        public string Name { get; }
+        /// <summary>
+        /// The enabled argument for the function.
+        /// </summary>
+        public bool Enabled { get; }
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    public class ExecuteFunctionResult
+    {
+        public ExecuteFunctionResult(string value)
         {
             Value = value;
         }
@@ -107,32 +107,6 @@ namespace NexGen.FunctionExecution
     }
 
     [GeneratedCode("nex-gen", null)]
-    public class ExecuteVarargsFunctionRequest
-    {
-        public ExecuteVarargsFunctionRequest(string function)
-        {
-            Function = function;
-        }
-
-        public string Function { get; }
-        /// <summary>
-        /// Arguments for the function.
-        /// </summary>
-        public IReadOnlyCollection<string>? Args { get; init; }
-    }
-
-    [GeneratedCode("nex-gen", null)]
-    public class ExecuteVarargsFunctionResult
-    {
-        public ExecuteVarargsFunctionResult(string value)
-        {
-            Value = value;
-        }
-
-        public string Value { get; }
-    }
-
-    [GeneratedCode("nex-gen", null)]
     public class ExecuteNamedVarargsFunctionRequest
     {
         public ExecuteNamedVarargsFunctionRequest(string function)
@@ -151,6 +125,32 @@ namespace NexGen.FunctionExecution
     public class ExecuteNamedVarargsFunctionResult
     {
         public ExecuteNamedVarargsFunctionResult(string value)
+        {
+            Value = value;
+        }
+
+        public string Value { get; }
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    public class ExecuteVarargsFunctionRequest
+    {
+        public ExecuteVarargsFunctionRequest(string function)
+        {
+            Function = function;
+        }
+
+        public string Function { get; }
+        /// <summary>
+        /// Arguments for the function.
+        /// </summary>
+        public IReadOnlyCollection<string>? Args { get; init; }
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    public class ExecuteVarargsFunctionResult
+    {
+        public ExecuteVarargsFunctionResult(string value)
         {
             Value = value;
         }

@@ -1,16 +1,16 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::{DescriptorIndex, MessageMetadata};
 use crate::error::{Error, Result};
+use crate::generator::{python, typescript};
 use crate::language::Language;
-use crate::python;
 use crate::spec::{
-    ApiSpec, AuthoredFieldTypeSpec, GeneratedModelSpec, LanguageStringSpec, TypeOverrideSpec,
+    ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, GeneratedModelSpec, RecordSpec,
+    ServiceSpec, TypeSpec,
 };
-use crate::typescript;
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 struct MessageUsage {
@@ -18,24 +18,55 @@ struct MessageUsage {
     output: bool,
 }
 
-pub(crate) fn validate_type_overrides(
+#[derive(Clone, Copy)]
+struct ModelConfig<'a> {
+    required_fields: &'a BTreeSet<String>,
+    omitted_fields: &'a BTreeSet<String>,
+    flatten_in_api: bool,
+    generated_model: &'a GeneratedModelSpec,
+}
+
+impl<'a> ModelConfig<'a> {
+    fn from_record(record: &'a RecordSpec) -> Self {
+        Self {
+            required_fields: &record.required_fields,
+            omitted_fields: &record.omitted_fields,
+            flatten_in_api: record.flatten_in_api,
+            generated_model: &record.generated_model,
+        }
+    }
+
+    fn is_field_omitted(&self, field_name: &str) -> bool {
+        self.omitted_fields.contains(field_name)
+    }
+
+    fn is_field_hidden(&self, field_name: &str) -> bool {
+        self.omitted_fields.contains(field_name)
+            || self.generated_model.field_source(field_name).is_some()
+    }
+}
+
+pub(crate) fn validate_external_type_bindings(
     spec: &ApiSpec,
     descriptors: &DescriptorIndex,
     language: Language,
 ) -> Result<()> {
     let usages = language_message_usages(spec, descriptors, language)?;
-    for (type_name, type_override) in &spec.types {
+    for (type_name, binding) in &spec.external_types {
         if let Some(message) = descriptors.message(type_name) {
-            validate_message_type_override(
-                type_name,
-                type_override,
-                message,
-                descriptors,
-                usages.get(type_name).copied().unwrap_or_default(),
-                language,
-            )?;
+            validate_message_external_type_binding(type_name, binding)?;
+            if let Some(record) = spec.record_for_proto(type_name) {
+                validate_message_model_config(
+                    type_name,
+                    ModelConfig::from_record(record),
+                    message,
+                    descriptors,
+                    usages.get(type_name).copied().unwrap_or_default(),
+                    language,
+                )?;
+            }
         } else if descriptors.enumeration(type_name).is_some() {
-            validate_enum_type_override(type_name, type_override)?;
+            validate_enum_external_type_binding(type_name, binding)?;
         } else if descriptors.file_count() == 0 {
             continue;
         } else {
@@ -48,6 +79,13 @@ pub(crate) fn validate_type_overrides(
     Ok(())
 }
 
+fn validate_message_external_type_binding(
+    _message_name: &str,
+    _binding: &ExternalTypeBindingSpec,
+) -> Result<()> {
+    Ok(())
+}
+
 fn language_message_usages(
     spec: &ApiSpec,
     descriptors: &DescriptorIndex,
@@ -57,35 +95,32 @@ fn language_message_usages(
 
     for service in &spec.services {
         for operation in &service.operations {
-            let Some(input_proto) = operation.input_proto() else {
+            let TypeSpec::External(ExternalTypeSpec::Proto(input_proto)) = operation.input_type()
+            else {
                 continue;
             };
-            let input_message = descriptors.message(input_proto).ok_or_else(|| {
-                Error::UnknownOperationInputProto {
-                    service: service.name.clone(),
-                    operation: operation.name.clone(),
-                    type_name: input_proto.to_string(),
-                }
-            })?;
+            let Some(input_message) = descriptors.message(input_proto.as_str()) else {
+                continue;
+            };
             usages
                 .entry(input_message.full_name.clone())
                 .or_default()
                 .input = true;
 
-            if operation.output_transform().is_some() || operation.output_resource().is_some() {
+            if operation.output_transform().is_some()
+                || operation_output_resource_name(service, operation).is_some()
+            {
                 continue;
             }
 
-            let Some(output_proto) = operation.output_proto() else {
+            let Some(TypeSpec::External(ExternalTypeSpec::Proto(output_proto))) =
+                operation.output_type()
+            else {
                 continue;
             };
-            let output_message = descriptors.message(output_proto).ok_or_else(|| {
-                Error::UnknownOperationOutputProto {
-                    service: service.name.clone(),
-                    operation: operation.name.clone(),
-                    type_name: output_proto.to_string(),
-                }
-            })?;
+            let Some(output_message) = descriptors.message(output_proto.as_str()) else {
+                continue;
+            };
             usages
                 .entry(output_message.full_name.clone())
                 .or_default()
@@ -96,54 +131,41 @@ fn language_message_usages(
     Ok(usages)
 }
 
-fn validate_message_type_override(
+fn operation_output_resource_name<'a>(
+    service: &'a ServiceSpec,
+    operation: &'a crate::spec::OperationSpec,
+) -> Option<&'a str> {
+    let TypeSpec::Resource(resource_name) = operation.output_type()? else {
+        return None;
+    };
+    service
+        .resource(resource_name.as_str())
+        .map(|_| resource_name.as_str())
+}
+
+fn validate_message_model_config(
     message_name: &str,
-    type_override: &TypeOverrideSpec,
+    model_config: ModelConfig<'_>,
     message: &MessageMetadata,
     descriptors: &DescriptorIndex,
     usage: MessageUsage,
     language: Language,
 ) -> Result<()> {
-    for field_name in &type_override.required_fields {
+    for field_name in model_config.required_fields {
         validate_model_required_field(message_name, field_name, message, descriptors)?;
     }
-    for field_name in &type_override.omitted_fields {
+    for field_name in model_config.omitted_fields {
         validate_model_override_field(message_name, field_name, message)?;
     }
-    if let Some(generated_model) = type_override.generated_model() {
-        for field_name in &generated_model.declared_fields {
-            validate_model_override_field(message_name, field_name, message)?;
-        }
-        validate_generated_model_fields(
-            message_name,
-            type_override,
-            &generated_model.field_names,
-            &generated_model.field_annotations,
-            &generated_model.field_flattened_annotations,
-            &generated_model.field_sources,
-            message,
-            usage,
-            language,
-        )?;
-        validate_authored_field_types(
-            message_name,
-            type_override,
-            generated_model,
-            message,
-            descriptors,
-        )?;
-        validate_invocation_fields(
-            message_name,
-            type_override,
-            generated_model,
-            message,
-            descriptors,
-            usage,
-        )?;
+    for field_name in &model_config.generated_model.declared_fields {
+        validate_model_override_field(message_name, field_name, message)?;
     }
-    for field_name in type_override
+    validate_generated_model_fields(message_name, model_config, message, usage, language)?;
+    validate_authored_field_types(message_name, model_config, message, descriptors)?;
+    validate_invocation_fields(message_name, model_config, message, descriptors, usage)?;
+    for field_name in model_config
         .required_fields
-        .intersection(&type_override.omitted_fields)
+        .intersection(model_config.omitted_fields)
     {
         return Err(Error::ConflictingTypeOverrideField {
             message: message_name.to_string(),
@@ -156,18 +178,15 @@ fn validate_message_type_override(
 
 fn validate_generated_model_fields(
     message_name: &str,
-    type_override: &TypeOverrideSpec,
-    field_names: &BTreeMap<String, String>,
-    field_annotations: &BTreeMap<String, LanguageStringSpec>,
-    field_flattened_annotations: &BTreeMap<String, LanguageStringSpec>,
-    field_sources: &BTreeMap<String, String>,
+    model_config: ModelConfig<'_>,
     message: &MessageMetadata,
     usage: MessageUsage,
     language: Language,
 ) -> Result<()> {
-    for field_name in field_names.keys() {
+    let generated_model = model_config.generated_model;
+    for field_name in generated_model.field_names.keys() {
         validate_model_override_field(message_name, field_name, message)?;
-        if type_override.omitted_fields.contains(field_name) {
+        if model_config.omitted_fields.contains(field_name) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
@@ -175,9 +194,9 @@ fn validate_generated_model_fields(
         }
     }
 
-    for field_name in field_annotations.keys() {
+    for field_name in generated_model.field_annotations.keys() {
         validate_model_override_field(message_name, field_name, message)?;
-        if type_override.omitted_fields.contains(field_name) {
+        if model_config.omitted_fields.contains(field_name) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
@@ -185,15 +204,15 @@ fn validate_generated_model_fields(
         }
     }
 
-    for field_name in field_flattened_annotations.keys() {
+    for field_name in generated_model.field_flattened_annotations.keys() {
         validate_model_override_field(message_name, field_name, message)?;
-        if type_override.omitted_fields.contains(field_name) {
+        if model_config.omitted_fields.contains(field_name) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
             });
         }
-        if !type_override.flatten_in_api() {
+        if !model_config.flatten_in_api {
             return Err(Error::InvalidTypeOverrideField {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
@@ -205,9 +224,9 @@ fn validate_generated_model_fields(
         }
     }
 
-    for field_name in field_sources.keys() {
+    for field_name in generated_model.field_sources.keys() {
         validate_model_override_field(message_name, field_name, message)?;
-        if type_override.omitted_fields.contains(field_name) {
+        if model_config.omitted_fields.contains(field_name) {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
                 message: message_name.to_string(),
                 field: field_name.to_string(),
@@ -231,20 +250,25 @@ fn validate_generated_model_fields(
             .name
             .as_deref()
             .expect("descriptor fields should be named");
-        if !type_override.is_field_omitted(proto_name) && !field_names.contains_key(proto_name) {
+        if !model_config.is_field_omitted(proto_name)
+            && !generated_model.field_names.contains_key(proto_name)
+        {
             return Err(Error::UndeclaredTypeOverrideField {
                 message: message_name.to_string(),
                 field: proto_name.to_string(),
             });
         }
-        if type_override.is_field_hidden(proto_name) {
+        if model_config.is_field_hidden(proto_name) {
             continue;
         }
 
         let generated_name = field_name_for_language(
             language,
             field,
-            field_names.get(proto_name).map(String::as_str),
+            generated_model
+                .field_names
+                .get(proto_name)
+                .map(String::as_str),
         );
         if let Some(existing) =
             seen_generated_names.insert(generated_name.clone(), proto_name.to_string())
@@ -265,18 +289,18 @@ fn validate_generated_model_fields(
 
 fn validate_authored_field_types(
     message_name: &str,
-    type_override: &TypeOverrideSpec,
-    generated_model: &GeneratedModelSpec,
+    model_config: ModelConfig<'_>,
     message: &MessageMetadata,
     descriptors: &DescriptorIndex,
 ) -> Result<()> {
-    for (field_name, authored_type) in &generated_model.field_wit_types {
+    let generated_model = model_config.generated_model;
+    for (field_name, authored_type) in &generated_model.field_types {
         if generated_model.function(field_name).is_some() {
             continue;
         }
 
         let field = validate_model_override_field(message_name, field_name, message)?;
-        if type_override.omitted_fields.contains(field_name) {
+        if model_config.omitted_fields.contains(field_name) {
             continue;
         }
 
@@ -288,12 +312,12 @@ fn validate_authored_field_types(
 
 fn validate_invocation_fields(
     message_name: &str,
-    type_override: &TypeOverrideSpec,
-    generated_model: &GeneratedModelSpec,
+    model_config: ModelConfig<'_>,
     message: &MessageMetadata,
     descriptors: &DescriptorIndex,
     usage: MessageUsage,
 ) -> Result<()> {
+    let generated_model = model_config.generated_model;
     if generated_model.functions.is_empty() {
         return Ok(());
     }
@@ -345,7 +369,7 @@ fn validate_invocation_fields(
 
     for (field_name, function) in &generated_model.functions {
         let callable_field = validate_model_override_field(message_name, field_name, message)?;
-        if type_override.omitted_fields.contains(field_name) {
+        if model_config.omitted_fields.contains(field_name) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
                 field: field_name.clone(),
@@ -370,13 +394,13 @@ fn validate_invocation_fields(
 
         let args_field =
             validate_model_override_field(message_name, &function.args_field, message)?;
-        if type_override.omitted_fields.contains(&function.args_field) {
+        if model_config.omitted_fields.contains(&function.args_field) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
                 message: message_name.to_string(),
                 field: function.args_field.clone(),
             });
         }
-        if type_override.required_fields.contains(&function.args_field) {
+        if model_config.required_fields.contains(&function.args_field) {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
                 message: message_name.to_string(),
                 field: function.args_field.clone(),
@@ -508,7 +532,7 @@ fn validate_invocation_args_field(
 fn validate_authored_field_type(
     message_name: &str,
     field_name: &str,
-    authored_type: &AuthoredFieldTypeSpec,
+    authored_type: &TypeSpec,
     field: &FieldDescriptorProto,
     descriptors: &DescriptorIndex,
 ) -> Result<()> {
@@ -521,23 +545,21 @@ fn validate_authored_field_type(
         field: field_name.to_string(),
         property: "type",
         reason: format!(
-            "WIT field type `{}` does not match proto field type `{}`; use `@nexus.flattened-type` if only the flattened API should differ",
-            authored_type.to_wit_string(),
+            "authored field type `{}` does not match proto field type `{}`; use `@nexus.flattened-type` if only the flattened API should differ",
+            authored_type.to_type_string(),
             proto_field_type_string(field, descriptors)?,
         ),
     })
 }
 
 fn authored_field_matches_proto(
-    authored_type: &AuthoredFieldTypeSpec,
+    authored_type: &TypeSpec,
     field: &FieldDescriptorProto,
     descriptors: &DescriptorIndex,
 ) -> Result<bool> {
     let authored_type = authored_type.validation_type();
     if field_is_map(field, descriptors) {
-        let AuthoredFieldTypeSpec::Map(authored_key, authored_value) =
-            authored_type.without_option()
-        else {
+        let TypeSpec::Map(authored_key, authored_value) = authored_type.without_option() else {
             return Ok(false);
         };
 
@@ -570,7 +592,7 @@ fn authored_field_matches_proto(
     }
 
     if field_label(field) == Some(Label::Repeated) {
-        let AuthoredFieldTypeSpec::List(inner) = authored_type.without_option() else {
+        let TypeSpec::List(inner) = authored_type.without_option() else {
             return Ok(false);
         };
         return authored_field_matches_singular_proto(inner, field);
@@ -580,13 +602,13 @@ fn authored_field_matches_proto(
 }
 
 fn authored_field_matches_singular_proto(
-    authored_type: &AuthoredFieldTypeSpec,
+    authored_type: &TypeSpec,
     field: &FieldDescriptorProto,
 ) -> Result<bool> {
     let authored_type = authored_type.validation_type();
     let matches = match field_type(field) {
         Some(Type::Double | Type::Float) => {
-            matches!(authored_type, AuthoredFieldTypeSpec::Float)
+            matches!(authored_type, TypeSpec::Float)
         }
         Some(
             Type::Int64
@@ -599,15 +621,15 @@ fn authored_field_matches_singular_proto(
             | Type::Uint32
             | Type::Sfixed32
             | Type::Sint32,
-        ) => matches!(authored_type, AuthoredFieldTypeSpec::Int),
-        Some(Type::Bool) => matches!(authored_type, AuthoredFieldTypeSpec::Bool),
-        Some(Type::String) => matches!(authored_type, AuthoredFieldTypeSpec::String),
-        Some(Type::Bytes) => matches!(authored_type, AuthoredFieldTypeSpec::Bytes),
+        ) => matches!(authored_type, TypeSpec::Int(_)),
+        Some(Type::Bool) => matches!(authored_type, TypeSpec::Bool),
+        Some(Type::String) => matches!(authored_type, TypeSpec::String),
+        Some(Type::Bytes) => matches!(authored_type, TypeSpec::Bytes),
         Some(Type::Enum | Type::Message | Type::Group) => match authored_type {
-            AuthoredFieldTypeSpec::Proto(proto_name) => field
+            TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) => field
                 .type_name
                 .as_deref()
-                .map(|name| proto_name == name.trim_start_matches('.'))
+                .map(|name| proto_name.as_str() == name.trim_start_matches('.'))
                 .unwrap_or(false),
             _ => false,
         },
@@ -704,38 +726,10 @@ fn field_name_for_language(
     }
 }
 
-fn validate_enum_type_override(
-    enumeration_name: &str,
-    type_override: &TypeOverrideSpec,
+fn validate_enum_external_type_binding(
+    _enumeration_name: &str,
+    _binding: &ExternalTypeBindingSpec,
 ) -> Result<()> {
-    if !type_override.required_fields.is_empty() {
-        return Err(Error::UnsupportedEnumTypeOverrideProperty {
-            enumeration: enumeration_name.to_string(),
-            property: "required",
-        });
-    }
-    if !type_override.omitted_fields.is_empty() {
-        return Err(Error::UnsupportedEnumTypeOverrideProperty {
-            enumeration: enumeration_name.to_string(),
-            property: "omit",
-        });
-    }
-    if let Some(generated_model) = type_override.generated_model() {
-        if !generated_model.field_names.is_empty()
-            || !generated_model.declared_fields.is_empty()
-            || !generated_model.field_annotations.is_empty()
-            || !generated_model.field_flattened_annotations.is_empty()
-            || !generated_model.field_wit_types.is_empty()
-            || !generated_model.field_sources.is_empty()
-            || !generated_model.functions.is_empty()
-        {
-            return Err(Error::UnsupportedTypeOverrideProperty {
-                type_name: enumeration_name.to_string(),
-                property: "fields",
-            });
-        }
-    }
-
     Ok(())
 }
 

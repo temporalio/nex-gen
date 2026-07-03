@@ -7,24 +7,24 @@ use prost_types::field_descriptor_proto::Type;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, AuthoredFieldTypeSpec, GeneratedModelSpec, ResourceFieldSpec, ResourceMethodSpec,
-    ResourceResultSpec, ServiceSpec,
+    ApiSpec, ExternalTypeSpec, GeneratedModelSpec, OperationSpec, ResourceFieldSpec,
+    ResourceMethodSpec, ResourceResultSpec, ServiceSpec, TypeSpec,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedServiceResources {
     pub resources: Vec<ResolvedResourceSpec>,
     pub operation_returns: BTreeMap<String, ResolvedResourceReturnSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedResourceSpec {
     pub name: String,
     pub fields: Vec<ResourceFieldSpec>,
     pub methods: Vec<ResolvedResourceMethodSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedResourceMethodSpec {
     pub name: String,
     pub params: Vec<ResourceFieldSpec>,
@@ -138,7 +138,7 @@ where
 #[derive(Debug, Clone)]
 struct MessageFieldInfo {
     proto_name: String,
-    wit_name: String,
+    api_name: String,
     required: bool,
     hidden: bool,
     message_name: Option<String>,
@@ -157,10 +157,10 @@ pub(crate) fn resolve_service_resources(
 
     let mut operation_returns = BTreeMap::new();
     for operation in &service.operations {
-        let Some(resource_name) = operation.output_resource() else {
+        let Some(resource_name) = operation_output_resource_name(service, operation) else {
             continue;
         };
-        if operation.output_proto().is_none() {
+        if operation.output_resource_type.is_none() {
             continue;
         }
         let resource = service
@@ -177,7 +177,9 @@ pub(crate) fn resolve_service_resources(
             .fields
             .iter()
             .map(|field| {
-                let Some(input_proto) = operation.input_proto() else {
+                let Some(input_message_name) =
+                    operation_input_message_name(operation, descriptors)
+                else {
                     return Err(Error::InvalidResource {
                         service: service.name.clone(),
                         resource: resource.name.to_upper_camel_case(),
@@ -187,7 +189,8 @@ pub(crate) fn resolve_service_resources(
                         ),
                     });
                 };
-                let Some(output_proto) = operation.output_proto() else {
+                let Some(output_message_name) = operation_output_resource_message_name(operation)
+                else {
                     return Err(Error::InvalidResource {
                         service: service.name.clone(),
                         resource: resource.name.to_upper_camel_case(),
@@ -202,8 +205,8 @@ pub(crate) fn resolve_service_resources(
                     &service.name,
                     &resource.name,
                     descriptors,
-                    input_proto,
-                    output_proto,
+                    input_message_name,
+                    output_message_name,
                     &field.name,
                 )?;
                 Ok(ResolvedResourceFieldBinding {
@@ -313,7 +316,7 @@ fn resolve_resource_method(
                 ),
             });
         };
-        if !resource_method_result_matches_operation(method, operation) {
+        if !resource_method_result_matches_operation(service, method, operation) {
             return Err(Error::InvalidResourceMethod {
                 service: service.name.clone(),
                 resource: resource.name.to_upper_camel_case(),
@@ -346,7 +349,7 @@ fn resolve_resource_method(
             continue;
         };
 
-        if !resource_method_result_matches_operation(method, operation) {
+        if !resource_method_result_matches_operation(service, method, operation) {
             continue;
         }
 
@@ -386,34 +389,38 @@ fn resolve_resource_method(
 }
 
 fn resource_method_result_matches_operation(
+    service: &ServiceSpec,
     method: &ResourceMethodSpec,
-    operation: &crate::spec::OperationSpec,
+    operation: &OperationSpec,
 ) -> bool {
     let Some(result) = &method.result else {
         return true;
     };
-    if let Some(resource_name) = &result.resource {
-        operation.output_resource() == Some(resource_name.as_str())
-    } else if let Some(proto_name) = &result.proto {
-        operation.output_proto() == Some(proto_name.as_str())
-    } else {
-        false
+    match result.result_type.without_option() {
+        TypeSpec::Resource(resource_name) => {
+            operation_output_resource_name(service, operation) == Some(resource_name.as_str())
+        }
+        TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) => {
+            operation_output_ref(operation) == Some(proto_name.as_str())
+                || operation_output_resource_message_name(operation) == Some(proto_name.as_str())
+        }
+        _ => false,
     }
 }
 
 fn synthesize_operation_request_plan(
     spec: &ApiSpec,
     descriptors: &DescriptorIndex,
-    operation: &crate::spec::OperationSpec,
+    operation: &OperationSpec,
     environment: &BTreeMap<String, RequestPlanSource>,
 ) -> Result<Option<RequestPlan>> {
-    if let Some(input_proto) = operation.input_proto() {
-        return synthesize_request_plan(spec, descriptors, input_proto, environment);
+    if let TypeSpec::External(ExternalTypeSpec::Proto(input_ref)) = operation.input_type() {
+        synthesize_request_plan(spec, descriptors, input_ref.as_str(), environment)
+    } else if let TypeSpec::Record(input_ref) = operation.input_type() {
+        synthesize_record_request_plan(spec, descriptors, input_ref.as_str(), environment)
+    } else {
+        Ok(None)
     }
-    let Some(input_record) = operation.input_record() else {
-        return Ok(None);
-    };
-    synthesize_wit_request_plan(spec, descriptors, input_record, environment)
 }
 
 fn bind_resource_return_field(
@@ -427,7 +434,7 @@ fn bind_resource_return_field(
 ) -> Result<ResolvedResourceBindingSource> {
     if let Some(field) = find_message_field(spec, descriptors, input_message_name, field_name)? {
         return Ok(ResolvedResourceBindingSource::RequestField {
-            field_name: field.wit_name,
+            field_name: field.api_name,
             proto_field_name: field.proto_name,
             hidden: field.hidden,
         });
@@ -436,7 +443,7 @@ fn bind_resource_return_field(
         find_visible_message_field(spec, descriptors, output_message_name, field_name)?
     {
         return Ok(ResolvedResourceBindingSource::ResultField {
-            field_name: field.wit_name,
+            field_name: field.api_name,
             proto_field_name: field.proto_name,
         });
     }
@@ -457,24 +464,21 @@ fn synthesize_request_plan(
 ) -> Result<Option<RequestPlan>> {
     let mut fields = Vec::new();
     for field in visible_message_fields(spec, descriptors, message_name)? {
-        if let Some(source) = environment.get(&field.wit_name) {
+        if let Some(source) = environment.get(&field.api_name) {
             fields.push(RequestPlanField {
-                field_name: field.wit_name,
+                field_name: field.api_name,
                 value: RequestPlan::Source(source.clone()),
             });
             continue;
         }
 
         if let Some(child_message_name) = field.message_name.as_deref() {
-            let child_generated_model = spec
-                .type_override(child_message_name)
-                .and_then(|type_override| type_override.generated_model());
-            if child_generated_model.is_some()
+            if spec.record_for_proto(child_message_name).is_some()
                 && let Some(value) =
                     synthesize_request_plan(spec, descriptors, child_message_name, environment)?
             {
                 fields.push(RequestPlanField {
-                    field_name: field.wit_name,
+                    field_name: field.api_name,
                     value,
                 });
                 continue;
@@ -492,39 +496,42 @@ fn synthesize_request_plan(
     }))
 }
 
-fn synthesize_wit_request_plan(
+fn synthesize_record_request_plan(
     spec: &ApiSpec,
     descriptors: &DescriptorIndex,
     record_name: &str,
     environment: &BTreeMap<String, RequestPlanSource>,
 ) -> Result<Option<RequestPlan>> {
     let mut fields = Vec::new();
-    for field in visible_wit_record_fields(spec, record_name)? {
-        if let Some(source) = environment.get(&field.wit_name) {
+    for field in visible_record_fields(spec, record_name)? {
+        if let Some(source) = environment.get(&field.api_name) {
             fields.push(RequestPlanField {
-                field_name: field.wit_name,
+                field_name: field.api_name,
                 value: RequestPlan::Source(source.clone()),
+            });
+            continue;
+        }
+
+        if let Some(child_message_name) = field
+            .message_name
+            .as_deref()
+            .and_then(|message_name| message_name.strip_prefix("proto:"))
+            && let Some(value) =
+                synthesize_request_plan(spec, descriptors, child_message_name, environment)?
+        {
+            fields.push(RequestPlanField {
+                field_name: field.api_name,
+                value,
             });
             continue;
         }
 
         if let Some(child_record_name) = field.message_name.as_deref()
             && let Some(value) =
-                synthesize_wit_request_plan(spec, descriptors, child_record_name, environment)?
+                synthesize_record_request_plan(spec, descriptors, child_record_name, environment)?
         {
             fields.push(RequestPlanField {
-                field_name: field.wit_name,
-                value,
-            });
-            continue;
-        }
-
-        if let Some(child_message_name) = field.proto_name.strip_prefix("proto:")
-            && let Some(value) =
-                synthesize_request_plan(spec, descriptors, child_message_name, environment)?
-        {
-            fields.push(RequestPlanField {
-                field_name: field.wit_name,
+                field_name: field.api_name,
                 value,
             });
             continue;
@@ -552,8 +559,8 @@ fn visible_message_fields(
         .collect())
 }
 
-fn visible_wit_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<MessageFieldInfo>> {
-    Ok(all_wit_record_fields(spec, record_name)?
+fn visible_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<MessageFieldInfo>> {
+    Ok(all_record_fields(spec, record_name)?
         .into_iter()
         .filter(|field| !field.hidden)
         .collect())
@@ -567,7 +574,7 @@ fn find_visible_message_field(
 ) -> Result<Option<MessageFieldInfo>> {
     Ok(visible_message_fields(spec, descriptors, message_name)?
         .into_iter()
-        .find(|field| field.wit_name == field_name))
+        .find(|field| field.api_name == field_name))
 }
 
 fn find_message_field(
@@ -578,7 +585,7 @@ fn find_message_field(
 ) -> Result<Option<MessageFieldInfo>> {
     Ok(all_message_fields(spec, descriptors, message_name)?
         .into_iter()
-        .find(|field| field.wit_name == field_name))
+        .find(|field| field.api_name == field_name))
 }
 
 fn all_message_fields(
@@ -591,18 +598,18 @@ fn all_message_fields(
         .ok_or_else(|| Error::UnknownTypeOverride {
             type_name: message_name.to_string(),
         })?;
-    let type_override = spec.type_override(message_name);
-    let generated_model = type_override.and_then(|type_override| type_override.generated_model());
+    let record = spec.record_for_proto(message_name);
+    let generated_model = record.map(|record| &record.generated_model);
 
     message
         .descriptor
         .field
         .iter()
-        .map(|field| build_message_field_info(field, type_override, generated_model, descriptors))
+        .map(|field| build_message_field_info(field, record, generated_model, descriptors))
         .collect()
 }
 
-fn all_wit_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<MessageFieldInfo>> {
+fn all_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<MessageFieldInfo>> {
     let record = spec
         .records
         .get(record_name)
@@ -613,40 +620,42 @@ fn all_wit_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<Messag
         .generated_model
         .declared_fields
         .iter()
-        .map(|field_name| build_wit_record_field_info(field_name, spec, &record.generated_model))
+        .map(|field_name| build_record_field_info(field_name, spec, &record.generated_model))
         .collect()
 }
 
-fn build_wit_record_field_info(
+fn build_record_field_info(
     field_name: &str,
     spec: &ApiSpec,
     generated_model: &GeneratedModelSpec,
 ) -> Result<MessageFieldInfo> {
-    let wit_name = generated_model
+    let api_name = generated_model
         .field_name_override(field_name)
         .map(str::to_string)
         .unwrap_or_else(|| field_name.to_kebab_case());
     let required = generated_model
-        .field_wit_type(field_name)
-        .is_some_and(|field_type| !matches!(field_type, AuthoredFieldTypeSpec::Option(_)))
+        .field_type(field_name)
+        .is_some_and(|field_type| !matches!(field_type, TypeSpec::Option(_)))
         && generated_model.field_default(field_name).is_none();
     let hidden = generated_model.field_source(field_name).is_some();
     let message_name = generated_model
-        .field_wit_type(field_name)
-        .and_then(|field_type| wit_field_message_name(field_type, spec));
+        .field_type(field_name)
+        .and_then(|field_type| api_field_message_name(field_type, spec));
     Ok(MessageFieldInfo {
         proto_name: field_name.to_string(),
-        wit_name,
+        api_name,
         required,
         hidden,
         message_name,
     })
 }
 
-fn wit_field_message_name(field_type: &AuthoredFieldTypeSpec, spec: &ApiSpec) -> Option<String> {
+fn api_field_message_name(field_type: &TypeSpec, spec: &ApiSpec) -> Option<String> {
     match field_type.without_option() {
-        AuthoredFieldTypeSpec::Record(record_name) => Some(record_name.clone()),
-        AuthoredFieldTypeSpec::Proto(proto_name) if spec.type_override(proto_name).is_some() => {
+        TypeSpec::Record(record_name) => Some(record_name.as_str().to_string()),
+        TypeSpec::External(ExternalTypeSpec::Proto(proto_name))
+            if spec.record_for_proto(proto_name.as_str()).is_some() =>
+        {
             Some(format!("proto:{proto_name}"))
         }
         _ => None,
@@ -655,7 +664,7 @@ fn wit_field_message_name(field_type: &AuthoredFieldTypeSpec, spec: &ApiSpec) ->
 
 fn build_message_field_info(
     field: &FieldDescriptorProto,
-    type_override: Option<&crate::spec::TypeOverrideSpec>,
+    record: Option<&crate::spec::RecordSpec>,
     generated_model: Option<&crate::spec::GeneratedModelSpec>,
     descriptors: &DescriptorIndex,
 ) -> Result<MessageFieldInfo> {
@@ -663,18 +672,19 @@ fn build_message_field_info(
         .name
         .as_deref()
         .expect("descriptor fields should be named");
-    let wit_name = generated_model
+    let api_name = generated_model
         .and_then(|generated_model| generated_model.field_name_override(proto_name))
         .map(str::to_string)
         .unwrap_or_else(|| proto_name.to_kebab_case());
-    let required =
-        type_override.is_some_and(|type_override| type_override.is_field_required(proto_name));
-    let hidden =
-        type_override.is_some_and(|type_override| type_override.is_field_hidden(proto_name));
+    let required = record.is_some_and(|record| record.required_fields.contains(proto_name));
+    let hidden = record.is_some_and(|record| {
+        record.omitted_fields.contains(proto_name)
+            || record.generated_model.field_source(proto_name).is_some()
+    });
     let message_name = field_message_name(field, descriptors);
     Ok(MessageFieldInfo {
         proto_name: proto_name.to_string(),
-        wit_name,
+        api_name,
         required,
         hidden,
         message_name,
@@ -691,6 +701,41 @@ fn field_message_name(
     let type_name = field.type_name.as_deref()?.trim_start_matches('.');
     descriptors.message(type_name)?;
     Some(type_name.to_string())
+}
+
+fn operation_input_message_name<'a>(
+    operation: &'a OperationSpec,
+    descriptors: &DescriptorIndex,
+) -> Option<&'a str> {
+    let TypeSpec::External(ExternalTypeSpec::Proto(input_ref)) = operation.input_type() else {
+        return None;
+    };
+    descriptors
+        .message(input_ref.as_str())
+        .map(|_| input_ref.as_str())
+}
+
+fn operation_output_resource_name<'a>(
+    service: &'a ServiceSpec,
+    operation: &'a OperationSpec,
+) -> Option<&'a str> {
+    let TypeSpec::Resource(resource_name) = operation.output_type()? else {
+        return None;
+    };
+    service
+        .resource(resource_name.as_str())
+        .map(|_| resource_name.as_str())
+}
+
+fn operation_output_ref(operation: &OperationSpec) -> Option<&str> {
+    operation.output_type()?.reference()
+}
+
+fn operation_output_resource_message_name(operation: &OperationSpec) -> Option<&str> {
+    let Some(ExternalTypeSpec::Proto(type_name)) = operation.output_resource_type.as_ref() else {
+        return None;
+    };
+    Some(type_name.as_ref())
 }
 
 pub(crate) fn ensure_unique_resource_names(spec: &ApiSpec) -> Result<()> {
@@ -739,7 +784,7 @@ mod tests {
     fn parse(language: Language, wit: &str) -> ApiSpec {
         let temporal_types_input =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/inputs/deps");
-        ApiSpec::parse_for_language_with_inputs(
+        crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
             language,
             wit,
             PathBuf::from("inline.wit"),
@@ -890,8 +935,12 @@ interface user-service {
   updates-email: func(request: update-email-request) -> user-result;
 }
 "#;
-        let spec = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
-            .unwrap();
+        let spec = crate::parser::parse_api_spec_from_wit_for_language(
+            Language::Python,
+            wit,
+            PathBuf::from("inline.wit"),
+        )
+        .unwrap();
         let service = &spec.services[0];
         let resolved = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap();
         let method = &resolved.resources[0].methods[0];
@@ -931,8 +980,12 @@ interface user-service {
   updates-email: func(request: update-email-request) -> user-result;
 }
 "#;
-        let spec = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
-            .unwrap();
+        let spec = crate::parser::parse_api_spec_from_wit_for_language(
+            Language::Python,
+            wit,
+            PathBuf::from("inline.wit"),
+        )
+        .unwrap();
         let service = &spec.services[0];
         let resolved = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap();
         let method = &resolved.resources[0].methods[0];
@@ -998,8 +1051,12 @@ interface user-service {
   update-email: func(request: update-email-request) -> user-result;
 }
 "#;
-        let spec = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
-            .unwrap();
+        let spec = crate::parser::parse_api_spec_from_wit_for_language(
+            Language::Python,
+            wit,
+            PathBuf::from("inline.wit"),
+        )
+        .unwrap();
         let service = &spec.services[0];
         let error = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap_err();
 
@@ -1036,8 +1093,12 @@ interface user-service {
   update-email: func(request: update-email-request) -> user-result;
 }
 "#;
-        let spec = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
-            .unwrap();
+        let spec = crate::parser::parse_api_spec_from_wit_for_language(
+            Language::Python,
+            wit,
+            PathBuf::from("inline.wit"),
+        )
+        .unwrap();
         let service = &spec.services[0];
         let resolved = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap();
         let method = &resolved.resources[0].methods[0];

@@ -12,6 +12,42 @@ namespace NexGen.StartWorkflowService
 {
 
     [GeneratedCode("nex-gen", null)]
+    internal class CancelWorkflowRequest
+    {
+        internal CancelWorkflowRequest(WorkflowExecution workflowExecution)
+        {
+            WorkflowExecution = workflowExecution;
+        }
+
+        public WorkflowExecution WorkflowExecution { get; }
+        public string? Reason { get; init; }
+
+        public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest ToProto()
+        {
+            var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest();
+            proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
+            proto.WorkflowExecution = WorkflowExecution.ToProto();
+            if (Reason is { } reason)
+            {
+                proto.Reason = reason;
+            }
+            return proto;
+        }
+
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    internal class CancelWorkflowResponse
+    {
+        public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse ToProto()
+        {
+            var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse();
+            return proto;
+        }
+
+    }
+
+    [GeneratedCode("nex-gen", null)]
     internal class StartWorkflowRequest
     {
         internal StartWorkflowRequest(string workflow, string workflowId, string taskQueue)
@@ -51,31 +87,6 @@ namespace NexGen.StartWorkflowService
     }
 
     [GeneratedCode("nex-gen", null)]
-    internal class CancelWorkflowRequest
-    {
-        internal CancelWorkflowRequest(WorkflowExecution workflowExecution)
-        {
-            WorkflowExecution = workflowExecution;
-        }
-
-        public WorkflowExecution WorkflowExecution { get; }
-        public string? Reason { get; init; }
-
-        public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest ToProto()
-        {
-            var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest();
-            proto.Namespace = NexGen.Support.TemporalWorkflowContext.WorkflowNamespace();
-            proto.WorkflowExecution = WorkflowExecution.ToProto();
-            if (Reason is { } reason)
-            {
-                proto.Reason = reason;
-            }
-            return proto;
-        }
-
-    }
-
-    [GeneratedCode("nex-gen", null)]
     public class WorkflowExecution
     {
         public WorkflowExecution(string workflowId)
@@ -94,17 +105,6 @@ namespace NexGen.StartWorkflowService
             {
                 proto.RunId = runId;
             }
-            return proto;
-        }
-
-    }
-
-    [GeneratedCode("nex-gen", null)]
-    internal class CancelWorkflowResponse
-    {
-        public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse ToProto()
-        {
-            var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse();
             return proto;
         }
 

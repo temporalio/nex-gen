@@ -1,28 +1,27 @@
-mod api_plan;
+mod planning;
 
 pub mod add_rpc;
 pub mod descriptors;
-pub mod dotnet;
 pub mod error;
 pub mod generator;
 pub mod language;
-pub mod python;
+pub mod parser;
 pub mod resources;
 pub mod spec;
-pub mod typescript;
 pub mod validation;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use add_rpc::generate_add_rpc_wit;
 use descriptors::DescriptorIndex;
 use error::Result;
 use generator::{GeneratedFiles, GeneratedOutputLayout, generate_files};
 use heck::ToSnakeCase;
 use language::Language;
-use spec::{ApiSpec, SupportFragmentSpec, write_prepared_wit_directory};
+use spec::{ApiSpec, SupportFragmentSpec};
+
+pub use add_rpc::{AddRpcRequest, add_rpc_to_file, add_rpc_to_string};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SupportFiles {
@@ -36,18 +35,6 @@ pub struct GenerateRequest {
     pub descriptor_paths: Vec<PathBuf>,
     pub output_path: PathBuf,
     pub format: bool,
-}
-
-pub struct AddRpcRequest {
-    pub descriptor_paths: Vec<PathBuf>,
-    pub rpc_name: String,
-    pub input_paths: Vec<PathBuf>,
-    pub output_path: Option<PathBuf>,
-}
-
-pub struct DebugWitDirRequest {
-    pub input_paths: Vec<PathBuf>,
-    pub output_path: PathBuf,
 }
 
 pub struct BuildExamplesRequest {
@@ -81,10 +68,11 @@ pub fn generate_to_string_with_inputs_and_support(
     descriptor_paths: &[PathBuf],
     support_paths: &[PathBuf],
 ) -> Result<String> {
-    let spec = ApiSpec::load_for_language_with_inputs(language, input_paths)?;
+    let spec =
+        crate::parser::load_api_spec_from_wit_for_language_with_inputs(language, input_paths)?;
     let descriptors = DescriptorIndex::load_many(descriptor_paths)?;
     let support = load_support_files(language, &spec, support_paths)?;
-    let generated = generate_files(language, &spec, &descriptors, &support)?;
+    let generated = generate_files(language, spec, &descriptors, &support)?;
     print_warnings(&generated);
     Ok(match generated.layout {
         GeneratedOutputLayout::SingleFile => generated
@@ -96,10 +84,13 @@ pub fn generate_to_string_with_inputs_and_support(
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
-    let spec = ApiSpec::load_for_language_with_inputs(request.language, &request.input_paths)?;
+    let spec = crate::parser::load_api_spec_from_wit_for_language_with_inputs(
+        request.language,
+        &request.input_paths,
+    )?;
     let descriptors = DescriptorIndex::load_many(&request.descriptor_paths)?;
     let support = load_support_files(request.language, &spec, &request.support_paths)?;
-    let generated = generate_files(request.language, &spec, &descriptors, &support)?;
+    let generated = generate_files(request.language, spec, &descriptors, &support)?;
     print_warnings(&generated);
 
     write_generated_files(&request.output_path, &generated)?;
@@ -109,64 +100,6 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
     }
 
     Ok(())
-}
-
-pub fn add_rpc_to_string(
-    descriptor_paths: &[PathBuf],
-    rpc_name: &str,
-    input_paths: &[PathBuf],
-) -> Result<String> {
-    let descriptors = DescriptorIndex::load_many(descriptor_paths)?;
-    let (input_path, linked_input_paths) = add_rpc_input_parts(input_paths);
-    if let Some(input_path) = input_path {
-        let input = fs::read_to_string(input_path).map_err(|source| error::Error::ReadFile {
-            path: input_path.to_path_buf(),
-            source,
-        })?;
-        add_rpc::generate_add_rpc_wit_with_input(
-            &descriptors,
-            rpc_name,
-            input_path,
-            &input,
-            linked_input_paths,
-        )
-    } else {
-        generate_add_rpc_wit(&descriptors, rpc_name, input_paths)
-    }
-}
-
-pub fn add_rpc_to_file(request: &AddRpcRequest) -> Result<()> {
-    let output = add_rpc_to_string(
-        &request.descriptor_paths,
-        &request.rpc_name,
-        &request.input_paths,
-    )?;
-    if let Some(path) = &request.output_path {
-        fs::write(path, output).map_err(|source| error::Error::WriteFile {
-            path: path.clone(),
-            source,
-        })?;
-    } else {
-        print!("{output}");
-    }
-    Ok(())
-}
-
-fn add_rpc_input_parts(input_paths: &[PathBuf]) -> (Option<&Path>, &[PathBuf]) {
-    if let Some((first, rest)) = input_paths.split_first() {
-        if first.is_file()
-            || first
-                .extension()
-                .is_some_and(|extension| extension == "wit")
-        {
-            return (Some(first.as_path()), rest);
-        }
-    }
-    (None, input_paths)
-}
-
-pub fn debug_wit_dir_to_file(request: &DebugWitDirRequest) -> Result<()> {
-    write_prepared_wit_directory(&request.input_paths, &request.output_path)
 }
 
 pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {

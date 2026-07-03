@@ -286,7 +286,7 @@ fn python_example_suite_type_checks_and_runs() {
 #[test]
 fn python_request_models_are_write_only() {
     let root = project_root();
-    let spec = nex_gen::spec::ApiSpec::load_for_language_with_inputs(
+    let spec = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
         nex_gen::language::Language::Python,
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
     )
@@ -294,7 +294,7 @@ fn python_request_models_are_write_only() {
     let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
     let generated = generate_files(
         nex_gen::language::Language::Python,
-        &spec,
+        spec.clone(),
         &descriptors,
         &nex_gen::SupportFiles::default(),
     )
@@ -445,7 +445,7 @@ fn python_request_models_are_write_only() {
 #[test]
 fn python_rejects_support_namespace() {
     let root = project_root();
-    let spec = nex_gen::spec::ApiSpec::load_for_language_with_inputs(
+    let spec = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
         nex_gen::language::Language::Python,
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
     )
@@ -453,7 +453,7 @@ fn python_rejects_support_namespace() {
     let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
     let err = generate_files(
         nex_gen::language::Language::Python,
-        &spec,
+        spec.clone(),
         &descriptors,
         &SupportFiles {
             fragments: vec![SupportFragmentSpec {
