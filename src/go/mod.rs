@@ -12,7 +12,7 @@ use crate::api_plan::{
     PlannedSourcedField, PlannedTypeInfo, PlannedValueType, PlannedVariant, message_model_name,
 };
 // `PlannedEnum` is referenced via `ensure_rendered_enum`'s parameter type below.
-use crate::api_plan::PlannedEnum;
+use crate::api_plan::{PlannedEnum, PlannedFieldRole};
 use crate::error::{Error, Result};
 use crate::generator::GeneratedFiles;
 use crate::language::Language;
@@ -209,6 +209,9 @@ pub(crate) fn generate(
     if has_operations && !package.is_self_import("go.temporal.io/sdk/workflow") {
         imports.insert("go.temporal.io/sdk/workflow".to_string());
     }
+    if services.iter().any(service_uses_primary_varargs_wrappers) {
+        imports.insert("errors".to_string());
+    }
     let output = render_file(
         &package,
         &imports,
@@ -236,6 +239,21 @@ pub(crate) fn generate(
     }
 
     Ok(GeneratedFiles::directory(files))
+}
+
+fn service_uses_primary_varargs_wrappers(service: &RenderedService<'_>) -> bool {
+    service
+        .operations
+        .iter()
+        .any(operation_uses_primary_varargs_wrapper)
+}
+
+fn operation_uses_primary_varargs_wrapper(operation: &RenderedOperation<'_>) -> bool {
+    operation
+        .unpacked_input
+        .as_deref()
+        .and_then(primary_varargs_args_param)
+        .is_some()
 }
 
 /// Derives the primary Go output filename from the first service name
@@ -602,6 +620,8 @@ struct RenderedUnpackedParam {
     /// Function field metadata for required `@nexus.function` fields. Optional
     /// function fields remain string-shaped in generated options structs.
     function: Option<FunctionFieldSpec>,
+    /// Function metadata for fields generated from a function's arguments.
+    function_args: Option<FunctionFieldSpec>,
     /// Whether this parameter is required (positional argument) or optional
     /// (placed in the options struct).
     required: bool,
@@ -1259,18 +1279,24 @@ fn resolve_operation<'a>(
             .enumerate()
             .map(|(index, field)| {
                 let planned_field = planned_fields.and_then(|fields| fields.get(index));
+                let function = planned_field.and_then(|planned_field| match &planned_field.role {
+                    PlannedFieldRole::Function(function) if planned_field.required => {
+                        Some(function.clone())
+                    }
+                    _ => None,
+                });
+                let function_args =
+                    planned_field.and_then(|planned_field| match &planned_field.role {
+                        PlannedFieldRole::FunctionArgs(function) => Some(function.clone()),
+                        _ => None,
+                    });
                 RenderedUnpackedParam {
                     field_name: field.name.clone(),
                     doc: field.doc.clone(),
                     param_name: go_unexported_name(&field.name),
                     go_type: field.go_type.clone(),
-                    function: planned_field.and_then(|planned_field| {
-                        if planned_field.required {
-                            planned_field.function.clone()
-                        } else {
-                            None
-                        }
-                    }),
+                    function,
+                    function_args,
                     required: field.required,
                     embed_in_options: planned_field.is_some_and(|planned_field| {
                         !planned_field.required
@@ -4160,6 +4186,16 @@ fn render_file(
                     }
                     output.push('\n');
                     render_convenience_wrapper(&mut output, operation, params, package, visibility);
+                    if primary_varargs_args_param(params).is_some() {
+                        output.push('\n');
+                        render_with_args_convenience_wrapper(
+                            &mut output,
+                            operation,
+                            params,
+                            package,
+                            visibility,
+                        );
+                    }
                 } else {
                     // External input type — generate a simple forwarding wrapper
                     output.push('\n');
@@ -5296,6 +5332,58 @@ fn go_authored_function_type_expr(
     visibility.rewrite_go_expr(&expr)
 }
 
+fn primary_varargs_args_param(params: &[RenderedUnpackedParam]) -> Option<&RenderedUnpackedParam> {
+    let primary_function = params.iter().find_map(|param| {
+        let function = param.function.as_ref()?;
+        if function.primary && matches!(function.args, FunctionArgsSpec::Varargs { .. }) {
+            Some(function)
+        } else {
+            None
+        }
+    })?;
+    params.iter().find(|param| {
+        !param.required
+            && param
+                .function_args
+                .as_ref()
+                .is_some_and(|function| function == primary_function)
+    })
+}
+
+fn render_operation_wrapper_return_type(output: &mut String, operation: &RenderedOperation<'_>) {
+    if let Some(transform_type) = &operation.output_transform_type {
+        output.push('(');
+        output.push_str(transform_type);
+        output.push_str(", error)");
+    } else if let Some(result_type) = &operation.output_type {
+        output.push_str("(*");
+        output.push_str(result_type);
+        output.push_str(", error)");
+    } else {
+        output.push_str("error");
+    }
+}
+
+fn render_with_args_conflict_return(output: &mut String, operation: &RenderedOperation<'_>) {
+    let error_expr = "errors.New(\"cannot specify both positional arguments and args\")";
+    if let Some(transform_type) = &operation.output_transform_type {
+        output.push_str("\t\tvar zero ");
+        output.push_str(transform_type);
+        output.push('\n');
+        output.push_str("\t\treturn zero, ");
+        output.push_str(error_expr);
+        output.push('\n');
+    } else if operation.output_type.is_some() {
+        output.push_str("\t\treturn nil, ");
+        output.push_str(error_expr);
+        output.push('\n');
+    } else {
+        output.push_str("\t\treturn ");
+        output.push_str(error_expr);
+        output.push('\n');
+    }
+}
+
 /// Renders an exported convenience wrapper that unpacks required fields as
 /// positional arguments and optional fields into a required options struct.
 ///
@@ -5406,17 +5494,7 @@ fn render_convenience_wrapper(
     output.push(' ');
 
     // Return type
-    if let Some(transform_type) = &operation.output_transform_type {
-        output.push('(');
-        output.push_str(transform_type);
-        output.push_str(", error)");
-    } else if let Some(result_type) = &operation.output_type {
-        output.push_str("(*");
-        output.push_str(result_type);
-        output.push_str(", error)");
-    } else {
-        output.push_str("error");
-    }
+    render_operation_wrapper_return_type(output, operation);
     output.push_str(" {\n");
 
     // Function body -- build the request as a multi-line struct literal,
@@ -5432,6 +5510,125 @@ fn render_convenience_wrapper(
         output.push_str(&param.field_name);
         output.push_str(": ");
         if param.required {
+            if param.function.is_some() {
+                output.push_str("nexGenFunctionName(");
+                output.push_str(&param.param_name);
+                output.push(')');
+            } else {
+                output.push_str(&param.param_name);
+            }
+        } else if param.embed_in_options {
+            output.push('&');
+            output.push_str("opts.");
+            output.push_str(&param.field_name);
+        } else {
+            output.push_str("opts.");
+            output.push_str(&param.field_name);
+        }
+        output.push_str(",\n");
+    }
+    output.push_str("\t})\n");
+
+    output.push_str("}\n");
+}
+
+fn render_with_args_convenience_wrapper(
+    output: &mut String,
+    operation: &RenderedOperation<'_>,
+    params: &[RenderedUnpackedParam],
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+) {
+    let exported_name = format!("{}WithArgs", go_field_name(operation.name));
+    let base_exported_name = go_field_name(operation.name);
+    let args_param = primary_varargs_args_param(params)
+        .expect("WithArgs wrapper requires a primary varargs args param");
+    let vararg_type = go_variadic_element_type(&args_param.go_type);
+    let type_params = required_function_type_parameters(params, package, visibility);
+
+    render_operation_doc_comment(output, operation);
+
+    let mut signature_params: Vec<(String, String)> = params
+        .iter()
+        .filter(|p| p.required)
+        .map(|p| {
+            let ty = if p.function.is_some() {
+                function_type_parameter_name(p)
+            } else {
+                p.go_type.clone()
+            };
+            (p.param_name.clone(), ty)
+        })
+        .collect();
+    signature_params.push(("opts".to_string(), format!("{base_exported_name}Options")));
+    signature_params.push(("args".to_string(), format!("...{vararg_type}")));
+
+    let multiline_signature = signature_params.len() + 1 > 3;
+
+    output.push_str("func ");
+    output.push_str(&exported_name);
+    if !type_params.is_empty() {
+        output.push('[');
+        for (index, (name, constraint)) in type_params.iter().enumerate() {
+            if index > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(constraint);
+        }
+        output.push(']');
+    }
+    if multiline_signature {
+        output.push_str("(\n\tctx ");
+        output.push_str(&package.workflow_context_type());
+        output.push_str(",\n");
+        for (name, ty) in &signature_params {
+            output.push('\t');
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(ty);
+            output.push_str(",\n");
+        }
+        output.push(')');
+    } else {
+        output.push_str("(ctx ");
+        output.push_str(&package.workflow_context_type());
+        for (name, ty) in &signature_params {
+            output.push_str(", ");
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(ty);
+        }
+        output.push(')');
+    }
+    output.push(' ');
+    render_operation_wrapper_return_type(output, operation);
+    output.push_str(" {\n");
+
+    output.push_str("\tif len(args) > 0 && opts.");
+    output.push_str(&args_param.field_name);
+    output.push_str(" != nil {\n");
+    render_with_args_conflict_return(output, operation);
+    output.push_str("\t}\n");
+    output.push_str("\tif len(args) == 0 {\n");
+    output.push_str("\t\targs = opts.");
+    output.push_str(&args_param.field_name);
+    output.push('\n');
+    output.push_str("\t}\n");
+
+    output.push_str("\treturn ");
+    output.push_str(&operation.func_name);
+    output.push_str("(ctx, ");
+    output.push_str(&operation.input_type);
+    output.push_str("{\n");
+    for param in params {
+        output.push_str("\t\t");
+        output.push_str(&param.field_name);
+        output.push_str(": ");
+        if param.field_name == args_param.field_name {
+            output.push_str("args");
+        } else if param.required {
             if param.function.is_some() {
                 output.push_str("nexGenFunctionName(");
                 output.push_str(&param.param_name);

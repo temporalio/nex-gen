@@ -2,6 +2,7 @@
 package temporalsystem
 
 import (
+	"errors"
 	"time"
 
 	common "go.temporal.io/api/common/v1"
@@ -233,6 +234,31 @@ func StartWorkflow[WorkflowF interface {
 	})
 }
 
+func StartWorkflowWithArgs[WorkflowF interface {
+	~string | func(workflow.Context, ...any) any
+}](
+	ctx workflow.Context,
+	workflow WorkflowF,
+	workflowId string,
+	taskQueue string,
+	opts StartWorkflowOptions,
+	args ...any,
+) (*StartedWorkflow, error) {
+	if len(args) > 0 && opts.Args != nil {
+		return nil, errors.New("cannot specify both positional arguments and args")
+	}
+	if len(args) == 0 {
+		args = opts.Args
+	}
+	return startWorkflow(ctx, startWorkflowRequest{
+		Workflow:           nexGenFunctionName(workflow),
+		Args:               args,
+		WorkflowId:         workflowId,
+		TaskQueue:          taskQueue,
+		WorkflowStartDelay: opts.WorkflowStartDelay,
+	})
+}
+
 type RestartWorkflowOptions struct {
 	// Arguments for the workflow.
 	Args               []any
@@ -251,6 +277,31 @@ func RestartWorkflow[WorkflowF interface {
 	return restartWorkflow(ctx, startWorkflowRequest{
 		Workflow:           nexGenFunctionName(workflow),
 		Args:               opts.Args,
+		WorkflowId:         workflowId,
+		TaskQueue:          taskQueue,
+		WorkflowStartDelay: opts.WorkflowStartDelay,
+	})
+}
+
+func RestartWorkflowWithArgs[WorkflowF interface {
+	~string | func(workflow.Context, ...any) any
+}](
+	ctx workflow.Context,
+	workflow WorkflowF,
+	workflowId string,
+	taskQueue string,
+	opts RestartWorkflowOptions,
+	args ...any,
+) (*StartedWorkflow, error) {
+	if len(args) > 0 && opts.Args != nil {
+		return nil, errors.New("cannot specify both positional arguments and args")
+	}
+	if len(args) == 0 {
+		args = opts.Args
+	}
+	return restartWorkflow(ctx, startWorkflowRequest{
+		Workflow:           nexGenFunctionName(workflow),
+		Args:               args,
 		WorkflowId:         workflowId,
 		TaskQueue:          taskQueue,
 		WorkflowStartDelay: opts.WorkflowStartDelay,

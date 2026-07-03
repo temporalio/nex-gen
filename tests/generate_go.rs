@@ -438,6 +438,7 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!service_rendered.contains("\"reflect\""));
     assert!(!service_rendered.contains("\"runtime\""));
     assert!(!service_rendered.contains("\"strings\""));
+    assert!(service_rendered.contains("\"errors\""));
     assert!(!service_rendered.contains("func nexGenFunctionName[F any](value F) string"));
     assert!(support_rendered.contains("\"reflect\""));
     assert!(support_rendered.contains("\"runtime\""));
@@ -469,10 +470,32 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     ));
     assert!(rendered.contains("\tfunction FunctionF,\n"));
     assert!(rendered.contains("\t\tFunction: nexGenFunctionName(function),\n"));
+    assert!(!rendered.contains("func ExecuteFunctionWithArgs"));
+    assert!(!rendered.contains("func ExecuteCountedFunctionWithArgs"));
+    assert!(!rendered.contains("func ExecuteNamedFunctionWithArgs"));
 
     // Optional function-adjacent args stay in the options struct with their
     // normal wire-compatible type.
     assert!(rendered.contains("type ExecuteVarargsFunctionOptions struct {\n\t// Arguments for the function.\n\tArgs []string\n}"));
+    assert!(rendered.contains(
+        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }](ctx workflow.Context, function FunctionF, opts ExecuteVarargsFunctionOptions) (*ExecuteVarargsFunctionResult, error) {"
+    ));
+    assert!(rendered.contains("\t\tArgs: opts.Args,\n"));
+
+    // Primary varargs function fields also get a trailing-args convenience
+    // wrapper that matches Python's positional/list-form conflict behavior.
+    assert!(rendered.contains(
+        "func ExecuteVarargsFunctionWithArgs[FunctionF interface{ ~string | func(...string) string }]("
+    ));
+    assert!(rendered.contains(
+        "func ExecuteNamedVarargsFunctionWithArgs[FunctionF interface{ ~string | func(...string) string }]("
+    ));
+    assert!(rendered.contains("\targs ...string,\n"));
+    assert!(rendered.contains(
+        "\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nil, errors.New(\"cannot specify both positional arguments and args\")\n\t}\n"
+    ));
+    assert!(rendered.contains("\tif len(args) == 0 {\n\t\targs = opts.Args\n\t}\n"));
+    assert!(rendered.contains("\t\tArgs: args,\n"));
 
     let user_rendered = generate_to_string_with_inputs(
         nex_gen::language::Language::Go,
@@ -484,6 +507,7 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!user_rendered.contains("\"reflect\""));
     assert!(!user_rendered.contains("\"runtime\""));
     assert!(!user_rendered.contains("\"strings\""));
+    assert!(!user_rendered.contains("\"errors\""));
 }
 
 #[test]
@@ -499,10 +523,16 @@ fn go_temporal_function_constraints_use_workflow_context_prefix() {
     assert!(rendered.contains(
         "func SignalWithStartWorkflow[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }, SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
     ));
+    assert!(rendered.contains(
+        "func SignalWithStartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }, SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
+    ));
     assert!(rendered.contains("\tworkflow WorkflowF,\n"));
     assert!(rendered.contains("\tsignal SignalF,\n"));
+    assert!(rendered.contains("\targs ...any,\n"));
     assert!(rendered.contains("\t\tWorkflow: nexGenFunctionName(workflow),\n"));
     assert!(rendered.contains("\t\tSignal: nexGenFunctionName(signal),\n"));
+    assert!(rendered.contains("\t\tArgs: args,\n"));
+    assert!(rendered.contains("\t\tSignalArgs: opts.SignalArgs,\n"));
 }
 
 #[test]
@@ -770,6 +800,15 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     assert!(rendered.contains(
         "fut := c.ExecuteOperation(ctx, \"RestartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
+    assert!(rendered.contains(
+        "func StartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }]("
+    ));
+    assert!(rendered.contains(
+        "func RestartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }]("
+    ));
+    assert!(rendered.contains("\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nil, errors.New(\"cannot specify both positional arguments and args\")\n\t}\n"));
+    assert!(rendered.contains("\tif len(args) == 0 {\n\t\targs = opts.Args\n\t}\n"));
+    assert!(rendered.contains("\t\tArgs: args,\n"));
 }
 
 #[test]

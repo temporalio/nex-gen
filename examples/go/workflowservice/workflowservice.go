@@ -2,6 +2,7 @@
 package temporalsystem
 
 import (
+	"errors"
 	"time"
 
 	enums "go.temporal.io/api/enums/v1"
@@ -317,6 +318,52 @@ func SignalWithStartWorkflow[WorkflowF interface {
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
 		Workflow:           nexGenFunctionName(workflow),
 		Args:               opts.Args,
+		Id:                 id,
+		TaskQueue:          taskQueue,
+		Signal:             nexGenFunctionName(signal),
+		SignalArgs:         opts.SignalArgs,
+		ExecutionTimeout:   opts.ExecutionTimeout,
+		RunTimeout:         opts.RunTimeout,
+		TaskTimeout:        opts.TaskTimeout,
+		RequestId:          opts.RequestId,
+		IdReusePolicy:      opts.IdReusePolicy,
+		IdConflictPolicy:   opts.IdConflictPolicy,
+		RetryPolicy:        opts.RetryPolicy,
+		CronSchedule:       opts.CronSchedule,
+		Memo:               opts.Memo,
+		SearchAttributes:   opts.SearchAttributes,
+		Priority:           opts.Priority,
+		VersioningOverride: opts.VersioningOverride,
+		StartDelay:         opts.StartDelay,
+		UserMetadata:       &opts.UserMetadata,
+	})
+}
+
+// Signal a workflow, starting it first if needed.
+//
+// Returns: A workflow handle to the started workflow.
+func SignalWithStartWorkflowWithArgs[WorkflowF interface {
+	~string | func(workflow.Context, ...any) any
+}, SignalF interface {
+	~string | func(workflow.Context, ...any) any
+}](
+	ctx workflow.Context,
+	workflow WorkflowF,
+	id string,
+	taskQueue string,
+	signal SignalF,
+	opts SignalWithStartWorkflowOptions,
+	args ...any,
+) (*SignalWithStartWorkflowResponse, error) {
+	if len(args) > 0 && opts.Args != nil {
+		return nil, errors.New("cannot specify both positional arguments and args")
+	}
+	if len(args) == 0 {
+		args = opts.Args
+	}
+	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
+		Workflow:           nexGenFunctionName(workflow),
+		Args:               args,
 		Id:                 id,
 		TaskQueue:          taskQueue,
 		Signal:             nexGenFunctionName(signal),

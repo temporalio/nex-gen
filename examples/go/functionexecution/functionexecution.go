@@ -2,6 +2,8 @@
 package functionexecution
 
 import (
+	"errors"
+
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -186,6 +188,26 @@ func ExecuteVarargsFunction[FunctionF interface {
 	})
 }
 
+func ExecuteVarargsFunctionWithArgs[FunctionF interface {
+	~string | func(...string) string
+}](
+	ctx workflow.Context,
+	function FunctionF,
+	opts ExecuteVarargsFunctionOptions,
+	args ...string,
+) (*ExecuteVarargsFunctionResult, error) {
+	if len(args) > 0 && opts.Args != nil {
+		return nil, errors.New("cannot specify both positional arguments and args")
+	}
+	if len(args) == 0 {
+		args = opts.Args
+	}
+	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
+		Function: nexGenFunctionName(function),
+		Args:     args,
+	})
+}
+
 type ExecuteNamedVarargsFunctionOptions struct {
 	// Arguments for the function.
 	Args []string
@@ -197,5 +219,25 @@ func ExecuteNamedVarargsFunction[FunctionF interface {
 	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
 		Function: nexGenFunctionName(function),
 		Args:     opts.Args,
+	})
+}
+
+func ExecuteNamedVarargsFunctionWithArgs[FunctionF interface {
+	~string | func(...string) string
+}](
+	ctx workflow.Context,
+	function FunctionF,
+	opts ExecuteNamedVarargsFunctionOptions,
+	args ...string,
+) (*ExecuteNamedVarargsFunctionResult, error) {
+	if len(args) > 0 && opts.Args != nil {
+		return nil, errors.New("cannot specify both positional arguments and args")
+	}
+	if len(args) == 0 {
+		args = opts.Args
+	}
+	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
+		Function: nexGenFunctionName(function),
+		Args:     args,
 	})
 }
