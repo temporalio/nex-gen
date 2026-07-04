@@ -47,11 +47,26 @@ fn input_path(root: &Path, example_id: &str) -> PathBuf {
 }
 
 fn python_output_path(root: &Path, example_id: &str) -> PathBuf {
-    python_root(root).join(example_id.to_snake_case())
+    python_root(root)
+        .join("wit")
+        .join(example_id.to_snake_case())
+}
+
+fn python_json_definitions_output_path(root: &Path, example_id: &str) -> PathBuf {
+    python_root(root)
+        .join("json_schema")
+        .join("definitions")
+        .join(example_id.to_snake_case())
+}
+
+fn python_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
+    python_root(root)
+        .join("json_schema")
+        .join("api")
+        .join(example_id.to_snake_case())
 }
 
 fn python_example_ids(root: &Path) -> Vec<String> {
-    let python_root = python_root(root);
     let mut ids = fs::read_dir(root.join("examples/inputs"))
         .unwrap()
         .filter_map(|entry| {
@@ -64,7 +79,7 @@ fn python_example_ids(root: &Path) -> Vec<String> {
             } else {
                 return None;
             };
-            if python_root.join(example_id.to_snake_case()).is_dir() {
+            if python_output_path(root, &example_id).is_dir() {
                 Some(example_id)
             } else {
                 None
@@ -142,21 +157,30 @@ fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: 
     assert!(format_status.success());
 }
 
-fn generate_formatted_json_python_output(root: &Path, example_id: &str, output_path: &Path) {
+fn generate_formatted_json_python_output(
+    root: &Path,
+    example_id: &str,
+    output_path: &Path,
+    generate_native_api: bool,
+) {
+    let input_path = root
+        .join("examples/json-inputs")
+        .join(format!("{example_id}.yaml"));
+    let mut args = vec![
+        "generate",
+        "--lang",
+        "python",
+        "--input",
+        input_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+    ];
+    if !generate_native_api {
+        args.push("--no-native-api");
+    }
+
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
-        .args([
-            "generate",
-            "--lang",
-            "python",
-            "--input",
-            root.join("examples/json-inputs")
-                .join(format!("{example_id}.yaml"))
-                .to_str()
-                .unwrap(),
-            "--output",
-            output_path.to_str().unwrap(),
-            "--no-native-api",
-        ])
+        .args(args)
         .status()
         .unwrap();
     assert!(status.success());
@@ -231,10 +255,22 @@ fn python_examples_generation_matches_checked_in_output() {
 fn python_json_example_generation_matches_checked_in_output() {
     let root = project_root();
     let output_path = unique_output_path("python-json-chat");
-    generate_formatted_json_python_output(&root, "chat", &output_path);
+    generate_formatted_json_python_output(&root, "chat", &output_path, false);
     assert_python_310_syntax_compatible(&output_path);
     let rendered = read_python_package_files(&output_path);
-    let expected = read_python_package_files(&python_output_path(&root, "chat"));
+    let expected = read_python_package_files(&python_json_definitions_output_path(&root, "chat"));
+    assert_eq!(rendered, expected);
+    fs::remove_dir_all(output_path).unwrap();
+}
+
+#[test]
+fn python_json_api_example_generation_matches_checked_in_output() {
+    let root = project_root();
+    let output_path = unique_output_path("python-json-api-chat");
+    generate_formatted_json_python_output(&root, "chat", &output_path, true);
+    assert_python_310_syntax_compatible(&output_path);
+    let rendered = read_python_package_files(&output_path);
+    let expected = read_python_package_files(&python_json_api_output_path(&root, "chat"));
     assert_eq!(rendered, expected);
     fs::remove_dir_all(output_path).unwrap();
 }

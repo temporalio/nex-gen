@@ -10,12 +10,12 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 APP_ROOT = Path(__file__).resolve().parent
-OUTPUT_PATH = APP_ROOT.parent / "user_service"
+OUTPUT_PATH = APP_ROOT.parent / "wit" / "user_service"
 
-import user_service
-import user_service.models
-import user_service.service
-from user_service._resources import User
+import wit.user_service as user_service
+import wit.user_service.models as user_service_models
+import wit.user_service.service as user_service_service
+from wit.user_service._resources import User
 
 GET_USER_OPERATION = user_service.__nexus_operation_registry__[
     ("UserService", "GetUser")
@@ -35,7 +35,7 @@ def user_resource(
     )
 
 
-@service_handler(service=user_service.service.UserService)
+@service_handler(service=user_service_service.UserService)
 class UserServiceHandler:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
@@ -44,7 +44,7 @@ class UserServiceHandler:
     async def get_user(
         self,
         _ctx: StartOperationContext,
-        input: user_service.models.GetUserRequest,
+        input: user_service_models.GetUserRequest,
     ) -> User:
         self.calls.append(("GetUser", input))
         assert input.user_id == "user-123"
@@ -54,7 +54,7 @@ class UserServiceHandler:
     async def update_email(
         self,
         _ctx: StartOperationContext,
-        input: user_service.models.UpdateEmailRequest,
+        input: user_service_models.UpdateEmailRequest,
     ) -> User:
         self.calls.append(("UpdateEmail", input))
         assert input.user_id == "user-123"
@@ -82,7 +82,7 @@ def test_generated_metadata() -> None:
     assert registry[("UserService", "UpdateEmail")] is UPDATE_EMAIL_OPERATION
     assert not hasattr(user_service, "UserService")
     assert not hasattr(user_service, "User")
-    assert not hasattr(user_service.models.GetUserRequest, "to_proto")
+    assert not hasattr(user_service_models.GetUserRequest, "to_proto")
 
 
 async def test_get_user_returns_user_resource(env: WorkflowEnvironment) -> None:
@@ -113,11 +113,11 @@ async def test_get_user_returns_user_resource(env: WorkflowEnvironment) -> None:
     assert len(service_handler.calls) == 2
     get_user_operation, get_user_request = service_handler.calls[0]
     assert get_user_operation == "GetUser"
-    assert isinstance(get_user_request, user_service.models.GetUserRequest)
+    assert isinstance(get_user_request, user_service_models.GetUserRequest)
     assert get_user_request.user_id == "user-123"
 
     update_operation, update_request = service_handler.calls[1]
     assert update_operation == "UpdateEmail"
-    assert isinstance(update_request, user_service.models.UpdateEmailRequest)
+    assert isinstance(update_request, user_service_models.UpdateEmailRequest)
     assert update_request.user_id == "user-123"
     assert update_request.email == "new@example.com"

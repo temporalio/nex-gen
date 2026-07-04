@@ -1,0 +1,9 @@
+{
+  "roomId": "r1",
+  "displayName": "General",
+  "topic": null,
+  "members": [
+    "a"
+  ],
+  "x-extra": 42
+}

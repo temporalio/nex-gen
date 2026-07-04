@@ -66,22 +66,11 @@ pub(crate) fn service_message_python_ref(
     })
 }
 
-pub(crate) fn model_python_ref(
-    model_type: &PlannedType,
-    planned_model: &RecordSpec<PlannedTypeFamily>,
-    proto_ref_override: Option<&str>,
-) -> Option<PythonReference> {
-    if let Some(proto_ref) = proto_ref_override {
-        return Some(PythonReference {
-            module_path: python_module_path(proto_ref).to_string(),
-            type_ref: proto_ref.to_string(),
-        });
-    }
-
-    model_type
-        .proto_message()
-        .map(|message| &message.proto)
-        .or(planned_model.data.proto.as_ref())
+fn record_python_ref(planned_model: &RecordSpec<PlannedTypeFamily>) -> Option<PythonReference> {
+    planned_model
+        .data
+        .proto
+        .as_ref()
         .and_then(message_python_ref)
 }
 
@@ -552,12 +541,11 @@ pub(crate) fn python_replacement_type_name(replacement: &TypeReplacementSpec) ->
 pub(in crate::generator) fn render_model_proto_methods(
     output: &mut String,
     model: &RenderedModel,
+    planned_model: &RecordSpec<PlannedTypeFamily>,
 ) -> bool {
     let mut wrote_method = false;
     if model.capabilities.from_wire {
-        let proto_ref = model
-            .proto_ref
-            .as_deref()
+        let proto_ref = record_python_ref(planned_model)
             .expect("from_proto models should have a proto reference");
         if !model.fields.is_empty() {
             output.push('\n');
@@ -570,7 +558,7 @@ pub(in crate::generator) fn render_model_proto_methods(
         } else {
             "        proto: "
         });
-        output.push_str(proto_ref);
+        output.push_str(&proto_ref.type_ref);
         output.push_str(",\n");
         output.push_str("    ) -> ");
         output.push_str(&model.name);
@@ -599,9 +587,7 @@ pub(in crate::generator) fn render_model_proto_methods(
         wrote_method = true;
     }
     if model.capabilities.to_wire {
-        let proto_ref = model
-            .proto_ref
-            .as_deref()
+        let proto_ref = record_python_ref(planned_model)
             .expect("to_proto models should have a proto reference");
         if model.fields.is_empty() {
             if wrote_method {
@@ -614,10 +600,10 @@ pub(in crate::generator) fn render_model_proto_methods(
             }
         }
         output.push_str("    def to_proto(self) -> ");
-        output.push_str(proto_ref);
+        output.push_str(&proto_ref.type_ref);
         output.push_str(":\n");
         output.push_str("        message = ");
-        output.push_str(proto_ref);
+        output.push_str(&proto_ref.type_ref);
         output.push_str("()\n");
         for field in &model.fields {
             for line in &field.to_wire.lines {
@@ -639,10 +625,17 @@ pub(in crate::generator) fn render_model_proto_methods(
     wrote_method
 }
 
-pub(in crate::generator) fn render_models(models: &[&RenderedModel]) -> RenderedModelFragments {
+pub(in crate::generator) fn render_models(
+    models: &[&RenderedModel],
+    api_plan: &PlannedSpec,
+) -> RenderedModelFragments {
     let mut body = String::new();
     for (index, model) in models.iter().enumerate() {
-        render_model(&mut body, model);
+        let planned_model = api_plan
+            .records
+            .get(&model.full_name)
+            .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
+        render_model(&mut body, model, planned_model);
         if index + 1 != models.len() {
             body.push_str("\n\n");
         }
@@ -656,8 +649,12 @@ pub(in crate::generator) fn render_models(models: &[&RenderedModel]) -> Rendered
         module_imports.insert("nex_gen_runtime".to_string());
     }
     for model in models {
-        if let Some(proto_module_path) = &model.proto_module_path {
-            module_imports.insert(proto_module_path.clone());
+        let planned_model = api_plan
+            .records
+            .get(&model.full_name)
+            .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
+        if let Some(proto_ref) = record_python_ref(planned_model) {
+            module_imports.insert(proto_ref.module_path);
         }
         for field in &model.fields {
             module_imports.extend(field.imports.module_imports.iter().cloned());
@@ -672,7 +669,11 @@ pub(in crate::generator) fn render_models(models: &[&RenderedModel]) -> Rendered
     }
 }
 
-fn render_model(output: &mut String, model: &RenderedModel) {
+fn render_model(
+    output: &mut String,
+    model: &RenderedModel,
+    planned_model: &RecordSpec<PlannedTypeFamily>,
+) {
     if model_needs_keyword_only_dataclass(model) {
         output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
     } else {
@@ -684,7 +685,7 @@ fn render_model(output: &mut String, model: &RenderedModel) {
     render_python_docstring(output, "    ", None, &[], None, model.experimental);
 
     if model.fields.is_empty() {
-        if !render_model_proto_methods(output, model) {
+        if !render_model_proto_methods(output, model, planned_model) {
             output.push_str("    pass\n");
         }
         return;
@@ -704,7 +705,7 @@ fn render_model(output: &mut String, model: &RenderedModel) {
         output.push('\n');
     }
 
-    render_model_proto_methods(output, model);
+    render_model_proto_methods(output, model, planned_model);
 }
 
 fn model_needs_keyword_only_dataclass(model: &RenderedModel) -> bool {
@@ -748,11 +749,4 @@ fn python_module_path_for_file_name(file_name: Option<&str>, package: &str) -> O
     } else {
         Some(package.to_string())
     }
-}
-
-fn python_module_path(reference: &str) -> &str {
-    reference
-        .rsplit_once('.')
-        .map(|(module, _)| module)
-        .unwrap_or(reference)
 }

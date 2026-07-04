@@ -392,17 +392,6 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn plan_service(&mut self, service: &ServiceSpec) -> Result<PlannedServiceBuild> {
-        let endpoint = match self.mode {
-            PlanningMode::NativeApi => service
-                .endpoint
-                .as_deref()
-                .ok_or_else(|| Error::MissingServiceEndpoint {
-                    service: service.name.clone(),
-                })?
-                .to_string(),
-            PlanningMode::DefinitionsOnly => service.endpoint.clone().unwrap_or_default(),
-        };
-
         let resolved_resources = if self.mode == PlanningMode::NativeApi {
             Some(resolve_service_resources(
                 &self.spec,
@@ -449,8 +438,12 @@ impl<'a> ApiPlanner<'a> {
             IndexMap::new()
         };
 
-        self.service_data
-            .insert(service.name.clone(), PlannedServiceData { endpoint });
+        self.service_data.insert(
+            service.name.clone(),
+            PlannedServiceData {
+                endpoint: service.endpoint.clone(),
+            },
+        );
         self.resource_data.extend(resources);
 
         Ok(PlannedServiceBuild {
@@ -1180,7 +1173,7 @@ fn json_ref_model_name(reference: &str) -> Option<&str> {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PlannedServiceData {
-    pub(crate) endpoint: String,
+    pub(crate) endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

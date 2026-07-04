@@ -167,6 +167,7 @@ fn render_model(
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut optional_non_nullable_fields = BTreeSet::new();
+    let mut const_fields = Vec::new();
     for (json_name, property) in properties {
         output.push('\n');
         let field_name = python_field_name(json_name);
@@ -176,6 +177,7 @@ fn render_model(
         output.push_str(&field_name);
         output.push_str(": ");
         if let Some(const_value) = &property.const_value {
+            const_fields.push((json_name.clone(), field_name.clone(), const_value.clone()));
             output.push_str(&annotation);
             output.push_str(" = ");
             let default = python_value_literal(const_value)?;
@@ -210,9 +212,10 @@ fn render_model(
             false,
         );
     }
+    render_const_validators(output, &const_fields)?;
     render_optional_non_nullable_validator(output, &optional_non_nullable_fields);
     *needs_optional_non_nullable_helper |= !optional_non_nullable_fields.is_empty();
-    *needs_pydantic_core |= !optional_non_nullable_fields.is_empty();
+    *needs_pydantic_core |= !optional_non_nullable_fields.is_empty() || !const_fields.is_empty();
     render_set_fields_serializer(output);
     *needs_set_fields_helper = true;
     Ok(())
@@ -396,6 +399,56 @@ fn render_set_fields_helper(output: &mut String) {
     output.push_str("    if model.model_extra:\n");
     output.push_str("        out.update(typing.cast(dict[str, object], model.model_extra))\n");
     output.push_str("    return out\n");
+}
+
+fn render_const_validators(output: &mut String, fields: &[(String, String, Value)]) -> Result<()> {
+    if fields.is_empty() {
+        return Ok(());
+    }
+
+    for (json_name, field_name, const_value) in fields {
+        let const_literal = python_value_literal(const_value)?;
+        let error_message = format!("{json_name} must equal {const_literal}");
+        output.push_str("\n    @pydantic.model_validator(mode=\"before\")\n");
+        output.push_str("    @classmethod\n");
+        output.push_str("    def _inject_const_");
+        output.push_str(field_name);
+        output.push_str("(\n");
+        output.push_str("        cls,\n");
+        output.push_str("        data: object,\n");
+        output.push_str("    ) -> object:\n");
+        output.push_str("        if isinstance(data, dict):\n");
+        output.push_str("            values = typing.cast(dict[str, object], data)\n");
+        output.push_str("            if ");
+        output.push_str(&python_string_literal(json_name));
+        output.push_str(" not in values");
+        if field_name != json_name {
+            output.push_str(" and ");
+            output.push_str(&python_string_literal(field_name));
+            output.push_str(" not in values");
+        }
+        output.push_str(":\n");
+        output.push_str("                data = {**values, ");
+        output.push_str(&python_string_literal(json_name));
+        output.push_str(": ");
+        output.push_str(&const_literal);
+        output.push_str("}\n");
+        output.push_str("            elif values.get(");
+        output.push_str(&python_string_literal(json_name));
+        output.push_str(", values.get(");
+        output.push_str(&python_string_literal(field_name));
+        output.push_str(")) != ");
+        output.push_str(&const_literal);
+        output.push_str(":\n");
+        output.push_str("                raise pydantic_core.PydanticCustomError(\n");
+        output.push_str("                    \"const\", ");
+        output.push_str(&python_string_literal(&error_message));
+        output.push_str("\n");
+        output.push_str("                )\n");
+        output.push_str("        return typing.cast(object, data)\n");
+    }
+
+    Ok(())
 }
 
 fn render_optional_non_nullable_validator(output: &mut String, fields: &BTreeSet<String>) {

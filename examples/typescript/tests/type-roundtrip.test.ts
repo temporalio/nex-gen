@@ -4,8 +4,8 @@ import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import * as nexus from "nexus-rpc";
 
-import type { ActivityOptions } from "../type-roundtrip/index.ts";
-import { typeRoundtripService } from "../type-roundtrip/service.ts";
+import type { ActivityOptions } from "../wit/type-roundtrip/index.ts";
+import { typeRoundtripService } from "../wit/type-roundtrip/service.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(

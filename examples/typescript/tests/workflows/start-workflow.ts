@@ -1,4 +1,4 @@
-import { startWorkflow } from "../../start-workflow/index.ts";
+import { startWorkflow } from "../../wit/start-workflow/index.ts";
 
 export async function exampleWorkflow(customerId: string): Promise<string> {
   return customerId;

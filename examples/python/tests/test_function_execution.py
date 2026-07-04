@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import typing
 
-import function_execution
+import wit.function_execution as function_execution
 
 
 def valid_function(name: str, enabled: bool) -> str:

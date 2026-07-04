@@ -364,7 +364,6 @@ fn infer_dotnet_namespace(contents: &str) -> Option<String> {
 }
 
 fn discover_example_ids(repo_root: &Path, language: Language) -> Result<Vec<String>> {
-    let language_root = example_language_root(repo_root, language);
     let mut ids = fs::read_dir(repo_root.join("examples/inputs"))
         .map_err(|source| error::Error::ReadFile {
             path: repo_root.join("examples/inputs"),
@@ -380,10 +379,7 @@ fn discover_example_ids(repo_root: &Path, language: Language) -> Result<Vec<Stri
             } else {
                 return None;
             };
-            if language_root
-                .join(example_directory_name(language, &example_id))
-                .is_dir()
-            {
+            if example_output_path(repo_root, language, &example_id).is_dir() {
                 Some(example_id)
             } else {
                 None
@@ -519,20 +515,41 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
 
 fn build_json_example(repo_root: &Path, language: Language, example_id: &str) -> Result<()> {
     let input_path = json_example_input_path(repo_root, example_id);
-    let output_path = example_output_path(repo_root, language, example_id);
+    let definitions_output_path = json_example_output_path(
+        repo_root,
+        language,
+        example_id,
+        GenerationMode::DefinitionsOnly,
+    );
 
+    generate_to_file(&GenerateRequest {
+        language,
+        input_paths: vec![input_path.clone()],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: definitions_output_path.clone(),
+        format: false,
+        generate_native_api: false,
+    })?;
+    format_example_output(repo_root, language, &definitions_output_path)?;
+
+    println!("Built {} with nex-gen", definitions_output_path.display());
+
+    let api_output_path =
+        json_example_output_path(repo_root, language, example_id, GenerationMode::NativeApi);
     generate_to_file(&GenerateRequest {
         language,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
-        output_path: output_path.clone(),
+        output_path: api_output_path.clone(),
         format: false,
-        generate_native_api: false,
+        generate_native_api: true,
     })?;
-    format_example_output(repo_root, language, &output_path)?;
+    format_example_output(repo_root, language, &api_output_path)?;
 
-    println!("Built {} with nex-gen", output_path.display());
+    println!("Built {} with nex-gen", api_output_path.display());
+
     Ok(())
 }
 
@@ -584,10 +601,28 @@ fn example_linked_input_paths(repo_root: &Path) -> Vec<PathBuf> {
 fn example_output_path(repo_root: &Path, language: Language, example_id: &str) -> PathBuf {
     match language {
         Language::Python => example_language_root(repo_root, language)
+            .join("wit")
             .join(example_directory_name(language, example_id)),
-        Language::TypeScript => example_language_root(repo_root, language).join(example_id),
-        _ => example_language_root(repo_root, language).join(example_id),
+        _ => example_language_root(repo_root, language)
+            .join("wit")
+            .join(example_directory_name(language, example_id)),
     }
+}
+
+fn json_example_output_path(
+    repo_root: &Path,
+    language: Language,
+    example_id: &str,
+    generation_mode: GenerationMode,
+) -> PathBuf {
+    let mode_directory = match generation_mode {
+        GenerationMode::NativeApi => "api",
+        GenerationMode::DefinitionsOnly => "definitions",
+    };
+    example_language_root(repo_root, language)
+        .join("json_schema")
+        .join(mode_directory)
+        .join(example_directory_name(language, example_id))
 }
 
 fn example_directory_name(language: Language, example_id: &str) -> String {

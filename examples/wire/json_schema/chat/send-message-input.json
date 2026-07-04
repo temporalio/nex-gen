@@ -1,0 +1,7 @@
+{
+  "roomId": "r1",
+  "message": {
+    "kind": "text",
+    "body": "hi"
+  }
+}

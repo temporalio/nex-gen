@@ -1,5 +1,5 @@
 import * as workflow from "@temporalio/workflow";
-import { signalWithStartWorkflow } from "../../workflow-service/index.ts";
+import { signalWithStartWorkflow } from "../../wit/workflow-service/index.ts";
 
 export async function exampleWorkflow(attempts: number, note: string): Promise<void> {
   void attempts;

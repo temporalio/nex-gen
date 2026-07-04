@@ -2,7 +2,7 @@ import type * as common from "@temporalio/common";
 import {
   activityOptionsOperation,
   retryPolicyOperation,
-} from "../../type-roundtrip/index.ts";
+} from "../../wit/type-roundtrip/index.ts";
 
 const TASK_QUEUE = "demo-task-queue";
 

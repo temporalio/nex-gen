@@ -13,12 +13,12 @@ from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-import type_roundtrip
-import type_roundtrip.models
-import type_roundtrip.service
-import type_roundtrip._support
+import wit.type_roundtrip as type_roundtrip
+import wit.type_roundtrip.models as type_roundtrip_models
+import wit.type_roundtrip.service as type_roundtrip_service
+import wit.type_roundtrip._support as type_roundtrip_support
 
-OUTPUT_PATH = Path(__file__).resolve().parent.parent / "type_roundtrip"
+OUTPUT_PATH = Path(__file__).resolve().parent.parent / "wit" / "type_roundtrip"
 TASK_QUEUE = "demo-task-queue"
 
 RETRY_POLICY_OPERATION = type_roundtrip.__nexus_operation_registry__[
@@ -29,7 +29,7 @@ ACTIVITY_OPTIONS_OPERATION = type_roundtrip.__nexus_operation_registry__[
 ]
 
 
-@service_handler(service=type_roundtrip.service.TypeRoundtripService)
+@service_handler(service=type_roundtrip_service.TypeRoundtripService)
 class TypeRoundtripServiceHandler:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
@@ -67,7 +67,7 @@ class TypeRoundtripCallerWorkflow:
     async def run(self) -> tuple[int, str | None, int | None, int | None]:
         retry_policy = temporalio.common.RetryPolicy(maximum_attempts=3)
         retry_handle = await type_roundtrip.retry_policy_operation(retry_policy)
-        retry_round_trip = type_roundtrip._support.retry_policy_from_proto(
+        retry_round_trip = type_roundtrip_support.retry_policy_from_proto(
             await retry_handle
         )
 
@@ -81,7 +81,7 @@ class TypeRoundtripCallerWorkflow:
                 fairness_weight=2.5,
             ),
         )
-        activity_response = type_roundtrip.models.ActivityOptions.from_proto(
+        activity_response = type_roundtrip_models.ActivityOptions.from_proto(
             await activity_handle
         )
         return (
@@ -129,7 +129,7 @@ def test_generated_metadata() -> None:
 
 
 def test_activity_options_round_trip() -> None:
-    activity_options = type_roundtrip.models.ActivityOptions(
+    activity_options = type_roundtrip_models.ActivityOptions(
         retry_policy=retry_policy(),
         task_queue=TASK_QUEUE,
         schedule_to_close_timeout=datetime.timedelta(seconds=7),
@@ -140,7 +140,7 @@ def test_activity_options_round_trip() -> None:
     assert activity_proto.task_queue.name == TASK_QUEUE
     assert activity_proto.schedule_to_close_timeout.seconds == 7
     assert activity_proto.priority.priority_key == 4
-    round_tripped_activity = type_roundtrip.models.ActivityOptions.from_proto(
+    round_tripped_activity = type_roundtrip_models.ActivityOptions.from_proto(
         activity_proto
     )
     assert isinstance(

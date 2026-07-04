@@ -69,17 +69,18 @@ impl ModelBackend {
         &self,
         output: &mut String,
         model: &RenderedModel,
+        planned_record: &RecordSpec<PlannedTypeFamily>,
     ) -> bool {
         let mut wrote_conversion = false;
         if let Some(function_name) = model.from_wire_function_name.as_deref() {
-            render_model_from_proto_function(output, model, function_name);
+            render_model_from_proto_function(output, model, planned_record, function_name);
             wrote_conversion = true;
         }
         if let Some(function_name) = model.to_wire_function_name.as_deref() {
             if wrote_conversion {
                 output.push('\n');
             }
-            render_model_to_proto_function(output, model, function_name);
+            render_model_to_proto_function(output, model, planned_record, function_name);
             wrote_conversion = true;
         }
         wrote_conversion
@@ -320,7 +321,25 @@ fn enum_wire_conversion(value_type: &PlannedType) -> Option<WireValueConversion>
     None
 }
 
-fn render_model_to_proto_function(output: &mut String, model: &RenderedModel, function_name: &str) {
+fn rendered_model_wire_annotation(
+    model: &RenderedModel,
+    planned_record: &RecordSpec<PlannedTypeFamily>,
+) -> String {
+    planned_record
+        .data
+        .proto
+        .as_ref()
+        .map(|proto| message_typescript_interface_ref(proto))
+        .unwrap_or_else(|| model.name.clone())
+}
+
+fn render_model_to_proto_function(
+    output: &mut String,
+    model: &RenderedModel,
+    planned_record: &RecordSpec<PlannedTypeFamily>,
+    function_name: &str,
+) {
+    let wire_annotation = rendered_model_wire_annotation(model, planned_record);
     if model.type_parameters.is_empty() {
         output.push_str("export function ");
         output.push_str(function_name);
@@ -343,7 +362,7 @@ fn render_model_to_proto_function(output: &mut String, model: &RenderedModel, fu
         output.push_str(" | null | undefined,\n");
     }
     output.push_str("): ");
-    output.push_str(&model.proto_ref);
+    output.push_str(&wire_annotation);
     output.push_str(" | undefined {\n");
     output.push_str("  if (model == null) {\n");
     output.push_str("    return undefined;\n");
@@ -374,14 +393,16 @@ fn render_model_to_proto_function(output: &mut String, model: &RenderedModel, fu
 fn render_model_from_proto_function(
     output: &mut String,
     model: &RenderedModel,
+    planned_record: &RecordSpec<PlannedTypeFamily>,
     function_name: &str,
 ) {
+    let wire_annotation = rendered_model_wire_annotation(model, planned_record);
     if model.type_parameters.is_empty() {
         output.push_str("export function ");
         output.push_str(function_name);
         output.push_str("(\n");
         output.push_str("  proto: ");
-        output.push_str(&model.proto_ref);
+        output.push_str(&wire_annotation);
         output.push_str(" | null | undefined,\n");
     } else {
         render_named_generic_function_start(
@@ -391,7 +412,7 @@ fn render_model_from_proto_function(
             0,
         );
         output.push_str("  proto: ");
-        output.push_str(&model.proto_ref);
+        output.push_str(&wire_annotation);
         output.push_str(" | null | undefined,\n");
     }
     output.push_str("): ");

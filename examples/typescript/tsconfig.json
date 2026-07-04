@@ -10,13 +10,8 @@
     "esModuleInterop": true
   },
   "include": [
-    "chat/**/*.ts",
-    "function-execution/**/*.ts",
-    "start-workflow/**/*.ts",
-    "user-service/**/*.ts",
-    "type-showcase/**/*.ts",
-    "type-roundtrip/**/*.ts",
-    "workflow-service/**/*.ts",
+    "json_schema/**/*.ts",
+    "wit/**/*.ts",
     "tests/**/*.ts"
   ]
 }

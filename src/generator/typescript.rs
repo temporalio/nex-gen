@@ -9,8 +9,8 @@ use crate::error::{Error, Result};
 use crate::generator::json::typescript as typescript_json;
 use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::proto::typescript::{
-    message_typescript_interface_ref, model_typescript_interface_ref, model_typescript_type_id,
-    record_proto_info, typescript_replacement_type_name,
+    model_typescript_interface_ref, model_typescript_type_id, record_proto_info,
+    typescript_replacement_type_name,
 };
 use crate::generator::{GeneratedFiles, GenerationMode, ModelBackend};
 use crate::language::Language;
@@ -69,8 +69,14 @@ impl TypeScriptExternalModels {
         Ok(this)
     }
 
-    fn render_model_wire_functions(&self, output: &mut String, model: &RenderedModel) -> bool {
-        self.proto.render_model_wire_functions(output, model)
+    fn render_model_wire_functions(
+        &self,
+        output: &mut String,
+        model: &RenderedModel,
+        planned_record: &RecordSpec<PlannedTypeFamily>,
+    ) -> bool {
+        self.proto
+            .render_model_wire_functions(output, model, planned_record)
     }
 }
 
@@ -192,10 +198,9 @@ impl<'a> ApiPlanner<'a> {
         let input = operation
             .input_type()
             .and_then(PlannedType::operation_model);
-        let input_conversion = input.map(|input| self.resolve_message_value_conversion(input));
         let output_transform = operation.output_transform.as_ref();
         let output_resource_return = operation.data.output_resource_return.clone();
-        let (output_proto_ref, output_type_id, output_annotation_default) =
+        let (output_operation_annotation, output_type_id, output_annotation_default) =
             match operation.output_type() {
                 Some(output) if output.operation_model().is_some() => {
                     let output = output
@@ -235,29 +240,44 @@ impl<'a> ApiPlanner<'a> {
                 }
             };
         let input_full_name = input.and_then(PlannedType::model_full_name);
-        let input_model =
-            input_full_name.and_then(|input_full_name| self.models.get(input_full_name));
-        let input_model_name = input_model.map(|model| model.name.clone());
-        let input_type_parameters = input_model
-            .map(|model| {
-                model
-                    .type_parameters
-                    .iter()
-                    .filter(|type_parameter| type_parameter.infer_from_operation_request)
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let input_annotation = input_conversion
-            .as_ref()
-            .map(|input_conversion| {
+        let rendered_input = input.map(|input| {
+            let input_conversion = self.resolve_message_value_conversion(input);
+            let input_model =
+                input_full_name.and_then(|input_full_name| self.models.get(input_full_name));
+            let model_name = input_model.map(|model| model.name.clone());
+            let type_parameters = input_model
+                .map(|model| {
+                    model
+                        .type_parameters
+                        .iter()
+                        .filter(|type_parameter| type_parameter.infer_from_operation_request)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let annotation = {
                 if input_conversion.uses_rendered_model_annotation() {
-                    generic_model_annotation(&input_conversion.annotation, &input_type_parameters)
+                    generic_model_annotation(&input_conversion.annotation, &type_parameters)
                 } else {
                     input_conversion.annotation.clone()
                 }
-            })
-            .unwrap_or_else(|| "void".to_string());
+            };
+            RenderedOperationInput {
+                operation_annotation: self.operation_type_annotation(input),
+                type_id: self.operation_wire_type_identifier(input),
+                model_name,
+                type_parameters,
+                annotation,
+                to_wire_expr: input_conversion.to_wire_expr("request"),
+                nexus_type_id: if matches!(input, PlannedType::Record(_))
+                    && record_proto_info(input, self.api_plan).is_none()
+                {
+                    input_full_name.map(str::to_string)
+                } else {
+                    None
+                },
+            }
+        });
 
         Ok(RenderedOperation {
             name: operation.name.as_str(),
@@ -272,29 +292,9 @@ impl<'a> ApiPlanner<'a> {
                 .return_doc
                 .for_language(Language::TypeScript)
                 .map(str::to_string),
-            input_proto_ref: input
-                .map(|input| self.operation_type_annotation(input))
-                .unwrap_or_else(|| "void".to_string()),
-            output_proto_ref,
-            input_type_id: input
-                .map(|input| self.operation_wire_type_identifier(input))
-                .unwrap_or_else(|| "void".to_string()),
+            output_operation_annotation,
             output_type_id,
-            input_model_name,
-            input_type_parameters,
-            input_annotation,
-            input_to_wire_expr: input_conversion
-                .map(|input_conversion| input_conversion.to_wire_expr("request"))
-                .unwrap_or_else(|| "undefined".to_string()),
-            input_nexus_type_id: input.and_then(|input| {
-                if matches!(input, PlannedType::Record(_))
-                    && record_proto_info(input, self.api_plan).is_none()
-                {
-                    input_full_name.map(str::to_string)
-                } else {
-                    None
-                }
-            }),
+            input: rendered_input,
             output_annotation: output_transform
                 .and_then(|transform| {
                     transform
@@ -425,16 +425,8 @@ impl<'a> ApiPlanner<'a> {
         self.models.insert(
             full_name.to_string(),
             RenderedModel {
+                full_name: planned_model.full_name.clone(),
                 name: planned_model.name.clone(),
-                proto_ref: if let Some(proto) = model_type
-                    .proto_message()
-                    .map(|message| &message.proto)
-                    .or(planned_model.data.proto.as_ref())
-                {
-                    message_typescript_interface_ref(proto)
-                } else {
-                    planned_model.name.clone()
-                },
                 from_wire_function_name,
                 to_wire_function_name,
                 experimental: planned_model.experimental,
@@ -2283,7 +2275,7 @@ struct RenderedService<'a> {
     attr_name: String,
     wire_name: &'a str,
     doc: Option<String>,
-    endpoint: String,
+    endpoint: Option<String>,
     experimental: bool,
     operations: Vec<RenderedOperation<'a>>,
     resources: Vec<PlannedResource>,
@@ -2297,19 +2289,24 @@ struct RenderedOperation<'a> {
     experimental: bool,
     doc: Option<String>,
     return_doc: Option<String>,
-    input_proto_ref: String,
-    output_proto_ref: String,
-    input_type_id: String,
+    output_operation_annotation: String,
     output_type_id: String,
-    input_model_name: Option<String>,
-    input_type_parameters: Vec<RenderedTypeParameter>,
-    input_annotation: String,
-    input_to_wire_expr: String,
-    input_nexus_type_id: Option<String>,
+    input: Option<RenderedOperationInput>,
     output_annotation: String,
     output_transform_expr: Option<String>,
     output_resource_return: Option<PlannedOperationResourceReturn>,
     output_direct_result: bool,
+}
+
+#[derive(Debug)]
+struct RenderedOperationInput {
+    operation_annotation: String,
+    type_id: String,
+    model_name: Option<String>,
+    type_parameters: Vec<RenderedTypeParameter>,
+    annotation: String,
+    to_wire_expr: String,
+    nexus_type_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -2351,8 +2348,8 @@ struct RenderedVariantCase {
 
 #[derive(Debug)]
 pub(in crate::generator) struct RenderedModel {
+    pub(in crate::generator) full_name: String,
     pub(in crate::generator) name: String,
-    pub(in crate::generator) proto_ref: String,
     pub(in crate::generator) from_wire_function_name: Option<String>,
     pub(in crate::generator) to_wire_function_name: Option<String>,
     experimental: bool,
@@ -2576,6 +2573,7 @@ fn render_module_files(
             language_imports,
             support_exports.as_ref(),
             model_registrations,
+            api_plan,
             mode,
         ),
     );
@@ -2915,10 +2913,12 @@ fn render_index_module(services: &[RenderedService<'_>]) -> String {
     let mut input_model_names = services
         .iter()
         .flat_map(|service| {
-            service
-                .operations
-                .iter()
-                .filter_map(|operation| operation.input_model_name.as_deref())
+            service.operations.iter().filter_map(|operation| {
+                operation
+                    .input
+                    .as_ref()
+                    .and_then(|input| input.model_name.as_deref())
+            })
         })
         .collect::<Vec<_>>();
     input_model_names.sort();
@@ -2944,7 +2944,13 @@ fn render_operation_registry_module(services: &[RenderedService<'_>]) -> String 
             body.push_str(&typescript_string_literal(operation.wire_name));
             body.push_str(",\n");
             body.push_str("    inputType: ");
-            body.push_str(&typescript_string_literal(&operation.input_type_id));
+            body.push_str(&typescript_string_literal(
+                operation
+                    .input
+                    .as_ref()
+                    .map(|input| input.type_id.as_str())
+                    .unwrap_or("void"),
+            ));
             body.push_str(",\n");
             body.push_str("    outputType: ");
             body.push_str(&typescript_string_literal(&operation.output_type_id));
@@ -2966,6 +2972,7 @@ fn render_models_module(
     language_imports: &[LanguageImportSpec],
     support_exports: Option<&SupportExports>,
     model_registrations: &str,
+    api_plan: &PlannedSpec,
     mode: GenerationMode,
 ) -> String {
     let mut body = String::new();
@@ -3012,7 +3019,7 @@ fn render_models_module(
     if !models.is_empty() {
         body.push('\n');
         for model in models {
-            render_model(&mut body, model, external_models);
+            render_model(&mut body, model, external_models, api_plan);
             body.push('\n');
         }
     }
@@ -3224,7 +3231,12 @@ fn render_operation_module(
     }
     render_value_imports(&mut imports, "../resources", &value_resources);
     render_type_imports(&mut imports, "../resources", &type_resources);
-    if operation.input_nexus_type_id.is_some() {
+    if operation
+        .input
+        .as_ref()
+        .and_then(|input| input.nexus_type_id.as_ref())
+        .is_some()
+    {
         render_value_imports(
             &mut imports,
             "../../nex-gen-runtime",
@@ -4237,6 +4249,7 @@ fn render_model(
     output: &mut String,
     model: &RenderedModel,
     external_models: &TypeScriptExternalModels,
+    api_plan: &PlannedSpec,
 ) {
     let doc_tags = experimental_doc_tag(model.experimental);
     if !model_uses_invocation_composition(model) {
@@ -4274,7 +4287,11 @@ fn render_model(
         render_function_model_invocations(output, model);
         output.push_str(">;\n\n");
     }
-    external_models.render_model_wire_functions(output, model);
+    let planned_record = api_plan
+        .records
+        .get(&model.full_name)
+        .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
+    external_models.render_model_wire_functions(output, model, planned_record);
 }
 
 fn render_service_definition(output: &mut String, service: &RenderedService<'_>) {
@@ -4292,10 +4309,16 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
         output.push_str(&operation.attr_name);
         output.push_str(": nexus.operation<\n");
         output.push_str("    ");
-        output.push_str(&operation.input_proto_ref);
+        output.push_str(
+            operation
+                .input
+                .as_ref()
+                .map(|input| input.operation_annotation.as_str())
+                .unwrap_or("void"),
+        );
         output.push_str(",\n");
         output.push_str("    ");
-        output.push_str(&operation.output_proto_ref);
+        output.push_str(&operation.output_operation_annotation);
         output.push('\n');
         output.push_str("  >({ name: ");
         output.push_str(&typescript_string_literal(operation.wire_name));
@@ -4583,7 +4606,10 @@ fn branchable_request_method_params(
     request_plan: &RequestPlan,
     operation: &RenderedOperation<'_>,
 ) -> Vec<String> {
-    if operation.input_type_parameters.is_empty() {
+    let Some(input) = &operation.input else {
+        return Vec::new();
+    };
+    if input.type_parameters.is_empty() {
         return Vec::new();
     }
     let mut used_params = BTreeSet::new();
@@ -4764,10 +4790,19 @@ fn render_operation_function(
     let returns_direct = operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
         || operation.output_direct_result;
-    let mut doc_tags = vec![(
-        "@param request -".to_string(),
-        "Request for the operation.".to_string(),
-    )];
+    let mut doc_tags = Vec::new();
+    if service.endpoint.is_none() {
+        doc_tags.push((
+            "@param endpoint -".to_string(),
+            "Endpoint for the service.".to_string(),
+        ));
+    }
+    if operation.input.is_some() {
+        doc_tags.push((
+            "@param request -".to_string(),
+            "Request for the operation.".to_string(),
+        ));
+    }
     if let Some(return_doc) = &operation.return_doc {
         doc_tags.push(("@returns".to_string(), return_doc.clone()));
     }
@@ -4778,7 +4813,12 @@ fn render_operation_function(
         ));
     }
     render_typescript_doc_comment(output, "", operation.doc.as_deref(), &doc_tags);
-    if operation.input_type_parameters.is_empty() {
+    let input_type_parameters = operation
+        .input
+        .as_ref()
+        .map(|input| input.type_parameters.as_slice())
+        .unwrap_or(&[]);
+    if input_type_parameters.is_empty() {
         output.push_str("export async function ");
         output.push_str(&operation.attr_name);
         output.push_str("(\n");
@@ -4786,13 +4826,18 @@ fn render_operation_function(
         render_named_generic_function_start(
             output,
             &format!("export async function {}", operation.attr_name),
-            &operation.input_type_parameters,
+            input_type_parameters,
             0,
         );
     }
-    output.push_str("  request: ");
-    output.push_str(&operation.input_annotation);
-    output.push_str(",\n");
+    if service.endpoint.is_none() {
+        output.push_str("  endpoint: string,\n");
+    }
+    if let Some(input) = &operation.input {
+        output.push_str("  request: ");
+        output.push_str(&input.annotation);
+        output.push_str(",\n");
+    }
     if returns_direct {
         output.push_str("): Promise<");
         output.push_str(&operation.output_annotation);
@@ -4806,7 +4851,7 @@ fn render_operation_function(
         output.push_str(&service.attr_name);
         output.push_str(",\n");
         output.push_str("    endpoint: ");
-        output.push_str(&typescript_string_literal(&service.endpoint));
+        output.push_str(&typescript_service_endpoint_expr(service));
         output.push_str(",\n");
         output.push_str("  });\n");
         output.push_str("  return await client.startOperation(\n");
@@ -4827,7 +4872,7 @@ fn render_operation_function(
     output.push_str(&service.attr_name);
     output.push_str(",\n");
     output.push_str("    endpoint: ");
-    output.push_str(&typescript_string_literal(&service.endpoint));
+    output.push_str(&typescript_service_endpoint_expr(service));
     output.push_str(",\n");
     output.push_str("  });\n");
     output.push_str("  const requestProto = ");
@@ -4863,15 +4908,26 @@ fn render_operation_function(
     output.push_str("}\n");
 }
 
+fn typescript_service_endpoint_expr(service: &RenderedService<'_>) -> String {
+    service
+        .endpoint
+        .as_ref()
+        .map(|endpoint| typescript_string_literal(endpoint))
+        .unwrap_or_else(|| "endpoint".to_string())
+}
+
 fn typescript_operation_input_expr(operation: &RenderedOperation<'_>) -> String {
-    if let Some(type_id) = &operation.input_nexus_type_id {
+    let Some(input) = &operation.input else {
+        return "undefined".to_string();
+    };
+    if let Some(type_id) = &input.nexus_type_id {
         format!(
             "nexusValue({}, {})",
             typescript_string_literal(type_id),
-            operation.input_to_wire_expr
+            input.to_wire_expr
         )
     } else {
-        operation.input_to_wire_expr.clone()
+        input.to_wire_expr.clone()
     }
 }
 
@@ -4987,7 +5043,7 @@ mod tests {
     }
 
     fn sample_typescript_output_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/typescript/workflow-service")
+        root.join("examples/typescript/wit/workflow-service")
     }
 
     fn sample_support_files(root: &std::path::Path) -> SupportFiles {
@@ -5412,7 +5468,7 @@ interface example-service {
     }
 
     #[test]
-    fn rejects_missing_service_endpoint() {
+    fn renders_endpoint_parameter_when_service_endpoint_is_missing() {
         let wit = r#"
 package temporal:nexus@1.0.0;
 
@@ -5424,6 +5480,7 @@ interface example-service {
   use nexus:temporal-types/model@1.0.0.{retry-policy};
 
   example-operation: func(request: retry-policy) -> retry-policy;
+  ping: func();
 }
 "#;
         let spec = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
@@ -5441,16 +5498,18 @@ interface example-service {
         )
         .unwrap();
 
-        let error = generate_source(
+        let output = generate_source(
             Language::TypeScript,
             spec.clone(),
             &descriptors,
             &SupportFiles::default(),
         )
-        .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "service `ExampleService` is missing an endpoint"
-        );
+        .unwrap();
+        assert!(output.contains("endpoint: string,"));
+        assert!(output.contains("    endpoint: endpoint,\n"));
+        assert!(output.contains(
+            "export async function ping(\n  endpoint: string,\n): Promise<workflow.NexusOperationHandle<void>>"
+        ));
+        assert!(!output.contains("request: void"));
     }
 }

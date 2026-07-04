@@ -1,4 +1,4 @@
-import { getUser } from "../../user-service/index.ts";
+import { getUser } from "../../wit/user-service/index.ts";
 
 export async function userServiceCaller(): Promise<{
   initialEmail: string;

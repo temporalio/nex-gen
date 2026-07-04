@@ -95,7 +95,6 @@ pub(crate) fn generate(
         });
         resolve_message_value_conversion(
             &model_type,
-            None,
             api_plan,
             &mut enums,
             &mut flags,
@@ -500,7 +499,7 @@ struct RenderedService<'a> {
     name: &'a str,
     wire_name: &'a str,
     doc: Option<String>,
-    endpoint: String,
+    endpoint: Option<String>,
     experimental: bool,
     delay_load_temporalio_workflow: bool,
     operations: Vec<RenderedOperation<'a>>,
@@ -515,12 +514,9 @@ struct RenderedOperation<'a> {
     experimental: bool,
     doc: Option<String>,
     return_doc: Option<String>,
-    input_ref: String,
-    input_module_path: Option<String>,
+    input: Option<RenderedOperationInput>,
     output_ref: String,
     output_module_path: Option<String>,
-    input_annotation: String,
-    input_wire_expr: String,
     output_annotation: String,
     overload_output_annotation: String,
     output_type_parameters: BTreeSet<String>,
@@ -530,6 +526,15 @@ struct RenderedOperation<'a> {
     output_direct_result: bool,
     output_none: bool,
     unpacked_input: Option<RenderedUnpackedInput>,
+}
+
+#[derive(Debug)]
+struct RenderedOperationInput {
+    type_ref: String,
+    module_path: Option<String>,
+    annotation: String,
+    wire_expr: String,
+    supports_unpacked: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -578,8 +583,6 @@ pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) full_name: String,
     pub(in crate::generator) name: String,
     pub(in crate::generator) native: bool,
-    pub(in crate::generator) proto_ref: Option<String>,
-    pub(in crate::generator) proto_module_path: Option<String>,
     pub(in crate::generator) capabilities: ModelWireCapabilities,
     pub(in crate::generator) experimental: bool,
     pub(in crate::generator) fields: Vec<RenderedField>,
@@ -824,7 +827,7 @@ fn render_model_fragments(
     api_plan: &PlannedSpec,
 ) -> Result<RenderedModelFragments> {
     let mut fragments = RenderedModelFragments::default();
-    fragments.extend(python_proto::render_models(models));
+    fragments.extend(python_proto::render_models(models, api_plan));
     fragments.extend(python_json::render_external_models(api_plan)?);
     Ok(fragments)
 }
@@ -1012,16 +1015,18 @@ fn resolve_operation<'a>(
 ) -> Result<RenderedOperation<'a>> {
     let output_resource_return = operation.data.output_resource_return.clone();
     let input = operation_input_model(operation);
-    let (input_ref, input_module_path, input_conversion) = match input {
-        Some(input) => {
-            let (input_ref, input_module_path) = operation_service_ref(input, "models", api_plan);
-            let input_conversion = resolve_message_value_conversion(
-                input, None, api_plan, enums, flags, variants, models,
-            );
-            (input_ref, input_module_path, Some(input_conversion))
+    let rendered_input = input.map(|input| {
+        let (type_ref, module_path) = operation_service_ref(input, "models", api_plan);
+        let input_conversion =
+            resolve_message_value_conversion(input, api_plan, enums, flags, variants, models);
+        RenderedOperationInput {
+            type_ref,
+            module_path,
+            annotation: input_conversion.annotation.clone(),
+            wire_expr: input_conversion.to_wire_expr("request"),
+            supports_unpacked: input_conversion.supports_unpacked_input(),
         }
-        None => ("None".to_string(), None, None),
-    };
+    });
     let output_transform = operation.output_transform.as_ref();
     let output_direct_result = operation_output_direct_result(operation);
     let (output_ref, output_module_path, output_annotation_default) = match operation.output_type()
@@ -1039,7 +1044,6 @@ fn resolve_operation<'a>(
             {
                 resolve_message_value_conversion(
                     output_model,
-                    None,
                     api_plan,
                     enums,
                     flags,
@@ -1082,22 +1086,21 @@ fn resolve_operation<'a>(
                 .map(|resource| resource.resource_type_name.clone())
         })
         .unwrap_or(output_annotation_default);
-    let unpacked_input =
-        if let Some((input, input_conversion)) = input.zip(input_conversion.as_ref()) {
-            if input_conversion.supports_unpacked_input() {
-                Some(build_unpacked_input(
-                    input
-                        .model_full_name()
-                        .expect("operation input should be a model"),
-                    models,
-                    api_plan,
-                )?)
-            } else {
-                None
-            }
+    let unpacked_input = if let (Some(input), Some(rendered_input)) = (input, &rendered_input) {
+        if rendered_input.supports_unpacked {
+            Some(build_unpacked_input(
+                input
+                    .model_full_name()
+                    .expect("operation input should be a model"),
+                models,
+                api_plan,
+            )?)
         } else {
             None
-        };
+        }
+    } else {
+        None
+    };
     let output_type_parameters = unpacked_input
         .iter()
         .flat_map(|unpacked_input| &unpacked_input.functions)
@@ -1124,18 +1127,9 @@ fn resolve_operation<'a>(
             .return_doc
             .for_language(Language::Python)
             .map(str::to_string),
-        input_ref,
-        input_module_path,
+        input: rendered_input,
         output_ref,
         output_module_path,
-        input_annotation: input_conversion
-            .as_ref()
-            .map(|conversion| conversion.annotation.clone())
-            .unwrap_or_else(|| "None".to_string()),
-        input_wire_expr: input_conversion
-            .as_ref()
-            .map(|conversion| conversion.to_wire_expr("request"))
-            .unwrap_or_else(|| "None".to_string()),
         output_annotation,
         overload_output_annotation,
         output_type_parameters,
@@ -1194,7 +1188,7 @@ fn resolve_output_annotation(
         }
         PlannedType::Record(_) => {
             let conversion = resolve_message_value_conversion(
-                model_type, None, api_plan, enums, flags, variants, models,
+                model_type, api_plan, enums, flags, variants, models,
             );
             conversion.annotation
         }
@@ -1408,7 +1402,6 @@ fn build_flattened_message(
 
 fn resolve_message_value_conversion(
     model_type: &PlannedType,
-    proto_ref_override: Option<&str>,
     api_plan: &PlannedSpec,
     enums: &mut IndexMap<String, RenderedEnum>,
     flags: &mut IndexMap<String, RenderedFlags>,
@@ -1460,15 +1453,7 @@ fn resolve_message_value_conversion(
         };
     }
 
-    ensure_rendered_model(
-        model_type,
-        proto_ref_override,
-        api_plan,
-        enums,
-        flags,
-        variants,
-        models,
-    );
+    ensure_rendered_model(model_type, api_plan, enums, flags, variants, models);
     let full_name = model_type
         .model_full_name()
         .expect("message conversion should be model-shaped");
@@ -1497,7 +1482,6 @@ fn resolve_message_value_conversion(
 
 fn ensure_rendered_model(
     model_type: &PlannedType,
-    proto_ref_override: Option<&str>,
     api_plan: &PlannedSpec,
     enums: &mut IndexMap<String, RenderedEnum>,
     flags: &mut IndexMap<String, RenderedFlags>,
@@ -1509,21 +1493,9 @@ fn ensure_rendered_model(
         .expect("rendered model should be model-shaped");
     let planned_model = planned_record(api_plan, full_name);
 
-    if let Some(existing) = models.get_mut(full_name) {
-        if let Some(proto_ref) = proto_ref_override {
-            let reference =
-                python_proto::model_python_ref(model_type, planned_model, Some(proto_ref))
-                    .expect("descriptor messages should have a Python reference");
-            existing.proto_ref = Some(reference.type_ref);
-            existing.proto_module_path = Some(reference.module_path);
-        }
+    if models.contains_key(full_name) {
         return;
     }
-
-    let proto_ref = python_proto::model_python_ref(model_type, planned_model, proto_ref_override);
-    let (proto_ref, proto_module_path) = proto_ref
-        .map(|reference| (Some(reference.type_ref), Some(reference.module_path)))
-        .unwrap_or((None, None));
 
     models.insert(
         full_name.to_string(),
@@ -1531,8 +1503,6 @@ fn ensure_rendered_model(
             full_name: full_name.to_string(),
             name: planned_model.name.clone(),
             native: planned_model.data.proto.is_none(),
-            proto_ref,
-            proto_module_path,
             capabilities: planned_model.data.capabilities,
             experimental: planned_model.experimental,
             fields: Vec::new(),
@@ -2089,7 +2059,6 @@ fn resolve_planned_value_type(
         | PlannedType::Record(_)) => {
             let conversion = resolve_message_value_conversion(
                 message_type,
-                None,
                 api_plan,
                 enums,
                 flags,
@@ -2999,7 +2968,11 @@ fn render_resource_module_file(
         .iter()
         .flat_map(|bound_operation| {
             [
-                bound_operation.operation.input_module_path.clone(),
+                bound_operation
+                    .operation
+                    .input
+                    .as_ref()
+                    .and_then(|input| input.module_path.clone()),
                 bound_operation.operation.output_module_path.clone(),
             ]
         })
@@ -3108,9 +3081,15 @@ fn render_service_module(services: &[RenderedService<'_>]) -> String {
     let mut resource_type_imports = BTreeMap::new();
     for service in services {
         for operation in &service.operations {
-            if let Some(input_module_path) = &operation.input_module_path {
+            if let Some(input_module_path) = operation
+                .input
+                .as_ref()
+                .and_then(|input| input.module_path.as_ref())
+            {
                 if input_module_path == ".models" {
-                    if let Some(type_name) = operation.input_ref.strip_prefix("models.") {
+                    if let Some(type_name) =
+                        operation_input_type_ref(operation).strip_prefix("models.")
+                    {
                         model_type_imports.insert(type_name.to_string());
                     }
                 } else {
@@ -3142,7 +3121,8 @@ fn render_service_module(services: &[RenderedService<'_>]) -> String {
         .iter()
         .flat_map(|service| service.operations.iter())
         .any(|operation| {
-            operation.input_ref.contains("typing.") || operation.output_ref.contains("typing.")
+            operation_input_type_ref(operation).contains("typing.")
+                || operation.output_ref.contains("typing.")
         });
     if uses_typing {
         output.push_str("import typing\n");
@@ -3190,7 +3170,11 @@ fn render_operation_module(
     language_imports: &[LanguageImportSpec],
 ) -> String {
     let mut module_imports = BTreeSet::new();
-    if let Some(input_module_path) = &operation.input_module_path {
+    if let Some(input_module_path) = operation
+        .input
+        .as_ref()
+        .and_then(|input| input.module_path.as_ref())
+    {
         module_imports.insert(input_module_path.clone());
     }
     if let Some(output_module_path) = &operation.output_module_path {
@@ -3406,7 +3390,7 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
         output.push_str(&operation.attr_name);
         output.push_str(": Operation[\n");
         output.push_str("        ");
-        output.push_str(&service_type_ref(&operation.input_ref));
+        output.push_str(&service_type_ref(operation_input_type_ref(operation)));
         output.push_str(",\n");
         output.push_str("        ");
         output.push_str(&service_type_ref(&operation.output_ref));
@@ -3601,7 +3585,7 @@ fn render_resource_method_operation_body(
     if let Some(unpacked_input) = &operation.unpacked_input {
         output.push_str(&unpacked_input.model_name);
     } else {
-        output.push_str(&operation.input_annotation);
+        output.push_str(operation_input_annotation(operation));
     }
     output.push_str("(\n");
     match request_plan {
@@ -3781,7 +3765,7 @@ fn resource_return_binding_expr_python(binding: &PlannedOperationResourceFieldBi
             hidden,
         } => {
             if *hidden {
-                let expr = format!("request_proto.{proto_field_name}");
+                let expr = format!("wire_input.{proto_field_name}");
                 if binding.optional {
                     format!("{expr} or None")
                 } else {
@@ -4346,6 +4330,7 @@ fn render_function_unpacked_overload(
     output.push_str("async def ");
     output.push_str(&operation.attr_name);
     output.push_str("(\n");
+    render_endpoint_parameter(output, service);
 
     let primary_function = primary_function(&unpacked_input.functions);
     let primary_case = primary_function.and_then(|function| {
@@ -4798,6 +4783,44 @@ fn request_operation_function_name(operation: &RenderedOperation<'_>) -> String 
     }
 }
 
+fn operation_input_type_ref<'a>(operation: &'a RenderedOperation<'_>) -> &'a str {
+    operation
+        .input
+        .as_ref()
+        .map(|input| input.type_ref.as_str())
+        .unwrap_or("None")
+}
+
+fn operation_input_annotation<'a>(operation: &'a RenderedOperation<'_>) -> &'a str {
+    operation
+        .input
+        .as_ref()
+        .map(|input| input.annotation.as_str())
+        .unwrap_or("None")
+}
+
+fn operation_input_wire_expr<'a>(operation: &'a RenderedOperation<'_>) -> &'a str {
+    operation
+        .input
+        .as_ref()
+        .map(|input| input.wire_expr.as_str())
+        .unwrap_or("None")
+}
+
+fn render_endpoint_parameter(output: &mut String, service: &RenderedService<'_>) {
+    if service.endpoint.is_none() {
+        output.push_str("    endpoint: str,\n");
+    }
+}
+
+fn endpoint_forward_args(service: &RenderedService<'_>) -> &'static str {
+    if service.endpoint.is_none() {
+        "endpoint, request"
+    } else {
+        "request"
+    }
+}
+
 fn render_request_only_operation_function(
     output: &mut String,
     service: &RenderedService<'_>,
@@ -4808,9 +4831,12 @@ fn render_request_only_operation_function(
     output.push_str("async def ");
     output.push_str(&function_name);
     output.push_str("(\n");
-    output.push_str("    request: ");
-    output.push_str(&operation.input_annotation);
-    output.push_str(",\n");
+    render_endpoint_parameter(output, service);
+    if let Some(input) = &operation.input {
+        output.push_str("    request: ");
+        output.push_str(&input.annotation);
+        output.push_str(",\n");
+    }
     if operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
         || operation.output_direct_result
@@ -4850,7 +4876,7 @@ fn render_request_only_operation_function(
         output.push_str(",\n");
         output.push_str("        ");
         output.push_str("input=");
-        output.push_str(&operation.input_wire_expr);
+        output.push_str(operation_input_wire_expr(operation));
         output.push_str(",\n");
         if !operation.output_none {
             output.push_str("        output_type=");
@@ -4880,7 +4906,7 @@ fn render_request_only_operation_function(
         output.push_str(",\n");
         output.push_str("        ");
         output.push_str("input=");
-        output.push_str(&operation.input_wire_expr);
+        output.push_str(operation_input_wire_expr(operation));
         output.push_str(",\n");
         output.push_str("        output_type=");
         output.push_str(&operation.output_type_expr);
@@ -4890,15 +4916,15 @@ fn render_request_only_operation_function(
         return;
     }
 
-    output.push_str("    request_proto = ");
-    output.push_str(&operation.input_wire_expr);
+    output.push_str("    wire_input = ");
+    output.push_str(operation_input_wire_expr(operation));
     output.push('\n');
     render_inline_nexus_client(output, service, "    ");
     output.push_str("    handle = await nexus_client.start_operation(\n");
     output.push_str("        operation=");
     output.push_str(&python_string_literal(operation.wire_name));
     output.push_str(",\n");
-    output.push_str("        input=request_proto,\n");
+    output.push_str("        input=wire_input,\n");
     if !operation.output_none {
         output.push_str("        output_type=");
         output.push_str(&operation.output_type_expr);
@@ -5216,6 +5242,7 @@ fn render_unpacked_operation_function(
     output.push_str("async def ");
     output.push_str(&operation.attr_name);
     output.push_str("(\n");
+    render_endpoint_parameter(output, service);
     output.push_str("    *,\n");
     for field in &unpacked_input.parameters {
         output.push_str("    ");
@@ -5270,7 +5297,9 @@ fn render_unpacked_operation_function(
     output.push_str("    )\n");
     output.push_str("    return await ");
     output.push_str(&request_operation_function_name(operation));
-    output.push_str("(request)\n");
+    output.push('(');
+    output.push_str(endpoint_forward_args(service));
+    output.push_str(")\n");
 }
 
 fn function_unpacked_implementation_return_annotation(
@@ -5294,6 +5323,7 @@ fn render_function_unpacked_implementation(
     output.push_str("async def ");
     output.push_str(&operation.attr_name);
     output.push_str("(\n");
+    render_endpoint_parameter(output, service);
 
     let primary_function = primary_function(&unpacked_input.functions);
     if let Some(function) = primary_function {
@@ -5481,7 +5511,9 @@ fn render_function_unpacked_implementation(
     output.push_str("    )\n");
     output.push_str("    return await ");
     output.push_str(&request_operation_function_name(operation));
-    output.push_str("(request)\n");
+    output.push('(');
+    output.push_str(endpoint_forward_args(service));
+    output.push_str(")\n");
 }
 
 fn rendered_function_implementation_renders_field(
@@ -5569,10 +5601,18 @@ fn render_inline_nexus_client(output: &mut String, service: &RenderedService<'_>
     output.push_str(",\n");
     output.push_str(indent);
     output.push_str("    endpoint=");
-    output.push_str(&python_string_literal(&service.endpoint));
+    output.push_str(&python_service_endpoint_expr(service));
     output.push_str(",\n");
     output.push_str(indent);
     output.push_str(")\n");
+}
+
+fn python_service_endpoint_expr(service: &RenderedService<'_>) -> String {
+    service
+        .endpoint
+        .as_ref()
+        .map(|endpoint| python_string_literal(endpoint))
+        .unwrap_or_else(|| "endpoint".to_string())
 }
 
 fn python_parameter_default_expr(default_kind: &PythonFieldDefaultKind) -> Option<String> {
@@ -5722,7 +5762,7 @@ mod tests {
     }
 
     fn sample_python_output_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/python/workflow_service")
+        root.join("examples/python/wit/workflow_service")
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {
@@ -6234,7 +6274,7 @@ interface example-service {
             "if typing.TYPE_CHECKING:\n    from temporalio.workflow import ExternalWorkflowHandle\n"
         ));
         assert!(get_handle.contains(
-            ") -> ExternalWorkflowHandle[str]:\n    from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )\n    request_proto = request\n    nexus_client = create_nexus_client("
+            ") -> ExternalWorkflowHandle[str]:\n    from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )\n    wire_input = request\n    nexus_client = create_nexus_client("
         ));
         assert!(get_handle.contains("return get_external_workflow_handle(request.id)\n"));
     }
@@ -6384,7 +6424,7 @@ interface workflow-service {
     }
 
     #[test]
-    fn rejects_missing_service_endpoint() {
+    fn allows_missing_service_endpoint() {
         let wit = r#"
 package temporal:nexus@1.0.0;
 
@@ -6413,16 +6453,14 @@ interface example-service {
         )
         .unwrap();
 
-        let error = generate_source(
+        let output = generate_source(
             Language::Python,
             spec.clone(),
             &descriptors,
             &SupportFiles::default(),
         )
-        .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "service `ExampleService` is missing an endpoint"
-        );
+        .unwrap();
+        assert!(output.contains("async def example_operation(\n    endpoint: str,\n    request:"));
+        assert!(output.contains("endpoint=endpoint,"));
     }
 }

@@ -13,13 +13,13 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 APP_ROOT = Path(__file__).resolve().parent
-OUTPUT_PATH = APP_ROOT.parent / "start_workflow"
+OUTPUT_PATH = APP_ROOT.parent / "wit" / "start_workflow"
 TASK_QUEUE = "demo-task-queue"
 
-import start_workflow
-import start_workflow.models
-import start_workflow.service
-from start_workflow._resources import StartedWorkflow
+import wit.start_workflow as start_workflow
+import wit.start_workflow.models as start_workflow_models
+import wit.start_workflow.service as start_workflow_service
+from wit.start_workflow._resources import StartedWorkflow
 
 START_WORKFLOW_OPERATION = start_workflow.__nexus_operation_registry__[
     ("StartWorkflowService", "StartWorkflow")
@@ -39,7 +39,7 @@ class ExampleWorkflow:
         return customer_id
 
 
-@service_handler(service=start_workflow.service.StartWorkflowService)
+@service_handler(service=start_workflow_service.StartWorkflowService)
 class StartWorkflowServiceHandler:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
@@ -146,7 +146,7 @@ def test_generated_metadata() -> None:
 
 
 def test_workflow_execution_serializes() -> None:
-    request = start_workflow.models.WorkflowExecution(workflow_id="workflow-id")
+    request = start_workflow_models.WorkflowExecution(workflow_id="workflow-id")
     proto = request.to_proto()
 
     assert proto.workflow_id == "workflow-id"

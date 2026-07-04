@@ -1,5 +1,5 @@
-import { getUser, recordSync } from "../../type-showcase/index.ts";
-import { UserCapability, type SyncReport } from "../../type-showcase/models.ts";
+import { getUser, recordSync } from "../../wit/type-showcase/index.ts";
+import { UserCapability, type SyncReport } from "../../wit/type-showcase/models.ts";
 
 const syncReport = (): SyncReport => ({
   route: [

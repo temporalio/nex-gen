@@ -17,12 +17,12 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 from typing_extensions import assert_type
 import pytest
-import workflow_service
-import workflow_service.models
-import workflow_service.service
+import wit.workflow_service as workflow_service
+import wit.workflow_service.models as workflow_service_models
+import wit.workflow_service.service as workflow_service_service
 
 APP_ROOT = Path(__file__).resolve().parent
-OUTPUT_PATH = APP_ROOT.parent / "workflow_service"
+OUTPUT_PATH = APP_ROOT.parent / "wit" / "workflow_service"
 
 SIGNAL_WITH_START_OPERATION = workflow_service.__nexus_operation_registry__[
     (
@@ -236,8 +236,8 @@ def build_full_signal_request(
     workflow_id: str,
     signal: str | Callable[..., None | Awaitable[None]],
     signal_args: list[typing.Any] | None = None,
-) -> workflow_service.models.SignalWithStartWorkflowRequest:
-    return workflow_service.models.SignalWithStartWorkflowRequest(
+) -> workflow_service_models.SignalWithStartWorkflowRequest:
+    return workflow_service_models.SignalWithStartWorkflowRequest(
         workflow=ExampleWorkflow.run,
         id=workflow_id,
         task_queue=TASK_QUEUE,
@@ -251,7 +251,7 @@ def build_full_signal_request(
         signal_args=signal_args,
         cron_schedule=CRON_SCHEDULE,
         search_attributes=example_data.typed_search_attributes,
-        user_metadata=workflow_service.models.UserMetadata(
+        user_metadata=workflow_service_models.UserMetadata(
             static_summary="Nightly sync",
             static_details="Processes 42 records",
         ),
@@ -260,7 +260,7 @@ def build_full_signal_request(
     )
 
 
-@service_handler(service=workflow_service.service.WorkflowService)
+@service_handler(service=workflow_service_service.WorkflowService)
 class WorkflowServiceHandler:
     def __init__(self) -> None:
         self.calls: list[
@@ -290,9 +290,9 @@ class WorkflowServiceCallerWorkflow:
             workflow_id=REQUEST_WORKFLOW_ID,
             signal="wake_up",
         )
-        request_proto = request.to_proto()
-        round_tripped_user_metadata = workflow_service.models.UserMetadata.from_proto(
-            request_proto.user_metadata
+        wire_input = request.to_proto()
+        round_tripped_user_metadata = workflow_service_models.UserMetadata.from_proto(
+            wire_input.user_metadata
         )
         assert round_tripped_user_metadata.static_summary
         assert round_tripped_user_metadata.static_details
