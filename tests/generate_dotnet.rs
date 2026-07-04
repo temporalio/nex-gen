@@ -43,7 +43,7 @@ fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
 }
 
 fn dotnet_output_path(root: &Path, example_id: &str) -> PathBuf {
-    dotnet_root(root).join(example_id)
+    dotnet_root(root).join("wit").join(example_id)
 }
 
 fn dotnet_json_definitions_output_path(root: &Path, example_id: &str) -> PathBuf {
@@ -74,7 +74,7 @@ fn dotnet_example_ids(root: &Path) -> Vec<String> {
             } else {
                 return None;
             };
-            if dotnet_root.join(&example_id).is_dir() {
+            if dotnet_root.join("wit").join(&example_id).is_dir() {
                 Some(example_id)
             } else {
                 None
@@ -285,6 +285,28 @@ fn dotnet_example_project_builds() {
         String::from_utf8_lossy(&output.stderr)
     );
     fs::remove_dir_all(build_path).unwrap();
+}
+
+#[test]
+fn dotnet_json_schema_runtime_checks_pass() {
+    let root = project_root();
+    let output = Command::new("dotnet")
+        .current_dir(dotnet_root(&root))
+        .args([
+            "test",
+            "tests/NexusApiGen.DotNetExamples.Tests.csproj",
+            "--nologo",
+            "-p:LangVersion=9.0",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

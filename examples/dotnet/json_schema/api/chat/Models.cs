@@ -6,11 +6,13 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace NexGen.ChatService
 {
 
+    [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     [GeneratedCode("nex-gen", null)]
     public class GetRoomInput
     {
@@ -20,7 +22,8 @@ namespace NexGen.ChatService
         }
 
         [JsonPropertyName("roomId")]
-        public string RoomId { get; }
+        [JsonRequired]
+        public string RoomId { get; init; }
     }
 
 
@@ -28,10 +31,106 @@ namespace NexGen.ChatService
     /// Arbitrary string key/value labels.
     /// </summary>
     [GeneratedCode("nex-gen", null)]
-    public class Labels
+    public class Labels : IJsonOnDeserialized
     {
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
+
+        void IJsonOnDeserialized.OnDeserialized()
+        {
+            if (AdditionalProperties.Count > 50)
+            {
+                throw new JsonException("maxProperties: at most 50 entries");
+            }
+            foreach (var entry in AdditionalProperties)
+            {
+                if (entry.Value is JsonElement json3 && json3.ValueKind != JsonValueKind.String)
+                {
+                    throw new JsonException($"{entry.Key}: expected string");
+                }
+                else if (entry.Value is not JsonElement && entry.Value is not string)
+                {
+                    throw new JsonException($"{entry.Key}: expected string");
+                }
+            }
+        }
+
+        private T? ReadOptionalValue<T>(string name, T? defaultValue = default)
+        {
+            if (!AdditionalProperties.TryGetValue(name, out var value))
+            {
+                return defaultValue;
+            }
+            return ReadJsonValue<T>(value);
+        }
+
+        private static T? ReadJsonValue<T>(object? value)
+        {
+            if (value is null)
+            {
+                return default;
+            }
+            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
+            {
+                return (T?)(object?)ReadJsonInteger(value);
+            }
+            if (value is JsonElement json)
+            {
+                return json.Deserialize<T>();
+            }
+            if (value is T typed)
+            {
+                return typed;
+            }
+            return (T)value;
+        }
+
+        private static long? ReadJsonInteger(object? value)
+        {
+            const double maxSafeInteger = 9007199254740991d;
+            if (value is null)
+            {
+                return default;
+            }
+            double number;
+            if (value is JsonElement json)
+            {
+                if (json.ValueKind == JsonValueKind.Null)
+                {
+                    return default;
+                }
+                if (json.ValueKind != JsonValueKind.Number)
+                {
+                    throw new JsonException("expected integer");
+                }
+                number = json.GetDouble();
+            }
+            else if (value is long longValue)
+            {
+                number = longValue;
+            }
+            else if (value is int intValue)
+            {
+                number = intValue;
+            }
+            else
+            {
+                throw new JsonException("expected integer");
+            }
+            if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)
+            {
+                throw new JsonException("expected integer");
+            }
+            return (long)number;
+        }
+
+        private static void RejectNull(string name, object? value)
+        {
+            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
+            {
+                throw new JsonException($"{name}: explicit null not allowed");
+            }
+        }
     }
 
 
@@ -39,7 +138,7 @@ namespace NexGen.ChatService
     /// A chat message.
     /// </summary>
     [GeneratedCode("nex-gen", null)]
-    public class Message
+    public class Message : IJsonOnDeserialized
     {
         public Message(string body)
         {
@@ -49,20 +148,149 @@ namespace NexGen.ChatService
         /// <summary>
         /// Discriminator; always "text".
         /// </summary>
+        private string kindValue = "text";
+
         [JsonPropertyName("kind")]
-        public string Kind { get; init; } = "text";
+        [JsonRequired]
+        public string Kind
+        {
+            get => kindValue;
+            init
+            {
+                if (value != "text")
+                {
+                    throw new JsonException("kind must equal \"text\"");
+                }
+                kindValue = value;
+            }
+        }
         [JsonPropertyName("body")]
-        public string Body { get; }
+        [JsonRequired]
+        public string Body { get; init; }
         /// <summary>
         /// Id of the message this replies to, if any.
         /// </summary>
-        [JsonPropertyName("replyToId")]
-        public string? ReplyToId { get; init; }
+        [JsonIgnore]
+        public string? ReplyToId
+        {
+            get => ReadOptionalValue<string?>("replyToId");
+            init
+            {
+                AdditionalProperties["replyToId"] = value;
+            }
+        }
         /// <summary>
         /// Delivery priority.
         /// </summary>
-        [JsonPropertyName("priority")]
-        public long? Priority { get; init; } = 0;
+        [JsonIgnore]
+        public long? Priority
+        {
+            get => ReadOptionalValue<long?>("priority", 0);
+            init
+            {
+                RejectNull("priority", value);
+                AdditionalProperties["priority"] = value;
+            }
+        }
+
+        [JsonExtensionData]
+        public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
+
+        void IJsonOnDeserialized.OnDeserialized()
+        {
+            foreach (var key in AdditionalProperties.Keys)
+            {
+                if (key != "replyToId" && key != "priority")
+                {
+                    throw new JsonException($"Unknown field `{key}`.");
+                }
+            }
+            if (AdditionalProperties.TryGetValue("replyToId", out var replyToIdValue))
+            {
+            }
+            if (AdditionalProperties.TryGetValue("priority", out var priorityValue))
+            {
+                RejectNull("priority", priorityValue);
+                _ = ReadJsonValue<long?>(priorityValue);
+            }
+        }
+
+        private T? ReadOptionalValue<T>(string name, T? defaultValue = default)
+        {
+            if (!AdditionalProperties.TryGetValue(name, out var value))
+            {
+                return defaultValue;
+            }
+            return ReadJsonValue<T>(value);
+        }
+
+        private static T? ReadJsonValue<T>(object? value)
+        {
+            if (value is null)
+            {
+                return default;
+            }
+            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
+            {
+                return (T?)(object?)ReadJsonInteger(value);
+            }
+            if (value is JsonElement json)
+            {
+                return json.Deserialize<T>();
+            }
+            if (value is T typed)
+            {
+                return typed;
+            }
+            return (T)value;
+        }
+
+        private static long? ReadJsonInteger(object? value)
+        {
+            const double maxSafeInteger = 9007199254740991d;
+            if (value is null)
+            {
+                return default;
+            }
+            double number;
+            if (value is JsonElement json)
+            {
+                if (json.ValueKind == JsonValueKind.Null)
+                {
+                    return default;
+                }
+                if (json.ValueKind != JsonValueKind.Number)
+                {
+                    throw new JsonException("expected integer");
+                }
+                number = json.GetDouble();
+            }
+            else if (value is long longValue)
+            {
+                number = longValue;
+            }
+            else if (value is int intValue)
+            {
+                number = intValue;
+            }
+            else
+            {
+                throw new JsonException("expected integer");
+            }
+            if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)
+            {
+                throw new JsonException("expected integer");
+            }
+            return (long)number;
+        }
+
+        private static void RejectNull(string name, object? value)
+        {
+            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
+            {
+                throw new JsonException($"{name}: explicit null not allowed");
+            }
+        }
     }
 
 
@@ -70,7 +298,7 @@ namespace NexGen.ChatService
     /// A chat room. Open to forward-compatible extension.
     /// </summary>
     [GeneratedCode("nex-gen", null)]
-    public class Room
+    public class Room : IJsonOnDeserialized
     {
         public Room(string roomId, string displayName, string? topic)
         {
@@ -80,27 +308,138 @@ namespace NexGen.ChatService
         }
 
         [JsonPropertyName("roomId")]
-        public string RoomId { get; }
+        [JsonRequired]
+        public string RoomId { get; init; }
         [JsonPropertyName("displayName")]
-        public string DisplayName { get; }
+        [JsonRequired]
+        public string DisplayName { get; init; }
         /// <summary>
         /// Room topic; may be explicitly cleared to null.
         /// </summary>
         [JsonPropertyName("topic")]
-        public string? Topic { get; }
-        [JsonPropertyName("members")]
-        public IReadOnlyList<string>? Members { get; init; }
-        [JsonPropertyName("labels")]
-        public Labels? Labels { get; init; }
+        [JsonRequired]
+        public string? Topic { get; init; }
+        [JsonIgnore]
+        public IReadOnlyList<string>? Members
+        {
+            get => ReadOptionalValue<List<string>?>("members");
+            init
+            {
+                RejectNull("members", value);
+                AdditionalProperties["members"] = value;
+            }
+        }
+        [JsonIgnore]
+        public Labels? Labels
+        {
+            get => ReadOptionalValue<Labels?>("labels");
+            init
+            {
+                RejectNull("labels", value);
+                AdditionalProperties["labels"] = value;
+            }
+        }
 
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
+
+        void IJsonOnDeserialized.OnDeserialized()
+        {
+            if (AdditionalProperties.TryGetValue("members", out var membersValue))
+            {
+                RejectNull("members", membersValue);
+                _ = ReadJsonValue<List<string>?>(membersValue);
+            }
+            if (AdditionalProperties.TryGetValue("labels", out var labelsValue))
+            {
+                RejectNull("labels", labelsValue);
+                _ = ReadJsonValue<Labels?>(labelsValue);
+            }
+        }
+
+        private T? ReadOptionalValue<T>(string name, T? defaultValue = default)
+        {
+            if (!AdditionalProperties.TryGetValue(name, out var value))
+            {
+                return defaultValue;
+            }
+            return ReadJsonValue<T>(value);
+        }
+
+        private static T? ReadJsonValue<T>(object? value)
+        {
+            if (value is null)
+            {
+                return default;
+            }
+            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
+            {
+                return (T?)(object?)ReadJsonInteger(value);
+            }
+            if (value is JsonElement json)
+            {
+                return json.Deserialize<T>();
+            }
+            if (value is T typed)
+            {
+                return typed;
+            }
+            return (T)value;
+        }
+
+        private static long? ReadJsonInteger(object? value)
+        {
+            const double maxSafeInteger = 9007199254740991d;
+            if (value is null)
+            {
+                return default;
+            }
+            double number;
+            if (value is JsonElement json)
+            {
+                if (json.ValueKind == JsonValueKind.Null)
+                {
+                    return default;
+                }
+                if (json.ValueKind != JsonValueKind.Number)
+                {
+                    throw new JsonException("expected integer");
+                }
+                number = json.GetDouble();
+            }
+            else if (value is long longValue)
+            {
+                number = longValue;
+            }
+            else if (value is int intValue)
+            {
+                number = intValue;
+            }
+            else
+            {
+                throw new JsonException("expected integer");
+            }
+            if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)
+            {
+                throw new JsonException("expected integer");
+            }
+            return (long)number;
+        }
+
+        private static void RejectNull(string name, object? value)
+        {
+            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
+            {
+                throw new JsonException($"{name}: explicit null not allowed");
+            }
+        }
     }
 
 
     /// <summary>
     /// Request to post a message.
     /// </summary>
+    [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     [GeneratedCode("nex-gen", null)]
     public class SendMessageInput
     {
@@ -111,12 +450,15 @@ namespace NexGen.ChatService
         }
 
         [JsonPropertyName("roomId")]
-        public string RoomId { get; }
+        [JsonRequired]
+        public string RoomId { get; init; }
         [JsonPropertyName("message")]
-        public Message Message { get; }
+        [JsonRequired]
+        public Message Message { get; init; }
     }
 
 
+    [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     [GeneratedCode("nex-gen", null)]
     public class SendMessageOutput
     {
@@ -126,7 +468,8 @@ namespace NexGen.ChatService
         }
 
         [JsonPropertyName("messageId")]
-        public string MessageId { get; }
+        [JsonRequired]
+        public string MessageId { get; init; }
     }
 
 }

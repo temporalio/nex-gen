@@ -72,6 +72,7 @@ impl<'a> ApiPlanner<'a> {
             "System.Collections.Generic",
         ];
         if self.external_model_fragments.has_models() {
+            imports.push("System.Text.Json");
             imports.push("System.Text.Json.Serialization");
         }
         if models.iter().any(|model| {
