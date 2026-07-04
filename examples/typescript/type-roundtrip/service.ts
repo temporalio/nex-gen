@@ -4,7 +4,7 @@ import * as nexus from "nexus-rpc";
 import type { temporal } from "@temporalio/proto";
 import type { ActivityOptions } from "./models";
 
-export const TypeRoundtripService = nexus.service("TypeRoundtripService", {
+export const typeRoundtripService = nexus.service("TypeRoundtripService", {
   retryPolicyOperation: nexus.operation<
     temporal.api.common.v1.IRetryPolicy,
     temporal.api.common.v1.IRetryPolicy

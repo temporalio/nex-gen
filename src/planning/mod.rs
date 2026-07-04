@@ -6,7 +6,7 @@ use prost_types::FileOptions;
 
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
-use crate::generator::ModelCapabilities;
+use crate::generator::ModelWireCapabilities;
 use crate::resources::{
     RequestPlan, ResolvedResourceBindingSource, ResolvedResourceMethodBinding,
     ResolvedResourceReturnSpec, ResolvedResourceSpec, resolve_service_resources,
@@ -74,7 +74,7 @@ pub(super) struct ApiPlanner<'a> {
     spec: ApiSpec,
     mode: PlanningMode,
     descriptors: &'a DescriptorIndex,
-    root_model_capabilities: BTreeMap<String, ModelCapabilities>,
+    root_model_capabilities: BTreeMap<String, ModelWireCapabilities>,
     service_data: IndexMap<String, PlannedServiceData>,
     resource_data: IndexMap<String, PlannedResource>,
     record_plans: IndexMap<String, PlannedRecordData>,
@@ -107,7 +107,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
             .get(name.as_str())
             .unwrap_or_else(|| panic!("record `{name}` should resolve during planning"));
         self.planner
-            .plan_record_type(record, ModelCapabilities::default())
+            .plan_record_type(record, ModelWireCapabilities::default())
     }
 
     fn map_enum(&mut self, name: crate::spec::ApiRef) -> PlannedEnumType {
@@ -537,7 +537,7 @@ impl<'a> ApiPlanner<'a> {
                     self.root_model_capabilities
                         .get(&input_message.full_name)
                         .copied()
-                        .unwrap_or(ModelCapabilities::TO_PROTO_ONLY),
+                        .unwrap_or(ModelWireCapabilities::TO_WIRE_ONLY),
                     self,
                 )))
             }
@@ -555,9 +555,10 @@ impl<'a> ApiPlanner<'a> {
                         operation: operation.name.clone(),
                         type_name: record_name.as_str().to_string(),
                     })?;
-                Ok(Some(TypeSpec::Record(
-                    self.plan_record_type(&record, ModelCapabilities::default()),
-                )))
+                Ok(Some(TypeSpec::Record(self.plan_record_type(
+                    &record,
+                    ModelWireCapabilities::default(),
+                ))))
             }
             Some(TypeSpec::Resource(resource_name)) => Err(Error::InvalidWit {
                 path: std::path::PathBuf::from("<api-plan>"),
@@ -595,7 +596,7 @@ impl<'a> ApiPlanner<'a> {
                         self.root_model_capabilities
                             .get(&output_message.full_name)
                             .copied()
-                            .unwrap_or(ModelCapabilities::BIDIRECTIONAL),
+                            .unwrap_or(ModelWireCapabilities::BIDIRECTIONAL),
                         self,
                     );
                 }
@@ -620,9 +621,10 @@ impl<'a> ApiPlanner<'a> {
                         operation: operation.name.clone(),
                         type_name: record_name.as_str().to_string(),
                     })?;
-                Ok(Some(TypeSpec::Record(
-                    self.plan_record_type(&record, ModelCapabilities::default()),
-                )))
+                Ok(Some(TypeSpec::Record(self.plan_record_type(
+                    &record,
+                    ModelWireCapabilities::default(),
+                ))))
             }
             Some(TypeSpec::Resource(resource_name)) => {
                 let Some(output_type) = operation.output_resource_type.as_ref() else {
@@ -759,7 +761,7 @@ impl<'a> ApiPlanner<'a> {
     fn plan_record_type(
         &mut self,
         record: &RecordSpec,
-        requested_capabilities: ModelCapabilities,
+        requested_capabilities: ModelWireCapabilities,
     ) -> PlannedRecordType {
         let planned_record = PlannedRecordType {
             full_name: record.full_name.clone(),
@@ -772,7 +774,7 @@ impl<'a> ApiPlanner<'a> {
     fn ensure_record_model_plan(
         &mut self,
         record: &RecordSpec,
-        requested_capabilities: ModelCapabilities,
+        requested_capabilities: ModelWireCapabilities,
     ) {
         if let Some(existing) = self.record_plans.get_mut(&record.full_name) {
             let previous_capabilities = existing.capabilities;
@@ -798,7 +800,7 @@ impl<'a> ApiPlanner<'a> {
     fn ensure_record_field_capabilities(
         &mut self,
         record: &RecordSpec,
-        requested_capabilities: ModelCapabilities,
+        requested_capabilities: ModelWireCapabilities,
     ) {
         let field_types = record
             .public_fields()
@@ -821,7 +823,7 @@ impl<'a> ApiPlanner<'a> {
     fn ensure_planned_type_capabilities(
         &mut self,
         kind: &PlannedType,
-        requested_capabilities: ModelCapabilities,
+        requested_capabilities: ModelWireCapabilities,
     ) {
         match kind {
             TypeSpec::Option(inner) | TypeSpec::List(inner) => {
@@ -1012,7 +1014,9 @@ impl<'a> ApiPlanner<'a> {
                 .get(record_name.as_str())
                 .cloned()
                 .map(|record| {
-                    TypeSpec::Record(self.plan_record_type(&record, ModelCapabilities::default()))
+                    TypeSpec::Record(
+                        self.plan_record_type(&record, ModelWireCapabilities::default()),
+                    )
                 })
                 .unwrap_or(TypeSpec::String),
             TypeSpec::Enum(enum_name) => self
@@ -1265,7 +1269,7 @@ pub(crate) struct PlannedEnumValue {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PlannedRecordData {
     pub(crate) proto: Option<PlannedProtoTypeInfo>,
-    pub(crate) capabilities: ModelCapabilities,
+    pub(crate) capabilities: ModelWireCapabilities,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1402,8 +1406,8 @@ impl PlannedProtoType {
 fn root_model_capabilities(
     spec: &ApiSpec,
     descriptors: &DescriptorIndex,
-) -> Result<BTreeMap<String, ModelCapabilities>> {
-    let mut capabilities: BTreeMap<String, ModelCapabilities> = BTreeMap::new();
+) -> Result<BTreeMap<String, ModelWireCapabilities>> {
+    let mut capabilities: BTreeMap<String, ModelWireCapabilities> = BTreeMap::new();
 
     for service in &spec.services {
         for operation in &service.operations {
@@ -1418,7 +1422,7 @@ fn root_model_capabilities(
             capabilities
                 .entry(input_message.full_name.clone())
                 .or_default()
-                .merge(ModelCapabilities::TO_PROTO_ONLY);
+                .merge(ModelWireCapabilities::TO_WIRE_ONLY);
 
             if operation.output_transform().is_some()
                 || operation_output_resource_name(service, operation).is_some()
@@ -1437,7 +1441,7 @@ fn root_model_capabilities(
             capabilities
                 .entry(output_message.full_name.clone())
                 .or_default()
-                .merge(ModelCapabilities::BIDIRECTIONAL);
+                .merge(ModelWireCapabilities::BIDIRECTIONAL);
         }
     }
 

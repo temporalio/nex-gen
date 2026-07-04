@@ -3,7 +3,7 @@ use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata};
-use crate::generator::ModelCapabilities;
+use crate::generator::ModelWireCapabilities;
 use crate::spec::{
     ApiRef, ApiSpec, ExternalTypeSpec, IntSpec, LanguageStringSpec, RecordFieldSpec,
     RecordFieldVisibility, RecordSpec, TypeSpec,
@@ -109,7 +109,7 @@ fn field_type(field: &FieldDescriptorProto) -> Option<Type> {
 
 pub(super) fn planned_type_for_message(
     message: &MessageMetadata,
-    requested_capabilities: ModelCapabilities,
+    requested_capabilities: ModelWireCapabilities,
     planner: &mut ApiPlanner<'_>,
 ) -> PlannedType {
     let planned_message = planned_message_reference(message, planner);
@@ -191,7 +191,7 @@ pub(super) fn record_field_has_presence(
 pub(super) fn planned_record_field_type(
     record: &RecordSpec,
     field_name: &str,
-    requested_capabilities: ModelCapabilities,
+    requested_capabilities: ModelWireCapabilities,
     planner: &mut ApiPlanner<'_>,
 ) -> Option<PlannedType> {
     let proto_name = record_proto_name(record)?;
@@ -250,7 +250,7 @@ pub(super) fn planned_value_type_from_authored_proto(
     planner: &mut ApiPlanner<'_>,
 ) -> PlannedType {
     if let Some(message) = planner.descriptors.message(proto_name).cloned() {
-        planned_type_for_message(&message, ModelCapabilities::BIDIRECTIONAL, planner)
+        planned_type_for_message(&message, ModelWireCapabilities::BIDIRECTIONAL, planner)
     } else if let Some(enumeration) = planner.descriptors.enumeration(proto_name).cloned() {
         let replacement = planner
             .spec
@@ -432,7 +432,7 @@ fn ensure_enum_plan(enumeration: &EnumMetadata, planner: &mut ApiPlanner<'_>) {
 
 fn planned_field_type(
     field: &FieldDescriptorProto,
-    requested_capabilities: ModelCapabilities,
+    requested_capabilities: ModelWireCapabilities,
     planner: &mut ApiPlanner<'_>,
 ) -> PlannedType {
     if let Some((key, value)) = map_field_value_types(field, requested_capabilities, planner) {
@@ -449,7 +449,7 @@ fn planned_field_type(
 
 fn map_field_value_types(
     field: &FieldDescriptorProto,
-    requested_capabilities: ModelCapabilities,
+    requested_capabilities: ModelWireCapabilities,
     planner: &mut ApiPlanner<'_>,
 ) -> Option<(PlannedType, PlannedType)> {
     if field_label(field) != Some(Label::Repeated) || field_type(field) != Some(Type::Message) {
@@ -487,7 +487,7 @@ fn map_field_value_types(
 
 fn planned_value_type(
     field: &FieldDescriptorProto,
-    _requested_capabilities: ModelCapabilities,
+    _requested_capabilities: ModelWireCapabilities,
     planner: &mut ApiPlanner<'_>,
 ) -> PlannedType {
     match field_type(field) {
@@ -509,7 +509,7 @@ fn planned_value_type(
                     .message(type_name.trim_start_matches('.'))
                     .cloned()
             }) {
-                planned_type_for_message(&message, ModelCapabilities::BIDIRECTIONAL, planner)
+                planned_type_for_message(&message, ModelWireCapabilities::BIDIRECTIONAL, planner)
             } else {
                 TypeSpec::String
             }

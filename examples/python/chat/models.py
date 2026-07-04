@@ -173,16 +173,16 @@ class Message(pydantic.BaseModel):
         strict=True, populate_by_name=True, extra="forbid"
     )
 
-    body: str = pydantic.Field()
-
     kind: typing.Literal["text"] = pydantic.Field(default="text")
     """Discriminator; always "text"."""
 
-    priority: SpecInt = pydantic.Field(default=0)
-    """Delivery priority."""
+    body: str = pydantic.Field()
 
     reply_to_id: str | None = pydantic.Field(default=None, alias="replyToId")
     """Id of the message this replies to, if any."""
+
+    priority: SpecInt = pydantic.Field(default=0)
+    """Delivery priority."""
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
@@ -199,16 +199,16 @@ class Room(pydantic.BaseModel):
         strict=True, populate_by_name=True, extra="allow"
     )
 
-    display_name: str = pydantic.Field(alias="displayName")
-
-    labels: Labels | None = pydantic.Field(default=None)
-
-    members: list[str] | None = pydantic.Field(default=None)
-
     room_id: str = pydantic.Field(alias="roomId")
+
+    display_name: str = pydantic.Field(alias="displayName")
 
     topic: str | None = pydantic.Field()
     """Room topic; may be explicitly cleared to null."""
+
+    members: list[str] | None = pydantic.Field(default=None)
+
+    labels: Labels | None = pydantic.Field(default=None)
 
     _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
         {"labels", "members"}
@@ -238,9 +238,9 @@ class SendMessageInput(pydantic.BaseModel):
         strict=True, populate_by_name=True, extra="forbid"
     )
 
-    message: Message = pydantic.Field()
-
     room_id: str = pydantic.Field(alias="roomId")
+
+    message: Message = pydantic.Field()
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(

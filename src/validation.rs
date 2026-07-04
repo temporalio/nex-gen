@@ -5,7 +5,8 @@ use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::{DescriptorIndex, MessageMetadata};
 use crate::error::{Error, Result};
-use crate::generator::{python, typescript};
+use crate::generator::proto::typescript as typescript_proto;
+use crate::generator::python;
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, RecordFieldVisibility, RecordSpec,
@@ -741,7 +742,7 @@ fn field_name_for_language(
                 .or_else(|| field.name.as_deref())
                 .expect("descriptor fields should be named"),
         ),
-        Language::TypeScript => typescript::field_name(field, explicit_name),
+        Language::TypeScript => typescript_proto::field_name(field, explicit_name),
         _ => explicit_name
             .or_else(|| field.name.as_deref())
             .expect("descriptor fields should be named")

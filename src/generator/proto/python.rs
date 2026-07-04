@@ -554,7 +554,7 @@ pub(in crate::generator) fn render_model_proto_methods(
     model: &RenderedModel,
 ) -> bool {
     let mut wrote_method = false;
-    if model.capabilities.from_proto {
+    if model.capabilities.from_wire {
         let proto_ref = model
             .proto_ref
             .as_deref()
@@ -598,7 +598,7 @@ pub(in crate::generator) fn render_model_proto_methods(
         }
         wrote_method = true;
     }
-    if model.capabilities.to_proto {
+    if model.capabilities.to_wire {
         let proto_ref = model
             .proto_ref
             .as_deref()

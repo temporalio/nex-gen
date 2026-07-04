@@ -2572,7 +2572,7 @@ fn resource_field_is_string(
 }
 
 fn model_needs_to_proto_method(model: &PlannedModel) -> bool {
-    model.data.capabilities.to_proto
+    model.data.capabilities.to_wire
         && model.data.proto.as_ref().is_some_and(|proto| {
             dotnet_proto_type_name_for_info(proto) != csharp_type_name(&model.name)
         })

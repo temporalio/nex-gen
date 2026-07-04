@@ -3,7 +3,7 @@
 import type * as common from "@temporalio/common";
 import * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
-import { TypeRoundtripService } from "../service";
+import { typeRoundtripService } from "../service";
 import { retryPolicyToProto } from "../support";
 
 /**
@@ -13,11 +13,11 @@ export async function retryPolicyOperation(
   request: common.RetryPolicy,
 ): Promise<workflow.NexusOperationHandle<temporal.api.common.v1.IRetryPolicy>> {
   const client = workflow.createNexusServiceClient({
-    service: TypeRoundtripService,
+    service: typeRoundtripService,
     endpoint: "temporal-system",
   });
   return await client.startOperation(
-    TypeRoundtripService.operations.retryPolicyOperation,
+    typeRoundtripService.operations.retryPolicyOperation,
     retryPolicyToProto(request),
   );
 }

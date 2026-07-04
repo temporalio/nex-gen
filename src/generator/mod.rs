@@ -11,9 +11,9 @@ use crate::SupportFiles;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
-use crate::planning::{PlannedSpec, PlanningMode, build_api_plan_with_mode};
+use crate::planning::{PlannedSpec, PlannedTypeFamily, PlanningMode, build_api_plan_with_mode};
 use crate::resources::ensure_unique_resource_names;
-use crate::spec::ApiSpec;
+use crate::spec::{ApiSpec, RecordSpec};
 use crate::validation::validate_external_type_bindings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,26 +55,56 @@ impl GeneratedFiles {
     }
 }
 
+/// Tracks which public-model/wire-model conversion directions must be generated.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ModelCapabilities {
-    pub(crate) from_proto: bool,
-    pub(crate) to_proto: bool,
+pub(crate) struct ModelWireCapabilities {
+    pub(crate) from_wire: bool,
+    pub(crate) to_wire: bool,
 }
 
-impl ModelCapabilities {
+impl ModelWireCapabilities {
     pub(crate) const BIDIRECTIONAL: Self = Self {
-        from_proto: true,
-        to_proto: true,
+        from_wire: true,
+        to_wire: true,
     };
-    pub(crate) const TO_PROTO_ONLY: Self = Self {
-        from_proto: false,
-        to_proto: true,
+    pub(crate) const TO_WIRE_ONLY: Self = Self {
+        from_wire: false,
+        to_wire: true,
     };
 
     pub(crate) fn merge(&mut self, other: Self) {
-        self.from_proto |= other.from_proto;
-        self.to_proto |= other.to_proto;
+        self.from_wire |= other.from_wire;
+        self.to_wire |= other.to_wire;
     }
+}
+
+pub(crate) trait ModelBackend {
+    type TypeRef;
+    type WireType;
+    type ModelFragments;
+    type WireConversion;
+
+    /// Give the backend a chance to precompute model metadata from the planned spec.
+    fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()>;
+
+    /// Render model definitions owned by this backend.
+    fn render_models(&self) -> Result<Self::ModelFragments>;
+
+    /// Return the target-language type annotation/name for a model reference.
+    fn model_type_annotation(&self, model_type: &Self::TypeRef) -> Option<String>;
+
+    /// Return the stable wire/runtime type identifier for a model reference.
+    fn wire_type_identifier(&self, model_type: &Self::TypeRef) -> Option<String>;
+
+    /// Return conversion templates between public model values and wire values.
+    ///
+    /// `planned_record` is present when the type has already resolved to a planned
+    /// record model, which lets backends handle generated/local model conversions.
+    fn wire_conversion(
+        &self,
+        model_type: &Self::WireType,
+        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+    ) -> Option<Self::WireConversion>;
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

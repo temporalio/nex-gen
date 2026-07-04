@@ -10,6 +10,7 @@
     "esModuleInterop": true
   },
   "include": [
+    "chat/**/*.ts",
     "function-execution/**/*.ts",
     "start-workflow/**/*.ts",
     "user-service/**/*.ts",

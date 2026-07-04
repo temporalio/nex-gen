@@ -3,7 +3,7 @@
 import * as nexus from "nexus-rpc";
 import type { temporal } from "@temporalio/proto";
 
-export const StartWorkflowService = nexus.service("StartWorkflowService", {
+export const startWorkflowService = nexus.service("StartWorkflowService", {
   startWorkflow: nexus.operation<
     temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest,
     temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse

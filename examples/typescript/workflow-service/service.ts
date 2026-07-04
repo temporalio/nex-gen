@@ -6,10 +6,12 @@ import type { temporal } from "@temporalio/proto";
 /**
  * @experimental This API is experimental and subject to change.
  */
-export const WorkflowService = nexus.service(
+export const workflowService = nexus.service(
   "temporal.api.workflowservice.v1.WorkflowService",
   {
     /**
+     * Signal a workflow, starting it first if needed.
+     *
      * @experimental This API is experimental and subject to change.
      */
     signalWithStartWorkflow: nexus.operation<

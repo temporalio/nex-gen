@@ -6,7 +6,7 @@ import * as nexus from "nexus-rpc";
 
 import { signalWithStartWorkflow } from "../workflow-service/index.ts";
 import type { SignalWithStartWorkflowRequest } from "../workflow-service/index.ts";
-import { WorkflowService } from "../workflow-service/service.ts";
+import { workflowService } from "../workflow-service/service.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(
@@ -27,10 +27,10 @@ function payloadJson(
 
 describe("workflow-service generated output", () => {
   test("exposes workflow service metadata", () => {
-    expect(WorkflowService.name).toBe(
+    expect(workflowService.name).toBe(
       "temporal.api.workflowservice.v1.WorkflowService",
     );
-    expect(WorkflowService.operations.signalWithStartWorkflow.name).toBe(
+    expect(workflowService.operations.signalWithStartWorkflow.name).toBe(
       "SignalWithStartWorkflowExecution",
     );
   });
@@ -38,7 +38,7 @@ describe("workflow-service generated output", () => {
   test("serializes signal-with-start requests through a real Nexus client", async () => {
     await withWorkflowEnvironment(async (env) => {
       const calls: Array<[string, unknown]> = [];
-      const handler = nexus.serviceHandler(WorkflowService, {
+      const handler = nexus.serviceHandler(workflowService, {
         async signalWithStartWorkflow(_ctx, input) {
           calls.push(["SignalWithStartWorkflowExecution", input]);
           return {

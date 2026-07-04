@@ -9,7 +9,7 @@ import { nexusValue, payloadConverter } from "../nex-gen-runtime.ts";
 import type { RecordSyncRequest, SetProfileRequest } from "../type-showcase/index.ts";
 import { UserCapability, UserStatus } from "../type-showcase/models.ts";
 import { User } from "../type-showcase/resources.ts";
-import { TypeShowcase } from "../type-showcase/service.ts";
+import { typeShowcase } from "../type-showcase/service.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const wireFixtureDir = fileURLToPath(
@@ -94,13 +94,13 @@ function payloadJson(
 
 describe("type-showcase generated output", () => {
   test("exposes WIT-native type showcase metadata", () => {
-    expect(TypeShowcase.name).toBe("TypeShowcase");
-    expect(TypeShowcase.operations.getUser.name).toBe("GetUser");
-    expect(TypeShowcase.operations.updateEmail.name).toBe("UpdateEmail");
-    expect(TypeShowcase.operations.rename.name).toBe("Rename");
-    expect(TypeShowcase.operations.setProfile.name).toBe("SetProfile");
-    expect(TypeShowcase.operations.recordSync.name).toBe("RecordSync");
-    expect(TypeShowcase.operations.deactivate.name).toBe("Deactivate");
+    expect(typeShowcase.name).toBe("TypeShowcase");
+    expect(typeShowcase.operations.getUser.name).toBe("GetUser");
+    expect(typeShowcase.operations.updateEmail.name).toBe("UpdateEmail");
+    expect(typeShowcase.operations.rename.name).toBe("Rename");
+    expect(typeShowcase.operations.setProfile.name).toBe("SetProfile");
+    expect(typeShowcase.operations.recordSync.name).toBe("RecordSync");
+    expect(typeShowcase.operations.deactivate.name).toBe("Deactivate");
     expect(UserStatus.Active).toBe(0);
     expect(UserCapability.ReadProfile).toBe(1);
     expect(UserCapability.UpdateEmail).toBe(2);
@@ -109,7 +109,7 @@ describe("type-showcase generated output", () => {
   test("passes WIT records through a real Nexus client", async () => {
     await withWorkflowEnvironment(async (env) => {
       const calls: Array<[string, unknown]> = [];
-      const handler = nexus.serviceHandler(TypeShowcase, {
+      const handler = nexus.serviceHandler(typeShowcase, {
         async getUser(_ctx, input) {
           calls.push(["GetUser", input]);
           return userResource("old@example.com", "Old Name");

@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use crate::error::{Error, Result};
 use crate::generator::json::python as python_json;
 use crate::generator::proto::python as python_proto;
-use crate::generator::{GeneratedFiles, GenerationMode, ModelCapabilities};
+use crate::generator::{GeneratedFiles, GenerationMode, ModelWireCapabilities};
 use crate::language::Language;
 use crate::planning::{
     PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedProtoType,
@@ -580,7 +580,7 @@ pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) native: bool,
     pub(in crate::generator) proto_ref: Option<String>,
     pub(in crate::generator) proto_module_path: Option<String>,
-    pub(in crate::generator) capabilities: ModelCapabilities,
+    pub(in crate::generator) capabilities: ModelWireCapabilities,
     pub(in crate::generator) experimental: bool,
     pub(in crate::generator) fields: Vec<RenderedField>,
     pub(in crate::generator) sourced_fields: Vec<RenderedSourcedField>,
@@ -2261,11 +2261,13 @@ fn render_package(
             language_imports,
         ),
     )?;
-    insert_generated_file(
-        &mut files,
-        "_resources/__init__.py",
-        render_resources_package_init(services),
-    )?;
+    if !resource_names.is_empty() {
+        insert_generated_file(
+            &mut files,
+            "_resources/__init__.py",
+            render_resources_package_init(services),
+        )?;
+    }
     insert_generated_file(&mut files, "service.py", render_service_module(services))?;
     if mode == GenerationMode::NativeApi {
         insert_generated_file(

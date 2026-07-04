@@ -148,20 +148,23 @@ pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
 pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let languages = if request.languages.is_empty() {
-        vec![Language::Python]
+        vec![Language::Python, Language::TypeScript]
     } else {
         request.languages.clone()
     };
 
     for language in languages {
-        if language != Language::Python {
+        if !matches!(language, Language::Python | Language::TypeScript) {
             return Err(error::Error::UnsupportedLanguage { language });
+        }
+        if language == Language::TypeScript {
+            ensure_typescript_dependencies(&repo_root)?;
         }
 
         let example_ids = if request.example_ids.is_empty() {
             discover_json_example_ids(&repo_root)?
         } else {
-            validate_json_example_ids(&repo_root, &request.example_ids)?
+            validate_json_example_ids(&repo_root, language, &request.example_ids)?
         };
         for example_id in example_ids {
             build_json_example(&repo_root, language, &example_id)?;
@@ -445,14 +448,18 @@ fn discover_json_example_ids(repo_root: &Path) -> Result<Vec<String>> {
     Ok(ids)
 }
 
-fn validate_json_example_ids(repo_root: &Path, example_ids: &[String]) -> Result<Vec<String>> {
+fn validate_json_example_ids(
+    repo_root: &Path,
+    language: Language,
+    example_ids: &[String],
+) -> Result<Vec<String>> {
     let available = discover_json_example_ids(repo_root)?
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
     for example_id in example_ids {
         if !available.contains(example_id) {
             return Err(error::Error::UnknownExampleId {
-                language: Language::Python,
+                language,
                 example_id: example_id.clone(),
             });
         }

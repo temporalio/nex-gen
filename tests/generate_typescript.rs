@@ -150,6 +150,43 @@ fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_pa
     assert!(format_status.success());
 }
 
+fn generate_formatted_json_typescript_output(root: &Path, example_id: &str, output_path: &Path) {
+    ensure_typescript_dependencies(root);
+
+    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args([
+            "generate",
+            "--lang",
+            "typescript",
+            "--input",
+            root.join("examples/json-inputs")
+                .join(format!("{example_id}.yaml"))
+                .to_str()
+                .unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+            "--no-native-api",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let format_status = Command::new("npm")
+        .current_dir(typescript_root(root))
+        .args([
+            "exec",
+            "--",
+            "prettier",
+            "--write",
+            "--print-width",
+            "88",
+            output_path.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+}
+
 fn unique_output_path(label: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -169,6 +206,17 @@ fn typescript_examples_generation_matches_checked_in_output() {
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
         fs::remove_dir_all(output_path).unwrap();
     }
+}
+
+#[test]
+fn typescript_json_example_generation_matches_checked_in_output() {
+    let root = project_root();
+    let output_path = unique_output_path("typescript-json-chat");
+    generate_formatted_json_typescript_output(&root, "chat", &output_path);
+    let rendered = read_typescript_output_files(&output_path);
+    let expected = read_typescript_output_files(&typescript_output_path(&root, "chat"));
+    assert_eq!(rendered, expected);
+    fs::remove_dir_all(output_path).unwrap();
 }
 
 #[test]
