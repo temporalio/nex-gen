@@ -148,13 +148,16 @@ pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
 pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let languages = if request.languages.is_empty() {
-        vec![Language::Python, Language::TypeScript]
+        vec![Language::Dotnet, Language::Python, Language::TypeScript]
     } else {
         request.languages.clone()
     };
 
     for language in languages {
-        if !matches!(language, Language::Python | Language::TypeScript) {
+        if !matches!(
+            language,
+            Language::Dotnet | Language::Python | Language::TypeScript
+        ) {
             return Err(error::Error::UnsupportedLanguage { language });
         }
         if language == Language::TypeScript {

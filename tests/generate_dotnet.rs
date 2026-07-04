@@ -46,6 +46,20 @@ fn dotnet_output_path(root: &Path, example_id: &str) -> PathBuf {
     dotnet_root(root).join(example_id)
 }
 
+fn dotnet_json_definitions_output_path(root: &Path, example_id: &str) -> PathBuf {
+    dotnet_root(root)
+        .join("json_schema")
+        .join("definitions")
+        .join(example_id)
+}
+
+fn dotnet_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
+    dotnet_root(root)
+        .join("json_schema")
+        .join("api")
+        .join(example_id)
+}
+
 fn dotnet_example_ids(root: &Path) -> Vec<String> {
     let dotnet_root = dotnet_root(root);
     let mut ids = fs::read_dir(root.join("examples/inputs"))
@@ -115,6 +129,35 @@ fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
     assert!(status.success());
 }
 
+fn generate_json_dotnet_output(
+    root: &Path,
+    example_id: &str,
+    output_path: &Path,
+    generate_native_api: bool,
+) {
+    let input_path = root
+        .join("examples/json-inputs")
+        .join(format!("{example_id}.yaml"));
+    let mut args = vec![
+        "generate",
+        "--lang",
+        "dotnet",
+        "--input",
+        input_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+    ];
+    if !generate_native_api {
+        args.push("--no-native-api");
+    }
+
+    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
 fn unique_output_path(label: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -142,6 +185,28 @@ fn dotnet_examples_generation_matches_checked_in_output() {
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
         fs::remove_dir_all(output_path).unwrap();
     }
+}
+
+#[test]
+fn dotnet_json_example_generation_matches_checked_in_output() {
+    let root = project_root();
+    let output_path = unique_output_path("dotnet-json-chat");
+    generate_json_dotnet_output(&root, "chat", &output_path, false);
+    let rendered = read_dotnet_output_files(&output_path);
+    let expected = read_dotnet_output_files(&dotnet_json_definitions_output_path(&root, "chat"));
+    assert_eq!(rendered, expected);
+    fs::remove_dir_all(output_path).unwrap();
+}
+
+#[test]
+fn dotnet_json_api_example_generation_matches_checked_in_output() {
+    let root = project_root();
+    let output_path = unique_output_path("dotnet-json-api-chat");
+    generate_json_dotnet_output(&root, "chat", &output_path, true);
+    let rendered = read_dotnet_output_files(&output_path);
+    let expected = read_dotnet_output_files(&dotnet_json_api_output_path(&root, "chat"));
+    assert_eq!(rendered, expected);
+    fs::remove_dir_all(output_path).unwrap();
 }
 
 #[test]

@@ -1,8 +1,8 @@
 use crate::error::Result;
 use crate::generator::ModelBackend as _;
 use crate::generator::dotnet::{
-    csharp_parameter_name, csharp_type_name, field_property_name, function_args_parameter_type,
-    qualify_dotnet_support_call, qualify_dotnet_support_reference,
+    WireValueConversion, csharp_parameter_name, csharp_type_name, field_property_name,
+    function_args_parameter_type, qualify_dotnet_support_call, qualify_dotnet_support_reference,
 };
 use crate::language::Language;
 use crate::planning::{
@@ -13,12 +13,6 @@ use crate::spec::{ExternalTypeSpec, RecordFieldSpec, RecordSpec, TypeReplacement
 
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::generator) struct WireValueConversion {
-    pub(in crate::generator) annotation: String,
-    pub(in crate::generator) to_wire: String,
-}
 
 impl crate::generator::ModelBackend for ModelBackend {
     type TypeRef = PlannedProtoType;

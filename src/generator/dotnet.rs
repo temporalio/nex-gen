@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use heck::{ToLowerCamelCase, ToUpperCamelCase};
 
 use crate::error::{Error, Result};
+use crate::generator::json::dotnet as dotnet_json;
 use crate::generator::proto::dotnet as dotnet_proto;
 use crate::generator::{GeneratedFiles, GenerationMode, ModelBackend};
 use crate::language::Language;
@@ -42,14 +43,18 @@ impl PlannedOperationExt for PlannedOperation {
 struct ApiPlanner<'a> {
     api_plan: &'a PlannedSpec,
     external_models: DotNetExternalModels,
+    external_model_fragments: DotNetExternalModelFragments,
     support_namespace: Option<&'a str>,
 }
 
 impl<'a> ApiPlanner<'a> {
     fn new(api_plan: &'a PlannedSpec, support_namespace: Option<&'a str>) -> Result<Self> {
+        let external_models = DotNetExternalModels::new(api_plan)?;
+        let external_model_fragments = external_models.render_models()?;
         Ok(Self {
             api_plan,
-            external_models: DotNetExternalModels::new(api_plan)?,
+            external_models,
+            external_model_fragments,
             support_namespace,
         })
     }
@@ -66,6 +71,9 @@ impl<'a> ApiPlanner<'a> {
             "System.CodeDom.Compiler",
             "System.Collections.Generic",
         ];
+        if self.external_model_fragments.has_models() {
+            imports.push("System.Text.Json.Serialization");
+        }
         if models.iter().any(|model| {
             self.external_models
                 .model_uses_support_extensions(model, self.api_plan)
@@ -89,6 +97,7 @@ impl<'a> ApiPlanner<'a> {
         for model in models {
             self.render_model(&mut output, model);
         }
+        output.push_str(&self.external_model_fragments.body);
         close_namespace(&mut output);
         output
     }
@@ -197,22 +206,23 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("class ");
         output.push_str(&dotnet_operations_class_name(service));
         output.push_str("\n{\n");
-        output.push_str("    ");
-        output.push_str(GENERATED_CODE_ATTRIBUTE);
-        output.push('\n');
-        output.push_str("    private const string ");
-        output.push_str(&service_endpoint_constant_name(service));
-        output.push_str(" = ");
-        output.push_str(&csharp_string_literal(
-            service.endpoint.as_deref().unwrap_or(""),
-        ));
-        output.push_str(";\n\n");
+        if let Some(endpoint) = &service.endpoint {
+            output.push_str("    ");
+            output.push_str(GENERATED_CODE_ATTRIBUTE);
+            output.push('\n');
+            output.push_str("    private const string ");
+            output.push_str(&service_endpoint_constant_name(service));
+            output.push_str(" = ");
+            output.push_str(&csharp_string_literal(endpoint));
+            output.push_str(";\n\n");
+        }
         for operation in &service.operations {
             self.render_operation_extension(
                 output,
                 operation,
                 &service_type,
                 &service_endpoint_constant_name(service),
+                service.endpoint.is_none(),
             );
         }
         output.push_str("}\n\n");
@@ -398,13 +408,18 @@ impl<'a> ApiPlanner<'a> {
         operation: &PlannedOperation,
         service_type: &str,
         endpoint_constant_name: &str,
+        endpoint_parameter: bool,
     ) {
         let method_name = format!("{}Async", csharp_type_name(&operation.name));
         let raw_return = self.operation_raw_return_type(operation);
         let high_level_return = self.operation_return_type(operation);
         let has_input = self.operation_has_input(operation);
-        let raw_input_type = self.operation_raw_input_type(operation.input_model());
-        let high_level_input_type = self.operation_input_type(operation.input_model());
+        let raw_input_type = has_input
+            .then(|| self.operation_raw_input_type(operation.input_model()))
+            .unwrap_or_default();
+        let high_level_input_type = has_input
+            .then(|| self.operation_input_type(operation.input_model()))
+            .unwrap_or_default();
 
         if high_level_input_type == raw_input_type
             || !operation_requires_high_level_request(operation)
@@ -420,6 +435,7 @@ impl<'a> ApiPlanner<'a> {
                 &high_level_return,
                 RequestArgumentKind::Raw,
                 endpoint_constant_name,
+                endpoint_parameter,
             );
         }
 
@@ -435,15 +451,18 @@ impl<'a> ApiPlanner<'a> {
                 &high_level_return,
                 RequestArgumentKind::HighLevel,
                 endpoint_constant_name,
+                endpoint_parameter,
             );
         }
 
-        if let Some(model) = self.api_plan.records.get(
-            operation
-                .input_model()
-                .model_full_name()
-                .expect("operation input should be a model"),
-        ) && operation_has_flattened_convenience(operation, model, self.api_plan)
+        if has_input
+            && let Some(model) = self.api_plan.records.get(
+                operation
+                    .input_model()
+                    .model_full_name()
+                    .expect("operation input should be a model"),
+            )
+            && operation_has_flattened_convenience(operation, model, self.api_plan)
         {
             self.render_operation_flattened_extension(
                 output,
@@ -506,8 +525,9 @@ impl<'a> ApiPlanner<'a> {
         high_level_return: &str,
         request_kind: RequestArgumentKind,
         endpoint_constant_name: &str,
+        endpoint_parameter: bool,
     ) {
-        render_operation_xml_doc(output, "    ", operation, self.api_plan);
+        render_operation_xml_doc(output, "    ", operation, self.api_plan, endpoint_parameter);
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
@@ -523,7 +543,13 @@ impl<'a> ApiPlanner<'a> {
         }
         output.push_str(method_name);
         output.push('(');
+        let mut has_parameters = false;
+        if endpoint_parameter {
+            output.push_str("string endpoint");
+            has_parameters = true;
+        }
         if has_input {
+            render_parameter_separator(output, &mut has_parameters);
             output.push_str(input_type);
             output.push_str(" request");
         }
@@ -531,7 +557,11 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("        var client = Workflow.CreateNexusWorkflowClient<");
         output.push_str(service_type);
         output.push_str(">(");
-        output.push_str(endpoint_constant_name);
+        if endpoint_parameter {
+            output.push_str("endpoint");
+        } else {
+            output.push_str(endpoint_constant_name);
+        }
         output.push_str(");\n");
         if matches!(request_kind, RequestArgumentKind::HighLevel) {
             output.push_str("        var protoRequest = request.ToProto();\n");
@@ -579,6 +609,9 @@ impl<'a> ApiPlanner<'a> {
         operation: &PlannedOperation,
         request_kind: RequestArgumentKind,
     ) -> &'static str {
+        if !self.operation_has_input(operation) {
+            return "public";
+        }
         let raw_input_type = self.operation_raw_input_type(operation.input_model());
         let high_level_input_type = self.operation_input_type(operation.input_model());
         if (matches!(request_kind, RequestArgumentKind::HighLevel)
@@ -644,9 +677,13 @@ impl<'a> ApiPlanner<'a> {
         names: &mut HashSet<String>,
         operation: &PlannedOperation,
     ) {
-        let raw_input_type = self.operation_raw_input_type(operation.input_model());
-        let high_level_input_type = self.operation_input_type(operation.input_model());
         let has_input = self.operation_has_input(operation);
+        let raw_input_type = has_input
+            .then(|| self.operation_raw_input_type(operation.input_model()))
+            .unwrap_or_default();
+        let high_level_input_type = has_input
+            .then(|| self.operation_input_type(operation.input_model()))
+            .unwrap_or_default();
         if has_input
             && (high_level_input_type == raw_input_type
                 || !operation_requires_high_level_request(operation))
@@ -686,6 +723,9 @@ impl<'a> ApiPlanner<'a> {
             collect_public_message_models(names, model_type, self.api_plan);
         }
 
+        if !has_input {
+            return;
+        }
         let Some(model) = self.api_plan.records.get(
             operation
                 .input_model()
@@ -968,6 +1008,9 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn render_operation_options_type(&self, output: &mut String, operation: &PlannedOperation) {
+        if !self.operation_has_input(operation) {
+            return;
+        }
         let Some(model) = self.api_plan.records.get(
             operation
                 .input_model()
@@ -1217,7 +1260,10 @@ impl<'a> ApiPlanner<'a> {
 #[derive(Debug, Default)]
 struct DotNetExternalModels {
     proto: dotnet_proto::ModelBackend,
+    json: dotnet_json::ModelBackend,
 }
+
+type DotNetExternalModelFragments = dotnet_json::RenderedModelFragments;
 
 impl DotNetExternalModels {
     fn new(api_plan: &PlannedSpec) -> Result<Self> {
@@ -1270,8 +1316,7 @@ impl DotNetExternalModels {
         let planned_record = model_type
             .model_full_name()
             .and_then(|full_name| api_plan.records.get(full_name));
-        self.proto
-            .wire_type_annotation(model_type, planned_record)
+        self.wire_type_annotation(model_type, planned_record)
             .or_else(|| self.model_type_annotation(model_type))
             .unwrap_or_else(|| {
                 csharp_type_name(
@@ -1281,20 +1326,38 @@ impl DotNetExternalModels {
                 )
             })
     }
+
+    fn wire_type_annotation(
+        &self,
+        model_type: &PlannedType,
+        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+    ) -> Option<String> {
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(_)) | PlannedType::Record(_) => {
+                self.proto.wire_type_annotation(model_type, planned_record)
+            }
+            PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
+                self.json.model_type_annotation(json_type)
+            }
+            _ => None,
+        }
+    }
 }
 
 impl ModelBackend for DotNetExternalModels {
     type TypeRef = PlannedType;
     type WireType = PlannedType;
-    type ModelFragments = ();
-    type WireConversion = dotnet_proto::WireValueConversion;
+    type ModelFragments = DotNetExternalModelFragments;
+    type WireConversion = WireValueConversion;
 
     fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
-        self.proto.prepare(api_plan)
+        self.proto.prepare(api_plan)?;
+        self.json.prepare(api_plan)
     }
 
-    fn render_models(&self) -> Result<()> {
-        self.proto.render_models()
+    fn render_models(&self) -> Result<DotNetExternalModelFragments> {
+        self.proto.render_models()?;
+        self.json.render_models()
     }
 
     fn model_type_annotation(&self, model_type: &PlannedType) -> Option<String> {
@@ -1303,7 +1366,7 @@ impl ModelBackend for DotNetExternalModels {
                 self.proto.model_type_annotation(proto_type)
             }
             PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
-                Some(csharp_type_name(&json_type.model_name))
+                self.json.model_type_annotation(json_type)
             }
             _ => None,
         }
@@ -1315,7 +1378,7 @@ impl ModelBackend for DotNetExternalModels {
                 self.proto.wire_type_identifier(proto_type)
             }
             PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
-                Some(json_type.full_name.clone())
+                self.json.wire_type_identifier(json_type)
             }
             _ => None,
         }
@@ -1325,16 +1388,13 @@ impl ModelBackend for DotNetExternalModels {
         &self,
         model_type: &PlannedType,
         planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
-    ) -> Option<dotnet_proto::WireValueConversion> {
+    ) -> Option<WireValueConversion> {
         match model_type {
             PlannedType::External(ExternalTypeSpec::Proto(_)) | PlannedType::Record(_) => {
                 self.proto.wire_conversion(model_type, planned_record)
             }
             PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
-                Some(dotnet_proto::WireValueConversion {
-                    annotation: csharp_type_name(&json_type.model_name),
-                    to_wire: "{value}".to_string(),
-                })
+                self.json.wire_conversion(json_type, planned_record)
             }
             _ => None,
         }
@@ -1622,27 +1682,38 @@ fn render_operation_xml_doc(
     indent: &str,
     operation: &PlannedOperation,
     api_plan: &PlannedSpec,
+    endpoint_parameter: bool,
 ) {
     let return_doc = operation
         .output
         .as_ref()
         .and_then(|_| dotnet_doc(&operation.return_doc));
-    let request_doc = api_plan
-        .records
-        .get(
-            operation
-                .input_model()
-                .model_full_name()
-                .expect("operation input should be a model"),
-        )
+    let request_doc = operation_has_input(operation, api_plan)
+        .then(|| {
+            api_plan.records.get(
+                operation
+                    .input_model()
+                    .model_full_name()
+                    .expect("operation input should be a model"),
+            )
+        })
+        .flatten()
         .and_then(|model| dotnet_doc(model.doc()));
+    let mut params = Vec::new();
+    if endpoint_parameter {
+        params.push((
+            "endpoint".to_string(),
+            "Endpoint for the service.".to_string(),
+        ));
+    }
+    if let Some(request_doc) = request_doc {
+        params.push(("request".to_string(), request_doc.to_string()));
+    }
     render_xml_doc(
         output,
         indent,
         dotnet_doc(&operation.doc),
-        request_doc
-            .map(|doc| vec![("request".to_string(), doc.to_string())])
-            .unwrap_or_default(),
+        params,
         return_doc,
         operation.experimental,
     );
@@ -1748,6 +1819,12 @@ fn xml_doc_escape(text: &str) -> String {
 enum RequestArgumentKind {
     Raw,
     HighLevel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::generator) struct WireValueConversion {
+    pub(in crate::generator) annotation: String,
+    pub(in crate::generator) to_wire: String,
 }
 
 fn operation_requires_high_level_request(operation: &PlannedOperation) -> bool {
@@ -2748,7 +2825,9 @@ fn render_result_helper(output: &mut String) {
 }
 
 fn operation_has_input(operation: &PlannedOperation, api_plan: &PlannedSpec) -> bool {
-    let input = operation.input_model();
+    let Some(input) = operation.input.as_ref() else {
+        return false;
+    };
     api_plan
         .records
         .get(
@@ -3102,7 +3181,7 @@ fn csharp_ident(name: &str) -> String {
     }
 }
 
-fn csharp_string_literal(value: &str) -> String {
+pub(in crate::generator) fn csharp_string_literal(value: &str) -> String {
     format!(
         "\"{}\"",
         value

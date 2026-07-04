@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="bin/**/*.cs;obj/**/*.cs;**/Support/*.cs;workflow-service/*.cs" />
+    <Compile Remove="bin/**/*.cs;obj/**/*.cs;**/Support/*.cs;workflow-service/*.cs;json_schema/definitions/**/*.cs" />
     <Compile Include="workflow-service/Support/TemporalSupport.cs" />
   </ItemGroup>
 
