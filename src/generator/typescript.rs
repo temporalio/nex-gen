@@ -5752,7 +5752,7 @@ interface example-service {
             "/**\n * @experimental This API is experimental and subject to change.\n */\nexport interface Request"
         ));
         assert!(output.contains(
-            "/**\n * @experimental This API is experimental and subject to change.\n */\nexport const ExampleService"
+            "/**\n * @experimental This API is experimental and subject to change.\n */\nexport const exampleService"
         ));
         assert!(output.contains(
             "  /**\n   * @experimental This API is experimental and subject to change.\n   */\n  requestOp:"
