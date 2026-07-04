@@ -10,7 +10,7 @@ import type { SendMessageInput, SendMessageOutput } from "../models";
  * @param endpoint - Endpoint for the service.
  * @param request - Request for the operation.
  */
-export async function sendMessage(
+export async function sendMessageRequest(
   endpoint: string,
   request: SendMessageInput,
 ): Promise<workflow.NexusOperationHandle<SendMessageOutput>> {

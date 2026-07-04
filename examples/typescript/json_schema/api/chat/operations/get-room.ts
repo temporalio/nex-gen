@@ -10,7 +10,7 @@ import type { GetRoomInput, Room } from "../models";
  * @param endpoint - Endpoint for the service.
  * @param request - Request for the operation.
  */
-export async function getRoom(
+export async function getRoomRequest(
   endpoint: string,
   request: GetRoomInput,
 ): Promise<workflow.NexusOperationHandle<Room>> {

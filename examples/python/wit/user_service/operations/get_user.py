@@ -8,26 +8,19 @@ from ..models import GetUserRequest
 from .._resources import User
 
 
-async def _get_user(
+async def get_user_request(
+    endpoint: str,
     request: GetUserRequest,
 ) -> User:
     nexus_client = temporalio.workflow.create_nexus_client(
         service="UserService",
-        endpoint="user-service",
+        endpoint=endpoint,
     )
     handle = await nexus_client.start_operation(
         operation="GetUser",
         input=request,
         output_type=User,
     )
-    return await handle
-
-
-async def get_user(
-    *,
-    user_id: str,
-) -> User:
-    request = GetUserRequest(
-        user_id=user_id,
-    )
-    return await _get_user(request)
+    resource = await handle
+    setattr(resource, "_endpoint", endpoint)
+    return resource

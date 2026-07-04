@@ -485,7 +485,7 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("SignalArgs = options.SignalArgs"));
     assert!(!rendered.contains("WorkflowNameFromRunMethod"));
     assert!(!rendered.contains("SignalNameFromMethod"));
-    assert!(rendered.contains("var protoRequest = request.ToProto();"));
+    assert!(rendered.contains("var wireRequest = request.ToProto();"));
     assert!(rendered.contains(
         "public Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest ToProto()"
     ));
@@ -494,7 +494,7 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("NexGen.Support.ProtoExtensions.ToWorkflowTypeProto(Workflow)"));
     assert!(rendered.contains("NexGen.Support.ProtoExtensions.ToTaskQueueProto(TaskQueue)"));
     assert!(rendered.contains("proto.UserMetadata = userMetadata.ToProto();"));
-    assert!(!rendered.contains("var protoRequest = ToProto(request);"));
+    assert!(!rendered.contains("var wireRequest = ToProto(request);"));
     assert!(!rendered.contains("private static Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest ToProto(SignalWithStartWorkflowRequest request)"));
     assert!(!rendered.contains("Temporalio.Api.Taskqueue.V1.TaskQueue"));
     assert!(rendered.contains("RetryPolicy = options.RetryPolicy"));

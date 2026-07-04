@@ -5,7 +5,7 @@ from __future__ import annotations
 import temporalio.workflow
 
 
-async def ping(
+async def ping_request(
     endpoint: str,
 ) -> temporalio.workflow.NexusOperationHandle[None,]:
     """Liveness probe."""

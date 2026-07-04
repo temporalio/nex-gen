@@ -10,7 +10,7 @@ from ..models import (
 )
 
 
-async def get_room(
+async def get_room_request(
     endpoint: str,
     request: GetRoomInput,
 ) -> temporalio.workflow.NexusOperationHandle[Room,]:

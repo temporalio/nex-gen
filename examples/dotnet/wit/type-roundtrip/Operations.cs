@@ -57,8 +57,8 @@ namespace NexGen.TypeRoundtripService
         private static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptions request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
-            var protoRequest = request.ToProto();
-            var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(protoRequest)).ConfigureAwait(true);
+            var wireRequest = request.ToProto();
+            var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(wireRequest)).ConfigureAwait(true);
             return result;
         }
 

@@ -66,7 +66,10 @@ pub(crate) fn planned_type_is_model_shaped(planned_type: &PlannedType) -> bool {
 pub(crate) fn operation_output_direct_result(operation: &OperationSpec<PlannedTypeFamily>) -> bool {
     matches!(
         operation.output_type(),
-        Some(TypeSpec::Resource(PlannedResourceType { proto: None, .. }))
+        Some(TypeSpec::Resource(PlannedResourceType {
+            wire_type: None,
+            ..
+        }))
     )
 }
 
@@ -164,7 +167,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
     fn map_resource(&mut self, name: crate::spec::ApiRef) -> PlannedResourceType {
         PlannedResourceType {
             type_name: name.as_str().to_upper_camel_case(),
-            proto: None,
+            wire_type: None,
         }
     }
 
@@ -623,7 +626,7 @@ impl<'a> ApiPlanner<'a> {
                 let Some(output_type) = operation.output_resource_type.as_ref() else {
                     return Ok(Some(TypeSpec::Resource(PlannedResourceType {
                         type_name: resource_name.as_str().to_upper_camel_case(),
-                        proto: None,
+                        wire_type: None,
                     })));
                 };
                 let ExternalTypeSpec::Proto(output_proto) = output_type else {
@@ -643,7 +646,7 @@ impl<'a> ApiPlanner<'a> {
                         })?;
                 Ok(Some(TypeSpec::Resource(PlannedResourceType {
                     type_name: resource_name.as_str().to_upper_camel_case(),
-                    proto: Some(Box::new(TypeSpec::External(ExternalTypeSpec::Proto(
+                    wire_type: Some(Box::new(TypeSpec::External(ExternalTypeSpec::Proto(
                         PlannedProtoType::Message(proto::planned_message_reference(
                             output_message,
                             self,
@@ -832,8 +835,8 @@ impl<'a> ApiPlanner<'a> {
                 }
             }
             TypeSpec::Resource(resource) => {
-                if let Some(proto) = resource.proto.as_deref() {
-                    self.ensure_planned_type_capabilities(proto, requested_capabilities);
+                if let Some(wire_type) = resource.wire_type.as_deref() {
+                    self.ensure_planned_type_capabilities(wire_type, requested_capabilities);
                 }
             }
             TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) => {
@@ -1065,7 +1068,7 @@ impl<'a> ApiPlanner<'a> {
                 .unwrap_or(TypeSpec::String),
             TypeSpec::Resource(resource_name) => TypeSpec::Resource(PlannedResourceType {
                 type_name: resource_name.as_str().to_upper_camel_case(),
-                proto: None,
+                wire_type: None,
             }),
             TypeSpec::Option(inner) => {
                 self.planned_value_type_from_authored(inner.without_option())
@@ -1341,7 +1344,7 @@ pub(crate) struct PlannedRecordType {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlannedResourceType {
     pub(crate) type_name: String,
-    pub(crate) proto: Option<Box<PlannedType>>,
+    pub(crate) wire_type: Option<Box<PlannedType>>,
 }
 
 impl PlannedType {
@@ -1350,7 +1353,10 @@ impl PlannedType {
             TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
             | TypeSpec::External(ExternalTypeSpec::Json(_))
             | TypeSpec::Record(_) => Some(self),
-            TypeSpec::Resource(resource) => resource.proto.as_ref().map(|proto| proto.as_ref()),
+            TypeSpec::Resource(resource) => resource
+                .wire_type
+                .as_ref()
+                .map(|wire_type| wire_type.as_ref()),
             _ => None,
         }
     }

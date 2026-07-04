@@ -8,10 +8,11 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 use crate::generator::python::{
-    RenderedModelFragments, python_field_name, python_string_literal, render_python_docstring,
+    PythonImports, RenderedModelFragments, WireValueConversion, python_field_name,
+    python_string_literal, render_python_docstring,
 };
-use crate::planning::{PlannedJsonType, PlannedSpec};
-use crate::spec::ExternalTypeSpec;
+use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
+use crate::spec::{ExternalTypeSpec, RecordSpec};
 
 #[derive(Debug, Deserialize, Default)]
 struct Schema {
@@ -38,18 +39,59 @@ pub(in crate::generator) fn model_type_ref(json_type: &PlannedJsonType) -> Strin
     json_type.model_name.clone()
 }
 
-pub(in crate::generator) fn render_external_models(
-    api_plan: &PlannedSpec,
-) -> Result<RenderedModelFragments> {
-    let json_models = api_plan
-        .external_types
-        .values()
-        .filter_map(|binding| match &binding.external_type {
-            ExternalTypeSpec::Json(json_type) => Some(json_type),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+#[derive(Debug, Default)]
+pub(in crate::generator) struct ModelBackend {
+    json_models: Vec<PlannedJsonType>,
+}
 
+impl ModelBackend {
+    pub(in crate::generator) fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+        self.json_models = api_plan
+            .external_types
+            .values()
+            .filter_map(|binding| match &binding.external_type {
+                ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
+                _ => None,
+            })
+            .collect();
+        Ok(())
+    }
+
+    pub(in crate::generator) fn render_models(&self) -> Result<RenderedModelFragments> {
+        let json_models = self.json_models.iter().collect::<Vec<_>>();
+        render_external_models(json_models.as_slice())
+    }
+
+    pub(in crate::generator) fn model_type_annotation(
+        &self,
+        json_type: &PlannedJsonType,
+    ) -> Option<String> {
+        Some(model_type_ref(json_type))
+    }
+
+    pub(in crate::generator) fn wire_type_identifier(
+        &self,
+        json_type: &PlannedJsonType,
+    ) -> Option<String> {
+        Some(json_type.full_name.clone())
+    }
+
+    pub(in crate::generator) fn wire_conversion(
+        &self,
+        json_type: &PlannedJsonType,
+        _planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+    ) -> Option<WireValueConversion> {
+        Some(WireValueConversion {
+            annotation: model_type_ref(json_type),
+            from_wire: "{wire}".to_string(),
+            to_wire: "{value}".to_string(),
+            imports: PythonImports::default(),
+            supports_unpacked_input: false,
+        })
+    }
+}
+
+fn render_external_models(json_models: &[&PlannedJsonType]) -> Result<RenderedModelFragments> {
     if json_models.is_empty() {
         return Ok(RenderedModelFragments::default());
     }

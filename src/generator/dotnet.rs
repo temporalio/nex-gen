@@ -6,7 +6,7 @@ use heck::{ToLowerCamelCase, ToUpperCamelCase};
 use crate::error::{Error, Result};
 use crate::generator::json::dotnet as dotnet_json;
 use crate::generator::proto::dotnet as dotnet_proto;
-use crate::generator::{GeneratedFiles, GenerationMode, ModelBackend};
+use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
     PlannedOperationResourceFieldBinding, PlannedProtoType, PlannedResource, PlannedResourceMethod,
@@ -196,11 +196,18 @@ impl<'a> ApiPlanner<'a> {
             .operations_class
             .for_language(Language::Dotnet)
             .is_some();
+        if service.endpoint.is_none() {
+            self.render_endpoint_service_class(output, service, &service_type);
+        }
         if !explicit_operations_class {
             output.push_str(GENERATED_CODE_ATTRIBUTE);
             output.push('\n');
         }
-        output.push_str("public static ");
+        if service.endpoint.is_none() {
+            output.push_str("internal static ");
+        } else {
+            output.push_str("public static ");
+        }
         if explicit_operations_class {
             output.push_str("partial ");
         }
@@ -225,6 +232,30 @@ impl<'a> ApiPlanner<'a> {
                 &service_endpoint_constant_name(service),
                 service.endpoint.is_none(),
             );
+        }
+        output.push_str("}\n\n");
+    }
+
+    fn render_endpoint_service_class(
+        &self,
+        output: &mut String,
+        service: &PlannedService,
+        service_type: &str,
+    ) {
+        let service_class_name = csharp_type_name(&service.name);
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push('\n');
+        output.push_str("public class ");
+        output.push_str(&service_class_name);
+        output.push_str("\n{\n");
+        output.push_str("    private readonly string _endpoint;\n\n");
+        output.push_str("    public ");
+        output.push_str(&service_class_name);
+        output.push_str("(string endpoint)\n    {\n");
+        output.push_str("        _endpoint = endpoint;\n");
+        output.push_str("    }\n\n");
+        for operation in &service.operations {
+            self.render_endpoint_service_operation(output, operation, service_type);
         }
         output.push_str("}\n\n");
     }
@@ -267,6 +298,24 @@ impl<'a> ApiPlanner<'a> {
             output.push(' ');
             output.push_str(&csharp_type_name(&field.name));
             output.push_str(" { get; }\n");
+        }
+        if service.endpoint.is_none() {
+            output.push_str("\n    internal string? NexGenEndpoint { get; set; }\n");
+            output.push_str("\n    internal static ");
+            output.push_str(&type_name);
+            output.push_str(" BindEndpoint(");
+            output.push_str(&type_name);
+            output.push_str(" resource, string endpoint)\n    {\n");
+            output.push_str("        resource.NexGenEndpoint = endpoint;\n");
+            output.push_str("        return resource;\n");
+            output.push_str("    }\n");
+            output.push_str("\n    private string RequireNexGenEndpoint()\n    {\n");
+            output.push_str(
+                "        return NexGenEndpoint ?? throw new InvalidOperationException(\"",
+            );
+            output.push_str(&type_name);
+            output.push_str(" methods require a service endpoint.\");\n");
+            output.push_str("    }\n");
         }
         if !resource.fields.is_empty() && !resource.methods.is_empty() {
             output.push('\n');
@@ -324,6 +373,10 @@ impl<'a> ApiPlanner<'a> {
                     operation,
                     request_plan,
                     self.api_plan,
+                    service
+                        .endpoint
+                        .is_none()
+                        .then_some("RequireNexGenEndpoint()"),
                 );
                 output.push_str("    }\n\n");
             }
@@ -472,8 +525,126 @@ impl<'a> ApiPlanner<'a> {
                 model,
                 &raw_return,
                 &high_level_return,
+                endpoint_parameter,
+                None,
+                endpoint_parameter.then_some("endpoint"),
             );
         }
+    }
+
+    fn render_endpoint_service_operation(
+        &self,
+        output: &mut String,
+        operation: &PlannedOperation,
+        service_type: &str,
+    ) {
+        let method_name = format!("{}Async", csharp_type_name(&operation.name));
+        let raw_return = self.operation_raw_return_type(operation);
+        let high_level_return = self.operation_return_type(operation);
+        let has_input = self.operation_has_input(operation);
+        let raw_input_type = has_input
+            .then(|| self.operation_raw_input_type(operation.input_model()))
+            .unwrap_or_default();
+        let high_level_input_type = has_input
+            .then(|| self.operation_input_type(operation.input_model()))
+            .unwrap_or_default();
+
+        if high_level_input_type == raw_input_type
+            || !operation_requires_high_level_request(operation)
+        {
+            self.render_endpoint_service_request_method(
+                output,
+                operation,
+                service_type,
+                &method_name,
+                has_input,
+                &raw_input_type,
+                &raw_return,
+                &high_level_return,
+                RequestArgumentKind::Raw,
+            );
+        }
+
+        if has_input && high_level_input_type != raw_input_type {
+            self.render_endpoint_service_request_method(
+                output,
+                operation,
+                service_type,
+                &method_name,
+                has_input,
+                &high_level_input_type,
+                &raw_return,
+                &high_level_return,
+                RequestArgumentKind::HighLevel,
+            );
+        }
+
+        if has_input
+            && let Some(model) = self.api_plan.records.get(
+                operation
+                    .input_model()
+                    .model_full_name()
+                    .expect("operation input should be a model"),
+            )
+            && operation_has_flattened_convenience(operation, model, self.api_plan)
+        {
+            self.render_operation_flattened_extension(
+                output,
+                operation,
+                &method_name,
+                model,
+                &raw_return,
+                &high_level_return,
+                false,
+                Some("Operations"),
+                Some("_endpoint"),
+            );
+        }
+    }
+
+    fn render_endpoint_service_request_method(
+        &self,
+        output: &mut String,
+        operation: &PlannedOperation,
+        _service_type: &str,
+        method_name: &str,
+        has_input: bool,
+        input_type: &str,
+        raw_return: &str,
+        high_level_return: &str,
+        request_kind: RequestArgumentKind,
+    ) {
+        if self.operation_request_method_access(operation, request_kind) != "public" {
+            return;
+        }
+
+        render_operation_xml_doc(output, "    ", operation, self.api_plan, false);
+        output.push_str("    ");
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push('\n');
+        output.push_str("    public ");
+        if raw_return == "void" {
+            output.push_str("Task ");
+        } else {
+            output.push_str("Task<");
+            output.push_str(high_level_return);
+            output.push_str("> ");
+        }
+        output.push_str(method_name);
+        output.push('(');
+        if has_input {
+            output.push_str(input_type);
+            output.push_str(" request");
+        }
+        output.push_str(")\n    {\n");
+        output.push_str("        return Operations.");
+        output.push_str(method_name);
+        output.push_str("(_endpoint");
+        if has_input {
+            output.push_str(", request");
+        }
+        output.push_str(");\n");
+        output.push_str("    }\n\n");
     }
 
     fn render_model_constructor(
@@ -533,7 +704,12 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("    ");
-        output.push_str(self.operation_request_method_access(operation, request_kind));
+        let access = self.operation_request_method_access(operation, request_kind);
+        if endpoint_parameter && access == "private" {
+            output.push_str("internal");
+        } else {
+            output.push_str(access);
+        }
         output.push_str(" static ");
         if raw_return == "void" {
             output.push_str("async Task ");
@@ -565,7 +741,9 @@ impl<'a> ApiPlanner<'a> {
         }
         output.push_str(");\n");
         if matches!(request_kind, RequestArgumentKind::HighLevel) {
-            output.push_str("        var protoRequest = request.ToProto();\n");
+            output.push_str("        var wireRequest = ");
+            output.push_str(&self.operation_request_wire_expr(operation, "request"));
+            output.push_str(";\n");
         }
         if raw_return == "void" {
             output.push_str("        await client.ExecuteNexusOperationAsync(svc => svc.");
@@ -578,7 +756,7 @@ impl<'a> ApiPlanner<'a> {
         output.push('(');
         if has_input {
             if matches!(request_kind, RequestArgumentKind::HighLevel) {
-                output.push_str("protoRequest");
+                output.push_str("wireRequest");
             } else {
                 output.push_str("request");
             }
@@ -590,19 +768,60 @@ impl<'a> ApiPlanner<'a> {
             return;
         }
         if operation.output_transform.is_some() || operation.data.output_resource_return.is_some() {
-            output.push_str("        return ");
-            output.push_str(&operation_transform_expression(
+            let expression = operation_transform_expression(
                 operation,
                 "request",
-                "protoRequest",
+                "wireRequest",
                 "result",
                 self.api_plan,
-            ));
+            );
+            output.push_str("        return ");
+            if endpoint_parameter && let Some(resource) = &operation.data.output_resource_return {
+                output.push_str(&csharp_type_name(&resource.resource_type_name));
+                output.push_str(".BindEndpoint(");
+                output.push_str(&expression);
+                output.push_str(", endpoint)");
+            } else {
+                output.push_str(&expression);
+            }
             output.push_str(";\n");
         } else {
-            output.push_str("        return result;\n");
+            if endpoint_parameter
+                && let Some(resource_type_name) =
+                    self.resource_type_name_for_return_type(high_level_return)
+            {
+                output.push_str("        return ");
+                output.push_str(&resource_type_name);
+                output.push_str(".BindEndpoint(result, endpoint);\n");
+            } else {
+                output.push_str("        return result;\n");
+            }
         }
         output.push_str("    }\n\n");
+    }
+
+    fn resource_type_name_for_return_type(&self, return_type: &str) -> Option<String> {
+        self.api_plan
+            .services
+            .iter()
+            .flat_map(|service| service.resources.iter().map(|resource| &resource.data))
+            .map(|resource| csharp_type_name(&resource.type_name))
+            .find(|resource_type_name| resource_type_name == return_type)
+    }
+
+    fn operation_request_wire_expr(
+        &self,
+        operation: &PlannedOperation,
+        request_expr: &str,
+    ) -> String {
+        let model_type = operation.input_model();
+        let planned_record = model_type
+            .model_full_name()
+            .and_then(|full_name| self.api_plan.records.get(full_name));
+        self.external_models
+            .wire_conversion(model_type, planned_record)
+            .map(|conversion| conversion.to_wire_expr(request_expr))
+            .unwrap_or_else(|| request_expr.to_string())
     }
 
     fn operation_request_method_access(
@@ -791,12 +1010,12 @@ impl<'a> ApiPlanner<'a> {
                     })
             }
             Some(PlannedType::Resource(resource)) => resource
-                .proto
+                .wire_type
                 .as_deref()
-                .map(|proto| {
+                .map(|wire_type| {
                     self.external_models
-                        .model_type_annotation(proto)
-                        .unwrap_or_else(|| dotnet_proto::dotnet_message_type(proto))
+                        .model_type_annotation(wire_type)
+                        .expect("resource wire output should have a .NET type annotation")
                 })
                 .unwrap_or_else(|| csharp_type_name(&resource.type_name)),
             None => "void".to_string(),
@@ -822,7 +1041,11 @@ impl<'a> ApiPlanner<'a> {
         field: &RecordFieldSpec<PlannedTypeFamily>,
     ) -> String {
         if model.function_for_args_field(field_name).is_some()
-            && let Some(base) = function_args_parameter_type(model, field_name, field)
+            && let Some(base) = function_args_parameter_type(
+                model,
+                field_name,
+                self.external_models.function_args_authored_type(field),
+            )
         {
             return if field.required {
                 base
@@ -977,8 +1200,12 @@ impl<'a> ApiPlanner<'a> {
             return function_expression_type(function);
         }
         if model.function_for_args_field(field_name).is_some() {
-            let base = function_args_parameter_type(model, field_name, field)
-                .unwrap_or_else(|| self.dotnet_field_kind_type(&field.field_type));
+            let base = function_args_parameter_type(
+                model,
+                field_name,
+                self.external_models.function_args_authored_type(field),
+            )
+            .unwrap_or_else(|| self.dotnet_field_kind_type(&field.field_type));
             return if field.required {
                 base
             } else {
@@ -1090,6 +1317,9 @@ impl<'a> ApiPlanner<'a> {
         model: &PlannedModel,
         raw_return: &str,
         high_level_return: &str,
+        endpoint_parameter: bool,
+        operation_call_target: Option<&str>,
+        endpoint_expr: Option<&str>,
     ) {
         for overload in flattened_overloads(model) {
             self.render_operation_flattened_overload(
@@ -1100,6 +1330,9 @@ impl<'a> ApiPlanner<'a> {
                 raw_return,
                 high_level_return,
                 &overload,
+                endpoint_parameter,
+                operation_call_target,
+                endpoint_expr,
             );
         }
     }
@@ -1113,6 +1346,9 @@ impl<'a> ApiPlanner<'a> {
         raw_return: &str,
         high_level_return: &str,
         overload: &FlattenedOverload,
+        endpoint_parameter: bool,
+        operation_call_target: Option<&str>,
+        endpoint_expr: Option<&str>,
     ) {
         self.render_flattened_method_signature(
             output,
@@ -1122,6 +1358,8 @@ impl<'a> ApiPlanner<'a> {
             high_level_return,
             model,
             overload,
+            endpoint_parameter,
+            operation_call_target.is_some(),
         );
         render_flattened_method_body(
             output,
@@ -1130,6 +1368,8 @@ impl<'a> ApiPlanner<'a> {
             self.api_plan,
             overload,
             self.support_namespace,
+            operation_call_target,
+            endpoint_expr,
         );
     }
 
@@ -1142,6 +1382,8 @@ impl<'a> ApiPlanner<'a> {
         high_level_return: &str,
         model: &PlannedModel,
         overload: &FlattenedOverload,
+        endpoint_parameter: bool,
+        instance_method: bool,
     ) {
         render_operation_flattened_xml_doc(
             output,
@@ -1154,7 +1396,10 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
-        output.push_str("    public static ");
+        output.push_str("    public ");
+        if !instance_method {
+            output.push_str("static ");
+        }
         if raw_return == "void" {
             output.push_str("Task ");
         } else {
@@ -1166,6 +1411,10 @@ impl<'a> ApiPlanner<'a> {
         render_flattened_generic_parameters(output, model, overload);
         output.push('(');
         let mut has_parameters = false;
+        if endpoint_parameter {
+            output.push_str("string endpoint");
+            has_parameters = true;
+        }
         self.render_flattened_parameters(output, model, overload, &mut has_parameters);
         if model_has_options_fields(model, self.api_plan) {
             render_parameter_separator(output, &mut has_parameters);
@@ -1292,6 +1541,18 @@ impl DotNetExternalModels {
         self.proto.model_uses_support_extensions(model, api_plan)
     }
 
+    fn function_args_authored_type<'b>(
+        &self,
+        field: &'b RecordFieldSpec<PlannedTypeFamily>,
+    ) -> Option<&'b PlannedType> {
+        match &field.field_type {
+            PlannedType::External(ExternalTypeSpec::Proto(_)) => {
+                self.proto.function_args_authored_type(field)
+            }
+            _ => None,
+        }
+    }
+
     fn public_model_type(&self, model_type: &PlannedType, api_plan: &PlannedSpec) -> String {
         if model_type
             .proto_message()
@@ -1309,8 +1570,13 @@ impl DotNetExternalModels {
                     .expect("model-shaped type should have a model name"),
             );
         }
-        self.model_type_annotation(model_type)
-            .unwrap_or_else(|| dotnet_proto::dotnet_message_type(model_type))
+        self.model_type_annotation(model_type).unwrap_or_else(|| {
+            csharp_type_name(
+                model_type
+                    .model_name()
+                    .expect("model-shaped type should have a model name"),
+            )
+        })
     }
 
     fn wire_model_type(&self, model_type: &PlannedType, api_plan: &PlannedSpec) -> String {
@@ -1343,11 +1609,42 @@ impl DotNetExternalModels {
             _ => None,
         }
     }
+
+    fn support_references(&self, value: &PlannedType) -> Vec<String> {
+        match value {
+            PlannedType::External(ExternalTypeSpec::Proto(_)) | PlannedType::Record(_) => {
+                self.proto.support_references(value)
+            }
+            PlannedType::External(ExternalTypeSpec::Json(_)) => Vec::new(),
+            PlannedType::External(ExternalTypeSpec::Alias {
+                target: fallback, ..
+            }) => self.support_references(fallback),
+            PlannedType::Option(inner) | PlannedType::List(inner) => self.support_references(inner),
+            PlannedType::Map(key, value) => {
+                let mut references = self.support_references(key);
+                references.extend(self.support_references(value));
+                references
+            }
+            PlannedType::Tuple(items) => items
+                .iter()
+                .flat_map(|item| self.support_references(item))
+                .collect(),
+            PlannedType::Result { ok, err } => {
+                let mut references = ok
+                    .as_deref()
+                    .map(|ok| self.support_references(ok))
+                    .unwrap_or_default();
+                if let Some(err) = err {
+                    references.extend(self.support_references(err));
+                }
+                references
+            }
+            _ => Vec::new(),
+        }
+    }
 }
 
-impl ModelBackend for DotNetExternalModels {
-    type TypeRef = PlannedType;
-    type WireType = PlannedType;
+impl ExternalModelBackend for DotNetExternalModels {
     type ModelFragments = DotNetExternalModelFragments;
     type WireConversion = WireValueConversion;
 
@@ -1408,8 +1705,12 @@ pub(crate) fn generate(
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     let support_namespace = dotnet_support_namespace(support_fragments)?;
-    validate_dotnet_support_references(api_plan, support_namespace.as_deref())?;
     let generator = ApiPlanner::new(api_plan, support_namespace.as_deref())?;
+    validate_dotnet_support_references(
+        api_plan,
+        &generator.external_models,
+        support_namespace.as_deref(),
+    )?;
     let namespace = dotnet_namespace(api_plan);
     let mut files = BTreeMap::<PathBuf, String>::new();
     files.insert("Models.cs".into(), generator.render_models_file(&namespace));
@@ -1477,6 +1778,7 @@ fn dotnet_support_namespace(support_fragments: &[SupportFragmentSpec]) -> Result
 
 fn validate_dotnet_support_references(
     api_plan: &PlannedSpec,
+    external_models: &DotNetExternalModels,
     support_namespace: Option<&str>,
 ) -> Result<()> {
     for model in api_plan.records.values() {
@@ -1486,6 +1788,7 @@ fn validate_dotnet_support_references(
             }
             validate_dotnet_field_kind_support_references(
                 &sourced_field.field_type,
+                external_models,
                 support_namespace,
             )?;
         }
@@ -1504,10 +1807,11 @@ fn validate_dotnet_support_references(
             {
                 validate_dotnet_support_reference(extractor, support_namespace)?;
             }
-            if let Some(reference) = function_args_to_proto_converter(field) {
-                validate_dotnet_support_reference(reference, support_namespace)?;
-            }
-            validate_dotnet_field_kind_support_references(&field.field_type, support_namespace)?;
+            validate_dotnet_field_kind_support_references(
+                &field.field_type,
+                external_models,
+                support_namespace,
+            )?;
         }
     }
     Ok(())
@@ -1515,51 +1819,30 @@ fn validate_dotnet_support_references(
 
 fn validate_dotnet_field_kind_support_references(
     kind: &PlannedType,
+    external_models: &DotNetExternalModels,
     support_namespace: Option<&str>,
 ) -> Result<()> {
     match kind {
         PlannedType::List(value) => {
-            validate_dotnet_value_support_references(value, support_namespace)
+            validate_dotnet_value_support_references(value, external_models, support_namespace)
         }
         PlannedType::Map(key, value) => {
-            validate_dotnet_value_support_references(key, support_namespace)?;
-            validate_dotnet_value_support_references(value, support_namespace)
+            validate_dotnet_value_support_references(key, external_models, support_namespace)?;
+            validate_dotnet_value_support_references(value, external_models, support_namespace)
         }
-        value => validate_dotnet_value_support_references(value, support_namespace),
+        value => {
+            validate_dotnet_value_support_references(value, external_models, support_namespace)
+        }
     }
 }
 
 fn validate_dotnet_value_support_references(
     value: &PlannedType,
+    external_models: &DotNetExternalModels,
     support_namespace: Option<&str>,
 ) -> Result<()> {
-    match value {
-        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
-        | PlannedType::Record(_) => {
-            if let Some(reference) = dotnet_proto::dotnet_to_proto_converter(value) {
-                validate_dotnet_support_reference(reference, support_namespace)?;
-            }
-        }
-        PlannedType::Resource(_) => {}
-        PlannedType::External(ExternalTypeSpec::Alias {
-            target: fallback, ..
-        }) => {
-            validate_dotnet_value_support_references(fallback, support_namespace)?;
-        }
-        PlannedType::Tuple(items) => {
-            for item in items {
-                validate_dotnet_value_support_references(item, support_namespace)?;
-            }
-        }
-        PlannedType::Result { ok, err } => {
-            if let Some(ok) = ok {
-                validate_dotnet_value_support_references(ok, support_namespace)?;
-            }
-            if let Some(err) = err {
-                validate_dotnet_value_support_references(err, support_namespace)?;
-            }
-        }
-        _ => {}
+    for reference in external_models.support_references(value) {
+        validate_dotnet_support_reference(&reference, support_namespace)?;
     }
     Ok(())
 }
@@ -1828,6 +2111,12 @@ pub(in crate::generator) struct WireValueConversion {
     pub(in crate::generator) to_wire: String,
 }
 
+impl WireValueConversion {
+    fn to_wire_expr(&self, value_expr: &str) -> String {
+        self.to_wire.replace("{value}", value_expr)
+    }
+}
+
 fn operation_requires_high_level_request(operation: &PlannedOperation) -> bool {
     operation.output_transform.is_some() || operation.data.output_resource_return.is_some()
 }
@@ -2041,6 +2330,8 @@ fn render_flattened_method_body(
     api_plan: &PlannedSpec,
     overload: &FlattenedOverload,
     support_namespace: Option<&str>,
+    operation_call_target: Option<&str>,
+    endpoint_expr: Option<&str>,
 ) {
     let options_required = model_options_required(model, api_plan);
     for (field_name, field) in model.public_fields() {
@@ -2115,8 +2406,17 @@ fn render_flattened_method_body(
         output.push_str("        };\n");
     }
     output.push_str("        return ");
+    if let Some(operation_call_target) = operation_call_target {
+        output.push_str(operation_call_target);
+        output.push('.');
+    }
     output.push_str(&csharp_type_name(&operation.name));
-    output.push_str("Async(request);\n");
+    output.push_str("Async(");
+    if let Some(endpoint_expr) = endpoint_expr {
+        output.push_str(endpoint_expr);
+        output.push_str(", ");
+    }
+    output.push_str("request);\n");
     output.push_str("    }\n\n");
 }
 
@@ -2586,6 +2886,7 @@ fn render_resource_method_operation_body(
     operation: &PlannedOperation,
     request_plan: &RequestPlan,
     api_plan: &PlannedSpec,
+    endpoint_expr: Option<&str>,
 ) {
     let operation_method_name = format!("{}Async", csharp_type_name(&operation.name));
     let operation_class_name = dotnet_operations_class_name(service);
@@ -2601,6 +2902,12 @@ fn render_resource_method_operation_body(
     output.push('.');
     output.push_str(&operation_method_name);
     output.push('(');
+    if let Some(endpoint_expr) = endpoint_expr {
+        output.push_str(endpoint_expr);
+        if !args.is_empty() {
+            output.push_str(", ");
+        }
+    }
     if args.len() == 1 {
         output.push_str("request");
     } else {
@@ -2848,7 +3155,7 @@ fn operation_has_input(operation: &PlannedOperation, api_plan: &PlannedSpec) -> 
 fn operation_transform_expression(
     operation: &PlannedOperation,
     request_expr: &str,
-    request_proto_expr: &str,
+    request_wire_expr: &str,
     result_expr: &str,
     api_plan: &PlannedSpec,
 ) -> String {
@@ -2868,7 +3175,7 @@ fn operation_transform_expression(
                     resource,
                     binding,
                     request_expr,
-                    request_proto_expr,
+                    request_wire_expr,
                     result_expr,
                     api_plan,
                 )
@@ -2887,30 +3194,28 @@ fn resource_return_binding_expr(
     resource: &crate::planning::PlannedOperationResourceReturn,
     binding: &PlannedOperationResourceFieldBinding,
     request_expr: &str,
-    request_proto_expr: &str,
+    request_wire_expr: &str,
     result_expr: &str,
     api_plan: &PlannedSpec,
 ) -> String {
     match &binding.source {
         ResolvedResourceBindingSource::RequestField {
             field_name,
-            proto_field_name,
+            proto_field_name: wire_field_name,
             hidden,
         } => {
             if *hidden {
-                let expr = format!(
-                    "{request_proto_expr}.{}",
-                    csharp_type_name(proto_field_name)
-                );
+                let expr = format!("{request_wire_expr}.{}", csharp_type_name(wire_field_name));
                 optional_resource_binding_expr(resource, binding, expr, api_plan)
             } else {
                 format!("{request_expr}.{}", csharp_type_name(field_name))
             }
         }
         ResolvedResourceBindingSource::ResultField {
-            proto_field_name, ..
+            proto_field_name: wire_field_name,
+            ..
         } => {
-            let expr = format!("{result_expr}.{}", csharp_type_name(proto_field_name));
+            let expr = format!("{result_expr}.{}", csharp_type_name(wire_field_name));
             optional_resource_binding_expr(resource, binding, expr, api_plan)
         }
     }
@@ -2958,25 +3263,14 @@ fn resource_field_is_string(
 pub(in crate::generator) fn function_args_parameter_type(
     model: &PlannedModel,
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    authored_type_override: Option<&PlannedType>,
 ) -> Option<String> {
     if let Some(field_type) = model.field_type(field_name)
         && !authored_type_is_direct_reference(field_type.without_option())
     {
         return Some(dotnet_function_args_wit_type(field_type));
     }
-    function_args_proto_authored_type(field).map(dotnet_function_args_wit_type)
-}
-
-fn function_args_proto_authored_type(
-    field: &RecordFieldSpec<PlannedTypeFamily>,
-) -> Option<&PlannedType> {
-    match &field.field_type {
-        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
-            proto.authored_type.as_deref()
-        }
-        _ => None,
-    }
+    authored_type_override.map(dotnet_function_args_wit_type)
 }
 
 fn authored_type_is_direct_reference(authored_type: &PlannedType) -> bool {
@@ -3052,15 +3346,6 @@ fn dotnet_authored_type(wit_type: &PlannedType) -> String {
             .for_language(Language::Dotnet)
             .map(str::to_string)
             .unwrap_or_else(|| dotnet_authored_type(target)),
-    }
-}
-
-fn function_args_to_proto_converter(field: &RecordFieldSpec<PlannedTypeFamily>) -> Option<&str> {
-    match &field.field_type {
-        model_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
-            _,
-        ))) => dotnet_proto::dotnet_to_proto_converter(model_type),
-        _ => None,
     }
 }
 

@@ -18,7 +18,46 @@ namespace NexGen.ChatService
 {
 
     [GeneratedCode("nex-gen", null)]
-    public static class Operations
+    public class ChatService
+    {
+        private readonly string _endpoint;
+
+        public ChatService(string endpoint)
+        {
+            _endpoint = endpoint;
+        }
+
+        /// <summary>
+        /// Post a message to a room.
+        /// </summary>
+        [GeneratedCode("nex-gen", null)]
+        public Task<SendMessageOutput> SendMessageAsync(SendMessageInput request)
+        {
+            return Operations.SendMessageAsync(_endpoint, request);
+        }
+
+        /// <summary>
+        /// Look up a room by id.
+        /// </summary>
+        [GeneratedCode("nex-gen", null)]
+        public Task<Room> GetRoomAsync(GetRoomInput request)
+        {
+            return Operations.GetRoomAsync(_endpoint, request);
+        }
+
+        /// <summary>
+        /// Liveness probe.
+        /// </summary>
+        [GeneratedCode("nex-gen", null)]
+        public Task PingAsync()
+        {
+            return Operations.PingAsync(_endpoint);
+        }
+
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    internal static class Operations
     {
         /// <summary>
         /// Post a message to a room.

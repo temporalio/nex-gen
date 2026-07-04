@@ -10,7 +10,7 @@ from ..models import (
 )
 
 
-async def send_message(
+async def send_message_request(
     endpoint: str,
     request: SendMessageInput,
 ) -> temporalio.workflow.NexusOperationHandle[SendMessageOutput,]:

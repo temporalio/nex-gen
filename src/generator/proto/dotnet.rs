@@ -1,5 +1,4 @@
 use crate::error::Result;
-use crate::generator::ModelBackend as _;
 use crate::generator::dotnet::{
     WireValueConversion, csharp_parameter_name, csharp_type_name, field_property_name,
     function_args_parameter_type, qualify_dotnet_support_call, qualify_dotnet_support_reference,
@@ -14,21 +13,19 @@ use crate::spec::{ExternalTypeSpec, RecordFieldSpec, RecordSpec, TypeReplacement
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend;
 
-impl crate::generator::ModelBackend for ModelBackend {
-    type TypeRef = PlannedProtoType;
-    type WireType = PlannedType;
-    type ModelFragments = ();
-    type WireConversion = WireValueConversion;
-
-    fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
+impl ModelBackend {
+    pub(in crate::generator) fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
         Ok(())
     }
 
-    fn render_models(&self) -> Result<()> {
+    pub(in crate::generator) fn render_models(&self) -> Result<()> {
         Ok(())
     }
 
-    fn model_type_annotation(&self, proto_type: &PlannedProtoType) -> Option<String> {
+    pub(in crate::generator) fn model_type_annotation(
+        &self,
+        proto_type: &PlannedProtoType,
+    ) -> Option<String> {
         Some(match proto_type {
             PlannedProtoType::Message(message) => dotnet_message_type_for_proto_message(message),
             PlannedProtoType::Enum(enumeration) => enumeration
@@ -41,14 +38,17 @@ impl crate::generator::ModelBackend for ModelBackend {
         })
     }
 
-    fn wire_type_identifier(&self, proto_type: &PlannedProtoType) -> Option<String> {
+    pub(in crate::generator) fn wire_type_identifier(
+        &self,
+        proto_type: &PlannedProtoType,
+    ) -> Option<String> {
         match proto_type {
             PlannedProtoType::Message(message) => Some(message.proto.full_name.clone()),
             PlannedProtoType::Enum(_) => None,
         }
     }
 
-    fn wire_conversion(
+    pub(in crate::generator) fn wire_conversion(
         &self,
         model_type: &PlannedType,
         planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
@@ -71,6 +71,53 @@ impl crate::generator::ModelBackend for ModelBackend {
                 None,
             ),
         })
+    }
+
+    pub(in crate::generator) fn support_references(&self, value: &PlannedType) -> Vec<String> {
+        match value {
+            model_type @ PlannedType::External(ExternalTypeSpec::Proto(
+                PlannedProtoType::Message(_),
+            )) => dotnet_to_proto_converter(model_type)
+                .map(|reference| vec![reference.to_string()])
+                .unwrap_or_default(),
+            PlannedType::Record(_) | PlannedType::Resource(_) => Vec::new(),
+            PlannedType::External(ExternalTypeSpec::Alias {
+                target: fallback, ..
+            }) => self.support_references(fallback),
+            PlannedType::Option(inner) | PlannedType::List(inner) => self.support_references(inner),
+            PlannedType::Map(key, value) => {
+                let mut references = self.support_references(key);
+                references.extend(self.support_references(value));
+                references
+            }
+            PlannedType::Tuple(items) => items
+                .iter()
+                .flat_map(|item| self.support_references(item))
+                .collect(),
+            PlannedType::Result { ok, err } => {
+                let mut references = ok
+                    .as_deref()
+                    .map(|ok| self.support_references(ok))
+                    .unwrap_or_default();
+                if let Some(err) = err {
+                    references.extend(self.support_references(err));
+                }
+                references
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub(in crate::generator) fn function_args_authored_type<'a>(
+        &self,
+        field: &'a RecordFieldSpec<PlannedTypeFamily>,
+    ) -> Option<&'a PlannedType> {
+        match &field.field_type {
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
+                proto.authored_type.as_deref()
+            }
+            _ => None,
+        }
     }
 }
 
@@ -468,7 +515,12 @@ fn function_args_field_uses_logical_storage(
 ) -> bool {
     model.function_for_args_field(field_name).is_some()
         && function_args_field_stores_proto(field)
-        && function_args_parameter_type(model, field_name, field).is_some()
+        && function_args_parameter_type(
+            model,
+            field_name,
+            ModelBackend.function_args_authored_type(field),
+        )
+        .is_some()
 }
 
 fn function_args_field_stores_proto(field: &RecordFieldSpec<PlannedTypeFamily>) -> bool {

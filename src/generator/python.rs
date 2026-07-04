@@ -7,7 +7,9 @@ use indexmap::IndexMap;
 use crate::error::{Error, Result};
 use crate::generator::json::python as python_json;
 use crate::generator::proto::python as python_proto;
-use crate::generator::{GeneratedFiles, GenerationMode, ModelWireCapabilities};
+use crate::generator::{
+    ExternalModelBackend, GeneratedFiles, GenerationMode, ModelWireCapabilities,
+};
 use crate::language::Language;
 use crate::planning::{
     PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedProtoType,
@@ -32,89 +34,1416 @@ pub(crate) fn generate(
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     reject_support_namespaces(Language::Python, support_fragments)?;
-    let language_imports = collect_python_language_imports(api_plan);
-    let mut enums = IndexMap::new();
-    let mut flags = IndexMap::new();
-    let mut variants = IndexMap::new();
-    let mut models = IndexMap::new();
-    let services = api_plan
-        .services
-        .iter()
-        .map(|service| {
-            let operations = service
-                .operations
-                .iter()
-                .map(|operation| {
-                    resolve_operation(
-                        operation,
-                        api_plan,
-                        &mut enums,
-                        &mut flags,
-                        &mut variants,
-                        &mut models,
-                    )
-                })
-                .collect::<Result<Vec<_>>>()?;
+    ApiPlanner::new(api_plan)?.build(support_fragments, mode)
+}
 
-            Ok(RenderedService {
-                name: &service.name,
-                wire_name: &service.wire_name,
-                doc: service
-                    .doc
-                    .for_language(Language::Python)
-                    .map(str::to_string),
-                endpoint: service.data.endpoint.clone(),
-                experimental: service.experimental,
-                delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
-                operations,
-                resources: service
-                    .resources
-                    .iter()
-                    .map(|resource| resource.data.clone())
-                    .collect(),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+struct ApiPlanner<'a> {
+    api_plan: &'a PlannedSpec,
+    external_models: PythonExternalModels,
+    language_imports: Vec<LanguageImportSpec>,
+    enums: IndexMap<String, RenderedEnum>,
+    flags: IndexMap<String, RenderedFlags>,
+    variants: IndexMap<String, RenderedVariant>,
+    models: IndexMap<String, RenderedModel>,
+}
 
-    for service in &services {
-        for resource in &service.resources {
-            ensure_resource_field_types(
-                resource,
-                api_plan,
-                &mut enums,
-                &mut flags,
-                &mut variants,
-                &mut models,
-            );
+#[derive(Debug, Default)]
+struct PythonExternalModels {
+    proto: python_proto::ModelBackend,
+    json: python_json::ModelBackend,
+}
+
+impl PythonExternalModels {
+    fn new(api_plan: &PlannedSpec) -> Result<Self> {
+        let mut this = Self::default();
+        this.prepare(api_plan)?;
+        Ok(this)
+    }
+
+    fn render_model_fragments(
+        &self,
+        models: &[&RenderedModel],
+        api_plan: &PlannedSpec,
+    ) -> Result<RenderedModelFragments> {
+        let mut fragments = RenderedModelFragments::default();
+        fragments.extend(render_record_models(models, api_plan, self));
+        fragments.extend(self.json.render_models()?);
+        Ok(fragments)
+    }
+
+    fn service_model_ref(
+        &self,
+        model_type: &PlannedType,
+        native_module: &str,
+        api_plan: &PlannedSpec,
+    ) -> (String, Option<String>) {
+        if let Some(reference) = self.proto.service_model_ref(model_type, api_plan) {
+            return (reference.type_ref, Some(reference.module_path));
+        }
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Json(json_type)) => (
+                format!(
+                    "{native_module}.{}",
+                    self.json
+                        .model_type_annotation(json_type)
+                        .expect("json model annotation should exist")
+                ),
+                Some(format!(".{native_module}")),
+            ),
+            PlannedType::Record(record) => (
+                format!("{native_module}.{}", record.model_name),
+                Some(format!(".{native_module}")),
+            ),
+            _ => panic!("operation service ref should be model-shaped"),
         }
     }
-    for record in api_plan.records.values() {
-        let model_type = TypeSpec::Record(PlannedRecordType {
-            full_name: record.full_name.clone(),
-            model_name: record.name.clone(),
-        });
-        resolve_message_value_conversion(
-            &model_type,
+
+    fn resolved_external_field_type(&self, value_type: &PlannedType) -> Option<ResolvedFieldType> {
+        match value_type {
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(_))) => {
+                self.proto.enum_field_type(value_type)
+            }
+            PlannedType::External(ExternalTypeSpec::Json(_)) => {
+                let conversion = self.wire_conversion(value_type, None)?;
+                Some(ResolvedFieldType {
+                    annotation: conversion.annotation.clone(),
+                    imports: conversion.imports.clone(),
+                    kind: ResolvedFieldKind::Scalar,
+                    wire_conversion: Some(conversion),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn render_record_wire_block(
+        &self,
+        model: &RenderedModel,
+        planned_model: &RecordSpec<PlannedTypeFamily>,
+    ) -> Option<RenderedRecordWireBlock> {
+        self.proto.render_record_wire_block(model, planned_model)
+    }
+}
+
+impl ExternalModelBackend for PythonExternalModels {
+    type ModelFragments = RenderedModelFragments;
+    type WireConversion = WireValueConversion;
+
+    fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+        self.proto.prepare(api_plan)?;
+        self.json.prepare(api_plan)
+    }
+
+    fn render_models(&self) -> Result<RenderedModelFragments> {
+        self.json.render_models()
+    }
+
+    fn model_type_annotation(&self, model_type: &PlannedType) -> Option<String> {
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(proto_type)) => {
+                self.proto.model_type_annotation(proto_type)
+            }
+            PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
+                self.json.model_type_annotation(json_type)
+            }
+            PlannedType::Record(record) => Some(record.model_name.clone()),
+            _ => None,
+        }
+    }
+
+    fn wire_type_identifier(&self, model_type: &PlannedType) -> Option<String> {
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(proto_type)) => {
+                self.proto.wire_type_identifier(proto_type)
+            }
+            PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
+                self.json.wire_type_identifier(json_type)
+            }
+            PlannedType::Record(record) => Some(record.full_name.clone()),
+            _ => None,
+        }
+    }
+
+    fn wire_conversion(
+        &self,
+        model_type: &PlannedType,
+        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+    ) -> Option<WireValueConversion> {
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(_)) | PlannedType::Record(_) => {
+                self.proto.wire_conversion(model_type, planned_record)
+            }
+            PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
+                self.json.wire_conversion(json_type, planned_record)
+            }
+            _ => None,
+        }
+    }
+}
+
+impl<'a> ApiPlanner<'a> {
+    fn new(api_plan: &'a PlannedSpec) -> Result<Self> {
+        Ok(Self {
             api_plan,
-            &mut enums,
-            &mut flags,
-            &mut variants,
-            &mut models,
+            external_models: PythonExternalModels::new(api_plan)?,
+            language_imports: collect_python_language_imports(api_plan),
+            enums: IndexMap::new(),
+            flags: IndexMap::new(),
+            variants: IndexMap::new(),
+            models: IndexMap::new(),
+        })
+    }
+
+    fn build(
+        mut self,
+        support_fragments: &[SupportFragmentSpec],
+        mode: GenerationMode,
+    ) -> Result<GeneratedFiles> {
+        let api_plan = self.api_plan;
+        let services = api_plan
+            .services
+            .iter()
+            .map(|service| {
+                let operations = service
+                    .operations
+                    .iter()
+                    .map(|operation| self.resolve_operation(operation))
+                    .collect::<Result<Vec<_>>>()?;
+
+                Ok(RenderedService {
+                    name: &service.name,
+                    wire_name: &service.wire_name,
+                    doc: service
+                        .doc
+                        .for_language(Language::Python)
+                        .map(str::to_string),
+                    endpoint: service.data.endpoint.clone(),
+                    experimental: service.experimental,
+                    delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
+                    operations,
+                    resources: service
+                        .resources
+                        .iter()
+                        .map(|resource| resource.data.clone())
+                        .collect(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        for service in &services {
+            for resource in &service.resources {
+                self.ensure_resource_field_types(resource);
+            }
+        }
+        for record in api_plan.records.values() {
+            let model_type = TypeSpec::Record(PlannedRecordType {
+                full_name: record.full_name.clone(),
+                model_name: record.name.clone(),
+            });
+            self.resolve_message_value_conversion(&model_type);
+        }
+        let model_refs = self.models.values().collect::<Vec<_>>();
+        let model_fragments = self.render_model_fragments(model_refs.as_slice())?;
+
+        self.render_package(&model_fragments, &services, support_fragments, mode)
+    }
+
+    fn render_model_fragments(&self, models: &[&RenderedModel]) -> Result<RenderedModelFragments> {
+        self.external_models
+            .render_model_fragments(models, self.api_plan)
+    }
+
+    fn render_package(
+        &self,
+        model_fragments: &RenderedModelFragments,
+        services: &[RenderedService<'_>],
+        support_fragments: &[SupportFragmentSpec],
+        mode: GenerationMode,
+    ) -> Result<GeneratedFiles> {
+        let mut files = BTreeMap::new();
+        render_support_package(&mut files, support_fragments)?;
+        let model_names = self
+            .enums
+            .values()
+            .map(|enumeration| enumeration.name.clone())
+            .chain(self.flags.values().map(|flag_set| flag_set.name.clone()))
+            .chain(self.variants.values().map(|variant| variant.name.clone()))
+            .chain(model_fragments.exported_names.iter().cloned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let resource_operation_owners = resource_operation_owners(services);
+        let resource_names = services
+            .iter()
+            .flat_map(|service| {
+                service
+                    .resources
+                    .iter()
+                    .map(|resource| resource.type_name.clone())
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let support_names = support_export_names(support_fragments);
+
+        insert_generated_file(
+            &mut files,
+            "__init__.py",
+            if mode == GenerationMode::NativeApi {
+                render_package_init(services, &resource_names, &resource_operation_owners)
+            } else {
+                render_definitions_only_package_init(services, &model_names)
+            },
+        )?;
+        insert_generated_file(
+            &mut files,
+            "models.py",
+            render_models_module(
+                self.enums.values().collect::<Vec<_>>().as_slice(),
+                self.flags.values().collect::<Vec<_>>().as_slice(),
+                self.variants.values().collect::<Vec<_>>().as_slice(),
+                model_fragments,
+                &support_names,
+                &self.language_imports,
+            ),
+        )?;
+        if !resource_names.is_empty() {
+            insert_generated_file(
+                &mut files,
+                "_resources/__init__.py",
+                render_resources_package_init(services),
+            )?;
+        }
+        insert_generated_file(&mut files, "service.py", render_service_module(services))?;
+        if mode == GenerationMode::NativeApi {
+            insert_generated_file(
+                &mut files,
+                "operations/__init__.py",
+                render_operations_package_init(),
+            )?;
+        }
+
+        for service in services {
+            for resource in &service.resources {
+                let bound_operations = if mode == GenerationMode::NativeApi {
+                    resource_bound_operations(service, resource)
+                } else {
+                    Vec::new()
+                };
+                insert_generated_file(
+                    &mut files,
+                    format!("_resources/{}.py", resource_module_name(resource)),
+                    self.render_resource_module_file(
+                        service,
+                        resource,
+                        &bound_operations,
+                        &model_names,
+                        &resource_names,
+                        &support_names,
+                    ),
+                )?;
+            }
+            if mode == GenerationMode::NativeApi {
+                for operation in &service.operations {
+                    if resource_operation_owners
+                        .contains_key(&operation_key(service.name, operation.name))
+                    {
+                        continue;
+                    }
+                    insert_generated_file(
+                        &mut files,
+                        format!("operations/{}.py", operation.attr_name),
+                        render_operation_module(
+                            service,
+                            operation,
+                            &model_names,
+                            &resource_names,
+                            &support_names,
+                            &self.language_imports,
+                        ),
+                    )?;
+                }
+            }
+        }
+
+        Ok(GeneratedFiles::directory(files))
+    }
+
+    fn render_resource_module_file(
+        &self,
+        service: &RenderedService<'_>,
+        resource: &PlannedResource,
+        bound_operations: &[ResourceBoundOperation<'_>],
+        model_names: &[String],
+        resource_names: &[String],
+        support_names: &[String],
+    ) -> String {
+        let mut module_imports = bound_operations
+            .iter()
+            .flat_map(|bound_operation| {
+                [
+                    bound_operation
+                        .operation
+                        .input
+                        .as_ref()
+                        .and_then(|input| input.module_path.clone()),
+                    bound_operation.operation.output_module_path.clone(),
+                ]
+            })
+            .flatten()
+            .collect::<BTreeSet<_>>();
+        module_imports.insert("nex_gen_runtime".to_string());
+
+        let mut body = String::new();
+        let function_fields = bound_operations
+            .iter()
+            .filter_map(|bound_operation| bound_operation.operation.unpacked_input.as_ref())
+            .flat_map(|unpacked_input| unpacked_input.functions.iter().cloned())
+            .collect::<Vec<_>>();
+        let output_type_parameters = bound_operations
+            .iter()
+            .flat_map(|bound_operation| bound_operation.operation.output_type_parameters.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if !function_fields.is_empty() {
+            render_function_type_parameter_definitions(
+                &mut body,
+                &function_fields,
+                &output_type_parameters,
+            );
+            body.push_str("\n\n");
+        }
+        self.render_resource(&mut body, service, resource, bound_operations);
+        if !bound_operations.is_empty() {
+            body.push_str("\n\n");
+            for (index, bound_operation) in bound_operations.iter().enumerate() {
+                render_operation_functions(&mut body, service, bound_operation.operation);
+                if index + 1 != bound_operations.len() {
+                    body.push_str("\n\n");
+                }
+            }
+        }
+        if !service.delay_load_temporalio_workflow {
+            module_imports.insert("temporalio.workflow".to_string());
+        }
+        body.push_str("\n\n");
+        body.push_str("nex_gen_runtime.register_nexus_type(");
+        body.push_str(&resource.type_name);
+        body.push_str(", ");
+        body.push_str(&python_string_literal(&python_resource_type_id(
+            service, resource,
+        )));
+        body.push_str(")\n");
+
+        let mut output = String::new();
+        render_generated_file_header(&mut output);
+        output.push('\n');
+        let type_checking_names = temporalio_workflow_type_checking_names(&body);
+        let body_for_imports =
+            if service.delay_load_temporalio_workflow && !type_checking_names.is_empty() {
+                format!("{body}\ntyping.TYPE_CHECKING")
+            } else {
+                body.clone()
+            };
+        let skipped_language_modules =
+            delayed_temporalio_workflow_skipped_language_modules(service);
+        let wrote_imports = render_optional_python_imports_with_skipped_language_modules(
+            &mut output,
+            &body_for_imports,
+            &module_imports,
+            &self.language_imports,
+            &skipped_language_modules,
+        );
+        if wrote_imports
+            && service.delay_load_temporalio_workflow
+            && !type_checking_names.is_empty()
+        {
+            output.push('\n');
+        }
+        let wrote_type_checking_imports =
+            render_temporalio_workflow_type_checking_imports(&mut output, service, &body);
+        if wrote_imports || wrote_type_checking_imports {
+            output.push('\n');
+        }
+        let used_model_names = used_python_symbol_imports(&body, model_names);
+        if !used_model_names.is_empty() {
+            render_named_python_import(&mut output, "..models", &used_model_names);
+        }
+        let used_resource_names = used_python_symbol_imports(&body, resource_names)
+            .into_iter()
+            .filter(|name| name != &resource.type_name)
+            .collect::<Vec<_>>();
+        if !used_resource_names.is_empty() {
+            render_named_python_import(&mut output, ".", &used_resource_names);
+        }
+        let used_support_names = used_python_symbol_imports(&body, support_names);
+        if !used_support_names.is_empty() {
+            render_named_python_import(&mut output, ".._support", &used_support_names);
+        }
+        if !body.is_empty() {
+            output.push('\n');
+            output.push('\n');
+            output.push_str(&body);
+        }
+        output
+    }
+
+    fn render_resource(
+        &self,
+        output: &mut String,
+        service: &RenderedService<'_>,
+        resource: &PlannedResource,
+        bound_operations: &[ResourceBoundOperation<'_>],
+    ) {
+        output.push_str("@dataclasses.dataclass\n");
+        output.push_str("class ");
+        output.push_str(&resource.type_name);
+        output.push_str(":\n");
+        for field in &resource.fields {
+            output.push_str("    ");
+            output.push_str(&python_field_name(&field.name));
+            output.push_str(": ");
+            output.push_str(&self.python_resource_field_annotation(
+                &field.kind,
+                field.optional,
+                field.function.as_ref(),
+            ));
+            output.push('\n');
+        }
+        if resource.methods.is_empty() {
+            output.push_str("\n    pass\n");
+            return;
+        }
+
+        for method in &resource.methods {
+            output.push_str("\n");
+            self.render_resource_class_method(output, service, resource, method, bound_operations);
+        }
+    }
+
+    fn render_resource_class_method(
+        &self,
+        output: &mut String,
+        service: &RenderedService<'_>,
+        resource: &PlannedResource,
+        method: &PlannedResourceMethod,
+        bound_operations: &[ResourceBoundOperation<'_>],
+    ) {
+        let result_annotation = self.python_resource_method_result_annotation(method);
+        output.push_str("    async def ");
+        output.push_str(&python_field_name(&method.name));
+        output.push_str("(\n");
+        output.push_str("        self,\n");
+        for param in &method.params {
+            output.push_str("        ");
+            output.push_str(&python_field_name(&param.name));
+            output.push_str(": ");
+            output.push_str(&self.python_resource_field_annotation(
+                &param.kind,
+                param.optional,
+                param.function.as_ref(),
+            ));
+            if param.optional {
+                output.push_str(" = None");
+            }
+            output.push_str(",\n");
+        }
+        output.push_str("    ) -> ");
+        output.push_str(&result_annotation);
+        output.push_str(":\n");
+
+        match &method.binding {
+            PlannedResourceMethodBindingSpec::Operation { operation_name, .. } => {
+                let operation = bound_operations
+                    .iter()
+                    .find(|bound_operation| bound_operation.operation.name == operation_name)
+                    .map(|bound_operation| bound_operation.operation)
+                    .expect("bound resource operation should be rendered in the same module");
+                render_resource_method_operation_body(
+                    output,
+                    service,
+                    method,
+                    operation,
+                    &result_annotation,
+                );
+            }
+            PlannedResourceMethodBindingSpec::Stub => {
+                output.push_str("        raise NotImplementedError(");
+                output.push_str(&python_string_literal(&format!(
+                    "{}.{} is not yet implemented",
+                    resource.name,
+                    python_field_name(&method.name)
+                )));
+                output.push_str(")\n");
+            }
+        }
+    }
+
+    fn python_resource_method_result_annotation(&self, method: &PlannedResourceMethod) -> String {
+        let Some(result) = &method.result else {
+            return "None".to_string();
+        };
+        let annotation = match &result.kind {
+            PlannedResourceMethodResultKind::Resource { type_name } => type_name.clone(),
+            PlannedResourceMethodResultKind::Value(kind) => {
+                self.python_resource_field_annotation(kind, result.optional, None)
+            }
+        };
+        if result.optional && !annotation.contains("| None") {
+            format!("{annotation} | None")
+        } else {
+            annotation
+        }
+    }
+
+    fn python_resource_field_annotation(
+        &self,
+        kind: &PlannedType,
+        optional: bool,
+        function: Option<&FunctionFieldSpec<PlannedTypeFamily>>,
+    ) -> String {
+        let base = if let Some(function) = function {
+            python_function_field_annotation(
+                function,
+                function
+                    .alternate_type
+                    .as_ref()
+                    .map(python_authored_type_annotation),
+            )
+        } else {
+            match kind {
+                PlannedType::Option(value) | PlannedType::List(value) => {
+                    format!(
+                        "collections.abc.Sequence[{}]",
+                        self.python_resource_value_annotation(value)
+                    )
+                }
+                PlannedType::Map(key, value) => format!(
+                    "collections.abc.Mapping[{}, {}]",
+                    self.python_resource_value_annotation(key),
+                    self.python_resource_value_annotation(value)
+                ),
+                value => self.python_resource_value_annotation(value),
+            }
+        };
+        if optional {
+            format!("{base} | None")
+        } else {
+            base
+        }
+    }
+
+    fn python_resource_value_annotation(&self, value: &PlannedType) -> String {
+        match value {
+            PlannedType::Float => "float".to_string(),
+            PlannedType::Int(_) => "int".to_string(),
+            PlannedType::Bool => "bool".to_string(),
+            PlannedType::String => "str".to_string(),
+            PlannedType::Bytes => "bytes".to_string(),
+            PlannedType::Enum(enum_type) => enum_type.name.clone(),
+            PlannedType::External(ExternalTypeSpec::Proto(_))
+            | PlannedType::External(ExternalTypeSpec::Json(_)) => self
+                .external_models
+                .model_type_annotation(value)
+                .expect("external resource value annotation should exist"),
+            PlannedType::Flags(flags_type) => flags_type.name.clone(),
+            PlannedType::Variant(variant_type) => variant_type.name.clone(),
+            PlannedType::Record(record) => record.model_name.clone(),
+            PlannedType::Resource(resource) => resource.type_name.clone(),
+            PlannedType::Option(inner) | PlannedType::List(inner) => {
+                format!(
+                    "collections.abc.Sequence[{}]",
+                    self.python_resource_value_annotation(inner)
+                )
+            }
+            PlannedType::Map(key, value) => format!(
+                "collections.abc.Mapping[{}, {}]",
+                self.python_resource_value_annotation(key),
+                self.python_resource_value_annotation(value)
+            ),
+            PlannedType::Tuple(items) => format!(
+                "tuple[{}]",
+                items
+                    .iter()
+                    .map(|item| self.python_resource_value_annotation(item))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            PlannedType::Result { ok, err } => python_result_annotation(
+                ok.as_ref()
+                    .map(|ok| self.python_resource_value_annotation(ok).to_string()),
+                err.as_ref()
+                    .map(|err| self.python_resource_value_annotation(err).to_string()),
+            ),
+            PlannedType::External(ExternalTypeSpec::Alias {
+                type_name, target, ..
+            }) => type_name
+                .for_language(Language::Python)
+                .map(str::to_string)
+                .unwrap_or_else(|| self.python_resource_value_annotation(target)),
+        }
+    }
+
+    fn ensure_resource_field_types(&mut self, resource: &PlannedResource) {
+        for field in &resource.fields {
+            self.ensure_resource_field_type(&field.kind);
+        }
+        for method in &resource.methods {
+            for param in &method.params {
+                self.ensure_resource_field_type(&param.kind);
+            }
+        }
+    }
+
+    fn ensure_resource_field_type(&mut self, kind: &PlannedType) {
+        match kind {
+            PlannedType::List(value) => {
+                self.resolve_planned_value_type(value);
+            }
+            PlannedType::Map(key, value) => {
+                self.resolve_planned_value_type(key);
+                self.resolve_planned_value_type(value);
+            }
+            value => {
+                self.resolve_planned_value_type(value);
+            }
+        }
+    }
+
+    fn resolve_operation<'operation>(
+        &mut self,
+        operation: &'operation OperationSpec<PlannedTypeFamily>,
+    ) -> Result<RenderedOperation<'operation>> {
+        let output_resource_return = operation.data.output_resource_return.clone();
+        let input = operation_input_model(operation);
+        let rendered_input = input.map(|input| {
+            let (type_ref, module_path) =
+                self.external_models
+                    .service_model_ref(input, "models", self.api_plan);
+            let input_conversion = self.resolve_message_value_conversion(input);
+            RenderedOperationInput {
+                type_ref,
+                module_path,
+                annotation: input_conversion.annotation.clone(),
+                wire_expr: input_conversion.to_wire_expr("request"),
+                supports_unpacked: input_conversion.supports_unpacked_input(),
+            }
+        });
+        let output_transform = operation.output_transform.as_ref();
+        let output_direct_result = operation_output_direct_result(operation);
+        let (output_ref, output_module_path, output_annotation_default) = match operation
+            .output_type()
+        {
+            Some(output) if output.operation_model().is_some() => {
+                let output_model = output
+                    .operation_model()
+                    .expect("operation model presence checked");
+                let (output_ref, output_module_path) =
+                    self.external_models
+                        .service_model_ref(output_model, "models", self.api_plan);
+                if output_transform.is_none()
+                    && output_resource_return.is_none()
+                    && !output_direct_result
+                    && matches!(output_model, PlannedType::Record(_))
+                {
+                    self.resolve_message_value_conversion(output_model);
+                }
+                let annotation = self.resolve_output_annotation(output_model);
+                (output_ref, output_module_path, annotation)
+            }
+            Some(PlannedType::Resource(resource)) => {
+                if let Some(output) = &resource.wire_type {
+                    let (output_ref, output_module_path) =
+                        self.external_models
+                            .service_model_ref(output, "models", self.api_plan);
+                    let annotation = self.resolve_output_annotation(output);
+                    (output_ref, output_module_path, annotation)
+                } else {
+                    (
+                        resource.type_name.clone(),
+                        Some("._resources".to_string()),
+                        resource.type_name.clone(),
+                    )
+                }
+            }
+            None => ("None".to_string(), None, "None".to_string()),
+            Some(_) => {
+                panic!("planned operation output should be proto, record, resource, or none")
+            }
+        };
+        let overload_output_annotation = output_transform
+            .and_then(|transform| {
+                transform
+                    .type_name
+                    .for_language(crate::language::Language::Python)
+                    .map(str::to_string)
+            })
+            .or_else(|| {
+                output_resource_return
+                    .as_ref()
+                    .map(|resource| resource.resource_type_name.clone())
+            })
+            .unwrap_or(output_annotation_default);
+        let unpacked_input = if let (Some(input), Some(rendered_input)) = (input, &rendered_input) {
+            if rendered_input.supports_unpacked {
+                Some(
+                    self.build_unpacked_input(
+                        input
+                            .model_full_name()
+                            .expect("operation input should be a model"),
+                    )?,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let output_type_parameters = unpacked_input
+            .iter()
+            .flat_map(|unpacked_input| &unpacked_input.functions)
+            .filter_map(|function| function.result_type_parameter.clone())
+            .filter(|name| python_annotation_uses_identifier(&overload_output_annotation, name))
+            .collect::<BTreeSet<_>>();
+        let output_annotation =
+            erase_python_type_parameters(&overload_output_annotation, &output_type_parameters);
+        let output_type_expr = if output_transform.is_some() || output_resource_return.is_some() {
+            output_ref.clone()
+        } else {
+            output_annotation.clone()
+        };
+        Ok(RenderedOperation {
+            name: operation.name.as_str(),
+            wire_name: operation.wire_name.as_str(),
+            attr_name: python_ident(&operation.name.to_snake_case()),
+            experimental: operation.experimental,
+            doc: operation
+                .doc
+                .for_language(Language::Python)
+                .map(str::to_string),
+            return_doc: operation
+                .return_doc
+                .for_language(Language::Python)
+                .map(str::to_string),
+            input: rendered_input,
+            output_ref,
+            output_module_path,
+            output_annotation,
+            overload_output_annotation,
+            output_type_parameters,
+            output_type_expr,
+            output_transform_expr: output_transform.and_then(|transform| {
+                transform
+                    .transform
+                    .for_language(crate::language::Language::Python)
+                    .map(str::to_string)
+            }),
+            output_resource_return,
+            output_direct_result,
+            output_none: operation.output_type().is_none(),
+            unpacked_input,
+        })
+    }
+
+    fn resolve_output_annotation(&mut self, model_type: &PlannedType) -> String {
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(_))
+            | PlannedType::External(ExternalTypeSpec::Json(_)) => self
+                .external_models
+                .model_type_annotation(model_type)
+                .expect("external model annotation should exist"),
+            PlannedType::Record(_) => {
+                let conversion = self.resolve_message_value_conversion(model_type);
+                conversion.annotation
+            }
+            _ => panic!("operation output annotation should be model-shaped"),
+        }
+    }
+
+    fn resolve_message_value_conversion(
+        &mut self,
+        model_type: &PlannedType,
+    ) -> WireValueConversion {
+        let planned_record = model_type
+            .model_full_name()
+            .and_then(|full_name| self.api_plan.records.get(full_name));
+        if let Some(conversion) = self
+            .external_models
+            .wire_conversion(model_type, planned_record)
+        {
+            if matches!(model_type, PlannedType::Record(_)) {
+                self.ensure_rendered_model(model_type);
+            }
+            return conversion;
+        }
+        panic!("message conversion should be model-shaped")
+    }
+
+    fn build_unpacked_input(&self, input_full_name: &str) -> Result<RenderedUnpackedInput> {
+        let model = self
+            .models
+            .get(input_full_name)
+            .expect("input model should be rendered before building unpacked input");
+        let planned_model = planned_record(self.api_plan, input_full_name);
+
+        let mut parameters = Vec::new();
+        let mut request_fields = Vec::new();
+        let mut flattened_messages = Vec::new();
+        let mut parameter_sources = BTreeMap::<String, String>::new();
+
+        for ((_field_name, planned_field), rendered_field) in
+            planned_model.public_fields().zip(model.fields.iter())
+        {
+            if let Some(flattened) = self.build_flattened_message(planned_field, rendered_field) {
+                request_fields.push(RenderedUnpackedRequestField {
+                    attr_name: flattened.local_name.clone(),
+                    value_expr: flattened.local_name.clone(),
+                    default_kind: PythonFieldDefaultKind::Required,
+                });
+                for child in &flattened.fields {
+                    register_unpacked_parameter_name(
+                        &mut parameter_sources,
+                        &child.value_expr,
+                        &format!("{}.{}", flattened.local_name, child.attr_name),
+                        &model.name,
+                    )?;
+                    parameters.push(RenderedUnpackedInputField {
+                        attr_name: child.value_expr.clone(),
+                        annotation: child.annotation.clone(),
+                        default_kind: child.default_kind.clone(),
+                        doc: child.doc.clone(),
+                    });
+                }
+                flattened_messages.push(flattened);
+                continue;
+            }
+
+            register_unpacked_parameter_name(
+                &mut parameter_sources,
+                &rendered_field.attr_name,
+                &rendered_field.attr_name,
+                &model.name,
+            )?;
+            parameters.push(RenderedUnpackedInputField {
+                attr_name: rendered_field.attr_name.clone(),
+                annotation: rendered_field.annotation.clone(),
+                default_kind: rendered_field.default_kind.clone(),
+                doc: planned_field
+                    .doc
+                    .as_ref()
+                    .and_then(|doc| doc.for_language(Language::Python))
+                    .map(str::to_string),
+            });
+            request_fields.push(RenderedUnpackedRequestField {
+                attr_name: rendered_field.attr_name.clone(),
+                value_expr: rendered_field.attr_name.clone(),
+                default_kind: rendered_field.default_kind.clone(),
+            });
+        }
+
+        Ok(RenderedUnpackedInput {
+            model_name: model.name.clone(),
+            parameters,
+            request_fields,
+            flattened_messages,
+            functions: planned_model
+                .functions()
+                .map(|(field_name, function)| {
+                    let result_annotation = python_function_result_annotation(&function.result);
+                    let result_type_parameters = function
+                        .result_type_parameter
+                        .iter()
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+                    let erased_result_annotation =
+                        erase_python_type_parameters(&result_annotation, &result_type_parameters);
+                    let args = python_function_args(&function.args);
+                    let alternate_annotation = function
+                        .alternate_type
+                        .as_ref()
+                        .map(python_authored_type_annotation);
+                    RenderedFunctionField {
+                        callable_field_name: planned_model
+                            .field_name_override(field_name)
+                            .map(python_field_name)
+                            .unwrap_or_else(|| python_field_name(field_name)),
+                        args_field_name: planned_model
+                            .field_name_override(&function.args_field)
+                            .map(python_field_name)
+                            .unwrap_or_else(|| python_field_name(&function.args_field)),
+                        args: args.clone(),
+                        primary: function.primary,
+                        callable_annotation: python_function_annotation_from_args(
+                            &args,
+                            alternate_annotation.as_deref(),
+                            &erased_result_annotation,
+                        ),
+                        result_annotation,
+                        erased_result_annotation,
+                        result_type_parameter: function.result_type_parameter.clone(),
+                        alternate_annotation,
+                    }
+                })
+                .collect(),
+        })
+    }
+
+    fn build_flattened_message(
+        &self,
+        planned_field: &RecordFieldSpec<PlannedTypeFamily>,
+        rendered_field: &RenderedField,
+    ) -> Option<RenderedFlattenedMessage> {
+        let model_type = &planned_field.field_type;
+        let full_name = model_type.model_full_name()?;
+        let nested_planned_model = self.api_plan.records.get(full_name)?;
+        if !nested_planned_model.flatten_in_api {
+            return None;
+        }
+        let nested_rendered_model = self.models.get(full_name)?;
+
+        Some(RenderedFlattenedMessage {
+            local_name: rendered_field.attr_name.clone(),
+            model_name: nested_rendered_model.name.clone(),
+            required: planned_field.required,
+            fields: nested_planned_model
+                .public_fields()
+                .zip(nested_rendered_model.fields.iter())
+                .map(
+                    |((nested_field_name, nested_planned_field), nested_rendered_field)| {
+                        RenderedFlattenedMessageField {
+                            attr_name: nested_rendered_field.attr_name.clone(),
+                            annotation: nested_planned_model
+                                .field_flattened_annotation(nested_field_name)
+                                .and_then(|annotation| annotation.for_language(Language::Python))
+                                .map(|annotation| {
+                                    if nested_planned_field.required {
+                                        annotation.to_string()
+                                    } else {
+                                        format!("{annotation} | None")
+                                    }
+                                })
+                                .unwrap_or_else(|| nested_rendered_field.annotation.clone()),
+                            value_expr: nested_rendered_field.attr_name.clone(),
+                            default_kind: if nested_planned_field.required {
+                                PythonFieldDefaultKind::Required
+                            } else {
+                                nested_rendered_field.default_kind.clone()
+                            },
+                            doc: nested_planned_field
+                                .doc
+                                .as_ref()
+                                .and_then(|doc| doc.for_language(Language::Python))
+                                .map(str::to_string),
+                        }
+                    },
+                )
+                .collect(),
+        })
+    }
+
+    fn ensure_rendered_model(&mut self, model_type: &PlannedType) {
+        let full_name = model_type
+            .model_full_name()
+            .expect("rendered model should be model-shaped");
+        let api_plan = self.api_plan;
+        let planned_model = planned_record(api_plan, full_name);
+
+        if self.models.contains_key(full_name) {
+            return;
+        }
+
+        self.models.insert(
+            full_name.to_string(),
+            RenderedModel {
+                full_name: full_name.to_string(),
+                name: planned_model.name.clone(),
+                native: planned_model.data.proto.is_none(),
+                capabilities: planned_model.data.capabilities,
+                experimental: planned_model.experimental,
+                fields: Vec::new(),
+                sourced_fields: Vec::new(),
+            },
+        );
+
+        let fields = planned_model
+            .public_fields()
+            .map(|(field_name, field)| self.build_field(planned_model, field_name, field))
+            .collect();
+
+        let sourced_fields = planned_model
+            .sourced_fields()
+            .map(|(field_name, field, source_expr)| {
+                self.build_sourced_field(field_name, field, source_expr)
+            })
+            .collect();
+
+        self.models
+            .get_mut(full_name)
+            .expect("model should be inserted before recursive field resolution")
+            .fields = fields;
+        self.models
+            .get_mut(full_name)
+            .expect("model should be inserted before recursive field resolution")
+            .sourced_fields = sourced_fields;
+    }
+
+    fn ensure_rendered_enum(&mut self, enum_spec: &EnumSpec) {
+        self.enums
+            .entry(enum_spec.full_name.clone())
+            .or_insert_with(|| RenderedEnum {
+                name: enum_spec.name.clone(),
+                values: enum_spec
+                    .values
+                    .iter()
+                    .map(|value| RenderedEnumValue {
+                        name: value.name.clone(),
+                        number: value.number,
+                    })
+                    .collect(),
+            });
+    }
+
+    fn ensure_rendered_flags(&mut self, flags_spec: &FlagsSpec) {
+        self.flags
+            .entry(flags_spec.full_name.clone())
+            .or_insert_with(|| RenderedFlags {
+                name: flags_spec.name.clone(),
+                flags: flags_spec
+                    .flags
+                    .iter()
+                    .map(|flag| RenderedFlag {
+                        name: flag.name.clone(),
+                        bit: flag.bit,
+                    })
+                    .collect(),
+            });
+    }
+
+    fn ensure_rendered_variant(&mut self, variant_spec: &VariantSpec<PlannedTypeFamily>) {
+        if self.variants.contains_key(&variant_spec.full_name) {
+            return;
+        }
+
+        let cases = variant_spec
+            .cases
+            .iter()
+            .map(|case| RenderedVariantCase {
+                name: case.name.clone(),
+                payload_annotation: case
+                    .payload
+                    .as_ref()
+                    .map(|payload| self.resolve_planned_value_type(payload).annotation),
+            })
+            .collect();
+        self.variants.insert(
+            variant_spec.full_name.clone(),
+            RenderedVariant {
+                name: variant_spec.name.clone(),
+                cases,
+            },
         );
     }
-    let model_refs = models.values().collect::<Vec<_>>();
-    let model_fragments = render_model_fragments(model_refs.as_slice(), api_plan)?;
 
-    render_package(
-        enums.values().collect::<Vec<_>>().as_slice(),
-        flags.values().collect::<Vec<_>>().as_slice(),
-        variants.values().collect::<Vec<_>>().as_slice(),
-        &model_fragments,
-        &services,
-        support_fragments,
-        &language_imports,
-        mode,
-    )
+    fn build_field(
+        &mut self,
+        record: &RecordSpec<PlannedTypeFamily>,
+        field_name: &str,
+        field: &RecordFieldSpec<PlannedTypeFamily>,
+    ) -> RenderedField {
+        let attr_name = python_field_name(&field.name);
+
+        if let PlannedType::Map(key, value) = &field.field_type {
+            let key_type = self.resolve_planned_value_type(key);
+            let value_type = self.resolve_planned_value_type(value);
+            let mut imports = key_type.imports.clone();
+            imports.extend(&value_type.imports);
+            return RenderedField {
+                attr_name: attr_name.clone(),
+                annotation: python_field_annotation(
+                    record,
+                    field_name,
+                    field,
+                    format!("dict[{}, {}]", key_type.annotation, value_type.annotation),
+                    false,
+                ),
+                default_kind: PythonFieldDefaultKind::EmptyDict,
+                default_expr: Some("dataclasses.field(default_factory=dict)".to_string()),
+                wire_value_type: value_type,
+                imports,
+            };
+        }
+
+        let (resolved_type, repeated) = match &field.field_type {
+            PlannedType::List(value) => (self.resolve_planned_value_type(value), true),
+            PlannedType::Map(_, _) => unreachable!("handled above"),
+            value => (self.resolve_planned_value_type(value), false),
+        };
+
+        if repeated {
+            return RenderedField {
+                attr_name: attr_name.clone(),
+                annotation: python_field_annotation(
+                    record,
+                    field_name,
+                    field,
+                    format!("list[{}]", resolved_type.annotation),
+                    false,
+                ),
+                default_kind: PythonFieldDefaultKind::EmptyList,
+                default_expr: Some("dataclasses.field(default_factory=list)".to_string()),
+                wire_value_type: resolved_type.clone(),
+                imports: resolved_type.imports,
+            };
+        }
+
+        if let Some(default_value) = &field.default_value {
+            let default_expr = enum_default_expr(&resolved_type, &default_value.enum_case);
+            return RenderedField {
+                attr_name: attr_name.clone(),
+                annotation: python_field_annotation(
+                    record,
+                    field_name,
+                    field,
+                    resolved_type.annotation.clone(),
+                    false,
+                ),
+                default_kind: PythonFieldDefaultKind::Expression(default_expr.clone()),
+                default_expr: Some(default_expr.clone()),
+                wire_value_type: resolved_type.clone(),
+                imports: resolved_type.imports,
+            };
+        }
+
+        if field.required {
+            return RenderedField {
+                attr_name: attr_name.clone(),
+                annotation: python_field_annotation(
+                    record,
+                    field_name,
+                    field,
+                    resolved_type.annotation.clone(),
+                    false,
+                ),
+                default_kind: PythonFieldDefaultKind::Required,
+                default_expr: None,
+                wire_value_type: resolved_type.clone(),
+                imports: resolved_type.imports,
+            };
+        }
+
+        RenderedField {
+            attr_name: attr_name.clone(),
+            annotation: python_field_annotation(
+                record,
+                field_name,
+                field,
+                resolved_type.annotation.clone(),
+                true,
+            ),
+            default_kind: PythonFieldDefaultKind::None,
+            default_expr: Some("None".to_string()),
+            wire_value_type: resolved_type.clone(),
+            imports: resolved_type.imports,
+        }
+    }
+
+    fn build_sourced_field(
+        &mut self,
+        field_name: &str,
+        field: &RecordFieldSpec<PlannedTypeFamily>,
+        source_expr: &str,
+    ) -> RenderedSourcedField {
+        if let PlannedType::Map(_, value) = &field.field_type {
+            let value_type = self.resolve_planned_value_type(value);
+            return RenderedSourcedField {
+                field_name: field_name.to_string(),
+                field: field.clone(),
+                source_expr: source_expr.to_string(),
+                wire_value_type: value_type,
+            };
+        }
+
+        let (resolved_type, repeated) = match &field.field_type {
+            PlannedType::List(value) => (self.resolve_planned_value_type(value), true),
+            PlannedType::Map(_, _) => unreachable!("handled above"),
+            value => (self.resolve_planned_value_type(value), false),
+        };
+        if repeated {
+            return RenderedSourcedField {
+                field_name: field_name.to_string(),
+                field: field.clone(),
+                source_expr: source_expr.to_string(),
+                wire_value_type: resolved_type,
+            };
+        }
+
+        RenderedSourcedField {
+            field_name: field_name.to_string(),
+            field: field.clone(),
+            source_expr: source_expr.to_string(),
+            wire_value_type: resolved_type,
+        }
+    }
+
+    fn resolve_planned_value_type(&mut self, value_type: &PlannedType) -> ResolvedFieldType {
+        let api_plan = self.api_plan;
+        match value_type {
+            PlannedType::Float => ResolvedFieldType {
+                annotation: "float".to_string(),
+                imports: PythonImports::default(),
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            },
+            PlannedType::Int(_) => ResolvedFieldType {
+                annotation: "int".to_string(),
+                imports: PythonImports::default(),
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            },
+            PlannedType::Bool => ResolvedFieldType {
+                annotation: "bool".to_string(),
+                imports: PythonImports::default(),
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            },
+            PlannedType::String => ResolvedFieldType {
+                annotation: "str".to_string(),
+                imports: PythonImports::default(),
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            },
+            PlannedType::Bytes => ResolvedFieldType {
+                annotation: "bytes".to_string(),
+                imports: PythonImports::default(),
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            },
+            PlannedType::Enum(enum_type) => {
+                if let Some(enum_spec) = api_plan.enums.get(&enum_type.full_name) {
+                    self.ensure_rendered_enum(enum_spec);
+                }
+                ResolvedFieldType {
+                    annotation: enum_type.name.clone(),
+                    imports: PythonImports::default(),
+                    kind: ResolvedFieldKind::Enum,
+                    wire_conversion: None,
+                }
+            }
+            value_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(
+                _,
+            ))) => self
+                .external_models
+                .resolved_external_field_type(value_type)
+                .expect("proto enum field type should exist"),
+            PlannedType::Flags(flags_type) => {
+                if let Some(flags_spec) = api_plan.flags.get(&flags_type.full_name) {
+                    self.ensure_rendered_flags(flags_spec);
+                }
+                ResolvedFieldType {
+                    annotation: flags_type.name.clone(),
+                    imports: PythonImports::default(),
+                    kind: ResolvedFieldKind::Scalar,
+                    wire_conversion: None,
+                }
+            }
+            PlannedType::Variant(variant_type) => {
+                if let Some(variant_spec) = api_plan.variants.get(&variant_type.full_name) {
+                    self.ensure_rendered_variant(variant_spec);
+                }
+                ResolvedFieldType {
+                    annotation: variant_type.name.clone(),
+                    imports: PythonImports::default(),
+                    kind: ResolvedFieldKind::Scalar,
+                    wire_conversion: None,
+                }
+            }
+            message_type @ (PlannedType::External(ExternalTypeSpec::Proto(
+                PlannedProtoType::Message(_),
+            ))
+            | PlannedType::Record(_)) => {
+                let conversion = self.resolve_message_value_conversion(message_type);
+                ResolvedFieldType {
+                    annotation: conversion.annotation.clone(),
+                    imports: conversion.imports.clone(),
+                    kind: ResolvedFieldKind::Message,
+                    wire_conversion: Some(conversion),
+                }
+            }
+            value_type @ PlannedType::External(ExternalTypeSpec::Json(_)) => self
+                .external_models
+                .resolved_external_field_type(value_type)
+                .expect("json model field type should exist"),
+            PlannedType::Resource(resource) => ResolvedFieldType {
+                annotation: resource.type_name.clone(),
+                imports: PythonImports::default(),
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            },
+            PlannedType::Option(inner) | PlannedType::List(inner) => {
+                let inner = self.resolve_planned_value_type(inner);
+                ResolvedFieldType {
+                    annotation: format!("list[{}]", inner.annotation),
+                    imports: inner.imports,
+                    kind: ResolvedFieldKind::Scalar,
+                    wire_conversion: None,
+                }
+            }
+            PlannedType::Map(key, value) => {
+                let key = self.resolve_planned_value_type(key);
+                let value = self.resolve_planned_value_type(value);
+                let mut imports = key.imports;
+                imports.extend(&value.imports);
+                ResolvedFieldType {
+                    annotation: format!("dict[{}, {}]", key.annotation, value.annotation),
+                    imports,
+                    kind: ResolvedFieldKind::Scalar,
+                    wire_conversion: None,
+                }
+            }
+            PlannedType::Tuple(items) => ResolvedFieldType {
+                annotation: format!(
+                    "tuple[{}]",
+                    items
+                        .iter()
+                        .map(|item| self.resolve_planned_value_type(item).annotation)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                imports: PythonImports::default(),
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            },
+            PlannedType::Result { ok, err } => {
+                let ok = ok.as_ref().map(|ok| self.resolve_planned_value_type(ok));
+                let err = err.as_ref().map(|err| self.resolve_planned_value_type(err));
+                let mut imports = PythonImports::default();
+                if let Some(ok) = &ok {
+                    imports.extend(&ok.imports);
+                }
+                if let Some(err) = &err {
+                    imports.extend(&err.imports);
+                }
+                ResolvedFieldType {
+                    annotation: python_result_annotation(
+                        ok.as_ref().map(|ok| ok.annotation.clone()),
+                        err.as_ref().map(|err| err.annotation.clone()),
+                    ),
+                    imports,
+                    kind: ResolvedFieldKind::Scalar,
+                    wire_conversion: None,
+                }
+            }
+            PlannedType::External(ExternalTypeSpec::Alias {
+                type_name, target, ..
+            }) => {
+                let mut resolved = self.resolve_planned_value_type(target);
+                if let Some(annotation) = type_name.for_language(Language::Python) {
+                    resolved.annotation = annotation.to_string();
+                }
+                resolved
+            }
+        }
+    }
 }
 
 fn collect_python_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageImportSpec> {
@@ -187,6 +1516,125 @@ fn collect_python_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageImport
     imports.into_iter().collect()
 }
 
+fn render_record_models(
+    models: &[&RenderedModel],
+    api_plan: &PlannedSpec,
+    external_models: &PythonExternalModels,
+) -> RenderedModelFragments {
+    let mut body = String::new();
+    let mut wire_blocks = BTreeMap::new();
+    for (index, model) in models.iter().enumerate() {
+        let planned_model = api_plan
+            .records
+            .get(&model.full_name)
+            .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
+        let wire_block = external_models.render_record_wire_block(model, planned_model);
+        render_record_model(&mut body, model, wire_block.as_ref());
+        if let Some(wire_block) = wire_block {
+            wire_blocks.insert(model.full_name.clone(), wire_block);
+        }
+        if index + 1 != models.len() {
+            body.push_str("\n\n");
+        }
+    }
+
+    let mut registrations = String::new();
+    render_nexus_type_registrations(&mut registrations, models);
+
+    let mut module_imports = BTreeSet::new();
+    if models.iter().any(|model| model.native) {
+        module_imports.insert("nex_gen_runtime".to_string());
+    }
+    for model in models {
+        if let Some(wire_block) = wire_blocks.get(&model.full_name) {
+            module_imports.extend(wire_block.imports.module_imports.iter().cloned());
+        }
+        for field in &model.fields {
+            module_imports.extend(field.imports.module_imports.iter().cloned());
+        }
+    }
+
+    RenderedModelFragments {
+        body,
+        registrations,
+        module_imports,
+        exported_names: models.iter().map(|model| model.name.clone()).collect(),
+    }
+}
+
+fn render_record_model(
+    output: &mut String,
+    model: &RenderedModel,
+    wire_block: Option<&RenderedRecordWireBlock>,
+) {
+    if model_needs_keyword_only_dataclass(model) {
+        output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
+    } else {
+        output.push_str("@dataclasses.dataclass(slots=True)\n");
+    }
+    output.push_str("class ");
+    output.push_str(&model.name);
+    output.push_str(":\n");
+    render_python_docstring(output, "    ", None, &[], None, model.experimental);
+
+    let wire_lines = wire_block
+        .map(|block| block.class_body_lines.as_slice())
+        .unwrap_or(&[]);
+    if model.fields.is_empty() {
+        if wire_lines.is_empty() {
+            output.push_str("    pass\n");
+        } else {
+            render_record_wire_block_lines(output, wire_lines);
+        }
+        return;
+    }
+
+    for field in &model.fields {
+        output.push_str("    ");
+        output.push_str(&field.attr_name);
+        output.push_str(": ");
+        output.push_str(&python_parameter_annotation(
+            &field.annotation,
+            &field.default_kind,
+        ));
+        if let Some(default_expr) = &field.default_expr {
+            render_python_default_expr(output, default_expr, "    ");
+        }
+        output.push('\n');
+    }
+
+    render_record_wire_block_lines(output, wire_lines);
+}
+
+fn render_record_wire_block_lines(output: &mut String, lines: &[String]) {
+    for line in lines {
+        output.push_str(line);
+        output.push('\n');
+    }
+}
+
+fn model_needs_keyword_only_dataclass(model: &RenderedModel) -> bool {
+    let mut saw_defaulted_field = false;
+    for field in &model.fields {
+        if field.default_expr.is_some() {
+            saw_defaulted_field = true;
+        } else if saw_defaulted_field {
+            return true;
+        }
+    }
+    false
+}
+
+fn render_nexus_type_registrations(output: &mut String, models: &[&RenderedModel]) {
+    for model in models.iter().filter(|model| model.native) {
+        output.push_str("nex_gen_runtime.register_nexus_type(");
+        output.push_str(&model.name);
+        output.push_str(", ");
+        output.push_str(&python_string_literal(&model.full_name));
+        output.push_str(")\n");
+    }
+}
+
 fn collect_proto_type_imports(
     proto: &PlannedProtoTypeInfo,
     imports: &mut BTreeSet<LanguageImportSpec>,
@@ -234,8 +1682,8 @@ fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<Langua
             collect_model_type_imports(value, imports);
         }
         PlannedType::Resource(resource) => {
-            if let Some(proto) = &resource.proto {
-                collect_model_type_imports(proto, imports);
+            if let Some(wire_type) = &resource.wire_type {
+                collect_model_type_imports(wire_type, imports);
             }
         }
         PlannedType::Option(inner) | PlannedType::List(inner) => {
@@ -450,46 +1898,6 @@ fn reject_support_namespaces(
     Ok(())
 }
 
-fn ensure_resource_field_types(
-    resource: &PlannedResource,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) {
-    for field in &resource.fields {
-        ensure_resource_field_type(&field.kind, api_plan, enums, flags, variants, models);
-    }
-    for method in &resource.methods {
-        for param in &method.params {
-            ensure_resource_field_type(&param.kind, api_plan, enums, flags, variants, models);
-        }
-    }
-}
-
-fn ensure_resource_field_type(
-    kind: &PlannedType,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) {
-    match kind {
-        PlannedType::List(value) => {
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models);
-        }
-        PlannedType::Map(key, value) => {
-            resolve_planned_value_type(key, api_plan, enums, flags, variants, models);
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models);
-        }
-        value => {
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models);
-        }
-    }
-}
-
 pub(crate) fn python_field_name(name: &str) -> String {
     python_ident(&name.to_snake_case())
 }
@@ -595,31 +2003,22 @@ pub(in crate::generator) struct RenderedField {
     pub(in crate::generator) annotation: String,
     pub(in crate::generator) default_kind: PythonFieldDefaultKind,
     pub(in crate::generator) default_expr: Option<String>,
-    pub(in crate::generator) from_wire: RenderedWireRead,
-    pub(in crate::generator) to_wire: RenderedWireWrite,
+    pub(in crate::generator) wire_value_type: ResolvedFieldType,
     pub(in crate::generator) imports: PythonImports,
 }
 
 #[derive(Debug)]
 pub(in crate::generator) struct RenderedSourcedField {
-    pub(in crate::generator) to_wire: RenderedWireWrite,
+    pub(in crate::generator) field_name: String,
+    pub(in crate::generator) field: RecordFieldSpec<PlannedTypeFamily>,
+    pub(in crate::generator) source_expr: String,
+    pub(in crate::generator) wire_value_type: ResolvedFieldType,
 }
 
-#[derive(Debug)]
-pub(in crate::generator) struct RenderedWireRead {
-    pub(in crate::generator) setup_lines: Vec<String>,
-    pub(in crate::generator) expr: String,
-}
-
-#[derive(Debug)]
-pub(in crate::generator) struct RenderedWireWrite {
-    pub(in crate::generator) lines: Vec<String>,
-}
-
-pub(in crate::generator) enum WireReadPolicy {
-    Required { missing_error: String },
-    Optional,
-    Default { default_expr: String },
+#[derive(Debug, Default)]
+pub(in crate::generator) struct RenderedRecordWireBlock {
+    pub(in crate::generator) imports: PythonImports,
+    pub(in crate::generator) class_body_lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -713,73 +2112,29 @@ pub(in crate::generator) struct ResolvedFieldType {
     pub(in crate::generator) annotation: String,
     pub(in crate::generator) imports: PythonImports,
     pub(in crate::generator) kind: ResolvedFieldKind,
-    pub(in crate::generator) message_conversion: Option<WireValueConversion>,
-    pub(in crate::generator) enum_conversion: Option<EnumValueConversion>,
+    pub(in crate::generator) wire_conversion: Option<WireValueConversion>,
 }
 
 #[derive(Debug, Clone)]
 pub(in crate::generator) struct WireValueConversion {
-    annotation: String,
-    message: WireMessageConversion,
-    imports: PythonImports,
+    pub(in crate::generator) annotation: String,
+    pub(in crate::generator) from_wire: String,
+    pub(in crate::generator) to_wire: String,
+    pub(in crate::generator) imports: PythonImports,
+    pub(in crate::generator) supports_unpacked_input: bool,
 }
 
 impl WireValueConversion {
     pub(in crate::generator) fn from_wire_expr(&self, wire_expr: &str) -> String {
-        self.message.from_wire_expr(wire_expr)
+        self.from_wire.replace("{wire}", wire_expr)
     }
 
     pub(in crate::generator) fn to_wire_expr(&self, value_expr: &str) -> String {
-        self.message.to_wire_expr(value_expr)
+        self.to_wire.replace("{value}", value_expr)
     }
 
     fn supports_unpacked_input(&self) -> bool {
-        self.message.supports_unpacked_input()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(in crate::generator) enum WireMessageConversion {
-    Proto(python_proto::PythonProtoMessageConversion),
-    Identity,
-}
-
-impl WireMessageConversion {
-    fn from_wire_expr(&self, wire_expr: &str) -> String {
-        match self {
-            WireMessageConversion::Proto(proto) => proto.from_proto_expr(wire_expr),
-            WireMessageConversion::Identity => wire_expr.to_string(),
-        }
-    }
-
-    fn to_wire_expr(&self, value_expr: &str) -> String {
-        match self {
-            WireMessageConversion::Proto(proto) => proto.to_proto_expr(value_expr),
-            WireMessageConversion::Identity => value_expr.to_string(),
-        }
-    }
-
-    fn supports_unpacked_input(&self) -> bool {
-        match self {
-            WireMessageConversion::Proto(proto) => proto.supports_unpacked_input(),
-            WireMessageConversion::Identity => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(in crate::generator) struct EnumValueConversion {
-    pub(in crate::generator) from_wire: String,
-    pub(in crate::generator) to_wire: String,
-}
-
-impl EnumValueConversion {
-    pub(in crate::generator) fn from_wire_expr(&self, proto_expr: &str) -> String {
-        format!("{}({proto_expr})", self.from_wire)
-    }
-
-    pub(in crate::generator) fn to_wire_expr(&self, value_expr: &str) -> String {
-        format!("{}({value_expr})", self.to_wire)
+        self.supports_unpacked_input
     }
 }
 
@@ -822,16 +2177,6 @@ impl RenderedModelFragments {
     }
 }
 
-fn render_model_fragments(
-    models: &[&RenderedModel],
-    api_plan: &PlannedSpec,
-) -> Result<RenderedModelFragments> {
-    let mut fragments = RenderedModelFragments::default();
-    fragments.extend(python_proto::render_models(models, api_plan));
-    fragments.extend(python_json::render_external_models(api_plan)?);
-    Ok(fragments)
-}
-
 fn python_function_result_annotation(result: &FunctionResultSpec<PlannedTypeFamily>) -> String {
     match result {
         FunctionResultSpec::Annotation(annotation) => annotation
@@ -844,7 +2189,7 @@ fn python_function_result_annotation(result: &FunctionResultSpec<PlannedTypeFami
     }
 }
 
-fn python_authored_type_annotation(authored_type: &PlannedType) -> String {
+pub(in crate::generator) fn python_authored_type_annotation(authored_type: &PlannedType) -> String {
     match authored_type {
         TypeSpec::Bool => "bool".to_string(),
         TypeSpec::Int(_) => "int".to_string(),
@@ -1005,197 +2350,6 @@ fn python_result_annotation(ok: Option<String>, err: Option<String>) -> String {
     format!("{ok_case} | {err_case}")
 }
 
-fn resolve_operation<'a>(
-    operation: &'a OperationSpec<PlannedTypeFamily>,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) -> Result<RenderedOperation<'a>> {
-    let output_resource_return = operation.data.output_resource_return.clone();
-    let input = operation_input_model(operation);
-    let rendered_input = input.map(|input| {
-        let (type_ref, module_path) = operation_service_ref(input, "models", api_plan);
-        let input_conversion =
-            resolve_message_value_conversion(input, api_plan, enums, flags, variants, models);
-        RenderedOperationInput {
-            type_ref,
-            module_path,
-            annotation: input_conversion.annotation.clone(),
-            wire_expr: input_conversion.to_wire_expr("request"),
-            supports_unpacked: input_conversion.supports_unpacked_input(),
-        }
-    });
-    let output_transform = operation.output_transform.as_ref();
-    let output_direct_result = operation_output_direct_result(operation);
-    let (output_ref, output_module_path, output_annotation_default) = match operation.output_type()
-    {
-        Some(output) if output.operation_model().is_some() => {
-            let output_model = output
-                .operation_model()
-                .expect("operation model presence checked");
-            let (output_ref, output_module_path) =
-                operation_service_ref(output_model, "models", api_plan);
-            if output_transform.is_none()
-                && output_resource_return.is_none()
-                && !output_direct_result
-                && matches!(output_model, PlannedType::Record(_))
-            {
-                resolve_message_value_conversion(
-                    output_model,
-                    api_plan,
-                    enums,
-                    flags,
-                    variants,
-                    models,
-                );
-            }
-            let annotation =
-                resolve_output_annotation(output_model, api_plan, enums, flags, variants, models);
-            (output_ref, output_module_path, annotation)
-        }
-        Some(PlannedType::Resource(resource)) => {
-            if let Some(output) = &resource.proto {
-                let (output_ref, output_module_path) =
-                    operation_service_ref(output, "models", api_plan);
-                let annotation =
-                    resolve_output_annotation(output, api_plan, enums, flags, variants, models);
-                (output_ref, output_module_path, annotation)
-            } else {
-                (
-                    resource.type_name.clone(),
-                    Some("._resources".to_string()),
-                    resource.type_name.clone(),
-                )
-            }
-        }
-        None => ("None".to_string(), None, "None".to_string()),
-        Some(_) => panic!("planned operation output should be proto, record, resource, or none"),
-    };
-    let overload_output_annotation = output_transform
-        .and_then(|transform| {
-            transform
-                .type_name
-                .for_language(crate::language::Language::Python)
-                .map(str::to_string)
-        })
-        .or_else(|| {
-            output_resource_return
-                .as_ref()
-                .map(|resource| resource.resource_type_name.clone())
-        })
-        .unwrap_or(output_annotation_default);
-    let unpacked_input = if let (Some(input), Some(rendered_input)) = (input, &rendered_input) {
-        if rendered_input.supports_unpacked {
-            Some(build_unpacked_input(
-                input
-                    .model_full_name()
-                    .expect("operation input should be a model"),
-                models,
-                api_plan,
-            )?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    let output_type_parameters = unpacked_input
-        .iter()
-        .flat_map(|unpacked_input| &unpacked_input.functions)
-        .filter_map(|function| function.result_type_parameter.clone())
-        .filter(|name| python_annotation_uses_identifier(&overload_output_annotation, name))
-        .collect::<BTreeSet<_>>();
-    let output_annotation =
-        erase_python_type_parameters(&overload_output_annotation, &output_type_parameters);
-    let output_type_expr = if output_transform.is_some() || output_resource_return.is_some() {
-        output_ref.clone()
-    } else {
-        output_annotation.clone()
-    };
-    Ok(RenderedOperation {
-        name: operation.name.as_str(),
-        wire_name: operation.wire_name.as_str(),
-        attr_name: python_ident(&operation.name.to_snake_case()),
-        experimental: operation.experimental,
-        doc: operation
-            .doc
-            .for_language(Language::Python)
-            .map(str::to_string),
-        return_doc: operation
-            .return_doc
-            .for_language(Language::Python)
-            .map(str::to_string),
-        input: rendered_input,
-        output_ref,
-        output_module_path,
-        output_annotation,
-        overload_output_annotation,
-        output_type_parameters,
-        output_type_expr,
-        output_transform_expr: output_transform.and_then(|transform| {
-            transform
-                .transform
-                .for_language(crate::language::Language::Python)
-                .map(str::to_string)
-        }),
-        output_resource_return,
-        output_direct_result,
-        output_none: operation.output_type().is_none(),
-        unpacked_input,
-    })
-}
-
-fn operation_service_ref(
-    model_type: &PlannedType,
-    _native_module: &str,
-    api_plan: &PlannedSpec,
-) -> (String, Option<String>) {
-    if let Some(reference) = python_proto::service_message_python_ref(model_type, api_plan) {
-        return (reference.type_ref, Some(reference.module_path));
-    }
-    match model_type {
-        PlannedType::External(ExternalTypeSpec::Json(json_type)) => (
-            format!(
-                "{_native_module}.{}",
-                python_json::model_type_ref(json_type)
-            ),
-            Some(format!(".{_native_module}")),
-        ),
-        PlannedType::Record(record) => (
-            format!("{_native_module}.{}", record.model_name),
-            Some(format!(".{_native_module}")),
-        ),
-        _ => panic!("operation service ref should be model-shaped"),
-    }
-}
-
-fn resolve_output_annotation(
-    model_type: &PlannedType,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) -> String {
-    if let Some(reference) = python_proto::external_message_python_ref(model_type) {
-        return reference.type_ref;
-    }
-    match model_type {
-        PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
-            python_json::model_type_ref(json_type)
-        }
-        PlannedType::Record(_) => {
-            let conversion = resolve_message_value_conversion(
-                model_type, api_plan, enums, flags, variants, models,
-            );
-            conversion.annotation
-        }
-        _ => panic!("operation output annotation should be model-shaped"),
-    }
-}
-
 fn planned_record<'a>(
     api_plan: &'a PlannedSpec,
     full_name: &str,
@@ -1204,125 +2358,6 @@ fn planned_record<'a>(
         .records
         .get(full_name)
         .unwrap_or_else(|| panic!("planned record should exist for {full_name}"))
-}
-
-fn build_unpacked_input(
-    input_full_name: &str,
-    models: &IndexMap<String, RenderedModel>,
-    api_plan: &PlannedSpec,
-) -> Result<RenderedUnpackedInput> {
-    let model = models
-        .get(input_full_name)
-        .expect("input model should be rendered before building unpacked input");
-    let planned_model = planned_record(api_plan, input_full_name);
-
-    let mut parameters = Vec::new();
-    let mut request_fields = Vec::new();
-    let mut flattened_messages = Vec::new();
-    let mut parameter_sources = BTreeMap::<String, String>::new();
-
-    for ((field_name, planned_field), rendered_field) in
-        planned_model.public_fields().zip(model.fields.iter())
-    {
-        if let Some(flattened) = build_flattened_message(
-            planned_model,
-            field_name,
-            planned_field,
-            rendered_field,
-            models,
-            api_plan,
-        ) {
-            request_fields.push(RenderedUnpackedRequestField {
-                attr_name: flattened.local_name.clone(),
-                value_expr: flattened.local_name.clone(),
-                default_kind: PythonFieldDefaultKind::Required,
-            });
-            for child in &flattened.fields {
-                register_unpacked_parameter_name(
-                    &mut parameter_sources,
-                    &child.value_expr,
-                    &format!("{}.{}", flattened.local_name, child.attr_name),
-                    &model.name,
-                )?;
-                parameters.push(RenderedUnpackedInputField {
-                    attr_name: child.value_expr.clone(),
-                    annotation: child.annotation.clone(),
-                    default_kind: child.default_kind.clone(),
-                    doc: child.doc.clone(),
-                });
-            }
-            flattened_messages.push(flattened);
-            continue;
-        }
-
-        register_unpacked_parameter_name(
-            &mut parameter_sources,
-            &rendered_field.attr_name,
-            &rendered_field.attr_name,
-            &model.name,
-        )?;
-        parameters.push(RenderedUnpackedInputField {
-            attr_name: rendered_field.attr_name.clone(),
-            annotation: rendered_field.annotation.clone(),
-            default_kind: rendered_field.default_kind.clone(),
-            doc: planned_field
-                .doc
-                .as_ref()
-                .and_then(|doc| doc.for_language(Language::Python))
-                .map(str::to_string),
-        });
-        request_fields.push(RenderedUnpackedRequestField {
-            attr_name: rendered_field.attr_name.clone(),
-            value_expr: rendered_field.attr_name.clone(),
-            default_kind: rendered_field.default_kind.clone(),
-        });
-    }
-
-    Ok(RenderedUnpackedInput {
-        model_name: model.name.clone(),
-        parameters,
-        request_fields,
-        flattened_messages,
-        functions: planned_model
-            .functions()
-            .map(|(field_name, function)| {
-                let result_annotation = python_function_result_annotation(&function.result);
-                let result_type_parameters = function
-                    .result_type_parameter
-                    .iter()
-                    .cloned()
-                    .collect::<BTreeSet<_>>();
-                let erased_result_annotation =
-                    erase_python_type_parameters(&result_annotation, &result_type_parameters);
-                let args = python_function_args(&function.args);
-                let alternate_annotation = function
-                    .alternate_type
-                    .as_ref()
-                    .map(python_authored_type_annotation);
-                RenderedFunctionField {
-                    callable_field_name: planned_model
-                        .field_name_override(field_name)
-                        .map(python_field_name)
-                        .unwrap_or_else(|| python_field_name(field_name)),
-                    args_field_name: planned_model
-                        .field_name_override(&function.args_field)
-                        .map(python_field_name)
-                        .unwrap_or_else(|| python_field_name(&function.args_field)),
-                    args: args.clone(),
-                    primary: function.primary,
-                    callable_annotation: python_function_annotation_from_args(
-                        &args,
-                        alternate_annotation.as_deref(),
-                        &erased_result_annotation,
-                    ),
-                    result_annotation,
-                    erased_result_annotation,
-                    result_type_parameter: function.result_type_parameter.clone(),
-                    alternate_annotation,
-                }
-            })
-            .collect(),
-    })
 }
 
 fn register_unpacked_parameter_name(
@@ -1340,540 +2375,6 @@ fn register_unpacked_parameter_name(
     }
     parameter_sources.insert(parameter_name.to_string(), source.to_string());
     Ok(())
-}
-
-fn build_flattened_message(
-    _record: &RecordSpec<PlannedTypeFamily>,
-    _field_name: &str,
-    planned_field: &RecordFieldSpec<PlannedTypeFamily>,
-    rendered_field: &RenderedField,
-    models: &IndexMap<String, RenderedModel>,
-    api_plan: &PlannedSpec,
-) -> Option<RenderedFlattenedMessage> {
-    let model_type = &planned_field.field_type;
-    let Some(full_name) = model_type.model_full_name() else {
-        return None;
-    };
-    let nested_planned_model = api_plan.records.get(full_name)?;
-    if !nested_planned_model.flatten_in_api {
-        return None;
-    }
-    let nested_rendered_model = models.get(full_name)?;
-
-    Some(RenderedFlattenedMessage {
-        local_name: rendered_field.attr_name.clone(),
-        model_name: nested_rendered_model.name.clone(),
-        required: planned_field.required,
-        fields: nested_planned_model
-            .public_fields()
-            .zip(nested_rendered_model.fields.iter())
-            .map(
-                |((nested_field_name, nested_planned_field), nested_rendered_field)| {
-                    RenderedFlattenedMessageField {
-                        attr_name: nested_rendered_field.attr_name.clone(),
-                        annotation: nested_planned_model
-                            .field_flattened_annotation(nested_field_name)
-                            .and_then(|annotation| annotation.for_language(Language::Python))
-                            .map(|annotation| {
-                                if nested_planned_field.required {
-                                    annotation.to_string()
-                                } else {
-                                    format!("{annotation} | None")
-                                }
-                            })
-                            .unwrap_or_else(|| nested_rendered_field.annotation.clone()),
-                        value_expr: nested_rendered_field.attr_name.clone(),
-                        default_kind: if nested_planned_field.required {
-                            PythonFieldDefaultKind::Required
-                        } else {
-                            nested_rendered_field.default_kind.clone()
-                        },
-                        doc: nested_planned_field
-                            .doc
-                            .as_ref()
-                            .and_then(|doc| doc.for_language(Language::Python))
-                            .map(str::to_string),
-                    }
-                },
-            )
-            .collect(),
-    })
-}
-
-fn resolve_message_value_conversion(
-    model_type: &PlannedType,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) -> WireValueConversion {
-    if let Some(override_conversion) = python_proto::message_override(model_type) {
-        match override_conversion {
-            python_proto::PythonProtoMessageOverride::Replacement {
-                annotation,
-                from_proto,
-                to_proto,
-            } => {
-                return WireValueConversion {
-                    annotation,
-                    message: WireMessageConversion::Proto(
-                        python_proto::PythonProtoMessageConversion::Override {
-                            from_proto,
-                            to_proto,
-                        },
-                    ),
-                    imports: PythonImports::default(),
-                };
-            }
-            python_proto::PythonProtoMessageOverride::Authored {
-                authored_type,
-                from_proto,
-                to_proto,
-            } => {
-                return WireValueConversion {
-                    annotation: python_authored_type_annotation(authored_type),
-                    message: WireMessageConversion::Proto(
-                        python_proto::PythonProtoMessageConversion::Override {
-                            from_proto,
-                            to_proto,
-                        },
-                    ),
-                    imports: PythonImports::default(),
-                };
-            }
-        }
-    }
-
-    if let PlannedType::External(ExternalTypeSpec::Json(json_type)) = model_type {
-        return WireValueConversion {
-            annotation: python_json::model_type_ref(json_type),
-            message: WireMessageConversion::Identity,
-            imports: PythonImports::default(),
-        };
-    }
-
-    ensure_rendered_model(model_type, api_plan, enums, flags, variants, models);
-    let full_name = model_type
-        .model_full_name()
-        .expect("message conversion should be model-shaped");
-    let planned_model = planned_record(api_plan, full_name);
-    let kind = if let Some(model_name) =
-        python_proto::generated_message_model_name(model_type, planned_model)
-    {
-        python_proto::PythonProtoMessageConversion::GeneratedModel { model_name }
-    } else {
-        match model_type {
-            PlannedType::Record(_) => python_proto::PythonProtoMessageConversion::NativeModel,
-            _ => panic!("message conversion should be model-shaped"),
-        }
-    };
-
-    WireValueConversion {
-        annotation: models
-            .get(full_name)
-            .expect("planned model should be rendered")
-            .name
-            .clone(),
-        message: WireMessageConversion::Proto(kind),
-        imports: PythonImports::default(),
-    }
-}
-
-fn ensure_rendered_model(
-    model_type: &PlannedType,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) {
-    let full_name = model_type
-        .model_full_name()
-        .expect("rendered model should be model-shaped");
-    let planned_model = planned_record(api_plan, full_name);
-
-    if models.contains_key(full_name) {
-        return;
-    }
-
-    models.insert(
-        full_name.to_string(),
-        RenderedModel {
-            full_name: full_name.to_string(),
-            name: planned_model.name.clone(),
-            native: planned_model.data.proto.is_none(),
-            capabilities: planned_model.data.capabilities,
-            experimental: planned_model.experimental,
-            fields: Vec::new(),
-            sourced_fields: Vec::new(),
-        },
-    );
-
-    let fields = planned_model
-        .public_fields()
-        .map(|(field_name, field)| {
-            build_field(
-                planned_model,
-                field_name,
-                field,
-                api_plan,
-                enums,
-                flags,
-                variants,
-                models,
-            )
-        })
-        .collect();
-
-    let sourced_fields = planned_model
-        .sourced_fields()
-        .map(|(field_name, field, source_expr)| {
-            build_sourced_field(
-                field_name,
-                field,
-                source_expr,
-                api_plan,
-                enums,
-                flags,
-                variants,
-                models,
-            )
-        })
-        .collect();
-
-    models
-        .get_mut(full_name)
-        .expect("model should be inserted before recursive field resolution")
-        .fields = fields;
-    models
-        .get_mut(full_name)
-        .expect("model should be inserted before recursive field resolution")
-        .sourced_fields = sourced_fields;
-}
-
-fn ensure_rendered_enum(enum_spec: &EnumSpec, enums: &mut IndexMap<String, RenderedEnum>) {
-    enums
-        .entry(enum_spec.full_name.clone())
-        .or_insert_with(|| RenderedEnum {
-            name: enum_spec.name.clone(),
-            values: enum_spec
-                .values
-                .iter()
-                .map(|value| RenderedEnumValue {
-                    name: value.name.clone(),
-                    number: value.number,
-                })
-                .collect(),
-        });
-}
-
-fn ensure_rendered_flags(flags_spec: &FlagsSpec, flags: &mut IndexMap<String, RenderedFlags>) {
-    flags
-        .entry(flags_spec.full_name.clone())
-        .or_insert_with(|| RenderedFlags {
-            name: flags_spec.name.clone(),
-            flags: flags_spec
-                .flags
-                .iter()
-                .map(|flag| RenderedFlag {
-                    name: flag.name.clone(),
-                    bit: flag.bit,
-                })
-                .collect(),
-        });
-}
-
-fn ensure_rendered_variant(
-    variant_spec: &VariantSpec<PlannedTypeFamily>,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) {
-    if variants.contains_key(&variant_spec.full_name) {
-        return;
-    }
-
-    let cases = variant_spec
-        .cases
-        .iter()
-        .map(|case| RenderedVariantCase {
-            name: case.name.clone(),
-            payload_annotation: case.payload.as_ref().map(|payload| {
-                resolve_planned_value_type(payload, api_plan, enums, flags, variants, models)
-                    .annotation
-            }),
-        })
-        .collect();
-    variants.insert(
-        variant_spec.full_name.clone(),
-        RenderedVariant {
-            name: variant_spec.name.clone(),
-            cases,
-        },
-    );
-}
-
-fn build_field(
-    record: &RecordSpec<PlannedTypeFamily>,
-    field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) -> RenderedField {
-    let attr_name = python_field_name(&field.name);
-
-    if let PlannedType::Map(key, value) = &field.field_type {
-        let key_type = resolve_planned_value_type(key, api_plan, enums, flags, variants, models);
-        let value_type =
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models);
-        let mut imports = key_type.imports.clone();
-        imports.extend(&value_type.imports);
-        return RenderedField {
-            attr_name: attr_name.clone(),
-            annotation: python_field_annotation(
-                record,
-                field_name,
-                field,
-                format!("dict[{}, {}]", key_type.annotation, value_type.annotation),
-                false,
-            ),
-            default_kind: PythonFieldDefaultKind::EmptyDict,
-            default_expr: Some("dataclasses.field(default_factory=dict)".to_string()),
-            from_wire: python_proto::field_read(
-                field_name,
-                &attr_name,
-                field,
-                &value_type,
-                WireReadPolicy::Default {
-                    default_expr: "{}".to_string(),
-                },
-            ),
-            to_wire: python_proto::field_write(
-                field_name,
-                field,
-                &format!("self.{attr_name}"),
-                &value_type,
-                true,
-            ),
-            imports,
-        };
-    }
-
-    let (resolved_type, repeated) = match &field.field_type {
-        PlannedType::List(value) => (
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models),
-            true,
-        ),
-        PlannedType::Map(_, _) => unreachable!("handled above"),
-        value => (
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models),
-            false,
-        ),
-    };
-    let model_name = record.name.clone();
-
-    if repeated {
-        return RenderedField {
-            attr_name: attr_name.clone(),
-            annotation: python_field_annotation(
-                record,
-                field_name,
-                field,
-                format!("list[{}]", resolved_type.annotation),
-                false,
-            ),
-            default_kind: PythonFieldDefaultKind::EmptyList,
-            default_expr: Some("dataclasses.field(default_factory=list)".to_string()),
-            from_wire: python_proto::field_read(
-                field_name,
-                &attr_name,
-                field,
-                &resolved_type,
-                WireReadPolicy::Default {
-                    default_expr: "[]".to_string(),
-                },
-            ),
-            to_wire: python_proto::field_write(
-                field_name,
-                field,
-                &format!("self.{attr_name}"),
-                &resolved_type,
-                true,
-            ),
-            imports: resolved_type.imports,
-        };
-    }
-
-    if let Some(default_value) = &field.default_value {
-        let default_expr = enum_default_expr(&resolved_type, &default_value.enum_case);
-        return RenderedField {
-            attr_name: attr_name.clone(),
-            annotation: python_field_annotation(
-                record,
-                field_name,
-                field,
-                resolved_type.annotation.clone(),
-                false,
-            ),
-            default_kind: PythonFieldDefaultKind::Expression(default_expr.clone()),
-            default_expr: Some(default_expr.clone()),
-            from_wire: python_proto::field_read(
-                field_name,
-                &attr_name,
-                field,
-                &resolved_type,
-                WireReadPolicy::Default { default_expr },
-            ),
-            to_wire: python_proto::field_write(
-                field_name,
-                field,
-                &format!("self.{attr_name}"),
-                &resolved_type,
-                false,
-            ),
-            imports: resolved_type.imports,
-        };
-    }
-
-    if field.required {
-        let missing_error =
-            python_string_literal(&format!("missing required field {model_name}.{attr_name}"));
-        return RenderedField {
-            attr_name: attr_name.clone(),
-            annotation: python_field_annotation(
-                record,
-                field_name,
-                field,
-                resolved_type.annotation.clone(),
-                false,
-            ),
-            default_kind: PythonFieldDefaultKind::Required,
-            default_expr: None,
-            from_wire: python_proto::field_read(
-                field_name,
-                &attr_name,
-                field,
-                &resolved_type,
-                WireReadPolicy::Required { missing_error },
-            ),
-            to_wire: match field
-                .function
-                .as_ref()
-                .and_then(|function| function.converter.as_deref())
-            {
-                Some(converter) => python_proto::function_field_write(
-                    field_name,
-                    field,
-                    &format!("self.{attr_name}"),
-                    converter,
-                    &resolved_type,
-                    false,
-                ),
-                None => python_proto::field_write(
-                    field_name,
-                    field,
-                    &format!("self.{attr_name}"),
-                    &resolved_type,
-                    false,
-                ),
-            },
-            imports: resolved_type.imports,
-        };
-    }
-
-    RenderedField {
-        attr_name: attr_name.clone(),
-        annotation: python_field_annotation(
-            record,
-            field_name,
-            field,
-            resolved_type.annotation.clone(),
-            true,
-        ),
-        default_kind: PythonFieldDefaultKind::None,
-        default_expr: Some("None".to_string()),
-        from_wire: python_proto::field_read(
-            field_name,
-            &attr_name,
-            field,
-            &resolved_type,
-            WireReadPolicy::Optional,
-        ),
-        to_wire: match field
-            .function
-            .as_ref()
-            .and_then(|function| function.converter.as_deref())
-        {
-            Some(converter) => python_proto::function_field_write(
-                field_name,
-                field,
-                &format!("self.{attr_name}"),
-                converter,
-                &resolved_type,
-                true,
-            ),
-            None => python_proto::field_write(
-                field_name,
-                field,
-                &format!("self.{attr_name}"),
-                &resolved_type,
-                true,
-            ),
-        },
-        imports: resolved_type.imports,
-    }
-}
-
-fn build_sourced_field(
-    field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
-    source_expr: &str,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) -> RenderedSourcedField {
-    if let PlannedType::Map(_, value) = &field.field_type {
-        let value_type =
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models);
-        return RenderedSourcedField {
-            to_wire: python_proto::field_write(field_name, field, source_expr, &value_type, false),
-        };
-    }
-
-    let (resolved_type, repeated) = match &field.field_type {
-        PlannedType::List(value) => (
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models),
-            true,
-        ),
-        PlannedType::Map(_, _) => unreachable!("handled above"),
-        value => (
-            resolve_planned_value_type(value, api_plan, enums, flags, variants, models),
-            false,
-        ),
-    };
-    if repeated {
-        return RenderedSourcedField {
-            to_wire: python_proto::field_write(
-                field_name,
-                field,
-                source_expr,
-                &resolved_type,
-                false,
-            ),
-        };
-    }
-
-    RenderedSourcedField {
-        to_wire: python_proto::field_write(field_name, field, source_expr, &resolved_type, false),
-    }
 }
 
 fn python_field_annotation(
@@ -1970,327 +2471,16 @@ fn python_function_annotation_from_args(
     }
 }
 
-fn resolve_planned_value_type(
-    value_type: &PlannedType,
-    api_plan: &PlannedSpec,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-) -> ResolvedFieldType {
-    match value_type {
-        PlannedType::Float => ResolvedFieldType {
-            annotation: "float".to_string(),
-            imports: PythonImports::default(),
-            kind: ResolvedFieldKind::Scalar,
-            message_conversion: None,
-            enum_conversion: None,
-        },
-        PlannedType::Int(_) => ResolvedFieldType {
-            annotation: "int".to_string(),
-            imports: PythonImports::default(),
-            kind: ResolvedFieldKind::Scalar,
-            message_conversion: None,
-            enum_conversion: None,
-        },
-        PlannedType::Bool => ResolvedFieldType {
-            annotation: "bool".to_string(),
-            imports: PythonImports::default(),
-            kind: ResolvedFieldKind::Scalar,
-            message_conversion: None,
-            enum_conversion: None,
-        },
-        PlannedType::String => ResolvedFieldType {
-            annotation: "str".to_string(),
-            imports: PythonImports::default(),
-            kind: ResolvedFieldKind::Scalar,
-            message_conversion: None,
-            enum_conversion: None,
-        },
-        PlannedType::Bytes => ResolvedFieldType {
-            annotation: "bytes".to_string(),
-            imports: PythonImports::default(),
-            kind: ResolvedFieldKind::Scalar,
-            message_conversion: None,
-            enum_conversion: None,
-        },
-        PlannedType::Enum(enum_type) => {
-            if let Some(enum_spec) = api_plan.enums.get(&enum_type.full_name) {
-                ensure_rendered_enum(enum_spec, enums);
-            }
-            ResolvedFieldType {
-                annotation: enum_type.name.clone(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Enum,
-                message_conversion: None,
-                enum_conversion: None,
-            }
-        }
-        value_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(_))) => {
-            python_proto::enum_field_type(value_type).expect("proto enum presence checked")
-        }
-        PlannedType::Flags(flags_type) => {
-            if let Some(flags_spec) = api_plan.flags.get(&flags_type.full_name) {
-                ensure_rendered_flags(flags_spec, flags);
-            }
-            ResolvedFieldType {
-                annotation: flags_type.name.clone(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                message_conversion: None,
-                enum_conversion: None,
-            }
-        }
-        PlannedType::Variant(variant_type) => {
-            if let Some(variant_spec) = api_plan.variants.get(&variant_type.full_name) {
-                ensure_rendered_variant(variant_spec, api_plan, enums, flags, variants, models);
-            }
-            ResolvedFieldType {
-                annotation: variant_type.name.clone(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                message_conversion: None,
-                enum_conversion: None,
-            }
-        }
-        message_type @ (PlannedType::External(ExternalTypeSpec::Proto(
-            PlannedProtoType::Message(_),
-        ))
-        | PlannedType::Record(_)) => {
-            let conversion = resolve_message_value_conversion(
-                message_type,
-                api_plan,
-                enums,
-                flags,
-                variants,
-                models,
-            );
-            ResolvedFieldType {
-                annotation: conversion.annotation.clone(),
-                imports: conversion.imports.clone(),
-                kind: ResolvedFieldKind::Message,
-                message_conversion: Some(conversion),
-                enum_conversion: None,
-            }
-        }
-        PlannedType::External(ExternalTypeSpec::Json(json_type)) => ResolvedFieldType {
-            annotation: json_type.model_name.clone(),
-            imports: PythonImports::default(),
-            kind: ResolvedFieldKind::Scalar,
-            message_conversion: None,
-            enum_conversion: None,
-        },
-        PlannedType::Resource(resource) => ResolvedFieldType {
-            annotation: resource.type_name.clone(),
-            imports: PythonImports::default(),
-            kind: ResolvedFieldKind::Scalar,
-            message_conversion: None,
-            enum_conversion: None,
-        },
-        PlannedType::Option(inner) | PlannedType::List(inner) => {
-            let inner = resolve_planned_value_type(inner, api_plan, enums, flags, variants, models);
-            ResolvedFieldType {
-                annotation: format!("list[{}]", inner.annotation),
-                imports: inner.imports,
-                kind: ResolvedFieldKind::Scalar,
-                message_conversion: None,
-                enum_conversion: None,
-            }
-        }
-        PlannedType::Map(key, value) => {
-            let key = resolve_planned_value_type(key, api_plan, enums, flags, variants, models);
-            let value = resolve_planned_value_type(value, api_plan, enums, flags, variants, models);
-            let mut imports = key.imports;
-            imports.extend(&value.imports);
-            ResolvedFieldType {
-                annotation: format!("dict[{}, {}]", key.annotation, value.annotation),
-                imports,
-                kind: ResolvedFieldKind::Scalar,
-                message_conversion: None,
-                enum_conversion: None,
-            }
-        }
-        PlannedType::Tuple(items) => ResolvedFieldType {
-            annotation: format!(
-                "tuple[{}]",
-                items
-                    .iter()
-                    .map(|item| {
-                        resolve_planned_value_type(item, api_plan, enums, flags, variants, models)
-                            .annotation
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            imports: PythonImports::default(),
-            kind: ResolvedFieldKind::Scalar,
-            message_conversion: None,
-            enum_conversion: None,
-        },
-        PlannedType::Result { ok, err } => {
-            let ok = ok
-                .as_ref()
-                .map(|ok| resolve_planned_value_type(ok, api_plan, enums, flags, variants, models));
-            let err = err.as_ref().map(|err| {
-                resolve_planned_value_type(err, api_plan, enums, flags, variants, models)
-            });
-            let mut imports = PythonImports::default();
-            if let Some(ok) = &ok {
-                imports.extend(&ok.imports);
-            }
-            if let Some(err) = &err {
-                imports.extend(&err.imports);
-            }
-            ResolvedFieldType {
-                annotation: python_result_annotation(
-                    ok.as_ref().map(|ok| ok.annotation.clone()),
-                    err.as_ref().map(|err| err.annotation.clone()),
-                ),
-                imports,
-                kind: ResolvedFieldKind::Scalar,
-                message_conversion: None,
-                enum_conversion: None,
-            }
-        }
-        PlannedType::External(ExternalTypeSpec::Alias {
-            type_name, target, ..
-        }) => {
-            let mut resolved =
-                resolve_planned_value_type(target, api_plan, enums, flags, variants, models);
-            if let Some(annotation) = type_name.for_language(Language::Python) {
-                resolved.annotation = annotation.to_string();
-            }
-            resolved
-        }
-    }
-}
-
-fn enum_default_expr(resolved_type: &ResolvedFieldType, enum_case: &str) -> String {
-    let value_name = if resolved_type.enum_conversion.is_some() {
+pub(in crate::generator) fn enum_default_expr(
+    resolved_type: &ResolvedFieldType,
+    enum_case: &str,
+) -> String {
+    let value_name = if resolved_type.wire_conversion.is_some() {
         enum_case.to_shouty_snake_case()
     } else {
         enum_case.to_upper_camel_case()
     };
     format!("{}.{}", resolved_type.annotation, value_name)
-}
-
-fn render_package(
-    enums: &[&RenderedEnum],
-    flags: &[&RenderedFlags],
-    variants: &[&RenderedVariant],
-    model_fragments: &RenderedModelFragments,
-    services: &[RenderedService<'_>],
-    support_fragments: &[SupportFragmentSpec],
-    language_imports: &[LanguageImportSpec],
-    mode: GenerationMode,
-) -> Result<GeneratedFiles> {
-    let mut files = BTreeMap::new();
-    render_support_package(&mut files, support_fragments)?;
-    let model_names = enums
-        .iter()
-        .map(|enumeration| enumeration.name.clone())
-        .chain(flags.iter().map(|flag_set| flag_set.name.clone()))
-        .chain(variants.iter().map(|variant| variant.name.clone()))
-        .chain(model_fragments.exported_names.iter().cloned())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let resource_operation_owners = resource_operation_owners(services);
-    let resource_names = services
-        .iter()
-        .flat_map(|service| {
-            service
-                .resources
-                .iter()
-                .map(|resource| resource.type_name.clone())
-        })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let support_names = support_export_names(support_fragments);
-
-    insert_generated_file(
-        &mut files,
-        "__init__.py",
-        if mode == GenerationMode::NativeApi {
-            render_package_init(services, &resource_names, &resource_operation_owners)
-        } else {
-            render_definitions_only_package_init(services, &model_names)
-        },
-    )?;
-    insert_generated_file(
-        &mut files,
-        "models.py",
-        render_models_module(
-            enums,
-            flags,
-            variants,
-            model_fragments,
-            &support_names,
-            language_imports,
-        ),
-    )?;
-    if !resource_names.is_empty() {
-        insert_generated_file(
-            &mut files,
-            "_resources/__init__.py",
-            render_resources_package_init(services),
-        )?;
-    }
-    insert_generated_file(&mut files, "service.py", render_service_module(services))?;
-    if mode == GenerationMode::NativeApi {
-        insert_generated_file(
-            &mut files,
-            "operations/__init__.py",
-            render_operations_package_init(),
-        )?;
-    }
-
-    for service in services {
-        for resource in &service.resources {
-            let bound_operations = if mode == GenerationMode::NativeApi {
-                resource_bound_operations(service, resource)
-            } else {
-                Vec::new()
-            };
-            insert_generated_file(
-                &mut files,
-                format!("_resources/{}.py", resource_module_name(resource)),
-                render_resource_module_file(
-                    service,
-                    resource,
-                    &bound_operations,
-                    &model_names,
-                    &resource_names,
-                    &support_names,
-                    language_imports,
-                ),
-            )?;
-        }
-        if mode == GenerationMode::NativeApi {
-            for operation in &service.operations {
-                if resource_operation_owners
-                    .contains_key(&operation_key(service.name, operation.name))
-                {
-                    continue;
-                }
-                insert_generated_file(
-                    &mut files,
-                    format!("operations/{}.py", operation.attr_name),
-                    render_operation_module(
-                        service,
-                        operation,
-                        &model_names,
-                        &resource_names,
-                        &support_names,
-                        language_imports,
-                    ),
-                )?;
-            }
-        }
-    }
-
-    Ok(GeneratedFiles::directory(files))
 }
 
 fn render_definitions_only_package_init(
@@ -2955,121 +3145,6 @@ fn resource_bound_operations<'a>(
         .collect()
 }
 
-fn render_resource_module_file(
-    service: &RenderedService<'_>,
-    resource: &PlannedResource,
-    bound_operations: &[ResourceBoundOperation<'_>],
-    model_names: &[String],
-    resource_names: &[String],
-    support_names: &[String],
-    language_imports: &[LanguageImportSpec],
-) -> String {
-    let mut module_imports = bound_operations
-        .iter()
-        .flat_map(|bound_operation| {
-            [
-                bound_operation
-                    .operation
-                    .input
-                    .as_ref()
-                    .and_then(|input| input.module_path.clone()),
-                bound_operation.operation.output_module_path.clone(),
-            ]
-        })
-        .flatten()
-        .collect::<BTreeSet<_>>();
-    module_imports.insert("nex_gen_runtime".to_string());
-
-    let mut body = String::new();
-    let function_fields = bound_operations
-        .iter()
-        .filter_map(|bound_operation| bound_operation.operation.unpacked_input.as_ref())
-        .flat_map(|unpacked_input| unpacked_input.functions.iter().cloned())
-        .collect::<Vec<_>>();
-    let output_type_parameters = bound_operations
-        .iter()
-        .flat_map(|bound_operation| bound_operation.operation.output_type_parameters.iter())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    if !function_fields.is_empty() {
-        render_function_type_parameter_definitions(
-            &mut body,
-            &function_fields,
-            &output_type_parameters,
-        );
-        body.push_str("\n\n");
-    }
-    render_resource(&mut body, resource, bound_operations);
-    if !bound_operations.is_empty() {
-        body.push_str("\n\n");
-        for (index, bound_operation) in bound_operations.iter().enumerate() {
-            render_operation_functions(&mut body, service, bound_operation.operation);
-            if index + 1 != bound_operations.len() {
-                body.push_str("\n\n");
-            }
-        }
-    }
-    if !service.delay_load_temporalio_workflow {
-        module_imports.insert("temporalio.workflow".to_string());
-    }
-    body.push_str("\n\n");
-    body.push_str("nex_gen_runtime.register_nexus_type(");
-    body.push_str(&resource.type_name);
-    body.push_str(", ");
-    body.push_str(&python_string_literal(&python_resource_type_id(
-        service, resource,
-    )));
-    body.push_str(")\n");
-
-    let mut output = String::new();
-    render_generated_file_header(&mut output);
-    output.push('\n');
-    let type_checking_names = temporalio_workflow_type_checking_names(&body);
-    let body_for_imports =
-        if service.delay_load_temporalio_workflow && !type_checking_names.is_empty() {
-            format!("{body}\ntyping.TYPE_CHECKING")
-        } else {
-            body.clone()
-        };
-    let skipped_language_modules = delayed_temporalio_workflow_skipped_language_modules(service);
-    let wrote_imports = render_optional_python_imports_with_skipped_language_modules(
-        &mut output,
-        &body_for_imports,
-        &module_imports,
-        language_imports,
-        &skipped_language_modules,
-    );
-    if wrote_imports && service.delay_load_temporalio_workflow && !type_checking_names.is_empty() {
-        output.push('\n');
-    }
-    let wrote_type_checking_imports =
-        render_temporalio_workflow_type_checking_imports(&mut output, service, &body);
-    if wrote_imports || wrote_type_checking_imports {
-        output.push('\n');
-    }
-    let used_model_names = used_python_symbol_imports(&body, model_names);
-    if !used_model_names.is_empty() {
-        render_named_python_import(&mut output, "..models", &used_model_names);
-    }
-    let used_resource_names = used_python_symbol_imports(&body, resource_names)
-        .into_iter()
-        .filter(|name| name != &resource.type_name)
-        .collect::<Vec<_>>();
-    if !used_resource_names.is_empty() {
-        render_named_python_import(&mut output, ".", &used_resource_names);
-    }
-    let used_support_names = used_python_symbol_imports(&body, support_names);
-    if !used_support_names.is_empty() {
-        render_named_python_import(&mut output, ".._support", &used_support_names);
-    }
-    if !body.is_empty() {
-        output.push('\n');
-        output.push('\n');
-        output.push_str(&body);
-    }
-    output
-}
-
 fn render_service_module(services: &[RenderedService<'_>]) -> String {
     let mut module_imports = BTreeSet::new();
     let mut model_type_imports = BTreeSet::new();
@@ -3288,11 +3363,12 @@ fn render_function_type_parameter_definitions(
 
 fn render_package_init(
     services: &[RenderedService<'_>],
-    _resource_names: &[String],
+    resource_names: &[String],
     resource_operation_owners: &BTreeMap<String, String>,
 ) -> String {
     let operation_function_names = services
         .iter()
+        .filter(|service| service.endpoint.is_some())
         .flat_map(|service| {
             service
                 .operations
@@ -3302,6 +3378,24 @@ fn render_package_init(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
+    let service_object_names = services
+        .iter()
+        .filter(|service| service.endpoint.is_none())
+        .map(|service| service.name.to_string())
+        .collect::<Vec<_>>();
+    let mut service_object_body = String::new();
+    if !service_object_names.is_empty() {
+        for (index, service) in services
+            .iter()
+            .filter(|service| service.endpoint.is_none())
+            .enumerate()
+        {
+            render_endpoint_service_object(&mut service_object_body, service);
+            if index + 1 != service_object_names.len() {
+                service_object_body.push('\n');
+            }
+        }
+    }
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
@@ -3311,7 +3405,6 @@ fn render_package_init(
     if !services.is_empty() {
         for service in services {
             for operation in &service.operations {
-                let imports = vec![operation.attr_name.clone()];
                 let module = if let Some(resource_owner) =
                     resource_operation_owners.get(&operation_key(service.name, operation.name))
                 {
@@ -3319,11 +3412,127 @@ fn render_package_init(
                 } else {
                     format!(".operations.{}", operation.attr_name)
                 };
-                render_named_python_import(&mut output, &module, &imports);
+                if service.endpoint.is_some() {
+                    render_named_python_import(
+                        &mut output,
+                        &module,
+                        std::slice::from_ref(&operation.attr_name),
+                    );
+                } else {
+                    output.push_str("from ");
+                    output.push_str(&module);
+                    output.push_str(" import ");
+                    output.push_str(&request_operation_function_name(service, operation));
+                    output.push_str(" as _");
+                    output.push_str(service.name);
+                    output.push('_');
+                    output.push_str(&request_operation_function_name(service, operation));
+                    output.push('\n');
+                }
             }
         }
     }
+    let runtime_model_names = services
+        .iter()
+        .flat_map(|service| {
+            service.operations.iter().filter_map(|operation| {
+                operation.unpacked_input.as_ref().map(|input| {
+                    std::iter::once(input.model_name.clone())
+                        .chain(
+                            input
+                                .flattened_messages
+                                .iter()
+                                .map(|message| message.model_name.clone()),
+                        )
+                        .collect::<Vec<_>>()
+                })
+            })
+        })
+        .flatten()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let used_runtime_model_names =
+        used_python_symbol_imports(&service_object_body, &runtime_model_names);
+    if !used_runtime_model_names.is_empty() {
+        render_named_python_import(&mut output, ".models", &used_runtime_model_names);
+    }
+    let type_checking_model_names = services
+        .iter()
+        .flat_map(|service| {
+            service.operations.iter().flat_map(|operation| {
+                let input_model = operation
+                    .input
+                    .as_ref()
+                    .and_then(|input| input.type_ref.strip_prefix("models."))
+                    .map(str::to_string);
+                let output_model = (!resource_names.contains(&operation.output_ref))
+                    .then(|| {
+                        operation
+                            .output_ref
+                            .strip_prefix("models.")
+                            .unwrap_or(&operation.output_ref)
+                            .to_string()
+                    })
+                    .filter(|name| name != "None" && !name.contains('.'));
+                input_model.into_iter().chain(output_model)
+            })
+        })
+        .filter(|name| !used_runtime_model_names.contains(name))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let used_type_checking_model_names =
+        used_python_symbol_imports(&service_object_body, &type_checking_model_names);
+    let used_resource_names = used_python_symbol_imports(&service_object_body, resource_names);
+    let needs_temporalio_workflow_type_checking =
+        service_object_body.contains("temporalio.workflow.");
+    let needs_type_checking_imports = needs_temporalio_workflow_type_checking
+        || !used_type_checking_model_names.is_empty()
+        || !used_resource_names.is_empty();
+    if service_object_body.contains("typing.") || needs_type_checking_imports {
+        output.push_str("import typing\n");
+    }
+    if needs_temporalio_workflow_type_checking {
+        output.push_str("if typing.TYPE_CHECKING:\n");
+        output.push_str("    import temporalio.workflow\n");
+        render_named_python_import_with_indent(
+            &mut output,
+            ".models",
+            &used_type_checking_model_names,
+            "    ",
+        );
+        render_named_python_import_with_indent(
+            &mut output,
+            "._resources",
+            &used_resource_names,
+            "    ",
+        );
+    } else if needs_type_checking_imports {
+        output.push_str("if typing.TYPE_CHECKING:\n");
+        render_named_python_import_with_indent(
+            &mut output,
+            ".models",
+            &used_type_checking_model_names,
+            "    ",
+        );
+        render_named_python_import_with_indent(
+            &mut output,
+            "._resources",
+            &used_resource_names,
+            "    ",
+        );
+    }
+    if !service_object_body.is_empty() {
+        output.push('\n');
+        output.push_str(&service_object_body);
+    }
     output.push_str("\n__all__ = [\n");
+    for name in &service_object_names {
+        output.push_str("    ");
+        output.push_str(&python_string_literal(name));
+        output.push_str(",\n");
+    }
     for name in &operation_function_names {
         output.push_str("    ");
         output.push_str(&python_string_literal(name));
@@ -3350,6 +3559,105 @@ fn render_package_init(
     }
     output.push_str("}\n");
     output
+}
+
+fn render_endpoint_service_object(output: &mut String, service: &RenderedService<'_>) {
+    output.push_str("\nclass ");
+    output.push_str(service.name);
+    output.push_str(":\n");
+    output.push_str("    def __init__(self, endpoint: str) -> None:\n");
+    output.push_str("        self.endpoint: str = endpoint\n");
+    if service.operations.is_empty() {
+        output.push('\n');
+        output.push_str("    pass\n");
+        return;
+    }
+    for operation in &service.operations {
+        output.push('\n');
+        render_endpoint_service_object_operation_method(output, service, operation);
+    }
+}
+
+fn render_endpoint_service_object_operation_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) {
+    if let Some(unpacked_input) = &operation.unpacked_input {
+        render_endpoint_service_object_unpacked_method(output, service, operation, unpacked_input);
+        return;
+    }
+
+    output.push_str("    async def ");
+    output.push_str(&operation.attr_name);
+    output.push_str("(\n");
+    output.push_str("        self,\n");
+    if let Some(input) = &operation.input {
+        output.push_str("        request: ");
+        output.push_str(&input.annotation);
+        output.push_str(",\n");
+    }
+    output.push_str("    ) -> ");
+    output.push_str(&operation_public_return_annotation(service, operation));
+    output.push_str(":\n");
+    output.push_str("        return await _");
+    output.push_str(service.name);
+    output.push('_');
+    output.push_str(&request_operation_function_name(service, operation));
+    output.push_str("(self.endpoint");
+    if operation.input.is_some() {
+        output.push_str(", request");
+    }
+    output.push_str(")\n");
+}
+
+fn render_endpoint_service_object_unpacked_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    unpacked_input: &RenderedUnpackedInput,
+) {
+    output.push_str("    async def ");
+    output.push_str(&operation.attr_name);
+    output.push_str("(\n");
+    output.push_str("        self,\n");
+    output.push_str("        *,\n");
+    for field in &unpacked_input.parameters {
+        output.push_str("        ");
+        output.push_str(&field.attr_name);
+        output.push_str(": ");
+        output.push_str(&python_parameter_annotation(
+            &field.annotation,
+            &field.default_kind,
+        ));
+        if let Some(default_expr) = python_parameter_default_expr(&field.default_kind) {
+            render_python_default_expr(output, &default_expr, "        ");
+        }
+        output.push_str(",\n");
+    }
+    output.push_str("    ) -> ");
+    output.push_str(&operation_public_return_annotation(service, operation));
+    output.push_str(":\n");
+    render_unpacked_operation_docstring(output, operation, unpacked_input, None);
+    for flattened_message in &unpacked_input.flattened_messages {
+        render_flattened_message_setup(output, flattened_message);
+    }
+    output.push_str("        request = ");
+    output.push_str(&unpacked_input.model_name);
+    output.push_str("(\n");
+    for field in &unpacked_input.request_fields {
+        output.push_str("            ");
+        output.push_str(&field.attr_name);
+        output.push('=');
+        output.push_str(&unpacked_request_field_value_expr(field));
+        output.push_str(",\n");
+    }
+    output.push_str("        )\n");
+    output.push_str("        return await _");
+    output.push_str(service.name);
+    output.push('_');
+    output.push_str(&request_operation_function_name(service, operation));
+    output.push_str("(self.endpoint, request)\n");
 }
 
 fn render_service_definition(output: &mut String, service: &RenderedService<'_>) {
@@ -3482,94 +3790,13 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
     output.push('\n');
 }
 
-fn render_resource(
-    output: &mut String,
-    resource: &PlannedResource,
-    bound_operations: &[ResourceBoundOperation<'_>],
-) {
-    output.push_str("@dataclasses.dataclass\n");
-    output.push_str("class ");
-    output.push_str(&resource.type_name);
-    output.push_str(":\n");
-    for field in &resource.fields {
-        output.push_str("    ");
-        output.push_str(&python_field_name(&field.name));
-        output.push_str(": ");
-        output.push_str(&python_resource_field_annotation(
-            &field.kind,
-            field.optional,
-            field.function.as_ref(),
-        ));
-        output.push('\n');
-    }
-
-    if resource.methods.is_empty() {
-        output.push_str("\n    pass\n");
-        return;
-    }
-
-    for method in &resource.methods {
-        output.push_str("\n");
-        render_resource_class_method(output, resource, method, bound_operations);
-    }
-}
-
-fn render_resource_class_method(
-    output: &mut String,
-    resource: &PlannedResource,
-    method: &PlannedResourceMethod,
-    bound_operations: &[ResourceBoundOperation<'_>],
-) {
-    let result_annotation = python_resource_method_result_annotation(method);
-    output.push_str("    async def ");
-    output.push_str(&python_field_name(&method.name));
-    output.push_str("(\n");
-    output.push_str("        self,\n");
-    for param in &method.params {
-        output.push_str("        ");
-        output.push_str(&python_field_name(&param.name));
-        output.push_str(": ");
-        output.push_str(&python_resource_field_annotation(
-            &param.kind,
-            param.optional,
-            param.function.as_ref(),
-        ));
-        if param.optional {
-            output.push_str(" = None");
-        }
-        output.push_str(",\n");
-    }
-    output.push_str("    ) -> ");
-    output.push_str(&result_annotation);
-    output.push_str(":\n");
-
-    match &method.binding {
-        PlannedResourceMethodBindingSpec::Operation { operation_name, .. } => {
-            let operation = bound_operations
-                .iter()
-                .find(|bound_operation| bound_operation.operation.name == operation_name)
-                .map(|bound_operation| bound_operation.operation)
-                .expect("bound resource operation should be rendered in the same module");
-            render_resource_method_operation_body(output, method, operation);
-        }
-        PlannedResourceMethodBindingSpec::Stub => {
-            output.push_str("        raise NotImplementedError(");
-            output.push_str(&python_string_literal(&format!(
-                "{}.{} is not yet implemented",
-                resource.name,
-                python_field_name(&method.name)
-            )));
-            output.push_str(")\n");
-        }
-    }
-}
-
 fn render_resource_method_operation_body(
     output: &mut String,
+    service: &RenderedService<'_>,
     method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
+    result_annotation: &str,
 ) {
-    let result_annotation = python_resource_method_result_annotation(method);
     let PlannedResourceMethodBindingSpec::Operation {
         request_plan,
         direct_return,
@@ -3579,7 +3806,7 @@ fn render_resource_method_operation_body(
         return;
     };
 
-    let operation_attr_name = request_operation_function_name(operation);
+    let operation_attr_name = request_operation_function_name(service, operation);
     let request_expr = render_request_plan_python(request_plan);
     output.push_str("        request = ");
     if let Some(unpacked_input) = &operation.unpacked_input {
@@ -3609,16 +3836,22 @@ fn render_resource_method_operation_body(
         if result_annotation == "None" {
             output.push_str("        await ");
             output.push_str(&operation_attr_name);
-            output.push_str("(request)\n");
+            output.push('(');
+            render_resource_operation_call_args(output, service);
+            output.push_str("request)\n");
         } else {
             output.push_str("        return await ");
             output.push_str(&operation_attr_name);
-            output.push_str("(request)\n");
+            output.push('(');
+            render_resource_operation_call_args(output, service);
+            output.push_str("request)\n");
         }
     } else {
         output.push_str("        handle = await ");
         output.push_str(&operation_attr_name);
-        output.push_str("(request)\n");
+        output.push('(');
+        render_resource_operation_call_args(output, service);
+        output.push_str("request)\n");
         if result_annotation == "None" {
             output.push_str("        await handle\n");
         } else {
@@ -3627,115 +3860,9 @@ fn render_resource_method_operation_body(
     }
 }
 
-fn python_resource_method_result_annotation(method: &PlannedResourceMethod) -> String {
-    let Some(result) = &method.result else {
-        return "None".to_string();
-    };
-    let annotation = match &result.kind {
-        PlannedResourceMethodResultKind::Resource { type_name } => type_name.clone(),
-        PlannedResourceMethodResultKind::Value(kind) => {
-            python_resource_field_annotation(kind, result.optional, None)
-        }
-    };
-    if result.optional && !annotation.contains("| None") {
-        format!("{annotation} | None")
-    } else {
-        annotation
-    }
-}
-
-fn python_resource_field_annotation(
-    kind: &PlannedType,
-    optional: bool,
-    function: Option<&FunctionFieldSpec<PlannedTypeFamily>>,
-) -> String {
-    let base = if let Some(function) = function {
-        python_function_field_annotation(
-            function,
-            function
-                .alternate_type
-                .as_ref()
-                .map(python_authored_type_annotation),
-        )
-    } else {
-        match kind {
-            PlannedType::Option(value) | PlannedType::List(value) => {
-                format!(
-                    "collections.abc.Sequence[{}]",
-                    python_resource_value_annotation(value)
-                )
-            }
-            PlannedType::Map(key, value) => format!(
-                "collections.abc.Mapping[{}, {}]",
-                python_resource_value_annotation(key),
-                python_resource_value_annotation(value)
-            ),
-            value => python_resource_value_annotation(value),
-        }
-    };
-    if optional {
-        format!("{base} | None")
-    } else {
-        base
-    }
-}
-
-fn python_resource_value_annotation(value: &PlannedType) -> String {
-    match value {
-        PlannedType::Float => "float".to_string(),
-        PlannedType::Int(_) => "int".to_string(),
-        PlannedType::Bool => "bool".to_string(),
-        PlannedType::String => "str".to_string(),
-        PlannedType::Bytes => "bytes".to_string(),
-        PlannedType::Enum(enum_type) => enum_type.name.clone(),
-        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enum_type))) => {
-            enum_type
-                .replacement
-                .as_ref()
-                .and_then(python_proto::python_replacement_type_name)
-                .unwrap_or_else(|| enum_type.name.clone())
-        }
-        PlannedType::Flags(flags_type) => flags_type.name.clone(),
-        PlannedType::Variant(variant_type) => variant_type.name.clone(),
-        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => proto
-            .replacement
-            .as_ref()
-            .and_then(python_proto::python_replacement_type_name)
-            .unwrap_or_else(|| proto.model_name.clone()),
-        PlannedType::External(ExternalTypeSpec::Json(json_type)) => json_type.model_name.clone(),
-        PlannedType::Record(record) => record.model_name.clone(),
-        PlannedType::Resource(resource) => resource.type_name.clone(),
-        PlannedType::Option(inner) | PlannedType::List(inner) => {
-            format!(
-                "collections.abc.Sequence[{}]",
-                python_resource_value_annotation(inner)
-            )
-        }
-        PlannedType::Map(key, value) => format!(
-            "collections.abc.Mapping[{}, {}]",
-            python_resource_value_annotation(key),
-            python_resource_value_annotation(value)
-        ),
-        PlannedType::Tuple(items) => format!(
-            "tuple[{}]",
-            items
-                .iter()
-                .map(python_resource_value_annotation)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        PlannedType::Result { ok, err } => python_result_annotation(
-            ok.as_ref()
-                .map(|ok| python_resource_value_annotation(ok).to_string()),
-            err.as_ref()
-                .map(|err| python_resource_value_annotation(err).to_string()),
-        ),
-        PlannedType::External(ExternalTypeSpec::Alias {
-            type_name, target, ..
-        }) => type_name
-            .for_language(Language::Python)
-            .map(str::to_string)
-            .unwrap_or_else(|| python_resource_value_annotation(target)),
+fn render_resource_operation_call_args(output: &mut String, service: &RenderedService<'_>) {
+    if service.endpoint.is_none() {
+        output.push_str("typing.cast(str, getattr(self, \"_endpoint\")), ");
     }
 }
 
@@ -4758,6 +4885,9 @@ fn render_operation_functions(
     operation: &RenderedOperation<'_>,
 ) {
     render_request_only_operation_function(output, service, operation);
+    if service.endpoint.is_none() {
+        return;
+    }
     if let Some(unpacked_input) = &operation.unpacked_input {
         output.push('\n');
         if function_unpacked_needs_overloads(&unpacked_input.functions) {
@@ -4775,8 +4905,13 @@ fn function_unpacked_needs_overloads(functions: &[RenderedFunctionField]) -> boo
     })
 }
 
-fn request_operation_function_name(operation: &RenderedOperation<'_>) -> String {
-    if operation.unpacked_input.is_some() {
+fn request_operation_function_name(
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) -> String {
+    if service.endpoint.is_none() {
+        format!("{}_request", operation.attr_name)
+    } else if operation.unpacked_input.is_some() {
         format!("_{}", operation.attr_name)
     } else {
         operation.attr_name.clone()
@@ -4826,7 +4961,7 @@ fn render_request_only_operation_function(
     service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
 ) {
-    let function_name = request_operation_function_name(operation);
+    let function_name = request_operation_function_name(service, operation);
     let render_request_doc = operation.unpacked_input.is_none();
     output.push_str("async def ");
     output.push_str(&function_name);
@@ -4912,7 +5047,15 @@ fn render_request_only_operation_function(
         output.push_str(&operation.output_type_expr);
         output.push_str(",\n");
         output.push_str("    )\n");
-        output.push_str("    return await handle\n");
+        if service.endpoint.is_none()
+            && operation.output_module_path.as_deref() == Some("._resources")
+        {
+            output.push_str("    resource = await handle\n");
+            output.push_str("    setattr(resource, \"_endpoint\", endpoint)\n");
+            output.push_str("    return resource\n");
+        } else {
+            output.push_str("    return await handle\n");
+        }
         return;
     }
 
@@ -4938,7 +5081,11 @@ fn render_request_only_operation_function(
         output.push('\n');
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("    result = await handle\n");
-        output.push_str("    return ");
+        if service.endpoint.is_none() {
+            output.push_str("    resource = ");
+        } else {
+            output.push_str("    return ");
+        }
         output.push_str(&resource_return.resource_type_name);
         output.push_str("(\n");
         for binding in &resource_return.bindings {
@@ -4949,6 +5096,10 @@ fn render_request_only_operation_function(
             output.push_str(",\n");
         }
         output.push_str("    )\n");
+        if service.endpoint.is_none() {
+            output.push_str("    setattr(resource, \"_endpoint\", endpoint)\n");
+            output.push_str("    return resource\n");
+        }
     }
 }
 
@@ -5296,7 +5447,7 @@ fn render_unpacked_operation_function(
     }
     output.push_str("    )\n");
     output.push_str("    return await ");
-    output.push_str(&request_operation_function_name(operation));
+    output.push_str(&request_operation_function_name(service, operation));
     output.push('(');
     output.push_str(endpoint_forward_args(service));
     output.push_str(")\n");
@@ -5312,6 +5463,24 @@ fn function_unpacked_implementation_return_annotation(
         "typing.Any",
     );
     temporalio_workflow_type_annotation(service, &output_annotation)
+}
+
+fn operation_public_return_annotation(
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) -> String {
+    let output_annotation = function_unpacked_implementation_return_annotation(service, operation);
+    if operation.output_transform_expr.is_some()
+        || operation.output_resource_return.is_some()
+        || operation.output_direct_result
+    {
+        output_annotation
+    } else {
+        format!(
+            "{}[{output_annotation}]",
+            temporalio_workflow_type_ref(service, "NexusOperationHandle")
+        )
+    }
 }
 
 fn render_function_unpacked_implementation(
@@ -5510,7 +5679,7 @@ fn render_function_unpacked_implementation(
     }
     output.push_str("    )\n");
     output.push_str("    return await ");
-    output.push_str(&request_operation_function_name(operation));
+    output.push_str(&request_operation_function_name(service, operation));
     output.push('(');
     output.push_str(endpoint_forward_args(service));
     output.push_str(")\n");

@@ -42,41 +42,68 @@ namespace NexGen.UserService
     }
 
     [GeneratedCode("nex-gen", null)]
-    public static class Operations
+    public class UserService
     {
-        [GeneratedCode("nex-gen", null)]
-        private const string UserServiceEndpoint = "user-service";
+        private readonly string _endpoint;
 
-        [GeneratedCode("nex-gen", null)]
-        private static async Task<User> GetUserAsync(GetUserRequest request)
+        public UserService(string endpoint)
         {
-            var client = Workflow.CreateNexusWorkflowClient<IUserService>(UserServiceEndpoint);
-            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.GetUser(request)).ConfigureAwait(true);
-            return result;
+            _endpoint = endpoint;
         }
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nex-gen", null)]
-        public static Task<User> GetUserAsync(GetUserOptions options)
+        public Task<User> GetUserAsync(GetUserOptions options)
         {
             var request = new GetUserRequest(options.UserId);
-            return GetUserAsync(request);
-        }
-
-        [GeneratedCode("nex-gen", null)]
-        private static async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
-        {
-            var client = Workflow.CreateNexusWorkflowClient<IUserService>(UserServiceEndpoint);
-            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
-            return result;
+            return Operations.GetUserAsync(_endpoint, request);
         }
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nex-gen", null)]
-        public static Task<User> UpdateEmailAsync(UpdateEmailOptions options)
+        public Task<User> UpdateEmailAsync(UpdateEmailOptions options)
         {
             var request = new UpdateEmailRequest(options.UserId, options.Email);
-            return UpdateEmailAsync(request);
+            return Operations.UpdateEmailAsync(_endpoint, request);
+        }
+
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    internal static class Operations
+    {
+        /// <param name="endpoint">Endpoint for the service.</param>
+        [GeneratedCode("nex-gen", null)]
+        internal static async Task<User> GetUserAsync(string endpoint, GetUserRequest request)
+        {
+            var client = Workflow.CreateNexusWorkflowClient<IUserService>(endpoint);
+            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.GetUser(request)).ConfigureAwait(true);
+            return User.BindEndpoint(result, endpoint);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
+        public static Task<User> GetUserAsync(string endpoint, GetUserOptions options)
+        {
+            var request = new GetUserRequest(options.UserId);
+            return GetUserAsync(endpoint, request);
+        }
+
+        /// <param name="endpoint">Endpoint for the service.</param>
+        [GeneratedCode("nex-gen", null)]
+        internal static async Task<User> UpdateEmailAsync(string endpoint, UpdateEmailRequest request)
+        {
+            var client = Workflow.CreateNexusWorkflowClient<IUserService>(endpoint);
+            var result = await client.ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
+            return User.BindEndpoint(result, endpoint);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
+        public static Task<User> UpdateEmailAsync(string endpoint, UpdateEmailOptions options)
+        {
+            var request = new UpdateEmailRequest(options.UserId, options.Email);
+            return UpdateEmailAsync(endpoint, request);
         }
 
     }

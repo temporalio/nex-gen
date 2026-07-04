@@ -1,12 +1,10 @@
-use std::collections::BTreeSet;
-
 use heck::ToSnakeCase;
 
+use crate::error::Result;
 use crate::generator::python::{
-    EnumValueConversion, PythonImports, RenderedModel, RenderedModelFragments, RenderedWireRead,
-    RenderedWireWrite, ResolvedFieldKind, ResolvedFieldType, WireReadPolicy,
-    python_parameter_annotation, python_string_literal, render_python_default_expr,
-    render_python_docstring,
+    PythonFieldDefaultKind, PythonImports, RenderedField, RenderedModel, RenderedRecordWireBlock,
+    ResolvedFieldKind, ResolvedFieldType, WireValueConversion, enum_default_expr,
+    python_authored_type_annotation, python_string_literal,
 };
 use crate::language::Language;
 use crate::planning::{
@@ -14,6 +12,95 @@ use crate::planning::{
     relative_descriptor_name,
 };
 use crate::spec::{ExternalTypeSpec, RecordFieldSpec, RecordSpec, TypeReplacementSpec};
+
+#[derive(Debug)]
+struct RenderedWireRead {
+    setup_lines: Vec<String>,
+    expr: String,
+}
+
+#[derive(Debug)]
+struct RenderedWireWrite {
+    lines: Vec<String>,
+}
+
+enum WireReadPolicy {
+    Required { missing_error: String },
+    Optional,
+    Default { default_expr: String },
+}
+
+#[derive(Debug, Default)]
+pub(in crate::generator) struct ModelBackend;
+
+impl ModelBackend {
+    pub(in crate::generator) fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
+        Ok(())
+    }
+
+    pub(in crate::generator) fn model_type_annotation(
+        &self,
+        proto_type: &PlannedProtoType,
+    ) -> Option<String> {
+        match proto_type {
+            PlannedProtoType::Message(message) => {
+                message_python_ref(&message.proto).map(|reference| reference.type_ref)
+            }
+            PlannedProtoType::Enum(enumeration) => enumeration
+                .replacement
+                .as_ref()
+                .and_then(python_replacement_type_name)
+                .or_else(|| Some(enumeration.name.clone())),
+        }
+    }
+
+    pub(in crate::generator) fn wire_type_identifier(
+        &self,
+        proto_type: &PlannedProtoType,
+    ) -> Option<String> {
+        match proto_type {
+            PlannedProtoType::Message(message) => Some(message.proto.full_name.clone()),
+            PlannedProtoType::Enum(_) => None,
+        }
+    }
+
+    pub(in crate::generator) fn wire_conversion(
+        &self,
+        model_type: &PlannedType,
+        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+    ) -> Option<WireValueConversion> {
+        enum_wire_conversion(model_type)
+            .or_else(|| message_override_conversion(model_type))
+            .or_else(|| {
+                planned_record.and_then(|record| generated_wire_conversion(model_type, record))
+            })
+    }
+}
+
+impl ModelBackend {
+    pub(in crate::generator) fn render_record_wire_block(
+        &self,
+        model: &RenderedModel,
+        planned_model: &RecordSpec<PlannedTypeFamily>,
+    ) -> Option<RenderedRecordWireBlock> {
+        render_record_wire_block(model, planned_model)
+    }
+
+    pub(in crate::generator) fn service_model_ref(
+        &self,
+        model_type: &PlannedType,
+        api_plan: &PlannedSpec,
+    ) -> Option<PythonReference> {
+        service_message_python_ref(model_type, api_plan)
+    }
+
+    pub(in crate::generator) fn enum_field_type(
+        &self,
+        value_type: &PlannedType,
+    ) -> Option<ResolvedFieldType> {
+        enum_field_type(value_type)
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct PythonReference {
@@ -74,91 +161,38 @@ fn record_python_ref(planned_model: &RecordSpec<PlannedTypeFamily>) -> Option<Py
         .and_then(message_python_ref)
 }
 
-pub(in crate::generator) enum PythonProtoMessageOverride<'a> {
-    Replacement {
-        annotation: String,
-        from_proto: String,
-        to_proto: String,
-    },
-    Authored {
-        authored_type: &'a PlannedType,
-        from_proto: String,
-        to_proto: String,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub(in crate::generator) enum PythonProtoMessageConversion {
-    GeneratedModel {
-        model_name: String,
-    },
-    NativeModel,
-    Override {
-        from_proto: String,
-        to_proto: String,
-    },
-}
-
-impl PythonProtoMessageConversion {
-    pub(in crate::generator) fn from_proto_expr(&self, proto_expr: &str) -> String {
-        match self {
-            PythonProtoMessageConversion::GeneratedModel { model_name } => {
-                format!("{model_name}.from_proto({proto_expr})")
-            }
-            PythonProtoMessageConversion::NativeModel => proto_expr.to_string(),
-            PythonProtoMessageConversion::Override { from_proto, .. } => {
-                format!("{from_proto}({proto_expr})")
-            }
-        }
-    }
-
-    pub(in crate::generator) fn to_proto_expr(&self, value_expr: &str) -> String {
-        match self {
-            PythonProtoMessageConversion::GeneratedModel { .. } => {
-                format!("{value_expr}.to_proto()")
-            }
-            PythonProtoMessageConversion::NativeModel => value_expr.to_string(),
-            PythonProtoMessageConversion::Override { to_proto, .. } => {
-                format!("{to_proto}({value_expr})")
-            }
-        }
-    }
-
-    pub(in crate::generator) fn supports_unpacked_input(&self) -> bool {
-        matches!(
-            self,
-            PythonProtoMessageConversion::GeneratedModel { .. }
-                | PythonProtoMessageConversion::NativeModel
-        )
-    }
-}
-
-pub(in crate::generator) fn message_override(
-    model_type: &PlannedType,
-) -> Option<PythonProtoMessageOverride<'_>> {
+fn message_override_conversion(model_type: &PlannedType) -> Option<WireValueConversion> {
     if let Some(proto) = model_type.proto_message()
         && let Some(language_override) = &proto.replacement
         && let Some(type_name) = python_replacement_type_name(language_override)
     {
-        return Some(PythonProtoMessageOverride::Replacement {
+        let from_proto = python_from_proto_converter(&proto.proto.full_name, language_override);
+        let to_proto = python_to_proto_converter(&proto.proto.full_name, language_override);
+        return Some(WireValueConversion {
             annotation: type_name,
-            from_proto: python_from_proto_converter(&proto.proto.full_name, language_override),
-            to_proto: python_to_proto_converter(&proto.proto.full_name, language_override),
+            from_wire: format!("{from_proto}({{wire}})"),
+            to_wire: format!("{to_proto}({{value}})"),
+            imports: PythonImports::default(),
+            supports_unpacked_input: false,
         });
     }
     if let Some(proto) = model_type.proto_message()
         && let Some(authored_type) = &proto.authored_type
     {
-        return Some(PythonProtoMessageOverride::Authored {
-            authored_type,
-            from_proto: python_default_from_proto_name(&proto.proto.full_name),
-            to_proto: python_default_to_proto_name(&proto.proto.full_name),
+        let from_proto = python_default_from_proto_name(&proto.proto.full_name);
+        let to_proto = python_default_to_proto_name(&proto.proto.full_name);
+        return Some(WireValueConversion {
+            annotation: python_authored_type_annotation(authored_type),
+            from_wire: format!("{from_proto}({{wire}})"),
+            to_wire: format!("{to_proto}({{value}})"),
+            imports: PythonImports::default(),
+            supports_unpacked_input: false,
         });
     }
     None
 }
 
-pub(in crate::generator) fn generated_message_model_name(
+fn generated_message_model_name(
     model_type: &PlannedType,
     planned_model: &RecordSpec<PlannedTypeFamily>,
 ) -> Option<String> {
@@ -168,6 +202,31 @@ pub(in crate::generator) fn generated_message_model_name(
     model_type
         .proto_message()
         .map(|proto| proto.model_name.clone())
+}
+
+fn generated_wire_conversion(
+    model_type: &PlannedType,
+    planned_model: &RecordSpec<PlannedTypeFamily>,
+) -> Option<WireValueConversion> {
+    if let Some(model_name) = generated_message_model_name(model_type, planned_model) {
+        return Some(WireValueConversion {
+            annotation: model_name.clone(),
+            from_wire: format!("{model_name}.from_proto({{wire}})"),
+            to_wire: "{value}.to_proto()".to_string(),
+            imports: PythonImports::default(),
+            supports_unpacked_input: true,
+        });
+    }
+    match model_type {
+        PlannedType::Record(record) => Some(WireValueConversion {
+            annotation: record.model_name.clone(),
+            from_wire: "{wire}".to_string(),
+            to_wire: "{value}".to_string(),
+            imports: PythonImports::default(),
+            supports_unpacked_input: true,
+        }),
+        _ => None,
+    }
 }
 
 pub(in crate::generator) struct PythonProtoEnumValue {
@@ -217,15 +276,23 @@ pub(in crate::generator) fn enum_field_type(value_type: &PlannedType) -> Option<
         annotation: proto_enum.annotation,
         imports,
         kind: ResolvedFieldKind::Enum,
-        message_conversion: None,
-        enum_conversion: proto_enum.conversion.map(|conversion| EnumValueConversion {
-            from_wire: conversion.from_proto,
-            to_wire: conversion.to_proto,
-        }),
+        wire_conversion: enum_wire_conversion(value_type),
     })
 }
 
-pub(in crate::generator) fn field_read(
+fn enum_wire_conversion(value_type: &PlannedType) -> Option<WireValueConversion> {
+    let proto_enum = enum_value(value_type)?;
+    let conversion = proto_enum.conversion?;
+    Some(WireValueConversion {
+        annotation: proto_enum.annotation,
+        from_wire: format!("{}({{wire}})", conversion.from_proto),
+        to_wire: format!("{}({{value}})", conversion.to_proto),
+        imports: PythonImports::default(),
+        supports_unpacked_input: false,
+    })
+}
+
+fn field_read(
     proto_name: &str,
     attr_name: &str,
     field: &RecordFieldSpec<PlannedTypeFamily>,
@@ -266,7 +333,7 @@ pub(in crate::generator) fn field_read(
     }
 }
 
-pub(in crate::generator) fn field_write(
+fn field_write(
     proto_name: &str,
     field: &RecordFieldSpec<PlannedTypeFamily>,
     value_expr: &str,
@@ -285,7 +352,7 @@ pub(in crate::generator) fn field_write(
     RenderedWireWrite { lines }
 }
 
-pub(in crate::generator) fn function_field_write(
+fn function_field_write(
     proto_name: &str,
     _field: &RecordFieldSpec<PlannedTypeFamily>,
     value_expr: &str,
@@ -342,7 +409,7 @@ fn repeated_from_proto_expr(resolved_type: &ResolvedFieldType, proto_name: &str)
         ResolvedFieldKind::Message => format!(
             "[{} for value in proto.{proto_name}]",
             resolved_type
-                .message_conversion
+                .wire_conversion
                 .as_ref()
                 .expect("message conversion should be present")
                 .from_wire_expr("value")
@@ -360,7 +427,7 @@ fn map_value_from_proto_expr(map_value_type: &ResolvedFieldType, proto_name: &st
         ResolvedFieldKind::Message => format!(
             "{{key: {} for key, value in proto.{proto_name}.items()}}",
             map_value_type
-                .message_conversion
+                .wire_conversion
                 .as_ref()
                 .expect("message conversion should be present")
                 .from_wire_expr("value")
@@ -376,7 +443,7 @@ fn map_value_from_proto_expr(map_value_type: &ResolvedFieldType, proto_name: &st
 fn from_proto_value_expr(resolved_type: &ResolvedFieldType, proto_expr: &str) -> String {
     match resolved_type.kind {
         ResolvedFieldKind::Message => resolved_type
-            .message_conversion
+            .wire_conversion
             .as_ref()
             .expect("message conversion should be present")
             .from_wire_expr(proto_expr),
@@ -403,7 +470,7 @@ fn repeated_to_proto_lines(
             lines.push(format!(
                 "{indent}    item.CopyFrom({})",
                 resolved_type
-                    .message_conversion
+                    .wire_conversion
                     .as_ref()
                     .expect("message conversion should be present")
                     .to_wire_expr("value")
@@ -435,7 +502,7 @@ fn map_value_to_proto_lines(
             lines.push(format!(
                 "{indent}    message.{proto_name}[key].CopyFrom({})",
                 map_value_type
-                    .message_conversion
+                    .wire_conversion
                     .as_ref()
                     .expect("message conversion should be present")
                     .to_wire_expr("value")
@@ -465,7 +532,7 @@ fn value_to_proto_lines(
         ResolvedFieldKind::Message => lines.push(format!(
             "{indent}message.{proto_name}.CopyFrom({})",
             resolved_type
-                .message_conversion
+                .wire_conversion
                 .as_ref()
                 .expect("message conversion should be present")
                 .to_wire_expr(value_expr)
@@ -480,7 +547,7 @@ fn value_to_proto_lines(
 }
 
 fn enum_from_proto_expr(resolved_type: &ResolvedFieldType, expr: &str) -> String {
-    if let Some(enum_conversion) = &resolved_type.enum_conversion {
+    if let Some(enum_conversion) = &resolved_type.wire_conversion {
         enum_conversion.from_wire_expr(expr)
     } else {
         format!("{}({expr})", resolved_type.annotation)
@@ -488,7 +555,7 @@ fn enum_from_proto_expr(resolved_type: &ResolvedFieldType, expr: &str) -> String
 }
 
 fn enum_to_proto_expr(resolved_type: &ResolvedFieldType, expr: &str) -> String {
-    if let Some(enum_conversion) = &resolved_type.enum_conversion {
+    if let Some(enum_conversion) = &resolved_type.wire_conversion {
         enum_conversion.to_wire_expr(expr)
     } else {
         format!("int({expr})")
@@ -538,15 +605,18 @@ pub(crate) fn python_replacement_type_name(replacement: &TypeReplacementSpec) ->
         .map(str::to_string)
 }
 
-pub(in crate::generator) fn render_model_proto_methods(
-    output: &mut String,
+fn render_record_wire_block(
     model: &RenderedModel,
     planned_model: &RecordSpec<PlannedTypeFamily>,
-) -> bool {
+) -> Option<RenderedRecordWireBlock> {
+    if !model.capabilities.from_wire && !model.capabilities.to_wire {
+        return None;
+    }
+
+    let proto_ref = record_python_ref(planned_model)?;
+    let mut output = String::new();
     let mut wrote_method = false;
     if model.capabilities.from_wire {
-        let proto_ref = record_python_ref(planned_model)
-            .expect("from_proto models should have a proto reference");
         if !model.fields.is_empty() {
             output.push('\n');
         }
@@ -566,8 +636,17 @@ pub(in crate::generator) fn render_model_proto_methods(
         if model.fields.is_empty() {
             output.push_str("        return cls()\n");
         } else {
-            for field in &model.fields {
-                for line in &field.from_wire.setup_lines {
+            for ((field_name, planned_field), rendered_field) in
+                planned_model.public_fields().zip(model.fields.iter())
+            {
+                let read = field_read(
+                    field_name,
+                    &rendered_field.attr_name,
+                    planned_field,
+                    &rendered_field.wire_value_type,
+                    field_read_policy(&model.name, rendered_field, planned_field),
+                );
+                for line in &read.setup_lines {
                     output.push_str("        ");
                     output.push_str(line);
                     output.push('\n');
@@ -575,11 +654,20 @@ pub(in crate::generator) fn render_model_proto_methods(
             }
 
             output.push_str("        return cls(\n");
-            for field in &model.fields {
+            for ((field_name, planned_field), rendered_field) in
+                planned_model.public_fields().zip(model.fields.iter())
+            {
+                let read = field_read(
+                    field_name,
+                    &rendered_field.attr_name,
+                    planned_field,
+                    &rendered_field.wire_value_type,
+                    field_read_policy(&model.name, rendered_field, planned_field),
+                );
                 output.push_str("            ");
-                output.push_str(&field.attr_name);
+                output.push_str(&rendered_field.attr_name);
                 output.push_str("=");
-                output.push_str(&field.from_wire.expr);
+                output.push_str(&read.expr);
                 output.push_str(",\n");
             }
             output.push_str("        )\n");
@@ -587,8 +675,6 @@ pub(in crate::generator) fn render_model_proto_methods(
         wrote_method = true;
     }
     if model.capabilities.to_wire {
-        let proto_ref = record_python_ref(planned_model)
-            .expect("to_proto models should have a proto reference");
         if model.fields.is_empty() {
             if wrote_method {
                 output.push('\n');
@@ -605,128 +691,119 @@ pub(in crate::generator) fn render_model_proto_methods(
         output.push_str("        message = ");
         output.push_str(&proto_ref.type_ref);
         output.push_str("()\n");
-        for field in &model.fields {
-            for line in &field.to_wire.lines {
+        for ((field_name, planned_field), rendered_field) in
+            planned_model.public_fields().zip(model.fields.iter())
+        {
+            let value_expr = format!("self.{}", rendered_field.attr_name);
+            let write = field_write_for_rendered_field(
+                field_name,
+                planned_field,
+                rendered_field,
+                &value_expr,
+            );
+            for line in &write.lines {
                 output.push_str("        ");
                 output.push_str(line);
                 output.push('\n');
             }
         }
         for field in &model.sourced_fields {
-            for line in &field.to_wire.lines {
+            let write = field_write(
+                &field.field_name,
+                &field.field,
+                &field.source_expr,
+                &field.wire_value_type,
+                false,
+            );
+            for line in &write.lines {
                 output.push_str("        ");
                 output.push_str(line);
                 output.push('\n');
             }
         }
         output.push_str("        return message\n");
-        wrote_method = true;
     }
-    wrote_method
+
+    Some(RenderedRecordWireBlock {
+        imports: PythonImports {
+            module_imports: [proto_ref.module_path].into_iter().collect(),
+            ..PythonImports::default()
+        },
+        class_body_lines: output.lines().map(str::to_string).collect(),
+    })
 }
 
-pub(in crate::generator) fn render_models(
-    models: &[&RenderedModel],
-    api_plan: &PlannedSpec,
-) -> RenderedModelFragments {
-    let mut body = String::new();
-    for (index, model) in models.iter().enumerate() {
-        let planned_model = api_plan
-            .records
-            .get(&model.full_name)
-            .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
-        render_model(&mut body, model, planned_model);
-        if index + 1 != models.len() {
-            body.push_str("\n\n");
+fn field_read_policy(
+    model_name: &str,
+    rendered_field: &RenderedField,
+    planned_field: &RecordFieldSpec<PlannedTypeFamily>,
+) -> WireReadPolicy {
+    match &rendered_field.default_kind {
+        PythonFieldDefaultKind::Required => {
+            let missing_error = python_string_literal(&format!(
+                "missing required field {model_name}.{}",
+                rendered_field.attr_name
+            ));
+            WireReadPolicy::Required { missing_error }
         }
-    }
-
-    let mut registrations = String::new();
-    render_nexus_type_registrations(&mut registrations, models);
-
-    let mut module_imports = BTreeSet::new();
-    if models.iter().any(|model| model.native) {
-        module_imports.insert("nex_gen_runtime".to_string());
-    }
-    for model in models {
-        let planned_model = api_plan
-            .records
-            .get(&model.full_name)
-            .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
-        if let Some(proto_ref) = record_python_ref(planned_model) {
-            module_imports.insert(proto_ref.module_path);
-        }
-        for field in &model.fields {
-            module_imports.extend(field.imports.module_imports.iter().cloned());
-        }
-    }
-
-    RenderedModelFragments {
-        body,
-        registrations,
-        module_imports,
-        exported_names: models.iter().map(|model| model.name.clone()).collect(),
+        PythonFieldDefaultKind::None => WireReadPolicy::Optional,
+        PythonFieldDefaultKind::EmptyDict => WireReadPolicy::Default {
+            default_expr: "{}".to_string(),
+        },
+        PythonFieldDefaultKind::EmptyList => WireReadPolicy::Default {
+            default_expr: "[]".to_string(),
+        },
+        PythonFieldDefaultKind::Expression(_) => WireReadPolicy::Default {
+            default_expr: enum_default_expr(
+                &rendered_field.wire_value_type,
+                &planned_field
+                    .default_value
+                    .as_ref()
+                    .expect("expression default should have planned default")
+                    .enum_case,
+            ),
+        },
     }
 }
 
-fn render_model(
-    output: &mut String,
-    model: &RenderedModel,
-    planned_model: &RecordSpec<PlannedTypeFamily>,
-) {
-    if model_needs_keyword_only_dataclass(model) {
-        output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
-    } else {
-        output.push_str("@dataclasses.dataclass(slots=True)\n");
-    }
-    output.push_str("class ");
-    output.push_str(&model.name);
-    output.push_str(":\n");
-    render_python_docstring(output, "    ", None, &[], None, model.experimental);
-
-    if model.fields.is_empty() {
-        if !render_model_proto_methods(output, model, planned_model) {
-            output.push_str("    pass\n");
-        }
-        return;
-    }
-
-    for field in &model.fields {
-        output.push_str("    ");
-        output.push_str(&field.attr_name);
-        output.push_str(": ");
-        output.push_str(&python_parameter_annotation(
-            &field.annotation,
-            &field.default_kind,
-        ));
-        if let Some(default_expr) = &field.default_expr {
-            render_python_default_expr(output, default_expr, "    ");
-        }
-        output.push('\n');
-    }
-
-    render_model_proto_methods(output, model, planned_model);
-}
-
-fn model_needs_keyword_only_dataclass(model: &RenderedModel) -> bool {
-    let mut saw_defaulted_field = false;
-    for field in &model.fields {
-        if field.default_expr.is_some() {
-            saw_defaulted_field = true;
-        } else if saw_defaulted_field {
-            return true;
-        }
-    }
-    false
-}
-
-fn render_nexus_type_registrations(output: &mut String, models: &[&RenderedModel]) {
-    for model in models.iter().filter(|model| model.native) {
-        output.push_str("nex_gen_runtime.register_nexus_type(");
-        output.push_str(&model.name);
-        output.push_str(", ");
-        output.push_str(&python_string_literal(&model.full_name));
-        output.push_str(")\n");
+fn field_write_for_rendered_field(
+    field_name: &str,
+    planned_field: &RecordFieldSpec<PlannedTypeFamily>,
+    rendered_field: &RenderedField,
+    value_expr: &str,
+) -> RenderedWireWrite {
+    let optional_guard = matches!(
+        rendered_field.default_kind,
+        PythonFieldDefaultKind::None
+            | PythonFieldDefaultKind::EmptyDict
+            | PythonFieldDefaultKind::EmptyList
+    );
+    let converter = planned_field
+        .function
+        .as_ref()
+        .and_then(|function| function.converter.as_deref())
+        .filter(|_| {
+            !matches!(
+                planned_field.field_type,
+                PlannedType::Map(_, _) | PlannedType::List(_)
+            ) && planned_field.default_value.is_none()
+        });
+    match converter {
+        Some(converter) => function_field_write(
+            field_name,
+            planned_field,
+            value_expr,
+            converter,
+            &rendered_field.wire_value_type,
+            optional_guard,
+        ),
+        None => field_write(
+            field_name,
+            planned_field,
+            value_expr,
+            &rendered_field.wire_value_type,
+            optional_guard,
+        ),
     }
 }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import typing
 import nex_gen_runtime
 import temporalio.workflow
 
@@ -22,34 +23,27 @@ class User:
             user_id=self.user_id,
             email=email,
         )
-        return await _update_email(request)
+        return await update_email_request(
+            typing.cast(str, getattr(self, "_endpoint")), request
+        )
 
 
-async def _update_email(
+async def update_email_request(
+    endpoint: str,
     request: UpdateEmailRequest,
 ) -> User:
     nexus_client = temporalio.workflow.create_nexus_client(
         service="UserService",
-        endpoint="user-service",
+        endpoint=endpoint,
     )
     handle = await nexus_client.start_operation(
         operation="UpdateEmail",
         input=request,
         output_type=User,
     )
-    return await handle
-
-
-async def update_email(
-    *,
-    user_id: str,
-    email: str,
-) -> User:
-    request = UpdateEmailRequest(
-        user_id=user_id,
-        email=email,
-    )
-    return await _update_email(request)
+    resource = await handle
+    setattr(resource, "_endpoint", endpoint)
+    return resource
 
 
 nex_gen_runtime.register_nexus_type(User, "UserService::resource::user")

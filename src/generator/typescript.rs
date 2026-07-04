@@ -12,7 +12,7 @@ use crate::generator::proto::typescript::{
     model_typescript_interface_ref, model_typescript_type_id, record_proto_info,
     typescript_replacement_type_name,
 };
-use crate::generator::{GeneratedFiles, GenerationMode, ModelBackend};
+use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
     PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedProtoType,
@@ -80,9 +80,7 @@ impl TypeScriptExternalModels {
     }
 }
 
-impl ModelBackend for TypeScriptExternalModels {
-    type TypeRef = PlannedType;
-    type WireType = PlannedType;
+impl ExternalModelBackend for TypeScriptExternalModels {
     type ModelFragments = RenderedExternalModelFragments;
     type WireConversion = WireValueConversion;
 
@@ -220,7 +218,7 @@ impl<'a> ApiPlanner<'a> {
                     )
                 }
                 Some(PlannedType::Resource(resource)) => {
-                    if let Some(output) = &resource.proto {
+                    if let Some(output) = &resource.wire_type {
                         (
                             self.operation_type_annotation(output),
                             self.operation_wire_type_identifier(output),
@@ -1730,8 +1728,8 @@ fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<Langua
             collect_model_type_imports(value, imports);
         }
         PlannedType::Resource(resource) => {
-            if let Some(proto) = &resource.proto {
-                collect_model_type_imports(proto, imports);
+            if let Some(wire_type) = &resource.wire_type {
+                collect_model_type_imports(wire_type, imports);
             }
         }
         PlannedType::Option(inner) | PlannedType::List(inner) => {
@@ -2898,16 +2896,19 @@ fn render_support_module(support_source: &str) -> String {
 }
 
 fn render_index_module(services: &[RenderedService<'_>]) -> String {
-    let mut output = String::new();
-    output.push_str(GENERATED_HEADER);
-    output.push_str("\n\n");
+    let mut body = String::new();
     for service in services {
-        for operation in &service.operations {
-            output.push_str("export { ");
-            output.push_str(&operation.attr_name);
-            output.push_str(" } from './operations/");
-            output.push_str(&operation_file_name(operation));
-            output.push_str("';\n");
+        if service.endpoint.is_some() {
+            for operation in &service.operations {
+                body.push_str("export { ");
+                body.push_str(&operation.attr_name);
+                body.push_str(" } from './operations/");
+                body.push_str(&operation_file_name(operation));
+                body.push_str("';\n");
+            }
+        } else {
+            render_endpoint_service_class(&mut body, service);
+            body.push('\n');
         }
     }
     let mut input_model_names = services
@@ -2923,12 +2924,148 @@ fn render_index_module(services: &[RenderedService<'_>]) -> String {
         .collect::<Vec<_>>();
     input_model_names.sort();
     input_model_names.dedup();
+    let import_body = body.clone();
     if !input_model_names.is_empty() {
-        output.push_str("export type { ");
-        output.push_str(&input_model_names.join(", "));
-        output.push_str(" } from './models';\n");
+        body.push_str("export type { ");
+        body.push_str(&input_model_names.join(", "));
+        body.push_str(" } from './models';\n");
     }
-    output
+    let mut imports = String::new();
+    render_typescript_namespace_imports(
+        &mut imports,
+        &import_body,
+        &[],
+        &[("workflow", "@temporalio/workflow")],
+    );
+    render_type_imports(
+        &mut imports,
+        "./models",
+        &used_import_names(&import_body, &index_model_type_names(services)),
+    );
+    render_type_imports(
+        &mut imports,
+        "./resources",
+        &used_import_names(&import_body, &resource_type_names(services)),
+    );
+    for service in services.iter().filter(|service| service.endpoint.is_none()) {
+        for operation in &service.operations {
+            if !contains_identifier(
+                &import_body,
+                &endpoint_service_operation_import_name(service, operation),
+            ) {
+                continue;
+            }
+            render_value_imports(
+                &mut imports,
+                &format!("./operations/{}", operation_file_name(operation)),
+                &[format!(
+                    "{} as {}",
+                    typescript_operation_function_name(service, operation),
+                    endpoint_service_operation_import_name(service, operation)
+                )],
+            );
+        }
+    }
+    render_generated_module(imports, body)
+}
+
+fn render_endpoint_service_class(output: &mut String, service: &RenderedService<'_>) {
+    let doc_tags = experimental_doc_tag(service.experimental);
+    render_typescript_doc_comment(output, "", service.doc.as_deref(), &doc_tags);
+    output.push_str("export class ");
+    output.push_str(service.name);
+    output.push_str(" {\n");
+    output.push_str("  public constructor(private readonly endpoint: string) {}\n");
+    for operation in &service.operations {
+        output.push('\n');
+        render_endpoint_service_operation_method(output, service, operation);
+    }
+    output.push_str("}\n");
+}
+
+fn render_endpoint_service_operation_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) {
+    let mut doc_tags = Vec::new();
+    if operation.input.is_some() {
+        doc_tags.push((
+            "@param request -".to_string(),
+            "Request for the operation.".to_string(),
+        ));
+    }
+    if let Some(return_doc) = &operation.return_doc {
+        doc_tags.push(("@returns".to_string(), return_doc.clone()));
+    }
+    if operation.experimental {
+        doc_tags.push((
+            "@experimental".to_string(),
+            EXPERIMENTAL_WARNING.to_string(),
+        ));
+    }
+    render_typescript_doc_comment(output, "  ", operation.doc.as_deref(), &doc_tags);
+    output.push_str("  public async ");
+    output.push_str(&operation.attr_name);
+    output.push_str("(\n");
+    if let Some(input) = &operation.input {
+        output.push_str("    request: ");
+        output.push_str(&input.annotation);
+        output.push_str(",\n");
+    }
+    output.push_str("  ): Promise<");
+    output.push_str(&typescript_operation_public_return_annotation(
+        service, operation,
+    ));
+    output.push_str("> {\n");
+    output.push_str("    return await ");
+    output.push_str(&endpoint_service_operation_import_name(service, operation));
+    output.push_str("(this.endpoint");
+    if operation.input.is_some() {
+        output.push_str(", request");
+    }
+    output.push_str(");\n");
+    output.push_str("  }\n");
+}
+
+fn index_model_type_names(services: &[RenderedService<'_>]) -> Vec<String> {
+    let resource_names = resource_type_names(services);
+    let mut names = services
+        .iter()
+        .flat_map(|service| {
+            service
+                .operations
+                .iter()
+                .filter_map(|operation| {
+                    operation
+                        .input
+                        .as_ref()
+                        .map(|input| input.annotation.clone())
+                })
+                .chain(
+                    service
+                        .operations
+                        .iter()
+                        .map(|operation| operation.output_annotation.clone()),
+                )
+        })
+        .filter(|name| !resource_names.contains(name))
+        .filter(|name| name != "void")
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn endpoint_service_operation_import_name(
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) -> String {
+    format!(
+        "{}_{}",
+        service.attr_name,
+        typescript_operation_function_name(service, operation)
+    )
 }
 
 fn render_operation_registry_module(services: &[RenderedService<'_>]) -> String {
@@ -3161,11 +3298,12 @@ fn render_resources_module(
     render_support_imports(&mut imports, support_exports, "./support", &body);
     for service in services {
         for operation in &service.operations {
-            if contains_identifier(&body, &operation.attr_name) {
+            let operation_function_name = typescript_operation_function_name(service, operation);
+            if contains_identifier(&body, &operation_function_name) {
                 render_value_imports(
                     &mut imports,
                     &format!("./operations/{}", operation_file_name(operation)),
-                    std::slice::from_ref(&operation.attr_name),
+                    std::slice::from_ref(&operation_function_name),
                 );
             }
         }
@@ -3226,10 +3364,21 @@ fn render_operation_module(
         .filter(|resource| !value_resources.contains(resource))
         .cloned()
         .collect::<Vec<_>>();
+    let resource_endpoint_binders = services
+        .iter()
+        .filter(|service| service.endpoint.is_none())
+        .flat_map(|service| service.resources.iter())
+        .filter(|resource| {
+            contains_identifier(&body, &resource_endpoint_bind_function_name(resource))
+        })
+        .map(resource_endpoint_bind_function_name)
+        .collect::<Vec<_>>();
     if !type_resources.is_empty() {
         imports.push_str("import '../resources';\n");
     }
-    render_value_imports(&mut imports, "../resources", &value_resources);
+    let mut resource_value_imports = value_resources;
+    resource_value_imports.extend(resource_endpoint_binders);
+    render_value_imports(&mut imports, "../resources", &resource_value_imports);
     render_type_imports(&mut imports, "../resources", &type_resources);
     if operation
         .input
@@ -4334,10 +4483,46 @@ fn typescript_resource_type_id(
     format!("{}::resource::{}", service.name, resource.name)
 }
 
+fn resource_endpoint_symbol_name(resource: &PlannedResource) -> String {
+    format!(
+        "{}Endpoint",
+        typescript_ident(&resource.type_name.to_lower_camel_case())
+    )
+}
+
+fn resource_endpoint_bind_function_name(resource: &PlannedResource) -> String {
+    resource_endpoint_bind_function_name_for_type(&resource.type_name)
+}
+
+fn resource_endpoint_bind_function_name_for_type(resource_type_name: &str) -> String {
+    format!("bind{resource_type_name}Endpoint")
+}
+
+fn resource_endpoint_require_function_name(resource: &PlannedResource) -> String {
+    format!("require{}Endpoint", resource.type_name)
+}
+
 fn render_resource(output: &mut String, resource: &PlannedResource, service: &RenderedService<'_>) {
+    let endpoint_symbol_name = resource_endpoint_symbol_name(resource);
+    if service.endpoint.is_none() {
+        output.push_str("const ");
+        output.push_str(&endpoint_symbol_name);
+        output.push_str(" = Symbol(");
+        output.push_str(&typescript_string_literal(&format!(
+            "nex-gen.{}.endpoint",
+            resource.type_name
+        )));
+        output.push_str(");\n\n");
+    }
     output.push_str("export class ");
     output.push_str(&resource.type_name);
     output.push_str(" {\n");
+    if service.endpoint.is_none() {
+        output.push_str("  ");
+        output.push_str("[");
+        output.push_str(&endpoint_symbol_name);
+        output.push_str("]: string | undefined;\n\n");
+    }
     output.push_str("  public constructor(\n");
     for field in &resource.fields {
         output.push_str("    public readonly ");
@@ -4393,10 +4578,19 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                     .expect("bound operation should exist on the resource service");
                 let branchable_params =
                     branchable_request_method_params(method, request_plan, operation);
+                let operation_function_name =
+                    typescript_operation_function_name(service, operation);
+                let endpoint_expr = service.endpoint.is_none().then(|| {
+                    format!(
+                        "{}(this)",
+                        resource_endpoint_require_function_name(resource)
+                    )
+                });
                 if *direct_return {
                     output.push_str(&render_resource_method_operation_body(
                         4,
-                        &operation.attr_name,
+                        &operation_function_name,
+                        endpoint_expr,
                         &result_annotation,
                         request_plan,
                         &branchable_params,
@@ -4405,7 +4599,8 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                 } else {
                     output.push_str(&render_resource_method_operation_body(
                         4,
-                        &operation.attr_name,
+                        &operation_function_name,
+                        endpoint_expr,
                         &result_annotation,
                         request_plan,
                         &branchable_params,
@@ -4427,6 +4622,39 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
     }
 
     output.push_str("}\n");
+    if service.endpoint.is_none() {
+        output.push('\n');
+        output.push_str("export function ");
+        output.push_str(&resource_endpoint_bind_function_name(resource));
+        output.push_str("(resource: ");
+        output.push_str(&resource.type_name);
+        output.push_str(", endpoint: string): ");
+        output.push_str(&resource.type_name);
+        output.push_str(" {\n");
+        output.push_str("  resource[");
+        output.push_str(&endpoint_symbol_name);
+        output.push_str("] = endpoint;\n");
+        output.push_str("  return resource;\n");
+        output.push_str("}\n\n");
+        output.push_str("function ");
+        output.push_str(&resource_endpoint_require_function_name(resource));
+        output.push_str("(resource: ");
+        output.push_str(&resource.type_name);
+        output.push_str("): string {\n");
+        output.push_str("  const endpoint = resource[");
+        output.push_str(&endpoint_symbol_name);
+        output.push_str("];\n");
+        output.push_str("  if (endpoint == null) {\n");
+        output.push_str("    throw new Error(");
+        output.push_str(&typescript_string_literal(&format!(
+            "{} methods require a service endpoint.",
+            resource.type_name
+        )));
+        output.push_str(");\n");
+        output.push_str("  }\n");
+        output.push_str("  return endpoint;\n");
+        output.push_str("}\n");
+    }
 }
 
 fn typescript_resource_method_result_annotation(method: &PlannedResourceMethod) -> String {
@@ -4648,6 +4876,7 @@ fn collect_request_plan_method_params(plan: &RequestPlan, params: &mut BTreeSet<
 fn render_resource_method_operation_body(
     indent: usize,
     operation_attr_name: &str,
+    endpoint_expr: Option<String>,
     result_annotation: &str,
     request_plan: &RequestPlan,
     branchable_params: &[String],
@@ -4664,6 +4893,7 @@ fn render_resource_method_operation_body(
         output.push_str(&render_resource_method_operation_body(
             indent + 2,
             operation_attr_name,
+            endpoint_expr.clone(),
             result_annotation,
             request_plan,
             remaining,
@@ -4674,6 +4904,7 @@ fn render_resource_method_operation_body(
         output.push_str(&render_resource_method_operation_body(
             indent + 2,
             operation_attr_name,
+            endpoint_expr,
             result_annotation,
             request_plan,
             remaining,
@@ -4695,6 +4926,10 @@ fn render_resource_method_operation_body(
         }
         output.push_str(operation_attr_name);
         output.push('(');
+        if let Some(endpoint_expr) = &endpoint_expr {
+            output.push_str(endpoint_expr);
+            output.push_str(", ");
+        }
         output.push_str(&request_expr);
         output.push_str(");\n");
     } else {
@@ -4702,6 +4937,10 @@ fn render_resource_method_operation_body(
         output.push_str("const handle = await ");
         output.push_str(operation_attr_name);
         output.push('(');
+        if let Some(endpoint_expr) = &endpoint_expr {
+            output.push_str(endpoint_expr);
+            output.push_str(", ");
+        }
         output.push_str(&request_expr);
         output.push_str(");\n");
         output.push_str(&indent_str);
@@ -4820,12 +5059,15 @@ fn render_operation_function(
         .unwrap_or(&[]);
     if input_type_parameters.is_empty() {
         output.push_str("export async function ");
-        output.push_str(&operation.attr_name);
+        output.push_str(&typescript_operation_function_name(service, operation));
         output.push_str("(\n");
     } else {
         render_named_generic_function_start(
             output,
-            &format!("export async function {}", operation.attr_name),
+            &format!(
+                "export async function {}",
+                typescript_operation_function_name(service, operation)
+            ),
             input_type_parameters,
             0,
         );
@@ -4893,7 +5135,16 @@ fn render_operation_function(
         output.push_str(";\n");
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("  const result = await handle.result();\n");
-        output.push_str("  return new ");
+        if service.endpoint.is_none() {
+            output.push_str("  return ");
+            output.push_str(&resource_endpoint_bind_function_name_for_type(
+                &resource_return.resource_type_name,
+            ));
+            output.push('(');
+        } else {
+            output.push_str("  return ");
+        }
+        output.push_str("new ");
         output.push_str(&resource_return.resource_type_name);
         output.push_str("(\n");
         for binding in &resource_return.bindings {
@@ -4901,11 +5152,55 @@ fn render_operation_function(
             output.push_str(&resource_return_binding_expr_typescript(binding));
             output.push_str(",\n");
         }
-        output.push_str("  );\n");
+        if service.endpoint.is_none() {
+            output.push_str("  ), endpoint);\n");
+        } else {
+            output.push_str("  );\n");
+        }
     } else if operation.output_direct_result {
-        output.push_str("  return await handle.result();\n");
+        if service.endpoint.is_none()
+            && let Some(resource) = service
+                .resources
+                .iter()
+                .find(|resource| resource.type_name == operation.output_annotation)
+        {
+            output.push_str("  const resource = await handle.result();\n");
+            output.push_str("  return ");
+            output.push_str(&resource_endpoint_bind_function_name(resource));
+            output.push_str("(resource, endpoint);\n");
+        } else {
+            output.push_str("  return await handle.result();\n");
+        }
     }
     output.push_str("}\n");
+}
+
+fn typescript_operation_function_name(
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) -> String {
+    if service.endpoint.is_none() {
+        format!("{}Request", operation.attr_name)
+    } else {
+        operation.attr_name.clone()
+    }
+}
+
+fn typescript_operation_public_return_annotation(
+    _service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) -> String {
+    if operation.output_transform_expr.is_some()
+        || operation.output_resource_return.is_some()
+        || operation.output_direct_result
+    {
+        operation.output_annotation.clone()
+    } else {
+        format!(
+            "workflow.NexusOperationHandle<{}>",
+            operation.output_annotation
+        )
+    }
 }
 
 fn typescript_service_endpoint_expr(service: &RenderedService<'_>) -> String {

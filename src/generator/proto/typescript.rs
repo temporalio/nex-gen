@@ -17,21 +17,19 @@ use crate::spec::{ExternalTypeSpec, RecordSpec, TypeReplacementSpec};
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend;
 
-impl crate::generator::ModelBackend for ModelBackend {
-    type TypeRef = PlannedProtoType;
-    type WireType = PlannedType;
-    type ModelFragments = RenderedExternalModelFragments;
-    type WireConversion = WireValueConversion;
-
-    fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
+impl ModelBackend {
+    pub(in crate::generator) fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
         Ok(())
     }
 
-    fn render_models(&self) -> Result<RenderedExternalModelFragments> {
+    pub(in crate::generator) fn render_models(&self) -> Result<RenderedExternalModelFragments> {
         Ok(RenderedExternalModelFragments::default())
     }
 
-    fn model_type_annotation(&self, proto_type: &PlannedProtoType) -> Option<String> {
+    pub(in crate::generator) fn model_type_annotation(
+        &self,
+        proto_type: &PlannedProtoType,
+    ) -> Option<String> {
         match proto_type {
             PlannedProtoType::Message(proto) => {
                 Some(message_typescript_interface_ref(&proto.proto))
@@ -44,14 +42,17 @@ impl crate::generator::ModelBackend for ModelBackend {
         }
     }
 
-    fn wire_type_identifier(&self, proto_type: &PlannedProtoType) -> Option<String> {
+    pub(in crate::generator) fn wire_type_identifier(
+        &self,
+        proto_type: &PlannedProtoType,
+    ) -> Option<String> {
         match proto_type {
             PlannedProtoType::Message(proto) => Some(proto.proto.full_name.clone()),
             PlannedProtoType::Enum(_) => None,
         }
     }
 
-    fn wire_conversion(
+    pub(in crate::generator) fn wire_conversion(
         &self,
         model_type: &PlannedType,
         planned_record: Option<&RecordSpec<PlannedTypeFamily>>,

@@ -4,21 +4,27 @@ import * as workflow from "@temporalio/workflow";
 import { userService } from "../service";
 import type { GetUserRequest } from "../models";
 import "../resources";
+import { bindUserEndpoint } from "../resources";
 import type { User } from "../resources";
 import { nexusValue } from "../../nex-gen-runtime";
 
 /**
+ * @param endpoint - Endpoint for the service.
  * @param request - Request for the operation.
  */
-export async function getUser(request: GetUserRequest): Promise<User> {
+export async function getUserRequest(
+  endpoint: string,
+  request: GetUserRequest,
+): Promise<User> {
   const client = workflow.createNexusServiceClient({
     service: userService,
-    endpoint: "user-service",
+    endpoint: endpoint,
   });
   const requestProto = nexusValue("user-service.get-user-request", request);
   const handle = await client.startOperation(
     userService.operations.getUser,
     requestProto,
   );
-  return await handle.result();
+  const resource = await handle.result();
+  return bindUserEndpoint(resource, endpoint);
 }

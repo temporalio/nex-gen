@@ -23,11 +23,24 @@ namespace NexGen.UserService
         public string UserId { get; }
         public string Email { get; }
 
+        internal string? NexGenEndpoint { get; set; }
+
+        internal static User BindEndpoint(User resource, string endpoint)
+        {
+            resource.NexGenEndpoint = endpoint;
+            return resource;
+        }
+
+        private string RequireNexGenEndpoint()
+        {
+            return NexGenEndpoint ?? throw new InvalidOperationException("User methods require a service endpoint.");
+        }
+
         [GeneratedCode("nex-gen", null)]
         public Task<User> UpdateEmailAsync(string email)
         {
             var request = new UpdateEmailOptions(UserId, email);
-            return Operations.UpdateEmailAsync(request);
+            return Operations.UpdateEmailAsync(RequireNexGenEndpoint(), request);
         }
 
     }

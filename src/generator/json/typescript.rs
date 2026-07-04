@@ -43,13 +43,8 @@ pub(in crate::generator) struct ModelBackend {
     json_models: Vec<PlannedJsonType>,
 }
 
-impl crate::generator::ModelBackend for ModelBackend {
-    type TypeRef = PlannedJsonType;
-    type WireType = PlannedJsonType;
-    type ModelFragments = RenderedExternalModelFragments;
-    type WireConversion = WireValueConversion;
-
-    fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+impl ModelBackend {
+    pub(in crate::generator) fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
         self.json_models = api_plan
             .external_types
             .values()
@@ -61,20 +56,26 @@ impl crate::generator::ModelBackend for ModelBackend {
         Ok(())
     }
 
-    fn render_models(&self) -> Result<RenderedExternalModelFragments> {
+    pub(in crate::generator) fn render_models(&self) -> Result<RenderedExternalModelFragments> {
         let json_models = self.json_models.iter().collect::<Vec<_>>();
         render_external_models(json_models.as_slice())
     }
 
-    fn model_type_annotation(&self, json_type: &PlannedJsonType) -> Option<String> {
+    pub(in crate::generator) fn model_type_annotation(
+        &self,
+        json_type: &PlannedJsonType,
+    ) -> Option<String> {
         Some(model_type_ref(json_type))
     }
 
-    fn wire_type_identifier(&self, json_type: &PlannedJsonType) -> Option<String> {
+    pub(in crate::generator) fn wire_type_identifier(
+        &self,
+        json_type: &PlannedJsonType,
+    ) -> Option<String> {
         Some(json_type.full_name.clone())
     }
 
-    fn wire_conversion(
+    pub(in crate::generator) fn wire_conversion(
         &self,
         json_type: &PlannedJsonType,
         _planned_record: Option<&RecordSpec<PlannedTypeFamily>>,

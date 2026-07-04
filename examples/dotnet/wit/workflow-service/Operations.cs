@@ -115,8 +115,8 @@ namespace Temporalio.Workflows
         private static async Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IWorkflowService>(WorkflowServiceEndpoint);
-            var protoRequest = request.ToProto();
-            var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse>(svc => svc.SignalWithStartWorkflow(protoRequest)).ConfigureAwait(true);
+            var wireRequest = request.ToProto();
+            var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse>(svc => svc.SignalWithStartWorkflow(wireRequest)).ConfigureAwait(true);
             return Temporalio.Workflows.Workflow.GetExternalWorkflowHandle(request.Id, result.RunId);
         }
 

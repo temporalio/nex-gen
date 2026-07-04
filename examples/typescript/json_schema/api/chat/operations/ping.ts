@@ -8,7 +8,7 @@ import { chatService } from "../service";
  *
  * @param endpoint - Endpoint for the service.
  */
-export async function ping(
+export async function pingRequest(
   endpoint: string,
 ): Promise<workflow.NexusOperationHandle<void>> {
   const client = workflow.createNexusServiceClient({

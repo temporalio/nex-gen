@@ -11,7 +11,9 @@ use crate::SupportFiles;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
-use crate::planning::{PlannedSpec, PlannedTypeFamily, PlanningMode, build_api_plan_with_mode};
+use crate::planning::{
+    PlannedSpec, PlannedType, PlannedTypeFamily, PlanningMode, build_api_plan_with_mode,
+};
 use crate::resources::ensure_unique_resource_names;
 use crate::spec::{ApiSpec, RecordSpec};
 use crate::validation::validate_external_type_bindings;
@@ -78,9 +80,7 @@ impl ModelWireCapabilities {
     }
 }
 
-pub(crate) trait ModelBackend {
-    type TypeRef;
-    type WireType;
+pub(crate) trait ExternalModelBackend {
     type ModelFragments;
     type WireConversion;
 
@@ -91,10 +91,10 @@ pub(crate) trait ModelBackend {
     fn render_models(&self) -> Result<Self::ModelFragments>;
 
     /// Return the target-language type annotation/name for a model reference.
-    fn model_type_annotation(&self, model_type: &Self::TypeRef) -> Option<String>;
+    fn model_type_annotation(&self, model_type: &PlannedType) -> Option<String>;
 
     /// Return the stable wire/runtime type identifier for a model reference.
-    fn wire_type_identifier(&self, model_type: &Self::TypeRef) -> Option<String>;
+    fn wire_type_identifier(&self, model_type: &PlannedType) -> Option<String>;
 
     /// Return conversion templates between public model values and wire values.
     ///
@@ -102,7 +102,7 @@ pub(crate) trait ModelBackend {
     /// record model, which lets backends handle generated/local model conversions.
     fn wire_conversion(
         &self,
-        model_type: &Self::WireType,
+        model_type: &PlannedType,
         planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
     ) -> Option<Self::WireConversion>;
 }

@@ -3,12 +3,47 @@
 from __future__ import annotations
 
 from . import service as _service
-from .operations.get_user import get_user
-from ._resources.user import update_email
+from .operations.get_user import get_user_request as _UserService_get_user_request
+from ._resources.user import update_email_request as _UserService_update_email_request
+from .models import (
+    GetUserRequest,
+    UpdateEmailRequest,
+)
+import typing
+
+if typing.TYPE_CHECKING:
+    from ._resources import User
+
+
+class UserService:
+    def __init__(self, endpoint: str) -> None:
+        self.endpoint: str = endpoint
+
+    async def get_user(
+        self,
+        *,
+        user_id: str,
+    ) -> User:
+        request = GetUserRequest(
+            user_id=user_id,
+        )
+        return await _UserService_get_user_request(self.endpoint, request)
+
+    async def update_email(
+        self,
+        *,
+        user_id: str,
+        email: str,
+    ) -> User:
+        request = UpdateEmailRequest(
+            user_id=user_id,
+            email=email,
+        )
+        return await _UserService_update_email_request(self.endpoint, request)
+
 
 __all__ = [
-    "get_user",
-    "update_email",
+    "UserService",
 ]
 
 
