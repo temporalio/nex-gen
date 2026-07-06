@@ -164,6 +164,7 @@ The WIT file defines the public surface. `@nexus` directives carry the parts WIT
 - service endpoint names
 - service wire names
 - support file paths
+- language-native service namespaces/packages
 - language-native override types
 - flattened API-only field types
 - sourced field expressions
@@ -174,6 +175,11 @@ The WIT file defines the public surface. `@nexus` directives carry the parts WIT
 - `@nexus.delay-load-temporalio-workflow` on Python services that must not import `temporalio.workflow` until an operation executes
 
 Resource methods bind to operations only when the method and operation have the same generated operation name. When they intentionally differ, mark the method with `@nexus.operation`, for example `/// @nexus.operation "cancel-workflow"` on `cancel: func(...)` to bind it to `cancel-workflow: func(...)`.
+
+Input WIT files can set generated service namespaces/packages with
+`@nexus.namespace`, such as `dotnet="Temporalio.Workflows"` or
+`go="go.temporal.io/sdk/workflow"`. For Go, the import path's final segment is
+used as the package name and the full path is used to remove self-imports.
 
 Input WIT files can add support code with `@nexus.support`. Python support fragments are copied into the generated private `_support` package, TypeScript support fragments are emitted as `support.ts` next to the generated `index.ts`, and .NET support fragments are copied under `Support/`.
 

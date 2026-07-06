@@ -188,8 +188,17 @@ fn cli_generates_go_support_file_from_parameter() {
 #[test]
 fn cli_generates_go_with_package_self_imports_removed() {
     let root = project_root();
-    let temp_dir = unique_output_path("go-package");
+    let temp_dir = unique_output_path("go-namespace");
     let output_path = temp_dir.join("output");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let temp_input_path = temp_dir.join("user-service.wit");
+    let input = fs::read_to_string(input_path(&root, "user-service"))
+        .unwrap()
+        .replace(
+            "/// @nexus.endpoint \"user-service\"\n",
+            "/// @nexus.endpoint \"user-service\"\n/// @nexus.namespace go=\"go.temporal.io/sdk/workflow\"\n",
+        );
+    fs::write(&temp_input_path, input).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
@@ -197,11 +206,9 @@ fn cli_generates_go_with_package_self_imports_removed() {
             "--lang",
             "go",
             "--input",
-            input_path(&root, "user-service").to_str().unwrap(),
+            temp_input_path.to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
-            "--go-package",
-            "go.temporal.io/sdk/workflow",
         ])
         .output()
         .unwrap();

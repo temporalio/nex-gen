@@ -36,9 +36,7 @@ const TUPLE_FIELD_NAMES: &[&str] = &[
 const GO_DOC_COMMENT_LINE_LENGTH: usize = 88;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GoOptions {
-    pub package_import_path: Option<String>,
-}
+pub struct GoOptions {}
 
 #[derive(Debug, Clone)]
 struct GoPackageContext {
@@ -47,8 +45,13 @@ struct GoPackageContext {
 }
 
 impl GoPackageContext {
-    fn new(api_plan: &ApiPlan, options: &GoOptions) -> Self {
-        let package_name = options.package_import_path.as_ref().map_or_else(
+    fn new(api_plan: &ApiPlan, _options: &GoOptions) -> Self {
+        let import_path = api_plan
+            .services
+            .first()
+            .and_then(|service| service.namespace.for_language(Language::Go))
+            .map(str::to_string);
+        let package_name = import_path.as_ref().map_or_else(
             || {
                 api_plan
                     .services
@@ -68,7 +71,7 @@ impl GoPackageContext {
 
         Self {
             package_name,
-            import_path: options.package_import_path.clone(),
+            import_path,
         }
     }
 
@@ -138,7 +141,7 @@ impl GoPackageContext {
 /// Walks the [`ApiPlan`] to collect all referenced enums, flags, variants, and
 /// models, then renders them into a single service-named `.go` file inside a
 /// directory output. The Go package name is derived from the first service
-/// endpoint unless an explicit package import path is provided.
+/// endpoint unless the first service declares `@nexus.namespace go="..."`.
 pub(crate) fn generate(
     api_plan: &ApiPlan,
     support_fragments: &[SupportFragmentSpec],
