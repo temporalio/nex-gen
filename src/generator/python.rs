@@ -6629,7 +6629,11 @@ interface example-service {
             &SupportFiles::default(),
         )
         .unwrap();
-        assert!(output.contains("async def example_operation(\n    endpoint: str,\n    request:"));
+        assert!(output.contains("class ExampleService:\n    def __init__(self, endpoint: str)"));
+        assert!(output.contains("async def example_operation(\n        self,\n        request:"));
+        assert!(output.contains(
+            "return await _ExampleService_example_operation_request(self.endpoint, request)"
+        ));
         assert!(output.contains("endpoint=endpoint,"));
     }
 }

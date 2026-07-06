@@ -5755,7 +5755,7 @@ interface example-service {
             "/**\n * @experimental This API is experimental and subject to change.\n */\nexport const exampleService"
         ));
         assert!(output.contains(
-            "  /**\n   * @experimental This API is experimental and subject to change.\n   */\n  requestOp:"
+            "  /**\n   * Runs example.\n   *\n   * @experimental This API is experimental and subject to change.\n   */\n  requestOp:"
         ));
         assert!(output.contains(
             " * Runs example.\n *\n * @param request - Request for the operation.\n * @experimental This API is experimental and subject to change."
@@ -5775,7 +5775,7 @@ interface example-service {
   use nexus:temporal-types/model@1.0.0.{retry-policy};
 
   example-operation: func(request: retry-policy) -> retry-policy;
-  ping: func();
+  ping: func(request: retry-policy);
 }
 "#;
         let spec = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
@@ -5800,11 +5800,14 @@ interface example-service {
             &SupportFiles::default(),
         )
         .unwrap();
-        assert!(output.contains("endpoint: string,"));
-        assert!(output.contains("    endpoint: endpoint,\n"));
+        assert!(output.contains("public constructor(private readonly endpoint: string)"));
         assert!(output.contains(
-            "export async function ping(\n  endpoint: string,\n): Promise<workflow.NexusOperationHandle<void>>"
+            "return await exampleService_exampleOperationRequest(this.endpoint, request);"
         ));
+        assert!(
+            output.contains("return await exampleService_pingRequest(this.endpoint, request);")
+        );
+        assert!(output.contains("    endpoint: endpoint,\n"));
         assert!(!output.contains("request: void"));
     }
 }
