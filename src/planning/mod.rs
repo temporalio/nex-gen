@@ -103,7 +103,7 @@ struct PlannedTypeMapper<'a, 'descriptors> {
 }
 
 impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, '_> {
-    fn map_record(&mut self, name: crate::spec::ApiRef) -> PlannedRecordType {
+    fn map_record(&mut self, name: crate::spec::Symbol) -> PlannedRecordType {
         let record = self
             .source_spec
             .records
@@ -113,7 +113,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
             .plan_record_type(record, ModelWireCapabilities::default())
     }
 
-    fn map_enum(&mut self, name: crate::spec::ApiRef) -> PlannedEnumType {
+    fn map_enum(&mut self, name: crate::spec::Symbol) -> PlannedEnumType {
         let enumeration = self
             .source_spec
             .enums
@@ -138,7 +138,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
         }
     }
 
-    fn map_flags(&mut self, name: crate::spec::ApiRef) -> PlannedFlagsType {
+    fn map_flags(&mut self, name: crate::spec::Symbol) -> PlannedFlagsType {
         let flags = self
             .source_spec
             .flags
@@ -151,7 +151,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
         }
     }
 
-    fn map_variant(&mut self, name: crate::spec::ApiRef) -> PlannedVariantType {
+    fn map_variant(&mut self, name: crate::spec::Symbol) -> PlannedVariantType {
         let variant = self
             .source_spec
             .variants
@@ -164,14 +164,14 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
         }
     }
 
-    fn map_resource(&mut self, name: crate::spec::ApiRef) -> PlannedResourceType {
+    fn map_resource(&mut self, name: crate::spec::Symbol) -> PlannedResourceType {
         PlannedResourceType {
             type_name: name.as_str().to_upper_camel_case(),
             wire_type: None,
         }
     }
 
-    fn map_proto(&mut self, name: crate::spec::ApiRef) -> PlannedProtoType {
+    fn map_proto(&mut self, name: crate::spec::Symbol) -> PlannedProtoType {
         if let Some(message) = self.planner.descriptors.message(name.as_str()) {
             PlannedProtoType::Message(proto::planned_message_reference(message, self.planner))
         } else if let Some(enumeration) = self.planner.descriptors.enumeration(name.as_str()) {
@@ -186,7 +186,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
 
     fn map_json(
         &mut self,
-        name: crate::spec::JsonModelSpec<crate::spec::ApiRef>,
+        name: crate::spec::JsonModelSpec<crate::spec::Symbol>,
     ) -> PlannedJsonType {
         PlannedJsonType {
             full_name: name.name.as_str().to_string(),
@@ -195,7 +195,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
         }
     }
 
-    fn map_alias(&mut self, name: crate::spec::ApiRef) -> PlannedAliasType {
+    fn map_alias(&mut self, name: crate::spec::Symbol) -> PlannedAliasType {
         PlannedAliasType {
             name: name.as_str().to_string(),
         }
@@ -1111,7 +1111,7 @@ impl<'a> ApiPlanner<'a> {
         }
     }
 
-    fn map_json_type(&mut self, json_type: &JsonModelSpec<crate::spec::ApiRef>) -> PlannedJsonType {
+    fn map_json_type(&mut self, json_type: &JsonModelSpec<crate::spec::Symbol>) -> PlannedJsonType {
         self.mark_json_model_used(json_type);
         PlannedJsonType {
             full_name: json_type.name.as_str().to_string(),
@@ -1120,7 +1120,7 @@ impl<'a> ApiPlanner<'a> {
         }
     }
 
-    fn mark_json_model_used(&mut self, json_type: &JsonModelSpec<crate::spec::ApiRef>) {
+    fn mark_json_model_used(&mut self, json_type: &JsonModelSpec<crate::spec::Symbol>) {
         if !self
             .used_json_models
             .insert(json_type.name.as_str().to_string())

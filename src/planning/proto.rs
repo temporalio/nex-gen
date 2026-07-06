@@ -5,8 +5,8 @@ use prost_types::field_descriptor_proto::{Label, Type};
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata};
 use crate::generator::ModelWireCapabilities;
 use crate::spec::{
-    ApiRef, ApiSpec, ExternalTypeSpec, IntSpec, LanguageStringSpec, RecordFieldSpec,
-    RecordFieldVisibility, RecordSpec, TypeSpec,
+    ApiSpec, ExternalTypeSpec, IntSpec, LanguageStringSpec, RecordFieldSpec, RecordFieldVisibility,
+    RecordSpec, Symbol, TypeSpec,
 };
 
 use super::{
@@ -289,7 +289,7 @@ fn ensure_model_record(message: &MessageMetadata, planner: &mut ApiPlanner<'_>) 
             name: planned_proto_model_name(message, &planner.spec),
             full_name: message.full_name.clone(),
             doc: LanguageStringSpec::default(),
-            source_type: Some(TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(
+            source_type: Some(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
                 message.full_name.clone(),
             )))),
             experimental: false,
@@ -402,7 +402,7 @@ fn authored_value_type(field: &FieldDescriptorProto) -> TypeSpec {
             .type_name
             .as_deref()
             .map(|type_name| {
-                TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(
+                TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
                     type_name.trim_start_matches('.').to_string(),
                 )))
             })

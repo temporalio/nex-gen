@@ -10,8 +10,8 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::spec::{
-    ApiRef, ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelSpec, LanguageStringSpec,
-    OperationSpec, ServiceSpec, SupportSpec, TypeSpec,
+    ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelSpec, LanguageStringSpec,
+    OperationSpec, ServiceSpec, SupportSpec, Symbol, TypeSpec,
 };
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -632,9 +632,9 @@ fn json_model_type(model: &JsonModel) -> Result<TypeSpec> {
     )?)))
 }
 
-fn json_model_spec(model: &JsonModel) -> Result<JsonModelSpec<ApiRef>> {
+fn json_model_spec(model: &JsonModel) -> Result<JsonModelSpec<Symbol>> {
     Ok(JsonModelSpec {
-        name: ApiRef::new(model.full_name.clone()),
+        name: Symbol::new(model.full_name.clone()),
         model_name: model.model_name.clone(),
         schema: serde_json::to_value(&model.schema).map_err(|error| Error::InvalidJsonSchema {
             path: PathBuf::from("<json-schema>"),

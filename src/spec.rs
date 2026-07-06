@@ -17,9 +17,9 @@ pub struct ApiSpec<F: TypeNameFamily = AuthoredNames> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ApiRef(String);
+pub struct Symbol(String);
 
-impl ApiRef {
+impl Symbol {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -29,13 +29,13 @@ impl ApiRef {
     }
 }
 
-impl AsRef<str> for ApiRef {
+impl AsRef<str> for Symbol {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
 }
 
-impl std::fmt::Display for ApiRef {
+impl std::fmt::Display for Symbol {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(formatter)
     }
@@ -61,14 +61,14 @@ pub trait TypeNameFamily {
 pub struct AuthoredNames;
 
 impl TypeNameFamily for AuthoredNames {
-    type Record = ApiRef;
-    type Enum = ApiRef;
-    type Flags = ApiRef;
-    type Variant = ApiRef;
-    type Resource = ApiRef;
-    type Proto = ApiRef;
-    type Json = JsonModelSpec<ApiRef>;
-    type Alias = ApiRef;
+    type Record = Symbol;
+    type Enum = Symbol;
+    type Flags = Symbol;
+    type Variant = Symbol;
+    type Resource = Symbol;
+    type Proto = Symbol;
+    type Json = JsonModelSpec<Symbol>;
+    type Alias = Symbol;
     type ServiceData = ();
     type RecordData = ();
     type ResourceData = ();

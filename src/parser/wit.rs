@@ -1164,7 +1164,7 @@ fn build_wit_record_spec(
             proto_directive
                 .value("value")
                 .map(|proto_name| {
-                    TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(proto_name.to_string())))
+                    TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(proto_name.to_string())))
                 })
                 .ok_or_else(|| Error::InvalidWitDirective {
                     path: path.to_path_buf(),
@@ -1279,7 +1279,7 @@ fn build_external_type_binding(
     }
 
     let external_type = ExternalTypeBindingSpec {
-        external_type: ExternalTypeSpec::Proto(ApiRef::new(proto_name.clone())),
+        external_type: ExternalTypeSpec::Proto(Symbol::new(proto_name.clone())),
         reference,
         type_name,
         replacement,
@@ -1570,18 +1570,18 @@ fn resolve_authored_field_type_spec(
                     find_owned_resource_name_for_type_def(resolve, type_def)
                     && directive(&directives, "type", path, &type_context)?.is_none()
                 {
-                    return Ok(TypeSpec::Resource(ApiRef::new(resource_name)));
+                    return Ok(TypeSpec::Resource(Symbol::new(resource_name)));
                 }
                 if let Some(type_directive) = directive(&directives, "type", path, &type_context)? {
                     return Ok(TypeSpec::External(ExternalTypeSpec::Alias {
-                        name: ApiRef::new(wit_type_full_name(resolve, *id)),
-                        target: Box::new(TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(
+                        name: Symbol::new(wit_type_full_name(resolve, *id)),
+                        target: Box::new(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
                             proto_name,
                         )))),
                         type_name: directive_language_string(type_directive),
                     }));
                 }
-                return Ok(TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(
+                return Ok(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
                     proto_name,
                 ))));
             }
@@ -1640,7 +1640,7 @@ fn resolve_authored_field_type_spec(
                         directive(&directives, "type", path, &type_context)?
                     {
                         Ok(TypeSpec::External(ExternalTypeSpec::Alias {
-                            name: ApiRef::new(wit_type_full_name(resolve, *id)),
+                            name: Symbol::new(wit_type_full_name(resolve, *id)),
                             target: Box::new(target),
                             type_name: directive_language_string(type_directive),
                         }))
@@ -1655,7 +1655,7 @@ fn resolve_authored_field_type_spec(
                             &type_context,
                         )? {
                             Ok(TypeSpec::External(ExternalTypeSpec::Alias {
-                                name: ApiRef::new(wit_type_full_name(resolve, *id)),
+                                name: Symbol::new(wit_type_full_name(resolve, *id)),
                                 target: Box::new(target),
                                 type_name,
                             }))
@@ -1666,25 +1666,25 @@ fn resolve_authored_field_type_spec(
                         Ok(target)
                     }
                 }
-                TypeDefKind::Record(_) => Ok(TypeSpec::Record(ApiRef::new(wit_type_full_name(
+                TypeDefKind::Record(_) => Ok(TypeSpec::Record(Symbol::new(wit_type_full_name(
                     resolve, *id,
                 )))),
-                TypeDefKind::Enum(_) => Ok(TypeSpec::Enum(ApiRef::new(wit_type_full_name(
+                TypeDefKind::Enum(_) => Ok(TypeSpec::Enum(Symbol::new(wit_type_full_name(
                     resolve, *id,
                 )))),
-                TypeDefKind::Flags(_) => Ok(TypeSpec::Flags(ApiRef::new(wit_type_full_name(
+                TypeDefKind::Flags(_) => Ok(TypeSpec::Flags(Symbol::new(wit_type_full_name(
                     resolve, *id,
                 )))),
-                TypeDefKind::Variant(_) => Ok(TypeSpec::Variant(ApiRef::new(wit_type_full_name(
+                TypeDefKind::Variant(_) => Ok(TypeSpec::Variant(Symbol::new(wit_type_full_name(
                     resolve, *id,
                 )))),
                 TypeDefKind::Handle(Handle::Own(resource_id))
                 | TypeDefKind::Handle(Handle::Borrow(resource_id)) => {
                     let resource_def = &resolve.types[*resource_id];
                     let resource_name = resource_def.name.as_deref().unwrap_or("unnamed-resource");
-                    Ok(TypeSpec::Resource(ApiRef::new(resource_name)))
+                    Ok(TypeSpec::Resource(Symbol::new(resource_name)))
                 }
-                TypeDefKind::Resource => Ok(TypeSpec::Resource(ApiRef::new(type_name))),
+                TypeDefKind::Resource => Ok(TypeSpec::Resource(Symbol::new(type_name))),
                 _ => Err(Error::InvalidWit {
                     path: path.to_path_buf(),
                     reason: format!(
@@ -2285,7 +2285,7 @@ fn function_alias_type_name(
             return Ok(None);
         }
         TypeSpec::External(ExternalTypeSpec::Alias {
-            name: ApiRef::new(""),
+            name: Symbol::new(""),
             target: Box::new(TypeSpec::String),
             type_name: result,
         })
@@ -3036,19 +3036,19 @@ fn find_operation_type_spec(
 ) -> Result<Option<(TypeSpec, Option<ExternalTypeSpec>)>> {
     if let Some(resource_name) = find_owned_resource_name_for_type(resolve, ty) {
         return Ok(Some((
-            TypeSpec::Resource(ApiRef::new(resource_name)),
+            TypeSpec::Resource(Symbol::new(resource_name)),
             find_proto_name_for_type(resolve, ty, path, context)?
-                .map(|proto_name| ExternalTypeSpec::Proto(ApiRef::new(proto_name))),
+                .map(|proto_name| ExternalTypeSpec::Proto(Symbol::new(proto_name))),
         )));
     }
     if let Some(proto_name) = find_proto_name_for_type(resolve, ty, path, context)? {
         return Ok(Some((
-            TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(proto_name))),
+            TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(proto_name))),
             None,
         )));
     }
     if let Some(record_name) = find_wit_record_name_for_type(resolve, ty) {
-        return Ok(Some((TypeSpec::Record(ApiRef::new(record_name)), None)));
+        return Ok(Some((TypeSpec::Record(Symbol::new(record_name)), None)));
     }
     Ok(None)
 }
@@ -3546,7 +3546,7 @@ mod tests {
     use crate::language::Language;
 
     use super::{
-        ApiRef, ApiSpec, ExternalTypeSpec, FunctionArgSpec, FunctionArgsSpec, TypeSpec, directive,
+        ApiSpec, ExternalTypeSpec, FunctionArgSpec, FunctionArgsSpec, Symbol, TypeSpec, directive,
         load_linked_wit_metadata_from_inputs, parse_directives,
     };
 
@@ -4206,7 +4206,7 @@ interface user-service {
                 .unwrap()
                 .source_type
                 .as_ref(),
-            Some(&TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(
+            Some(&TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
                 "acme.users.v1.ProtoRequest"
             ))))
         );
@@ -4222,17 +4222,17 @@ interface user-service {
         let proto_to_resource = service.operation("ProtoToResource").unwrap();
         assert_eq!(
             proto_to_resource.input,
-            Some(TypeSpec::External(ExternalTypeSpec::Proto(ApiRef::new(
+            Some(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
                 "acme.users.v1.ProtoRequest"
             ))))
         );
         assert_eq!(
             proto_to_resource.output,
-            Some(TypeSpec::Resource(ApiRef::new("user")))
+            Some(TypeSpec::Resource(Symbol::new("user")))
         );
         assert_eq!(
             proto_to_resource.output_resource_type,
-            Some(ExternalTypeSpec::Proto(ApiRef::new(
+            Some(ExternalTypeSpec::Proto(Symbol::new(
                 "acme.users.v1.UserResult"
             )))
         );
@@ -4242,23 +4242,23 @@ interface user-service {
                 .as_ref()
                 .unwrap()
                 .result_type,
-            TypeSpec::Resource(ApiRef::new("user"))
+            TypeSpec::Resource(Symbol::new("user"))
         );
 
         let json_echo = service.operation("JsonEcho").unwrap();
         assert_eq!(
             json_echo.input,
-            Some(TypeSpec::Record(ApiRef::new("user-service.json-request")))
+            Some(TypeSpec::Record(Symbol::new("user-service.json-request")))
         );
         assert_eq!(
             json_echo.output,
-            Some(TypeSpec::Record(ApiRef::new("user-service.json-request")))
+            Some(TypeSpec::Record(Symbol::new("user-service.json-request")))
         );
 
         let resource_input = service.operation("ResourceInput").unwrap();
         assert_eq!(
             resource_input.input,
-            Some(TypeSpec::Resource(ApiRef::new("user")))
+            Some(TypeSpec::Resource(Symbol::new("user")))
         );
     }
 
