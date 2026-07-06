@@ -323,12 +323,19 @@ func versioningOverrideToProto(_ workflow.Context, versioningOverride *client.Ve
 }
 
 // --- Workflow namespace (sourced field) ---
-//
-// The namespace is sourced at runtime from the workflow context. Conversion in
-// a context-free `ToProto` cannot access it, so this returns the empty string;
-// the server fills in the caller's namespace. Populate this when sourced fields
-// gain access to the workflow context.
 
-func workflowNamespace() string {
+func workflowNamespace(ctx workflow.Context) string {
+	if options := ctx.Value("wfEnvOptions"); options != nil {
+		optionsValue := reflect.ValueOf(options)
+		if optionsValue.Kind() == reflect.Pointer && !optionsValue.IsNil() {
+			optionsValue = optionsValue.Elem()
+		}
+		if optionsValue.Kind() == reflect.Struct {
+			field := optionsValue.FieldByName("Namespace")
+			if field.IsValid() && field.Kind() == reflect.String {
+				return field.String()
+			}
+		}
+	}
 	return ""
 }

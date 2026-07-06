@@ -55,7 +55,7 @@ func (m startWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.St
 		}
 		message.WorkflowStartDelay = converted
 	}
-	message.Namespace = workflowNamespace()
+	message.Namespace = workflowNamespace(ctx)
 	return message, nil
 }
 
@@ -77,7 +77,7 @@ func (m cancelWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.R
 	if m.Reason != nil {
 		message.Reason = (*m.Reason)
 	}
-	message.Namespace = workflowNamespace()
+	message.Namespace = workflowNamespace(ctx)
 	return message, nil
 }
 

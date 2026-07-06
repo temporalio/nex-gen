@@ -2479,6 +2479,10 @@ fn build_source_call(
         });
     };
 
+    if is_valid_support_helper_call(helper_name) {
+        return Ok(Some(helper_name.to_string()));
+    }
+
     if !is_valid_support_helper_path(helper_name) {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
@@ -2489,6 +2493,22 @@ fn build_source_call(
     }
 
     Ok(Some(format!("{helper_name}()")))
+}
+
+fn is_valid_support_helper_call(name: &str) -> bool {
+    let Some(open_paren) = name.find('(') else {
+        return false;
+    };
+    if !name.ends_with(')') {
+        return false;
+    }
+    let helper = &name[..open_paren];
+    let args = &name[open_paren + 1..name.len() - 1];
+    is_valid_support_helper_path(helper)
+        && args
+            .split(',')
+            .map(str::trim)
+            .all(|arg| arg.is_empty() || is_valid_support_helper_path(arg))
 }
 
 fn is_valid_support_helper_name(name: &str) -> bool {
@@ -4497,7 +4517,7 @@ world system {
 interface workflow-service {
   /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
   record request {
-    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" dotnet="TemporalWorkflowContext.WorkflowNamespace"
+    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" go="workflowNamespace(ctx)" dotnet="TemporalWorkflowContext.WorkflowNamespace"
     namespace: option<string>,
   }
 
@@ -4514,6 +4534,8 @@ interface workflow-service {
         let dotnet =
             ApiSpec::parse_for_language(Language::Dotnet, wit, PathBuf::from("inline.wit"))
                 .unwrap();
+        let go =
+            ApiSpec::parse_for_language(Language::Go, wit, PathBuf::from("inline.wit")).unwrap();
         assert_eq!(
             python
                 .type_override(
@@ -4531,6 +4553,14 @@ interface workflow-service {
                 .unwrap()
                 .field_source("namespace"),
             Some("workflowNamespace()")
+        );
+        assert_eq!(
+            go.type_override(
+                "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
+            )
+            .unwrap()
+            .field_source("namespace"),
+            Some("workflowNamespace(ctx)")
         );
         assert_eq!(
             dotnet
