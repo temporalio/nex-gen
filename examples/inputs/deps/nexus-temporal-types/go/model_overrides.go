@@ -166,7 +166,7 @@ func workflowTypeFromProto(_ workflow.Context, t *common.WorkflowType) (*string,
 
 // --- Payload / Payloads (temporal.api.common.v1.Payload[s]) ---
 func payloadToProto(ctx workflow.Context, value any) (*common.Payload, error) {
-	return workflow.GetDataConverter(ctx).ToPayload(value)
+	return nexGenWorkflowDataConverter(ctx).ToPayload(value)
 }
 
 func payloadFromProto(ctx workflow.Context, payload *common.Payload) (any, error) {
@@ -174,7 +174,7 @@ func payloadFromProto(ctx workflow.Context, payload *common.Payload) (any, error
 		return nil, nil
 	}
 	var value any
-	if err := workflow.GetDataConverter(ctx).FromPayload(payload, &value); err != nil {
+	if err := nexGenWorkflowDataConverter(ctx).FromPayload(payload, &value); err != nil {
 		return nil, err
 	}
 	return value, nil
@@ -184,7 +184,7 @@ func payloadsToProto(ctx workflow.Context, values []any) (*common.Payloads, erro
 	if len(values) == 0 {
 		return nil, nil
 	}
-	payloads, err := workflow.GetDataConverter(ctx).ToPayloads(values...)
+	payloads, err := nexGenWorkflowDataConverter(ctx).ToPayloads(values...)
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +204,28 @@ func payloadsFromProto(ctx workflow.Context, payloads *common.Payloads) ([]any, 
 		values = append(values, value)
 	}
 	return values, nil
+}
+
+func nexGenWorkflowDataConverter(ctx workflow.Context) converter.DataConverter {
+	dataConverter := converter.GetDefaultDataConverter()
+	if options := ctx.Value("wfEnvOptions"); options != nil {
+		optionsValue := reflect.ValueOf(options)
+		if optionsValue.Kind() == reflect.Pointer && !optionsValue.IsNil() {
+			optionsValue = optionsValue.Elem()
+		}
+		if optionsValue.Kind() == reflect.Struct {
+			field := optionsValue.FieldByName("DataConverter")
+			if field.IsValid() && field.CanInterface() && !field.IsNil() {
+				if value, ok := field.Interface().(converter.DataConverter); ok {
+					dataConverter = value
+				}
+			}
+		}
+	}
+	if contextAware, ok := dataConverter.(workflow.ContextAware); ok {
+		return contextAware.WithWorkflowContext(ctx)
+	}
+	return dataConverter
 }
 
 // --- Memo (temporal.api.common.v1.Memo) ---
