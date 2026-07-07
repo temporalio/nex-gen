@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use heck::{ToSnakeCase, ToUpperCamelCase};
+use heck::{ToLowerCamelCase, ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
 use crate::api_plan::{
@@ -3118,27 +3118,27 @@ enum GoConversionKind {
 
 /// Default Go `FromProto` converter name for an override/replacement type,
 /// derived from the type's leaf name (e.g. `temporal.api.common.v1.RetryPolicy`
-/// becomes `RetryPolicyFromProto`).
+/// becomes `retryPolicyFromProto`).
 fn go_default_from_proto_name(full_name: &str) -> String {
-    format!("{}FromProto", leaf_upper_camel(full_name))
+    format!("{}FromProto", leaf_lower_camel(full_name))
 }
 
-/// Default Go `ToProto` converter name (e.g. `RetryPolicyToProto`).
+/// Default Go `ToProto` converter name (e.g. `retryPolicyToProto`).
 fn go_default_to_proto_name(full_name: &str) -> String {
-    format!("{}ToProto", leaf_upper_camel(full_name))
+    format!("{}ToProto", leaf_lower_camel(full_name))
 }
 
-/// Returns the UpperCamelCase leaf segment of a dotted name.
-fn leaf_upper_camel(full_name: &str) -> String {
+/// Returns the lowerCamelCase leaf segment of a dotted name.
+fn leaf_lower_camel(full_name: &str) -> String {
     full_name
         .rsplit('.')
         .next()
         .unwrap_or(full_name)
-        .to_upper_camel_case()
+        .to_lower_camel_case()
 }
 
 /// Resolves the Go converter function name for a replacement's `from` proto
-/// direction, honoring an explicit `from-go=` override if present.
+/// direction, honoring an explicit `go-from=` override if present.
 fn go_from_proto_converter(full_name: &str, replacement: &TypeReplacementSpec) -> String {
     replacement
         .from_proto
@@ -3148,7 +3148,7 @@ fn go_from_proto_converter(full_name: &str, replacement: &TypeReplacementSpec) -
 }
 
 /// Resolves the Go converter function name for a replacement's `to` proto
-/// direction, honoring an explicit `to-go=` override if present.
+/// direction, honoring an explicit `go-to=` override if present.
 fn go_to_proto_converter(full_name: &str, replacement: &TypeReplacementSpec) -> String {
     replacement
         .to_proto
