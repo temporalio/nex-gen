@@ -82,6 +82,8 @@ impl<'a> ApiPlanner<'a> {
         {
             imports.push(support_namespace);
         }
+        let module_imports = dotnet_module_imports(self.api_plan);
+        imports.extend(module_imports.iter().map(String::as_str));
         let mut output = generated_file_prelude(namespace, &imports);
         if needs_result {
             render_result_helper(&mut output);
@@ -104,10 +106,10 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn render_service_file(&self, namespace: &str) -> String {
-        let mut output = generated_file_prelude(
-            namespace,
-            &["System", "System.CodeDom.Compiler", "NexusRpc"],
-        );
+        let module_imports = dotnet_module_imports(self.api_plan);
+        let mut imports = vec!["System", "System.CodeDom.Compiler", "NexusRpc"];
+        imports.extend(module_imports.iter().map(String::as_str));
+        let mut output = generated_file_prelude(namespace, &imports);
         for service in &self.api_plan.services {
             render_xml_summary(&mut output, "", None, service.experimental);
             output.push_str(GENERATED_CODE_ATTRIBUTE);
@@ -128,7 +130,7 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn render_operations_file(&self, namespace: &str) -> String {
-        let imports = [
+        let mut imports = vec![
             "System",
             "System.CodeDom.Compiler",
             "System.Collections.Generic",
@@ -140,6 +142,8 @@ impl<'a> ApiPlanner<'a> {
             "Temporalio.Converters",
             "Temporalio.Workflows",
         ];
+        let module_imports = dotnet_module_imports(self.api_plan);
+        imports.extend(module_imports.iter().map(String::as_str));
         let mut output = generated_file_prelude(namespace, &imports);
         for service in &self.api_plan.services {
             self.render_operations_class(&mut output, service);
@@ -149,15 +153,15 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn render_resources_file(&self, namespace: &str) -> String {
-        let mut output = generated_file_prelude(
-            namespace,
-            &[
-                "System",
-                "System.CodeDom.Compiler",
-                "System.Collections.Generic",
-                "System.Threading.Tasks",
-            ],
-        );
+        let mut imports = vec![
+            "System",
+            "System.CodeDom.Compiler",
+            "System.Collections.Generic",
+            "System.Threading.Tasks",
+        ];
+        let module_imports = dotnet_module_imports(self.api_plan);
+        imports.extend(module_imports.iter().map(String::as_str));
+        let mut output = generated_file_prelude(namespace, &imports);
         for service in &self.api_plan.services {
             for resource in &service.resources {
                 self.render_resource(&mut output, service, &resource.data);
@@ -510,12 +514,8 @@ impl<'a> ApiPlanner<'a> {
         }
 
         if has_input
-            && let Some(model) = self.api_plan.records.get(
-                operation
-                    .input_model()
-                    .model_full_name()
-                    .expect("operation input should be a model"),
-            )
+            && let PlannedType::Record(input_record) = operation.input_model()
+            && let Some(model) = self.api_plan.records.get(&input_record.full_name)
             && operation_has_flattened_convenience(operation, model, self.api_plan)
         {
             self.render_operation_flattened_extension(
@@ -580,12 +580,8 @@ impl<'a> ApiPlanner<'a> {
         }
 
         if has_input
-            && let Some(model) = self.api_plan.records.get(
-                operation
-                    .input_model()
-                    .model_full_name()
-                    .expect("operation input should be a model"),
-            )
+            && let PlannedType::Record(input_record) = operation.input_model()
+            && let Some(model) = self.api_plan.records.get(&input_record.full_name)
             && operation_has_flattened_convenience(operation, model, self.api_plan)
         {
             self.render_operation_flattened_extension(
@@ -815,9 +811,10 @@ impl<'a> ApiPlanner<'a> {
         request_expr: &str,
     ) -> String {
         let model_type = operation.input_model();
-        let planned_record = model_type
-            .model_full_name()
-            .and_then(|full_name| self.api_plan.records.get(full_name));
+        let planned_record = match model_type {
+            PlannedType::Record(record) => self.api_plan.records.get(&record.full_name),
+            _ => None,
+        };
         self.external_models
             .wire_conversion(model_type, planned_record)
             .map(|conversion| conversion.to_wire_expr(request_expr))
@@ -839,12 +836,10 @@ impl<'a> ApiPlanner<'a> {
             && self
                 .api_plan
                 .records
-                .get(
-                    operation
-                        .input_model()
-                        .model_full_name()
-                        .expect("operation input should be a model"),
-                )
+                .get(match operation.input_model() {
+                    PlannedType::Record(record) => &record.full_name,
+                    _ => return "public",
+                })
                 .is_some_and(|model| {
                     operation_has_flattened_convenience(operation, model, self.api_plan)
                 })
@@ -929,16 +924,24 @@ impl<'a> ApiPlanner<'a> {
             );
         }
 
-        if let Some(output) = &operation.output
-            && let Some(model_type) = output.operation_model()
+        if let Some(
+            model_type @ (PlannedType::External(ExternalTypeSpec::Proto(
+                PlannedProtoType::Message(_),
+            ))
+            | PlannedType::External(ExternalTypeSpec::Json(_))
+            | PlannedType::Record(_)),
+        ) = &operation.output
             && operation.output_transform.is_none()
             && operation.data.output_resource_return.is_none()
             && self.operation_return_type(operation)
-                == csharp_type_name(
-                    model_type
-                        .model_name()
-                        .expect("operation output should be a model"),
-                )
+                == csharp_type_name(match model_type {
+                    PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
+                        proto,
+                    ))) => &proto.model_name,
+                    PlannedType::External(ExternalTypeSpec::Json(json)) => &json.model_name,
+                    PlannedType::Record(record) => &record.model_name,
+                    _ => unreachable!("model type pattern checked"),
+                })
         {
             collect_public_message_models(names, model_type, self.api_plan);
         }
@@ -946,12 +949,10 @@ impl<'a> ApiPlanner<'a> {
         if !has_input {
             return;
         }
-        let Some(model) = self.api_plan.records.get(
-            operation
-                .input_model()
-                .model_full_name()
-                .expect("operation input should be a model"),
-        ) else {
+        let PlannedType::Record(input_record) = operation.input_model() else {
+            return;
+        };
+        let Some(model) = self.api_plan.records.get(&input_record.full_name) else {
             return;
         };
         if !operation_has_flattened_convenience(operation, model, self.api_plan) {
@@ -995,26 +996,32 @@ impl<'a> ApiPlanner<'a> {
 
     fn operation_output_type(&self, operation: &PlannedOperation) -> String {
         match &operation.output {
-            Some(output) if output.operation_model().is_some() => {
-                let model_type = output
-                    .operation_model()
-                    .expect("operation model presence checked");
-                self.external_models
-                    .model_type_annotation(model_type)
-                    .unwrap_or_else(|| {
-                        csharp_type_name(
-                            model_type
-                                .model_name()
-                                .expect("operation output should be a model"),
-                        )
+            Some(
+                model_type @ (PlannedType::External(ExternalTypeSpec::Proto(
+                    PlannedProtoType::Message(_),
+                ))
+                | PlannedType::External(ExternalTypeSpec::Json(_))
+                | PlannedType::Record(_)),
+            ) => self
+                .external_models
+                .model_type_annotation(model_type)
+                .unwrap_or_else(|| {
+                    csharp_type_name(match model_type {
+                        PlannedType::External(ExternalTypeSpec::Proto(
+                            PlannedProtoType::Message(proto),
+                        )) => &proto.model_name,
+                        PlannedType::External(ExternalTypeSpec::Json(json)) => &json.model_name,
+                        PlannedType::Record(record) => &record.model_name,
+                        _ => unreachable!("model type pattern checked"),
                     })
-            }
+                }),
             Some(PlannedType::Resource(resource)) => resource
                 .wire_type
-                .as_deref()
+                .as_ref()
                 .map(|wire_type| {
+                    let wire_type = PlannedType::External(wire_type.clone());
                     self.external_models
-                        .model_type_annotation(wire_type)
+                        .model_type_annotation(&wire_type)
                         .expect("resource wire output should have a .NET type annotation")
                 })
                 .unwrap_or_else(|| csharp_type_name(&resource.type_name)),
@@ -1148,8 +1155,15 @@ impl<'a> ApiPlanner<'a> {
             | PlannedType::Record(_)) => self
                 .external_models
                 .model_type_annotation(model_type)
-                .unwrap_or_else(|| {
-                    csharp_type_name(model_type.model_name().expect("model type name"))
+                .unwrap_or_else(|| match model_type {
+                    PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
+                        proto,
+                    ))) => csharp_type_name(&proto.model_name),
+                    PlannedType::External(ExternalTypeSpec::Json(json)) => {
+                        csharp_type_name(&json.model_name)
+                    }
+                    PlannedType::Record(record) => csharp_type_name(&record.model_name),
+                    _ => unreachable!("model type pattern checked"),
                 }),
             PlannedType::Resource(resource) => csharp_type_name(&resource.type_name),
             PlannedType::Option(inner) => nullable_type(&self.dotnet_value_type(inner)),
@@ -1239,12 +1253,10 @@ impl<'a> ApiPlanner<'a> {
         if !self.operation_has_input(operation) {
             return;
         }
-        let Some(model) = self.api_plan.records.get(
-            operation
-                .input_model()
-                .model_full_name()
-                .expect("operation input should be a model"),
-        ) else {
+        let PlannedType::Record(input_record) = operation.input_model() else {
+            return;
+        };
+        let Some(model) = self.api_plan.records.get(&input_record.full_name) else {
             return;
         };
         if !operation_has_flattened_convenience(operation, model, self.api_plan)
@@ -1554,43 +1566,46 @@ impl DotNetExternalModels {
     }
 
     fn public_model_type(&self, model_type: &PlannedType, api_plan: &PlannedSpec) -> String {
-        if model_type
-            .proto_message()
-            .is_some_and(|proto| proto.replacement.is_some())
+        if let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) =
+            model_type
+            && proto.replacement.is_some()
             && let Some(annotation) = self.model_type_annotation(model_type)
         {
             return annotation;
         }
-        if let Some(full_name) = model_type.model_full_name()
-            && api_plan.records.contains_key(full_name)
+        if let PlannedType::Record(record) = model_type
+            && api_plan.records.contains_key(&record.full_name)
         {
-            return csharp_type_name(
-                model_type
-                    .model_name()
-                    .expect("model-shaped type should have a model name"),
-            );
+            return csharp_type_name(&record.model_name);
         }
         self.model_type_annotation(model_type).unwrap_or_else(|| {
-            csharp_type_name(
-                model_type
-                    .model_name()
-                    .expect("model-shaped type should have a model name"),
-            )
+            csharp_type_name(match model_type {
+                PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
+                    proto,
+                ))) => &proto.model_name,
+                PlannedType::External(ExternalTypeSpec::Json(json)) => &json.model_name,
+                PlannedType::Record(record) => &record.model_name,
+                _ => panic!("model-shaped type should have a model name"),
+            })
         })
     }
 
     fn wire_model_type(&self, model_type: &PlannedType, api_plan: &PlannedSpec) -> String {
-        let planned_record = model_type
-            .model_full_name()
-            .and_then(|full_name| api_plan.records.get(full_name));
+        let planned_record = match model_type {
+            PlannedType::Record(record) => api_plan.records.get(&record.full_name),
+            _ => None,
+        };
         self.wire_type_annotation(model_type, planned_record)
             .or_else(|| self.model_type_annotation(model_type))
             .unwrap_or_else(|| {
-                csharp_type_name(
-                    model_type
-                        .model_name()
-                        .expect("model-shaped type should have a model name"),
-                )
+                csharp_type_name(match model_type {
+                    PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
+                        proto,
+                    ))) => &proto.model_name,
+                    PlannedType::External(ExternalTypeSpec::Json(json)) => &json.model_name,
+                    PlannedType::Record(record) => &record.model_name,
+                    _ => panic!("model-shaped type should have a model name"),
+                })
             })
     }
 
@@ -1974,12 +1989,10 @@ fn render_operation_xml_doc(
         .and_then(|_| dotnet_doc(&operation.return_doc));
     let request_doc = operation_has_input(operation, api_plan)
         .then(|| {
-            api_plan.records.get(
-                operation
-                    .input_model()
-                    .model_full_name()
-                    .expect("operation input should be a model"),
-            )
+            let PlannedType::Record(record) = operation.input_model() else {
+                return None;
+            };
+            api_plan.records.get(&record.full_name)
         })
         .flatten()
         .and_then(|model| dotnet_doc(model.doc()));
@@ -2490,14 +2503,10 @@ fn flattened_nested_model<'a>(
     field: &RecordFieldSpec<PlannedTypeFamily>,
     api_plan: &'a PlannedSpec,
 ) -> Option<&'a PlannedModel> {
-    let model_type @ (PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
-    | PlannedType::Record(_)) = &field.field_type
-    else {
+    let PlannedType::Record(record) = &field.field_type else {
         return None;
     };
-    let nested_model = api_plan
-        .records
-        .get(model_type.model_full_name().expect("model-shaped field"))?;
+    let nested_model = api_plan.records.get(&record.full_name)?;
     nested_model.flatten_in_api.then_some(nested_model)
 }
 
@@ -2850,16 +2859,13 @@ fn collect_public_message_models(
     model_type: &PlannedType,
     api_plan: &PlannedSpec,
 ) {
-    if model_type
-        .proto_message()
-        .is_some_and(|proto| proto.replacement.is_some())
-    {
-        return;
-    }
-    if let Some(full_name) = model_type.model_full_name()
-        && api_plan.records.contains_key(full_name)
-    {
-        names.insert(full_name.to_string());
+    match model_type {
+        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto)))
+            if proto.replacement.is_some() => {}
+        PlannedType::Record(record) if api_plan.records.contains_key(&record.full_name) => {
+            names.insert(record.full_name.clone());
+        }
+        _ => {}
     }
 }
 
@@ -2870,11 +2876,14 @@ fn collect_public_operation_input_models(
     api_plan: &PlannedSpec,
 ) {
     if input_type
-        == csharp_type_name(
-            model_type
-                .model_name()
-                .expect("operation input should be a model"),
-        )
+        == csharp_type_name(match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
+                &proto.model_name
+            }
+            PlannedType::External(ExternalTypeSpec::Json(json)) => &json.model_name,
+            PlannedType::Record(record) => &record.model_name,
+            _ => panic!("operation input should be a model"),
+        })
     {
         collect_public_message_models(names, model_type, api_plan);
     }
@@ -2923,10 +2932,10 @@ fn resource_method_operation_call_args(
 ) -> Option<Vec<String>> {
     let model = api_plan_record_for_request_name(
         api_plan,
-        operation
-            .input_model()
-            .model_full_name()
-            .expect("operation input should be a model"),
+        match operation.input_model() {
+            PlannedType::Record(record) => &record.full_name,
+            _ => return None,
+        },
     )?;
     if operation_has_flattened_convenience(operation, model, api_plan) {
         if model
@@ -3060,9 +3069,8 @@ fn api_plan_record_for_request_name<'a>(
         api_plan.records.values().find(|record| {
             matches!(
                 record.source_type.as_ref(),
-                Some(TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
-                    message
-                )))) if message.proto.full_name == name
+                Some(ExternalTypeSpec::Proto(PlannedProtoType::Message(message)))
+                    if message.proto.full_name == name
             )
         })
     })
@@ -3136,20 +3144,15 @@ fn operation_has_input(operation: &PlannedOperation, api_plan: &PlannedSpec) -> 
     let Some(input) = operation.input.as_ref() else {
         return false;
     };
-    api_plan
-        .records
-        .get(
-            input
-                .model_full_name()
-                .expect("operation input should be a model"),
-        )
-        .is_none_or(|model| {
-            model.public_fields().next().is_some()
-                || matches!(
-                    input,
-                    PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
-                )
-        })
+    match input {
+        PlannedType::Record(record) => api_plan
+            .records
+            .get(&record.full_name)
+            .is_none_or(|model| model.public_fields().next().is_some()),
+        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
+        | PlannedType::External(ExternalTypeSpec::Json(_)) => true,
+        _ => panic!("operation input should be a model"),
+    }
 }
 
 fn operation_transform_expression(
@@ -3401,6 +3404,9 @@ fn support_fragment_path(fragment: &SupportFragmentSpec) -> Result<PathBuf> {
 }
 
 fn dotnet_namespace(api_plan: &PlannedSpec) -> String {
+    if !api_plan.module_path.is_root() {
+        return dotnet_module_namespace(&api_plan.module_path);
+    }
     api_plan
         .services
         .first()
@@ -3413,6 +3419,29 @@ fn dotnet_namespace(api_plan: &PlannedSpec) -> String {
                 .map(|service| format!("NexGen.{}", csharp_type_name(&service.name)))
         })
         .unwrap_or_else(|| "NexGen.Generated".to_string())
+}
+
+fn dotnet_module_imports(api_plan: &PlannedSpec) -> Vec<String> {
+    api_plan
+        .data
+        .module_imports
+        .keys()
+        .map(dotnet_module_namespace)
+        .collect()
+}
+
+fn dotnet_module_namespace(module_path: &crate::spec::ModulePath) -> String {
+    let suffix = module_path
+        .0
+        .iter()
+        .map(|segment| csharp_type_name(&segment.to_upper_camel_case()))
+        .collect::<Vec<_>>()
+        .join(".");
+    if suffix.is_empty() {
+        "NexGen.Generated".to_string()
+    } else {
+        format!("NexGen.Generated.{suffix}")
+    }
 }
 
 fn dotnet_operations_class_name(service: &PlannedService) -> String {

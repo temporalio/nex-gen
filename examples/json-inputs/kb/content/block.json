@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A content block. The other half of the Page <-> Block cross-file cycle. The `page` back-reference is optional + nullable, which terminates the cycle so it is satisfiable.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "blockId": { "type": "string" },
+    "order": {
+      "description": "Non-negative position within the page. Exercises a numeric `minimum` bound over an integer field.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "text": { "type": "string" },
+    "style": { "$ref": "#/$defs/BlockStyle" },
+    "page": {
+      "description": "Optional back-reference to the containing page - closes the Page <-> Block cycle. Optional + nullable, so this edge terminates.",
+      "oneOf": [
+        { "$ref": "page.json" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "required": ["blockId", "order"],
+  "$defs": {
+    "BlockStyle": {
+      "description": "Non-cyclic helper; stays in the content_block module. All members optional.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bold": { "type": "boolean" },
+        "indent": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

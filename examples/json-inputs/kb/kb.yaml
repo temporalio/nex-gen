@@ -1,0 +1,40 @@
+# Sample input for nex-gen - the multi-file closure entry point.
+nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+description: A knowledge-base service whose types span several schema files.
+
+services:
+  KnowledgeBaseService:
+    fqn: example.kb.v1.KnowledgeBaseService
+    description: Fetch and update pages, blocks, and the category tree.
+    operations:
+      getPage:
+        description: Fetch a page by id.
+        input:
+          type: object
+          additionalProperties: false
+          properties:
+            pageId: { type: string }
+          required: [pageId]
+        output: { $ref: "content/page.json" }
+
+      putBlock:
+        description: Create or update a content block.
+        input: { $ref: "content/block.json" }
+        output:
+          type: object
+          additionalProperties: false
+          properties:
+            blockId: { type: string }
+            revision: { type: integer }
+          required: [blockId, revision]
+
+      getCategoryTree:
+        description: Fetch the category tree rooted at a category.
+        input:
+          type: object
+          additionalProperties: false
+          properties:
+            rootId: { type: string }
+          required: [rootId]
+        output: { $ref: "tree/category.json" }

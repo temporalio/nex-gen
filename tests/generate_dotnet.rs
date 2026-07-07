@@ -60,6 +60,15 @@ fn dotnet_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
         .join(example_id)
 }
 
+fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
+    let dir_path = root.join("examples/json-inputs").join(example_id);
+    if dir_path.is_dir() {
+        return dir_path;
+    }
+    root.join("examples/json-inputs")
+        .join(format!("{example_id}.yaml"))
+}
+
 fn dotnet_example_ids(root: &Path) -> Vec<String> {
     let dotnet_root = dotnet_root(root);
     let mut ids = fs::read_dir(root.join("examples/inputs"))
@@ -135,9 +144,7 @@ fn generate_json_dotnet_output(
     output_path: &Path,
     generate_native_api: bool,
 ) {
-    let input_path = root
-        .join("examples/json-inputs")
-        .join(format!("{example_id}.yaml"));
+    let input_path = json_input_path(root, example_id);
     let mut args = vec![
         "generate",
         "--lang",
@@ -190,23 +197,28 @@ fn dotnet_examples_generation_matches_checked_in_output() {
 #[test]
 fn dotnet_json_example_generation_matches_checked_in_output() {
     let root = project_root();
-    let output_path = unique_output_path("dotnet-json-chat");
-    generate_json_dotnet_output(&root, "chat", &output_path, false);
-    let rendered = read_dotnet_output_files(&output_path);
-    let expected = read_dotnet_output_files(&dotnet_json_definitions_output_path(&root, "chat"));
-    assert_eq!(rendered, expected);
-    fs::remove_dir_all(output_path).unwrap();
+    for example_id in ["chat", "kb"] {
+        let output_path = unique_output_path(&format!("dotnet-json-{example_id}"));
+        generate_json_dotnet_output(&root, example_id, &output_path, false);
+        let rendered = read_dotnet_output_files(&output_path);
+        let expected =
+            read_dotnet_output_files(&dotnet_json_definitions_output_path(&root, example_id));
+        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        fs::remove_dir_all(output_path).unwrap();
+    }
 }
 
 #[test]
 fn dotnet_json_api_example_generation_matches_checked_in_output() {
     let root = project_root();
-    let output_path = unique_output_path("dotnet-json-api-chat");
-    generate_json_dotnet_output(&root, "chat", &output_path, true);
-    let rendered = read_dotnet_output_files(&output_path);
-    let expected = read_dotnet_output_files(&dotnet_json_api_output_path(&root, "chat"));
-    assert_eq!(rendered, expected);
-    fs::remove_dir_all(output_path).unwrap();
+    for example_id in ["chat", "kb"] {
+        let output_path = unique_output_path(&format!("dotnet-json-api-{example_id}"));
+        generate_json_dotnet_output(&root, example_id, &output_path, true);
+        let rendered = read_dotnet_output_files(&output_path);
+        let expected = read_dotnet_output_files(&dotnet_json_api_output_path(&root, example_id));
+        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        fs::remove_dir_all(output_path).unwrap();
+    }
 }
 
 #[test]

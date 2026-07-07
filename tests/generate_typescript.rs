@@ -64,6 +64,15 @@ fn typescript_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
         .join(example_id)
 }
 
+fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
+    let dir_path = root.join("examples/json-inputs").join(example_id);
+    if dir_path.is_dir() {
+        return dir_path;
+    }
+    root.join("examples/json-inputs")
+        .join(format!("{example_id}.yaml"))
+}
+
 fn typescript_example_ids(root: &Path) -> Vec<String> {
     let mut ids = fs::read_dir(root.join("examples/inputs"))
         .unwrap()
@@ -171,9 +180,7 @@ fn generate_formatted_json_typescript_output(
 ) {
     ensure_typescript_dependencies(root);
 
-    let input_path = root
-        .join("examples/json-inputs")
-        .join(format!("{example_id}.yaml"));
+    let input_path = json_input_path(root, example_id);
     let mut args = vec![
         "generate",
         "--lang",
@@ -233,24 +240,30 @@ fn typescript_examples_generation_matches_checked_in_output() {
 #[test]
 fn typescript_json_example_generation_matches_checked_in_output() {
     let root = project_root();
-    let output_path = unique_output_path("typescript-json-chat");
-    generate_formatted_json_typescript_output(&root, "chat", &output_path, false);
-    let rendered = read_typescript_output_files(&output_path);
-    let expected =
-        read_typescript_output_files(&typescript_json_definitions_output_path(&root, "chat"));
-    assert_eq!(rendered, expected);
-    fs::remove_dir_all(output_path).unwrap();
+    for example_id in ["chat", "kb"] {
+        let output_path = unique_output_path(&format!("typescript-json-{example_id}"));
+        generate_formatted_json_typescript_output(&root, example_id, &output_path, false);
+        let rendered = read_typescript_output_files(&output_path);
+        let expected = read_typescript_output_files(&typescript_json_definitions_output_path(
+            &root, example_id,
+        ));
+        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        fs::remove_dir_all(output_path).unwrap();
+    }
 }
 
 #[test]
 fn typescript_json_api_example_generation_matches_checked_in_output() {
     let root = project_root();
-    let output_path = unique_output_path("typescript-json-api-chat");
-    generate_formatted_json_typescript_output(&root, "chat", &output_path, true);
-    let rendered = read_typescript_output_files(&output_path);
-    let expected = read_typescript_output_files(&typescript_json_api_output_path(&root, "chat"));
-    assert_eq!(rendered, expected);
-    fs::remove_dir_all(output_path).unwrap();
+    for example_id in ["chat", "kb"] {
+        let output_path = unique_output_path(&format!("typescript-json-api-{example_id}"));
+        generate_formatted_json_typescript_output(&root, example_id, &output_path, true);
+        let rendered = read_typescript_output_files(&output_path);
+        let expected =
+            read_typescript_output_files(&typescript_json_api_output_path(&root, example_id));
+        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        fs::remove_dir_all(output_path).unwrap();
+    }
 }
 
 #[test]

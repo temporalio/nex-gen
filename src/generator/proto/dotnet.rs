@@ -192,9 +192,10 @@ impl ModelBackend {
                 value,
                 source_expr,
                 optional,
-                value
-                    .model_full_name()
-                    .and_then(|full_name| api_plan.records.get(full_name)),
+                match value {
+                    PlannedType::Record(record) => api_plan.records.get(&record.full_name),
+                    _ => None,
+                },
                 Some(api_plan),
                 support_namespace,
             ),
@@ -229,9 +230,12 @@ impl ModelBackend {
                 fallback,
                 source_expr,
                 optional,
-                fallback.model_full_name().and_then(|full_name| {
-                    api_plan.and_then(|api_plan| api_plan.records.get(full_name))
-                }),
+                match fallback.as_ref() {
+                    PlannedType::Record(record) => {
+                        api_plan.and_then(|api_plan| api_plan.records.get(&record.full_name))
+                    }
+                    _ => None,
+                },
                 api_plan,
                 support_namespace,
             ),
@@ -277,22 +281,13 @@ impl ModelBackend {
 
     fn value_uses_support_extensions(&self, value: &PlannedType, api_plan: &PlannedSpec) -> bool {
         match value {
-            model_type @ (PlannedType::External(ExternalTypeSpec::Proto(
+            model_type @ PlannedType::External(ExternalTypeSpec::Proto(
                 PlannedProtoType::Message(_),
-            ))
-            | PlannedType::Record(_)) => {
-                api_plan
-                    .records
-                    .get(model_type.model_full_name().expect("model-shaped value"))
-                    .is_some_and(|model| self.model_needs_wire_method(model))
-                    || (matches!(
-                        model_type,
-                        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
-                            _
-                        )))
-                    ) && dotnet_message_type(model_type)
-                        != dotnet_proto_type_name_for_message(model_type))
-            }
+            )) => dotnet_message_type(model_type) != dotnet_proto_type_name_for_message(model_type),
+            PlannedType::Record(record) => api_plan
+                .records
+                .get(&record.full_name)
+                .is_some_and(|model| self.model_needs_wire_method(model)),
             PlannedType::Resource(_) => false,
             PlannedType::List(inner) => self.value_uses_support_extensions(inner, api_plan),
             PlannedType::Map(key, value) => {
@@ -318,16 +313,12 @@ impl ModelBackend {
 }
 
 pub(crate) fn dotnet_message_type(model_type: &PlannedType) -> String {
-    if let Some(proto) = model_type.proto_message()
-        && let Some(replacement) = &proto.replacement
-        && let Some(type_name) = dotnet_replacement_type_name(replacement)
-    {
-        return type_name;
-    }
     match model_type {
-        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_))) => {
-            dotnet_proto_type_name_for_message(model_type)
-        }
+        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => proto
+            .replacement
+            .as_ref()
+            .and_then(dotnet_replacement_type_name)
+            .unwrap_or_else(|| dotnet_proto_type_name_for_info(&proto.proto)),
         PlannedType::Record(record) => csharp_type_name(&record.model_name),
         PlannedType::Resource(resource) => csharp_type_name(&resource.type_name),
         _ => panic!("dotnet message type should be model-shaped"),
@@ -361,7 +352,12 @@ pub(crate) fn dotnet_proto_or_local_type(
 }
 
 pub(crate) fn dotnet_proto_type_name_for_message(model_type: &PlannedType) -> String {
-    dotnet_proto_type_name_for_info(&model_type.proto_message().expect("proto message").proto)
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) =
+        model_type
+    else {
+        panic!("dotnet proto type name should receive a proto message");
+    };
+    dotnet_proto_type_name_for_info(&proto.proto)
 }
 
 pub(crate) fn dotnet_proto_type_name_for_info(info: &PlannedProtoTypeInfo) -> String {
@@ -379,8 +375,12 @@ pub(crate) fn dotnet_proto_type_name_for_info(info: &PlannedProtoTypeInfo) -> St
 }
 
 pub(crate) fn dotnet_to_proto_converter(model_type: &PlannedType) -> Option<&str> {
-    model_type
-        .proto_message()?
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) =
+        model_type
+    else {
+        return None;
+    };
+    proto
         .replacement
         .as_ref()
         .and_then(|replacement| replacement.to_proto.for_language(Language::Dotnet))

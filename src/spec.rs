@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use indexmap::IndexMap;
 
@@ -6,6 +7,8 @@ use crate::language::Language;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApiSpec<F: TypeNameFamily = AuthoredNames> {
+    pub module_path: ModulePath,
+    pub data: F::SpecData,
     pub version: String,
     pub support: SupportSpec,
     pub services: Vec<ServiceSpec<F>>,
@@ -16,16 +19,68 @@ pub struct ApiSpec<F: TypeNameFamily = AuthoredNames> {
     pub variants: BTreeMap<String, VariantSpec<F>>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ModulePath(pub Vec<String>);
+
+impl ModulePath {
+    pub fn child(&self, segment: impl Into<String>) -> Self {
+        let mut segments = self.0.clone();
+        segments.push(segment.into());
+        Self(segments)
+    }
+
+    pub fn is_root(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn to_path_buf(&self) -> PathBuf {
+        self.0.iter().collect()
+    }
+
+    pub fn as_module_key(&self) -> String {
+        self.0.join("/")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Symbol(String);
+pub struct Symbol {
+    name: String,
+    module_path: Option<ModulePath>,
+    local_name: String,
+}
 
 impl Symbol {
     pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
+        let value = value.into();
+        Self {
+            name: value.clone(),
+            module_path: None,
+            local_name: value,
+        }
+    }
+
+    pub fn qualified(
+        module_path: ModulePath,
+        name: impl Into<String>,
+        local_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            module_path: Some(module_path),
+            local_name: local_name.into(),
+        }
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.name
+    }
+
+    pub fn local_name(&self) -> &str {
+        &self.local_name
+    }
+
+    pub fn module_path(&self) -> Option<&ModulePath> {
+        self.module_path.as_ref()
     }
 }
 
@@ -37,11 +92,43 @@ impl AsRef<str> for Symbol {
 
 impl std::fmt::Display for Symbol {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
+        self.name.fmt(formatter)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuthoredResourceType {
+    pub name: Symbol,
+    pub wire_type: Option<ExternalTypeSpec<AuthoredNames>>,
+}
+
+impl AuthoredResourceType {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: Symbol::new(name),
+            wire_type: None,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+impl AsRef<str> for AuthoredResourceType {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::fmt::Display for AuthoredResourceType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.name.fmt(formatter)
     }
 }
 
 pub trait TypeNameFamily {
+    type SpecData: std::fmt::Debug + Clone + PartialEq;
     type Record: std::fmt::Debug + Clone + PartialEq;
     type Enum: std::fmt::Debug + Clone + PartialEq;
     type Flags: std::fmt::Debug + Clone + PartialEq;
@@ -61,11 +148,12 @@ pub trait TypeNameFamily {
 pub struct AuthoredNames;
 
 impl TypeNameFamily for AuthoredNames {
+    type SpecData = ();
     type Record = Symbol;
     type Enum = Symbol;
     type Flags = Symbol;
     type Variant = Symbol;
-    type Resource = Symbol;
+    type Resource = AuthoredResourceType;
     type Proto = Symbol;
     type Json = JsonModelSpec<Symbol>;
     type Alias = Symbol;
@@ -77,6 +165,7 @@ impl TypeNameFamily for AuthoredNames {
 }
 
 pub trait TypeNameMapper<From: TypeNameFamily, To: TypeNameFamily> {
+    fn map_spec_data(&mut self, data: From::SpecData) -> To::SpecData;
     fn map_record(&mut self, name: From::Record) -> To::Record;
     fn map_enum(&mut self, name: From::Enum) -> To::Enum;
     fn map_flags(&mut self, name: From::Flags) -> To::Flags;
@@ -136,6 +225,8 @@ impl<F: TypeNameFamily> ApiSpec<F> {
         M: TypeNameMapper<F, G>,
     {
         ApiSpec {
+            module_path: self.module_path,
+            data: map.map_spec_data(self.data),
             version: self.version,
             support: self.support,
             services: self
@@ -170,7 +261,7 @@ impl ApiSpec<AuthoredNames> {
         self.records.values().find(|record| {
             matches!(
                 record.source_type.as_ref(),
-                Some(TypeSpec::External(ExternalTypeSpec::Proto(source_proto)))
+                Some(ExternalTypeSpec::Proto(source_proto))
                     if source_proto.as_str() == proto_name
             )
         })
@@ -263,7 +354,6 @@ pub struct OperationSpec<F: TypeNameFamily = AuthoredNames> {
     pub return_doc: LanguageStringSpec,
     pub input: Option<TypeSpec<F>>,
     pub output: Option<TypeSpec<F>>,
-    pub output_resource_type: Option<ExternalTypeSpec<F>>,
     pub output_transform: Option<OperationOutputTransformSpec>,
     pub data: F::OperationData,
 }
@@ -295,9 +385,6 @@ impl<F: TypeNameFamily> OperationSpec<F> {
             return_doc: self.return_doc,
             input: self.input.map(|input| input.map_names_with(map)),
             output: self.output.map(|output| output.map_names_with(map)),
-            output_resource_type: self
-                .output_resource_type
-                .map(|output_resource_type| output_resource_type.map_names_with(map)),
             output_transform: self.output_transform,
             data,
         }
@@ -408,7 +495,7 @@ pub struct RecordSpec<F: TypeNameFamily = AuthoredNames> {
     pub name: String,
     pub full_name: String,
     pub doc: LanguageStringSpec,
-    pub source_type: Option<TypeSpec<F>>,
+    pub source_type: Option<ExternalTypeSpec<F>>,
     pub experimental: bool,
     pub flatten_in_api: bool,
     pub fields: IndexMap<String, RecordFieldSpec<F>>,

@@ -4,10 +4,7 @@ use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata};
 use crate::generator::ModelWireCapabilities;
-use crate::spec::{
-    ApiSpec, ExternalTypeSpec, IntSpec, LanguageStringSpec, RecordFieldSpec, RecordFieldVisibility,
-    RecordSpec, Symbol, TypeSpec,
-};
+use crate::spec::{ApiSpec, ExternalTypeSpec, IntSpec, RecordSpec, TypeSpec};
 
 use super::{
     ApiPlanner, PlannedEnum, PlannedEnumValue, PlannedProtoEnumType, PlannedProtoMessageType,
@@ -65,13 +62,6 @@ fn planned_proto_model_name(message: &MessageMetadata, spec: &ApiSpec) -> String
         .unwrap_or_else(|| message_model_name(&message.full_name))
 }
 
-fn field_hidden(message: &MessageMetadata, proto_name: &str, spec: &ApiSpec) -> bool {
-    spec.record_for_proto(&message.full_name)
-        .is_some_and(|record| {
-            record.field_omitted(proto_name) || record.field_source(proto_name).is_some()
-        })
-}
-
 fn enum_name(full_name: &str) -> String {
     full_name
         .rsplit('.')
@@ -118,13 +108,12 @@ pub(super) fn planned_type_for_message(
             planned_message,
         )));
     }
-    ensure_model_record(message, planner);
-    let record = planner
-        .spec
-        .record_for_proto(&message.full_name)
-        .cloned()
-        .expect("proto-backed record should exist after proto planning");
-    TypeSpec::Record(planner.plan_record_type(&record, requested_capabilities))
+    if let Some(record) = planner.spec.record_for_proto(&message.full_name).cloned() {
+        return TypeSpec::Record(planner.plan_record_type(&record, requested_capabilities));
+    }
+    TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
+        planned_message,
+    )))
 }
 
 pub(super) fn planned_message_reference(
@@ -201,8 +190,7 @@ pub(super) fn planned_record_field_type(
 }
 
 fn record_proto_name(record: &RecordSpec) -> Option<&str> {
-    let Some(TypeSpec::External(ExternalTypeSpec::Proto(proto_name))) = record.source_type.as_ref()
-    else {
+    let Some(ExternalTypeSpec::Proto(proto_name)) = record.source_type.as_ref() else {
         return None;
     };
     Some(proto_name.as_str())
@@ -265,149 +253,6 @@ pub(super) fn planned_value_type_from_authored_proto(
         )))
     } else {
         TypeSpec::String
-    }
-}
-
-fn ensure_model_record(message: &MessageMetadata, planner: &mut ApiPlanner<'_>) {
-    if planner
-        .spec
-        .external_type_binding(&message.full_name)
-        .and_then(|binding| binding.replacement())
-        .is_some()
-    {
-        return;
-    }
-
-    if planner.spec.record_for_proto(&message.full_name).is_some() {
-        return;
-    }
-
-    let fields = record_fields_for_message(message, &planner.spec, planner);
-    planner.spec.records.insert(
-        message.full_name.clone(),
-        RecordSpec {
-            name: planned_proto_model_name(message, &planner.spec),
-            full_name: message.full_name.clone(),
-            doc: LanguageStringSpec::default(),
-            source_type: Some(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
-                message.full_name.clone(),
-            )))),
-            experimental: false,
-            flatten_in_api: false,
-            fields,
-            data: (),
-        },
-    );
-}
-
-fn record_fields_for_message(
-    message: &MessageMetadata,
-    spec: &ApiSpec,
-    planner: &ApiPlanner<'_>,
-) -> indexmap::IndexMap<String, RecordFieldSpec> {
-    message
-        .descriptor
-        .field
-        .iter()
-        .filter_map(|field| {
-            let proto_name = field
-                .name
-                .as_deref()
-                .expect("descriptor fields should be named");
-            if field_hidden(message, proto_name, spec) {
-                return None;
-            }
-            Some((
-                proto_name.to_string(),
-                RecordFieldSpec {
-                    name: proto_name.to_string(),
-                    doc: None,
-                    annotation: None,
-                    flattened_annotation: None,
-                    field_type: authored_field_type(field, planner),
-                    default_value: None,
-                    required: false,
-                    visibility: RecordFieldVisibility::Public,
-                    function: None,
-                    data: (),
-                },
-            ))
-        })
-        .collect()
-}
-
-fn authored_field_type(field: &FieldDescriptorProto, planner: &ApiPlanner<'_>) -> TypeSpec {
-    if let Some((key, value)) = authored_map_field_value_types(field, planner) {
-        return TypeSpec::Map(Box::new(key), Box::new(value));
-    }
-
-    let value = authored_value_type(field);
-    if field_label(field) == Some(Label::Repeated) {
-        TypeSpec::List(Box::new(value))
-    } else {
-        value
-    }
-}
-
-fn authored_map_field_value_types(
-    field: &FieldDescriptorProto,
-    planner: &ApiPlanner<'_>,
-) -> Option<(TypeSpec, TypeSpec)> {
-    if field_label(field) != Some(Label::Repeated) || field_type(field) != Some(Type::Message) {
-        return None;
-    }
-
-    let entry_name = field.type_name.as_deref()?.trim_start_matches('.');
-    let entry = planner.descriptors.message(entry_name)?;
-    let is_map_entry = entry
-        .descriptor
-        .options
-        .as_ref()
-        .and_then(|options| options.map_entry)
-        .unwrap_or(false);
-    if !is_map_entry {
-        return None;
-    }
-
-    let key_field = entry
-        .descriptor
-        .field
-        .iter()
-        .find(|field| field.name.as_deref() == Some("key"))?;
-    let value_field = entry
-        .descriptor
-        .field
-        .iter()
-        .find(|field| field.name.as_deref() == Some("value"))?;
-
-    Some((
-        authored_value_type(key_field),
-        authored_value_type(value_field),
-    ))
-}
-
-fn authored_value_type(field: &FieldDescriptorProto) -> TypeSpec {
-    match field_type(field) {
-        Some(Type::Double | Type::Float) => TypeSpec::Float,
-        Some(Type::Int64 | Type::Uint64 | Type::Fixed64 | Type::Sfixed64 | Type::Sint64) => {
-            TypeSpec::Int(IntSpec::I64)
-        }
-        Some(Type::Int32 | Type::Fixed32 | Type::Uint32 | Type::Sfixed32 | Type::Sint32) => {
-            TypeSpec::Int(IntSpec::I32)
-        }
-        Some(Type::Bool) => TypeSpec::Bool,
-        Some(Type::String) => TypeSpec::String,
-        Some(Type::Bytes) => TypeSpec::Bytes,
-        Some(Type::Enum | Type::Message | Type::Group) => field
-            .type_name
-            .as_deref()
-            .map(|type_name| {
-                TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
-                    type_name.trim_start_matches('.').to_string(),
-                )))
-            })
-            .unwrap_or(TypeSpec::String),
-        None => TypeSpec::String,
     }
 }
 

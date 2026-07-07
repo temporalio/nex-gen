@@ -12,12 +12,14 @@ use crate::resources::{
     ResolvedResourceReturnSpec, ResolvedResourceSpec, resolve_service_resources,
 };
 use crate::spec::{
-    ApiSpec, AuthoredNames, ExternalTypeSpec, FunctionArgSpec, FunctionArgsSpec, FunctionFieldSpec,
-    FunctionResultSpec, JsonModelSpec, LanguageStringSpec, OperationSpec, RecordSpec,
-    ResourceFieldSpec, ServiceSpec, TypeNameFamily, TypeNameMapper, TypeReplacementSpec, TypeSpec,
-    VariantSpec,
+    ApiSpec, AuthoredNames, AuthoredResourceType, ExternalTypeSpec, FunctionArgSpec,
+    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, JsonModelSpec, LanguageStringSpec,
+    ModulePath, OperationSpec, RecordSpec, ResourceFieldSpec, ServiceSpec, TypeNameFamily,
+    TypeNameMapper, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
+use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
+mod json;
 mod proto;
 
 pub(crate) use proto::{message_model_name, relative_descriptor_name};
@@ -26,6 +28,7 @@ pub(crate) use proto::{message_model_name, relative_descriptor_name};
 pub(crate) struct PlannedTypeFamily;
 
 impl TypeNameFamily for PlannedTypeFamily {
+    type SpecData = PlannedSpecData;
     type Record = PlannedRecordType;
     type Enum = PlannedEnumType;
     type Flags = PlannedFlagsType;
@@ -34,7 +37,7 @@ impl TypeNameFamily for PlannedTypeFamily {
     type Proto = PlannedProtoType;
     type Json = PlannedJsonType;
     type Alias = PlannedAliasType;
-    type ServiceData = PlannedServiceData;
+    type ServiceData = ();
     type RecordData = PlannedRecordData;
     type ResourceData = PlannedResource;
     type OperationData = PlannedOperationData;
@@ -75,10 +78,10 @@ pub(crate) fn operation_output_direct_result(operation: &OperationSpec<PlannedTy
 
 pub(super) struct ApiPlanner<'a> {
     spec: ApiSpec,
+    spec_data: PlannedSpecData,
     mode: PlanningMode,
     descriptors: &'a DescriptorIndex,
     root_model_capabilities: BTreeMap<String, ModelWireCapabilities>,
-    service_data: IndexMap<String, PlannedServiceData>,
     resource_data: IndexMap<String, PlannedResource>,
     record_plans: IndexMap<String, PlannedRecordData>,
     used_json_models: BTreeSet<String>,
@@ -103,6 +106,10 @@ struct PlannedTypeMapper<'a, 'descriptors> {
 }
 
 impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, '_> {
+    fn map_spec_data(&mut self, _data: ()) -> PlannedSpecData {
+        self.planner.spec_data.clone()
+    }
+
     fn map_record(&mut self, name: crate::spec::Symbol) -> PlannedRecordType {
         let record = self
             .source_spec
@@ -164,11 +171,8 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
         }
     }
 
-    fn map_resource(&mut self, name: crate::spec::Symbol) -> PlannedResourceType {
-        PlannedResourceType {
-            type_name: name.as_str().to_upper_camel_case(),
-            wire_type: None,
-        }
+    fn map_resource(&mut self, resource: AuthoredResourceType) -> PlannedResourceType {
+        self.planner.planned_resource_type_from_authored(&resource)
     }
 
     fn map_proto(&mut self, name: crate::spec::Symbol) -> PlannedProtoType {
@@ -190,6 +194,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
     ) -> PlannedJsonType {
         PlannedJsonType {
             full_name: name.name.as_str().to_string(),
+            module_path: name.name.module_path().cloned(),
             model_name: name.model_name,
             schema: name.schema,
         }
@@ -201,13 +206,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
         }
     }
 
-    fn map_service_data(&mut self, name: &str, _data: ()) -> PlannedServiceData {
-        self.planner
-            .service_data
-            .get(name)
-            .cloned()
-            .unwrap_or_default()
-    }
+    fn map_service_data(&mut self, _name: &str, _data: ()) {}
 
     fn map_record_data(&mut self, full_name: &str, _data: ()) -> PlannedRecordData {
         self.planner
@@ -262,18 +261,282 @@ pub(crate) fn build_api_plan_with_mode(
     descriptors: &DescriptorIndex,
     mode: PlanningMode,
 ) -> Result<PlannedSpec> {
-    ApiPlanner::new(spec, descriptors, mode)?.build()
+    ApiPlanner::new(spec, PlannedSpecData::default(), descriptors, mode)?.build()
+}
+
+pub(crate) fn build_api_plans_for_tree_with_mode(
+    tree: ApiSpecTree,
+    descriptors: &DescriptorIndex,
+    mode: PlanningMode,
+) -> Result<ApiSpecTree<PlannedTypeFamily>> {
+    let import_index = module_import_index(&tree);
+    plan_tree_node(tree.root, &import_index, descriptors, mode).map(|root| ApiSpecTree { root })
+}
+
+fn plan_tree_node(
+    node: ApiSpecNode,
+    import_index: &BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+    descriptors: &DescriptorIndex,
+    mode: PlanningMode,
+) -> Result<ApiSpecNode<PlannedTypeFamily>> {
+    match node {
+        ApiSpecNode::Leaf(leaf) => {
+            let spec_data = PlannedSpecData {
+                module_imports: import_index
+                    .get(&leaf.module_path)
+                    .cloned()
+                    .unwrap_or_default(),
+                module_exports: module_export_names(&leaf.spec),
+            };
+            let planned = ApiPlanner::new(leaf.spec, spec_data, descriptors, mode)?.build()?;
+            Ok(ApiSpecNode::Leaf(ApiSpecLeaf {
+                module_path: leaf.module_path,
+                source_root: leaf.source_root,
+                source_path: leaf.source_path,
+                spec: planned,
+            }))
+        }
+        ApiSpecNode::Branch(branch) => {
+            let children = branch
+                .children
+                .into_iter()
+                .map(|(name, child)| {
+                    Ok((
+                        name,
+                        plan_tree_node(child, import_index, descriptors, mode)?,
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>>>()?;
+            Ok(ApiSpecNode::Branch(ApiSpecBranch {
+                module_path: branch.module_path,
+                children,
+            }))
+        }
+    }
+}
+
+fn module_import_index(
+    tree: &ApiSpecTree,
+) -> BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>> {
+    let mut imports = BTreeMap::<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>::new();
+    collect_tree_module_imports(&tree.root, &mut imports);
+    imports
+}
+
+fn module_export_names(spec: &ApiSpec) -> BTreeSet<String> {
+    spec.external_types
+        .iter()
+        .filter_map(|(name, binding)| {
+            external_type_module_path(&binding.external_type)
+                .is_none_or(|module_path| module_path == &spec.module_path)
+                .then(|| name.clone())
+        })
+        .collect()
+}
+
+fn external_type_module_path(external: &ExternalTypeSpec) -> Option<&ModulePath> {
+    match external {
+        ExternalTypeSpec::Proto(symbol) => symbol.module_path(),
+        ExternalTypeSpec::Json(json_type) => json_type.name.module_path(),
+        ExternalTypeSpec::Alias { name, .. } => name.module_path(),
+    }
+}
+
+fn collect_tree_module_imports(
+    node: &ApiSpecNode,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    match node {
+        ApiSpecNode::Leaf(leaf) => collect_spec_module_imports(&leaf.spec, imports),
+        ApiSpecNode::Branch(branch) => {
+            for child in branch.children.values() {
+                collect_tree_module_imports(child, imports);
+            }
+        }
+    }
+}
+
+fn collect_spec_module_imports(
+    spec: &ApiSpec,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    for service in &spec.services {
+        for operation in &service.operations {
+            collect_type_module_imports(&spec.module_path, operation.input_type(), imports);
+            collect_type_module_imports(&spec.module_path, operation.output_type(), imports);
+        }
+        for resource in &service.resources {
+            for field in &resource.fields {
+                collect_type_module_imports(&spec.module_path, Some(&field.field_type), imports);
+            }
+            for method in &resource.methods {
+                for field in &method.params {
+                    collect_type_module_imports(
+                        &spec.module_path,
+                        Some(&field.field_type),
+                        imports,
+                    );
+                }
+                if let Some(result) = &method.result {
+                    collect_type_module_imports(
+                        &spec.module_path,
+                        Some(&result.result_type),
+                        imports,
+                    );
+                }
+            }
+        }
+    }
+    for binding in spec.external_types.values() {
+        collect_external_type_module_imports(&spec.module_path, &binding.external_type, imports);
+        if let Some(authored_type) = &binding.authored_type {
+            collect_type_module_imports(&spec.module_path, Some(authored_type), imports);
+        }
+    }
+    for record in spec.records.values() {
+        if let Some(source_type) = &record.source_type {
+            collect_external_type_module_imports(&spec.module_path, source_type, imports);
+        }
+        for field in record.fields.values() {
+            collect_type_module_imports(&spec.module_path, Some(&field.field_type), imports);
+            if let Some(function) = &field.function {
+                if let Some(alternate) = &function.alternate_type {
+                    collect_type_module_imports(&spec.module_path, Some(alternate), imports);
+                }
+                collect_function_args_module_imports(&spec.module_path, &function.args, imports);
+                if let Some(result) = &function.result_type_parameter {
+                    let _ = result;
+                }
+            }
+        }
+    }
+    for variant in spec.variants.values() {
+        for case in &variant.cases {
+            if let Some(payload) = &case.payload {
+                collect_type_module_imports(&spec.module_path, Some(payload), imports);
+            }
+        }
+    }
+}
+
+fn collect_function_args_module_imports(
+    source_module: &ModulePath,
+    args: &FunctionArgsSpec,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    let args = match args {
+        FunctionArgsSpec::Varargs { prefix, .. } => prefix.as_slice(),
+        FunctionArgsSpec::Fixed(args) => args.as_slice(),
+    };
+    for arg in args {
+        collect_type_module_imports(source_module, Some(&arg.field_type), imports);
+    }
+}
+
+fn collect_type_module_imports(
+    source_module: &ModulePath,
+    ty: Option<&TypeSpec>,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    let Some(ty) = ty else {
+        return;
+    };
+    match ty {
+        TypeSpec::Record(symbol)
+        | TypeSpec::Enum(symbol)
+        | TypeSpec::Flags(symbol)
+        | TypeSpec::Variant(symbol) => {
+            collect_symbol_module_import(source_module, symbol, imports);
+        }
+        TypeSpec::Resource(resource) => {
+            collect_resource_symbol_module_import(source_module, resource, imports)
+        }
+        TypeSpec::External(external) => {
+            collect_external_type_module_imports(source_module, external, imports)
+        }
+        TypeSpec::Option(inner) | TypeSpec::List(inner) => {
+            collect_type_module_imports(source_module, Some(inner), imports);
+        }
+        TypeSpec::Tuple(items) => {
+            for item in items {
+                collect_type_module_imports(source_module, Some(item), imports);
+            }
+        }
+        TypeSpec::Map(key, value) => {
+            collect_type_module_imports(source_module, Some(key), imports);
+            collect_type_module_imports(source_module, Some(value), imports);
+        }
+        TypeSpec::Result { ok, err } => {
+            collect_type_module_imports(source_module, ok.as_deref(), imports);
+            collect_type_module_imports(source_module, err.as_deref(), imports);
+        }
+        _ => {}
+    }
+}
+
+fn collect_external_type_module_imports(
+    source_module: &ModulePath,
+    external: &ExternalTypeSpec,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    match external {
+        ExternalTypeSpec::Proto(symbol) => {
+            collect_symbol_module_import(source_module, symbol, imports)
+        }
+        ExternalTypeSpec::Json(json_type) => {
+            collect_symbol_module_import(source_module, &json_type.name, imports)
+        }
+        ExternalTypeSpec::Alias { name, target, .. } => {
+            collect_symbol_module_import(source_module, name, imports);
+            collect_type_module_imports(source_module, Some(target), imports);
+        }
+    }
+}
+
+fn collect_resource_symbol_module_import(
+    source_module: &ModulePath,
+    resource: &AuthoredResourceType,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    collect_symbol_module_import(source_module, &resource.name, imports);
+    if let Some(wire_type) = &resource.wire_type {
+        collect_external_type_module_imports(source_module, wire_type, imports);
+    }
+}
+
+fn collect_symbol_module_import(
+    source_module: &ModulePath,
+    symbol: &crate::spec::Symbol,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    let Some(target_module) = symbol.module_path() else {
+        return;
+    };
+    if target_module == source_module {
+        return;
+    }
+    imports
+        .entry(source_module.clone())
+        .or_default()
+        .entry(target_module.clone())
+        .or_default()
+        .insert(symbol.local_name().to_string());
 }
 
 impl<'a> ApiPlanner<'a> {
-    fn new(spec: ApiSpec, descriptors: &'a DescriptorIndex, mode: PlanningMode) -> Result<Self> {
+    fn new(
+        spec: ApiSpec,
+        spec_data: PlannedSpecData,
+        descriptors: &'a DescriptorIndex,
+        mode: PlanningMode,
+    ) -> Result<Self> {
         let root_model_capabilities = root_model_capabilities(&spec, descriptors)?;
         Ok(Self {
             spec,
+            spec_data,
             mode,
             descriptors,
             root_model_capabilities,
-            service_data: IndexMap::new(),
             resource_data: IndexMap::new(),
             record_plans: IndexMap::new(),
             used_json_models: BTreeSet::new(),
@@ -316,7 +579,7 @@ impl<'a> ApiPlanner<'a> {
             model_names.contains(name)
                 || matches!(
                     record.source_type.as_ref(),
-                    Some(TypeSpec::External(ExternalTypeSpec::Proto(proto_name)))
+                    Some(ExternalTypeSpec::Proto(proto_name))
                         if model_names.contains(proto_name.as_str())
                 )
         });
@@ -325,9 +588,15 @@ impl<'a> ApiPlanner<'a> {
         spec.variants
             .retain(|name, _| self.used_variants.contains(name));
         spec.external_types.retain(|name, _| {
+            if !self.spec_data.module_exports.is_empty()
+                && !self.spec_data.module_exports.contains(name)
+            {
+                return false;
+            }
             model_names.contains(name)
                 || proto_model_names.contains(name)
                 || self.used_json_models.contains(name)
+                || self.spec_data.module_exports.contains(name)
                 || self.used_enums.contains(name)
                 || self.used_flags.contains(name)
                 || self.used_variants.contains(name)
@@ -441,12 +710,6 @@ impl<'a> ApiPlanner<'a> {
             IndexMap::new()
         };
 
-        self.service_data.insert(
-            service.name.clone(),
-            PlannedServiceData {
-                endpoint: service.endpoint.clone(),
-            },
-        );
         self.resource_data.extend(resources);
 
         Ok(PlannedServiceBuild {
@@ -471,45 +734,11 @@ impl<'a> ApiPlanner<'a> {
             return_doc: operation.return_doc.clone(),
             input,
             output,
-            output_resource_type: self.plan_operation_output_resource_type(service, operation)?,
             output_transform: operation.output_transform.clone(),
             data: PlannedOperationData {
                 output_resource_return: plan_operation_resource_return(output_resource_return),
             },
         })
-    }
-
-    fn plan_operation_output_resource_type(
-        &mut self,
-        service: &ServiceSpec,
-        operation: &OperationSpec,
-    ) -> Result<Option<ExternalTypeSpec<PlannedTypeFamily>>> {
-        let Some(type_ref) = operation.output_resource_type.as_ref() else {
-            return Ok(None);
-        };
-        match type_ref {
-            ExternalTypeSpec::Proto(proto_ref) => {
-                let output_message =
-                    self.descriptors
-                        .message(proto_ref.as_str())
-                        .ok_or_else(|| Error::UnknownOperationOutputProto {
-                            service: service.name.clone(),
-                            operation: operation.name.clone(),
-                            type_name: proto_ref.as_str().to_string(),
-                        })?;
-                Ok(Some(ExternalTypeSpec::Proto(PlannedProtoType::Message(
-                    proto::planned_message_reference(output_message, self),
-                ))))
-            }
-            ExternalTypeSpec::Json(json_type) => {
-                Ok(Some(ExternalTypeSpec::Json(self.map_json_type(json_type))))
-            }
-            ExternalTypeSpec::Alias { name, .. } => Err(Error::UnknownOperationOutputProto {
-                service: service.name.clone(),
-                operation: operation.name.clone(),
-                type_name: name.as_str().to_string(),
-            }),
-        }
     }
 
     fn plan_operation_input(
@@ -622,20 +851,32 @@ impl<'a> ApiPlanner<'a> {
                     ModelWireCapabilities::default(),
                 ))))
             }
-            Some(TypeSpec::Resource(resource_name)) => {
-                let Some(output_type) = operation.output_resource_type.as_ref() else {
-                    return Ok(Some(TypeSpec::Resource(PlannedResourceType {
-                        type_name: resource_name.as_str().to_upper_camel_case(),
-                        wire_type: None,
-                    })));
-                };
-                let ExternalTypeSpec::Proto(output_proto) = output_type else {
-                    return Err(Error::UnknownOperationOutputProto {
-                        service: service.name.clone(),
-                        operation: operation.name.clone(),
-                        type_name: output_type.reference().unwrap_or_default().to_string(),
-                    });
-                };
+            Some(TypeSpec::Resource(resource_name)) => Ok(Some(TypeSpec::Resource(
+                self.plan_operation_resource_type(service, operation, resource_name)?,
+            ))),
+            Some(_) => Err(Error::InvalidWit {
+                path: std::path::PathBuf::from("<api-plan>"),
+                reason: format!("operation `{}` output must be a named type", operation.name),
+            }),
+            None => Ok(None),
+        }
+    }
+
+    fn plan_operation_resource_type(
+        &mut self,
+        service: &ServiceSpec,
+        operation: &OperationSpec,
+        resource: &AuthoredResourceType,
+    ) -> Result<PlannedResourceType> {
+        let Some(output_type) = resource.wire_type.as_ref() else {
+            return Ok(PlannedResourceType {
+                type_name: resource.as_str().to_upper_camel_case(),
+                wire_type: None,
+            });
+        };
+
+        let wire_type = match output_type {
+            ExternalTypeSpec::Proto(output_proto) => {
                 let output_message =
                     self.descriptors
                         .message(output_proto.as_str())
@@ -644,22 +885,26 @@ impl<'a> ApiPlanner<'a> {
                             operation: operation.name.clone(),
                             type_name: output_proto.as_str().to_string(),
                         })?;
-                Ok(Some(TypeSpec::Resource(PlannedResourceType {
-                    type_name: resource_name.as_str().to_upper_camel_case(),
-                    wire_type: Some(Box::new(TypeSpec::External(ExternalTypeSpec::Proto(
-                        PlannedProtoType::Message(proto::planned_message_reference(
-                            output_message,
-                            self,
-                        )),
-                    )))),
-                })))
+                ExternalTypeSpec::Proto(PlannedProtoType::Message(
+                    proto::planned_message_reference(output_message, self),
+                ))
             }
-            Some(_) => Err(Error::InvalidWit {
-                path: std::path::PathBuf::from("<api-plan>"),
-                reason: format!("operation `{}` output must be a named type", operation.name),
-            }),
-            None => Ok(None),
-        }
+            ExternalTypeSpec::Json(json_type) => {
+                ExternalTypeSpec::Json(self.map_json_type(json_type))
+            }
+            ExternalTypeSpec::Alias { name, .. } => {
+                return Err(Error::UnknownOperationOutputProto {
+                    service: service.name.clone(),
+                    operation: operation.name.clone(),
+                    type_name: name.as_str().to_string(),
+                });
+            }
+        };
+
+        Ok(PlannedResourceType {
+            type_name: resource.as_str().to_upper_camel_case(),
+            wire_type: Some(wire_type),
+        })
     }
 
     fn plan_resource(
@@ -835,8 +1080,11 @@ impl<'a> ApiPlanner<'a> {
                 }
             }
             TypeSpec::Resource(resource) => {
-                if let Some(wire_type) = resource.wire_type.as_deref() {
-                    self.ensure_planned_type_capabilities(wire_type, requested_capabilities);
+                if let Some(wire_type) = &resource.wire_type {
+                    self.ensure_planned_type_capabilities(
+                        &TypeSpec::External(wire_type.clone()),
+                        requested_capabilities,
+                    );
                 }
             }
             TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) => {
@@ -923,6 +1171,54 @@ impl<'a> ApiPlanner<'a> {
         FunctionArgSpec {
             name: arg.name.clone(),
             field_type: self.planned_authored_type_override_from_authored(&arg.field_type),
+        }
+    }
+
+    fn planned_external_type_from_authored(
+        &mut self,
+        authored_type: &ExternalTypeSpec,
+    ) -> ExternalTypeSpec<PlannedTypeFamily> {
+        match authored_type {
+            ExternalTypeSpec::Proto(proto_name) => {
+                let planned_proto = if let Some(message) =
+                    self.descriptors.message(proto_name.as_str())
+                {
+                    PlannedProtoType::Message(proto::planned_message_reference(message, self))
+                } else if let Some(enumeration) = self.descriptors.enumeration(proto_name.as_str())
+                {
+                    PlannedProtoType::Enum(proto::planned_enum_reference(enumeration, &self.spec))
+                } else {
+                    panic!("proto `{proto_name}` should resolve during planning");
+                };
+                ExternalTypeSpec::Proto(planned_proto)
+            }
+            ExternalTypeSpec::Json(json_type) => {
+                ExternalTypeSpec::Json(self.map_json_type(json_type))
+            }
+            ExternalTypeSpec::Alias {
+                name,
+                target,
+                type_name,
+            } => ExternalTypeSpec::Alias {
+                name: PlannedAliasType {
+                    name: name.as_str().to_string(),
+                },
+                target: Box::new(self.planned_authored_type_override_from_authored(target)),
+                type_name: type_name.clone(),
+            },
+        }
+    }
+
+    fn planned_resource_type_from_authored(
+        &mut self,
+        resource: &AuthoredResourceType,
+    ) -> PlannedResourceType {
+        PlannedResourceType {
+            type_name: resource.as_str().to_upper_camel_case(),
+            wire_type: resource
+                .wire_type
+                .as_ref()
+                .map(|wire_type| self.planned_external_type_from_authored(wire_type)),
         }
     }
 
@@ -1068,7 +1364,10 @@ impl<'a> ApiPlanner<'a> {
                 .unwrap_or(TypeSpec::String),
             TypeSpec::Resource(resource_name) => TypeSpec::Resource(PlannedResourceType {
                 type_name: resource_name.as_str().to_upper_camel_case(),
-                wire_type: None,
+                wire_type: resource_name
+                    .wire_type
+                    .as_ref()
+                    .map(|wire_type| self.planned_external_type_from_authored(wire_type)),
             }),
             TypeSpec::Option(inner) => {
                 self.planned_value_type_from_authored(inner.without_option())
@@ -1115,68 +1414,11 @@ impl<'a> ApiPlanner<'a> {
         self.mark_json_model_used(json_type);
         PlannedJsonType {
             full_name: json_type.name.as_str().to_string(),
+            module_path: json_type.name.module_path().cloned(),
             model_name: json_type.model_name.clone(),
             schema: json_type.schema.clone(),
         }
     }
-
-    fn mark_json_model_used(&mut self, json_type: &JsonModelSpec<crate::spec::Symbol>) {
-        if !self
-            .used_json_models
-            .insert(json_type.name.as_str().to_string())
-        {
-            return;
-        }
-        self.mark_json_schema_refs_used(&json_type.schema);
-    }
-
-    fn mark_json_schema_refs_used(&mut self, schema: &serde_json::Value) {
-        let Some(object) = schema.as_object() else {
-            return;
-        };
-
-        if let Some(reference) = object.get("$ref").and_then(serde_json::Value::as_str)
-            && let Some(model_name) = json_ref_model_name(reference)
-            && let Some(nested) = self
-                .spec
-                .external_types
-                .get(model_name)
-                .and_then(|binding| match &binding.external_type {
-                    ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
-                    _ => None,
-                })
-        {
-            self.mark_json_model_used(&nested);
-        }
-
-        for value in object.values() {
-            match value {
-                serde_json::Value::Array(values) => {
-                    for value in values {
-                        self.mark_json_schema_refs_used(value);
-                    }
-                }
-                serde_json::Value::Object(_) => self.mark_json_schema_refs_used(value),
-                _ => {}
-            }
-        }
-    }
-}
-
-fn json_ref_model_name(reference: &str) -> Option<&str> {
-    reference
-        .split('#')
-        .next_back()
-        .unwrap_or(reference)
-        .trim_start_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|name| !name.is_empty())
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct PlannedServiceData {
-    pub(crate) endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1304,8 +1546,15 @@ pub(crate) struct PlannedAliasType {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlannedJsonType {
     pub(crate) full_name: String,
+    pub(crate) module_path: Option<ModulePath>,
     pub(crate) model_name: String,
     pub(crate) schema: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PlannedSpecData {
+    pub(crate) module_imports: BTreeMap<ModulePath, BTreeSet<String>>,
+    pub(crate) module_exports: BTreeSet<String>,
 }
 
 impl AsRef<str> for PlannedJsonType {
@@ -1344,52 +1593,12 @@ pub(crate) struct PlannedRecordType {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlannedResourceType {
     pub(crate) type_name: String,
-    pub(crate) wire_type: Option<Box<PlannedType>>,
+    pub(crate) wire_type: Option<ExternalTypeSpec<PlannedTypeFamily>>,
 }
 
-impl PlannedType {
-    pub(crate) fn operation_model(&self) -> Option<&PlannedType> {
-        match self {
-            TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
-            | TypeSpec::External(ExternalTypeSpec::Json(_))
-            | TypeSpec::Record(_) => Some(self),
-            TypeSpec::Resource(resource) => resource
-                .wire_type
-                .as_ref()
-                .map(|wire_type| wire_type.as_ref()),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn model_full_name(&self) -> Option<&str> {
-        match self {
-            TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
-                Some(proto.proto.full_name.as_str())
-            }
-            TypeSpec::External(ExternalTypeSpec::Json(json)) => Some(json.full_name.as_str()),
-            TypeSpec::Record(record) => Some(record.full_name.as_str()),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn model_name(&self) -> Option<&str> {
-        match self {
-            TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
-                Some(&proto.model_name)
-            }
-            TypeSpec::External(ExternalTypeSpec::Json(json)) => Some(&json.model_name),
-            TypeSpec::Record(record) => Some(&record.model_name),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn proto_message(&self) -> Option<&PlannedProtoMessageType> {
-        match self {
-            TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
-                Some(proto)
-            }
-            _ => None,
-        }
+impl AsRef<str> for PlannedResourceType {
+    fn as_ref(&self) -> &str {
+        &self.type_name
     }
 }
 
@@ -1474,4 +1683,76 @@ fn plan_operation_resource_return(
             })
             .collect(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::spec::{ExternalTypeSpec, LanguageStringSpec, SupportSpec, Symbol};
+
+    #[test]
+    fn descriptor_proto_refs_remain_external_models() {
+        let proto_name = "temporal.api.common.v1.RetryPolicy";
+        let spec = ApiSpec {
+            module_path: crate::spec::ModulePath::default(),
+            data: (),
+            version: "1.0.0".to_string(),
+            support: SupportSpec::default(),
+            services: vec![ServiceSpec {
+                name: "example-service".to_string(),
+                wire_name: "ExampleService".to_string(),
+                doc: LanguageStringSpec::default(),
+                namespace: LanguageStringSpec::default(),
+                operations_class: LanguageStringSpec::default(),
+                endpoint: Some("example".to_string()),
+                experimental: false,
+                delay_load_temporalio_workflow: false,
+                operations: vec![OperationSpec {
+                    name: "example-operation".to_string(),
+                    wire_name: "ExampleOperation".to_string(),
+                    experimental: false,
+                    doc: LanguageStringSpec::default(),
+                    return_doc: LanguageStringSpec::default(),
+                    input: Some(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
+                        proto_name,
+                    )))),
+                    output: Some(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
+                        proto_name,
+                    )))),
+                    output_transform: None,
+                    data: (),
+                }],
+                resources: Vec::new(),
+                data: (),
+            }],
+            external_types: BTreeMap::new(),
+            records: BTreeMap::new(),
+            enums: BTreeMap::new(),
+            flags: BTreeMap::new(),
+            variants: BTreeMap::new(),
+        };
+        let descriptors = DescriptorIndex::load(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples/descriptors/temporal_api.bin"),
+        )
+        .unwrap();
+
+        let plan =
+            build_api_plan_with_mode(spec, &descriptors, PlanningMode::DefinitionsOnly).unwrap();
+
+        assert!(plan.records.is_empty());
+        let operation = &plan.services[0].operations[0];
+        for model_type in [operation.input_type(), operation.output_type()] {
+            let Some(TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
+                message,
+            )))) = model_type
+            else {
+                panic!("descriptor-only proto reference should stay external");
+            };
+            assert_eq!(message.proto.full_name, proto_name);
+        }
+    }
 }

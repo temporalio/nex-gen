@@ -66,6 +66,15 @@ fn python_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
         .join(example_id.to_snake_case())
 }
 
+fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
+    let dir_path = root.join("examples/json-inputs").join(example_id);
+    if dir_path.is_dir() {
+        return dir_path;
+    }
+    root.join("examples/json-inputs")
+        .join(format!("{example_id}.yaml"))
+}
+
 fn python_example_ids(root: &Path) -> Vec<String> {
     let mut ids = fs::read_dir(root.join("examples/inputs"))
         .unwrap()
@@ -163,9 +172,7 @@ fn generate_formatted_json_python_output(
     output_path: &Path,
     generate_native_api: bool,
 ) {
-    let input_path = root
-        .join("examples/json-inputs")
-        .join(format!("{example_id}.yaml"));
+    let input_path = json_input_path(root, example_id);
     let mut args = vec![
         "generate",
         "--lang",
@@ -254,25 +261,30 @@ fn python_examples_generation_matches_checked_in_output() {
 #[test]
 fn python_json_example_generation_matches_checked_in_output() {
     let root = project_root();
-    let output_path = unique_output_path("python-json-chat");
-    generate_formatted_json_python_output(&root, "chat", &output_path, false);
-    assert_python_310_syntax_compatible(&output_path);
-    let rendered = read_python_package_files(&output_path);
-    let expected = read_python_package_files(&python_json_definitions_output_path(&root, "chat"));
-    assert_eq!(rendered, expected);
-    fs::remove_dir_all(output_path).unwrap();
+    for example_id in ["chat", "kb"] {
+        let output_path = unique_output_path(&format!("python-json-{example_id}"));
+        generate_formatted_json_python_output(&root, example_id, &output_path, false);
+        assert_python_310_syntax_compatible(&output_path);
+        let rendered = read_python_package_files(&output_path);
+        let expected =
+            read_python_package_files(&python_json_definitions_output_path(&root, example_id));
+        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        fs::remove_dir_all(output_path).unwrap();
+    }
 }
 
 #[test]
 fn python_json_api_example_generation_matches_checked_in_output() {
     let root = project_root();
-    let output_path = unique_output_path("python-json-api-chat");
-    generate_formatted_json_python_output(&root, "chat", &output_path, true);
-    assert_python_310_syntax_compatible(&output_path);
-    let rendered = read_python_package_files(&output_path);
-    let expected = read_python_package_files(&python_json_api_output_path(&root, "chat"));
-    assert_eq!(rendered, expected);
-    fs::remove_dir_all(output_path).unwrap();
+    for example_id in ["chat", "kb"] {
+        let output_path = unique_output_path(&format!("python-json-api-{example_id}"));
+        generate_formatted_json_python_output(&root, example_id, &output_path, true);
+        assert_python_310_syntax_compatible(&output_path);
+        let rendered = read_python_package_files(&output_path);
+        let expected = read_python_package_files(&python_json_api_output_path(&root, example_id));
+        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        fs::remove_dir_all(output_path).unwrap();
+    }
 }
 
 #[test]

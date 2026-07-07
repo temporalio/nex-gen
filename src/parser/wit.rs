@@ -130,6 +130,8 @@ fn api_spec_from_wit(
     }
 
     Ok(ApiSpec {
+        module_path: crate::spec::ModulePath::default(),
+        data: (),
         version: package
             .name
             .version
@@ -1163,9 +1165,7 @@ fn build_wit_record_spec(
         .map(|proto_directive| {
             proto_directive
                 .value("value")
-                .map(|proto_name| {
-                    TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(proto_name.to_string())))
-                })
+                .map(|proto_name| ExternalTypeSpec::Proto(Symbol::new(proto_name.to_string())))
                 .ok_or_else(|| Error::InvalidWitDirective {
                     path: path.to_path_buf(),
                     context: context.clone(),
@@ -1570,7 +1570,7 @@ fn resolve_authored_field_type_spec(
                     find_owned_resource_name_for_type_def(resolve, type_def)
                     && directive(&directives, "type", path, &type_context)?.is_none()
                 {
-                    return Ok(TypeSpec::Resource(Symbol::new(resource_name)));
+                    return Ok(TypeSpec::Resource(AuthoredResourceType::new(resource_name)));
                 }
                 if let Some(type_directive) = directive(&directives, "type", path, &type_context)? {
                     return Ok(TypeSpec::External(ExternalTypeSpec::Alias {
@@ -1682,9 +1682,11 @@ fn resolve_authored_field_type_spec(
                 | TypeDefKind::Handle(Handle::Borrow(resource_id)) => {
                     let resource_def = &resolve.types[*resource_id];
                     let resource_name = resource_def.name.as_deref().unwrap_or("unnamed-resource");
-                    Ok(TypeSpec::Resource(Symbol::new(resource_name)))
+                    Ok(TypeSpec::Resource(AuthoredResourceType::new(resource_name)))
                 }
-                TypeDefKind::Resource => Ok(TypeSpec::Resource(Symbol::new(type_name))),
+                TypeDefKind::Resource => {
+                    Ok(TypeSpec::Resource(AuthoredResourceType::new(type_name)))
+                }
                 _ => Err(Error::InvalidWit {
                     path: path.to_path_buf(),
                     reason: format!(
@@ -2972,7 +2974,7 @@ fn build_operation(
     };
     let parameter_name = &parameter.name;
     let input_type = &parameter.ty;
-    let (input, _) = find_operation_type_spec(resolve, input_type, path, &context)?.ok_or_else(|| {
+    let input = find_operation_type_spec(resolve, input_type, path, &context)?.ok_or_else(|| {
         Error::InvalidWit {
             path: path.to_path_buf(),
             reason: format!(
@@ -2987,8 +2989,8 @@ fn build_operation(
         service_name,
         &operation_name,
     )?;
-    let (output, output_resource_type) = if let Some(output_type) = function.result.as_ref() {
-        let (output, output_resource_type) =
+    let output = if let Some(output_type) = function.result.as_ref() {
+        Some(
             find_operation_type_spec(resolve, output_type, path, &context)?.ok_or_else(|| {
                 Error::InvalidWit {
                     path: path.to_path_buf(),
@@ -2996,8 +2998,8 @@ fn build_operation(
                         "{context} result type must resolve to a record, resource, or type annotated with `@nexus.proto`"
                     ),
                 }
-            })?;
-        (Some(output), output_resource_type)
+            })?,
+        )
     } else {
         if output_transform.is_some() {
             return Err(Error::InvalidWitDirective {
@@ -3007,7 +3009,7 @@ fn build_operation(
                 reason: "operation does not declare a result type".to_string(),
             });
         }
-        (None, None)
+        None
     };
 
     Ok(OperationSpec {
@@ -3022,7 +3024,6 @@ fn build_operation(
             .unwrap_or_default(),
         input: Some(input),
         output,
-        output_resource_type,
         output_transform,
         data: (),
     })
@@ -3033,22 +3034,22 @@ fn find_operation_type_spec(
     ty: &Type,
     path: &Path,
     context: &str,
-) -> Result<Option<(TypeSpec, Option<ExternalTypeSpec>)>> {
+) -> Result<Option<TypeSpec>> {
     if let Some(resource_name) = find_owned_resource_name_for_type(resolve, ty) {
-        return Ok(Some((
-            TypeSpec::Resource(Symbol::new(resource_name)),
-            find_proto_name_for_type(resolve, ty, path, context)?
-                .map(|proto_name| ExternalTypeSpec::Proto(Symbol::new(proto_name))),
-        )));
+        let wire_type = find_proto_name_for_type(resolve, ty, path, context)?
+            .map(|proto_name| ExternalTypeSpec::Proto(Symbol::new(proto_name)));
+        return Ok(Some(TypeSpec::Resource(AuthoredResourceType {
+            name: Symbol::new(resource_name),
+            wire_type,
+        })));
     }
     if let Some(proto_name) = find_proto_name_for_type(resolve, ty, path, context)? {
-        return Ok(Some((
-            TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(proto_name))),
-            None,
-        )));
+        return Ok(Some(TypeSpec::External(ExternalTypeSpec::Proto(
+            Symbol::new(proto_name),
+        ))));
     }
     if let Some(record_name) = find_wit_record_name_for_type(resolve, ty) {
-        return Ok(Some((TypeSpec::Record(Symbol::new(record_name)), None)));
+        return Ok(Some(TypeSpec::Record(Symbol::new(record_name))));
     }
     Ok(None)
 }
@@ -3546,8 +3547,8 @@ mod tests {
     use crate::language::Language;
 
     use super::{
-        ApiSpec, ExternalTypeSpec, FunctionArgSpec, FunctionArgsSpec, Symbol, TypeSpec, directive,
-        load_linked_wit_metadata_from_inputs, parse_directives,
+        ApiSpec, AuthoredResourceType, ExternalTypeSpec, FunctionArgSpec, FunctionArgsSpec, Symbol,
+        TypeSpec, directive, load_linked_wit_metadata_from_inputs, parse_directives,
     };
 
     fn root() -> PathBuf {
@@ -4206,9 +4207,9 @@ interface user-service {
                 .unwrap()
                 .source_type
                 .as_ref(),
-            Some(&TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
+            Some(&ExternalTypeSpec::Proto(Symbol::new(
                 "acme.users.v1.ProtoRequest"
-            ))))
+            )))
         );
         assert_eq!(
             spec.records
@@ -4228,13 +4229,12 @@ interface user-service {
         );
         assert_eq!(
             proto_to_resource.output,
-            Some(TypeSpec::Resource(Symbol::new("user")))
-        );
-        assert_eq!(
-            proto_to_resource.output_resource_type,
-            Some(ExternalTypeSpec::Proto(Symbol::new(
-                "acme.users.v1.UserResult"
-            )))
+            Some(TypeSpec::Resource(AuthoredResourceType {
+                name: Symbol::new("user"),
+                wire_type: Some(ExternalTypeSpec::Proto(Symbol::new(
+                    "acme.users.v1.UserResult"
+                ))),
+            }))
         );
         assert_eq!(
             service.resource("user").unwrap().methods[0]
@@ -4242,7 +4242,7 @@ interface user-service {
                 .as_ref()
                 .unwrap()
                 .result_type,
-            TypeSpec::Resource(Symbol::new("user"))
+            TypeSpec::Resource(AuthoredResourceType::new("user"))
         );
 
         let json_echo = service.operation("JsonEcho").unwrap();
@@ -4258,7 +4258,7 @@ interface user-service {
         let resource_input = service.operation("ResourceInput").unwrap();
         assert_eq!(
             resource_input.input,
-            Some(TypeSpec::Resource(Symbol::new("user")))
+            Some(TypeSpec::Resource(AuthoredResourceType::new("user")))
         );
     }
 

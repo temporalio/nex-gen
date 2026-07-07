@@ -1,11 +1,13 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use heck::ToUpperCamelCase;
 use indexmap::IndexMap;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::{Error, Result};
+use crate::generator::ExternalModelBackend;
 use crate::generator::dotnet::{
     WireValueConversion, csharp_parameter_name, csharp_string_literal, csharp_type_name,
 };
@@ -51,8 +53,11 @@ impl RenderedModelFragments {
     }
 }
 
-impl ModelBackend {
-    pub(in crate::generator) fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
+    type ModelFragments = RenderedModelFragments;
+    type WireConversion = WireValueConversion;
+
+    fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
         self.json_models = api_plan
             .external_types
             .values()
@@ -64,25 +69,19 @@ impl ModelBackend {
         Ok(())
     }
 
-    pub(in crate::generator) fn render_models(&self) -> Result<RenderedModelFragments> {
+    fn render_models(&self) -> Result<RenderedModelFragments> {
         render_external_models(&self.json_models)
     }
 
-    pub(in crate::generator) fn model_type_annotation(
-        &self,
-        json_type: &PlannedJsonType,
-    ) -> Option<String> {
+    fn model_type_annotation(&self, json_type: &PlannedJsonType) -> Option<String> {
         Some(model_type_ref(json_type))
     }
 
-    pub(in crate::generator) fn wire_type_identifier(
-        &self,
-        json_type: &PlannedJsonType,
-    ) -> Option<String> {
+    fn wire_type_identifier(&self, json_type: &PlannedJsonType) -> Option<String> {
         Some(json_type.full_name.clone())
     }
 
-    pub(in crate::generator) fn wire_conversion(
+    fn wire_conversion(
         &self,
         json_type: &PlannedJsonType,
         _planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
@@ -599,7 +598,7 @@ fn schema_type(schema: &Schema, optional: bool) -> Result<String> {
 
 fn schema_base_type(schema: &Schema) -> Result<String> {
     if let Some(reference) = &schema.reference {
-        return Ok(csharp_type_name(&reference_model_name(reference)));
+        return Ok(reference_type_name(reference));
     }
     if let Some(one_of) = &schema.one_of {
         let non_null = one_of
@@ -690,8 +689,36 @@ fn reference_model_name(reference: &str) -> String {
         .rsplit('/')
         .next()
         .unwrap_or(reference)
+        .rsplit('#')
+        .next()
+        .unwrap_or(reference)
         .replace("~1", "/")
         .replace("~0", "~")
+}
+
+fn reference_type_name(reference: &str) -> String {
+    let target = reference
+        .split_once('#')
+        .map(|(_, fragment)| fragment)
+        .unwrap_or(reference)
+        .strip_prefix("/$defs/")
+        .map(|name| name.replace("~1", "/").replace("~0", "~"));
+    if let Some(target) = target
+        && let Some((module_key, model_name)) = target.rsplit_once('#')
+        && !module_key.is_empty()
+    {
+        let namespace = module_key
+            .split('/')
+            .map(|segment| csharp_type_name(&segment.to_upper_camel_case()))
+            .collect::<Vec<_>>()
+            .join(".");
+        return format!(
+            "global::NexGen.Generated.{}.{}",
+            namespace,
+            csharp_type_name(model_name)
+        );
+    }
+    csharp_type_name(&reference_model_name(reference))
 }
 
 fn csharp_value_literal(value: &Value) -> Option<String> {

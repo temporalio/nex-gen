@@ -2,101 +2,15 @@
 
 from __future__ import annotations
 
-import collections.abc
 import typing
 import pydantic
-import pydantic.functional_validators
 import pydantic_core
 
-
-_INTEGER_CAP = (1 << 53) - 1
-
-
-def _parse_spec_integer(value: object) -> int:
-    if isinstance(value, bool):
-        raise ValueError("expected integer, got boolean")
-    if isinstance(value, int):
-        out = value
-    elif isinstance(value, float):
-        if not value.is_integer():
-            raise ValueError("number has a fractional part; not an integer")
-        out = int(value)
-    else:
-        raise ValueError(f"expected integer, got {type(value).__name__}")
-    if abs(out) > _INTEGER_CAP:
-        raise ValueError("integer exceeds +/-(2**53-1) cap")
-    return out
-
-
-SpecInt: typing.TypeAlias = typing.Annotated[
-    int, pydantic.functional_validators.BeforeValidator(_parse_spec_integer)
-]
-
-
-def _reject_explicit_null(
-    cls: type[pydantic.BaseModel],
-    data: object,
-    handler: typing.Callable[[object], typing.Any],
-) -> typing.Any:
-    null_fields = typing.cast(
-        frozenset[str], getattr(cls, "_OPTIONAL_NON_NULLABLE_FIELDS")
-    )
-    raw_data = data
-    pre_errors: list[pydantic_core.InitErrorDetails] = []
-    if isinstance(data, dict):
-        values = typing.cast(dict[str, object], data)
-        pre_errors = [
-            pydantic_core.InitErrorDetails(
-                type=pydantic_core.PydanticCustomError(
-                    "null_for_nonnullable", "explicit null not allowed"
-                ),
-                loc=(field,),
-                input=None,
-            )
-            for field in null_fields
-            if field in values and values[field] is None
-        ]
-    try:
-        instance = handler(raw_data)
-    except pydantic.ValidationError as error:
-        field_errors: list[pydantic_core.InitErrorDetails] = []
-        for error_detail in typing.cast(list[dict[str, object]], error.errors()):
-            loc: tuple[str | int, ...] = tuple(
-                typing.cast(collections.abc.Iterable[str | int], error_detail["loc"])
-            )
-            field_errors.append(
-                pydantic_core.InitErrorDetails(
-                    type=pydantic_core.PydanticCustomError(
-                        typing.cast(typing.Any, error_detail["type"]),
-                        typing.cast(typing.Any, error_detail["msg"]),
-                    ),
-                    loc=loc,
-                    input=error_detail.get("input"),
-                )
-            )
-        raise pydantic.ValidationError.from_exception_data(
-            title=cls.__name__, line_errors=pre_errors + field_errors
-        ) from None
-    if pre_errors:
-        raise pydantic.ValidationError.from_exception_data(
-            title=cls.__name__, line_errors=pre_errors
-        )
-    return instance
-
-
-def _emit_set_fields(
-    model: pydantic.BaseModel,
-    handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-) -> dict[str, object]:
-    dumped = typing.cast(dict[str, object], handler(model))
-    alias_of = {
-        name: (field.alias or name) for name, field in type(model).model_fields.items()
-    }
-    keep = {alias_of.get(name, name) for name in model.model_fields_set}
-    out = {key: value for key, value in dumped.items() if key in keep}
-    if model.model_extra:
-        out.update(typing.cast(dict[str, object], model.model_extra))
-    return out
+from ._json import (
+    SpecInt,
+    _emit_set_fields,
+    _reject_explicit_null,
+)
 
 
 class GetRoomInput(pydantic.BaseModel):

@@ -6,8 +6,12 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::spec::ApiSpec;
+use crate::workspace::ApiSpecTree;
 
-pub use json_schema::load_api_spec_from_json_schema_for_language_with_inputs;
+pub use json_schema::{
+    load_api_spec_from_json_schema_for_language_with_inputs,
+    load_api_spec_tree_from_json_schema_for_language_with_inputs,
+};
 pub use wit::{load_api_spec_from_wit_for_language_with_inputs, write_prepared_wit_directory};
 
 pub(crate) use wit::{
@@ -31,11 +35,26 @@ pub fn load_api_spec_for_language_with_inputs(
     language: Language,
     input_paths: &[PathBuf],
 ) -> Result<ApiSpec> {
+    let tree = load_api_spec_tree_for_language_with_inputs(language, input_paths)?;
+    tree.into_single_spec()
+        .ok_or_else(|| Error::InvalidJsonSchema {
+            path: PathBuf::from("<input>"),
+            reason: "multiple input modules require tree generation".to_string(),
+        })
+}
+
+pub fn load_api_spec_tree_for_language_with_inputs(
+    language: Language,
+    input_paths: &[PathBuf],
+) -> Result<ApiSpecTree> {
     let format = detect_input_format(input_paths)?;
     match format {
-        InputFormat::Wit => load_api_spec_from_wit_for_language_with_inputs(language, input_paths),
+        InputFormat::Wit => {
+            let spec = load_api_spec_from_wit_for_language_with_inputs(language, input_paths)?;
+            Ok(ApiSpecTree::single(spec))
+        }
         InputFormat::JsonSchema => {
-            load_api_spec_from_json_schema_for_language_with_inputs(language, input_paths)
+            load_api_spec_tree_from_json_schema_for_language_with_inputs(language, input_paths)
         }
     }
 }
@@ -65,6 +84,9 @@ fn detect_input_format(input_paths: &[PathBuf]) -> Result<InputFormat> {
 }
 
 fn input_format(path: &Path) -> Result<InputFormat> {
+    if path.is_dir() {
+        return Ok(InputFormat::JsonSchema);
+    }
     match path.extension().and_then(|extension| extension.to_str()) {
         Some("wit") => Ok(InputFormat::Wit),
         Some("json" | "yaml" | "yml") => Ok(InputFormat::JsonSchema),

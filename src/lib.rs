@@ -9,6 +9,7 @@ pub mod parser;
 pub mod resources;
 pub mod spec;
 pub mod validation;
+pub mod workspace;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,10 +17,13 @@ use std::process::Command;
 
 use descriptors::DescriptorIndex;
 use error::Result;
-use generator::{GeneratedFiles, GeneratedOutputLayout, GenerationMode, generate_files};
+use generator::{
+    GeneratedFiles, GeneratedOutputLayout, GenerationMode, generate_files_for_tree_with_mode,
+};
 use heck::ToSnakeCase;
 use language::Language;
-use spec::{ApiSpec, SupportFragmentSpec};
+use spec::SupportFragmentSpec;
+use workspace::{ApiSpecNode, ApiSpecTree};
 
 pub use add_rpc::{AddRpcRequest, add_rpc_to_file, add_rpc_to_string};
 
@@ -69,10 +73,16 @@ pub fn generate_to_string_with_inputs_and_support(
     descriptor_paths: &[PathBuf],
     support_paths: &[PathBuf],
 ) -> Result<String> {
-    let spec = crate::parser::load_api_spec_for_language_with_inputs(language, input_paths)?;
+    let tree = crate::parser::load_api_spec_tree_for_language_with_inputs(language, input_paths)?;
     let descriptors = DescriptorIndex::load_many(descriptor_paths)?;
-    let support = load_support_files(language, &spec, support_paths)?;
-    let generated = generate_files(language, spec, &descriptors, &support)?;
+    let support = load_support_files_for_tree(language, &tree, support_paths)?;
+    let generated = generate_files_for_tree_with_mode(
+        language,
+        tree,
+        &descriptors,
+        &support,
+        GenerationMode::NativeApi,
+    )?;
     print_warnings(&generated);
     Ok(match generated.layout {
         GeneratedOutputLayout::SingleFile => generated
@@ -84,15 +94,15 @@ pub fn generate_to_string_with_inputs_and_support(
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
-    let spec = crate::parser::load_api_spec_for_language_with_inputs(
+    let tree = crate::parser::load_api_spec_tree_for_language_with_inputs(
         request.language,
         &request.input_paths,
     )?;
     let descriptors = DescriptorIndex::load_many(&request.descriptor_paths)?;
-    let support = load_support_files(request.language, &spec, &request.support_paths)?;
-    let generated = generator::generate_files_with_mode(
+    let support = load_support_files_for_tree(request.language, &tree, &request.support_paths)?;
+    let generated = generator::generate_files_for_tree_with_mode(
         request.language,
-        spec,
+        tree,
         &descriptors,
         &support,
         if request.generate_native_api {
@@ -306,16 +316,36 @@ fn format_formatter_command(program: &str, args: &[String]) -> String {
         .join(" ")
 }
 
-fn load_support_files(
+fn load_support_files_for_tree(
     language: Language,
-    spec: &ApiSpec,
+    tree: &ApiSpecTree,
     support_paths: &[PathBuf],
 ) -> Result<SupportFiles> {
-    let mut support_fragments = spec.support.fragments_for_language(language).to_vec();
-    support_fragments.extend(load_support_fragments_from_paths(language, support_paths)?);
-    Ok(SupportFiles {
-        fragments: support_fragments,
-    })
+    if !support_paths.is_empty() {
+        return Ok(SupportFiles {
+            fragments: load_support_fragments_from_paths(language, support_paths)?,
+        });
+    }
+    let mut fragments = Vec::new();
+    collect_tree_support_fragments(language, &tree.root, &mut fragments);
+    Ok(SupportFiles { fragments })
+}
+
+fn collect_tree_support_fragments(
+    language: Language,
+    node: &ApiSpecNode,
+    fragments: &mut Vec<SupportFragmentSpec>,
+) {
+    match node {
+        ApiSpecNode::Leaf(leaf) => {
+            fragments.extend(leaf.spec.support.fragments_for_language(language).to_vec());
+        }
+        ApiSpecNode::Branch(branch) => {
+            for child in branch.children.values() {
+                collect_tree_support_fragments(language, child, fragments);
+            }
+        }
+    }
 }
 
 fn load_support_fragments_from_paths(
@@ -436,8 +466,12 @@ fn discover_json_example_ids(repo_root: &Path) -> Result<Vec<String>> {
         })?
         .filter_map(|entry| {
             let path = entry.ok()?.path();
-            let extension = path.extension()?.to_str()?;
-            if !matches!(extension, "json" | "yaml" | "yml") {
+            if path.is_dir() {
+                return directory_contains_input_file(&path)
+                    .then(|| path.file_name()?.to_str().map(str::to_string))
+                    .flatten();
+            }
+            if !is_json_schema_input_path(&path) {
                 return None;
             }
             Some(path.file_stem()?.to_string_lossy().into_owned())
@@ -445,6 +479,29 @@ fn discover_json_example_ids(repo_root: &Path) -> Result<Vec<String>> {
         .collect::<Vec<_>>();
     ids.sort();
     Ok(ids)
+}
+
+fn directory_contains_input_file(path: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if directory_contains_input_file(&path) {
+                return true;
+            }
+        } else if path.is_file() {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_json_schema_input_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "json" | "yaml" | "yml"))
 }
 
 fn validate_json_example_ids(
@@ -579,6 +636,10 @@ fn example_input_path(repo_root: &Path, example_id: &str) -> PathBuf {
 }
 
 fn json_example_input_path(repo_root: &Path, example_id: &str) -> PathBuf {
+    let dir_path = repo_root.join("examples/json-inputs").join(example_id);
+    if dir_path.is_dir() {
+        return dir_path;
+    }
     for extension in ["yaml", "yml", "json"] {
         let path = repo_root
             .join("examples/json-inputs")

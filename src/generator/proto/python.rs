@@ -1,10 +1,11 @@
 use heck::ToSnakeCase;
 
 use crate::error::Result;
+use crate::generator::ExternalModelBackend;
 use crate::generator::python::{
-    PythonFieldDefaultKind, PythonImports, RenderedField, RenderedModel, RenderedRecordWireBlock,
-    ResolvedFieldKind, ResolvedFieldType, WireValueConversion, enum_default_expr,
-    python_authored_type_annotation, python_string_literal,
+    PythonFieldDefaultKind, PythonImports, RenderedField, RenderedModel, RenderedModelFragments,
+    RenderedRecordWireBlock, ResolvedFieldKind, ResolvedFieldType, WireValueConversion,
+    enum_default_expr, python_authored_type_annotation, python_string_literal,
 };
 use crate::language::Language;
 use crate::planning::{
@@ -33,38 +34,47 @@ enum WireReadPolicy {
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend;
 
-impl ModelBackend {
-    pub(in crate::generator) fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
+impl ExternalModelBackend for ModelBackend {
+    type ModelFragments = RenderedModelFragments;
+    type WireConversion = WireValueConversion;
+
+    fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
         Ok(())
     }
 
-    pub(in crate::generator) fn model_type_annotation(
-        &self,
-        proto_type: &PlannedProtoType,
-    ) -> Option<String> {
-        match proto_type {
-            PlannedProtoType::Message(message) => {
+    fn render_models(&self) -> Result<RenderedModelFragments> {
+        Ok(RenderedModelFragments::default())
+    }
+
+    fn model_type_annotation(&self, model_type: &PlannedType) -> Option<String> {
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) => {
                 message_python_ref(&message.proto).map(|reference| reference.type_ref)
             }
-            PlannedProtoType::Enum(enumeration) => enumeration
-                .replacement
-                .as_ref()
-                .and_then(python_replacement_type_name)
-                .or_else(|| Some(enumeration.name.clone())),
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enumeration))) => {
+                enumeration
+                    .replacement
+                    .as_ref()
+                    .and_then(python_replacement_type_name)
+                    .or_else(|| Some(enumeration.name.clone()))
+            }
+            PlannedType::Record(record) => Some(record.model_name.clone()),
+            _ => None,
         }
     }
 
-    pub(in crate::generator) fn wire_type_identifier(
-        &self,
-        proto_type: &PlannedProtoType,
-    ) -> Option<String> {
-        match proto_type {
-            PlannedProtoType::Message(message) => Some(message.proto.full_name.clone()),
-            PlannedProtoType::Enum(_) => None,
+    fn wire_type_identifier(&self, model_type: &PlannedType) -> Option<String> {
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) => {
+                Some(message.proto.full_name.clone())
+            }
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(_))) => None,
+            PlannedType::Record(record) => Some(record.full_name.clone()),
+            _ => None,
         }
     }
 
-    pub(in crate::generator) fn wire_conversion(
+    fn wire_conversion(
         &self,
         model_type: &PlannedType,
         planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
@@ -162,8 +172,12 @@ fn record_python_ref(planned_model: &RecordSpec<PlannedTypeFamily>) -> Option<Py
 }
 
 fn message_override_conversion(model_type: &PlannedType) -> Option<WireValueConversion> {
-    if let Some(proto) = model_type.proto_message()
-        && let Some(language_override) = &proto.replacement
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) =
+        model_type
+    else {
+        return None;
+    };
+    if let Some(language_override) = &proto.replacement
         && let Some(type_name) = python_replacement_type_name(language_override)
     {
         let from_proto = python_from_proto_converter(&proto.proto.full_name, language_override);
@@ -176,9 +190,7 @@ fn message_override_conversion(model_type: &PlannedType) -> Option<WireValueConv
             supports_unpacked_input: false,
         });
     }
-    if let Some(proto) = model_type.proto_message()
-        && let Some(authored_type) = &proto.authored_type
-    {
+    if let Some(authored_type) = &proto.authored_type {
         let from_proto = python_default_from_proto_name(&proto.proto.full_name);
         let to_proto = python_default_to_proto_name(&proto.proto.full_name);
         return Some(WireValueConversion {
@@ -199,9 +211,12 @@ fn generated_message_model_name(
     if planned_model.data.proto.is_some() {
         return Some(planned_model.name.clone());
     }
-    model_type
-        .proto_message()
-        .map(|proto| proto.model_name.clone())
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) =
+        model_type
+    else {
+        return None;
+    };
+    Some(proto.model_name.clone())
 }
 
 fn generated_wire_conversion(

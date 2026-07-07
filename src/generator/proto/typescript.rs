@@ -2,6 +2,7 @@ use heck::ToLowerCamelCase;
 use prost_types::FieldDescriptorProto;
 
 use crate::error::Result;
+use crate::generator::ExternalModelBackend;
 use crate::generator::typescript::{
     RenderedExternalModelFragments, RenderedModel, WireValueConversion, generic_model_annotation,
     render_named_generic_function_start, typescript_authored_type_annotation,
@@ -17,42 +18,45 @@ use crate::spec::{ExternalTypeSpec, RecordSpec, TypeReplacementSpec};
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend;
 
-impl ModelBackend {
-    pub(in crate::generator) fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
+impl ExternalModelBackend for ModelBackend {
+    type ModelFragments = RenderedExternalModelFragments;
+    type WireConversion = WireValueConversion;
+
+    fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
         Ok(())
     }
 
-    pub(in crate::generator) fn render_models(&self) -> Result<RenderedExternalModelFragments> {
+    fn render_models(&self) -> Result<RenderedExternalModelFragments> {
         Ok(RenderedExternalModelFragments::default())
     }
 
-    pub(in crate::generator) fn model_type_annotation(
-        &self,
-        proto_type: &PlannedProtoType,
-    ) -> Option<String> {
-        match proto_type {
-            PlannedProtoType::Message(proto) => {
+    fn model_type_annotation(&self, model_type: &PlannedType) -> Option<String> {
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
                 Some(message_typescript_interface_ref(&proto.proto))
             }
-            PlannedProtoType::Enum(enum_type) => enum_type
-                .replacement
-                .as_ref()
-                .and_then(typescript_replacement_type_name)
-                .or_else(|| Some(enum_type.name.clone())),
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enum_type))) => {
+                enum_type
+                    .replacement
+                    .as_ref()
+                    .and_then(typescript_replacement_type_name)
+                    .or_else(|| Some(enum_type.name.clone()))
+            }
+            _ => None,
         }
     }
 
-    pub(in crate::generator) fn wire_type_identifier(
-        &self,
-        proto_type: &PlannedProtoType,
-    ) -> Option<String> {
-        match proto_type {
-            PlannedProtoType::Message(proto) => Some(proto.proto.full_name.clone()),
-            PlannedProtoType::Enum(_) => None,
+    fn wire_type_identifier(&self, model_type: &PlannedType) -> Option<String> {
+        match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
+                Some(proto.proto.full_name.clone())
+            }
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(_))) => None,
+            _ => None,
         }
     }
 
-    pub(in crate::generator) fn wire_conversion(
+    fn wire_conversion(
         &self,
         model_type: &PlannedType,
         planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
@@ -199,8 +203,12 @@ pub(crate) fn typescript_replacement_type_name(
 pub(in crate::generator) fn message_override_conversion(
     model_type: &PlannedType,
 ) -> Option<WireValueConversion> {
-    if let Some(proto) = model_type.proto_message()
-        && let Some(language_override) = &proto.replacement
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) =
+        model_type
+    else {
+        return None;
+    };
+    if let Some(language_override) = &proto.replacement
         && let Some(type_name) = typescript_replacement_type_name(language_override)
     {
         return Some(WireValueConversion {
@@ -222,9 +230,7 @@ pub(in crate::generator) fn message_override_conversion(
             uses_rendered_model_annotation: false,
         });
     }
-    if let Some(proto) = model_type.proto_message()
-        && let Some(authored_type) = &proto.authored_type
-    {
+    if let Some(authored_type) = &proto.authored_type {
         return Some(WireValueConversion {
             annotation: typescript_authored_type_annotation(authored_type),
             from_wire: format!(
@@ -254,7 +260,12 @@ fn generated_wire_conversion(
     let model_name = if planned_model.data.proto.is_some() {
         planned_model.name.clone()
     } else {
-        model_type.proto_message()?.model_name.clone()
+        let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) =
+            model_type
+        else {
+            return None;
+        };
+        proto.model_name.clone()
     };
     let from_wire_function_name = model_from_proto_function_name(&model_name);
     let to_wire_function_name = model_to_proto_function_name(&model_name);

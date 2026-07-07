@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A page. One half of the Page <-> Block cross-file cycle. Because the cycle spans two input files, Page and Block hoist together into Python's _recursive.py; the non-cyclic PageMeta helper stays in this module.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "pageId": { "type": "string" },
+    "title": { "type": "string" },
+    "meta": { "$ref": "#/$defs/PageMeta" },
+    "blocks": {
+      "description": "Ordered content blocks. Cross-file `$ref` to block.json (same directory); the array is the terminating edge of the cycle.",
+      "type": "array",
+      "items": { "$ref": "block.json" }
+    }
+  },
+  "required": ["pageId", "title", "meta"],
+  "$defs": {
+    "PageMeta": {
+      "description": "Non-cyclic helper. Referenced only by Page, references nothing recursive, so it stays in the content_page module even though Page is hoisted.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "author": { "type": "string" },
+        "wordCount": { "type": "integer" }
+      },
+      "required": ["author"]
+    }
+  }
+}

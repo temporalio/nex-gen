@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use heck::ToUpperCamelCase;
@@ -7,12 +7,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::{Error, Result};
+use crate::generator::ExternalModelBackend;
 use crate::generator::python::{
     PythonImports, RenderedModelFragments, WireValueConversion, python_field_name,
     python_string_literal, render_python_docstring,
 };
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
-use crate::spec::{ExternalTypeSpec, RecordSpec};
+use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
 #[derive(Debug, Deserialize, Default)]
 struct Schema {
@@ -42,10 +43,21 @@ pub(in crate::generator) fn model_type_ref(json_type: &PlannedJsonType) -> Strin
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend {
     json_models: Vec<PlannedJsonType>,
+    tree_leaf: bool,
+    runtime_import_module: String,
 }
 
-impl ModelBackend {
-    pub(in crate::generator) fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
+    type ModelFragments = RenderedModelFragments;
+    type WireConversion = WireValueConversion;
+
+    fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+        self.tree_leaf = !api_plan.module_path.is_root();
+        self.runtime_import_module = if self.tree_leaf {
+            root_python_runtime_module(&api_plan.module_path)
+        } else {
+            "._json".to_string()
+        };
         self.json_models = api_plan
             .external_types
             .values()
@@ -57,26 +69,31 @@ impl ModelBackend {
         Ok(())
     }
 
-    pub(in crate::generator) fn render_models(&self) -> Result<RenderedModelFragments> {
+    fn render_models(&self) -> Result<RenderedModelFragments> {
         let json_models = self.json_models.iter().collect::<Vec<_>>();
-        render_external_models(json_models.as_slice())
+        render_external_models(json_models.as_slice(), &self.runtime_import_module)
     }
 
-    pub(in crate::generator) fn model_type_annotation(
-        &self,
-        json_type: &PlannedJsonType,
-    ) -> Option<String> {
+    fn render_support_files(&self) -> Result<BTreeMap<PathBuf, String>> {
+        if self.tree_leaf || self.json_models.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+
+        Ok(BTreeMap::from([(
+            PathBuf::from("_json.py"),
+            render_support_file(),
+        )]))
+    }
+
+    fn model_type_annotation(&self, json_type: &PlannedJsonType) -> Option<String> {
         Some(model_type_ref(json_type))
     }
 
-    pub(in crate::generator) fn wire_type_identifier(
-        &self,
-        json_type: &PlannedJsonType,
-    ) -> Option<String> {
+    fn wire_type_identifier(&self, json_type: &PlannedJsonType) -> Option<String> {
         Some(json_type.full_name.clone())
     }
 
-    pub(in crate::generator) fn wire_conversion(
+    fn wire_conversion(
         &self,
         json_type: &PlannedJsonType,
         _planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
@@ -91,7 +108,18 @@ impl ModelBackend {
     }
 }
 
-fn render_external_models(json_models: &[&PlannedJsonType]) -> Result<RenderedModelFragments> {
+pub(in crate::generator) fn render_support_file() -> String {
+    render_json_runtime_module()
+}
+
+fn root_python_runtime_module(module_path: &ModulePath) -> String {
+    format!("{}{}", ".".repeat(module_path.0.len() + 1), "_json")
+}
+
+fn render_external_models(
+    json_models: &[&PlannedJsonType],
+    runtime_import_module: &str,
+) -> Result<RenderedModelFragments> {
     if json_models.is_empty() {
         return Ok(RenderedModelFragments::default());
     }
@@ -115,39 +143,56 @@ fn render_external_models(json_models: &[&PlannedJsonType]) -> Result<RenderedMo
         }
     }
     let mut body = String::new();
-    if needs_spec_int_helper {
-        render_spec_int_helper(&mut body);
-        body.push_str("\n\n");
-    }
-    if needs_optional_non_nullable_helper {
-        render_optional_non_nullable_helper(&mut body);
-        body.push_str("\n\n");
-    }
-    if needs_set_fields_helper {
-        render_set_fields_helper(&mut body);
-        body.push_str("\n\n");
-    }
     body.push_str(&models_body);
 
     let mut registrations = String::new();
-    render_model_rebuilds(&mut registrations, &json_models);
+    render_model_rebuilds(&mut registrations, json_models);
     let mut module_imports = BTreeSet::from(["pydantic".to_string()]);
-    if needs_spec_int_helper {
-        module_imports.insert("pydantic.functional_validators".to_string());
-    }
     if needs_pydantic_core {
         module_imports.insert("pydantic_core".to_string());
+    }
+    let mut relative_imports = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut runtime_imports = BTreeSet::new();
+    if needs_spec_int_helper {
+        runtime_imports.insert("SpecInt".to_string());
+    }
+    if needs_optional_non_nullable_helper {
+        runtime_imports.insert("_reject_explicit_null".to_string());
+    }
+    if needs_set_fields_helper {
+        runtime_imports.insert("_emit_set_fields".to_string());
+    }
+    if !runtime_imports.is_empty() {
+        relative_imports.insert(runtime_import_module.to_string(), runtime_imports);
     }
 
     Ok(RenderedModelFragments {
         body,
         registrations,
         module_imports,
+        relative_imports,
         exported_names: json_models
             .iter()
             .map(|model| model.model_name.clone())
             .collect(),
     })
+}
+
+fn render_json_runtime_module() -> String {
+    let mut output = String::new();
+    output.push_str("# Generated by nex-gen. DO NOT EDIT!\n\n");
+    output.push_str("from __future__ import annotations\n\n");
+    output.push_str("import collections.abc\n");
+    output.push_str("import typing\n\n");
+    output.push_str("import pydantic\n");
+    output.push_str("import pydantic.functional_validators\n");
+    output.push_str("import pydantic_core\n\n\n");
+    render_spec_int_helper(&mut output);
+    output.push_str("\n\n");
+    render_optional_non_nullable_helper(&mut output);
+    output.push_str("\n\n");
+    render_set_fields_helper(&mut output);
+    output
 }
 
 fn render_model_rebuilds(output: &mut String, models: &[&PlannedJsonType]) {
@@ -715,13 +760,16 @@ fn optional_annotation(annotation: &str) -> String {
 }
 
 fn reference_model_name(reference: &str) -> String {
-    reference
+    let name = reference
         .split('#')
         .next_back()
         .unwrap_or(reference)
         .trim_start_matches('/')
         .rsplit('/')
         .next()
-        .unwrap_or(reference)
+        .unwrap_or(reference);
+    name.rsplit('#')
+        .next()
+        .unwrap_or(name)
         .to_upper_camel_case()
 }

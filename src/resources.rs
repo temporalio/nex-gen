@@ -7,8 +7,9 @@ use prost_types::field_descriptor_proto::Type;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ExternalTypeSpec, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
-    ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec, ServiceSpec, TypeSpec,
+    ApiSpec, AuthoredNames, ExternalTypeSpec, OperationSpec, RecordFieldSpec,
+    RecordFieldVisibility, ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec, ServiceSpec,
+    TypeSpec,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,7 +161,7 @@ pub(crate) fn resolve_service_resources(
         let Some(resource_name) = operation_output_resource_name(service, operation) else {
             continue;
         };
-        if operation.output_resource_type.is_none() {
+        if operation_output_resource_wire_type(operation).is_none() {
             continue;
         }
         let resource = service
@@ -722,10 +723,20 @@ fn operation_output_ref(operation: &OperationSpec) -> Option<&str> {
 }
 
 fn operation_output_resource_message_name(operation: &OperationSpec) -> Option<&str> {
-    let Some(ExternalTypeSpec::Proto(type_name)) = operation.output_resource_type.as_ref() else {
+    let Some(ExternalTypeSpec::Proto(type_name)) = operation_output_resource_wire_type(operation)
+    else {
         return None;
     };
     Some(type_name.as_ref())
+}
+
+fn operation_output_resource_wire_type(
+    operation: &OperationSpec,
+) -> Option<&ExternalTypeSpec<AuthoredNames>> {
+    let TypeSpec::Resource(resource_name) = operation.output_type()? else {
+        return None;
+    };
+    resource_name.wire_type.as_ref()
 }
 
 pub(crate) fn ensure_unique_resource_names(spec: &ApiSpec) -> Result<()> {
