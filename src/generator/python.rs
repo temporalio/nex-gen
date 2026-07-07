@@ -526,11 +526,13 @@ impl<'a> ApiPlanner<'a> {
                 render_resources_package_init(services),
             )?;
         }
-        insert_generated_file(
-            &mut files,
-            "service.py",
-            render_service_module(services, self.api_plan, self.model_hoists),
-        )?;
+        if !services.is_empty() {
+            insert_generated_file(
+                &mut files,
+                "services.py",
+                render_service_module(services, self.api_plan, self.model_hoists),
+            )?;
+        }
         if has_standalone_operations {
             insert_generated_file(
                 &mut files,
@@ -2818,7 +2820,7 @@ fn render_definitions_only_package_init(
         render_named_python_import(&mut output, ".models", model_names);
     }
     if !service_names.is_empty() {
-        render_named_python_import(&mut output, ".service", &service_names);
+        render_named_python_import(&mut output, ".services", &service_names);
     }
 
     output.push_str("\n__all__ = [\n");
@@ -3985,7 +3987,7 @@ fn render_package_init(
         render_named_python_import(&mut output, ".models", model_names);
     }
     if !services.is_empty() {
-        output.push_str("from . import service as _service\n");
+        output.push_str("from . import services as _services\n");
     }
     if !services.is_empty() {
         for service in services {
@@ -4150,7 +4152,7 @@ fn render_package_init(
                 output.push_str(operation.wire_name);
                 output.push_str("\",\n");
                 output.push_str("    ): ");
-                output.push_str("_service.");
+                output.push_str("_services.");
                 output.push_str(service.name);
                 output.push('.');
                 output.push_str(&operation.attr_name);

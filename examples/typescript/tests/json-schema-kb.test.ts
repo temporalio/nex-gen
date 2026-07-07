@@ -23,12 +23,10 @@ import {
   serializeGetPageInput,
   serializePutBlockOutput,
 } from "../json_schema/definitions/kb/kb/models.ts";
-import type {
-  Category,
-  Page,
-  PutBlockOutput,
-} from "../json_schema/api/kb/kb/models.ts";
-import { knowledgeBaseService } from "../json_schema/api/kb/kb/service.ts";
+import type { Page } from "../json_schema/api/kb/content/page/models.ts";
+import type { PutBlockOutput } from "../json_schema/api/kb/kb/models.ts";
+import type { Category } from "../json_schema/api/kb/tree/category/models.ts";
+import { knowledgeBaseService } from "../json_schema/api/kb/kb/services.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const wireFixtureDir = new URL("../../wire/json_schema/kb/", import.meta.url);

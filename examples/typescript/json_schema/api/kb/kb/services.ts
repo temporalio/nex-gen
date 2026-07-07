@@ -2,14 +2,10 @@
 
 import * as nexus from "nexus-rpc";
 import * as workflow from "@temporalio/workflow";
-import type {
-  Block,
-  Category,
-  GetCategoryTreeInput,
-  GetPageInput,
-  Page,
-  PutBlockOutput,
-} from "./models";
+import type { GetCategoryTreeInput, GetPageInput, PutBlockOutput } from "./models";
+import type { Block } from "../content/block/models";
+import type { Page } from "../content/page/models";
+import type { Category } from "../tree/category/models";
 import { getPageRequest as knowledgeBaseService_getPageRequest } from "./operations/get-page";
 import { putBlockRequest as knowledgeBaseService_putBlockRequest } from "./operations/put-block";
 import { getCategoryTreeRequest as knowledgeBaseService_getCategoryTreeRequest } from "./operations/get-category-tree";

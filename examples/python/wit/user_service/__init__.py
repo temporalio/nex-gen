@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import service as _service
+from . import services as _services
 from .operations.get_user import get_user_request as _UserService_get_user_request
 from ._resources.user import update_email_request as _UserService_update_email_request
 from .models import (
@@ -51,9 +51,9 @@ __nexus_operation_registry__ = {
     (
         "UserService",
         "GetUser",
-    ): _service.UserService.get_user,
+    ): _services.UserService.get_user,
     (
         "UserService",
         "UpdateEmail",
-    ): _service.UserService.update_email,
+    ): _services.UserService.update_email,
 }

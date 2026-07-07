@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import service as _service
+from . import services as _services
 from .operations.start_workflow import start_workflow
 from ._resources.started_workflow import restart_workflow
 from ._resources.started_workflow import cancel_workflow
@@ -18,13 +18,13 @@ __nexus_operation_registry__ = {
     (
         "StartWorkflowService",
         "StartWorkflow",
-    ): _service.StartWorkflowService.start_workflow,
+    ): _services.StartWorkflowService.start_workflow,
     (
         "StartWorkflowService",
         "RestartWorkflow",
-    ): _service.StartWorkflowService.restart_workflow,
+    ): _services.StartWorkflowService.restart_workflow,
     (
         "StartWorkflowService",
         "CancelWorkflow",
-    ): _service.StartWorkflowService.cancel_workflow,
+    ): _services.StartWorkflowService.cancel_workflow,
 }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import service as _service
+from . import services as _services
 from .operations.send_message import (
     send_message_request as _ChatService_send_message_request,
 )
@@ -51,13 +51,13 @@ __nexus_operation_registry__ = {
     (
         "example.chat.v1.ChatService",
         "SendMessage",
-    ): _service.ChatService.send_message,
+    ): _services.ChatService.send_message,
     (
         "example.chat.v1.ChatService",
         "GetRoom",
-    ): _service.ChatService.get_room,
+    ): _services.ChatService.get_room,
     (
         "example.chat.v1.ChatService",
         "Ping",
-    ): _service.ChatService.ping,
+    ): _services.ChatService.ping,
 }

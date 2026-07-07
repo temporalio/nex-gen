@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
 
 import { User } from "../wit/user-service/resources.ts";
-import { userService } from "../wit/user-service/service.ts";
+import { userService } from "../wit/user-service/services.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(

@@ -2,6 +2,8 @@
 
 import type { Violation } from "../../json";
 import { ValidationError, isPlainObject, collect } from "../../json";
+import { parseBlock } from "../block/models";
+import type { Block } from "../block/models";
 
 // ---------------------------------------------------------------------------
 // Models.
@@ -168,18 +170,3 @@ export function serializePageMeta(value: PageMeta): unknown {
   }
   return out;
 }
-
-import type { Block, BlockStyle } from "../block/models";
-import {
-  parseBlock,
-  serializeBlock,
-  parseBlockStyle,
-  serializeBlockStyle,
-} from "../block/models";
-export type { Block, BlockStyle } from "../block/models";
-export {
-  parseBlock,
-  serializeBlock,
-  parseBlockStyle,
-  serializeBlockStyle,
-} from "../block/models";

@@ -10,7 +10,7 @@ from .models import (
     SendMessageInput,
     SendMessageOutput,
 )
-from .service import ChatService
+from .services import ChatService
 
 __all__ = [
     "GetRoomInput",

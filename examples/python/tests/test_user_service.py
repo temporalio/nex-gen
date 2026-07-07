@@ -14,7 +14,7 @@ OUTPUT_PATH = APP_ROOT.parent / "wit" / "user_service"
 
 import wit.user_service as user_service
 import wit.user_service.models as user_service_models
-import wit.user_service.service as user_service_service
+import wit.user_service.services as user_service_services
 from wit.user_service._resources import User
 
 GET_USER_OPERATION = user_service.__nexus_operation_registry__[
@@ -35,7 +35,7 @@ def user_resource(
     )
 
 
-@service_handler(service=user_service_service.UserService)
+@service_handler(service=user_service_services.UserService)
 class UserServiceHandler:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []

@@ -405,12 +405,12 @@ interface example-service {
         .unwrap();
 
         assert!(generated.files.contains_key(&PathBuf::from("models.py")));
-        assert!(generated.files.contains_key(&PathBuf::from("service.py")));
+        assert!(generated.files.contains_key(&PathBuf::from("services.py")));
         assert!(
             !generated
                 .files
                 .contains_key(&PathBuf::from("operations/example_operation.py"))
         );
-        assert!(generated.files[&PathBuf::from("service.py")].contains("class ExampleService"));
+        assert!(generated.files[&PathBuf::from("services.py")].contains("class ExampleService"));
     }
 }

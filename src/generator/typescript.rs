@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use heck::{ToKebabCase, ToLowerCamelCase, ToShoutySnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
@@ -2732,12 +2732,7 @@ fn render_module_files(
 ) -> Result<GeneratedFiles> {
     let support_source = support_source.filter(|source| !source.trim().is_empty());
     let support_exports = support_source.map(support_exports);
-    let module_model_names = model_fragments
-        .exported_names
-        .iter()
-        .cloned()
-        .chain(planned_module_import_names(api_plan).into_iter())
-        .collect::<BTreeSet<_>>();
+    let module_model_names = model_fragments.exported_names.iter().cloned().collect();
     let mut files = BTreeMap::<PathBuf, String>::new();
     files.insert(
         "index.ts".into(),
@@ -2763,21 +2758,24 @@ fn render_module_files(
             mode,
         ),
     );
-    files.insert(
-        "service.ts".into(),
-        render_service_module(
-            enums,
-            flags,
-            variants,
-            models,
-            &module_model_names,
-            services,
-            requirements,
-            language_imports,
-            !model_registrations.is_empty(),
-            mode == GenerationMode::NativeApi,
-        ),
-    );
+    if !services.is_empty() {
+        files.insert(
+            "services.ts".into(),
+            render_service_module(
+                enums,
+                flags,
+                variants,
+                models,
+                &module_model_names,
+                services,
+                requirements,
+                language_imports,
+                !model_registrations.is_empty(),
+                mode == GenerationMode::NativeApi,
+                api_plan,
+            ),
+        );
+    }
     if services.iter().any(|service| !service.resources.is_empty()) {
         files.insert(
             "resources.ts".into(),
@@ -2812,6 +2810,7 @@ fn render_module_files(
                         requirements,
                         language_imports,
                         support_exports.as_ref(),
+                        api_plan,
                     ),
                 );
             }
@@ -3073,7 +3072,7 @@ fn render_definitions_only_index_module(services: &[RenderedService<'_>]) -> Str
     output.push_str(GENERATED_HEADER);
     output.push_str("\n\n");
     if !services.is_empty() {
-        output.push_str("export * from './service';\n");
+        output.push_str("export * from './services';\n");
     }
     output.push_str("export type * from './models';\n");
     if services.iter().any(|service| !service.resources.is_empty()) {
@@ -3100,7 +3099,7 @@ fn render_index_module(services: &[RenderedService<'_>]) -> String {
         } else {
             body.push_str("export { ");
             body.push_str(service.name);
-            body.push_str(" } from './service';\n");
+            body.push_str(" } from './services';\n");
         }
     }
     let mut input_model_names = services
@@ -3290,11 +3289,6 @@ fn render_models_module(
         body.push('\n');
         body.push_str(&model_fragments.body);
     }
-    let module_model_exports = render_typescript_module_model_exports(api_plan);
-    if !module_model_exports.is_empty() {
-        body.push('\n');
-        body.push_str(&module_model_exports);
-    }
     if !model_registrations.is_empty() {
         body.push('\n');
         body.push_str(model_registrations);
@@ -3335,65 +3329,65 @@ fn render_models_module(
         }
         imports.push_str(&model_fragments.imports);
     }
+    render_cross_module_model_value_imports(
+        &mut imports,
+        &api_plan.module_path.to_path_buf(),
+        api_plan,
+        &body,
+    );
+    render_cross_module_model_type_imports(
+        &mut imports,
+        &api_plan.module_path.to_path_buf(),
+        api_plan,
+        &body,
+    );
     render_generated_module(imports, body)
 }
 
-fn planned_module_import_names(api_plan: &PlannedSpec) -> BTreeSet<String> {
-    api_plan
-        .data
-        .module_imports
-        .values()
-        .flat_map(|names| names.iter().cloned())
-        .collect()
-}
-
-fn render_typescript_module_model_exports(api_plan: &PlannedSpec) -> String {
-    let mut output = String::new();
-    for (module_path, names) in &api_plan.data.module_imports {
-        if names.is_empty() {
-            continue;
-        }
-        let module = typescript_relative_models_module(&api_plan.module_path, module_path);
-        output.push_str("import type { ");
-        output.push_str(&names.iter().cloned().collect::<Vec<_>>().join(", "));
-        output.push_str(" } from \"");
-        output.push_str(&module);
-        output.push_str("\";\n");
-        output.push_str("import { ");
-        output.push_str(
-            &names
-                .iter()
-                .flat_map(|name| [format!("parse{name}"), format!("serialize{name}")])
-                .collect::<Vec<_>>()
-                .join(", "),
-        );
-        output.push_str(" } from \"");
-        output.push_str(&module);
-        output.push_str("\";\n");
-        output.push_str("export type { ");
-        output.push_str(&names.iter().cloned().collect::<Vec<_>>().join(", "));
-        output.push_str(" } from \"");
-        output.push_str(&module);
-        output.push_str("\";\n");
-        output.push_str("export { ");
-        output.push_str(
-            &names
-                .iter()
-                .flat_map(|name| [format!("parse{name}"), format!("serialize{name}")])
-                .collect::<Vec<_>>()
-                .join(", "),
-        );
-        output.push_str(" } from \"");
-        output.push_str(&module);
-        output.push_str("\";\n");
-    }
-    output.trim_end().to_string()
-}
-
-fn typescript_relative_models_module(from: &ModulePath, to: &ModulePath) -> String {
-    let from_dir = from.to_path_buf();
+fn typescript_relative_models_module_from_dir(from_dir: &Path, to: &ModulePath) -> String {
     let target = to.to_path_buf().join("models");
-    relative_module_path(&from_dir, &target)
+    relative_module_path(from_dir, &target)
+}
+
+fn render_cross_module_model_type_imports(
+    output: &mut String,
+    source_dir: &Path,
+    api_plan: &PlannedSpec,
+    source: &str,
+) {
+    for (module_path, names) in &api_plan.data.module_imports {
+        let candidates = names.iter().cloned().collect::<Vec<_>>();
+        let used_names = used_import_names(source, &candidates);
+        if !used_names.is_empty() {
+            render_type_imports(
+                output,
+                &typescript_relative_models_module_from_dir(source_dir, module_path),
+                &used_names,
+            );
+        }
+    }
+}
+
+fn render_cross_module_model_value_imports(
+    output: &mut String,
+    source_dir: &Path,
+    api_plan: &PlannedSpec,
+    source: &str,
+) {
+    for (module_path, names) in &api_plan.data.module_imports {
+        let candidates = names
+            .iter()
+            .flat_map(|name| [format!("parse{name}"), format!("serialize{name}")])
+            .collect::<Vec<_>>();
+        let used_names = used_import_names(source, &candidates);
+        if !used_names.is_empty() {
+            render_value_imports(
+                output,
+                &typescript_relative_models_module_from_dir(source_dir, module_path),
+                &used_names,
+            );
+        }
+    }
 }
 
 fn relative_module_path(from_dir: &std::path::Path, target: &std::path::Path) -> String {
@@ -3431,6 +3425,7 @@ fn render_service_module(
     language_imports: &[LanguageImportSpec],
     has_model_registrations: bool,
     include_native_api: bool,
+    api_plan: &PlannedSpec,
 ) -> String {
     let mut body = String::new();
     for service in services {
@@ -3465,6 +3460,12 @@ fn render_service_module(
             &body,
             &model_type_names(enums, flags, variants, models, external_model_names),
         ),
+    );
+    render_cross_module_model_type_imports(
+        &mut imports,
+        &api_plan.module_path.to_path_buf(),
+        api_plan,
+        &body,
     );
     render_type_imports(
         &mut imports,
@@ -3539,6 +3540,12 @@ fn render_resources_module(
             &model_type_names(enums, flags, variants, models, external_model_names),
         ),
     );
+    render_cross_module_model_type_imports(
+        &mut imports,
+        &api_plan.module_path.to_path_buf(),
+        api_plan,
+        &body,
+    );
     render_support_imports(&mut imports, support_exports, "./support", &body);
     for service in services {
         for operation in &service.operations {
@@ -3567,6 +3574,7 @@ fn render_operation_module(
     _requirements: &TypeScriptRequirements,
     language_imports: &[LanguageImportSpec],
     support_exports: Option<&SupportExports>,
+    api_plan: &PlannedSpec,
 ) -> String {
     let mut body = String::new();
     render_operation_function(&mut body, service, operation);
@@ -3578,7 +3586,7 @@ fn render_operation_module(
         &[("workflow", "@temporalio/workflow")],
     );
     render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
-    render_value_imports(&mut imports, "../service", &[service.attr_name.clone()]);
+    render_value_imports(&mut imports, "../services", &[service.attr_name.clone()]);
     let mut model_values = model_to_wire_function_names(models);
     model_values.push("requiredField".to_string());
     model_values.sort();
@@ -3595,6 +3603,12 @@ fn render_operation_module(
             &body,
             &model_type_names(enums, flags, variants, models, external_model_names),
         ),
+    );
+    render_cross_module_model_type_imports(
+        &mut imports,
+        &api_plan.module_path.to_path_buf().join("operations"),
+        api_plan,
+        &body,
     );
     render_support_imports(&mut imports, support_exports, "../support", &body);
     let resources = used_import_names(&body, &resource_type_names(services));

@@ -9,7 +9,7 @@ import { nexusValue, payloadConverter } from "../nex-gen-runtime.ts";
 import type { RecordSyncRequest, SetProfileRequest } from "../wit/type-showcase/index.ts";
 import { UserCapability, UserStatus } from "../wit/type-showcase/models.ts";
 import { User } from "../wit/type-showcase/resources.ts";
-import { typeShowcase } from "../wit/type-showcase/service.ts";
+import { typeShowcase } from "../wit/type-showcase/services.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const wireFixtureDir = fileURLToPath(

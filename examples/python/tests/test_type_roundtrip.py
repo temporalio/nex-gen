@@ -15,7 +15,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 import wit.type_roundtrip as type_roundtrip
 import wit.type_roundtrip.models as type_roundtrip_models
-import wit.type_roundtrip.service as type_roundtrip_service
+import wit.type_roundtrip.services as type_roundtrip_services
 import wit.type_roundtrip._support as type_roundtrip_support
 
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "wit" / "type_roundtrip"
@@ -29,7 +29,7 @@ ACTIVITY_OPTIONS_OPERATION = type_roundtrip.__nexus_operation_registry__[
 ]
 
 
-@service_handler(service=type_roundtrip_service.TypeRoundtripService)
+@service_handler(service=type_roundtrip_services.TypeRoundtripService)
 class TypeRoundtripServiceHandler:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []

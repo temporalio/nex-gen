@@ -19,7 +19,7 @@ from typing_extensions import assert_type
 import pytest
 import wit.workflow_service as workflow_service
 import wit.workflow_service.models as workflow_service_models
-import wit.workflow_service.service as workflow_service_service
+import wit.workflow_service.services as workflow_service_services
 
 APP_ROOT = Path(__file__).resolve().parent
 OUTPUT_PATH = APP_ROOT.parent / "wit" / "workflow_service"
@@ -260,7 +260,7 @@ def build_full_signal_request(
     )
 
 
-@service_handler(service=workflow_service_service.WorkflowService)
+@service_handler(service=workflow_service_services.WorkflowService)
 class WorkflowServiceHandler:
     def __init__(self) -> None:
         self.calls: list[

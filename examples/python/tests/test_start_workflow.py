@@ -18,7 +18,7 @@ TASK_QUEUE = "demo-task-queue"
 
 import wit.start_workflow as start_workflow
 import wit.start_workflow.models as start_workflow_models
-import wit.start_workflow.service as start_workflow_service
+import wit.start_workflow.services as start_workflow_services
 from wit.start_workflow._resources import StartedWorkflow
 
 START_WORKFLOW_OPERATION = start_workflow.__nexus_operation_registry__[
@@ -39,7 +39,7 @@ class ExampleWorkflow:
         return customer_id
 
 
-@service_handler(service=start_workflow_service.StartWorkflowService)
+@service_handler(service=start_workflow_services.StartWorkflowService)
 class StartWorkflowServiceHandler:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []

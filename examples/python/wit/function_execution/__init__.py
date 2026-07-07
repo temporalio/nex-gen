@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import service as _service
+from . import services as _services
 from .operations.execute_function import execute_function
 from .operations.execute_counted_function import execute_counted_function
 from .operations.execute_named_function import execute_named_function
@@ -22,21 +22,21 @@ __nexus_operation_registry__ = {
     (
         "FunctionExecution",
         "ExecuteFunction",
-    ): _service.FunctionExecution.execute_function,
+    ): _services.FunctionExecution.execute_function,
     (
         "FunctionExecution",
         "ExecuteCountedFunction",
-    ): _service.FunctionExecution.execute_counted_function,
+    ): _services.FunctionExecution.execute_counted_function,
     (
         "FunctionExecution",
         "ExecuteNamedFunction",
-    ): _service.FunctionExecution.execute_named_function,
+    ): _services.FunctionExecution.execute_named_function,
     (
         "FunctionExecution",
         "ExecuteVarargsFunction",
-    ): _service.FunctionExecution.execute_varargs_function,
+    ): _services.FunctionExecution.execute_varargs_function,
     (
         "FunctionExecution",
         "ExecuteNamedVarargsFunction",
-    ): _service.FunctionExecution.execute_named_varargs_function,
+    ): _services.FunctionExecution.execute_named_varargs_function,
 }

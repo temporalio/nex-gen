@@ -1747,10 +1747,12 @@ fn generate_leaf(
     let namespace = dotnet_namespace(api_plan);
     let mut files = BTreeMap::<PathBuf, String>::new();
     files.insert("Models.cs".into(), generator.render_models_file(&namespace));
-    files.insert(
-        "Service.cs".into(),
-        generator.render_service_file(&namespace),
-    );
+    if !api_plan.services.is_empty() {
+        files.insert(
+            "Services.cs".into(),
+            generator.render_service_file(&namespace),
+        );
+    }
     if mode == GenerationMode::NativeApi
         && api_plan
             .services

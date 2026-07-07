@@ -2,7 +2,7 @@
 
 import * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
-import { typeRoundtripService } from "../service";
+import { typeRoundtripService } from "../services";
 import { activityOptionsToProto } from "../models";
 import type { ActivityOptions } from "../models";
 

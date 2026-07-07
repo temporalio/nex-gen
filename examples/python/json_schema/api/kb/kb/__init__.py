@@ -7,7 +7,7 @@ from .models import (
     GetPageInput,
     PutBlockOutput,
 )
-from . import service as _service
+from . import services as _services
 from .operations.get_page import (
     get_page_request as _KnowledgeBaseService_get_page_request,
 )
@@ -70,13 +70,13 @@ __nexus_operation_registry__ = {
     (
         "example.kb.v1.KnowledgeBaseService",
         "GetPage",
-    ): _service.KnowledgeBaseService.get_page,
+    ): _services.KnowledgeBaseService.get_page,
     (
         "example.kb.v1.KnowledgeBaseService",
         "PutBlock",
-    ): _service.KnowledgeBaseService.put_block,
+    ): _services.KnowledgeBaseService.put_block,
     (
         "example.kb.v1.KnowledgeBaseService",
         "GetCategoryTree",
-    ): _service.KnowledgeBaseService.get_category_tree,
+    ): _services.KnowledgeBaseService.get_category_tree,
 }

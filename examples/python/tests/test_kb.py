@@ -17,7 +17,7 @@ from json_schema.api.kb import Category as ApiCategory
 from json_schema.api.kb import KnowledgeBaseService
 from json_schema.api.kb import Page as ApiPage
 from json_schema.api.kb.kb import models as api_kb_models
-from json_schema.api.kb.kb import service as api_kb_service
+from json_schema.api.kb.kb import services as api_kb_services
 from json_schema.definitions.kb import Block
 from json_schema.definitions.kb import Category
 from json_schema.definitions.kb import Page
@@ -47,7 +47,7 @@ def roundtrip_fixture(name: str, model_type: type[typing.Any]) -> typing.Any:
     return model
 
 
-@service_handler(service=api_kb_service.KnowledgeBaseService)
+@service_handler(service=api_kb_services.KnowledgeBaseService)
 class KnowledgeBaseServiceHandler:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []

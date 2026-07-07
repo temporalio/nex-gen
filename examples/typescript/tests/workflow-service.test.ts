@@ -6,7 +6,7 @@ import * as nexus from "nexus-rpc";
 
 import { signalWithStartWorkflow } from "../wit/workflow-service/index.ts";
 import type { SignalWithStartWorkflowRequest } from "../wit/workflow-service/index.ts";
-import { workflowService } from "../wit/workflow-service/service.ts";
+import { workflowService } from "../wit/workflow-service/services.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
 const workflowsPath = fileURLToPath(

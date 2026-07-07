@@ -508,7 +508,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
         "outputType: \"temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionResponse\""
     ));
     assert!(rendered.contains("export type { SignalWithStartWorkflowRequest } from './models';"));
-    assert!(!rendered.contains("export { WorkflowService } from './service';"));
+    assert!(!rendered.contains("export { WorkflowService } from './services';"));
     assert!(!rendered.contains("export type { SignalWithStartWorkflowResponse"));
     assert!(rendered.contains("request: SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>,"));
     assert!(rendered.contains("const client = workflow.createNexusServiceClient({"));

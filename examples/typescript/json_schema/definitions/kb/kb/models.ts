@@ -139,36 +139,3 @@ export function serializePutBlockOutput(value: PutBlockOutput): unknown {
   out.revision = value.revision;
   return out;
 }
-
-import type { Block, BlockStyle } from "../content/block/models";
-import {
-  parseBlock,
-  serializeBlock,
-  parseBlockStyle,
-  serializeBlockStyle,
-} from "../content/block/models";
-export type { Block, BlockStyle } from "../content/block/models";
-export {
-  parseBlock,
-  serializeBlock,
-  parseBlockStyle,
-  serializeBlockStyle,
-} from "../content/block/models";
-import type { Page, PageMeta } from "../content/page/models";
-import {
-  parsePage,
-  serializePage,
-  parsePageMeta,
-  serializePageMeta,
-} from "../content/page/models";
-export type { Page, PageMeta } from "../content/page/models";
-export {
-  parsePage,
-  serializePage,
-  parsePageMeta,
-  serializePageMeta,
-} from "../content/page/models";
-import type { Category } from "../tree/category/models";
-import { parseCategory, serializeCategory } from "../tree/category/models";
-export type { Category } from "../tree/category/models";
-export { parseCategory, serializeCategory } from "../tree/category/models";

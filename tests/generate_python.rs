@@ -365,7 +365,7 @@ interface example-service {
     );
     assert!(output_path.join("__init__.py").is_file());
     assert!(output_path.join("models.py").is_file());
-    assert!(output_path.join("service.py").is_file());
+    assert!(output_path.join("services.py").is_file());
     assert!(!output_path.join("operations/example_operation.py").exists());
 
     fs::remove_dir_all(temp_dir).unwrap();

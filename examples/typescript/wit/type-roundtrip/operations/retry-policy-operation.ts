@@ -3,7 +3,7 @@
 import type * as common from "@temporalio/common";
 import * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
-import { typeRoundtripService } from "../service";
+import { typeRoundtripService } from "../services";
 import { retryPolicyToProto } from "../support";
 
 /**

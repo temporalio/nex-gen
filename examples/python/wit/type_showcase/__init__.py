@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import service as _service
+from . import services as _services
 from .operations.get_user import get_user
 from ._resources.user import update_email
 from ._resources.user import rename
@@ -24,25 +24,25 @@ __nexus_operation_registry__ = {
     (
         "TypeShowcase",
         "GetUser",
-    ): _service.TypeShowcase.get_user,
+    ): _services.TypeShowcase.get_user,
     (
         "TypeShowcase",
         "UpdateEmail",
-    ): _service.TypeShowcase.update_email,
+    ): _services.TypeShowcase.update_email,
     (
         "TypeShowcase",
         "Rename",
-    ): _service.TypeShowcase.rename,
+    ): _services.TypeShowcase.rename,
     (
         "TypeShowcase",
         "SetProfile",
-    ): _service.TypeShowcase.set_profile,
+    ): _services.TypeShowcase.set_profile,
     (
         "TypeShowcase",
         "RecordSync",
-    ): _service.TypeShowcase.record_sync,
+    ): _services.TypeShowcase.record_sync,
     (
         "TypeShowcase",
         "Deactivate",
-    ): _service.TypeShowcase.deactivate,
+    ): _services.TypeShowcase.deactivate,
 }

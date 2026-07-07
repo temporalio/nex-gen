@@ -2,7 +2,7 @@
 
 import * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
-import { startWorkflowService } from "../service";
+import { startWorkflowService } from "../services";
 import { cancelWorkflowRequestToProto } from "../models";
 import type { CancelWorkflowRequest } from "../models";
 

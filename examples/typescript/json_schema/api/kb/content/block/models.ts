@@ -2,6 +2,8 @@
 
 import type { Violation } from "../../json";
 import { ValidationError, isPlainObject, collect } from "../../json";
+import { parsePage, serializePage } from "../page/models";
+import type { Page } from "../page/models";
 
 export function requiredField<T>(
   value: T | null | undefined,
@@ -207,18 +209,3 @@ export function serializeBlockStyle(value: BlockStyle): unknown {
   }
   return out;
 }
-
-import type { Page, PageMeta } from "../page/models";
-import {
-  parsePage,
-  serializePage,
-  parsePageMeta,
-  serializePageMeta,
-} from "../page/models";
-export type { Page, PageMeta } from "../page/models";
-export {
-  parsePage,
-  serializePage,
-  parsePageMeta,
-  serializePageMeta,
-} from "../page/models";

@@ -26,7 +26,7 @@ TYPESCRIPT_RECORD_SYNC_FIXTURE = (
 
 import wit.type_showcase as type_showcase
 import wit.type_showcase.models as type_showcase_models
-import wit.type_showcase.service as type_showcase_service
+import wit.type_showcase.services as type_showcase_services
 from wit.type_showcase._resources import User
 
 GET_USER_OPERATION = type_showcase.__nexus_operation_registry__[
@@ -135,7 +135,7 @@ def payload_json(payloads: Payloads) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-@service_handler(service=type_showcase_service.TypeShowcase)
+@service_handler(service=type_showcase_services.TypeShowcase)
 class TypeShowcaseHandler:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []

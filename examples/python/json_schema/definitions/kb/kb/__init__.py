@@ -7,7 +7,7 @@ from .models import (
     GetPageInput,
     PutBlockOutput,
 )
-from .service import KnowledgeBaseService
+from .services import KnowledgeBaseService
 
 __all__ = [
     "GetCategoryTreeInput",
