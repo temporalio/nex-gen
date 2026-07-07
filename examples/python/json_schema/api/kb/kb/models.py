@@ -7,19 +7,8 @@ import pydantic
 
 from .._json import (
     SpecInt,
-    _emit_set_fields,
+    emit_set_fields,
 )
-
-if typing.TYPE_CHECKING:
-    from ..content.block.models import (
-        Block,
-        BlockStyle,
-    )
-    from ..content.page.models import (
-        Page,
-        PageMeta,
-    )
-    from ..tree.category.models import Category
 
 
 class GetCategoryTreeInput(pydantic.BaseModel):
@@ -34,7 +23,7 @@ class GetCategoryTreeInput(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        return emit_set_fields(self, handler)
 
 
 class GetPageInput(pydantic.BaseModel):
@@ -49,7 +38,7 @@ class GetPageInput(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        return emit_set_fields(self, handler)
 
 
 class PutBlockOutput(pydantic.BaseModel):
@@ -66,4 +55,9 @@ class PutBlockOutput(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        return emit_set_fields(self, handler)
+
+
+_ = GetCategoryTreeInput.model_rebuild()
+_ = GetPageInput.model_rebuild()
+_ = PutBlockOutput.model_rebuild()

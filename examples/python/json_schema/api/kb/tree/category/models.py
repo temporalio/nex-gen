@@ -6,8 +6,8 @@ import typing
 import pydantic
 
 from ..._json import (
-    _emit_set_fields,
-    _reject_explicit_null,
+    emit_set_fields,
+    reject_explicit_null,
 )
 
 
@@ -40,14 +40,14 @@ class Category(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return _reject_explicit_null(cls, data, handler)
+        return reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        return emit_set_fields(self, handler)
 
 
 class Palette(pydantic.BaseModel):
@@ -66,7 +66,7 @@ class Palette(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        return emit_set_fields(self, handler)
 
 
 _ = Category.model_rebuild()

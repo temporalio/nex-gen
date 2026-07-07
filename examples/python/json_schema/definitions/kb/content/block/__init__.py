@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from .models import (
-    Block,
-    BlockStyle,
-)
+from .models import BlockStyle
 
 __all__ = [
-    "Block",
     "BlockStyle",
 ]

@@ -3,4 +3,4 @@
 from .content import *  # noqa: F401,F403
 from .kb import *  # noqa: F401,F403
 from .tree import *  # noqa: F401,F403
-from . import _rebuild as _rebuild  # noqa: F401
+from ._models import *  # noqa: F401,F403

@@ -15,8 +15,8 @@ import {
   serializeRoom,
   serializeSendMessageInput,
   serializeSendMessageOutput,
-  ValidationError,
 } from "../json_schema/definitions/chat/models.ts";
+import { ValidationError } from "../json_schema/definitions/chat/json.ts";
 
 const wireFixtureDir = new URL("../../wire/json_schema/chat/", import.meta.url);
 

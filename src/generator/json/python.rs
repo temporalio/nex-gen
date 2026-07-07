@@ -9,11 +9,14 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::python::{
-    PythonImports, RenderedModelFragments, WireValueConversion, python_field_name,
-    python_string_literal, render_python_docstring,
+    PythonImports, PythonModelHoists, RenderedModelFragments, WireValueConversion,
+    module_common_prefix_len, python_field_name, python_string_literal,
+    render_generated_file_header, render_named_python_import, render_optional_python_imports,
+    render_python_docstring,
 };
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
+use crate::workspace::{ApiSpecBranch, ApiSpecNode};
 
 #[derive(Debug, Deserialize, Default)]
 struct Schema {
@@ -43,6 +46,7 @@ pub(in crate::generator) fn model_type_ref(json_type: &PlannedJsonType) -> Strin
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend {
     json_models: Vec<PlannedJsonType>,
+    hoisted_json_models: Vec<PlannedJsonType>,
     tree_leaf: bool,
     runtime_import_module: String,
 }
@@ -58,7 +62,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         } else {
             "._json".to_string()
         };
-        self.json_models = api_plan
+        let mut json_models = api_plan
             .external_types()
             .map(|(_, binding)| binding)
             .filter_map(|binding| match &binding.external_type {
@@ -66,6 +70,8 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
                 _ => None,
             })
             .collect();
+        self.json_models = std::mem::take(&mut json_models);
+        self.hoisted_json_models = Vec::new();
         Ok(())
     }
 
@@ -108,6 +114,282 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
     }
 }
 
+impl ModelBackend {
+    pub(in crate::generator) fn prepare_with_hoists(
+        &mut self,
+        api_plan: &PlannedSpec,
+        hoists: &PythonModelHoists,
+    ) -> Result<()> {
+        self.prepare(api_plan)?;
+        let mut local_models = Vec::new();
+        let mut hoisted_models = Vec::new();
+        for model in std::mem::take(&mut self.json_models) {
+            if hoists.is_hoisted(&api_plan.module_path, &model.model_name) {
+                hoisted_models.push(model);
+            } else {
+                local_models.push(model);
+            }
+        }
+        self.json_models = local_models;
+        self.hoisted_json_models = hoisted_models;
+        Ok(())
+    }
+
+    pub(in crate::generator) fn is_hoisted(&self, json_type: &PlannedJsonType) -> bool {
+        self.hoisted_json_models
+            .iter()
+            .any(|model| model.full_name == json_type.full_name)
+    }
+}
+
+#[derive(Debug, Default)]
+struct JsonModelHoistPlan {
+    hoisted: BTreeMap<ModulePath, BTreeSet<String>>,
+    hoisted_models: Vec<PlannedJsonType>,
+    dependency_imports: BTreeMap<ModulePath, BTreeSet<String>>,
+}
+
+impl JsonModelHoistPlan {
+    fn for_tree(branch: &ApiSpecBranch<PlannedTypeFamily>) -> Self {
+        let mut models = BTreeMap::<String, (ModulePath, PlannedJsonType)>::new();
+        collect_tree_json_models(branch, &mut models);
+
+        let mut graph = BTreeMap::<String, BTreeSet<String>>::new();
+        for (full_name, (_, model)) in &models {
+            let mut refs = BTreeSet::new();
+            collect_json_schema_model_refs(&model.schema, &models, &mut refs);
+            graph.insert(full_name.clone(), refs);
+        }
+
+        let mut hoisted_full_names = BTreeSet::new();
+        for (source_name, (source_module, _)) in &models {
+            for target_name in graph.get(source_name).into_iter().flatten() {
+                let Some((target_module, _)) = models.get(target_name) else {
+                    continue;
+                };
+                if source_module == target_module {
+                    continue;
+                }
+                if json_model_can_reach(target_name, source_name, &graph, &mut BTreeSet::new()) {
+                    hoisted_full_names.insert(source_name.clone());
+                    hoisted_full_names.insert(target_name.clone());
+                }
+            }
+        }
+
+        let mut hoisted = BTreeMap::<ModulePath, BTreeSet<String>>::new();
+        let mut hoisted_models = Vec::new();
+        for full_name in &hoisted_full_names {
+            let Some((module_path, model)) = models.get(full_name) else {
+                continue;
+            };
+            hoisted
+                .entry(module_path.clone())
+                .or_default()
+                .insert(model.model_name.clone());
+            hoisted_models.push(model.clone());
+        }
+
+        let mut dependency_imports = BTreeMap::<ModulePath, BTreeSet<String>>::new();
+        for full_name in &hoisted_full_names {
+            for target_name in graph.get(full_name).into_iter().flatten() {
+                if hoisted_full_names.contains(target_name) {
+                    continue;
+                }
+                let Some((module_path, model)) = models.get(target_name) else {
+                    continue;
+                };
+                dependency_imports
+                    .entry(module_path.clone())
+                    .or_default()
+                    .insert(model.model_name.clone());
+            }
+        }
+
+        Self {
+            hoisted,
+            hoisted_models,
+            dependency_imports,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.hoisted_models.is_empty()
+    }
+}
+
+pub(in crate::generator) fn tree_model_hoists(
+    branch: &ApiSpecBranch<PlannedTypeFamily>,
+) -> Result<PythonModelHoists> {
+    let plan = JsonModelHoistPlan::for_tree(branch);
+    let mut hoists = PythonModelHoists::default();
+    if plan.is_empty() {
+        return Ok(hoists);
+    }
+    for (module_path, names) in &plan.hoisted {
+        hoists.add_module_hoists(module_path.clone(), names.clone());
+    }
+    hoists.add_file(
+        PathBuf::from("_models.py"),
+        render_hoisted_models_module(&plan)?,
+    );
+    Ok(hoists)
+}
+
+fn render_hoisted_models_module(hoists: &JsonModelHoistPlan) -> Result<String> {
+    let models = hoists.hoisted_models.iter().collect::<Vec<_>>();
+    let model_fragments = render_external_models(models.as_slice(), "._json")?;
+    let mut body = model_fragments.body.clone();
+    if !model_fragments.registrations.is_empty() {
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str(&model_fragments.registrations);
+    }
+
+    let mut output = String::new();
+    render_generated_file_header(&mut output);
+    output.push('\n');
+    let wrote_imports =
+        render_optional_python_imports(&mut output, &body, &model_fragments.module_imports, &[]);
+    let mut wrote_relative_imports = false;
+    for (module, names) in &model_fragments.relative_imports {
+        if names.is_empty() {
+            continue;
+        }
+        if wrote_imports || wrote_relative_imports {
+            output.push('\n');
+        }
+        render_named_python_import(
+            &mut output,
+            module,
+            &names.iter().cloned().collect::<Vec<_>>(),
+        );
+        wrote_relative_imports = true;
+    }
+    let mut wrote_dependency_imports = false;
+    for (module_path, names) in &hoists.dependency_imports {
+        if names.is_empty() {
+            continue;
+        }
+        if wrote_imports || wrote_relative_imports || wrote_dependency_imports {
+            output.push('\n');
+        }
+        render_named_python_import(
+            &mut output,
+            &python_relative_models_module(&ModulePath::default(), module_path),
+            &names.iter().cloned().collect::<Vec<_>>(),
+        );
+        wrote_dependency_imports = true;
+    }
+
+    if !body.is_empty() {
+        output.push('\n');
+        output.push('\n');
+        output.push_str(&body);
+    }
+    output.push_str("\n\n__all__ = [\n");
+    for name in hoists
+        .hoisted_models
+        .iter()
+        .map(|model| &model.model_name)
+        .collect::<BTreeSet<_>>()
+    {
+        output.push_str("    ");
+        output.push_str(&python_string_literal(name));
+        output.push_str(",\n");
+    }
+    output.push_str("]\n");
+    Ok(output)
+}
+
+fn collect_tree_json_models(
+    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    models: &mut BTreeMap<String, (ModulePath, PlannedJsonType)>,
+) {
+    for node in branch.children.values() {
+        match node {
+            ApiSpecNode::Leaf(leaf) => {
+                for binding in leaf.spec.external_types().map(|(_, binding)| binding) {
+                    if let ExternalTypeSpec::Json(json_type) = &binding.external_type {
+                        models.insert(
+                            json_type.full_name.clone(),
+                            (leaf.module_path.clone(), json_type.clone()),
+                        );
+                    }
+                }
+            }
+            ApiSpecNode::Branch(branch) => collect_tree_json_models(branch, models),
+        }
+    }
+}
+
+fn collect_json_schema_model_refs(
+    value: &serde_json::Value,
+    models: &BTreeMap<String, (ModulePath, PlannedJsonType)>,
+    refs: &mut BTreeSet<String>,
+) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if let Some(reference) = object.get("$ref").and_then(serde_json::Value::as_str)
+                && let Some(full_name) = json_schema_ref_full_name(reference)
+                && models.contains_key(&full_name)
+            {
+                refs.insert(full_name);
+            }
+            for value in object.values() {
+                collect_json_schema_model_refs(value, models, refs);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_json_schema_model_refs(value, models, refs);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn json_schema_ref_full_name(reference: &str) -> Option<String> {
+    let fragment = reference
+        .split_once('#')
+        .map(|(_, fragment)| fragment)
+        .unwrap_or(reference);
+    let name = fragment.strip_prefix("/$defs/")?;
+    Some(name.replace("~1", "/").replace("~0", "~"))
+}
+
+fn json_model_can_reach(
+    source: &str,
+    target: &str,
+    graph: &BTreeMap<String, BTreeSet<String>>,
+    visited: &mut BTreeSet<String>,
+) -> bool {
+    if source == target {
+        return true;
+    }
+    if !visited.insert(source.to_string()) {
+        return false;
+    }
+    graph.get(source).is_some_and(|next| {
+        next.iter()
+            .any(|name| json_model_can_reach(name, target, graph, visited))
+    })
+}
+
+fn python_relative_models_module(from: &ModulePath, to: &ModulePath) -> String {
+    let common = module_common_prefix_len(&from.0, &to.0);
+    let dot_count = from.0.len().saturating_sub(common) + 1;
+    let mut module = ".".repeat(dot_count);
+    let rest = to.0[common..]
+        .iter()
+        .map(|segment| segment.replace('-', "_"))
+        .chain(std::iter::once("models".to_string()))
+        .collect::<Vec<_>>();
+    module.push_str(&rest.join("."));
+    module
+}
+
 pub(in crate::generator) fn render_support_file() -> String {
     render_json_runtime_module()
 }
@@ -116,7 +398,7 @@ fn root_python_runtime_module(module_path: &ModulePath) -> String {
     format!("{}{}", ".".repeat(module_path.0.len() + 1), "_json")
 }
 
-fn render_external_models(
+pub(in crate::generator) fn render_external_models(
     json_models: &[&PlannedJsonType],
     runtime_import_module: &str,
 ) -> Result<RenderedModelFragments> {
@@ -157,10 +439,10 @@ fn render_external_models(
         runtime_imports.insert("SpecInt".to_string());
     }
     if needs_optional_non_nullable_helper {
-        runtime_imports.insert("_reject_explicit_null".to_string());
+        runtime_imports.insert("reject_explicit_null".to_string());
     }
     if needs_set_fields_helper {
-        runtime_imports.insert("_emit_set_fields".to_string());
+        runtime_imports.insert("emit_set_fields".to_string());
     }
     if !runtime_imports.is_empty() {
         relative_imports.insert(runtime_import_module.to_string(), runtime_imports);
@@ -414,7 +696,7 @@ fn render_typed_map_value_validator(output: &mut String, value_schema: &Schema) 
 }
 
 fn render_optional_non_nullable_helper(output: &mut String) {
-    output.push_str("def _reject_explicit_null(\n");
+    output.push_str("def reject_explicit_null(\n");
     output.push_str("    cls: type[pydantic.BaseModel],\n");
     output.push_str("    data: object,\n");
     output.push_str("    handler: typing.Callable[[object], typing.Any],\n");
@@ -471,7 +753,7 @@ fn render_optional_non_nullable_helper(output: &mut String) {
 }
 
 fn render_set_fields_helper(output: &mut String) {
-    output.push_str("def _emit_set_fields(\n");
+    output.push_str("def emit_set_fields(\n");
     output.push_str("    model: pydantic.BaseModel,\n");
     output.push_str("    handler: typing.Callable[[pydantic.BaseModel], typing.Any],\n");
     output.push_str(") -> dict[str, object]:\n");
@@ -560,7 +842,7 @@ fn render_optional_non_nullable_validator(output: &mut String, fields: &BTreeSet
     output.push_str("        data: object,\n");
     output.push_str("        handler: typing.Callable[[object], typing.Any],\n");
     output.push_str("    ) -> typing.Any:\n");
-    output.push_str("        return _reject_explicit_null(cls, data, handler)\n");
+    output.push_str("        return reject_explicit_null(cls, data, handler)\n");
 }
 
 fn render_set_fields_serializer(output: &mut String) {
@@ -569,7 +851,7 @@ fn render_set_fields_serializer(output: &mut String) {
     output.push_str("        self,\n");
     output.push_str("        handler: typing.Callable[[pydantic.BaseModel], typing.Any],\n");
     output.push_str("    ) -> dict[str, object]:\n");
-    output.push_str("        return _emit_set_fields(self, handler)\n");
+    output.push_str("        return emit_set_fields(self, handler)\n");
 }
 
 fn render_field_expr(

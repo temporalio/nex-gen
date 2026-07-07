@@ -2,12 +2,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nex_gen::generate_to_string_with_inputs;
 
 const WORKFLOW_SERVICE_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_SHOWCASE_EXAMPLE_ID: &str = "type-showcase";
+static DOTNET_COMMAND_LOCK: Mutex<()> = Mutex::new(());
 
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -23,6 +25,16 @@ fn linked_inputs_path(root: &Path) -> PathBuf {
 
 fn dotnet_root(root: &Path) -> PathBuf {
     root.join("examples/dotnet")
+}
+
+fn dotnet_command() -> (MutexGuard<'static, ()>, Command) {
+    let guard = DOTNET_COMMAND_LOCK.lock().unwrap();
+    let mut command = Command::new("dotnet");
+    command
+        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        .env("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "1")
+        .env("DOTNET_NOLOGO", "1");
+    (guard, command)
 }
 
 fn input_path(root: &Path, example_id: &str) -> PathBuf {
@@ -276,7 +288,8 @@ fn dotnet_example_project_builds() {
         format!("-p:BaseIntermediateOutputPath={base_intermediate_output_path}");
     let base_output_arg = format!("-p:BaseOutputPath={base_output_path}");
 
-    let output = Command::new("dotnet")
+    let (_dotnet_guard, mut command) = dotnet_command();
+    let output = command
         .current_dir(dotnet_root(&root))
         .args([
             "build",
@@ -302,7 +315,8 @@ fn dotnet_example_project_builds() {
 #[test]
 fn dotnet_json_schema_runtime_checks_pass() {
     let root = project_root();
-    let output = Command::new("dotnet")
+    let (_dotnet_guard, mut command) = dotnet_command();
+    let output = command
         .current_dir(dotnet_root(&root))
         .args([
             "test",

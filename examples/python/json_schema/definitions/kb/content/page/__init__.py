@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from .models import (
-    Page,
-    PageMeta,
-)
+from .models import PageMeta
 
 __all__ = [
-    "Page",
     "PageMeta",
 ]

@@ -7,57 +7,9 @@ import pydantic
 
 from ..._json import (
     SpecInt,
-    _emit_set_fields,
-    _reject_explicit_null,
+    emit_set_fields,
+    reject_explicit_null,
 )
-
-if typing.TYPE_CHECKING:
-    from ..block.models import (
-        Block,
-        BlockStyle,
-    )
-
-
-class Page(pydantic.BaseModel):
-    """A page. One half of the Page <-> Block cross-file cycle. Because the cycle spans two
-    input files, Page and Block hoist together into Python's _recursive.py; the
-    non-cyclic PageMeta helper stays in this module.
-    """
-
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
-
-    page_id: str = pydantic.Field(alias="pageId")
-
-    title: str = pydantic.Field()
-
-    meta: PageMeta = pydantic.Field()
-
-    blocks: list[Block] | None = pydantic.Field(default=None)
-    """Ordered content blocks. Cross-file `$ref` to block.json (same directory); the array
-    is the terminating edge of the cycle.
-    """
-
-    _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
-        {"blocks"}
-    )
-
-    @pydantic.model_validator(mode="wrap")
-    @classmethod
-    def _reject_null(
-        cls,
-        data: object,
-        handler: typing.Callable[[object], typing.Any],
-    ) -> typing.Any:
-        return _reject_explicit_null(cls, data, handler)
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
 
 
 class PageMeta(pydantic.BaseModel):
@@ -84,11 +36,14 @@ class PageMeta(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return _reject_explicit_null(cls, data, handler)
+        return reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        return emit_set_fields(self, handler)
+
+
+_ = PageMeta.model_rebuild()

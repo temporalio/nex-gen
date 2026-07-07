@@ -16,12 +16,14 @@ import typing
 
 if typing.TYPE_CHECKING:
     import temporalio.workflow
-    from .models import (
+    from .._models import (
         Block,
-        Category,
+        Page,
+    )
+    from ..tree.category.models import Category
+    from .models import (
         GetCategoryTreeInput,
         GetPageInput,
-        Page,
         PutBlockOutput,
     )
 

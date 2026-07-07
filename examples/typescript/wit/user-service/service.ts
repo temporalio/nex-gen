@@ -4,11 +4,31 @@ import "./models";
 import * as nexus from "nexus-rpc";
 import type { GetUserRequest, UpdateEmailRequest } from "./models";
 import type { User } from "./resources";
+import { getUserRequest as userService_getUserRequest } from "./operations/get-user";
+import { updateEmailRequest as userService_updateEmailRequest } from "./operations/update-email";
 
 export const userService = nexus.service("UserService", {
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
 });
+
+export class UserService {
+  public constructor(private readonly endpoint: string) {}
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async getUser(request: GetUserRequest): Promise<User> {
+    return await userService_getUserRequest(this.endpoint, request);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async updateEmail(request: UpdateEmailRequest): Promise<User> {
+    return await userService_updateEmailRequest(this.endpoint, request);
+  }
+}
 
 export const operationRegistry = [
   {

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import temporalio.workflow
 
-from ..models import GetCategoryTreeInput
 from ...tree.category.models import Category
+from ..models import GetCategoryTreeInput
 
 
 async def get_category_tree_request(

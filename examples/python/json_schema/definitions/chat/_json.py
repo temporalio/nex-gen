@@ -34,7 +34,7 @@ SpecInt: typing.TypeAlias = typing.Annotated[
 ]
 
 
-def _reject_explicit_null(
+def reject_explicit_null(
     cls: type[pydantic.BaseModel],
     data: object,
     handler: typing.Callable[[object], typing.Any],
@@ -85,7 +85,7 @@ def _reject_explicit_null(
     return instance
 
 
-def _emit_set_fields(
+def emit_set_fields(
     model: pydantic.BaseModel,
     handler: typing.Callable[[pydantic.BaseModel], typing.Any],
 ) -> dict[str, object]:

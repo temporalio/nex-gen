@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import temporalio.workflow
 
+from ..._models import Block
 from ..models import PutBlockOutput
-from ...content.block.models import Block
 
 
 async def put_block_request(

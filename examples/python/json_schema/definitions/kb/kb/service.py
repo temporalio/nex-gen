@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
+from .._models import (
+    Block,
+    Page,
+)
+from ..tree.category.models import Category
 from .models import (
     GetCategoryTreeInput,
     GetPageInput,
     PutBlockOutput,
 )
-from ..content.block.models import Block
-from ..content.page.models import Page
-from ..tree.category.models import Category
 
 
 @service(name="example.kb.v1.KnowledgeBaseService")

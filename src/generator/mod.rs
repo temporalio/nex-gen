@@ -18,7 +18,7 @@ use crate::planning::{
 use crate::resources::ensure_unique_resource_names;
 use crate::spec::{ApiSpec, RecordSpec};
 use crate::validation::validate_external_type_bindings;
-use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
+use crate::workspace::{ApiSpecNode, ApiSpecTree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedOutputLayout {
@@ -143,37 +143,13 @@ pub fn generate_files_with_mode(
     support: &SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
-    validate_external_type_bindings(&spec, descriptors, language)?;
-    ensure_unique_resource_names(&spec)?;
-    let support_fragments = if support.fragments.is_empty() {
-        spec.support.fragments_for_language(language).to_vec()
-    } else {
-        support.fragments.clone()
-    };
-    let plan = build_api_plan_with_mode(spec, descriptors, planning_mode(mode))?;
-    generate_files_from_plan(language, plan, &support_fragments, mode)
-}
-
-fn generate_files_from_plan(
-    language: Language,
-    plan: PlannedSpec,
-    support_fragments: &[crate::spec::SupportFragmentSpec],
-    mode: GenerationMode,
-) -> Result<GeneratedFiles> {
-    let warnings = if mode == GenerationMode::NativeApi {
-        generation_warnings(&plan)
-    } else {
-        Vec::new()
-    };
-
-    let mut generated = match language {
-        Language::Dotnet => dotnet::generate(&plan, support_fragments, mode),
-        Language::Python => python::generate(&plan, support_fragments, mode),
-        Language::TypeScript => typescript::generate(&plan, support_fragments, mode),
-        language => Err(Error::UnsupportedLanguage { language }),
-    }?;
-    generated.warnings = warnings;
-    Ok(generated)
+    generate_files_for_tree_with_mode(
+        language,
+        ApiSpecTree::single(spec),
+        descriptors,
+        support,
+        mode,
+    )
 }
 
 pub fn generate_files_for_tree_with_mode(
@@ -183,68 +159,24 @@ pub fn generate_files_for_tree_with_mode(
     support: &SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
-    match &tree.root {
+    validate_tree_specs(&tree.root, descriptors, language)?;
+    let planned_tree = match tree.root {
         ApiSpecNode::Leaf(leaf) => {
-            generate_files_with_mode(language, leaf.spec.clone(), descriptors, support, mode)
+            let planned = build_api_plan_with_mode(leaf.spec, descriptors, planning_mode(mode))?;
+            ApiSpecTree {
+                root: ApiSpecNode::Leaf(crate::workspace::ApiSpecLeaf {
+                    module_path: leaf.module_path,
+                    source_root: leaf.source_root,
+                    source_path: leaf.source_path,
+                    spec: planned,
+                }),
+            }
         }
         ApiSpecNode::Branch(_) => {
-            validate_tree_specs(&tree.root, descriptors, language)?;
-            let planned_tree =
-                build_api_plans_for_tree_with_mode(tree, descriptors, planning_mode(mode))?;
-            let mut files = BTreeMap::new();
-            let mut warnings = Vec::new();
-            let ApiSpecNode::Branch(branch) = planned_tree.root else {
-                unreachable!("planned tree root should stay a branch");
-            };
-            insert_branch_index_files(language, &branch, &mut files)?;
-            insert_tree_support_files(language, &branch, &mut files)?;
-            if language == Language::Python {
-                let path = PathBuf::from("_rebuild.py");
-                if files
-                    .insert(
-                        path.clone(),
-                        python::render_tree_model_rebuild_module(&branch),
-                    )
-                    .is_some()
-                {
-                    return Err(Error::GeneratedFileConflict { path });
-                }
-            }
-            for node in branch.children.into_values() {
-                generate_planned_tree_node(
-                    language,
-                    node,
-                    support,
-                    mode,
-                    &mut files,
-                    &mut warnings,
-                )?;
-            }
-            Ok(GeneratedFiles {
-                layout: GeneratedOutputLayout::Directory,
-                files,
-                warnings,
-            })
+            build_api_plans_for_tree_with_mode(tree, descriptors, planning_mode(mode))?
         }
-    }
-}
-
-fn insert_tree_support_files(
-    language: Language,
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
-    files: &mut BTreeMap<PathBuf, String>,
-) -> Result<()> {
-    let support_files = match language {
-        Language::Python => python::render_tree_support_files(branch),
-        Language::TypeScript => typescript::render_tree_support_files(branch),
-        _ => BTreeMap::new(),
     };
-    for (path, contents) in support_files {
-        if files.insert(path.clone(), contents).is_some() {
-            return Err(Error::GeneratedFileConflict { path });
-        }
-    }
-    Ok(())
+    generate_files_from_planned_tree(language, &planned_tree, support, mode)
 }
 
 fn validate_tree_specs(
@@ -266,104 +198,24 @@ fn validate_tree_specs(
     }
 }
 
-fn generate_planned_tree_node(
+fn generate_files_from_planned_tree(
     language: Language,
-    node: ApiSpecNode<PlannedTypeFamily>,
+    tree: &ApiSpecTree<PlannedTypeFamily>,
     support: &SupportFiles,
     mode: GenerationMode,
-    files: &mut BTreeMap<PathBuf, String>,
-    warnings: &mut Vec<String>,
-) -> Result<()> {
-    match node {
-        ApiSpecNode::Leaf(leaf) => {
-            insert_planned_leaf_generated_files(language, leaf, support, mode, files, warnings)
-        }
-        ApiSpecNode::Branch(branch) => {
-            insert_branch_index_files(language, &branch, files)?;
-            for node in branch.children.into_values() {
-                generate_planned_tree_node(language, node, support, mode, files, warnings)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-fn insert_branch_index_files(
-    language: Language,
-    branch: &crate::workspace::ApiSpecBranch<impl crate::spec::TypeNameFamily>,
-    files: &mut BTreeMap<PathBuf, String>,
-) -> Result<()> {
-    let Some((path, contents)) = branch_index_file(language, branch) else {
-        return Ok(());
-    };
-    if files.insert(path.clone(), contents).is_some() {
-        return Err(Error::GeneratedFileConflict { path });
-    }
-    Ok(())
-}
-
-fn branch_index_file(
-    language: Language,
-    branch: &crate::workspace::ApiSpecBranch<impl crate::spec::TypeNameFamily>,
-) -> Option<(PathBuf, String)> {
-    let path = branch.module_path.to_path_buf();
-    match language {
-        Language::Python => {
-            let mut file_path = path;
-            file_path.push("__init__.py");
-            let mut contents = String::from("# Generated by nex-gen. DO NOT EDIT!\n\n");
-            for name in branch.children.keys() {
-                contents.push_str("from .");
-                contents.push_str(&python_package_segment(name));
-                contents.push_str(" import *  # noqa: F401,F403\n");
-            }
-            if branch.module_path.is_root() {
-                contents.push_str("from . import _rebuild as _rebuild  # noqa: F401\n");
-            }
-            Some((file_path, contents))
-        }
-        Language::TypeScript => {
-            let mut file_path = path;
-            file_path.push("index.ts");
-            let mut contents = String::from("// Generated by nex-gen. DO NOT EDIT!\n\n");
-            for name in branch.children.keys() {
-                contents.push_str("export * from './");
-                contents.push_str(name);
-                contents.push_str("';\n");
-            }
-            Some((file_path, contents))
-        }
-        _ => None,
-    }
-}
-
-fn python_package_segment(segment: &str) -> String {
-    segment.replace('-', "_")
-}
-
-fn insert_planned_leaf_generated_files(
-    language: Language,
-    leaf: ApiSpecLeaf<PlannedTypeFamily>,
-    support: &SupportFiles,
-    mode: GenerationMode,
-    files: &mut BTreeMap<PathBuf, String>,
-    warnings: &mut Vec<String>,
-) -> Result<()> {
-    let prefix = leaf.module_path.to_path_buf();
-    let support_fragments = if support.fragments.is_empty() {
-        leaf.spec.support.fragments_for_language(language).to_vec()
+) -> Result<GeneratedFiles> {
+    let mut generated = match language {
+        Language::Dotnet => dotnet::generate(tree, support, mode),
+        Language::Python => python::generate(tree, support, mode),
+        Language::TypeScript => typescript::generate(tree, support, mode),
+        language => Err(Error::UnsupportedLanguage { language }),
+    }?;
+    generated.warnings = if mode == GenerationMode::NativeApi {
+        generation_warnings_for_tree(tree)
     } else {
-        support.fragments.clone()
+        Vec::new()
     };
-    let generated = generate_files_from_plan(language, leaf.spec, &support_fragments, mode)?;
-    warnings.extend(generated.warnings);
-    for (path, contents) in generated.files {
-        let path = prefix.join(path);
-        if files.insert(path.clone(), contents).is_some() {
-            return Err(Error::GeneratedFileConflict { path });
-        }
-    }
-    Ok(())
+    Ok(generated)
 }
 
 fn planning_mode(mode: GenerationMode) -> PlanningMode {
@@ -430,6 +282,23 @@ fn generation_warnings(plan: &PlannedSpec) -> Vec<String> {
             })
         })
         .collect()
+}
+
+fn generation_warnings_for_tree(tree: &ApiSpecTree<PlannedTypeFamily>) -> Vec<String> {
+    fn collect(node: &ApiSpecNode<PlannedTypeFamily>, warnings: &mut Vec<String>) {
+        match node {
+            ApiSpecNode::Leaf(leaf) => warnings.extend(generation_warnings(&leaf.spec)),
+            ApiSpecNode::Branch(branch) => {
+                for child in branch.children.values() {
+                    collect(child, warnings);
+                }
+            }
+        }
+    }
+
+    let mut warnings = Vec::new();
+    collect(&tree.root, &mut warnings);
+    warnings
 }
 
 #[cfg(test)]

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import temporalio.workflow
 
+from ..._models import Page
 from ..models import GetPageInput
-from ...content.page.models import Page
 
 
 async def get_page_request(
