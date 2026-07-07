@@ -85,7 +85,7 @@ interface workflow-service {
     /// @nexus.proto-field "workflow_start_delay"
     start-delay: option<duration>,
     user-metadata: option<user-metadata>,
-    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" go="workflowNamespace(ctx)" dotnet="TemporalWorkflowContext.WorkflowNamespace"
+    /// @nexus.source python="workflow_namespace()" typescript="workflowNamespace()" go="workflowNamespace(ctx)" dotnet="TemporalWorkflowContext.WorkflowNamespace()"
     namespace: string,
     /// @nexus.omit
     control: placeholder,

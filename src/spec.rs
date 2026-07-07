@@ -4506,7 +4506,7 @@ interface workflow-service {
     }
 
     #[test]
-    fn accepts_language_specific_source_helpers() {
+    fn accepts_language_specific_source_helper_calls() {
         let wit = r#"
 package temporal:nexus@1.0.0;
 
@@ -4517,7 +4517,7 @@ world system {
 interface workflow-service {
   /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
   record request {
-    /// @nexus.source python="workflow_namespace" typescript="workflowNamespace" go="workflowNamespace(ctx)" dotnet="TemporalWorkflowContext.WorkflowNamespace"
+    /// @nexus.source python="workflow_namespace()" typescript="workflowNamespace()" go="workflowNamespace(ctx)" dotnet="TemporalWorkflowContext.WorkflowNamespace()"
     namespace: option<string>,
   }
 
