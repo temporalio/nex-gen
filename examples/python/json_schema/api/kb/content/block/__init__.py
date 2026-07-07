@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from .models import BlockStyle
 
-__all__ = []
-
-
-__nexus_operation_registry__ = {}
+__all__ = [
+    "BlockStyle",
+]

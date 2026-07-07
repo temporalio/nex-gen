@@ -1,0 +1,145 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, test } from "vitest";
+import * as nexus from "nexus-rpc";
+
+import {
+  parseBlock,
+  serializeBlock,
+} from "../json_schema/definitions/kb/content/block/models.ts";
+import {
+  parsePage,
+  serializePage,
+} from "../json_schema/definitions/kb/content/page/models.ts";
+import {
+  parseCategory,
+  serializeCategory,
+} from "../json_schema/definitions/kb/tree/category/models.ts";
+import {
+  parseGetCategoryTreeInput,
+  parseGetPageInput,
+  parsePutBlockOutput,
+  serializeGetCategoryTreeInput,
+  serializeGetPageInput,
+  serializePutBlockOutput,
+} from "../json_schema/definitions/kb/kb/models.ts";
+import type {
+  Category,
+  Page,
+  PutBlockOutput,
+} from "../json_schema/api/kb/kb/models.ts";
+import { knowledgeBaseService } from "../json_schema/api/kb/kb/service.ts";
+import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
+
+const wireFixtureDir = new URL("../../wire/json_schema/kb/", import.meta.url);
+const workflowsPath = fileURLToPath(
+  new URL("./workflows/json-schema-kb.ts", import.meta.url),
+);
+
+function loadFixture<T = unknown>(name: string): T {
+  return JSON.parse(readFileSync(new URL(name, wireFixtureDir), "utf8")) as T;
+}
+
+function expectRoundTrip<T>(
+  name: string,
+  parse: (raw: unknown) => T,
+  serialize: (value: T) => unknown,
+): T {
+  const wire = loadFixture(name);
+  const value = parse(wire);
+  expect(serialize(value)).toEqual(wire);
+  return value;
+}
+
+describe("json-schema KB generated output", () => {
+  test("roundtrips multi-file KB fixtures through parse and serialize helpers", () => {
+    const page = expectRoundTrip("page.json", parsePage, serializePage);
+    expect(page.pageId).toBe("page-1");
+    expect(page.blocks?.[0]?.blockId).toBe("block-1");
+    expect(page.blocks?.[0]?.page).toBeNull();
+    expect(page.blocks?.[0]?.style?.bold).toBe(true);
+
+    const block = expectRoundTrip("block.json", parseBlock, serializeBlock);
+    expect(block.blockId).toBe("block-1");
+    expect(block.page).toBeNull();
+
+    const category = expectRoundTrip(
+      "category-tree.json",
+      parseCategory,
+      serializeCategory,
+    );
+    expect(category.children?.[0]?.id).toBe("child");
+
+    const request = expectRoundTrip(
+      "get-page-input.json",
+      parseGetPageInput,
+      serializeGetPageInput,
+    );
+    expect(request.pageId).toBe("page-1");
+
+    const categoryRequest = expectRoundTrip(
+      "get-category-tree-input.json",
+      parseGetCategoryTreeInput,
+      serializeGetCategoryTreeInput,
+    );
+    expect(categoryRequest.rootId).toBe("root");
+
+    const response = expectRoundTrip(
+      "put-block-output.json",
+      parsePutBlockOutput,
+      serializePutBlockOutput,
+    );
+    expect(response.revision).toBe(7);
+  });
+
+  test("uses all generated KB operations through a real Nexus client", async () => {
+    await withWorkflowEnvironment(async (env) => {
+      const calls: Array<[string, unknown]> = [];
+      const handler = nexus.serviceHandler(knowledgeBaseService, {
+        async getPage(_ctx, input) {
+          calls.push(["GetPage", input]);
+          expect(input).toEqual({ pageId: "page-1" });
+          return loadFixture<Page>("page.json");
+        },
+        async putBlock(_ctx, input) {
+          calls.push(["PutBlock", input]);
+          expect(input).toMatchObject({
+            blockId: "block-1",
+            order: 0,
+            style: { bold: true, indent: 1 },
+          });
+          return loadFixture<PutBlockOutput>("put-block-output.json");
+        },
+        async getCategoryTree(_ctx, input) {
+          calls.push(["GetCategoryTree", input]);
+          expect(input).toEqual({ rootId: "root" });
+          return loadFixture<Category>("category-tree.json");
+        },
+      });
+
+      const result = await executeWorkflowWithNexus<{
+        blockId: string;
+        categoryChildId: string | undefined;
+        pageId: string;
+        revision: number;
+      }>(env, {
+        endpoint: "knowledge-base",
+        nexusServices: [handler],
+        workflowType: "jsonSchemaKbCaller",
+        workflowsPath,
+      });
+
+      expect(result).toEqual({
+        blockId: "block-1",
+        categoryChildId: "child",
+        pageId: "page-1",
+        revision: 7,
+      });
+      expect(calls.map(([operation]) => operation)).toEqual([
+        "GetPage",
+        "PutBlock",
+        "GetCategoryTree",
+      ]);
+    });
+  });
+});

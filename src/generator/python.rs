@@ -483,12 +483,18 @@ impl<'a> ApiPlanner<'a> {
             .collect::<Vec<_>>();
         let support_names = support_export_names(support_fragments);
 
+        let package_model_names = if self.model_hoists.is_some() {
+            model_names.as_slice()
+        } else {
+            &[]
+        };
         insert_generated_file(
             &mut files,
             "__init__.py",
             if mode == GenerationMode::NativeApi {
                 render_package_init(
                     services,
+                    package_model_names,
                     &resource_names,
                     &resource_operation_owners,
                     self.api_plan,
@@ -3936,6 +3942,7 @@ fn render_function_type_parameter_definitions(
 
 fn render_package_init(
     services: &[RenderedService<'_>],
+    model_names: &[String],
     resource_names: &[String],
     resource_operation_owners: &BTreeMap<String, String>,
     api_plan: &PlannedSpec,
@@ -3974,6 +3981,9 @@ fn render_package_init(
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
+    if !model_names.is_empty() {
+        render_named_python_import(&mut output, ".models", model_names);
+    }
     if !services.is_empty() {
         output.push_str("from . import service as _service\n");
     }
@@ -4109,6 +4119,11 @@ fn render_package_init(
         output.push_str(&service_object_body);
     }
     output.push_str("\n__all__ = [\n");
+    for name in model_names {
+        output.push_str("    ");
+        output.push_str(&python_string_literal(name));
+        output.push_str(",\n");
+    }
     for name in &service_object_names {
         output.push_str("    ");
         output.push_str(&python_string_literal(name));
@@ -4120,25 +4135,30 @@ fn render_package_init(
         output.push_str(",\n");
     }
     output.push_str("]\n");
-    output.push_str("\n\n__nexus_operation_registry__ = {\n");
-    for service in services {
-        for operation in &service.operations {
-            output.push_str("    (\n");
-            output.push_str("        \"");
-            output.push_str(service.wire_name);
-            output.push_str("\",\n");
-            output.push_str("        \"");
-            output.push_str(operation.wire_name);
-            output.push_str("\",\n");
-            output.push_str("    ): ");
-            output.push_str("_service.");
-            output.push_str(service.name);
-            output.push('.');
-            output.push_str(&operation.attr_name);
-            output.push_str(",\n");
+    if services
+        .iter()
+        .any(|service| !service.operations.is_empty())
+    {
+        output.push_str("\n\n__nexus_operation_registry__ = {\n");
+        for service in services {
+            for operation in &service.operations {
+                output.push_str("    (\n");
+                output.push_str("        \"");
+                output.push_str(service.wire_name);
+                output.push_str("\",\n");
+                output.push_str("        \"");
+                output.push_str(operation.wire_name);
+                output.push_str("\",\n");
+                output.push_str("    ): ");
+                output.push_str("_service.");
+                output.push_str(service.name);
+                output.push('.');
+                output.push_str(&operation.attr_name);
+                output.push_str(",\n");
+            }
         }
+        output.push_str("}\n");
     }
-    output.push_str("}\n");
     output
 }
 

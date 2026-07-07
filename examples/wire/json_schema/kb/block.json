@@ -1,0 +1,10 @@
+{
+  "blockId": "block-1",
+  "order": 0,
+  "text": "hello",
+  "style": {
+    "bold": true,
+    "indent": 1
+  },
+  "page": null
+}

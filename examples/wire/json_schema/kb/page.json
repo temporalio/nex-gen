@@ -1,0 +1,20 @@
+{
+  "pageId": "page-1",
+  "title": "Runtime coverage",
+  "meta": {
+    "author": "nex-gen",
+    "wordCount": 42
+  },
+  "blocks": [
+    {
+      "blockId": "block-1",
+      "order": 0,
+      "text": "hello",
+      "style": {
+        "bold": true,
+        "indent": 1
+      },
+      "page": null
+    }
+  ]
+}

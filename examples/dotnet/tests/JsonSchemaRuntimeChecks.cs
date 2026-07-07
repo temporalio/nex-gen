@@ -5,6 +5,10 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Xunit;
 using Chat = NexGen.ChatService;
+using Kb = NexGen.Generated.Kb;
+using KbBlock = NexGen.Generated.Content.Block;
+using KbCategory = NexGen.Generated.Tree.Category;
+using KbPage = NexGen.Generated.Content.Page;
 
 namespace NexGen.DotNetExamples.Tests
 {
@@ -16,7 +20,7 @@ namespace NexGen.DotNetExamples.Tests
         [Fact]
         public void CanonicalWireFixturesRoundTrip()
         {
-            var fixtureDirectory = FixtureDirectory();
+            var fixtureDirectory = FixtureDirectory("chat");
             var message = RoundTrip<Chat.Message>(fixtureDirectory, "message-minimal.json");
             Assert.Equal("text", message.Kind);
             Assert.Equal("hi", message.Body);
@@ -39,6 +43,39 @@ namespace NexGen.DotNetExamples.Tests
 
             var response = RoundTrip<Chat.SendMessageOutput>(fixtureDirectory, "send-message-output.json");
             Assert.Equal("m1", response.MessageId);
+        }
+
+        [Fact]
+        public void KnowledgeBaseWireFixturesRoundTrip()
+        {
+            var fixtureDirectory = FixtureDirectory("kb");
+
+            var page = RoundTrip<KbPage.Page>(fixtureDirectory, "page.json");
+            Assert.Equal("page-1", page.PageId);
+            Assert.NotNull(page.Blocks);
+            var pageBlock = Assert.Single(page.Blocks);
+            Assert.Equal("block-1", pageBlock.BlockId);
+            Assert.Null(pageBlock.Page);
+            Assert.NotNull(pageBlock.Style);
+            Assert.True(pageBlock.Style.Bold);
+
+            var block = RoundTrip<KbBlock.Block>(fixtureDirectory, "block.json");
+            Assert.Equal("block-1", block.BlockId);
+            Assert.Null(block.Page);
+
+            var category = RoundTrip<KbCategory.Category>(fixtureDirectory, "category-tree.json");
+            Assert.NotNull(category.Children);
+            Assert.Equal("child", Assert.Single(category.Children).Id);
+
+            var request = RoundTrip<Kb.GetPageInput>(fixtureDirectory, "get-page-input.json");
+            Assert.Equal("page-1", request.PageId);
+
+            var categoryRequest = RoundTrip<Kb.GetCategoryTreeInput>(fixtureDirectory, "get-category-tree-input.json");
+            Assert.Equal("root", categoryRequest.RootId);
+
+            var response = RoundTrip<Kb.PutBlockOutput>(fixtureDirectory, "put-block-output.json");
+            Assert.Equal("block-1", response.BlockId);
+            Assert.Equal(7, response.Revision);
         }
 
         [Fact]
@@ -158,7 +195,7 @@ namespace NexGen.DotNetExamples.Tests
             Assert.Fail($"Expected JSON exception for {label}");
         }
 
-        private static string FixtureDirectory()
+        private static string FixtureDirectory(string exampleId)
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
@@ -168,14 +205,14 @@ namespace NexGen.DotNetExamples.Tests
                     "examples",
                     "wire",
                     "json_schema",
-                    "chat");
+                    exampleId);
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
                 }
                 directory = directory.Parent;
             }
-            throw new DirectoryNotFoundException("Could not find examples/wire/json_schema/chat");
+            throw new DirectoryNotFoundException($"Could not find examples/wire/json_schema/{exampleId}");
         }
     }
 }

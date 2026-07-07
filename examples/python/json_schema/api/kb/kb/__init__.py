@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from .models import (
+    GetCategoryTreeInput,
+    GetPageInput,
+    PutBlockOutput,
+)
 from . import service as _service
 from .operations.get_page import (
     get_page_request as _KnowledgeBaseService_get_page_request,
@@ -54,6 +59,9 @@ class KnowledgeBaseService:
 
 
 __all__ = [
+    "GetCategoryTreeInput",
+    "GetPageInput",
+    "PutBlockOutput",
     "KnowledgeBaseService",
 ]
 

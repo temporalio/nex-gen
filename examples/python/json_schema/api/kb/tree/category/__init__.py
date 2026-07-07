@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from .models import (
+    Category,
+    Palette,
+)
 
-__all__ = []
-
-
-__nexus_operation_registry__ = {}
+__all__ = [
+    "Category",
+    "Palette",
+]
