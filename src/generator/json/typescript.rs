@@ -58,8 +58,8 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
             "./json".to_string()
         };
         self.json_models = api_plan
-            .external_types
-            .values()
+            .external_types()
+            .map(|(_, binding)| binding)
             .filter_map(|binding| match &binding.external_type {
                 ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
                 _ => None,

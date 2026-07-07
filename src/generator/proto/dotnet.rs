@@ -193,7 +193,7 @@ impl ModelBackend {
                 source_expr,
                 optional,
                 match value {
-                    PlannedType::Record(record) => api_plan.records.get(&record.full_name),
+                    PlannedType::Record(record) => api_plan.record(&record.full_name),
                     _ => None,
                 },
                 Some(api_plan),
@@ -232,7 +232,7 @@ impl ModelBackend {
                 optional,
                 match fallback.as_ref() {
                     PlannedType::Record(record) => {
-                        api_plan.and_then(|api_plan| api_plan.records.get(&record.full_name))
+                        api_plan.and_then(|api_plan| api_plan.record(&record.full_name))
                     }
                     _ => None,
                 },
@@ -285,8 +285,7 @@ impl ModelBackend {
                 PlannedProtoType::Message(_),
             )) => dotnet_message_type(model_type) != dotnet_proto_type_name_for_message(model_type),
             PlannedType::Record(record) => api_plan
-                .records
-                .get(&record.full_name)
+                .record(&record.full_name)
                 .is_some_and(|model| self.model_needs_wire_method(model)),
             PlannedType::Resource(_) => false,
             PlannedType::List(inner) => self.value_uses_support_extensions(inner, api_plan),

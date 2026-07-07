@@ -40,16 +40,15 @@ impl ApiPlanner<'_> {
 
     fn json_model_for_ref(&self, model_name: &str) -> Option<JsonModelSpec<crate::spec::Symbol>> {
         self.spec
-            .external_types
-            .get(model_name)
+            .external_type_binding(model_name)
             .and_then(|binding| match &binding.external_type {
                 ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
                 _ => None,
             })
             .or_else(|| {
                 self.spec
-                    .external_types
-                    .values()
+                    .external_types()
+                    .map(|(_, binding)| binding)
                     .find_map(|binding| match &binding.external_type {
                         ExternalTypeSpec::Json(json_type)
                             if json_type.model_name == model_name

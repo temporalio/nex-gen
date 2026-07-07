@@ -247,7 +247,7 @@ impl<'a> ApiPlanner<'a> {
                 self.ensure_resource_field_types(resource);
             }
         }
-        for record in api_plan.records.values() {
+        for record in api_plan.records().map(|(_, record)| record) {
             let model_type = TypeSpec::Record(PlannedRecordType {
                 full_name: record.full_name.clone(),
                 model_name: record.name.clone(),
@@ -908,7 +908,7 @@ impl<'a> ApiPlanner<'a> {
         model_type: &PlannedType,
     ) -> WireValueConversion {
         let planned_record = match model_type {
-            PlannedType::Record(record) => self.api_plan.records.get(&record.full_name),
+            PlannedType::Record(record) => self.api_plan.record(&record.full_name),
             _ => None,
         };
         if let Some(conversion) = self
@@ -1042,7 +1042,7 @@ impl<'a> ApiPlanner<'a> {
             return None;
         };
         let full_name = &record.full_name;
-        let nested_planned_model = self.api_plan.records.get(full_name)?;
+        let nested_planned_model = self.api_plan.record(full_name)?;
         if !nested_planned_model.flatten_in_api {
             return None;
         }
@@ -1367,7 +1367,7 @@ impl<'a> ApiPlanner<'a> {
                 wire_conversion: None,
             },
             PlannedType::Enum(enum_type) => {
-                if let Some(enum_spec) = api_plan.enums.get(&enum_type.full_name) {
+                if let Some(enum_spec) = api_plan.enum_decl(&enum_type.full_name) {
                     self.ensure_rendered_enum(enum_spec);
                 }
                 ResolvedFieldType {
@@ -1384,7 +1384,7 @@ impl<'a> ApiPlanner<'a> {
                 .resolved_external_field_type(value_type)
                 .expect("proto enum field type should exist"),
             PlannedType::Flags(flags_type) => {
-                if let Some(flags_spec) = api_plan.flags.get(&flags_type.full_name) {
+                if let Some(flags_spec) = api_plan.flags_decl(&flags_type.full_name) {
                     self.ensure_rendered_flags(flags_spec);
                 }
                 ResolvedFieldType {
@@ -1395,7 +1395,7 @@ impl<'a> ApiPlanner<'a> {
                 }
             }
             PlannedType::Variant(variant_type) => {
-                if let Some(variant_spec) = api_plan.variants.get(&variant_type.full_name) {
+                if let Some(variant_spec) = api_plan.variant(&variant_type.full_name) {
                     self.ensure_rendered_variant(variant_spec);
                 }
                 ResolvedFieldType {
@@ -1496,14 +1496,14 @@ impl<'a> ApiPlanner<'a> {
 
 fn collect_python_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageImportSpec> {
     let mut imports = BTreeSet::new();
-    for variant in api_plan.variants.values() {
+    for variant in api_plan.variants().map(|(_, variant)| variant) {
         for case in &variant.cases {
             if let Some(payload) = &case.payload {
                 collect_value_type_imports(payload, &mut imports);
             }
         }
     }
-    for record in api_plan.records.values() {
+    for record in api_plan.records().map(|(_, record)| record) {
         if let Some(proto) = &record.data.proto {
             collect_proto_type_imports(proto, &mut imports);
         }
@@ -1586,8 +1586,7 @@ fn render_record_models(
     let mut wire_blocks = BTreeMap::new();
     for (index, model) in models.iter().enumerate() {
         let planned_model = api_plan
-            .records
-            .get(&model.full_name)
+            .record(&model.full_name)
             .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
         let wire_block = external_models.render_record_wire_block(model, planned_model);
         render_record_model(&mut body, model, wire_block.as_ref());
@@ -2266,8 +2265,8 @@ fn branch_has_json_models(branch: &ApiSpecBranch<PlannedTypeFamily>) -> bool {
     branch.children.values().any(|node| match node {
         ApiSpecNode::Leaf(leaf) => leaf
             .spec
-            .external_types
-            .values()
+            .external_types()
+            .map(|(_, binding)| binding)
             .any(|binding| matches!(binding.external_type, ExternalTypeSpec::Json(_))),
         ApiSpecNode::Branch(branch) => branch_has_json_models(branch),
     })
@@ -2451,8 +2450,7 @@ fn planned_record<'a>(
     full_name: &str,
 ) -> &'a RecordSpec<PlannedTypeFamily> {
     api_plan
-        .records
-        .get(full_name)
+        .record(full_name)
         .unwrap_or_else(|| panic!("planned record should exist for {full_name}"))
 }
 
@@ -2840,8 +2838,8 @@ fn collect_tree_rebuild_model_modules(
             ApiSpecNode::Leaf(leaf) => {
                 let model_names = leaf
                     .spec
-                    .external_types
-                    .values()
+                    .external_types()
+                    .map(|(_, binding)| binding)
                     .filter_map(|binding| match &binding.external_type {
                         ExternalTypeSpec::Json(json_type) => Some(json_type.model_name.clone()),
                         _ => None,

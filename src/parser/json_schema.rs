@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelSpec, LanguageStringSpec,
-    ModulePath, OperationSpec, ServiceSpec, SupportSpec, Symbol, TypeSpec,
+    ModulePath, OperationSpec, ServiceSpec, SupportSpec, Symbol, TypeDeclSpec, TypeSpec,
 };
 use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
@@ -475,11 +475,10 @@ fn api_spec_from_parsed_json_documents(
         version: "0.0.0".to_string(),
         support: SupportSpec::default(),
         services,
-        external_types,
-        records: BTreeMap::new(),
-        enums: BTreeMap::new(),
-        flags: BTreeMap::new(),
-        variants: BTreeMap::new(),
+        types: external_types
+            .into_iter()
+            .map(|(name, binding)| (name, TypeDeclSpec::External(binding)))
+            .collect(),
     })
 }
 
@@ -1268,7 +1267,7 @@ $defs:
 "##,
         );
 
-        assert!(spec.records.is_empty());
+        assert!(spec.records().next().is_none());
         assert_eq!(spec.services[0].name, "ChatService");
         assert_eq!(spec.services[0].endpoint.as_deref(), Some("__chat_service"));
         let operation = &spec.services[0].operations[0];
@@ -1284,8 +1283,8 @@ $defs:
             panic!("output should be a JSON external model");
         };
         assert_eq!(output.name.as_str(), "SendMessageOutput");
-        assert!(spec.external_types.contains_key("SendMessageInput"));
-        assert!(spec.external_types.contains_key("SendMessageOutput"));
+        assert!(spec.external_type_binding("SendMessageInput").is_some());
+        assert!(spec.external_type_binding("SendMessageOutput").is_some());
     }
 
     #[test]
@@ -1310,7 +1309,7 @@ services:
 "##,
         );
 
-        assert!(spec.records.is_empty());
+        assert!(spec.records().next().is_none());
         let operation = &spec.services[0].operations[0];
         let Some(TypeSpec::External(ExternalTypeSpec::Json(input))) = &operation.input else {
             panic!("input should be a JSON external model");

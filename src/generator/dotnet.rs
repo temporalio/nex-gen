@@ -60,7 +60,11 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn render_models_file(&self, namespace: &str) -> String {
-        let models = self.api_plan.records.values().collect::<Vec<_>>();
+        let models = self
+            .api_plan
+            .records()
+            .map(|(_, record)| record)
+            .collect::<Vec<_>>();
         let needs_result = models.iter().any(|model| {
             model
                 .public_fields()
@@ -88,13 +92,13 @@ impl<'a> ApiPlanner<'a> {
         if needs_result {
             render_result_helper(&mut output);
         }
-        for enumeration in self.api_plan.enums.values() {
+        for enumeration in self.api_plan.enums().map(|(_, enumeration)| enumeration) {
             render_enum(&mut output, enumeration);
         }
-        for flag_set in self.api_plan.flags.values() {
+        for flag_set in self.api_plan.flags().map(|(_, flag_set)| flag_set) {
             render_flags(&mut output, flag_set);
         }
-        for variant in self.api_plan.variants.values() {
+        for variant in self.api_plan.variants().map(|(_, variant)| variant) {
             self.render_variant(&mut output, variant);
         }
         for model in models {
@@ -515,7 +519,7 @@ impl<'a> ApiPlanner<'a> {
 
         if has_input
             && let PlannedType::Record(input_record) = operation.input_model()
-            && let Some(model) = self.api_plan.records.get(&input_record.full_name)
+            && let Some(model) = self.api_plan.record(&input_record.full_name)
             && operation_has_flattened_convenience(operation, model, self.api_plan)
         {
             self.render_operation_flattened_extension(
@@ -581,7 +585,7 @@ impl<'a> ApiPlanner<'a> {
 
         if has_input
             && let PlannedType::Record(input_record) = operation.input_model()
-            && let Some(model) = self.api_plan.records.get(&input_record.full_name)
+            && let Some(model) = self.api_plan.record(&input_record.full_name)
             && operation_has_flattened_convenience(operation, model, self.api_plan)
         {
             self.render_operation_flattened_extension(
@@ -812,7 +816,7 @@ impl<'a> ApiPlanner<'a> {
     ) -> String {
         let model_type = operation.input_model();
         let planned_record = match model_type {
-            PlannedType::Record(record) => self.api_plan.records.get(&record.full_name),
+            PlannedType::Record(record) => self.api_plan.record(&record.full_name),
             _ => None,
         };
         self.external_models
@@ -835,8 +839,7 @@ impl<'a> ApiPlanner<'a> {
             || high_level_input_type == raw_input_type)
             && self
                 .api_plan
-                .records
-                .get(match operation.input_model() {
+                .record(match operation.input_model() {
                     PlannedType::Record(record) => &record.full_name,
                     _ => return "public",
                 })
@@ -872,7 +875,7 @@ impl<'a> ApiPlanner<'a> {
         loop {
             let before = names.len();
             for name in names.clone() {
-                let Some(model) = self.api_plan.records.get(&name) else {
+                let Some(model) = self.api_plan.record(&name) else {
                     continue;
                 };
                 for (_, field) in model.public_fields() {
@@ -952,7 +955,7 @@ impl<'a> ApiPlanner<'a> {
         let PlannedType::Record(input_record) = operation.input_model() else {
             return;
         };
-        let Some(model) = self.api_plan.records.get(&input_record.full_name) else {
+        let Some(model) = self.api_plan.record(&input_record.full_name) else {
             return;
         };
         if !operation_has_flattened_convenience(operation, model, self.api_plan) {
@@ -1256,7 +1259,7 @@ impl<'a> ApiPlanner<'a> {
         let PlannedType::Record(input_record) = operation.input_model() else {
             return;
         };
-        let Some(model) = self.api_plan.records.get(&input_record.full_name) else {
+        let Some(model) = self.api_plan.record(&input_record.full_name) else {
             return;
         };
         if !operation_has_flattened_convenience(operation, model, self.api_plan)
@@ -1574,7 +1577,7 @@ impl DotNetExternalModels {
             return annotation;
         }
         if let PlannedType::Record(record) = model_type
-            && api_plan.records.contains_key(&record.full_name)
+            && api_plan.record(&record.full_name).is_some()
         {
             return csharp_type_name(&record.model_name);
         }
@@ -1592,7 +1595,7 @@ impl DotNetExternalModels {
 
     fn wire_model_type(&self, model_type: &PlannedType, api_plan: &PlannedSpec) -> String {
         let planned_record = match model_type {
-            PlannedType::Record(record) => api_plan.records.get(&record.full_name),
+            PlannedType::Record(record) => api_plan.record(&record.full_name),
             _ => None,
         };
         self.wire_type_annotation(model_type, planned_record)
@@ -1796,7 +1799,7 @@ fn validate_dotnet_support_references(
     external_models: &DotNetExternalModels,
     support_namespace: Option<&str>,
 ) -> Result<()> {
-    for model in api_plan.records.values() {
+    for model in api_plan.records().map(|(_, record)| record) {
         for (_, sourced_field, source_expr) in model.sourced_fields() {
             if let Some(reference) = source_expr.strip_suffix("()") {
                 validate_dotnet_support_reference(reference, support_namespace)?;
@@ -1992,7 +1995,7 @@ fn render_operation_xml_doc(
             let PlannedType::Record(record) = operation.input_model() else {
                 return None;
             };
-            api_plan.records.get(&record.full_name)
+            api_plan.record(&record.full_name)
         })
         .flatten()
         .and_then(|model| dotnet_doc(model.doc()));
@@ -2506,7 +2509,7 @@ fn flattened_nested_model<'a>(
     let PlannedType::Record(record) = &field.field_type else {
         return None;
     };
-    let nested_model = api_plan.records.get(&record.full_name)?;
+    let nested_model = api_plan.record(&record.full_name)?;
     nested_model.flatten_in_api.then_some(nested_model)
 }
 
@@ -2862,7 +2865,7 @@ fn collect_public_message_models(
     match model_type {
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto)))
             if proto.replacement.is_some() => {}
-        PlannedType::Record(record) if api_plan.records.contains_key(&record.full_name) => {
+        PlannedType::Record(record) if api_plan.record(&record.full_name).is_some() => {
             names.insert(record.full_name.clone());
         }
         _ => {}
@@ -3064,9 +3067,9 @@ fn api_plan_record_for_request_name<'a>(
     api_plan: &'a PlannedSpec,
     name: &str,
 ) -> Option<&'a PlannedModel> {
-    api_plan.records.get(name).or_else(|| {
+    api_plan.record(name).or_else(|| {
         let name = name.trim_start_matches('.');
-        api_plan.records.values().find(|record| {
+        api_plan.records().map(|(_, record)| record).find(|record| {
             matches!(
                 record.source_type.as_ref(),
                 Some(ExternalTypeSpec::Proto(PlannedProtoType::Message(message)))
@@ -3146,8 +3149,7 @@ fn operation_has_input(operation: &PlannedOperation, api_plan: &PlannedSpec) -> 
     };
     match input {
         PlannedType::Record(record) => api_plan
-            .records
-            .get(&record.full_name)
+            .record(&record.full_name)
             .is_none_or(|model| model.public_fields().next().is_some()),
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
         | PlannedType::External(ExternalTypeSpec::Json(_)) => true,

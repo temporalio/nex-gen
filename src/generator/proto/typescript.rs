@@ -144,8 +144,7 @@ pub(crate) fn record_proto_info<'a>(
         return None;
     };
     api_plan
-        .records
-        .get(&record.full_name)
+        .record(&record.full_name)
         .and_then(|record| record.data.proto.as_ref())
 }
 

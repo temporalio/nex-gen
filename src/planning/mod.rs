@@ -14,8 +14,8 @@ use crate::resources::{
 use crate::spec::{
     ApiSpec, AuthoredNames, AuthoredResourceType, ExternalTypeSpec, FunctionArgSpec,
     FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, JsonModelSpec, LanguageStringSpec,
-    ModulePath, OperationSpec, RecordSpec, ResourceFieldSpec, ServiceSpec, TypeNameFamily,
-    TypeNameMapper, TypeReplacementSpec, TypeSpec, VariantSpec,
+    ModulePath, OperationSpec, RecordSpec, ResourceFieldSpec, ServiceSpec, TypeDeclSpec,
+    TypeNameFamily, TypeNameMapper, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
@@ -113,8 +113,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
     fn map_record(&mut self, name: crate::spec::Symbol) -> PlannedRecordType {
         let record = self
             .source_spec
-            .records
-            .get(name.as_str())
+            .record(name.as_str())
             .unwrap_or_else(|| panic!("record `{name}` should resolve during planning"));
         self.planner
             .plan_record_type(record, ModelWireCapabilities::default())
@@ -123,8 +122,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
     fn map_enum(&mut self, name: crate::spec::Symbol) -> PlannedEnumType {
         let enumeration = self
             .source_spec
-            .enums
-            .get(name.as_str())
+            .enum_decl(name.as_str())
             .unwrap_or_else(|| panic!("enum `{name}` should resolve during planning"));
         self.planner.insert_enum(PlannedEnum {
             full_name: enumeration.full_name.clone(),
@@ -148,8 +146,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
     fn map_flags(&mut self, name: crate::spec::Symbol) -> PlannedFlagsType {
         let flags = self
             .source_spec
-            .flags
-            .get(name.as_str())
+            .flags_decl(name.as_str())
             .unwrap_or_else(|| panic!("flags `{name}` should resolve during planning"));
         self.planner.mark_flags_used(&flags.full_name);
         PlannedFlagsType {
@@ -161,8 +158,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
     fn map_variant(&mut self, name: crate::spec::Symbol) -> PlannedVariantType {
         let variant = self
             .source_spec
-            .variants
-            .get(name.as_str())
+            .variant(name.as_str())
             .unwrap_or_else(|| panic!("variant `{name}` should resolve during planning"));
         self.planner.mark_variant_used(variant);
         PlannedVariantType {
@@ -241,8 +237,7 @@ impl TypeNameMapper<AuthoredNames, PlannedTypeFamily> for PlannedTypeMapper<'_, 
     ) -> PlannedFieldData {
         let has_presence = self
             .source_spec
-            .records
-            .get(record_full_name)
+            .record(record_full_name)
             .and_then(|record| {
                 proto::record_field_has_presence(record, field_name, self.planner.descriptors)
             });
@@ -324,10 +319,19 @@ fn module_import_index(
 }
 
 fn module_export_names(spec: &ApiSpec) -> BTreeSet<String> {
-    spec.external_types
+    spec.types
         .iter()
-        .filter_map(|(name, binding)| {
-            external_type_module_path(&binding.external_type)
+        .filter_map(|(name, decl)| {
+            let module_path = match decl {
+                TypeDeclSpec::External(binding) => {
+                    external_type_module_path(&binding.external_type)
+                }
+                TypeDeclSpec::Record(_)
+                | TypeDeclSpec::Enum(_)
+                | TypeDeclSpec::Flags(_)
+                | TypeDeclSpec::Variant(_) => None,
+            };
+            module_path
                 .is_none_or(|module_path| module_path == &spec.module_path)
                 .then(|| name.clone())
         })
@@ -387,34 +391,55 @@ fn collect_spec_module_imports(
             }
         }
     }
-    for binding in spec.external_types.values() {
-        collect_external_type_module_imports(&spec.module_path, &binding.external_type, imports);
-        if let Some(authored_type) = &binding.authored_type {
-            collect_type_module_imports(&spec.module_path, Some(authored_type), imports);
-        }
-    }
-    for record in spec.records.values() {
-        if let Some(source_type) = &record.source_type {
-            collect_external_type_module_imports(&spec.module_path, source_type, imports);
-        }
-        for field in record.fields.values() {
-            collect_type_module_imports(&spec.module_path, Some(&field.field_type), imports);
-            if let Some(function) = &field.function {
-                if let Some(alternate) = &function.alternate_type {
-                    collect_type_module_imports(&spec.module_path, Some(alternate), imports);
-                }
-                collect_function_args_module_imports(&spec.module_path, &function.args, imports);
-                if let Some(result) = &function.result_type_parameter {
-                    let _ = result;
+    for decl in spec.types.values() {
+        match decl {
+            TypeDeclSpec::External(binding) => {
+                collect_external_type_module_imports(
+                    &spec.module_path,
+                    &binding.external_type,
+                    imports,
+                );
+                if let Some(authored_type) = &binding.authored_type {
+                    collect_type_module_imports(&spec.module_path, Some(authored_type), imports);
                 }
             }
-        }
-    }
-    for variant in spec.variants.values() {
-        for case in &variant.cases {
-            if let Some(payload) = &case.payload {
-                collect_type_module_imports(&spec.module_path, Some(payload), imports);
+            TypeDeclSpec::Record(record) => {
+                if let Some(source_type) = &record.source_type {
+                    collect_external_type_module_imports(&spec.module_path, source_type, imports);
+                }
+                for field in record.fields.values() {
+                    collect_type_module_imports(
+                        &spec.module_path,
+                        Some(&field.field_type),
+                        imports,
+                    );
+                    if let Some(function) = &field.function {
+                        if let Some(alternate) = &function.alternate_type {
+                            collect_type_module_imports(
+                                &spec.module_path,
+                                Some(alternate),
+                                imports,
+                            );
+                        }
+                        collect_function_args_module_imports(
+                            &spec.module_path,
+                            &function.args,
+                            imports,
+                        );
+                        if let Some(result) = &function.result_type_parameter {
+                            let _ = result;
+                        }
+                    }
+                }
             }
+            TypeDeclSpec::Variant(variant) => {
+                for case in &variant.cases {
+                    if let Some(payload) = &case.payload {
+                        collect_type_module_imports(&spec.module_path, Some(payload), imports);
+                    }
+                }
+            }
+            TypeDeclSpec::Enum(_) | TypeDeclSpec::Flags(_) => {}
         }
     }
 }
@@ -575,31 +600,39 @@ impl<'a> ApiPlanner<'a> {
             .filter_map(|model| model.proto.as_ref().map(|proto| proto.full_name.clone()))
             .collect::<BTreeSet<_>>();
 
-        spec.records.retain(|name, record| {
-            model_names.contains(name)
-                || matches!(
-                    record.source_type.as_ref(),
-                    Some(ExternalTypeSpec::Proto(proto_name))
-                        if model_names.contains(proto_name.as_str())
-                )
-        });
-        spec.enums.retain(|name, _| self.used_enums.contains(name));
-        spec.flags.retain(|name, _| self.used_flags.contains(name));
-        spec.variants
-            .retain(|name, _| self.used_variants.contains(name));
-        spec.external_types.retain(|name, _| {
+        spec.types.retain(|name, decl| {
             if !self.spec_data.module_exports.is_empty()
-                && !self.spec_data.module_exports.contains(name)
+                && self.spec_data.module_exports.contains(name)
             {
-                return false;
+                return true;
             }
-            model_names.contains(name)
-                || proto_model_names.contains(name)
-                || self.used_json_models.contains(name)
-                || self.spec_data.module_exports.contains(name)
-                || self.used_enums.contains(name)
-                || self.used_flags.contains(name)
-                || self.used_variants.contains(name)
+            match decl {
+                TypeDeclSpec::Record(record) => {
+                    model_names.contains(name)
+                        || matches!(
+                            record.source_type.as_ref(),
+                            Some(ExternalTypeSpec::Proto(proto_name))
+                                if model_names.contains(proto_name.as_str())
+                        )
+                }
+                TypeDeclSpec::Enum(_) => self.used_enums.contains(name),
+                TypeDeclSpec::Flags(_) => self.used_flags.contains(name),
+                TypeDeclSpec::Variant(_) => self.used_variants.contains(name),
+                TypeDeclSpec::External(_) => {
+                    if !self.spec_data.module_exports.is_empty()
+                        && !self.spec_data.module_exports.contains(name)
+                    {
+                        return false;
+                    }
+                    model_names.contains(name)
+                        || proto_model_names.contains(name)
+                        || self.used_json_models.contains(name)
+                        || self.spec_data.module_exports.contains(name)
+                        || self.used_enums.contains(name)
+                        || self.used_flags.contains(name)
+                        || self.used_variants.contains(name)
+                }
+            }
         });
     }
 
@@ -618,8 +651,11 @@ impl<'a> ApiPlanner<'a> {
         source_spec: &ApiSpec,
         planned_spec: &mut PlannedSpec,
     ) {
-        for (record_name, planned_record) in &mut planned_spec.records {
-            let Some(source_record) = source_spec.records.get(record_name) else {
+        for (record_name, planned_decl) in &mut planned_spec.types {
+            let TypeDeclSpec::Record(planned_record) = planned_decl else {
+                continue;
+            };
+            let Some(source_record) = source_spec.record(record_name) else {
                 continue;
             };
             let capabilities = planned_record.data.capabilities;
@@ -772,8 +808,7 @@ impl<'a> ApiPlanner<'a> {
             Some(TypeSpec::Record(record_name)) => {
                 let record = self
                     .spec
-                    .records
-                    .get(record_name.as_str())
+                    .record(record_name.as_str())
                     .cloned()
                     .ok_or_else(|| Error::UnknownOperationInputProto {
                         service: service.name.clone(),
@@ -838,8 +873,7 @@ impl<'a> ApiPlanner<'a> {
             Some(TypeSpec::Record(record_name)) => {
                 let record = self
                     .spec
-                    .records
-                    .get(record_name.as_str())
+                    .record(record_name.as_str())
                     .cloned()
                     .ok_or_else(|| Error::UnknownOperationOutputProto {
                         service: service.name.clone(),
@@ -1075,7 +1109,7 @@ impl<'a> ApiPlanner<'a> {
                 self.ensure_planned_type_capabilities(value, requested_capabilities);
             }
             TypeSpec::Record(record_type) => {
-                if let Some(record) = self.spec.records.get(&record_type.full_name).cloned() {
+                if let Some(record) = self.spec.record(&record_type.full_name).cloned() {
                     self.plan_record_type(&record, requested_capabilities);
                 }
             }
@@ -1302,8 +1336,7 @@ impl<'a> ApiPlanner<'a> {
             }
             TypeSpec::Record(record_name) => self
                 .spec
-                .records
-                .get(record_name.as_str())
+                .record(record_name.as_str())
                 .cloned()
                 .map(|record| {
                     TypeSpec::Record(
@@ -1313,8 +1346,7 @@ impl<'a> ApiPlanner<'a> {
                 .unwrap_or(TypeSpec::String),
             TypeSpec::Enum(enum_name) => self
                 .spec
-                .enums
-                .get(enum_name.as_str())
+                .enum_decl(enum_name.as_str())
                 .cloned()
                 .map(|enumeration| {
                     self.insert_enum(PlannedEnum {
@@ -1338,8 +1370,7 @@ impl<'a> ApiPlanner<'a> {
                 .unwrap_or(TypeSpec::String),
             TypeSpec::Flags(flags_name) => self
                 .spec
-                .flags
-                .get(flags_name.as_str())
+                .flags_decl(flags_name.as_str())
                 .cloned()
                 .map(|flags| {
                     self.mark_flags_used(&flags.full_name);
@@ -1351,8 +1382,7 @@ impl<'a> ApiPlanner<'a> {
                 .unwrap_or(TypeSpec::String),
             TypeSpec::Variant(variant_name) => self
                 .spec
-                .variants
-                .get(variant_name.as_str())
+                .variant(variant_name.as_str())
                 .cloned()
                 .map(|variant| {
                     self.mark_variant_used(&variant);
@@ -1728,11 +1758,7 @@ mod tests {
                 resources: Vec::new(),
                 data: (),
             }],
-            external_types: BTreeMap::new(),
-            records: BTreeMap::new(),
-            enums: BTreeMap::new(),
-            flags: BTreeMap::new(),
-            variants: BTreeMap::new(),
+            types: BTreeMap::new(),
         };
         let descriptors = DescriptorIndex::load(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1743,7 +1769,7 @@ mod tests {
         let plan =
             build_api_plan_with_mode(spec, &descriptors, PlanningMode::DefinitionsOnly).unwrap();
 
-        assert!(plan.records.is_empty());
+        assert!(plan.records().next().is_none());
         let operation = &plan.services[0].operations[0];
         for model_type in [operation.input_type(), operation.output_type()] {
             let Some(TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(

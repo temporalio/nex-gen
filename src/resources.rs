@@ -611,8 +611,7 @@ fn all_message_fields(
 
 fn all_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<MessageFieldInfo>> {
     let record = spec
-        .records
-        .get(record_name)
+        .record(record_name)
         .ok_or_else(|| Error::UnknownTypeOverride {
             type_name: record_name.to_string(),
         })?;

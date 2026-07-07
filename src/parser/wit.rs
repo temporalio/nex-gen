@@ -98,25 +98,11 @@ fn api_spec_from_wit(
     let world = &resolve.worlds[world_id];
     let support = collect_support_spec(resolve, package_id, package_origins)?;
 
-    let mut external_types = BTreeMap::new();
-    let mut records = BTreeMap::new();
-    let mut enums = BTreeMap::new();
-    let mut flags = BTreeMap::new();
-    let mut variants = BTreeMap::new();
+    let mut types = BTreeMap::new();
     for (_, dependency_package) in resolve.packages.iter() {
         for interface_id in dependency_package.interfaces.values() {
             let interface = &resolve.interfaces[*interface_id];
-            collect_interface_types(
-                resolve,
-                interface,
-                &path,
-                language,
-                &mut external_types,
-                &mut records,
-                &mut enums,
-                &mut flags,
-                &mut variants,
-            )?;
+            collect_interface_types(resolve, interface, &path, language, &mut types)?;
         }
     }
 
@@ -140,11 +126,7 @@ fn api_spec_from_wit(
             .unwrap_or_else(|| "0.0.0".to_string()),
         support,
         services,
-        external_types,
-        records,
-        enums,
-        flags,
-        variants,
+        types,
     })
 }
 
@@ -970,11 +952,7 @@ fn collect_interface_types(
     interface: &Interface,
     path: &Path,
     language: Language,
-    external_types: &mut BTreeMap<String, ExternalTypeBindingSpec>,
-    records: &mut BTreeMap<String, RecordSpec>,
-    enums: &mut BTreeMap<String, EnumSpec>,
-    flags: &mut BTreeMap<String, FlagsSpec>,
-    variants: &mut BTreeMap<String, VariantSpec>,
+    types: &mut BTreeMap<String, TypeDeclSpec>,
 ) -> Result<()> {
     let interface_name = interface
         .name
@@ -986,7 +964,10 @@ fn collect_interface_types(
         if let Some(record) =
             build_wit_record_spec(resolve, *type_id, type_def, path, &interface_name, language)?
         {
-            if records.insert(record.full_name.clone(), record).is_some() {
+            if types
+                .insert(record.full_name.clone(), TypeDeclSpec::Record(record))
+                .is_some()
+            {
                 return Err(Error::InvalidWit {
                     path: path.to_path_buf(),
                     reason: format!(
@@ -997,8 +978,11 @@ fn collect_interface_types(
             }
         }
         if let Some(enumeration) = build_wit_enum_spec(resolve, *type_id, type_def) {
-            if enums
-                .insert(enumeration.full_name.clone(), enumeration)
+            if types
+                .insert(
+                    enumeration.full_name.clone(),
+                    TypeDeclSpec::Enum(enumeration),
+                )
                 .is_some()
             {
                 return Err(Error::InvalidWit {
@@ -1011,7 +995,10 @@ fn collect_interface_types(
             }
         }
         if let Some(flag_set) = build_wit_flags_spec(resolve, *type_id, type_def) {
-            if flags.insert(flag_set.full_name.clone(), flag_set).is_some() {
+            if types
+                .insert(flag_set.full_name.clone(), TypeDeclSpec::Flags(flag_set))
+                .is_some()
+            {
                 return Err(Error::InvalidWit {
                     path: path.to_path_buf(),
                     reason: format!(
@@ -1023,8 +1010,8 @@ fn collect_interface_types(
         }
         if let Some(variant) = build_wit_variant_spec(resolve, *type_id, type_def, path, language)?
         {
-            if variants
-                .insert(variant.full_name.clone(), variant)
+            if types
+                .insert(variant.full_name.clone(), TypeDeclSpec::Variant(variant))
                 .is_some()
             {
                 return Err(Error::InvalidWit {
@@ -1041,8 +1028,8 @@ fn collect_interface_types(
         else {
             continue;
         };
-        if external_types
-            .insert(proto_name.clone(), external_type)
+        if types
+            .insert(proto_name.clone(), TypeDeclSpec::External(external_type))
             .is_some()
         {
             return Err(Error::InvalidWit {
@@ -4155,8 +4142,7 @@ interface workflow-service {
             .experimental
         );
         assert!(
-            spec.records
-                .get("workflow-service.request")
+            spec.record("workflow-service.request")
                 .unwrap()
                 .experimental
         );
@@ -4202,8 +4188,7 @@ interface user-service {
         .unwrap();
         let service = &spec.services[0];
         assert_eq!(
-            spec.records
-                .get("user-service.proto-request")
+            spec.record("user-service.proto-request")
                 .unwrap()
                 .source_type
                 .as_ref(),
@@ -4212,8 +4197,7 @@ interface user-service {
             )))
         );
         assert_eq!(
-            spec.records
-                .get("user-service.json-request")
+            spec.record("user-service.json-request")
                 .unwrap()
                 .source_type
                 .as_ref(),
@@ -4382,8 +4366,7 @@ interface function-execution {
 
         let spec = parse(Language::Python, wit);
         let request = spec
-            .records
-            .get("function-execution.execute-function-request")
+            .record("function-execution.execute-function-request")
             .unwrap();
         let model = request;
         assert_eq!(model.field_name_override("name"), Some("name"));
@@ -4465,8 +4448,7 @@ interface function-execution {
 
         let spec = parse(Language::Python, wit);
         let request = spec
-            .records
-            .get("function-execution.execute-function-request")
+            .record("function-execution.execute-function-request")
             .unwrap();
         let model = request;
         assert_eq!(

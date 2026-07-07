@@ -156,8 +156,7 @@ pub(crate) fn service_message_python_ref(
             return None;
         };
         api_plan
-            .records
-            .get(&record.full_name)
+            .record(&record.full_name)
             .and_then(|record| record.data.proto.as_ref())
             .and_then(message_python_ref)
     })

@@ -135,7 +135,7 @@ services:
                 .unwrap();
 
         assert_eq!(spec.services[0].name, "ChatService");
-        assert!(spec.records.is_empty());
+        assert!(spec.records().next().is_none());
     }
 
     #[test]

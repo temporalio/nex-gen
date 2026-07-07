@@ -12,11 +12,7 @@ pub struct ApiSpec<F: TypeNameFamily = AuthoredNames> {
     pub version: String,
     pub support: SupportSpec,
     pub services: Vec<ServiceSpec<F>>,
-    pub external_types: BTreeMap<String, ExternalTypeBindingSpec<F>>,
-    pub records: BTreeMap<String, RecordSpec<F>>,
-    pub enums: BTreeMap<String, EnumSpec>,
-    pub flags: BTreeMap<String, FlagsSpec>,
-    pub variants: BTreeMap<String, VariantSpec<F>>,
+    pub types: BTreeMap<String, TypeDeclSpec<F>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -208,7 +204,73 @@ pub type AuthoredTypeSpec = TypeSpec<AuthoredNames>;
 
 impl<F: TypeNameFamily> ApiSpec<F> {
     pub fn external_type_binding(&self, type_name: &str) -> Option<&ExternalTypeBindingSpec<F>> {
-        self.external_types.get(type_name.trim_start_matches('.'))
+        match self.types.get(type_name.trim_start_matches('.')) {
+            Some(TypeDeclSpec::External(binding)) => Some(binding),
+            _ => None,
+        }
+    }
+
+    pub fn external_types(&self) -> impl Iterator<Item = (&str, &ExternalTypeBindingSpec<F>)> {
+        self.types.iter().filter_map(|(name, decl)| match decl {
+            TypeDeclSpec::External(binding) => Some((name.as_str(), binding)),
+            _ => None,
+        })
+    }
+
+    pub fn records(&self) -> impl Iterator<Item = (&str, &RecordSpec<F>)> {
+        self.types.iter().filter_map(|(name, decl)| match decl {
+            TypeDeclSpec::Record(record) => Some((name.as_str(), record)),
+            _ => None,
+        })
+    }
+
+    pub fn record(&self, name: &str) -> Option<&RecordSpec<F>> {
+        match self.types.get(name) {
+            Some(TypeDeclSpec::Record(record)) => Some(record),
+            _ => None,
+        }
+    }
+
+    pub fn enums(&self) -> impl Iterator<Item = (&str, &EnumSpec)> {
+        self.types.iter().filter_map(|(name, decl)| match decl {
+            TypeDeclSpec::Enum(enumeration) => Some((name.as_str(), enumeration)),
+            _ => None,
+        })
+    }
+
+    pub fn enum_decl(&self, name: &str) -> Option<&EnumSpec> {
+        match self.types.get(name) {
+            Some(TypeDeclSpec::Enum(enumeration)) => Some(enumeration),
+            _ => None,
+        }
+    }
+
+    pub fn flags(&self) -> impl Iterator<Item = (&str, &FlagsSpec)> {
+        self.types.iter().filter_map(|(name, decl)| match decl {
+            TypeDeclSpec::Flags(flags) => Some((name.as_str(), flags)),
+            _ => None,
+        })
+    }
+
+    pub fn flags_decl(&self, name: &str) -> Option<&FlagsSpec> {
+        match self.types.get(name) {
+            Some(TypeDeclSpec::Flags(flags)) => Some(flags),
+            _ => None,
+        }
+    }
+
+    pub fn variants(&self) -> impl Iterator<Item = (&str, &VariantSpec<F>)> {
+        self.types.iter().filter_map(|(name, decl)| match decl {
+            TypeDeclSpec::Variant(variant) => Some((name.as_str(), variant)),
+            _ => None,
+        })
+    }
+
+    pub fn variant(&self, name: &str) -> Option<&VariantSpec<F>> {
+        match self.types.get(name) {
+            Some(TypeDeclSpec::Variant(variant)) => Some(variant),
+            _ => None,
+        }
     }
 
     pub fn map_names<G, M>(self, mut map: M) -> ApiSpec<G>
@@ -234,22 +296,10 @@ impl<F: TypeNameFamily> ApiSpec<F> {
                 .into_iter()
                 .map(|service| service.map_names_with(map))
                 .collect(),
-            external_types: self
-                .external_types
+            types: self
+                .types
                 .into_iter()
-                .map(|(name, binding)| (name, binding.map_names_with(map)))
-                .collect(),
-            records: self
-                .records
-                .into_iter()
-                .map(|(name, record)| (name, record.map_names_with(map)))
-                .collect(),
-            enums: self.enums,
-            flags: self.flags,
-            variants: self
-                .variants
-                .into_iter()
-                .map(|(name, variant)| (name, variant.map_names_with(map)))
+                .map(|(name, decl)| (name, decl.map_names_with(map)))
                 .collect(),
         }
     }
@@ -258,13 +308,42 @@ impl<F: TypeNameFamily> ApiSpec<F> {
 impl ApiSpec<AuthoredNames> {
     pub fn record_for_proto(&self, proto_name: &str) -> Option<&RecordSpec> {
         let proto_name = proto_name.trim_start_matches('.');
-        self.records.values().find(|record| {
+        self.types.values().find_map(|decl| {
+            let TypeDeclSpec::Record(record) = decl else {
+                return None;
+            };
             matches!(
                 record.source_type.as_ref(),
                 Some(ExternalTypeSpec::Proto(source_proto))
                     if source_proto.as_str() == proto_name
             )
+            .then_some(record)
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeDeclSpec<F: TypeNameFamily = AuthoredNames> {
+    External(ExternalTypeBindingSpec<F>),
+    Record(RecordSpec<F>),
+    Enum(EnumSpec),
+    Flags(FlagsSpec),
+    Variant(VariantSpec<F>),
+}
+
+impl<F: TypeNameFamily> TypeDeclSpec<F> {
+    fn map_names_with<G, M>(self, map: &mut M) -> TypeDeclSpec<G>
+    where
+        G: TypeNameFamily,
+        M: TypeNameMapper<F, G>,
+    {
+        match self {
+            TypeDeclSpec::External(binding) => TypeDeclSpec::External(binding.map_names_with(map)),
+            TypeDeclSpec::Record(record) => TypeDeclSpec::Record(record.map_names_with(map)),
+            TypeDeclSpec::Enum(enumeration) => TypeDeclSpec::Enum(enumeration),
+            TypeDeclSpec::Flags(flags) => TypeDeclSpec::Flags(flags),
+            TypeDeclSpec::Variant(variant) => TypeDeclSpec::Variant(variant.map_names_with(map)),
+        }
     }
 }
 

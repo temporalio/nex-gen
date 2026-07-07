@@ -44,7 +44,7 @@ pub(crate) fn validate_external_type_bindings(
     language: Language,
 ) -> Result<()> {
     let usages = language_message_usages(spec, descriptors, language)?;
-    for (type_name, binding) in &spec.external_types {
+    for (type_name, binding) in spec.external_types() {
         if let Some(message) = descriptors.message(type_name) {
             validate_message_external_type_binding(type_name, binding)?;
             if let Some(record) = spec.record_for_proto(type_name) {
@@ -63,7 +63,7 @@ pub(crate) fn validate_external_type_bindings(
             continue;
         } else {
             return Err(Error::UnknownTypeOverride {
-                type_name: type_name.clone(),
+                type_name: type_name.to_string(),
             });
         }
     }

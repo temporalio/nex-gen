@@ -59,8 +59,8 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
 
     fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
         self.json_models = api_plan
-            .external_types
-            .values()
+            .external_types()
+            .map(|(_, binding)| binding)
             .filter_map(|binding| match &binding.external_type {
                 ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
                 _ => None,

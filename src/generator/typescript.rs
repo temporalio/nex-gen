@@ -82,8 +82,8 @@ fn branch_has_json_models(branch: &ApiSpecBranch<PlannedTypeFamily>) -> bool {
     branch.children.values().any(|node| match node {
         ApiSpecNode::Leaf(leaf) => leaf
             .spec
-            .external_types
-            .values()
+            .external_types()
+            .map(|(_, binding)| binding)
             .any(|binding| matches!(binding.external_type, ExternalTypeSpec::Json(_))),
         ApiSpecNode::Branch(branch) => branch_has_json_models(branch),
     })
@@ -408,8 +408,7 @@ impl<'a> ApiPlanner<'a> {
             .expect("planned model should be rendered");
         let planned_model = self
             .api_plan
-            .records
-            .get(full_name)
+            .record(full_name)
             .unwrap_or_else(|| panic!("planned model should exist for {full_name}"));
         let message = if let Some(conversion) = self
             .external_models
@@ -439,8 +438,7 @@ impl<'a> ApiPlanner<'a> {
         let full_name = record.full_name.as_str();
         let planned_model = self
             .api_plan
-            .records
-            .get(full_name)
+            .record(full_name)
             .unwrap_or_else(|| panic!("planned model should exist for {full_name}"))
             .clone();
 
@@ -932,7 +930,7 @@ impl<'a> ApiPlanner<'a> {
             return None;
         };
         let full_name = &record.full_name;
-        let nested_planned_model = self.api_plan.records.get(full_name)?.clone();
+        let nested_planned_model = self.api_plan.record(full_name)?.clone();
         if !nested_planned_model.flatten_in_api {
             return None;
         }
@@ -1118,7 +1116,7 @@ impl<'a> ApiPlanner<'a> {
                 wire_conversion: None,
             },
             PlannedType::Enum(enum_type) => {
-                if let Some(planned_enum) = self.api_plan.enums.get(&enum_type.full_name) {
+                if let Some(planned_enum) = self.api_plan.enum_decl(&enum_type.full_name) {
                     let planned_enum = planned_enum.clone();
                     self.ensure_rendered_enum(&planned_enum);
                 }
@@ -1141,7 +1139,7 @@ impl<'a> ApiPlanner<'a> {
                 }
             }
             PlannedType::Flags(flags_type) => {
-                if let Some(planned_flags) = self.api_plan.flags.get(&flags_type.full_name) {
+                if let Some(planned_flags) = self.api_plan.flags_decl(&flags_type.full_name) {
                     let planned_flags = planned_flags.clone();
                     self.ensure_rendered_flags(&planned_flags);
                 }
@@ -1153,7 +1151,7 @@ impl<'a> ApiPlanner<'a> {
                 }
             }
             PlannedType::Variant(variant_type) => {
-                if let Some(planned_variant) = self.api_plan.variants.get(&variant_type.full_name) {
+                if let Some(planned_variant) = self.api_plan.variant(&variant_type.full_name) {
                     let planned_variant = planned_variant.clone();
                     self.ensure_rendered_variant(&planned_variant);
                 }
@@ -1620,7 +1618,7 @@ pub(crate) fn generate(
             planner.ensure_resource_field_types(resource);
         }
     }
-    for record in api_plan.records.values() {
+    for record in api_plan.records().map(|(_, record)| record) {
         let model_type = TypeSpec::Record(PlannedRecordType {
             full_name: record.full_name.clone(),
             model_name: record.name.clone(),
@@ -1657,14 +1655,14 @@ pub(crate) fn generate(
 
 fn collect_typescript_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageImportSpec> {
     let mut imports = BTreeSet::new();
-    for variant in api_plan.variants.values() {
+    for variant in api_plan.variants().map(|(_, variant)| variant) {
         for case in &variant.cases {
             if let Some(payload) = &case.payload {
                 collect_value_type_imports(payload, &mut imports);
             }
         }
     }
-    for model in api_plan.records.values() {
+    for model in api_plan.records().map(|(_, record)| record) {
         if let Some(proto) = &model.data.proto {
             collect_proto_type_imports(proto, &mut imports);
         }
@@ -3716,7 +3714,7 @@ fn render_model_schema_registrations(
 ) -> String {
     let mut output = String::new();
     for full_name in models.keys() {
-        let Some(planned) = api_plan.records.get(full_name) else {
+        let Some(planned) = api_plan.record(full_name) else {
             continue;
         };
         // Proto-backed models travel as protobuf, not json/nexus.
@@ -3776,8 +3774,7 @@ fn typescript_wire_schema(value: &PlannedType, api_plan: &PlannedSpec) -> String
         | PlannedType::Flags(_) => "{ kind: \"scalar\" }".to_string(),
         PlannedType::Variant(variant_type) => {
             let cases = api_plan
-                .variants
-                .get(&variant_type.full_name)
+                .variant(&variant_type.full_name)
                 .map(|planned_variant| {
                     planned_variant
                         .cases
@@ -4598,8 +4595,7 @@ fn render_model(
         output.push_str(">;\n\n");
     }
     let planned_record = api_plan
-        .records
-        .get(&model.full_name)
+        .record(&model.full_name)
         .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
     external_models.render_model_wire_functions(output, model, planned_record);
 }
