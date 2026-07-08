@@ -101,7 +101,9 @@ def test_integer_fields_follow_json_schema_number_semantics() -> None:
         _ = Message.model_validate({"body": "hello", "priority": 2**53})
 
 
-def test_canonical_wire_fixtures_roundtrip_through_temporal_pydantic_converter() -> None:
+def test_canonical_wire_fixtures_roundtrip_through_temporal_pydantic_converter() -> (
+    None
+):
     message = typing.cast(Message, roundtrip_fixture("message-minimal.json", Message))
     assert message.kind == "text"
     assert message.body == "hi"
