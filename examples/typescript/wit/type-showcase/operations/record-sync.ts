@@ -3,7 +3,6 @@
 import * as workflow from "@temporalio/workflow";
 import { typeShowcase } from "../services";
 import type { RecordSyncRequest } from "../models";
-import { nexusValue } from "../../nex-gen-runtime";
 
 /**
  * @param request - Request for the operation.
@@ -15,8 +14,5 @@ export async function recordSync(
     service: typeShowcase,
     endpoint: "type-showcase",
   });
-  return await client.startOperation(
-    typeShowcase.operations.recordSync,
-    nexusValue("type-showcase.record-sync-request", request),
-  );
+  return await client.startOperation(typeShowcase.operations.recordSync, request);
 }

@@ -7,7 +7,6 @@ import dataclasses
 import typing
 import typing_extensions
 import datetime
-import nex_gen_runtime
 import temporalio.api.workflowservice.v1.request_response_pb2
 import temporalio.workflow
 
@@ -193,8 +192,3 @@ async def restart_workflow(
         workflow_start_delay=workflow_start_delay,
     )
     return await _restart_workflow(request)
-
-
-nex_gen_runtime.register_nexus_type(
-    StartedWorkflow, "StartWorkflowService::resource::started-workflow"
-)

@@ -6,7 +6,6 @@ import type {
   ExecuteNamedFunctionResult,
   ExecuteNamedFunctionRequest,
 } from "../models";
-import { nexusValue } from "../../nex-gen-runtime";
 
 /**
  * @param request - Request for the operation.
@@ -25,6 +24,6 @@ export async function executeNamedFunction<
   });
   return await client.startOperation(
     functionExecution.operations.executeNamedFunction,
-    nexusValue("function-execution.execute-named-function-request", request),
+    request,
   );
 }

@@ -240,11 +240,11 @@ fn render_hoisted_models_module(hoists: &JsonModelHoistPlan) -> Result<String> {
     let models = hoists.hoisted_models.iter().collect::<Vec<_>>();
     let model_fragments = render_external_models(models.as_slice(), "._json")?;
     let mut body = model_fragments.body.clone();
-    if !model_fragments.registrations.is_empty() {
+    if !model_fragments.post_model_statements.is_empty() {
         if !body.is_empty() {
             body.push_str("\n\n");
         }
-        body.push_str(&model_fragments.registrations);
+        body.push_str(&model_fragments.post_model_statements);
     }
 
     let mut output = String::new();
@@ -427,8 +427,8 @@ pub(in crate::generator) fn render_external_models(
     let mut body = String::new();
     body.push_str(&models_body);
 
-    let mut registrations = String::new();
-    render_model_rebuilds(&mut registrations, json_models);
+    let mut post_model_statements = String::new();
+    render_model_rebuilds(&mut post_model_statements, json_models);
     let mut module_imports = BTreeSet::from(["pydantic".to_string()]);
     if needs_pydantic_core {
         module_imports.insert("pydantic_core".to_string());
@@ -450,7 +450,7 @@ pub(in crate::generator) fn render_external_models(
 
     Ok(RenderedModelFragments {
         body,
-        registrations,
+        post_model_statements,
         module_imports,
         relative_imports,
         exported_names: json_models

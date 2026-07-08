@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses
 import enum
 import typing
-import nex_gen_runtime
 
 
 class UserStatus(enum.IntEnum):
@@ -14,10 +13,10 @@ class UserStatus(enum.IntEnum):
     Deleted = 2
 
 
-class UserCapability(enum.IntFlag):
-    ReadProfile = 1 << 0
-    UpdateEmail = 1 << 1
-    Deactivate = 1 << 2
+UserCapability: typing.TypeAlias = int
+UserCapabilityReadProfile = 1 << 0
+UserCapabilityUpdateEmail = 1 << 1
+UserCapabilityDeactivate = 1 << 2
 
 
 @dataclasses.dataclass(slots=True)
@@ -91,23 +90,4 @@ NotificationTarget = (
     tuple[typing.Literal["email"], str]
     | tuple[typing.Literal["sms"], str]
     | tuple[typing.Literal["none"]]
-)
-
-
-nex_gen_runtime.register_nexus_type(GetUserRequest, "type-showcase.get-user-request")
-nex_gen_runtime.register_nexus_type(
-    UpdateEmailRequest, "type-showcase.update-email-request"
-)
-nex_gen_runtime.register_nexus_type(RenameRequest, "type-showcase.rename-request")
-nex_gen_runtime.register_nexus_type(
-    SetProfileRequest, "type-showcase.set-profile-request"
-)
-nex_gen_runtime.register_nexus_type(UserProfile, "type-showcase.user-profile")
-nex_gen_runtime.register_nexus_type(PostalAddress, "type-showcase.postal-address")
-nex_gen_runtime.register_nexus_type(
-    RecordSyncRequest, "type-showcase.record-sync-request"
-)
-nex_gen_runtime.register_nexus_type(SyncReport, "type-showcase.sync-report")
-nex_gen_runtime.register_nexus_type(
-    DeactivateRequest, "type-showcase.deactivate-request"
 )

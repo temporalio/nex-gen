@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import typing
-import nex_gen_runtime
 
 from ..models import UpdateEmailRequest
 
@@ -41,6 +40,3 @@ def bind_user_client(
 ) -> User:
     setattr(resource, "_nexus_client", nexus_client)
     return resource
-
-
-nex_gen_runtime.register_nexus_type(User, "UserService::resource::user")

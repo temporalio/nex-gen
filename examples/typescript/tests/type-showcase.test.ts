@@ -1,24 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import * as common from "@temporalio/common";
-import { temporal } from "@temporalio/proto";
 import * as nexus from "nexus-rpc";
-import { nexusValue, payloadConverter } from "../nex-gen-runtime.ts";
 
-import type { RecordSyncRequest, SetProfileRequest } from "../wit/type-showcase/index.ts";
+import type { RecordSyncRequest } from "../wit/type-showcase/index.ts";
 import { UserCapability, UserStatus } from "../wit/type-showcase/models.ts";
 import { User } from "../wit/type-showcase/resources.ts";
 import { typeShowcase } from "../wit/type-showcase/services.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
-const wireFixtureDir = fileURLToPath(
-  new URL("../../wire/type-showcase/", import.meta.url),
-);
-const typescriptWireFixture = `${wireFixtureDir}set-profile-request.typescript.payloads`;
-const pythonWireFixture = `${wireFixtureDir}set-profile-request.python.payloads`;
-const typescriptRecordSyncFixture = `${wireFixtureDir}record-sync-request.typescript.payloads`;
-const pythonRecordSyncFixture = `${wireFixtureDir}record-sync-request.python.payloads`;
 const workflowsPath = fileURLToPath(
   new URL("./workflows/type-showcase.ts", import.meta.url),
 );
@@ -39,58 +28,6 @@ const userProfile = () => ({
 
 const userResource = (email: string, displayName: string) =>
   new User("user-123", email, displayName, UserStatus.Active, userProfile());
-
-function sampleSetProfileRequest(): SetProfileRequest {
-  return {
-    userId: "user-123",
-    profile: userProfile(),
-  };
-}
-
-function writePayloads(
-  path: string,
-  payloads: temporal.api.common.v1.IPayload[],
-): void {
-  mkdirSync(wireFixtureDir, { recursive: true });
-  const payloadWrapper = temporal.api.common.v1.Payloads.create({
-    payloads,
-  });
-  const bytes = temporal.api.common.v1.Payloads.encode(payloadWrapper).finish();
-  writeFileSync(path, `${Buffer.from(bytes).toString("base64")}\n`);
-}
-
-function readPayloads(path: string): common.Payload[] {
-  const bytes = Buffer.from(readFileSync(path, "utf8").trim(), "base64");
-  return temporal.api.common.v1.Payloads.decode(bytes).payloads as common.Payload[];
-}
-
-function encodeRequest(request: SetProfileRequest): temporal.api.common.v1.IPayload[] {
-  return (
-    common.toPayloads(
-      payloadConverter,
-      nexusValue("type-showcase.set-profile-request", request),
-    ) ?? []
-  );
-}
-
-function decodeRequest(payloads: temporal.api.common.v1.IPayload[]): SetProfileRequest {
-  return common.fromPayloadsAtIndex<SetProfileRequest>(payloadConverter, 0, payloads);
-}
-
-function payloadJson(
-  payloads: temporal.api.common.v1.IPayload[],
-): Record<string, unknown> {
-  expect(payloads).toHaveLength(1);
-  const payload = payloads[0];
-  expect(Buffer.from(payload.metadata?.encoding ?? []).toString()).toBe("json/nexus");
-  expect(Buffer.from(payload.metadata?.nexusType ?? []).toString()).toBe(
-    "type-showcase.set-profile-request",
-  );
-  return JSON.parse(Buffer.from(payload.data ?? []).toString()) as Record<
-    string,
-    unknown
-  >;
-}
 
 describe("type-showcase generated output", () => {
   test("exposes WIT-native type showcase metadata", () => {
@@ -209,19 +146,7 @@ describe("type-showcase generated output", () => {
     });
   });
 
-  test("serializes and reads cross-language request wire fixtures", () => {
-    const expected = sampleSetProfileRequest();
-    const typescriptPayloads = encodeRequest(expected);
-    writePayloads(typescriptWireFixture, typescriptPayloads);
-
-    expect(payloadJson(typescriptPayloads)["user-id"]).toBe("user-123");
-    expect(decodeRequest(readPayloads(typescriptWireFixture))).toEqual(expected);
-    expect(decodeRequest(readPayloads(pythonWireFixture))).toEqual(expected);
-  });
-
-  test("round-trips containers of tuples and results across languages", () => {
-    // Map keys containing dashes are data and must be preserved verbatim by
-    // the type-directed runtime, unlike record field names.
+  test("constructs WIT-native models for common WIT shapes", () => {
     const expected: RecordSyncRequest = {
       userId: "user-123",
       report: {
@@ -239,16 +164,9 @@ describe("type-showcase generated output", () => {
         },
       },
     };
-    const typescriptPayloads =
-      common.toPayloads(
-        payloadConverter,
-        nexusValue("type-showcase.record-sync-request", expected),
-      ) ?? [];
-    writePayloads(typescriptRecordSyncFixture, typescriptPayloads);
-
-    const decode = (payloads: temporal.api.common.v1.IPayload[]): RecordSyncRequest =>
-      common.fromPayloadsAtIndex<RecordSyncRequest>(payloadConverter, 0, payloads);
-    expect(decode(readPayloads(typescriptRecordSyncFixture))).toEqual(expected);
-    expect(decode(readPayloads(pythonRecordSyncFixture))).toEqual(expected);
+    expect(expected.report.regionStatus?.["us-west"]).toEqual({
+      tag: "ok",
+      value: "healthy",
+    });
   });
 });

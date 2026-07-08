@@ -1,28 +1,16 @@
 from __future__ import annotations
 
-import base64
-import json
 from pathlib import Path
-from typing import cast
 import uuid
 
-import nex_gen_runtime
 from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
 from nexusrpc import Operation
-from temporalio.api.common.v1 import Payloads
 from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 APP_ROOT = Path(__file__).resolve().parent
 OUTPUT_PATH = APP_ROOT.parent / "wit" / "type_showcase"
-WIRE_FIXTURE_DIR = APP_ROOT.parent.parent / "wire" / "type-showcase"
-PYTHON_WIRE_FIXTURE = WIRE_FIXTURE_DIR / "set-profile-request.python.payloads"
-TYPESCRIPT_WIRE_FIXTURE = WIRE_FIXTURE_DIR / "set-profile-request.typescript.payloads"
-PYTHON_RECORD_SYNC_FIXTURE = WIRE_FIXTURE_DIR / "record-sync-request.python.payloads"
-TYPESCRIPT_RECORD_SYNC_FIXTURE = (
-    WIRE_FIXTURE_DIR / "record-sync-request.typescript.payloads"
-)
 
 import wit.type_showcase as type_showcase
 import wit.type_showcase.models as type_showcase_models
@@ -43,17 +31,10 @@ DEACTIVATE_OPERATION = type_showcase.__nexus_operation_registry__[
 ]
 
 
-def sample_set_profile_request() -> type_showcase_models.SetProfileRequest:
-    return type_showcase_models.SetProfileRequest(
-        user_id="user-123",
-        profile=user_profile(),
-    )
-
-
 def user_profile() -> type_showcase_models.UserProfile:
     return type_showcase_models.UserProfile(
-        capabilities=type_showcase_models.UserCapability.ReadProfile
-        | type_showcase_models.UserCapability.UpdateEmail,
+        capabilities=type_showcase_models.UserCapabilityReadProfile
+        | type_showcase_models.UserCapabilityUpdateEmail,
         notification_target=("email", "old@example.com"),
         sync_state=("ok", "synced"),
         address=type_showcase_models.PostalAddress(
@@ -90,49 +71,6 @@ def user_resource(
         status=type_showcase_models.UserStatus.Active,
         profile=user_profile(),
     )
-
-
-def write_payloads(path: Path, payloads: Payloads) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _ = path.write_text(
-        base64.b64encode(payloads.SerializeToString(deterministic=True)).decode()
-        + "\n",
-        encoding="utf-8",
-    )
-
-
-def read_payloads(path: Path) -> Payloads:
-    payloads = Payloads()
-    _ = payloads.ParseFromString(base64.b64decode(path.read_text(encoding="utf-8")))
-    return payloads
-
-
-async def encode_request(request: type_showcase_models.SetProfileRequest) -> Payloads:
-    return await nex_gen_runtime.nexus_data_converter.encode_wrapper([request])
-
-
-async def decode_request(payloads: Payloads) -> type_showcase_models.SetProfileRequest:
-    values = cast(
-        list[object],
-        await nex_gen_runtime.nexus_data_converter.decode_wrapper(
-            payloads,
-            [type_showcase_models.SetProfileRequest],
-        ),
-    )
-    assert len(values) == 1
-    value = values[0]
-    assert isinstance(value, type_showcase_models.SetProfileRequest)
-    return value
-
-
-def payload_json(payloads: Payloads) -> dict[str, object]:
-    assert len(payloads.payloads) == 1
-    payload = payloads.payloads[0]
-    assert payload.metadata["encoding"] == b"json/nexus"
-    assert payload.metadata["nexusType"] == b"type-showcase.set-profile-request"
-    value = cast(object, json.loads(payload.data))
-    assert isinstance(value, dict)
-    return cast(dict[str, object], value)
 
 
 @service_handler(service=type_showcase_services.TypeShowcase)
@@ -249,8 +187,8 @@ def test_generated_metadata() -> None:
     assert not hasattr(type_showcase_models, "DeactivateResponse")
     assert not hasattr(type_showcase_models.GetUserRequest, "to_proto")
     assert type_showcase_models.UserStatus.Active == 0
-    assert type_showcase_models.UserCapability.ReadProfile == 1
-    assert type_showcase_models.UserCapability.UpdateEmail == 2
+    assert type_showcase_models.UserCapabilityReadProfile == 1
+    assert type_showcase_models.UserCapabilityUpdateEmail == 2
 
 
 def test_generated_wit_native_models_cover_common_wit_shapes() -> None:
@@ -258,68 +196,14 @@ def test_generated_wit_native_models_cover_common_wit_shapes() -> None:
 
     assert profile.notification_target == ("email", "old@example.com")
     assert profile.capabilities == (
-        type_showcase_models.UserCapability.ReadProfile
-        | type_showcase_models.UserCapability.UpdateEmail
+        type_showcase_models.UserCapabilityReadProfile
+        | type_showcase_models.UserCapabilityUpdateEmail
     )
     assert profile.sync_state == ("ok", "synced")
     assert profile.address is not None
     assert profile.address.coordinates == (45.5152, -122.6784)
     assert profile.metadata == {"tier": "enterprise"}
     assert profile.tags == ["admin", "beta"]
-
-
-async def test_type_showcase_request_wire_fixtures_are_cross_language_compatible() -> (
-    None
-):
-    expected = sample_set_profile_request()
-    python_payloads = await encode_request(expected)
-    write_payloads(PYTHON_WIRE_FIXTURE, python_payloads)
-
-    assert payload_json(python_payloads)["user-id"] == "user-123"
-    assert await decode_request(read_payloads(PYTHON_WIRE_FIXTURE)) == expected
-    assert await decode_request(read_payloads(TYPESCRIPT_WIRE_FIXTURE)) == expected
-
-
-def sample_record_sync_request() -> type_showcase_models.RecordSyncRequest:
-    return type_showcase_models.RecordSyncRequest(
-        user_id="user-123",
-        report=sync_report(),
-    )
-
-
-async def decode_record_sync_request(
-    payloads: Payloads,
-) -> type_showcase_models.RecordSyncRequest:
-    values = cast(
-        list[object],
-        await nex_gen_runtime.nexus_data_converter.decode_wrapper(
-            payloads,
-            [type_showcase_models.RecordSyncRequest],
-        ),
-    )
-    assert len(values) == 1
-    value = values[0]
-    assert isinstance(value, type_showcase_models.RecordSyncRequest)
-    return value
-
-
-async def test_record_sync_wire_fixtures_are_cross_language_compatible() -> None:
-    """Containers of tuples and results -- including map keys containing
-    dashes, which must be preserved verbatim -- round-trip across languages."""
-    expected = sample_record_sync_request()
-    python_payloads = await nex_gen_runtime.nexus_data_converter.encode_wrapper(
-        [expected]
-    )
-    write_payloads(PYTHON_RECORD_SYNC_FIXTURE, python_payloads)
-
-    assert (
-        await decode_record_sync_request(read_payloads(PYTHON_RECORD_SYNC_FIXTURE))
-        == expected
-    )
-    assert (
-        await decode_record_sync_request(read_payloads(TYPESCRIPT_RECORD_SYNC_FIXTURE))
-        == expected
-    )
 
 
 async def test_get_user_returns_wit_user_resource_through_real_nexus_client(
@@ -353,8 +237,8 @@ async def test_get_user_returns_wit_user_resource_through_real_nexus_client(
     assert user.profile.notification_target == ("email", "old@example.com")
     assert user.profile.sync_state == ("ok", "synced")
     assert (
-        user.profile.capabilities & type_showcase_models.UserCapability.ReadProfile
-    ) == type_showcase_models.UserCapability.ReadProfile
+        user.profile.capabilities & type_showcase_models.UserCapabilityReadProfile
+    ) == type_showcase_models.UserCapabilityReadProfile
 
     assert len(service_handler.calls) == 5
     get_user_operation, get_user_request = service_handler.calls[0]
@@ -381,8 +265,6 @@ async def test_get_user_returns_wit_user_resource_through_real_nexus_client(
     assert deactivate_request.user_id == "user-123"
     assert deactivate_request.reason == "requested"
 
-    # Containers of tuples and results round-trip through the json/nexus
-    # wire format.
     record_sync_operation, record_sync_request = service_handler.calls[4]
     assert record_sync_operation == "RecordSync"
     assert isinstance(record_sync_request, type_showcase_models.RecordSyncRequest)

@@ -6,7 +6,6 @@ import type {
   ExecuteNamedVarargsFunctionResult,
   ExecuteNamedVarargsFunctionRequest,
 } from "../models";
-import { nexusValue } from "../../nex-gen-runtime";
 
 /**
  * @param request - Request for the operation.
@@ -22,6 +21,6 @@ export async function executeNamedVarargsFunction<
   });
   return await client.startOperation(
     functionExecution.operations.executeNamedVarargsFunction,
-    nexusValue("function-execution.execute-named-varargs-function-request", request),
+    request,
   );
 }

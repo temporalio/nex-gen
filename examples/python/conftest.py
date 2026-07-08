@@ -8,8 +8,6 @@ import pytest_asyncio
 from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 
-import nex_gen_runtime
-
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
@@ -34,15 +32,10 @@ def env_type(request: pytest.FixtureRequest) -> str:
 @pytest_asyncio.fixture(scope="session")
 async def env(env_type: str) -> AsyncIterator[WorkflowEnvironment]:
     if env_type == "local":
-        workflow_environment = await WorkflowEnvironment.start_local(  # pyright: ignore[reportUnknownMemberType]
-            data_converter=nex_gen_runtime.nexus_data_converter,
-        )
+        workflow_environment = await WorkflowEnvironment.start_local()  # pyright: ignore[reportUnknownMemberType]
     else:
         workflow_environment = WorkflowEnvironment.from_client(
-            await Client.connect(
-                env_type,
-                data_converter=nex_gen_runtime.nexus_data_converter,
-            )
+            await Client.connect(env_type)
         )
 
     try:

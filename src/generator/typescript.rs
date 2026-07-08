@@ -9,8 +9,7 @@ use crate::error::{Error, Result};
 use crate::generator::json::typescript as typescript_json;
 use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::proto::typescript::{
-    model_typescript_interface_ref, model_typescript_type_id, record_proto_info,
-    typescript_replacement_type_name,
+    model_typescript_interface_ref, model_typescript_type_id, typescript_replacement_type_name,
 };
 use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;
@@ -419,13 +418,6 @@ impl<'a> ApiPlanner<'a> {
                 type_parameters,
                 annotation,
                 to_wire_expr: input_conversion.to_wire_expr("request"),
-                nexus_type_id: if matches!(input, PlannedType::Record(_))
-                    && record_proto_info(input, self.api_plan).is_none()
-                {
-                    input_full_name.map(str::to_string)
-                } else {
-                    None
-                },
             }
         });
 
@@ -1755,7 +1747,6 @@ fn generate_leaf(
     );
 
     let support_source = support_source(support_fragments);
-    let model_registrations = render_model_schema_registrations(api_plan, &planner.models);
     let model_fragments = planner.render_external_models()?;
 
     render_module_files(
@@ -1769,7 +1760,6 @@ fn generate_leaf(
         &requirements,
         &language_imports,
         support_source.as_deref(),
-        &model_registrations,
         api_plan,
         mode,
     )
@@ -2486,7 +2476,6 @@ struct RenderedOperationInput {
     type_parameters: Vec<RenderedTypeParameter>,
     annotation: String,
     to_wire_expr: String,
-    nexus_type_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -2726,7 +2715,6 @@ fn render_module_files(
     requirements: &TypeScriptRequirements,
     language_imports: &[LanguageImportSpec],
     support_source: Option<&str>,
-    model_registrations: &str,
     api_plan: &PlannedSpec,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
@@ -2753,7 +2741,6 @@ fn render_module_files(
             model_fragments,
             language_imports,
             support_exports.as_ref(),
-            model_registrations,
             api_plan,
             mode,
         ),
@@ -2770,7 +2757,6 @@ fn render_module_files(
                 services,
                 requirements,
                 language_imports,
-                !model_registrations.is_empty(),
                 mode == GenerationMode::NativeApi,
                 api_plan,
             ),
@@ -3305,7 +3291,6 @@ fn render_models_module(
     model_fragments: &RenderedExternalModelFragments,
     language_imports: &[LanguageImportSpec],
     support_exports: Option<&SupportExports>,
-    model_registrations: &str,
     api_plan: &PlannedSpec,
     mode: GenerationMode,
 ) -> String {
@@ -3361,10 +3346,6 @@ fn render_models_module(
         body.push('\n');
         body.push_str(&model_fragments.body);
     }
-    if !model_registrations.is_empty() {
-        body.push('\n');
-        body.push_str(model_registrations);
-    }
     let mut imports = String::new();
     let generated_value_imports = if uses_configured_payload_converter {
         vec![("common", "@temporalio/common")]
@@ -3389,11 +3370,6 @@ fn render_models_module(
         &generated_value_imports,
     );
     render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
-    render_value_imports(
-        &mut imports,
-        "../nex-gen-runtime",
-        &used_import_names(&body, &["registerNexusType".to_string()]),
-    );
     render_support_imports(&mut imports, support_exports, "./support", &body);
     if !model_fragments.imports.is_empty() {
         if !imports.is_empty() && !imports.ends_with('\n') {
@@ -3485,14 +3461,6 @@ fn relative_module_path(from_dir: &std::path::Path, target: &std::path::Path) ->
     }
 }
 
-fn typescript_relative_runtime_module(module_path: &ModulePath) -> String {
-    if module_path.is_root() {
-        "../nex-gen-runtime".to_string()
-    } else {
-        relative_module_path(&module_path.to_path_buf(), Path::new("nex-gen-runtime"))
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn render_service_module(
     enums: &[&RenderedEnum],
@@ -3503,7 +3471,6 @@ fn render_service_module(
     services: &[RenderedService<'_>],
     _requirements: &TypeScriptRequirements,
     language_imports: &[LanguageImportSpec],
-    has_model_registrations: bool,
     include_native_api: bool,
     api_plan: &PlannedSpec,
 ) -> String {
@@ -3520,12 +3487,6 @@ fn render_service_module(
         body.push_str(&render_operation_registry_module(services));
     }
     let mut imports = String::new();
-    if has_model_registrations {
-        // Side-effect import: model interfaces are imported `type`-only
-        // elsewhere, so without this the `registerNexusType` calls in
-        // models.ts would never run at runtime.
-        imports.push_str("import \"./models\";\n");
-    }
     render_typescript_namespace_imports(
         &mut imports,
         &body,
@@ -3562,11 +3523,6 @@ fn render_service_module(
         .map(resource_client_bind_function_name)
         .collect::<Vec<_>>();
     render_value_imports(&mut imports, "./resources", &resource_client_binders);
-    render_value_imports(
-        &mut imports,
-        &typescript_relative_runtime_module(&api_plan.module_path),
-        &used_import_names(&body, &["nexusValue".to_string()]),
-    );
     render_generated_module(imports, body)
 }
 
@@ -3590,7 +3546,6 @@ fn render_resources_module(
             body.push('\n');
         }
     }
-    render_nexus_type_registrations(&mut body, services, api_plan);
     let mut imports = String::new();
     render_typescript_namespace_imports(
         &mut imports,
@@ -3599,18 +3554,6 @@ fn render_resources_module(
         &[("workflow", "@temporalio/workflow")],
     );
     render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
-    render_value_imports(
-        &mut imports,
-        "../nex-gen-runtime",
-        &used_import_names(
-            &body,
-            &[
-                "markNexusResource".to_string(),
-                "nexusValue".to_string(),
-                "registerNexusType".to_string(),
-            ],
-        ),
-    );
     render_type_imports(
         &mut imports,
         "./models",
@@ -3727,18 +3670,6 @@ fn render_operation_module(
     resource_value_imports.extend(resource_client_binders);
     render_value_imports(&mut imports, "../resources", &resource_value_imports);
     render_type_imports(&mut imports, "../resources", &type_resources);
-    if operation
-        .input
-        .as_ref()
-        .and_then(|input| input.nexus_type_id.as_ref())
-        .is_some()
-    {
-        render_value_imports(
-            &mut imports,
-            "../../nex-gen-runtime",
-            &["nexusValue".to_string()],
-        );
-    }
     render_generated_module(imports, body)
 }
 
@@ -3834,230 +3765,6 @@ fn render_required_field(output: &mut String, exported: bool) {
     output.push_str("  }\n");
     output.push_str("  return value;\n");
     output.push_str("}\n");
-}
-
-fn render_nexus_type_registrations(
-    output: &mut String,
-    services: &[RenderedService<'_>],
-    api_plan: &PlannedSpec,
-) {
-    let has_resources = services.iter().any(|service| !service.resources.is_empty());
-    if !has_resources {
-        return;
-    }
-    output.push('\n');
-    for service in services {
-        for resource in &service.resources {
-            let type_id = typescript_resource_type_id(service, resource);
-            output.push_str("registerNexusType(");
-            output.push_str(&typescript_string_literal(&type_id));
-            output.push_str(", {\n");
-            output.push_str("  fields: {\n");
-            for field in &resource.fields {
-                output.push_str("    ");
-                output.push_str(&typescript_object_key(&typescript_generated_field_name(
-                    &field.name,
-                )));
-                output.push_str(": { wire: ");
-                output.push_str(&typescript_string_literal(&field.name.to_kebab_case()));
-                output.push_str(", schema: ");
-                output.push_str(&typescript_field_kind_schema(&field.kind, api_plan));
-                output.push_str(" },\n");
-            }
-            output.push_str("  },\n");
-            output.push_str("  factory: (fields): ");
-            output.push_str(&resource.type_name);
-            output.push_str(" => {\n");
-            output.push_str("    return new ");
-            output.push_str(&resource.type_name);
-            output.push_str("(\n");
-            for field in &resource.fields {
-                output.push_str("      fields.");
-                output.push_str(&typescript_generated_field_name(&field.name));
-                output.push_str(" as ");
-                output.push_str(&typescript_resource_field_annotation(
-                    &field.kind,
-                    field.optional,
-                    field.function.as_ref(),
-                ));
-                output.push_str(",\n");
-            }
-            output.push_str("    );\n");
-            output.push_str("  },\n");
-            output.push_str("});\n");
-            output.push_str("markNexusResource(");
-            output.push_str(&resource.type_name);
-            output.push_str(", ");
-            output.push_str(&typescript_string_literal(&type_id));
-            output.push_str(");\n\n");
-        }
-    }
-}
-
-/// Renders `registerNexusType` calls for every WIT-native rendered model so
-/// the json/nexus runtime can encode and decode them type-directedly.
-fn render_model_schema_registrations(
-    api_plan: &PlannedSpec,
-    models: &IndexMap<String, RenderedModel>,
-) -> String {
-    let mut output = String::new();
-    for full_name in models.keys() {
-        let Some(planned) = api_plan.record(full_name) else {
-            continue;
-        };
-        // Proto-backed models travel as protobuf, not json/nexus.
-        if planned.data.proto.is_some() {
-            continue;
-        }
-        if !output.is_empty() {
-            output.push('\n');
-        }
-        output.push_str("registerNexusType(");
-        output.push_str(&typescript_string_literal(full_name));
-        output.push_str(", {\n");
-        output.push_str("  fields: {\n");
-        for (_, field) in planned.public_fields() {
-            output.push_str("    ");
-            output.push_str(&typescript_object_key(&typescript_generated_field_name(
-                &field.name,
-            )));
-            output.push_str(": { wire: ");
-            output.push_str(&typescript_string_literal(&field.name.to_kebab_case()));
-            output.push_str(", schema: ");
-            output.push_str(&typescript_field_kind_schema(&field.field_type, api_plan));
-            output.push_str(" },\n");
-        }
-        output.push_str("  },\n");
-        output.push_str("});\n");
-    }
-    output
-}
-
-/// Renders the wire schema literal for a planned field type.
-fn typescript_field_kind_schema(kind: &PlannedType, api_plan: &PlannedSpec) -> String {
-    match kind {
-        PlannedType::List(value) => format!(
-            "{{ kind: \"list\", element: {} }}",
-            typescript_wire_schema(value, api_plan)
-        ),
-        PlannedType::Map(_, value) => format!(
-            "{{ kind: \"map\", value: {} }}",
-            typescript_wire_schema(value, api_plan)
-        ),
-        value => typescript_wire_schema(value, api_plan),
-    }
-}
-
-/// Renders the wire schema literal for a planned value type, used by the
-/// json/nexus runtime's type-directed encoder/decoder.
-fn typescript_wire_schema(value: &PlannedType, api_plan: &PlannedSpec) -> String {
-    match value {
-        PlannedType::Bytes => "{ kind: \"bytes\" }".to_string(),
-        // Enums and flags are numbers on the wire.
-        PlannedType::Bool
-        | PlannedType::Int(_)
-        | PlannedType::Float
-        | PlannedType::String
-        | PlannedType::Enum(_)
-        | PlannedType::Flags(_) => "{ kind: \"scalar\" }".to_string(),
-        PlannedType::Variant(variant_type) => {
-            let cases = api_plan
-                .variant(&variant_type.full_name)
-                .map(|planned_variant| {
-                    planned_variant
-                        .cases
-                        .iter()
-                        .map(|case| {
-                            let payload = case
-                                .payload
-                                .as_ref()
-                                .map(|payload| typescript_wire_schema(payload, api_plan))
-                                .unwrap_or_else(|| "null".to_string());
-                            format!("{}: {payload}", typescript_object_key(&case.name))
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            format!("{{ kind: \"variant\", cases: {{ {} }} }}", cases.join(", "))
-        }
-        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
-            if proto.replacement.is_some() || proto.authored_type.is_some() {
-                "{ kind: \"scalar\" }".to_string()
-            } else {
-                format!(
-                    "{{ kind: \"ref\", typeId: {} }}",
-                    typescript_string_literal(&proto.proto.full_name)
-                )
-            }
-        }
-        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(_))) => {
-            "{ kind: \"scalar\" }".to_string()
-        }
-        PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
-            format!(
-                "{{ kind: \"ref\", typeId: {} }}",
-                typescript_string_literal(&json_type.full_name)
-            )
-        }
-        PlannedType::Record(record) => {
-            format!(
-                "{{ kind: \"ref\", typeId: {} }}",
-                typescript_string_literal(&record.full_name)
-            )
-        }
-        PlannedType::Resource(resource) => format!(
-            "{{ kind: \"ref\", typeId: {} }}",
-            typescript_string_literal(&resource.type_name)
-        ),
-        PlannedType::Option(inner) => typescript_wire_schema(inner, api_plan),
-        PlannedType::List(inner) => format!(
-            "{{ kind: \"list\", element: {} }}",
-            typescript_wire_schema(inner, api_plan)
-        ),
-        PlannedType::Map(_, value) => format!(
-            "{{ kind: \"map\", value: {} }}",
-            typescript_wire_schema(value, api_plan)
-        ),
-        PlannedType::Tuple(items) => {
-            let elements = items
-                .iter()
-                .map(|item| typescript_wire_schema(item, api_plan))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{{ kind: \"tuple\", elements: [{elements}] }}")
-        }
-        PlannedType::Result { ok, err } => {
-            let ok_schema = ok
-                .as_ref()
-                .map(|payload| typescript_wire_schema(payload, api_plan))
-                .unwrap_or_else(|| "null".to_string());
-            let err_schema = err
-                .as_ref()
-                .map(|payload| typescript_wire_schema(payload, api_plan))
-                .unwrap_or_else(|| "null".to_string());
-            format!("{{ kind: \"variant\", cases: {{ ok: {ok_schema}, err: {err_schema} }} }}")
-        }
-        PlannedType::External(ExternalTypeSpec::Alias {
-            target: fallback, ..
-        }) => typescript_wire_schema(fallback, api_plan),
-    }
-}
-
-/// Renders an object-literal key: bare when it is a valid identifier, quoted
-/// otherwise (matching prettier's `as-needed` quote style).
-fn typescript_object_key(name: &str) -> String {
-    let mut chars = name.chars();
-    let valid = match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() || first == '_' || first == '$' => {
-            chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
-        }
-        _ => false,
-    };
-    if valid {
-        name.to_string()
-    } else {
-        typescript_string_literal(name)
-    }
 }
 
 fn render_enum(output: &mut String, enumeration: &RenderedEnum) {
@@ -4821,13 +4528,6 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
     output.push_str("});\n\n");
 }
 
-fn typescript_resource_type_id(
-    service: &RenderedService<'_>,
-    resource: &PlannedResource,
-) -> String {
-    format!("{}::resource::{}", service.name, resource.name)
-}
-
 fn resource_client_symbol_name(resource: &PlannedResource) -> String {
     format!(
         "{}Client",
@@ -4978,15 +4678,22 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
         output.push_str(&resource_client_bind_function_name(resource));
         output.push_str("(resource: ");
         output.push_str(&resource.type_name);
+        output.push_str(" | ");
+        render_resource_structural_type(output, resource);
         output.push_str(", client: workflow.NexusServiceClient<typeof ");
         output.push_str(&service.attr_name);
         output.push_str(">): ");
         output.push_str(&resource.type_name);
         output.push_str(" {\n");
-        output.push_str("  resource[");
+        output.push_str("  const bound = resource instanceof ");
+        output.push_str(&resource.type_name);
+        output.push_str(" ? resource : ");
+        render_resource_constructor(output, resource, "resource", "  ");
+        output.push_str(";\n");
+        output.push_str("  bound[");
         output.push_str(&client_symbol_name);
         output.push_str("] = client;\n");
-        output.push_str("  return resource;\n");
+        output.push_str("  return bound;\n");
         output.push_str("}\n\n");
         output.push_str("function ");
         output.push_str(&resource_client_require_function_name(resource));
@@ -5641,21 +5348,62 @@ fn render_operation_function(
             output.push_str("  );\n");
         }
     } else if operation.output_direct_result {
-        if service.endpoint.is_none()
-            && let Some(resource) = service
-                .resources
-                .iter()
-                .find(|resource| resource.type_name == operation.output_annotation)
+        if let Some(resource) = service
+            .resources
+            .iter()
+            .find(|resource| resource.type_name == operation.output_annotation)
         {
             output.push_str("  const resource = await handle.result();\n");
             output.push_str("  return ");
-            output.push_str(&resource_client_bind_function_name(resource));
-            output.push_str("(resource, endpoint);\n");
+            if service.endpoint.is_none() {
+                output.push_str(&resource_client_bind_function_name(resource));
+                output.push_str("(resource, endpoint);\n");
+            } else {
+                render_resource_constructor(output, resource, "resource", "  ");
+                output.push_str(";\n");
+            }
         } else {
             output.push_str("  return await handle.result();\n");
         }
     }
     output.push_str("}\n");
+}
+
+fn render_resource_constructor(
+    output: &mut String,
+    resource: &PlannedResource,
+    value_expr: &str,
+    indent: &str,
+) {
+    output.push_str("new ");
+    output.push_str(&resource.type_name);
+    output.push_str("(\n");
+    for field in &resource.fields {
+        output.push_str(indent);
+        output.push_str("  ");
+        output.push_str(value_expr);
+        output.push('.');
+        output.push_str(&typescript_generated_field_name(&field.name));
+        output.push_str(",\n");
+    }
+    output.push_str(indent);
+    output.push(')');
+}
+
+fn render_resource_structural_type(output: &mut String, resource: &PlannedResource) {
+    output.push_str("{ ");
+    for field in &resource.fields {
+        output.push_str("readonly ");
+        output.push_str(&typescript_generated_field_name(&field.name));
+        output.push_str(": ");
+        output.push_str(&typescript_resource_field_annotation(
+            &field.kind,
+            field.optional,
+            field.function.as_ref(),
+        ));
+        output.push_str("; ");
+    }
+    output.push('}');
 }
 
 fn typescript_operation_function_name(
@@ -5698,15 +5446,7 @@ fn typescript_operation_input_expr(operation: &RenderedOperation<'_>) -> String 
     let Some(input) = &operation.input else {
         return "undefined".to_string();
     };
-    if let Some(type_id) = &input.nexus_type_id {
-        format!(
-            "nexusValue({}, {})",
-            typescript_string_literal(type_id),
-            input.to_wire_expr
-        )
-    } else {
-        input.to_wire_expr.clone()
-    }
+    input.to_wire_expr.clone()
 }
 
 pub(in crate::generator) fn required_field_expr(

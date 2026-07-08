@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import nex_gen_runtime
 import temporalio.workflow
 
 from ..models import (
@@ -132,6 +131,3 @@ async def deactivate(
         reason=reason,
     )
     return await _deactivate(request)
-
-
-nex_gen_runtime.register_nexus_type(User, "TypeShowcase::resource::user")

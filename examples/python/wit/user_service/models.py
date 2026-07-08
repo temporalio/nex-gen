@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import nex_gen_runtime
 
 
 @dataclasses.dataclass(slots=True)
@@ -15,9 +14,3 @@ class GetUserRequest:
 class UpdateEmailRequest:
     user_id: str
     email: str
-
-
-nex_gen_runtime.register_nexus_type(GetUserRequest, "user-service.get-user-request")
-nex_gen_runtime.register_nexus_type(
-    UpdateEmailRequest, "user-service.update-email-request"
-)

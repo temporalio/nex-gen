@@ -3,7 +3,6 @@
 import * as workflow from "@temporalio/workflow";
 import { functionExecution } from "../services";
 import type { ExecuteFunctionResult, ExecuteFunctionRequest } from "../models";
-import { nexusValue } from "../../nex-gen-runtime";
 
 /**
  * @param request - Request for the operation.
@@ -22,6 +21,6 @@ export async function executeFunction<
   });
   return await client.startOperation(
     functionExecution.operations.executeFunction,
-    nexusValue("function-execution.execute-function-request", request),
+    request,
   );
 }

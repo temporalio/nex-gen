@@ -3,9 +3,7 @@
 import * as workflow from "@temporalio/workflow";
 import { typeShowcase } from "../services";
 import type { UpdateEmailRequest } from "../models";
-import "../resources";
-import type { User } from "../resources";
-import { nexusValue } from "../../nex-gen-runtime";
+import { User } from "../resources";
 
 /**
  * @param request - Request for the operation.
@@ -15,10 +13,17 @@ export async function updateEmail(request: UpdateEmailRequest): Promise<User> {
     service: typeShowcase,
     endpoint: "type-showcase",
   });
-  const requestProto = nexusValue("type-showcase.update-email-request", request);
+  const requestProto = request;
   const handle = await client.startOperation(
     typeShowcase.operations.updateEmail,
     requestProto,
   );
-  return await handle.result();
+  const resource = await handle.result();
+  return new User(
+    resource.userId,
+    resource.email,
+    resource.displayName,
+    resource.status,
+    resource.profile,
+  );
 }

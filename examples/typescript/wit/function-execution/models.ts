@@ -2,7 +2,6 @@
 
 import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
-import { registerNexusType } from "../nex-gen-runtime";
 
 export function requiredField<T>(
   value: T | null | undefined,
@@ -182,71 +181,3 @@ export type ExecuteNamedVarargsFunctionRequest<
           args?: Parameters<FunctionFn> | Readonly<Parameters<FunctionFn>>;
         }))
 >;
-
-registerNexusType("function-execution.execute-function-result", {
-  fields: {
-    value: { wire: "value", schema: { kind: "scalar" } },
-  },
-});
-
-registerNexusType("function-execution.execute-function-request", {
-  fields: {
-    function_: { wire: "function", schema: { kind: "scalar" } },
-    name: { wire: "name", schema: { kind: "scalar" } },
-    enabled: { wire: "enabled", schema: { kind: "scalar" } },
-  },
-});
-
-registerNexusType("function-execution.execute-counted-function-result", {
-  fields: {
-    value: { wire: "value", schema: { kind: "scalar" } },
-  },
-});
-
-registerNexusType("function-execution.execute-counted-function-request", {
-  fields: {
-    function_: { wire: "function", schema: { kind: "scalar" } },
-    name: { wire: "name", schema: { kind: "scalar" } },
-    count: { wire: "count", schema: { kind: "scalar" } },
-  },
-});
-
-registerNexusType("function-execution.execute-named-function-result", {
-  fields: {
-    value: { wire: "value", schema: { kind: "scalar" } },
-  },
-});
-
-registerNexusType("function-execution.execute-named-function-request", {
-  fields: {
-    function_: { wire: "function", schema: { kind: "scalar" } },
-    name: { wire: "name", schema: { kind: "scalar" } },
-    enabled: { wire: "enabled", schema: { kind: "scalar" } },
-  },
-});
-
-registerNexusType("function-execution.execute-varargs-function-result", {
-  fields: {
-    value: { wire: "value", schema: { kind: "scalar" } },
-  },
-});
-
-registerNexusType("function-execution.execute-varargs-function-request", {
-  fields: {
-    function_: { wire: "function", schema: { kind: "scalar" } },
-    args: { wire: "args", schema: { kind: "list", element: { kind: "scalar" } } },
-  },
-});
-
-registerNexusType("function-execution.execute-named-varargs-function-result", {
-  fields: {
-    value: { wire: "value", schema: { kind: "scalar" } },
-  },
-});
-
-registerNexusType("function-execution.execute-named-varargs-function-request", {
-  fields: {
-    function_: { wire: "function", schema: { kind: "scalar" } },
-    args: { wire: "args", schema: { kind: "list", element: { kind: "scalar" } } },
-  },
-});

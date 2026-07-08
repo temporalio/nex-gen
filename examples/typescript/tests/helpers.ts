@@ -1,23 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import type { DataConverter } from "@temporalio/common";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import type * as nexus from "nexus-rpc";
-
-export const nexusDataConverter: DataConverter = {
-  payloadConverterPath: fileURLToPath(
-    new URL("../nex-gen-payload-converter.cjs", import.meta.url),
-  ),
-};
 
 export async function withWorkflowEnvironment<T>(
   fn: (env: TestWorkflowEnvironment) => Promise<T>,
 ): Promise<T> {
   const temporalCliPath = resolveTemporalCliPath();
   const env = await TestWorkflowEnvironment.createLocal({
-    client: { dataConverter: nexusDataConverter },
     server:
       temporalCliPath == null
         ? undefined
@@ -60,7 +51,6 @@ export async function executeWorkflowWithNexus<T>(
   const taskQueue = randomUUID();
   const worker = await Worker.create({
     connection: env.nativeConnection,
-    dataConverter: nexusDataConverter,
     namespace: env.namespace ?? "default",
     nexusServices: options.nexusServices,
     taskQueue,

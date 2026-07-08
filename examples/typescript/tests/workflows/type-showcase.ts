@@ -10,8 +10,7 @@ const syncReport = (): SyncReport => ({
     { tag: "ok" as const, value: "synced" },
     { tag: "err" as const, value: "timeout" },
   ],
-  // Dashed map keys exercise the type-directed runtime: map keys are data
-  // and must be preserved verbatim, unlike record field names.
+  // Dashed map keys are data and should be preserved verbatim.
   regionStatus: {
     "us-west": { tag: "ok" as const, value: "healthy" },
     "eu-central": { tag: "err" as const, value: "degraded" },

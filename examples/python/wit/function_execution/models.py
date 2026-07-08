@@ -5,7 +5,6 @@ from __future__ import annotations
 import collections.abc
 import dataclasses
 import typing
-import nex_gen_runtime
 
 
 @dataclasses.dataclass(slots=True)
@@ -64,37 +63,3 @@ class ExecuteNamedVarargsFunctionRequest:
 @dataclasses.dataclass(slots=True)
 class ExecuteNamedVarargsFunctionResult:
     value: str
-
-
-nex_gen_runtime.register_nexus_type(
-    ExecuteFunctionRequest, "function-execution.execute-function-request"
-)
-nex_gen_runtime.register_nexus_type(
-    ExecuteFunctionResult, "function-execution.execute-function-result"
-)
-nex_gen_runtime.register_nexus_type(
-    ExecuteCountedFunctionRequest, "function-execution.execute-counted-function-request"
-)
-nex_gen_runtime.register_nexus_type(
-    ExecuteCountedFunctionResult, "function-execution.execute-counted-function-result"
-)
-nex_gen_runtime.register_nexus_type(
-    ExecuteNamedFunctionRequest, "function-execution.execute-named-function-request"
-)
-nex_gen_runtime.register_nexus_type(
-    ExecuteNamedFunctionResult, "function-execution.execute-named-function-result"
-)
-nex_gen_runtime.register_nexus_type(
-    ExecuteVarargsFunctionRequest, "function-execution.execute-varargs-function-request"
-)
-nex_gen_runtime.register_nexus_type(
-    ExecuteVarargsFunctionResult, "function-execution.execute-varargs-function-result"
-)
-nex_gen_runtime.register_nexus_type(
-    ExecuteNamedVarargsFunctionRequest,
-    "function-execution.execute-named-varargs-function-request",
-)
-nex_gen_runtime.register_nexus_type(
-    ExecuteNamedVarargsFunctionResult,
-    "function-execution.execute-named-varargs-function-result",
-)

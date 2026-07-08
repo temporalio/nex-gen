@@ -621,7 +621,6 @@ impl<'a> ApiPlanner<'a> {
             })
             .flatten()
             .collect::<BTreeSet<_>>();
-        module_imports.insert("nex_gen_runtime".to_string());
 
         let mut body = String::new();
         let function_fields = bound_operations
@@ -659,14 +658,6 @@ impl<'a> ApiPlanner<'a> {
         if !service.delay_load_temporalio_workflow {
             module_imports.insert("temporalio.workflow".to_string());
         }
-        body.push_str("\n\n");
-        body.push_str("nex_gen_runtime.register_nexus_type(");
-        body.push_str(&resource.type_name);
-        body.push_str(", ");
-        body.push_str(&python_string_literal(&python_resource_type_id(
-            service, resource,
-        )));
-        body.push_str(")\n");
 
         let mut output = String::new();
         render_generated_file_header(&mut output);
@@ -1313,7 +1304,6 @@ impl<'a> ApiPlanner<'a> {
             RenderedModel {
                 full_name: full_name.to_string(),
                 name: planned_model.name.clone(),
-                native: planned_model.data.proto.is_none(),
                 capabilities: planned_model.data.capabilities,
                 experimental: planned_model.experimental,
                 fields: Vec::new(),
@@ -1806,13 +1796,7 @@ fn render_record_models(
         }
     }
 
-    let mut registrations = String::new();
-    render_nexus_type_registrations(&mut registrations, models);
-
     let mut module_imports = BTreeSet::new();
-    if models.iter().any(|model| model.native) {
-        module_imports.insert("nex_gen_runtime".to_string());
-    }
     for model in models {
         if let Some(wire_block) = wire_blocks.get(&model.full_name) {
             module_imports.extend(wire_block.imports.module_imports.iter().cloned());
@@ -1824,7 +1808,7 @@ fn render_record_models(
 
     RenderedModelFragments {
         body,
-        registrations,
+        post_model_statements: String::new(),
         module_imports,
         relative_imports: BTreeMap::new(),
         exported_names: models.iter().map(|model| model.name.clone()).collect(),
@@ -1892,16 +1876,6 @@ fn model_needs_keyword_only_dataclass(model: &RenderedModel) -> bool {
         }
     }
     false
-}
-
-fn render_nexus_type_registrations(output: &mut String, models: &[&RenderedModel]) {
-    for model in models.iter().filter(|model| model.native) {
-        output.push_str("nex_gen_runtime.register_nexus_type(");
-        output.push_str(&model.name);
-        output.push_str(", ");
-        output.push_str(&python_string_literal(&model.full_name));
-        output.push_str(")\n");
-    }
 }
 
 fn collect_proto_type_imports(
@@ -2262,7 +2236,6 @@ struct RenderedVariantCase {
 pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) full_name: String,
     pub(in crate::generator) name: String,
-    pub(in crate::generator) native: bool,
     pub(in crate::generator) capabilities: ModelWireCapabilities,
     pub(in crate::generator) experimental: bool,
     pub(in crate::generator) fields: Vec<RenderedField>,
@@ -2425,7 +2398,7 @@ impl PythonImports {
 #[derive(Debug, Default)]
 pub(in crate::generator) struct RenderedModelFragments {
     pub(in crate::generator) body: String,
-    pub(in crate::generator) registrations: String,
+    pub(in crate::generator) post_model_statements: String,
     pub(in crate::generator) module_imports: BTreeSet<String>,
     pub(in crate::generator) relative_imports: BTreeMap<String, BTreeSet<String>>,
     pub(in crate::generator) exported_names: BTreeSet<String>,
@@ -2439,11 +2412,12 @@ impl RenderedModelFragments {
             }
             self.body.push_str(&other.body);
         }
-        if !other.registrations.is_empty() {
-            if !self.registrations.is_empty() {
-                self.registrations.push_str("\n\n");
+        if !other.post_model_statements.is_empty() {
+            if !self.post_model_statements.is_empty() {
+                self.post_model_statements.push_str("\n\n");
             }
-            self.registrations.push_str(&other.registrations);
+            self.post_model_statements
+                .push_str(&other.post_model_statements);
         }
         self.module_imports.extend(other.module_imports);
         for (module, names) in other.relative_imports {
@@ -2858,10 +2832,6 @@ fn render_definitions_only_package_init(
 
 fn operation_key(service_name: &str, operation_name: &str) -> String {
     format!("{service_name}::{operation_name}")
-}
-
-fn python_resource_type_id(service: &RenderedService<'_>, resource: &PlannedResource) -> String {
-    format!("{}::resource::{}", service.name, resource.name)
 }
 
 fn resource_module_name(resource: &PlannedResource) -> String {
@@ -3417,11 +3387,11 @@ fn render_models_module(
         }
     }
 
-    if inline_model_rebuilds && !model_fragments.registrations.is_empty() {
+    if inline_model_rebuilds && !model_fragments.post_model_statements.is_empty() {
         if !body.is_empty() {
             body.push_str("\n\n");
         }
-        body.push_str(&model_fragments.registrations);
+        body.push_str(&model_fragments.post_model_statements);
     }
 
     let mut output = String::new();
@@ -4488,17 +4458,18 @@ fn render_enum(output: &mut String, enumeration: &RenderedEnum) {
 }
 
 fn render_flags(output: &mut String, flags: &RenderedFlags) {
-    output.push_str("class ");
+    // Keep native WIT flags default-converter friendly for now. We can return
+    // to enum.IntFlag once native WIT types have a consistent cross-language
+    // serialization story.
     output.push_str(&flags.name);
-    output.push_str("(enum.IntFlag):\n");
+    output.push_str(": typing.TypeAlias = int\n");
 
     if flags.flags.is_empty() {
-        output.push_str("    pass\n");
         return;
     }
 
     for flag in &flags.flags {
-        output.push_str("    ");
+        output.push_str(&flags.name);
         output.push_str(&flag.name);
         output.push_str(" = 1 << ");
         output.push_str(&flag.bit.to_string());
