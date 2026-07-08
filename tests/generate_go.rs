@@ -225,7 +225,7 @@ fn cli_generates_go_with_package_self_imports_removed() {
     assert!(api.contains("c := NewNexusClient(\"user-service\", \"UserService\")"));
     assert!(!api.contains("const ServiceName"));
     assert!(!api.contains("const Endpoint"));
-    assert!(!api.contains("GetUserOp"));
+    assert!(!api.contains("const GetUserOp"));
     assert!(api.contains("NexusOperationOptions{}"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
@@ -407,7 +407,7 @@ interface sample-service {
     );
     assert!(rendered.contains("\t\t*typedValue = value\n"));
     assert!(rendered.contains(
-        "func GetHandle(ctx workflow.Context, id string) workflow.NexusOperationFuture {"
+        "func GetHandle(ctx workflow.Context, opts GetHandleOptions) workflow.NexusOperationFuture {"
     ));
     fs::remove_dir_all(temp_dir).unwrap();
 }
@@ -448,15 +448,15 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(service_rendered.contains("\"reflect\""));
     assert!(service_rendered.contains("\"runtime\""));
     assert!(service_rendered.contains("\"strings\""));
-    assert!(service_rendered.contains("\"errors\""));
+    assert!(!service_rendered.contains("\"errors\""));
     assert!(!service_rendered.contains("func nexGenFunctionName[F any](value F) string"));
     assert!(service_rendered.contains("functionName = strings.TrimSuffix(shortName, \"-fm\")"));
     assert!(service_rendered.contains("switch rv := reflect.ValueOf(function); rv.Kind()"));
     assert!(service_rendered.contains("functionName = strings.TrimSuffix(shortName, \"-fm\")"));
     assert!(!service_rendered.contains("func nexGenWorkflowDataConverter"));
     assert!(!service_rendered.contains("func getWorkflowDataConverter"));
-    assert!(service_rendered.contains("type nexGenNexusOperationFuture struct"));
-    assert!(service_rendered.contains("func nexGenFailedNexusOperationFuture"));
+    assert!(!service_rendered.contains("type nexGenNexusOperationFuture struct"));
+    assert!(!service_rendered.contains("func nexGenFailedNexusOperationFuture"));
     assert!(support_rendered.contains("\"reflect\""));
     assert!(!support_rendered.contains("\"runtime\""));
     assert!(!support_rendered.contains("\"strings\""));
@@ -495,16 +495,18 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!rendered.contains("func ExecuteCountedFunctionWithArgs"));
     assert!(!rendered.contains("func ExecuteNamedFunctionWithArgs"));
 
-    // Optional function-adjacent args stay in the options struct with their
-    // normal wire-compatible type.
-    assert!(rendered.contains("type ExecuteVarargsFunctionOptions struct {\n\t// Arguments for the function.\n\tArgs []string\n}"));
+    // Function-adjacent args stay positional and do not enter the options struct.
+    assert!(rendered.contains("type ExecuteVarargsFunctionOptions struct {\n}"));
     assert!(rendered.contains(
-        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }](ctx workflow.Context, function FunctionF, opts ExecuteVarargsFunctionOptions) workflow.NexusOperationFuture {"
+        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }]("
     ));
-    assert!(rendered.contains("\t\tArgs: opts.Args,\n"));
+    assert!(rendered.contains("\topts ExecuteVarargsFunctionOptions,\n"));
+    assert!(rendered.contains("\tfunction FunctionF,\n"));
+    assert!(rendered.contains("\targs []string,\n"));
+    assert!(rendered.contains("\t\tArgs: args,\n"));
 
     // Primary varargs function fields also get a trailing-args convenience
-    // wrapper that matches Python's positional/list-form conflict behavior.
+    // wrapper; args are positional only, never options fields.
     assert!(rendered.contains(
         "func ExecuteVarargsFunctionWithArgs[FunctionF interface{ ~string | func(...string) string }]("
     ));
@@ -512,10 +514,8 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
         "func ExecuteNamedVarargsFunctionWithArgs[FunctionF interface{ ~string | func(...string) string }]("
     ));
     assert!(rendered.contains("\targs ...string,\n"));
-    assert!(rendered.contains(
-        "\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nexGenFailedNexusOperationFuture(ctx, errors.New(\"cannot specify both positional arguments and args\"))\n\t}\n"
-    ));
-    assert!(rendered.contains("\tif len(args) == 0 {\n\t\targs = opts.Args\n\t}\n"));
+    assert!(!rendered.contains("cannot specify both positional arguments and args"));
+    assert!(!rendered.contains("opts.Args"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
     assert!(rendered.contains(
         "// Input name: The name argument for the function.\n// Input enabled: The enabled argument for the function.\nfunc ExecuteFunction"
@@ -549,20 +549,25 @@ fn go_temporal_function_constraints_use_workflow_context_prefix() {
     .unwrap();
 
     assert!(rendered.contains(
-        "func SignalWithStartWorkflow[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }, SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
+        "func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface{ ~func(workflow.Context, WorkflowArg) WorkflowResult }, SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
     ));
     assert!(rendered.contains(
-        "func SignalWithStartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }, SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
+        "func SignalWithStartWorkflowWithArgs[SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
     ));
+    assert!(rendered.contains("\topts SignalWithStartWorkflowOptions,\n"));
     assert!(rendered.contains("\tworkflow WorkflowF,\n"));
+    assert!(rendered.contains("\targ WorkflowArg,\n"));
+    assert!(rendered.contains("\tworkflow any,\n"));
     assert!(rendered.contains("\tsignal SignalF,\n"));
+    assert!(rendered.contains("\tsignalArgs []any,\n"));
     assert!(rendered.contains("\targs ...any,\n"));
     assert!(rendered.contains("switch rv := reflect.ValueOf(workflow); rv.Kind()"));
     assert!(rendered.contains("switch rv := reflect.ValueOf(signal); rv.Kind()"));
     assert!(rendered.contains("\t\tWorkflow: workflowName,\n"));
     assert!(rendered.contains("\t\tSignal: signalName,\n"));
+    assert!(rendered.contains("\t\tArgs: []any{arg},\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
-    assert!(rendered.contains("\t\tSignalArgs: opts.SignalArgs,\n"));
+    assert!(rendered.contains("\t\tSignalArgs: signalArgs,\n"));
 }
 
 #[test]
@@ -679,11 +684,13 @@ fn go_type_showcase_generates_expected_types() {
         "func (u *User) Rename(ctx workflow.Context, displayName string) workflow.NexusOperationFuture"
     ));
     assert!(rendered.contains("renameRequest{UserId: u.UserId, DisplayName: displayName}"));
-    // Void resource method -- optional param is a pointer.
+    // Void resource method -- optional primitive param is value-shaped publicly
+    // and converted to a pointer for the internal request.
     assert!(
-        rendered.contains("func (u *User) Deactivate(ctx workflow.Context, reason *string) workflow.NexusOperationFuture")
+        rendered.contains("func (u *User) Deactivate(ctx workflow.Context, reason string) workflow.NexusOperationFuture")
     );
-    assert!(rendered.contains("deactivateRequest{UserId: u.UserId, Reason: reason}"));
+    assert!(rendered.contains("var reasonPtr *string"));
+    assert!(rendered.contains("deactivateRequest{UserId: u.UserId, Reason: reasonPtr}"));
 
     // Unexported operation wrapper functions
     assert!(rendered.contains(
@@ -702,25 +709,31 @@ fn go_type_showcase_generates_expected_types() {
     );
     assert!(rendered.contains("\treturn fut\n"));
 
-    // Exported convenience wrappers -- all required fields become positional args
+    // Exported convenience wrappers -- required non-function fields live in options.
     assert!(rendered.contains(
-        "func UpdateEmail(ctx workflow.Context, userId string, email string) workflow.NexusOperationFuture"
+        "func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.NexusOperationFuture"
     ));
     // The request struct is always constructed across multiple lines.
-    assert!(rendered.contains("updateEmailRequest{\n\t\tUserId: userId,\n\t\tEmail: email,\n\t}"));
-    // Optional fields produce an options struct (pointer-typed)
-    assert!(rendered.contains("type GetUserOptions struct"));
-    assert!(rendered.contains("ConsistencyToken *string"));
     assert!(rendered.contains(
-        "func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) workflow.NexusOperationFuture"
+        "updateEmailRequest{\n\t\tUserId: opts.UserId,\n\t\tEmail: opts.Email,\n\t}"
     ));
+    // Required and optional public fields share the options struct; optional
+    // primitive fields default-pun to nil internally.
+    assert!(rendered.contains("type GetUserOptions struct"));
+    assert!(rendered.contains("UserId string"));
+    assert!(rendered.contains("ConsistencyToken string"));
     assert!(rendered.contains(
-        "getUserRequest{\n\t\tUserId: userId,\n\t\tConsistencyToken: opts.ConsistencyToken,\n\t}"
+        "func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.NexusOperationFuture"
+    ));
+    assert!(rendered.contains("var consistencyToken *string"));
+    assert!(rendered.contains(
+        "getUserRequest{\n\t\tUserId: opts.UserId,\n\t\tConsistencyToken: consistencyToken,\n\t}"
     ));
     // Void convenience wrapper with options
     assert!(rendered.contains("type DeactivateOptions struct"));
+    assert!(rendered.contains("Reason string"));
     assert!(rendered.contains(
-        "func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) workflow.NexusOperationFuture"
+        "func Deactivate(ctx workflow.Context, opts DeactivateOptions) workflow.NexusOperationFuture"
     ));
 }
 
@@ -832,14 +845,20 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
         "fut := c.ExecuteOperation(ctx, \"RestartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains(
-        "func StartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }]("
+        "func StartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface{ ~func(workflow.Context, WorkflowArg) WorkflowResult }]("
     ));
     assert!(rendered.contains(
-        "func RestartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }]("
+        "func StartWorkflowWithArgs(\n\tctx workflow.Context,\n\topts StartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
     ));
-    assert!(rendered.contains("\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nexGenFailedNexusOperationFuture(ctx, errors.New(\"cannot specify both positional arguments and args\"))\n\t}\n"));
-    assert!(rendered.contains("\tif len(args) == 0 {\n\t\targs = opts.Args\n\t}\n"));
+    assert!(rendered.contains(
+        "func RestartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface{ ~func(workflow.Context, WorkflowArg) WorkflowResult }]("
+    ));
+    assert!(rendered.contains(
+        "func RestartWorkflowWithArgs(\n\tctx workflow.Context,\n\topts RestartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
+    ));
+    assert!(rendered.contains("\t\tArgs: []any{arg},\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
+    assert!(!rendered.contains("opts.Args"));
 }
 
 #[test]
@@ -991,7 +1010,7 @@ interface doc-service {
     // Operation docs render on the exported convenience wrapper, with the
     // `returns=` text in a separate paragraph.
     assert!(rendered.contains(
-        "// Greets the given person.\n//\n// Input name: Name of the person to greet.\n//\n// Returns: The rendered greeting.\nfunc Greet("
+        "// Greets the given person.\n//\n// Returns: The rendered greeting.\nfunc Greet("
     ));
 
     fs::remove_dir_all(temp_dir).unwrap();

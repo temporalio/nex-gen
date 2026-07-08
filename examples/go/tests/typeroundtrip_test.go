@@ -58,7 +58,7 @@ func (s *TypeRoundtripTestSuite) TestRetryPolicyOperation() {
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*temporal.RetryPolicy, error) {
-		return getFutureResult[temporal.RetryPolicy](ctx, tr.RetryPolicyOperation(ctx, policy))
+		return getFutureResult[temporal.RetryPolicy](ctx, tr.RetryPolicyOperation(ctx, tr.RetryPolicyOperationOptions{}, policy))
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -101,9 +101,10 @@ func (s *TypeRoundtripTestSuite) TestActivityOptionsOperation() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*tr.ActivityOptions, error) {
 		return getFutureResult[tr.ActivityOptions](
 			ctx,
-			tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{
-				TaskQueue:              ptr("demo-task-queue"),
-				ScheduleToCloseTimeout: ptr(7 * time.Second),
+			tr.ActivityOptionsOperation(ctx, tr.ActivityOptionsOperationOptions{
+				RetryPolicy:            policy,
+				TaskQueue:              "demo-task-queue",
+				ScheduleToCloseTimeout: 7 * time.Second,
 				Priority:               &priority,
 			}),
 		)
@@ -162,7 +163,7 @@ func (s *TypeRoundtripIntegrationSuite) TestRetryPolicyOperation() {
 	policy := temporal.RetryPolicy{MaximumAttempts: 3}
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*temporal.RetryPolicy, error) {
-		return getFutureResult[temporal.RetryPolicy](ctx, tr.RetryPolicyOperation(ctx, policy))
+		return getFutureResult[temporal.RetryPolicy](ctx, tr.RetryPolicyOperation(ctx, tr.RetryPolicyOperationOptions{}, policy))
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -188,9 +189,10 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperation() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*tr.ActivityOptions, error) {
 		return getFutureResult[tr.ActivityOptions](
 			ctx,
-			tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{
-				TaskQueue:              ptr("demo-task-queue"),
-				ScheduleToCloseTimeout: ptr(7 * time.Second),
+			tr.ActivityOptionsOperation(ctx, tr.ActivityOptionsOperationOptions{
+				RetryPolicy:            policy,
+				TaskQueue:              "demo-task-queue",
+				ScheduleToCloseTimeout: 7 * time.Second,
 				Priority:               &priority,
 			}),
 		)
@@ -225,7 +227,7 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperationRequiredOnly
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*tr.ActivityOptions, error) {
 		return getFutureResult[tr.ActivityOptions](
 			ctx,
-			tr.ActivityOptionsOperation(ctx, policy, tr.ActivityOptionsOperationOptions{}),
+			tr.ActivityOptionsOperation(ctx, tr.ActivityOptionsOperationOptions{RetryPolicy: policy}),
 		)
 	})
 
@@ -244,10 +246,4 @@ func (s *TypeRoundtripIntegrationSuite) TestActivityOptionsOperationRequiredOnly
 	s.Equal("ActivityOptionsOperation", s.calls[0].Operation)
 	handlerInput := s.calls[0].Input.(*activitypb.ActivityOptions)
 	s.Equal(int32(5), handlerInput.GetRetryPolicy().GetMaximumAttempts())
-}
-
-// ptr returns a pointer to v, used to populate optional pointer fields in the
-// generated structs.
-func ptr[T any](v T) *T {
-	return &v
 }

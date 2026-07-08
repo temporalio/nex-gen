@@ -136,8 +136,12 @@ type StartedWorkflow struct {
 	RunId      *string
 }
 
-func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason *string) workflow.NexusOperationFuture {
-	return cancelWorkflow(ctx, cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reason})
+func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) workflow.NexusOperationFuture {
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+	return cancelWorkflow(ctx, cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reasonPtr})
 }
 
 func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string, taskQueue string) workflow.NexusOperationFuture {
@@ -287,20 +291,26 @@ func cancelWorkflowResponseFromProto(ctx workflow.Context, proto *workflowservic
 }
 
 type StartWorkflowOptions struct {
-	// Arguments for the workflow.
-	Args               []any
-	WorkflowStartDelay *time.Duration
+	// Required.
+	WorkflowId string
+	// Required.
+	TaskQueue          string
+	WorkflowStartDelay time.Duration
 }
 
-func StartWorkflow[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
+// Input args: Arguments for the workflow.
+func StartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
+	~func(workflow.Context, WorkflowArg) WorkflowResult
 }](
 	ctx workflow.Context,
-	workflow WorkflowF,
-	workflowId string,
-	taskQueue string,
 	opts StartWorkflowOptions,
+	workflow WorkflowF,
+	arg WorkflowArg,
 ) workflow.NexusOperationFuture {
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
+	}
 	workflowName := ""
 	switch rv := reflect.ValueOf(workflow); rv.Kind() {
 	case reflect.String:
@@ -315,29 +325,23 @@ func StartWorkflow[WorkflowF interface {
 	}
 	return startWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
-		Args:               opts.Args,
-		WorkflowId:         workflowId,
-		TaskQueue:          taskQueue,
-		WorkflowStartDelay: opts.WorkflowStartDelay,
+		Args:               []any{arg},
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
 	})
 }
 
 // Input args: Arguments for the workflow.
-func StartWorkflowWithArgs[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
-}](
+func StartWorkflowWithArgs(
 	ctx workflow.Context,
-	workflow WorkflowF,
-	workflowId string,
-	taskQueue string,
 	opts StartWorkflowOptions,
+	workflow any,
 	args ...any,
 ) workflow.NexusOperationFuture {
-	if len(args) > 0 && opts.Args != nil {
-		return nexGenFailedNexusOperationFuture(ctx, errors.New("cannot specify both positional arguments and args"))
-	}
-	if len(args) == 0 {
-		args = opts.Args
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
 	}
 	workflowName := ""
 	switch rv := reflect.ValueOf(workflow); rv.Kind() {
@@ -354,27 +358,33 @@ func StartWorkflowWithArgs[WorkflowF interface {
 	return startWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
-		WorkflowId:         workflowId,
-		TaskQueue:          taskQueue,
-		WorkflowStartDelay: opts.WorkflowStartDelay,
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
 	})
 }
 
 type RestartWorkflowOptions struct {
-	// Arguments for the workflow.
-	Args               []any
-	WorkflowStartDelay *time.Duration
+	// Required.
+	WorkflowId string
+	// Required.
+	TaskQueue          string
+	WorkflowStartDelay time.Duration
 }
 
-func RestartWorkflow[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
+// Input args: Arguments for the workflow.
+func RestartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
+	~func(workflow.Context, WorkflowArg) WorkflowResult
 }](
 	ctx workflow.Context,
-	workflow WorkflowF,
-	workflowId string,
-	taskQueue string,
 	opts RestartWorkflowOptions,
+	workflow WorkflowF,
+	arg WorkflowArg,
 ) workflow.NexusOperationFuture {
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
+	}
 	workflowName := ""
 	switch rv := reflect.ValueOf(workflow); rv.Kind() {
 	case reflect.String:
@@ -389,29 +399,23 @@ func RestartWorkflow[WorkflowF interface {
 	}
 	return restartWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
-		Args:               opts.Args,
-		WorkflowId:         workflowId,
-		TaskQueue:          taskQueue,
-		WorkflowStartDelay: opts.WorkflowStartDelay,
+		Args:               []any{arg},
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
 	})
 }
 
 // Input args: Arguments for the workflow.
-func RestartWorkflowWithArgs[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
-}](
+func RestartWorkflowWithArgs(
 	ctx workflow.Context,
-	workflow WorkflowF,
-	workflowId string,
-	taskQueue string,
 	opts RestartWorkflowOptions,
+	workflow any,
 	args ...any,
 ) workflow.NexusOperationFuture {
-	if len(args) > 0 && opts.Args != nil {
-		return nexGenFailedNexusOperationFuture(ctx, errors.New("cannot specify both positional arguments and args"))
-	}
-	if len(args) == 0 {
-		args = opts.Args
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
 	}
 	workflowName := ""
 	switch rv := reflect.ValueOf(workflow); rv.Kind() {
@@ -428,19 +432,25 @@ func RestartWorkflowWithArgs[WorkflowF interface {
 	return restartWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
-		WorkflowId:         workflowId,
-		TaskQueue:          taskQueue,
-		WorkflowStartDelay: opts.WorkflowStartDelay,
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
 	})
 }
 
 type CancelWorkflowOptions struct {
-	Reason *string
+	// Required.
+	WorkflowExecution WorkflowExecution
+	Reason            string
 }
 
-func CancelWorkflow(ctx workflow.Context, workflowExecution WorkflowExecution, opts CancelWorkflowOptions) workflow.NexusOperationFuture {
+func CancelWorkflow(ctx workflow.Context, opts CancelWorkflowOptions) workflow.NexusOperationFuture {
+	var reason *string
+	if opts.Reason != "" {
+		reason = &opts.Reason
+	}
 	return cancelWorkflow(ctx, cancelWorkflowRequest{
-		WorkflowExecution: workflowExecution,
-		Reason:            opts.Reason,
+		WorkflowExecution: opts.WorkflowExecution,
+		Reason:            reason,
 	})
 }

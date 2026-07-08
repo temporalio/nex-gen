@@ -67,7 +67,7 @@ func (s *FunctionExecutionTestSuite) TestExecuteFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteFunctionResult](
 			ctx,
-			functionexecution.ExecuteFunction(ctx, validFunction, "one", true),
+			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, validFunction, "one", true),
 		)
 	})
 
@@ -94,8 +94,9 @@ func (s *FunctionExecutionTestSuite) TestExecuteVarargsFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteVarargsFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteVarargsFunctionResult](ctx, functionexecution.ExecuteVarargsFunction(
 			ctx,
+			functionexecution.ExecuteVarargsFunctionOptions{},
 			"valid-varargs-function",
-			functionexecution.ExecuteVarargsFunctionOptions{Args: []string{"one", "two"}},
+			[]string{"one", "two"},
 		))
 	})
 
@@ -120,7 +121,7 @@ func (s *FunctionExecutionTestSuite) TestExecuteFunctionError() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteFunctionResult](
 			ctx,
-			functionexecution.ExecuteFunction(ctx, "missing-function", "one", false),
+			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, "missing-function", "one", false),
 		)
 	})
 
@@ -190,7 +191,7 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteFunctionResult](
 			ctx,
-			functionexecution.ExecuteFunction(ctx, "valid-function", "one", true),
+			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, "valid-function", "one", true),
 		)
 	})
 
@@ -208,7 +209,7 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteCountedFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteCountedFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteCountedFunctionResult](
 			ctx,
-			functionexecution.ExecuteCountedFunction(ctx, validCountedFunction, "one", 7),
+			functionexecution.ExecuteCountedFunction(ctx, functionexecution.ExecuteCountedFunctionOptions{}, validCountedFunction, "one", 7),
 		)
 	})
 
@@ -226,7 +227,7 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteNamedFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteNamedFunctionResult](
 			ctx,
-			functionexecution.ExecuteNamedFunction(ctx, validFunction, "one", true),
+			functionexecution.ExecuteNamedFunction(ctx, functionexecution.ExecuteNamedFunctionOptions{}, validFunction, "one", true),
 		)
 	})
 
@@ -244,8 +245,9 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteVarargsFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteVarargsFunctionResult](ctx, functionexecution.ExecuteVarargsFunction(
 			ctx,
+			functionexecution.ExecuteVarargsFunctionOptions{},
 			validVarargsFunction,
-			functionexecution.ExecuteVarargsFunctionOptions{Args: []string{"one", "two"}},
+			[]string{"one", "two"},
 		))
 	})
 
@@ -265,8 +267,8 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunctionWithArgsSt
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteVarargsFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteVarargsFunctionResult](ctx, functionexecution.ExecuteVarargsFunctionWithArgs(
 			ctx,
-			"valid-varargs-function",
 			functionexecution.ExecuteVarargsFunctionOptions{},
+			"valid-varargs-function",
 			"one",
 			"two",
 		))
@@ -284,48 +286,13 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunctionWithArgsSt
 	s.Equal([]string{"one", "two"}, stringSliceField(s.calls[0].Input, "Args"))
 }
 
-func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunctionWithArgsFallsBackToOptions() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteVarargsFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteVarargsFunctionResult](ctx, functionexecution.ExecuteVarargsFunctionWithArgs(
-			ctx,
-			validVarargsFunction,
-			functionexecution.ExecuteVarargsFunctionOptions{Args: []string{"from", "options"}},
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteVarargsFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("varargs", result.Value)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("ExecuteVarargsFunction", s.calls[0].Operation)
-	s.Equal("validVarargsFunction", stringField(s.calls[0].Input, "Function"))
-	s.Equal([]string{"from", "options"}, stringSliceField(s.calls[0].Input, "Args"))
-}
-
-func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunctionWithArgsRejectsConflictingArgs() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteVarargsFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteVarargsFunctionResult](ctx, functionexecution.ExecuteVarargsFunctionWithArgs(
-			ctx,
-			validVarargsFunction,
-			functionexecution.ExecuteVarargsFunctionOptions{Args: []string{"from", "options"}},
-			"positional",
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.ErrorContains(s.env.GetWorkflowError(), "cannot specify both positional arguments and args")
-	s.Empty(s.calls)
-}
-
 func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteNamedVarargsFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteNamedVarargsFunctionResult](ctx, functionexecution.ExecuteNamedVarargsFunction(
 			ctx,
+			functionexecution.ExecuteNamedVarargsFunctionOptions{},
 			"named-varargs-function",
-			functionexecution.ExecuteNamedVarargsFunctionOptions{Args: []string{"one", "two"}},
+			[]string{"one", "two"},
 		))
 	})
 
@@ -345,8 +312,8 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunctionWithA
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteNamedVarargsFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteNamedVarargsFunctionResult](ctx, functionexecution.ExecuteNamedVarargsFunctionWithArgs(
 			ctx,
-			validVarargsFunction,
 			functionexecution.ExecuteNamedVarargsFunctionOptions{},
+			validVarargsFunction,
 			"one",
 			"two",
 		))

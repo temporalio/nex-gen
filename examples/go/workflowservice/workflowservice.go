@@ -318,29 +318,29 @@ func signalWithStartWorkflowResponseFromProto(ctx workflow.Context, proto *workf
 }
 
 type SignalWithStartWorkflowOptions struct {
-	// Arguments for the workflow.
-	Args []any
-	// Arguments for the signal.
-	SignalArgs []any
+	// Required. Unique identifier for the workflow execution.
+	Id string
+	// Required. Task queue to run the workflow on.
+	TaskQueue string
 	// Total workflow execution timeout, including retries and continue-as-new.
-	ExecutionTimeout *time.Duration
+	ExecutionTimeout time.Duration
 	// Timeout of a single workflow run.
-	RunTimeout *time.Duration
+	RunTimeout time.Duration
 	// Timeout of a single workflow task.
-	TaskTimeout *time.Duration
+	TaskTimeout time.Duration
 	// Request ID used to deduplicate workflow start requests.
-	RequestId *string
+	RequestId string
 	// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
-	IdReusePolicy *enums.WorkflowIdReusePolicy
+	IdReusePolicy enums.WorkflowIdReusePolicy
 	// Behavior when a workflow is currently running with the same ID. Set to use-existing
 	// for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is
 	// terminate-if-running.
-	IdConflictPolicy *enums.WorkflowIdConflictPolicy
+	IdConflictPolicy enums.WorkflowIdConflictPolicy
 	// Retry policy for the workflow.
 	RetryPolicy *temporal.RetryPolicy
 	// Cron schedule for recurring workflow executions. See
 	// https://docs.temporal.io/cron-job.
-	CronSchedule *string
+	CronSchedule string
 	// Memo for the workflow.
 	Memo map[string]any
 	// Typed search attributes for the workflow.
@@ -351,28 +351,60 @@ type SignalWithStartWorkflowOptions struct {
 	VersioningOverride client.VersioningOverride
 	// Amount of time to wait before starting the workflow. This does not work with
 	// cron-schedule.
-	StartDelay *time.Duration
+	StartDelay time.Duration
 	UserMetadata
 }
 
 // Signal a workflow, starting it first if needed.
 //
-// Input id: Unique identifier for the workflow execution.
-// Input taskQueue: Task queue to run the workflow on.
+// Input args: Arguments for the workflow.
+// Input signalArgs: Arguments for the signal.
 //
 // Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflow[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
+func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
+	~func(workflow.Context, WorkflowArg) WorkflowResult
 }, SignalF interface {
 	~string | func(workflow.Context, ...any) any
 }](
 	ctx workflow.Context,
-	workflow WorkflowF,
-	id string,
-	taskQueue string,
-	signal SignalF,
 	opts SignalWithStartWorkflowOptions,
+	workflow WorkflowF,
+	arg WorkflowArg,
+	signal SignalF,
+	signalArgs []any,
 ) workflow.NexusOperationFuture {
+	var executionTimeout *time.Duration
+	if opts.ExecutionTimeout != 0 {
+		executionTimeout = &opts.ExecutionTimeout
+	}
+	var runTimeout *time.Duration
+	if opts.RunTimeout != 0 {
+		runTimeout = &opts.RunTimeout
+	}
+	var taskTimeout *time.Duration
+	if opts.TaskTimeout != 0 {
+		taskTimeout = &opts.TaskTimeout
+	}
+	var requestId *string
+	if opts.RequestId != "" {
+		requestId = &opts.RequestId
+	}
+	var idReusePolicy *enums.WorkflowIdReusePolicy
+	if opts.IdReusePolicy != 0 {
+		idReusePolicy = &opts.IdReusePolicy
+	}
+	var idConflictPolicy *enums.WorkflowIdConflictPolicy
+	if opts.IdConflictPolicy != 0 {
+		idConflictPolicy = &opts.IdConflictPolicy
+	}
+	var cronSchedule *string
+	if opts.CronSchedule != "" {
+		cronSchedule = &opts.CronSchedule
+	}
+	var startDelay *time.Duration
+	if opts.StartDelay != 0 {
+		startDelay = &opts.StartDelay
+	}
 	workflowName := ""
 	switch rv := reflect.ValueOf(workflow); rv.Kind() {
 	case reflect.String:
@@ -399,53 +431,75 @@ func SignalWithStartWorkflow[WorkflowF interface {
 	}
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
-		Args:               opts.Args,
-		Id:                 id,
-		TaskQueue:          taskQueue,
+		Args:               []any{arg},
+		Id:                 opts.Id,
+		TaskQueue:          opts.TaskQueue,
 		Signal:             signalName,
-		SignalArgs:         opts.SignalArgs,
-		ExecutionTimeout:   opts.ExecutionTimeout,
-		RunTimeout:         opts.RunTimeout,
-		TaskTimeout:        opts.TaskTimeout,
-		RequestId:          opts.RequestId,
-		IdReusePolicy:      opts.IdReusePolicy,
-		IdConflictPolicy:   opts.IdConflictPolicy,
+		SignalArgs:         signalArgs,
+		ExecutionTimeout:   executionTimeout,
+		RunTimeout:         runTimeout,
+		TaskTimeout:        taskTimeout,
+		RequestId:          requestId,
+		IdReusePolicy:      idReusePolicy,
+		IdConflictPolicy:   idConflictPolicy,
 		RetryPolicy:        opts.RetryPolicy,
-		CronSchedule:       opts.CronSchedule,
+		CronSchedule:       cronSchedule,
 		Memo:               opts.Memo,
 		SearchAttributes:   opts.SearchAttributes,
 		Priority:           opts.Priority,
 		VersioningOverride: opts.VersioningOverride,
-		StartDelay:         opts.StartDelay,
+		StartDelay:         startDelay,
 		UserMetadata:       &opts.UserMetadata,
 	})
 }
 
 // Signal a workflow, starting it first if needed.
 //
-// Input id: Unique identifier for the workflow execution.
-// Input taskQueue: Task queue to run the workflow on.
+// Input signalArgs: Arguments for the signal.
 // Input args: Arguments for the workflow.
 //
 // Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflowWithArgs[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
-}, SignalF interface {
+func SignalWithStartWorkflowWithArgs[SignalF interface {
 	~string | func(workflow.Context, ...any) any
 }](
 	ctx workflow.Context,
-	workflow WorkflowF,
-	id string,
-	taskQueue string,
-	signal SignalF,
 	opts SignalWithStartWorkflowOptions,
+	workflow any,
+	signal SignalF,
+	signalArgs []any,
 	args ...any,
 ) workflow.NexusOperationFuture {
-	if len(args) > 0 && opts.Args != nil {
-		return nexGenFailedNexusOperationFuture(ctx, errors.New("cannot specify both positional arguments and args"))
+	var executionTimeout *time.Duration
+	if opts.ExecutionTimeout != 0 {
+		executionTimeout = &opts.ExecutionTimeout
 	}
-	if len(args) == 0 {
-		args = opts.Args
+	var runTimeout *time.Duration
+	if opts.RunTimeout != 0 {
+		runTimeout = &opts.RunTimeout
+	}
+	var taskTimeout *time.Duration
+	if opts.TaskTimeout != 0 {
+		taskTimeout = &opts.TaskTimeout
+	}
+	var requestId *string
+	if opts.RequestId != "" {
+		requestId = &opts.RequestId
+	}
+	var idReusePolicy *enums.WorkflowIdReusePolicy
+	if opts.IdReusePolicy != 0 {
+		idReusePolicy = &opts.IdReusePolicy
+	}
+	var idConflictPolicy *enums.WorkflowIdConflictPolicy
+	if opts.IdConflictPolicy != 0 {
+		idConflictPolicy = &opts.IdConflictPolicy
+	}
+	var cronSchedule *string
+	if opts.CronSchedule != "" {
+		cronSchedule = &opts.CronSchedule
+	}
+	var startDelay *time.Duration
+	if opts.StartDelay != 0 {
+		startDelay = &opts.StartDelay
 	}
 	workflowName := ""
 	switch rv := reflect.ValueOf(workflow); rv.Kind() {
@@ -474,23 +528,23 @@ func SignalWithStartWorkflowWithArgs[WorkflowF interface {
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
-		Id:                 id,
-		TaskQueue:          taskQueue,
+		Id:                 opts.Id,
+		TaskQueue:          opts.TaskQueue,
 		Signal:             signalName,
-		SignalArgs:         opts.SignalArgs,
-		ExecutionTimeout:   opts.ExecutionTimeout,
-		RunTimeout:         opts.RunTimeout,
-		TaskTimeout:        opts.TaskTimeout,
-		RequestId:          opts.RequestId,
-		IdReusePolicy:      opts.IdReusePolicy,
-		IdConflictPolicy:   opts.IdConflictPolicy,
+		SignalArgs:         signalArgs,
+		ExecutionTimeout:   executionTimeout,
+		RunTimeout:         runTimeout,
+		TaskTimeout:        taskTimeout,
+		RequestId:          requestId,
+		IdReusePolicy:      idReusePolicy,
+		IdConflictPolicy:   idConflictPolicy,
 		RetryPolicy:        opts.RetryPolicy,
-		CronSchedule:       opts.CronSchedule,
+		CronSchedule:       cronSchedule,
 		Memo:               opts.Memo,
 		SearchAttributes:   opts.SearchAttributes,
 		Priority:           opts.Priority,
 		VersioningOverride: opts.VersioningOverride,
-		StartDelay:         opts.StartDelay,
+		StartDelay:         startDelay,
 		UserMetadata:       &opts.UserMetadata,
 	})
 }

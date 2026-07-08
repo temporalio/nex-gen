@@ -48,15 +48,27 @@ func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Nexu
 
 // --- Operations (public API) ---
 
-func GetUser(ctx workflow.Context, userId string) workflow.NexusOperationFuture {
+type GetUserOptions struct {
+	// Required.
+	UserId string
+}
+
+func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.NexusOperationFuture {
 	return getUser(ctx, getUserRequest{
-		UserId: userId,
+		UserId: opts.UserId,
 	})
 }
 
-func UpdateEmail(ctx workflow.Context, userId string, email string) workflow.NexusOperationFuture {
+type UpdateEmailOptions struct {
+	// Required.
+	UserId string
+	// Required.
+	Email string
+}
+
+func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.NexusOperationFuture {
 	return updateEmail(ctx, updateEmailRequest{
-		UserId: userId,
-		Email:  email,
+		UserId: opts.UserId,
+		Email:  opts.Email,
 	})
 }

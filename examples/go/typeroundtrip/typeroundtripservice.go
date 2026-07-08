@@ -191,21 +191,34 @@ func activityOptionsFromProto(ctx workflow.Context, proto *activity.ActivityOpti
 	return value, nil
 }
 
-func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) workflow.NexusOperationFuture {
+type RetryPolicyOperationOptions struct {
+}
+
+func RetryPolicyOperation(ctx workflow.Context, opts RetryPolicyOperationOptions, request temporal.RetryPolicy) workflow.NexusOperationFuture {
 	return retryPolicyOperation(ctx, request)
 }
 
 type ActivityOptionsOperationOptions struct {
-	TaskQueue              *string
-	ScheduleToCloseTimeout *time.Duration
+	TaskQueue string
+	// Required.
+	RetryPolicy            temporal.RetryPolicy
+	ScheduleToCloseTimeout time.Duration
 	Priority               *temporal.Priority
 }
 
-func ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ActivityOptionsOperationOptions) workflow.NexusOperationFuture {
+func ActivityOptionsOperation(ctx workflow.Context, opts ActivityOptionsOperationOptions) workflow.NexusOperationFuture {
+	var taskQueue *string
+	if opts.TaskQueue != "" {
+		taskQueue = &opts.TaskQueue
+	}
+	var scheduleToCloseTimeout *time.Duration
+	if opts.ScheduleToCloseTimeout != 0 {
+		scheduleToCloseTimeout = &opts.ScheduleToCloseTimeout
+	}
 	return activityOptionsOperation(ctx, ActivityOptions{
-		TaskQueue:              opts.TaskQueue,
-		RetryPolicy:            retryPolicy,
-		ScheduleToCloseTimeout: opts.ScheduleToCloseTimeout,
+		TaskQueue:              taskQueue,
+		RetryPolicy:            opts.RetryPolicy,
+		ScheduleToCloseTimeout: scheduleToCloseTimeout,
 		Priority:               opts.Priority,
 	})
 }

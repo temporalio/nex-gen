@@ -230,7 +230,7 @@ pub(crate) fn generate(
     if has_operations && !package.is_self_import("go.temporal.io/sdk/workflow") {
         imports.insert("go.temporal.io/sdk/workflow".to_string());
     }
-    if needs_future_helpers || services.iter().any(service_uses_primary_varargs_wrappers) {
+    if needs_future_helpers {
         imports.insert("errors".to_string());
     }
     if needs_function_name_inlining {
@@ -268,18 +268,9 @@ pub(crate) fn generate(
     Ok(GeneratedFiles::directory(files))
 }
 
-fn service_uses_primary_varargs_wrappers(service: &RenderedService<'_>) -> bool {
-    service
-        .operations
-        .iter()
-        .any(operation_uses_primary_varargs_wrapper)
-}
-
 fn service_uses_generated_future_helpers(service: &RenderedService<'_>) -> bool {
     service.operations.iter().any(|operation| {
-        operation.proto_binding.is_some()
-            || operation_uses_primary_varargs_wrapper(operation)
-            || operation_uses_native_future_adapter(operation)
+        operation.proto_binding.is_some() || operation_uses_native_future_adapter(operation)
     })
 }
 
@@ -291,14 +282,6 @@ fn service_uses_function_name_inlining(service: &RenderedService<'_>) -> bool {
                 .any(|param| param.required && param.function.is_some())
         })
     })
-}
-
-fn operation_uses_primary_varargs_wrapper(operation: &RenderedOperation<'_>) -> bool {
-    operation
-        .unpacked_input
-        .as_deref()
-        .and_then(primary_varargs_args_param)
-        .is_some()
 }
 
 fn operation_uses_native_future_adapter(operation: &RenderedOperation<'_>) -> bool {
@@ -758,15 +741,22 @@ struct RenderedUnpackedParam {
     /// Unexported Go parameter name used in the function signature
     /// (e.g. `"userId"`).
     param_name: String,
-    /// Go type expression (e.g. `"string"`, `"UserProfile"`).
+    /// Internal request Go type expression (e.g. `"string"`, `"*string"`).
     go_type: String,
+    /// Public options/parameter Go type expression. This may differ from
+    /// `go_type` for optional scalar-like fields that use default-punning in the
+    /// public API while keeping pointer presence internally.
+    public_go_type: String,
+    /// The public zero value expression that means "absent" for an optional
+    /// scalar-like value, or `None` when the public value is already
+    /// presence-shaped.
+    default_punning_zero: Option<String>,
     /// Function field metadata for required `@nexus.function` fields. Optional
     /// function fields remain string-shaped in generated options structs.
     function: Option<FunctionFieldSpec>,
     /// Function metadata for fields generated from a function's arguments.
     function_args: Option<FunctionFieldSpec>,
-    /// Whether this parameter is required (positional argument) or optional
-    /// (placed in the options struct).
+    /// Whether this request field is required internally.
     required: bool,
     /// Whether this optional parameter should be embedded as a value in the
     /// generated options struct because its model is marked `flatten-in-api`.
@@ -1281,6 +1271,7 @@ fn apply_go_visibility(
             if let Some(params) = &mut operation.unpacked_input {
                 for param in params {
                     param.go_type = visibility.rewrite_go_expr(&param.go_type);
+                    param.public_go_type = visibility.rewrite_go_expr(&param.public_go_type);
                 }
             }
             if let Some(binding) = &mut operation.proto_binding {
@@ -1433,18 +1424,35 @@ fn resolve_operation<'a>(
                         PlannedFieldRole::FunctionArgs(function) => Some(function.clone()),
                         _ => None,
                     });
+                let embed_in_options = planned_field.is_some_and(|planned_field| {
+                    !planned_field.required
+                        && field_kind_is_flattened_message(&planned_field.kind, api_plan)
+                });
+                let default_punning_zero = planned_field
+                    .filter(|planned_field| !planned_field.required && !embed_in_options)
+                    .and_then(|planned_field| {
+                        public_default_punning_zero_for_field(&planned_field.kind, &field.go_type)
+                    });
+                let public_go_type = if default_punning_zero.is_some() {
+                    field
+                        .go_type
+                        .strip_prefix('*')
+                        .unwrap_or(&field.go_type)
+                        .to_string()
+                } else {
+                    field.go_type.clone()
+                };
                 RenderedUnpackedParam {
                     field_name: field.name.clone(),
                     doc: field.doc.clone(),
                     param_name: go_unexported_name(&field.name),
                     go_type: field.go_type.clone(),
+                    public_go_type,
+                    default_punning_zero,
                     function,
                     function_args,
                     required: field.required,
-                    embed_in_options: planned_field.is_some_and(|planned_field| {
-                        !planned_field.required
-                            && field_kind_is_flattened_message(&planned_field.kind, api_plan)
-                    }),
+                    embed_in_options,
                 }
             })
             .collect()
@@ -1475,6 +1483,61 @@ fn field_kind_is_flattened_message(kind: &PlannedFieldKind, api_plan: &ApiPlan) 
         .models
         .get(&message.info.full_name)
         .is_some_and(|model| model.flatten_in_api)
+}
+
+fn public_default_punning_zero_for_field(
+    kind: &PlannedFieldKind,
+    internal_go_type: &str,
+) -> Option<String> {
+    let public_go_type = internal_go_type.strip_prefix('*')?;
+    if let Some(zero) = public_default_punning_zero_for_go_type(public_go_type) {
+        return Some(zero.to_string());
+    }
+    match kind {
+        PlannedFieldKind::Singular(value) => {
+            public_default_punning_zero_for_value(value, public_go_type)
+        }
+        PlannedFieldKind::Repeated(_) | PlannedFieldKind::Map { .. } => None,
+    }
+}
+
+fn public_default_punning_zero_for_value(
+    value: &PlannedValueType,
+    public_go_type: &str,
+) -> Option<String> {
+    match value {
+        PlannedValueType::Scalar(scalar) => public_default_punning_zero_for_scalar(scalar),
+        PlannedValueType::Enum(_) | PlannedValueType::Flags(_) => Some("0".to_string()),
+        PlannedValueType::External { .. } => {
+            public_default_punning_zero_for_go_type(public_go_type).map(str::to_string)
+        }
+        PlannedValueType::Variant(_)
+        | PlannedValueType::Message(_)
+        | PlannedValueType::Tuple(_)
+        | PlannedValueType::Result { .. }
+        | PlannedValueType::Unknown => None,
+    }
+}
+
+fn public_default_punning_zero_for_scalar(scalar: &PlannedScalarType) -> Option<String> {
+    match scalar {
+        PlannedScalarType::Bool => Some("false".to_string()),
+        PlannedScalarType::String => Some("\"\"".to_string()),
+        PlannedScalarType::Int32 | PlannedScalarType::Int64 | PlannedScalarType::Float => {
+            Some("0".to_string())
+        }
+        PlannedScalarType::Bytes => None,
+    }
+}
+
+fn public_default_punning_zero_for_go_type(public_go_type: &str) -> Option<&'static str> {
+    match public_go_type {
+        "string" => Some("\"\""),
+        "bool" => Some("false"),
+        "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16" | "uint32"
+        | "uint64" | "float32" | "float64" | "time.Duration" => Some("0"),
+        _ => None,
+    }
 }
 
 /// Computes the proto binding for an operation message: the proto type
@@ -4329,11 +4392,8 @@ fn render_file(
         for service in services {
             for operation in &service.operations {
                 if let Some(params) = &operation.unpacked_input {
-                    let has_optional = params.iter().any(|p| !p.required);
-                    if has_optional {
-                        output.push('\n');
-                        render_options_struct(&mut output, operation, params);
-                    }
+                    output.push('\n');
+                    render_options_struct(&mut output, operation, params);
                     output.push('\n');
                     render_convenience_wrapper(&mut output, operation, params, package, visibility);
                     if primary_varargs_args_param(params).is_some() {
@@ -4348,6 +4408,8 @@ fn render_file(
                     }
                 } else {
                     // External input type — generate a simple forwarding wrapper
+                    output.push('\n');
+                    render_empty_options_struct(&mut output, operation);
                     output.push('\n');
                     render_forwarding_wrapper(&mut output, operation, package);
                 }
@@ -4887,6 +4949,36 @@ fn render_resource_methods(
                     .find(|op| op.name == operation_name)
                     .expect("bound resource operation should exist on the service");
 
+                let rendered_params = method
+                    .params
+                    .iter()
+                    .map(|param| {
+                        let param_name = go_unexported_name(&go_field_name(&param.name));
+                        let internal_type =
+                            resolve_resource_field_kind(&param.kind, param.optional, package);
+                        let default_punning_zero = if param.optional {
+                            public_default_punning_zero_for_field(&param.kind, &internal_type)
+                        } else {
+                            None
+                        };
+                        let public_type = if default_punning_zero.is_some() {
+                            internal_type
+                                .strip_prefix('*')
+                                .unwrap_or(&internal_type)
+                                .to_string()
+                        } else {
+                            internal_type.clone()
+                        };
+                        (
+                            param.name.clone(),
+                            param_name,
+                            internal_type,
+                            public_type,
+                            default_punning_zero,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
                 // Method signature: func (u *Type) Method(ctx workflow.Context, params...) (return)
                 output.push_str("func (u *");
                 output.push_str(&resource.type_name);
@@ -4894,18 +4986,46 @@ fn render_resource_methods(
                 output.push_str(&method_name);
                 output.push_str("(ctx ");
                 output.push_str(&package.workflow_context_type());
-                for param in &method.params {
+                for (_authored_name, param_name, _internal_type, public_type, _zero) in
+                    &rendered_params
+                {
                     output.push_str(", ");
-                    output.push_str(&go_unexported_name(&go_field_name(&param.name)));
+                    output.push_str(param_name);
                     output.push(' ');
-                    let param_type =
-                        resolve_resource_field_kind(&param.kind, param.optional, package);
-                    output.push_str(&visibility.rewrite_go_expr(&param_type));
+                    output.push_str(&visibility.rewrite_go_expr(public_type));
                 }
                 output.push_str(") ");
 
                 render_operation_future_return_type(output, package);
                 output.push_str(" {\n");
+
+                let method_param_sources = rendered_params
+                    .iter()
+                    .map(
+                        |(authored_name, param_name, internal_type, _public_type, zero)| {
+                            if let Some(zero) = zero {
+                                let pointer_name = format!("{param_name}Ptr");
+                                output.push_str("\tvar ");
+                                output.push_str(&pointer_name);
+                                output.push(' ');
+                                output.push_str(&visibility.rewrite_go_expr(internal_type));
+                                output.push('\n');
+                                output.push_str("\tif ");
+                                output.push_str(param_name);
+                                output.push_str(" != ");
+                                output.push_str(zero);
+                                output.push_str(" {\n\t\t");
+                                output.push_str(&pointer_name);
+                                output.push_str(" = &");
+                                output.push_str(param_name);
+                                output.push_str("\n\t}\n");
+                                (authored_name.clone(), pointer_name)
+                            } else {
+                                (authored_name.clone(), param_name.clone())
+                            }
+                        },
+                    )
+                    .collect::<BTreeMap<_, _>>();
 
                 // Body: construct request and delegate
                 let request_expr = render_request_plan(
@@ -4927,7 +5047,12 @@ fn render_resource_methods(
                         }
                     },
                     |name| format!("u.{}", go_field_name(name)),
-                    |name| go_unexported_name(&go_field_name(name)),
+                    |name| {
+                        method_param_sources
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| go_unexported_name(&go_field_name(name)))
+                    },
                 );
 
                 output.push_str("\treturn ");
@@ -4949,8 +5074,19 @@ fn render_resource_methods(
                     output.push_str(", ");
                     output.push_str(&go_unexported_name(&go_field_name(&param.name)));
                     output.push(' ');
-                    let param_type =
+                    let internal_type =
                         resolve_resource_field_kind(&param.kind, param.optional, package);
+                    let param_type = if param.optional
+                        && public_default_punning_zero_for_field(&param.kind, &internal_type)
+                            .is_some()
+                    {
+                        internal_type
+                            .strip_prefix('*')
+                            .unwrap_or(&internal_type)
+                            .to_string()
+                    } else {
+                        internal_type
+                    };
                     output.push_str(&visibility.rewrite_go_expr(&param_type));
                 }
                 output.push_str(") ");
@@ -5328,10 +5464,11 @@ fn render_operation_function_proto(
     output.push_str("}\n");
 }
 
-/// Renders an options struct for optional parameters of a convenience wrapper.
+/// Renders an options struct for non-function parameters of a convenience wrapper.
 ///
 /// ```go
 /// type GetUserOptions struct {
+///     UserId string
 ///     ConsistencyToken string
 /// }
 /// ```
@@ -5343,43 +5480,76 @@ fn render_options_struct(
     output.push_str("type ");
     output.push_str(&go_field_name(operation.name));
     output.push_str("Options struct {\n");
-    for param in params.iter().filter(|p| !p.required) {
-        if let Some(doc) = &param.doc {
-            render_go_doc_comment(output, "\t", doc);
-        }
+    for param in params.iter().filter(|p| param_belongs_in_options(p)) {
+        render_field_doc_comment(output, "\t", param.doc.as_deref(), param.required);
         output.push('\t');
         if param.embed_in_options {
-            output.push_str(param.go_type.trim_start_matches('*'));
+            output.push_str(param.public_go_type.trim_start_matches('*'));
         } else {
             output.push_str(&param.field_name);
             output.push(' ');
-            output.push_str(&param.go_type);
+            output.push_str(&param.public_go_type);
         }
         output.push('\n');
     }
     output.push_str("}\n");
 }
 
+fn render_empty_options_struct(output: &mut String, operation: &RenderedOperation<'_>) {
+    output.push_str("type ");
+    output.push_str(&go_field_name(operation.name));
+    output.push_str("Options struct {\n}\n");
+}
+
+fn param_belongs_in_options(param: &RenderedUnpackedParam) -> bool {
+    param.function.is_none() && param.function_args.is_none()
+}
+
+fn param_is_positional(param: &RenderedUnpackedParam) -> bool {
+    !param_belongs_in_options(param)
+}
+
 fn function_type_parameter_name(param: &RenderedUnpackedParam) -> String {
     format!("{}F", param.field_name)
 }
 
-fn required_function_type_parameters(
+fn function_type_parameters(
     params: &[RenderedUnpackedParam],
     package: &GoPackageContext,
     visibility: &GoVisibility,
+    mode: WrapperMode<'_>,
 ) -> Vec<(String, String)> {
-    params
-        .iter()
-        .filter(|param| param.required)
-        .filter_map(|param| {
-            let function = param.function.as_ref()?;
-            Some((
+    let mut type_params = Vec::new();
+    let unary_primary = mode.unary_primary;
+    for param in params.iter().filter(|param| param.function.is_some()) {
+        let function = param.function.as_ref().unwrap();
+        if mode
+            .with_args_primary_function
+            .is_some_and(|primary| primary.field_name == param.field_name)
+        {
+            continue;
+        }
+        if unary_primary.is_some_and(|primary| primary.field_name == param.field_name) {
+            type_params.push((primary_arg_type_parameter_name(param), "any".to_string()));
+            type_params.push((primary_result_type_parameter_name(param), "any".to_string()));
+            type_params.push((
+                function_type_parameter_name(param),
+                go_unary_function_constraint(param, function, package, visibility),
+            ));
+        } else {
+            type_params.push((
                 function_type_parameter_name(param),
                 go_function_constraint(function, params, package, visibility),
-            ))
-        })
-        .collect()
+            ));
+        }
+    }
+    type_params
+}
+
+#[derive(Clone, Copy)]
+struct WrapperMode<'a> {
+    unary_primary: Option<&'a RenderedUnpackedParam>,
+    with_args_primary_function: Option<&'a RenderedUnpackedParam>,
 }
 
 fn go_function_constraint(
@@ -5441,6 +5611,35 @@ fn go_function_constraint(
     )
 }
 
+fn go_unary_function_constraint(
+    param: &RenderedUnpackedParam,
+    function: &FunctionFieldSpec,
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+) -> String {
+    let mut args = match &function.args {
+        FunctionArgsSpec::Varargs { prefix, .. } => prefix
+            .iter()
+            .map(|arg| go_authored_function_type_expr(&arg.field_type, package, visibility))
+            .collect::<Vec<_>>(),
+        FunctionArgsSpec::Fixed(args) => args
+            .iter()
+            .map(|arg| go_authored_function_type_expr(&arg.field_type, package, visibility))
+            .collect::<Vec<_>>(),
+    };
+    args.push(primary_arg_type_parameter_name(param));
+    let result_type = primary_result_type_parameter_name(param);
+    format!("interface{{ ~func({}) {} }}", args.join(", "), result_type)
+}
+
+fn primary_arg_type_parameter_name(param: &RenderedUnpackedParam) -> String {
+    format!("{}Arg", param.field_name)
+}
+
+fn primary_result_type_parameter_name(param: &RenderedUnpackedParam) -> String {
+    format!("{}Result", param.field_name)
+}
+
 fn go_variadic_element_type(go_type: &str) -> String {
     go_type
         .strip_prefix("[]")
@@ -5500,19 +5699,42 @@ fn primary_varargs_args_param(params: &[RenderedUnpackedParam]) -> Option<&Rende
     })
 }
 
+fn primary_varargs_function_param(
+    params: &[RenderedUnpackedParam],
+) -> Option<&RenderedUnpackedParam> {
+    params.iter().find(|param| {
+        param.function.as_ref().is_some_and(|function| {
+            function.primary && matches!(function.args, FunctionArgsSpec::Varargs { .. })
+        })
+    })
+}
+
+fn unary_primary_varargs_function_param(
+    params: &[RenderedUnpackedParam],
+) -> Option<&RenderedUnpackedParam> {
+    let function_param = primary_varargs_function_param(params)?;
+    let function = function_param.function.as_ref()?;
+    let FunctionArgsSpec::Varargs { prefix, .. } = &function.args else {
+        return None;
+    };
+    if prefix.is_empty() {
+        return None;
+    }
+    let args_param = primary_varargs_args_param(params)?;
+    if go_variadic_element_type(&args_param.go_type) == "any" {
+        Some(function_param)
+    } else {
+        None
+    }
+}
+
 fn render_operation_wrapper_return_type(output: &mut String, package: &GoPackageContext) {
     render_operation_future_return_type(output, package);
 }
 
-fn render_with_args_conflict_return(output: &mut String) {
-    output.push_str(
-        "\t\treturn nexGenFailedNexusOperationFuture(ctx, errors.New(\"cannot specify both positional arguments and args\"))\n",
-    );
-}
-
 fn render_function_name_inlining(output: &mut String, params: &[RenderedUnpackedParam]) {
     for param in params {
-        if param.required && param.function.is_some() {
+        if param.function.is_some() {
             render_function_name_inline_assignment(output, param);
         }
     }
@@ -5564,6 +5786,179 @@ fn wrapper_input_docs<'a>(
         .collect()
 }
 
+fn render_signature(
+    output: &mut String,
+    exported_name: &str,
+    type_params: &[(String, String)],
+    signature_params: &[(String, String)],
+    package: &GoPackageContext,
+) {
+    output.push_str("func ");
+    output.push_str(exported_name);
+    if !type_params.is_empty() {
+        output.push('[');
+        for (index, (name, constraint)) in type_params.iter().enumerate() {
+            if index > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(constraint);
+        }
+        output.push(']');
+    }
+    let multiline_signature = signature_params.len() + 1 > 3;
+    if multiline_signature {
+        output.push_str("(\n\tctx ");
+        output.push_str(&package.workflow_context_type());
+        output.push_str(",\n");
+        for (name, ty) in signature_params {
+            output.push('\t');
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(ty);
+            output.push_str(",\n");
+        }
+        output.push(')');
+    } else {
+        output.push_str("(ctx ");
+        output.push_str(&package.workflow_context_type());
+        for (name, ty) in signature_params {
+            output.push_str(", ");
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(ty);
+        }
+        output.push(')');
+    }
+}
+
+fn render_public_default_punning_locals(output: &mut String, params: &[RenderedUnpackedParam]) {
+    for param in params
+        .iter()
+        .filter(|param| param_belongs_in_options(param))
+    {
+        if let Some(zero) = &param.default_punning_zero {
+            output.push_str("\tvar ");
+            output.push_str(&param.param_name);
+            output.push(' ');
+            output.push_str(&param.go_type);
+            output.push('\n');
+            output.push_str("\tif opts.");
+            output.push_str(&param.field_name);
+            output.push_str(" != ");
+            output.push_str(zero);
+            output.push_str(" {\n\t\t");
+            output.push_str(&param.param_name);
+            output.push_str(" = &opts.");
+            output.push_str(&param.field_name);
+            output.push_str("\n\t}\n");
+        }
+    }
+}
+
+fn public_option_request_expr(param: &RenderedUnpackedParam) -> String {
+    if param.default_punning_zero.is_some() {
+        param.param_name.clone()
+    } else if param.embed_in_options {
+        format!("&opts.{}", param.field_name)
+    } else {
+        format!("opts.{}", param.field_name)
+    }
+}
+
+fn positional_param_type(param: &RenderedUnpackedParam, mode: WrapperMode<'_>) -> Option<String> {
+    if param.function.is_some() {
+        if mode
+            .with_args_primary_function
+            .is_some_and(|primary| primary.field_name == param.field_name)
+        {
+            Some("any".to_string())
+        } else {
+            Some(function_type_parameter_name(param))
+        }
+    } else if mode.unary_primary.is_some()
+        && primary_varargs_args_field_matches(param, mode.unary_primary.unwrap())
+    {
+        Some(primary_arg_type_parameter_name(mode.unary_primary.unwrap()))
+    } else if param.function_args.is_some() {
+        Some(param.public_go_type.clone())
+    } else {
+        None
+    }
+}
+
+fn positional_param_name(param: &RenderedUnpackedParam, mode: WrapperMode<'_>) -> String {
+    if mode.unary_primary.is_some()
+        && primary_varargs_args_field_matches(param, mode.unary_primary.unwrap())
+    {
+        "arg".to_string()
+    } else {
+        param.param_name.clone()
+    }
+}
+
+fn primary_varargs_args_field_matches(
+    args_param: &RenderedUnpackedParam,
+    function_param: &RenderedUnpackedParam,
+) -> bool {
+    let Some(args_function) = &args_param.function_args else {
+        return false;
+    };
+    function_param
+        .function
+        .as_ref()
+        .is_some_and(|function| args_function == function)
+}
+
+fn request_expr_for_param(
+    param: &RenderedUnpackedParam,
+    mode: WrapperMode<'_>,
+    with_args_param: Option<&RenderedUnpackedParam>,
+) -> String {
+    if param.function.is_some() {
+        function_name_local_var(param)
+    } else if let Some(primary) = mode.unary_primary {
+        if primary_varargs_args_field_matches(param, primary) {
+            return format!("{}{{arg}}", param.go_type);
+        }
+        if param.function_args.is_some() {
+            return param.param_name.clone();
+        }
+        public_option_request_expr(param)
+    } else if with_args_param.is_some_and(|args_param| args_param.field_name == param.field_name) {
+        "args".to_string()
+    } else if param.function_args.is_some() {
+        param.param_name.clone()
+    } else {
+        public_option_request_expr(param)
+    }
+}
+
+fn render_operation_request_call(
+    output: &mut String,
+    operation: &RenderedOperation<'_>,
+    params: &[RenderedUnpackedParam],
+    mode: WrapperMode<'_>,
+    with_args_param: Option<&RenderedUnpackedParam>,
+) {
+    render_public_default_punning_locals(output, params);
+    render_function_name_inlining(output, params);
+    output.push_str("\treturn ");
+    output.push_str(&operation.func_name);
+    output.push_str("(ctx, ");
+    output.push_str(&operation.input_type);
+    output.push_str("{\n");
+    for param in params {
+        output.push_str("\t\t");
+        output.push_str(&param.field_name);
+        output.push_str(": ");
+        output.push_str(&request_expr_for_param(param, mode, with_args_param));
+        output.push_str(",\n");
+    }
+    output.push_str("\t})\n");
+}
+
 /// Renders an exported convenience wrapper that unpacks required fields as
 /// positional arguments and optional fields into a required options struct.
 ///
@@ -5606,109 +6001,43 @@ fn render_convenience_wrapper(
     visibility: &GoVisibility,
 ) {
     let exported_name = go_field_name(operation.name);
-    let has_optional = params.iter().any(|p| !p.required);
-    let type_params = required_function_type_parameters(params, package, visibility);
+    let unary_primary = unary_primary_varargs_function_param(params);
+    let mode = WrapperMode {
+        unary_primary,
+        with_args_primary_function: None,
+    };
+    let type_params = function_type_parameters(params, package, visibility, mode);
 
-    let input_docs = wrapper_input_docs(params.iter().filter(|p| p.required));
+    let input_docs = wrapper_input_docs(params.iter().filter(|p| param_is_positional(p)));
     render_operation_doc_comment(output, operation, &input_docs);
 
-    // Build the list of signature parameters (after `ctx`): one per required
-    // field, plus a trailing `opts` parameter when optional fields exist.
-    let mut signature_params: Vec<(String, String)> = params
-        .iter()
-        .filter(|p| p.required)
-        .map(|p| {
-            let ty = if p.function.is_some() {
-                function_type_parameter_name(p)
-            } else {
-                p.go_type.clone()
-            };
-            (p.param_name.clone(), ty)
-        })
-        .collect();
-    if has_optional {
-        signature_params.push(("opts".to_string(), format!("{exported_name}Options")));
-    }
+    let mut signature_params: Vec<(String, String)> =
+        vec![("opts".to_string(), format!("{exported_name}Options"))];
+    signature_params.extend(
+        params
+            .iter()
+            .filter(|p| param_is_positional(p))
+            .filter_map(|p| {
+                Some((
+                    positional_param_name(p, mode),
+                    positional_param_type(p, mode)?,
+                ))
+            }),
+    );
 
-    // The signature is multi-line when it has more than 3 parameters total
-    // (counting `ctx` plus the parameters above).
-    let multiline_signature = signature_params.len() + 1 > 3;
-
-    // Function signature
-    output.push_str("func ");
-    output.push_str(&exported_name);
-    if !type_params.is_empty() {
-        output.push('[');
-        for (index, (name, constraint)) in type_params.iter().enumerate() {
-            if index > 0 {
-                output.push_str(", ");
-            }
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(constraint);
-        }
-        output.push(']');
-    }
-    if multiline_signature {
-        output.push_str("(\n\tctx ");
-        output.push_str(&package.workflow_context_type());
-        output.push_str(",\n");
-        for (name, ty) in &signature_params {
-            output.push('\t');
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(ty);
-            output.push_str(",\n");
-        }
-        output.push(')');
-    } else {
-        output.push_str("(ctx ");
-        output.push_str(&package.workflow_context_type());
-        for (name, ty) in &signature_params {
-            output.push_str(", ");
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(ty);
-        }
-        output.push(')');
-    }
+    render_signature(
+        output,
+        &exported_name,
+        &type_params,
+        &signature_params,
+        package,
+    );
     output.push(' ');
 
-    // Return type
     render_operation_wrapper_return_type(output, package);
     output.push_str(" {\n");
 
-    // Function body -- build the request as a multi-line struct literal,
-    // sourcing required fields from positional args and optional fields from
-    // opts.
-    render_function_name_inlining(output, params);
-    output.push_str("\treturn ");
-    output.push_str(&operation.func_name);
-    output.push_str("(ctx, ");
-    output.push_str(&operation.input_type);
-    output.push_str("{\n");
-    for param in params {
-        output.push_str("\t\t");
-        output.push_str(&param.field_name);
-        output.push_str(": ");
-        if param.required {
-            if param.function.is_some() {
-                output.push_str(&function_name_local_var(param));
-            } else {
-                output.push_str(&param.param_name);
-            }
-        } else if param.embed_in_options {
-            output.push('&');
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
-        } else {
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
-        }
-        output.push_str(",\n");
-    }
-    output.push_str("\t})\n");
-
+    render_operation_request_call(output, operation, params, mode, None);
     output.push_str("}\n");
 }
 
@@ -5724,115 +6053,52 @@ fn render_with_args_convenience_wrapper(
     let args_param = primary_varargs_args_param(params)
         .expect("WithArgs wrapper requires a primary varargs args param");
     let vararg_type = go_variadic_element_type(&args_param.go_type);
-    let type_params = required_function_type_parameters(params, package, visibility);
+    let primary_function = primary_varargs_function_param(params);
+    let mode = WrapperMode {
+        unary_primary: None,
+        with_args_primary_function: if unary_primary_varargs_function_param(params).is_some() {
+            primary_function
+        } else {
+            None
+        },
+    };
+    let type_params = function_type_parameters(params, package, visibility, mode);
 
     let input_docs = wrapper_input_docs(
         params
             .iter()
-            .filter(|p| p.required)
+            .filter(|p| param_is_positional(p) && p.field_name != args_param.field_name)
             .chain(std::iter::once(args_param)),
     );
     render_operation_doc_comment(output, operation, &input_docs);
 
-    let mut signature_params: Vec<(String, String)> = params
-        .iter()
-        .filter(|p| p.required)
-        .map(|p| {
-            let ty = if p.function.is_some() {
-                function_type_parameter_name(p)
-            } else {
-                p.go_type.clone()
-            };
-            (p.param_name.clone(), ty)
-        })
-        .collect();
-    signature_params.push(("opts".to_string(), format!("{base_exported_name}Options")));
+    let mut signature_params: Vec<(String, String)> =
+        vec![("opts".to_string(), format!("{base_exported_name}Options"))];
+    signature_params.extend(
+        params
+            .iter()
+            .filter(|p| param_is_positional(p) && p.field_name != args_param.field_name)
+            .filter_map(|p| {
+                Some((
+                    positional_param_name(p, mode),
+                    positional_param_type(p, mode)?,
+                ))
+            }),
+    );
     signature_params.push(("args".to_string(), format!("...{vararg_type}")));
 
-    let multiline_signature = signature_params.len() + 1 > 3;
-
-    output.push_str("func ");
-    output.push_str(&exported_name);
-    if !type_params.is_empty() {
-        output.push('[');
-        for (index, (name, constraint)) in type_params.iter().enumerate() {
-            if index > 0 {
-                output.push_str(", ");
-            }
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(constraint);
-        }
-        output.push(']');
-    }
-    if multiline_signature {
-        output.push_str("(\n\tctx ");
-        output.push_str(&package.workflow_context_type());
-        output.push_str(",\n");
-        for (name, ty) in &signature_params {
-            output.push('\t');
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(ty);
-            output.push_str(",\n");
-        }
-        output.push(')');
-    } else {
-        output.push_str("(ctx ");
-        output.push_str(&package.workflow_context_type());
-        for (name, ty) in &signature_params {
-            output.push_str(", ");
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(ty);
-        }
-        output.push(')');
-    }
+    render_signature(
+        output,
+        &exported_name,
+        &type_params,
+        &signature_params,
+        package,
+    );
     output.push(' ');
     render_operation_wrapper_return_type(output, package);
     output.push_str(" {\n");
 
-    output.push_str("\tif len(args) > 0 && opts.");
-    output.push_str(&args_param.field_name);
-    output.push_str(" != nil {\n");
-    render_with_args_conflict_return(output);
-    output.push_str("\t}\n");
-    output.push_str("\tif len(args) == 0 {\n");
-    output.push_str("\t\targs = opts.");
-    output.push_str(&args_param.field_name);
-    output.push('\n');
-    output.push_str("\t}\n");
-
-    render_function_name_inlining(output, params);
-    output.push_str("\treturn ");
-    output.push_str(&operation.func_name);
-    output.push_str("(ctx, ");
-    output.push_str(&operation.input_type);
-    output.push_str("{\n");
-    for param in params {
-        output.push_str("\t\t");
-        output.push_str(&param.field_name);
-        output.push_str(": ");
-        if param.field_name == args_param.field_name {
-            output.push_str("args");
-        } else if param.required {
-            if param.function.is_some() {
-                output.push_str(&function_name_local_var(param));
-            } else {
-                output.push_str(&param.param_name);
-            }
-        } else if param.embed_in_options {
-            output.push('&');
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
-        } else {
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
-        }
-        output.push_str(",\n");
-    }
-    output.push_str("\t})\n");
-
+    render_operation_request_call(output, operation, params, mode, Some(args_param));
     output.push_str("}\n");
 }
 
@@ -5841,7 +6107,7 @@ fn render_with_args_convenience_wrapper(
 /// forwards to the unexported operation function.
 ///
 /// ```go
-/// func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
+/// func RetryPolicyOperation(ctx workflow.Context, opts RetryPolicyOperationOptions, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
 ///     return retryPolicyOperation(ctx, request)
 /// }
 /// ```
@@ -5857,7 +6123,9 @@ fn render_forwarding_wrapper(
     output.push_str(&exported_name);
     output.push_str("(ctx ");
     output.push_str(&package.workflow_context_type());
-    output.push_str(", request ");
+    output.push_str(", opts ");
+    output.push_str(&exported_name);
+    output.push_str("Options, request ");
     output.push_str(&operation.input_type);
     output.push_str(") ");
 

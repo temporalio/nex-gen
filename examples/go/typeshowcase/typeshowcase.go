@@ -70,8 +70,12 @@ func (u *User) Rename(ctx workflow.Context, displayName string) workflow.NexusOp
 	return rename(ctx, renameRequest{UserId: u.UserId, DisplayName: displayName})
 }
 
-func (u *User) Deactivate(ctx workflow.Context, reason *string) workflow.NexusOperationFuture {
-	return deactivate(ctx, deactivateRequest{UserId: u.UserId, Reason: reason})
+func (u *User) Deactivate(ctx workflow.Context, reason string) workflow.NexusOperationFuture {
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+	return deactivate(ctx, deactivateRequest{UserId: u.UserId, Reason: reasonPtr})
 }
 
 // --- Operations (internal) ---
@@ -208,51 +212,91 @@ type Result[T, E any] struct {
 }
 
 type GetUserOptions struct {
-	ConsistencyToken *string
+	// Required.
+	UserId           string
+	ConsistencyToken string
 }
 
-func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) workflow.NexusOperationFuture {
+func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.NexusOperationFuture {
+	var consistencyToken *string
+	if opts.ConsistencyToken != "" {
+		consistencyToken = &opts.ConsistencyToken
+	}
 	return getUser(ctx, getUserRequest{
-		UserId:           userId,
-		ConsistencyToken: opts.ConsistencyToken,
+		UserId:           opts.UserId,
+		ConsistencyToken: consistencyToken,
 	})
 }
 
-func UpdateEmail(ctx workflow.Context, userId string, email string) workflow.NexusOperationFuture {
+type UpdateEmailOptions struct {
+	// Required.
+	UserId string
+	// Required.
+	Email string
+}
+
+func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.NexusOperationFuture {
 	return updateEmail(ctx, updateEmailRequest{
-		UserId: userId,
-		Email:  email,
+		UserId: opts.UserId,
+		Email:  opts.Email,
 	})
 }
 
-func Rename(ctx workflow.Context, userId string, displayName string) workflow.NexusOperationFuture {
+type RenameOptions struct {
+	// Required.
+	UserId string
+	// Required.
+	DisplayName string
+}
+
+func Rename(ctx workflow.Context, opts RenameOptions) workflow.NexusOperationFuture {
 	return rename(ctx, renameRequest{
-		UserId:      userId,
-		DisplayName: displayName,
+		UserId:      opts.UserId,
+		DisplayName: opts.DisplayName,
 	})
 }
 
-func SetProfile(ctx workflow.Context, userId string, profile UserProfile) workflow.NexusOperationFuture {
+type SetProfileOptions struct {
+	// Required.
+	UserId string
+	// Required.
+	Profile UserProfile
+}
+
+func SetProfile(ctx workflow.Context, opts SetProfileOptions) workflow.NexusOperationFuture {
 	return setProfile(ctx, setProfileRequest{
-		UserId:  userId,
-		Profile: profile,
+		UserId:  opts.UserId,
+		Profile: opts.Profile,
 	})
 }
 
-func RecordSync(ctx workflow.Context, userId string, report SyncReport) workflow.NexusOperationFuture {
+type RecordSyncOptions struct {
+	// Required.
+	UserId string
+	// Required.
+	Report SyncReport
+}
+
+func RecordSync(ctx workflow.Context, opts RecordSyncOptions) workflow.NexusOperationFuture {
 	return recordSync(ctx, recordSyncRequest{
-		UserId: userId,
-		Report: report,
+		UserId: opts.UserId,
+		Report: opts.Report,
 	})
 }
 
 type DeactivateOptions struct {
-	Reason *string
+	// Required.
+	UserId string
+	Reason string
 }
 
-func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) workflow.NexusOperationFuture {
+func Deactivate(ctx workflow.Context, opts DeactivateOptions) workflow.NexusOperationFuture {
+	var reason *string
+	if opts.Reason != "" {
+		reason = &opts.Reason
+	}
 	return deactivate(ctx, deactivateRequest{
-		UserId: userId,
-		Reason: opts.Reason,
+		UserId: opts.UserId,
+		Reason: reason,
 	})
 }

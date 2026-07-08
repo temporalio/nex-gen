@@ -2,55 +2,12 @@
 package functionexecution
 
 import (
-	"errors"
 	"reflect"
 	"runtime"
 	"strings"
 
 	"go.temporal.io/sdk/workflow"
 )
-
-// --- Helpers ---
-
-type nexGenNexusOperationFuture struct {
-	operation workflow.NexusOperationFuture
-	result    workflow.Future
-	execution workflow.Future
-	get       func(workflow.Context, any) error
-}
-
-func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
-	if f.get != nil {
-		return f.get(ctx, valuePtr)
-	}
-	return f.result.Get(ctx, valuePtr)
-}
-
-func (f *nexGenNexusOperationFuture) IsReady() bool {
-	if f.operation != nil {
-		return f.operation.IsReady()
-	}
-	return f.result.IsReady()
-}
-
-func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
-	if f.operation != nil {
-		return f.operation.GetNexusOperationExecution()
-	}
-	return f.execution
-}
-
-func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
-	result, resultSettable := workflow.NewFuture(ctx)
-	resultSettable.SetError(err)
-	execution, executionSettable := workflow.NewFuture(ctx)
-	executionSettable.SetError(err)
-	return &nexGenNexusOperationFuture{result: result, execution: execution}
-}
-
-func nexGenFutureResultTypeError() error {
-	return errors.New("nex-gen future result pointer has unexpected type")
-}
 
 // --- Datatypes ---
 
@@ -154,12 +111,16 @@ type ExecuteNamedVarargsFunctionResult struct {
 	Value string
 }
 
+type ExecuteFunctionOptions struct {
+}
+
 // Input name: The name argument for the function.
 // Input enabled: The enabled argument for the function.
 func ExecuteFunction[FunctionF interface {
 	~string | func(string, bool) string
 }](
 	ctx workflow.Context,
+	opts ExecuteFunctionOptions,
 	function FunctionF,
 	name string,
 	enabled bool,
@@ -183,12 +144,16 @@ func ExecuteFunction[FunctionF interface {
 	})
 }
 
+type ExecuteCountedFunctionOptions struct {
+}
+
 // Input name: The name argument for the function.
 // Input count: The count argument for the function.
 func ExecuteCountedFunction[FunctionF interface {
 	~string | func(string, int32) string
 }](
 	ctx workflow.Context,
+	opts ExecuteCountedFunctionOptions,
 	function FunctionF,
 	name string,
 	count int32,
@@ -212,12 +177,16 @@ func ExecuteCountedFunction[FunctionF interface {
 	})
 }
 
+type ExecuteNamedFunctionOptions struct {
+}
+
 // Input name: The name argument for the function.
 // Input enabled: The enabled argument for the function.
 func ExecuteNamedFunction[FunctionF interface {
 	~string | func(string, bool) string
 }](
 	ctx workflow.Context,
+	opts ExecuteNamedFunctionOptions,
 	function FunctionF,
 	name string,
 	enabled bool,
@@ -242,13 +211,17 @@ func ExecuteNamedFunction[FunctionF interface {
 }
 
 type ExecuteVarargsFunctionOptions struct {
-	// Arguments for the function.
-	Args []string
 }
 
+// Input args: Arguments for the function.
 func ExecuteVarargsFunction[FunctionF interface {
 	~string | func(...string) string
-}](ctx workflow.Context, function FunctionF, opts ExecuteVarargsFunctionOptions) workflow.NexusOperationFuture {
+}](
+	ctx workflow.Context,
+	opts ExecuteVarargsFunctionOptions,
+	function FunctionF,
+	args []string,
+) workflow.NexusOperationFuture {
 	functionName := ""
 	switch rv := reflect.ValueOf(function); rv.Kind() {
 	case reflect.String:
@@ -263,7 +236,7 @@ func ExecuteVarargsFunction[FunctionF interface {
 	}
 	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
 		Function: functionName,
-		Args:     opts.Args,
+		Args:     args,
 	})
 }
 
@@ -272,16 +245,10 @@ func ExecuteVarargsFunctionWithArgs[FunctionF interface {
 	~string | func(...string) string
 }](
 	ctx workflow.Context,
-	function FunctionF,
 	opts ExecuteVarargsFunctionOptions,
+	function FunctionF,
 	args ...string,
 ) workflow.NexusOperationFuture {
-	if len(args) > 0 && opts.Args != nil {
-		return nexGenFailedNexusOperationFuture(ctx, errors.New("cannot specify both positional arguments and args"))
-	}
-	if len(args) == 0 {
-		args = opts.Args
-	}
 	functionName := ""
 	switch rv := reflect.ValueOf(function); rv.Kind() {
 	case reflect.String:
@@ -301,13 +268,17 @@ func ExecuteVarargsFunctionWithArgs[FunctionF interface {
 }
 
 type ExecuteNamedVarargsFunctionOptions struct {
-	// Arguments for the function.
-	Args []string
 }
 
+// Input args: Arguments for the function.
 func ExecuteNamedVarargsFunction[FunctionF interface {
 	~string | func(...string) string
-}](ctx workflow.Context, function FunctionF, opts ExecuteNamedVarargsFunctionOptions) workflow.NexusOperationFuture {
+}](
+	ctx workflow.Context,
+	opts ExecuteNamedVarargsFunctionOptions,
+	function FunctionF,
+	args []string,
+) workflow.NexusOperationFuture {
 	functionName := ""
 	switch rv := reflect.ValueOf(function); rv.Kind() {
 	case reflect.String:
@@ -322,7 +293,7 @@ func ExecuteNamedVarargsFunction[FunctionF interface {
 	}
 	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
 		Function: functionName,
-		Args:     opts.Args,
+		Args:     args,
 	})
 }
 
@@ -331,16 +302,10 @@ func ExecuteNamedVarargsFunctionWithArgs[FunctionF interface {
 	~string | func(...string) string
 }](
 	ctx workflow.Context,
-	function FunctionF,
 	opts ExecuteNamedVarargsFunctionOptions,
+	function FunctionF,
 	args ...string,
 ) workflow.NexusOperationFuture {
-	if len(args) > 0 && opts.Args != nil {
-		return nexGenFailedNexusOperationFuture(ctx, errors.New("cannot specify both positional arguments and args"))
-	}
-	if len(args) == 0 {
-		args = opts.Args
-	}
 	functionName := ""
 	switch rv := reflect.ValueOf(function); rv.Kind() {
 	case reflect.String:
