@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -200,7 +199,7 @@ fn dotnet_example_project_builds() {
         format!("-p:BaseIntermediateOutputPath={base_intermediate_output_path}");
     let base_output_arg = format!("-p:BaseOutputPath={base_output_path}");
 
-    let output = match Command::new("dotnet")
+    let output = Command::new("dotnet")
         .current_dir(dotnet_root(&root))
         .args([
             "build",
@@ -212,15 +211,7 @@ fn dotnet_example_project_builds() {
             &base_output_arg,
         ])
         .output()
-    {
-        Ok(output) => output,
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            eprintln!("skipping .NET example project build because `dotnet` is not installed");
-            fs::remove_dir_all(build_path).unwrap();
-            return;
-        }
-        Err(error) => panic!("failed to run dotnet build: {error}"),
-    };
+        .unwrap();
 
     assert!(
         output.status.success(),
