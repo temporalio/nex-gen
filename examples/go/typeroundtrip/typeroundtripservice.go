@@ -13,6 +13,10 @@ import (
 
 // --- Helpers ---
 
+func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient {
+	return workflow.NewNexusClient(endpoint, service)
+}
+
 type nexGenNexusOperationFuture struct {
 	operation workflow.NexusOperationFuture
 	result    workflow.Future
@@ -55,13 +59,12 @@ func nexGenFutureResultTypeError() error {
 
 // --- Operations (internal) ---
 
-func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) workflow.NexusOperationFuture {
+func retryPolicyOperation(ctx workflow.Context, client workflow.NexusClient, request temporal.RetryPolicy) workflow.NexusOperationFuture {
 	requestProto, err := retryPolicyToProto(ctx, &request)
 	if err != nil {
 		return nexGenFailedNexusOperationFuture(ctx, err)
 	}
-	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
-	fut := c.ExecuteOperation(ctx, "RetryPolicyOperation", requestProto, workflow.NexusOperationOptions{})
+	fut := client.ExecuteOperation(ctx, "RetryPolicyOperation", requestProto, workflow.NexusOperationOptions{})
 	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
@@ -85,13 +88,12 @@ func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) wo
 	}}
 }
 
-func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) workflow.NexusOperationFuture {
+func activityOptionsOperation(ctx workflow.Context, client workflow.NexusClient, request ActivityOptions) workflow.NexusOperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
 		return nexGenFailedNexusOperationFuture(ctx, err)
 	}
-	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
-	fut := c.ExecuteOperation(ctx, "ActivityOptionsOperation", requestProto, workflow.NexusOperationOptions{})
+	fut := client.ExecuteOperation(ctx, "ActivityOptionsOperation", requestProto, workflow.NexusOperationOptions{})
 	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
@@ -111,6 +113,29 @@ func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) wor
 		*typedValue = value
 		return nil
 	}}
+}
+
+// --- Service clients ---
+
+type TypeRoundtripServiceClient struct {
+	client workflow.NexusClient
+}
+
+func NewTypeRoundtripServiceClient(endpoint string) *TypeRoundtripServiceClient {
+	return &TypeRoundtripServiceClient{client: nexGenNewNexusClient(endpoint, "TypeRoundtripService")}
+}
+
+func (c *TypeRoundtripServiceClient) RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) workflow.NexusOperationFuture {
+	return retryPolicyOperation(ctx, c.client, request)
+}
+
+func (c *TypeRoundtripServiceClient) ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ActivityOptionsOperationOptions) workflow.NexusOperationFuture {
+	return activityOptionsOperation(ctx, c.client, ActivityOptions{
+		TaskQueue:              opts.TaskQueue,
+		RetryPolicy:            retryPolicy,
+		ScheduleToCloseTimeout: opts.ScheduleToCloseTimeout,
+		Priority:               opts.Priority,
+	})
 }
 
 // --- Operations (public API) ---
@@ -192,7 +217,8 @@ func activityOptionsFromProto(ctx workflow.Context, proto *activity.ActivityOpti
 }
 
 func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) workflow.NexusOperationFuture {
-	return retryPolicyOperation(ctx, request)
+	client := nexGenNewNexusClient("temporal-system", "TypeRoundtripService")
+	return retryPolicyOperation(ctx, client, request)
 }
 
 type ActivityOptionsOperationOptions struct {
@@ -202,7 +228,8 @@ type ActivityOptionsOperationOptions struct {
 }
 
 func ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ActivityOptionsOperationOptions) workflow.NexusOperationFuture {
-	return activityOptionsOperation(ctx, ActivityOptions{
+	client := nexGenNewNexusClient("temporal-system", "TypeRoundtripService")
+	return activityOptionsOperation(ctx, client, ActivityOptions{
 		TaskQueue:              opts.TaskQueue,
 		RetryPolicy:            retryPolicy,
 		ScheduleToCloseTimeout: opts.ScheduleToCloseTimeout,

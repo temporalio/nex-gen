@@ -275,14 +275,6 @@ impl GoImportCollector {
     pub(in crate::generator) fn paths(&self) -> impl Iterator<Item = (&String, &String)> {
         self.by_path.iter()
     }
-
-    pub(in crate::generator) fn contains_path(&self, path: &str) -> bool {
-        self.by_path.contains_key(path)
-    }
-
-    pub(in crate::generator) fn is_empty(&self) -> bool {
-        self.by_path.is_empty()
-    }
 }
 
 /// A reference to a Go protobuf type, derived from a proto descriptor's
@@ -798,19 +790,18 @@ impl ModelBackend {
 /// the SDK call and deserializes the proto response afterwards.
 pub(in crate::generator) fn render_operation_function_proto(
     output: &mut String,
-    service: &RenderedService<'_>,
     operation: &crate::generator::go::RenderedOperation<'_>,
     binding: &OperationBinding,
     package: &GoPackageContext,
 ) {
-    let endpoint = go_string_literal(&service.endpoint);
-    let service_name = go_string_literal(service.wire_name);
     let operation_name = go_string_literal(operation.wire_name);
 
     output.push_str("func ");
     output.push_str(&operation.func_name);
     output.push_str("(ctx ");
     output.push_str(&package.workflow_context_type());
+    output.push_str(", client ");
+    output.push_str(&package.workflow_nexus_client_type());
     output.push_str(", request ");
     output.push_str(&operation.input_type);
     output.push_str(") ");
@@ -823,14 +814,7 @@ pub(in crate::generator) fn render_operation_function_proto(
     output.push_str("\tif err != nil {\n");
     output.push_str("\t\treturn nexGenFailedNexusOperationFuture(ctx, err)\n");
     output.push_str("\t}\n");
-    output.push_str("\tc := ");
-    output.push_str(&package.new_nexus_client());
-    output.push('(');
-    output.push_str(&endpoint);
-    output.push_str(", ");
-    output.push_str(&service_name);
-    output.push_str(")\n");
-    output.push_str("\tfut := c.ExecuteOperation(ctx, ");
+    output.push_str("\tfut := client.ExecuteOperation(ctx, ");
     output.push_str(&operation_name);
     output.push_str(", requestProto");
     output.push_str(", ");

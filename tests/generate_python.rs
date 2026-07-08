@@ -2,16 +2,18 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use heck::ToSnakeCase;
 use nex_gen::SupportFiles;
-use nex_gen::generate_to_string_with_inputs;
 use nex_gen::generator::{GeneratedOutputLayout, generate_files};
 use nex_gen::spec::SupportFragmentSpec;
+use nex_gen::{GenerateRequest, generate_to_file};
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
+static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -130,6 +132,36 @@ fn read_python_package_files(dir: &Path) -> BTreeMap<PathBuf, String> {
     files
 }
 
+fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
+    files
+        .into_iter()
+        .map(|(path, contents)| format!("### {}\n{contents}", path.display()))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn generate_python_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBuf]) -> String {
+    let temp_dir = unique_output_path("python-rendered");
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        language: nex_gen::language::Language::Python,
+        input_paths: input_paths.to_vec(),
+        support_paths: Vec::new(),
+        descriptor_paths: descriptor_paths.to_vec(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: true,
+    })
+    .unwrap();
+    let rendered = if output_path.is_file() {
+        fs::read_to_string(&output_path).unwrap()
+    } else {
+        render_output_files(read_python_package_files(&output_path))
+    };
+    fs::remove_dir_all(temp_dir).unwrap();
+    rendered
+}
+
 fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: &Path) {
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
@@ -241,7 +273,8 @@ fn unique_output_path(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}"))
+    let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}-{counter}"))
 }
 
 #[test]
@@ -457,12 +490,10 @@ fn python_request_models_are_write_only() {
         .files
         .get(&PathBuf::from("models.py"))
         .expect("Python package should include models.py");
-    let rendered = generate_to_string_with_inputs(
-        nex_gen::language::Language::Python,
+    let rendered = generate_python_to_string(
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
         &[descriptor_path(&root)],
-    )
-    .unwrap();
+    );
 
     assert!(!rendered.contains("SignalWithStartWorkflowRequest.from_proto"));
     assert!(!rendered.contains(
@@ -583,12 +614,10 @@ fn python_request_models_are_write_only() {
     assert!(models.contains("from ._support import ("));
     assert!(models.contains("retry_policy_to_proto,"));
 
-    let type_roundtrip_rendered = generate_to_string_with_inputs(
-        nex_gen::language::Language::Python,
+    let type_roundtrip_rendered = generate_python_to_string(
         &example_input_paths(&root, TYPE_ROUNDTRIP_EXAMPLE_ID),
         &[descriptor_path(&root)],
-    )
-    .unwrap();
+    );
     assert!(type_roundtrip_rendered.contains("async def activity_options_operation("));
     assert!(type_roundtrip_rendered.contains("task_queue: str | None = None,"));
     assert!(type_roundtrip_rendered.contains("retry_policy: temporalio.common.RetryPolicy,"));

@@ -18,9 +18,7 @@ use std::process::Command;
 use descriptors::DescriptorIndex;
 use error::Result;
 use generator::go;
-use generator::{
-    GeneratedFiles, GeneratedOutputLayout, GenerationMode, generate_files_for_tree_with_mode,
-};
+use generator::{GenerateFilesOptions, GeneratedFiles, GeneratedOutputLayout, GenerationMode};
 use heck::ToSnakeCase;
 use language::Language;
 use spec::SupportFragmentSpec;
@@ -48,52 +46,6 @@ pub struct BuildExamplesRequest {
     pub example_ids: Vec<String>,
 }
 
-pub fn generate_to_string(
-    language: Language,
-    input_path: impl AsRef<Path>,
-    descriptor_paths: &[PathBuf],
-) -> Result<String> {
-    generate_to_string_with_inputs(
-        language,
-        &[input_path.as_ref().to_path_buf()],
-        descriptor_paths,
-    )
-}
-
-pub fn generate_to_string_with_inputs(
-    language: Language,
-    input_paths: &[PathBuf],
-    descriptor_paths: &[PathBuf],
-) -> Result<String> {
-    generate_to_string_with_inputs_and_support(language, input_paths, descriptor_paths, &[])
-}
-
-pub fn generate_to_string_with_inputs_and_support(
-    language: Language,
-    input_paths: &[PathBuf],
-    descriptor_paths: &[PathBuf],
-    support_paths: &[PathBuf],
-) -> Result<String> {
-    let tree = crate::parser::load_api_spec_tree_for_language_with_inputs(language, input_paths)?;
-    let descriptors = DescriptorIndex::load_many(descriptor_paths)?;
-    let support = load_support_files_for_tree(language, &tree, support_paths)?;
-    let generated = generate_files_for_tree_with_mode(
-        language,
-        tree,
-        &descriptors,
-        &support,
-        GenerationMode::NativeApi,
-    )?;
-    print_warnings(&generated);
-    Ok(match generated.layout {
-        GeneratedOutputLayout::SingleFile => generated
-            .single_file_contents()
-            .expect("single-file output should contain one file")
-            .to_string(),
-        GeneratedOutputLayout::Directory => render_generated_files_for_debug(&generated),
-    })
-}
-
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
     let tree = crate::parser::load_api_spec_tree_for_language_with_inputs(
         request.language,
@@ -101,7 +53,14 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
     )?;
     let descriptors = DescriptorIndex::load_many(&request.descriptor_paths)?;
     let support = load_support_files_for_tree(request.language, &tree, &request.support_paths)?;
-    let generated = generator::generate_files_for_tree_with_mode(
+    let options = GenerateFilesOptions {
+        go_import_root: if request.language == Language::Go {
+            infer_go_import_root(&request.output_path)?
+        } else {
+            None
+        },
+    };
+    let generated = generator::generate_files_for_tree_with_mode_and_options(
         request.language,
         tree,
         &descriptors,
@@ -111,6 +70,7 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
         } else {
             GenerationMode::DefinitionsOnly
         },
+        options,
     )?;
     print_warnings(&generated);
 
@@ -159,7 +119,12 @@ pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
 pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let languages = if request.languages.is_empty() {
-        vec![Language::Dotnet, Language::Python, Language::TypeScript]
+        vec![
+            Language::Dotnet,
+            Language::Python,
+            Language::TypeScript,
+            Language::Go,
+        ]
     } else {
         request.languages.clone()
     };
@@ -167,7 +132,7 @@ pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
     for language in languages {
         if !matches!(
             language,
-            Language::Dotnet | Language::Python | Language::TypeScript
+            Language::Dotnet | Language::Python | Language::TypeScript | Language::Go
         ) {
             return Err(error::Error::UnsupportedLanguage { language });
         }
@@ -175,17 +140,81 @@ pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
             ensure_typescript_dependencies(&repo_root)?;
         }
 
-        let example_ids = if request.example_ids.is_empty() {
+        let example_ids = if language == Language::Go && request.example_ids.is_empty() {
+            vec!["chat".to_string(), "kb".to_string()]
+        } else if request.example_ids.is_empty() {
             discover_json_example_ids(&repo_root)?
         } else {
             validate_json_example_ids(&repo_root, language, &request.example_ids)?
         };
+        if language == Language::Go {
+            for example_id in &example_ids {
+                if !matches!(example_id.as_str(), "chat" | "kb") {
+                    return Err(error::Error::UnknownExampleId {
+                        language,
+                        example_id: example_id.clone(),
+                    });
+                }
+            }
+        }
         for example_id in example_ids {
             build_json_example(&repo_root, language, &example_id)?;
         }
     }
 
     Ok(())
+}
+
+fn infer_go_import_root(output_path: &Path) -> Result<Option<String>> {
+    let output_path = if output_path.is_absolute() {
+        output_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|source| error::Error::ReadFile {
+                path: PathBuf::from("."),
+                source,
+            })?
+            .join(output_path)
+    };
+
+    for ancestor in output_path.ancestors() {
+        let go_mod_path = ancestor.join("go.mod");
+        if !go_mod_path.is_file() {
+            continue;
+        }
+        let module_name = read_go_module_name(&go_mod_path)?;
+        let relative_output = output_path.strip_prefix(ancestor).unwrap_or(Path::new(""));
+        let relative_output = relative_output
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .filter(|component| !component.is_empty())
+            .collect::<Vec<_>>()
+            .join("/");
+        return Ok(Some(if relative_output.is_empty() {
+            module_name
+        } else {
+            format!("{module_name}/{relative_output}")
+        }));
+    }
+
+    Ok(None)
+}
+
+fn read_go_module_name(go_mod_path: &Path) -> Result<String> {
+    let contents = fs::read_to_string(go_mod_path).map_err(|source| error::Error::ReadFile {
+        path: go_mod_path.to_path_buf(),
+        source,
+    })?;
+    contents
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("module "))
+        .map(str::trim)
+        .filter(|module| !module.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| error::Error::InvalidGeneratedPath {
+            path: go_mod_path.to_path_buf(),
+            reason: "go.mod does not contain a module directive".to_string(),
+        })
 }
 
 fn format_generated_file(language: Language, output_path: &Path) -> Result<()> {
@@ -209,15 +238,6 @@ fn format_generated_file(language: Language, output_path: &Path) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn render_generated_files_for_debug(generated: &GeneratedFiles) -> String {
-    generated
-        .files
-        .iter()
-        .map(|(path, contents)| format!("### {}\n{contents}", path.display()))
-        .collect::<Vec<_>>()
-        .join("\n\n")
 }
 
 fn print_warnings(generated: &GeneratedFiles) {
@@ -427,8 +447,8 @@ fn discover_example_ids(repo_root: &Path, language: Language) -> Result<Vec<Stri
     Ok(ids)
 }
 
-fn example_is_excluded(language: Language, example_id: &str) -> bool {
-    language == Language::Go && example_id == "user-service"
+fn example_is_excluded(_language: Language, _example_id: &str) -> bool {
+    false
 }
 
 fn validate_example_ids(

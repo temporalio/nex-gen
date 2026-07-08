@@ -18,6 +18,10 @@ import (
 
 // --- Helpers ---
 
+func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient {
+	return workflow.NewNexusClient(endpoint, service)
+}
+
 type nexGenNexusOperationFuture struct {
 	operation workflow.NexusOperationFuture
 	result    workflow.Future
@@ -226,13 +230,12 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 
 // --- Operations (internal) ---
 
-func signalWithStartWorkflow(ctx workflow.Context, request signalWithStartWorkflowRequest) workflow.NexusOperationFuture {
+func signalWithStartWorkflow(ctx workflow.Context, client workflow.NexusClient, request signalWithStartWorkflowRequest) workflow.NexusOperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
 		return nexGenFailedNexusOperationFuture(ctx, err)
 	}
-	c := workflow.NewNexusClient("temporal-system", "temporal.api.workflowservice.v1.WorkflowService")
-	fut := c.ExecuteOperation(ctx, "SignalWithStartWorkflowExecution", requestProto, workflow.NexusOperationOptions{})
+	fut := client.ExecuteOperation(ctx, "SignalWithStartWorkflowExecution", requestProto, workflow.NexusOperationOptions{})
 	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
@@ -252,6 +255,16 @@ func signalWithStartWorkflow(ctx workflow.Context, request signalWithStartWorkfl
 		*typedValue = value
 		return nil
 	}}
+}
+
+// --- Service clients ---
+
+type WorkflowServiceClient struct {
+	client workflow.NexusClient
+}
+
+func NewWorkflowServiceClient(endpoint string) *WorkflowServiceClient {
+	return &WorkflowServiceClient{client: nexGenNewNexusClient(endpoint, "temporal.api.workflowservice.v1.WorkflowService")}
 }
 
 // --- Operations (public API) ---
@@ -397,7 +410,8 @@ func SignalWithStartWorkflow[WorkflowF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
+	client := nexGenNewNexusClient("temporal-system", "temporal.api.workflowservice.v1.WorkflowService")
+	return signalWithStartWorkflow(ctx, client, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               opts.Args,
 		Id:                 id,
@@ -471,7 +485,8 @@ func SignalWithStartWorkflowWithArgs[WorkflowF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
+	client := nexGenNewNexusClient("temporal-system", "temporal.api.workflowservice.v1.WorkflowService")
+	return signalWithStartWorkflow(ctx, client, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
 		Id:                 id,

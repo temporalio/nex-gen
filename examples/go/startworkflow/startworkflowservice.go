@@ -15,6 +15,10 @@ import (
 
 // --- Helpers ---
 
+func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient {
+	return workflow.NewNexusClient(endpoint, service)
+}
+
 type nexGenNexusOperationFuture struct {
 	operation workflow.NexusOperationFuture
 	result    workflow.Future
@@ -137,11 +141,11 @@ type StartedWorkflow struct {
 }
 
 func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason *string) workflow.NexusOperationFuture {
-	return cancelWorkflow(ctx, cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reason})
+	return cancelWorkflow(ctx, nexGenNewNexusClient("temporal-system", "StartWorkflowService"), cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reason})
 }
 
 func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string, taskQueue string) workflow.NexusOperationFuture {
-	return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflow, TaskQueue: taskQueue})
+	return restartWorkflow(ctx, nexGenNewNexusClient("temporal-system", "StartWorkflowService"), startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflow, TaskQueue: taskQueue})
 }
 
 func (u *StartedWorkflow) GetResult(ctx workflow.Context) workflow.NexusOperationFuture {
@@ -150,13 +154,12 @@ func (u *StartedWorkflow) GetResult(ctx workflow.Context) workflow.NexusOperatio
 
 // --- Operations (internal) ---
 
-func startWorkflow(ctx workflow.Context, request startWorkflowRequest) workflow.NexusOperationFuture {
+func startWorkflow(ctx workflow.Context, client workflow.NexusClient, request startWorkflowRequest) workflow.NexusOperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
 		return nexGenFailedNexusOperationFuture(ctx, err)
 	}
-	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
-	fut := c.ExecuteOperation(ctx, "StartWorkflow", requestProto, workflow.NexusOperationOptions{})
+	fut := client.ExecuteOperation(ctx, "StartWorkflow", requestProto, workflow.NexusOperationOptions{})
 	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
@@ -185,13 +188,12 @@ func startWorkflow(ctx workflow.Context, request startWorkflowRequest) workflow.
 	}}
 }
 
-func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) workflow.NexusOperationFuture {
+func restartWorkflow(ctx workflow.Context, client workflow.NexusClient, request startWorkflowRequest) workflow.NexusOperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
 		return nexGenFailedNexusOperationFuture(ctx, err)
 	}
-	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
-	fut := c.ExecuteOperation(ctx, "RestartWorkflow", requestProto, workflow.NexusOperationOptions{})
+	fut := client.ExecuteOperation(ctx, "RestartWorkflow", requestProto, workflow.NexusOperationOptions{})
 	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
@@ -220,13 +222,12 @@ func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) workflo
 	}}
 }
 
-func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) workflow.NexusOperationFuture {
+func cancelWorkflow(ctx workflow.Context, client workflow.NexusClient, request cancelWorkflowRequest) workflow.NexusOperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
 		return nexGenFailedNexusOperationFuture(ctx, err)
 	}
-	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
-	fut := c.ExecuteOperation(ctx, "CancelWorkflow", requestProto, workflow.NexusOperationOptions{})
+	fut := client.ExecuteOperation(ctx, "CancelWorkflow", requestProto, workflow.NexusOperationOptions{})
 	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
@@ -246,6 +247,23 @@ func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) workflo
 		*typedValue = value
 		return nil
 	}}
+}
+
+// --- Service clients ---
+
+type StartWorkflowServiceClient struct {
+	client workflow.NexusClient
+}
+
+func NewStartWorkflowServiceClient(endpoint string) *StartWorkflowServiceClient {
+	return &StartWorkflowServiceClient{client: nexGenNewNexusClient(endpoint, "StartWorkflowService")}
+}
+
+func (c *StartWorkflowServiceClient) CancelWorkflow(ctx workflow.Context, workflowExecution WorkflowExecution, opts CancelWorkflowOptions) workflow.NexusOperationFuture {
+	return cancelWorkflow(ctx, c.client, cancelWorkflowRequest{
+		WorkflowExecution: workflowExecution,
+		Reason:            opts.Reason,
+	})
 }
 
 // --- Operations (public API) ---
@@ -313,7 +331,8 @@ func StartWorkflow[WorkflowF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return startWorkflow(ctx, startWorkflowRequest{
+	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
+	return startWorkflow(ctx, client, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               opts.Args,
 		WorkflowId:         workflowId,
@@ -351,7 +370,8 @@ func StartWorkflowWithArgs[WorkflowF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return startWorkflow(ctx, startWorkflowRequest{
+	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
+	return startWorkflow(ctx, client, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
 		WorkflowId:         workflowId,
@@ -387,7 +407,8 @@ func RestartWorkflow[WorkflowF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return restartWorkflow(ctx, startWorkflowRequest{
+	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
+	return restartWorkflow(ctx, client, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               opts.Args,
 		WorkflowId:         workflowId,
@@ -425,7 +446,8 @@ func RestartWorkflowWithArgs[WorkflowF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return restartWorkflow(ctx, startWorkflowRequest{
+	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
+	return restartWorkflow(ctx, client, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
 		WorkflowId:         workflowId,
@@ -439,7 +461,8 @@ type CancelWorkflowOptions struct {
 }
 
 func CancelWorkflow(ctx workflow.Context, workflowExecution WorkflowExecution, opts CancelWorkflowOptions) workflow.NexusOperationFuture {
-	return cancelWorkflow(ctx, cancelWorkflowRequest{
+	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
+	return cancelWorkflow(ctx, client, cancelWorkflowRequest{
 		WorkflowExecution: workflowExecution,
 		Reason:            opts.Reason,
 	})

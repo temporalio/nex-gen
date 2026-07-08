@@ -4,23 +4,26 @@ use std::path::PathBuf;
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
+use crate::SupportFiles;
 use crate::error::{Error, Result};
-use crate::generator::{ExternalModelBackend, GeneratedFiles};
+use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
     PlannedProtoType, PlannedProtoTypeInfo, PlannedResource,
     PlannedResourceMethodBindingSpec as PlannedResourceMethodBinding,
-    PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedType,
-    PlannedTypeFamily,
+    PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedSpecData,
+    PlannedType, PlannedTypeFamily,
 };
 use crate::resources::render_request_plan;
 use crate::spec::{
     EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec as GenericFunctionArgsSpec,
     FunctionFieldSpec as GenericFunctionFieldSpec, FunctionResultSpec as GenericFunctionResultSpec,
-    IntSpec, LanguageStringSpec, OperationSpec, RecordFieldSpec, RecordSpec, SupportFragmentSpec,
-    TypeReplacementSpec, TypeSpec, VariantSpec,
+    IntSpec, LanguageStringSpec, ModulePath, OperationSpec, RecordFieldSpec, RecordSpec,
+    SupportFragmentSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
+use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
+use super::json::go as json;
 use super::proto::go as proto;
 
 type FunctionArgsSpec = GenericFunctionArgsSpec<PlannedTypeFamily>;
@@ -43,7 +46,10 @@ const TUPLE_FIELD_NAMES: &[&str] = &[
 const GO_DOC_COMMENT_LINE_LENGTH: usize = 88;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GoOptions {}
+pub struct GoOptions {
+    pub(crate) import_root: Option<String>,
+    pub(crate) module_output_paths: BTreeMap<ModulePath, ModulePath>,
+}
 
 #[derive(Debug, Clone)]
 pub(in crate::generator) enum PlannedOperationOutput {
@@ -180,6 +186,7 @@ pub(in crate::generator) struct PlannedMessageType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::generator) enum PlannedMessageSource {
+    Json,
     Proto,
     Wit,
 }
@@ -243,6 +250,13 @@ pub(in crate::generator) fn planned_message_type(
                 source: PlannedMessageSource::Proto,
             })
         }
+        TypeSpec::External(ExternalTypeSpec::Json(json_type)) => Some(PlannedMessageType {
+            info: local_type_info(&json_type.full_name),
+            model_name: json_type.model_name.clone(),
+            replacement: None,
+            authored_type: None,
+            source: PlannedMessageSource::Json,
+        }),
         TypeSpec::External(ExternalTypeSpec::Alias {
             target, type_name, ..
         }) => {
@@ -434,7 +448,15 @@ fn planned_value_type(value_type: &PlannedType, spec: &PlannedSpec) -> PlannedVa
                 replacement: enum_type.replacement.clone(),
             })
         }
-        TypeSpec::External(ExternalTypeSpec::Json(_)) => PlannedValueType::Unknown,
+        TypeSpec::External(ExternalTypeSpec::Json(json_type)) => {
+            PlannedValueType::Message(PlannedMessageType {
+                info: local_type_info(&json_type.full_name),
+                model_name: json_type.model_name.clone(),
+                replacement: None,
+                authored_type: None,
+                source: PlannedMessageSource::Json,
+            })
+        }
         TypeSpec::External(ExternalTypeSpec::Alias {
             target, type_name, ..
         }) => PlannedValueType::External {
@@ -462,15 +484,27 @@ fn planned_value_type(value_type: &PlannedType, spec: &PlannedSpec) -> PlannedVa
 pub(in crate::generator) struct GoPackageContext {
     package_name: String,
     import_path: Option<String>,
+    import_root: Option<String>,
+    module_path: ModulePath,
+    module_output_paths: BTreeMap<ModulePath, ModulePath>,
 }
 
 impl GoPackageContext {
-    fn new(api_plan: &PlannedSpec, _options: &GoOptions) -> Self {
-        let import_path = api_plan
+    fn new(api_plan: &PlannedSpec, options: &GoOptions) -> Self {
+        let has_json_models = api_plan
+            .external_types()
+            .any(|(_, binding)| matches!(binding.external_type, ExternalTypeSpec::Json(_)));
+        let explicit_import_path = api_plan
             .services
             .first()
             .and_then(|service| service.namespace.for_language(Language::Go))
             .map(str::to_string);
+        let import_path = explicit_import_path.or_else(|| {
+            options
+                .import_root
+                .as_deref()
+                .map(|root| go_module_import_path(root, &api_plan.module_path))
+        });
         let package_name = import_path.as_ref().map_or_else(
             || {
                 api_plan
@@ -478,6 +512,33 @@ impl GoPackageContext {
                     .first()
                     .and_then(|service| service.endpoint.as_deref())
                     .map(go_package_name)
+                    .or_else(|| {
+                        if has_json_models {
+                            api_plan
+                                .module_path
+                                .0
+                                .last()
+                                .map(|segment| go_package_name(segment))
+                                .or_else(|| {
+                                    api_plan
+                                        .services
+                                        .first()
+                                        .map(|service| {
+                                            service
+                                                .name
+                                                .strip_suffix("Service")
+                                                .unwrap_or(&service.name)
+                                                .to_string()
+                                        })
+                                        .map(|name| go_package_name(&name))
+                                })
+                        } else {
+                            api_plan
+                                .services
+                                .first()
+                                .map(|service| go_package_name(&service.wire_name))
+                        }
+                    })
                     .unwrap_or_else(|| "api".to_string())
             },
             |import_path| {
@@ -493,6 +554,9 @@ impl GoPackageContext {
         Self {
             package_name,
             import_path,
+            import_root: options.import_root.clone(),
+            module_path: api_plan.module_path.clone(),
+            module_output_paths: options.module_output_paths.clone(),
         }
     }
 
@@ -515,6 +579,10 @@ impl GoPackageContext {
 
     pub(in crate::generator) fn workflow_context_type(&self) -> String {
         self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Context")
+    }
+
+    pub(in crate::generator) fn workflow_nexus_client_type(&self) -> String {
+        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.NexusClient")
     }
 
     fn workflow_future_type(&self) -> String {
@@ -555,6 +623,46 @@ impl GoPackageContext {
         let qualifier = format!("{}.", self.package_name);
         code_expr.replace(&qualifier, "")
     }
+
+    pub(in crate::generator) fn module_import_path(
+        &self,
+        source_module_path: &ModulePath,
+    ) -> Result<Option<String>> {
+        let output_module_path = self.output_module_path(source_module_path);
+        if output_module_path == &self.module_path {
+            return Ok(None);
+        }
+        let Some(import_root) = self.import_root.as_deref() else {
+            return Err(Error::InvalidJsonSchema {
+                path: PathBuf::from("<go-tree-generator>"),
+                reason: format!(
+                    "Go tree output references module `{}` from module `{}`, but no Go module import root could be inferred from the output path",
+                    source_module_path.as_module_key(),
+                    self.module_path.as_module_key(),
+                ),
+            });
+        };
+        Ok(Some(go_module_import_path(import_root, output_module_path)))
+    }
+
+    pub(in crate::generator) fn shared_json_import_path(&self) -> Option<String> {
+        (!self.module_output_paths.is_empty())
+            .then(|| self.import_root.clone())
+            .flatten()
+    }
+
+    fn output_module_path<'a>(&'a self, source_module_path: &'a ModulePath) -> &'a ModulePath {
+        self.module_output_paths
+            .get(source_module_path)
+            .unwrap_or(source_module_path)
+    }
+}
+
+fn go_module_import_path(import_root: &str, module_path: &ModulePath) -> String {
+    if module_path.is_root() {
+        return import_root.to_string();
+    }
+    format!("{}/{}", import_root, module_path.as_module_key())
 }
 
 /// Entry point for the Go code generator.
@@ -567,15 +675,433 @@ pub(crate) fn generate(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
     options: &GoOptions,
+    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
-    ApiPlanner::new(api_plan, options)?.generate(support_fragments)
+    ApiPlanner::new(api_plan, options, mode)?.generate(support_fragments)
+}
+
+pub(crate) fn generate_tree(
+    tree: &ApiSpecTree<PlannedTypeFamily>,
+    support: &SupportFiles,
+    options: &GoOptions,
+    mode: GenerationMode,
+) -> Result<GeneratedFiles> {
+    match &tree.root {
+        ApiSpecNode::Leaf(leaf) => generate(&leaf.spec, &support.fragments, options, mode),
+        ApiSpecNode::Branch(branch) => generate_branch_tree(branch, support, options, mode),
+    }
+}
+
+fn generate_branch_tree(
+    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    support: &SupportFiles,
+    options: &GoOptions,
+    mode: GenerationMode,
+) -> Result<GeneratedFiles> {
+    let mut leaves = Vec::new();
+    collect_leaf_specs(branch, &mut leaves);
+    if leaves.is_empty() {
+        return Err(Error::InvalidJsonSchema {
+            path: PathBuf::from("<go-tree-generator>"),
+            reason: "input tree contains no API specs".to_string(),
+        });
+    };
+
+    let module_output_paths = go_tree_module_output_paths(&leaves);
+    let mut grouped = BTreeMap::<ModulePath, Vec<&ApiSpecLeaf<PlannedTypeFamily>>>::new();
+    for leaf in &leaves {
+        let output_module = module_output_paths
+            .get(&leaf.module_path)
+            .cloned()
+            .unwrap_or_else(|| leaf.module_path.clone());
+        grouped.entry(output_module).or_default().push(*leaf);
+    }
+
+    let mut files = BTreeMap::new();
+    let mut warnings = Vec::new();
+    if go_tree_has_json_models(&leaves) {
+        insert_generated_file(
+            &mut files,
+            PathBuf::from("json.go"),
+            json::render_support_file(),
+        )?;
+    }
+    for (output_module, group_leaves) in grouped {
+        let merged = merge_go_tree_group(&output_module, &group_leaves, &module_output_paths)?;
+        let support_fragments = support_fragments_for_plans(&group_leaves, support);
+        let mut group_options = options.clone();
+        group_options.module_output_paths = module_output_paths.clone();
+        let generated = generate(&merged, &support_fragments, &group_options, mode)?;
+        warnings.extend(generated.warnings);
+        let prefix = output_module.to_path_buf();
+        for (path, contents) in generated.files {
+            insert_generated_file(&mut files, prefix.join(path), contents)?;
+        }
+    }
+
+    Ok(GeneratedFiles {
+        layout: crate::generator::GeneratedOutputLayout::Directory,
+        files,
+        warnings,
+    })
+}
+
+fn go_tree_has_json_models(leaves: &[&ApiSpecLeaf<PlannedTypeFamily>]) -> bool {
+    leaves.iter().any(|leaf| {
+        leaf.spec
+            .external_types()
+            .map(|(_, binding)| binding)
+            .any(|binding| matches!(binding.external_type, ExternalTypeSpec::Json(_)))
+    })
+}
+
+fn merge_go_tree_group(
+    module_path: &ModulePath,
+    leaves: &[&ApiSpecLeaf<PlannedTypeFamily>],
+    module_output_paths: &BTreeMap<ModulePath, ModulePath>,
+) -> Result<PlannedSpec> {
+    let first_leaf = leaves
+        .first()
+        .expect("Go tree package group should not be empty");
+    let mut merged = PlannedSpec {
+        module_path: module_path.clone(),
+        data: PlannedSpecData::default(),
+        version: first_leaf.spec.version.clone(),
+        support: first_leaf.spec.support.clone(),
+        services: Vec::new(),
+        types: BTreeMap::new(),
+    };
+
+    for leaf in leaves {
+        merged.services.extend(leaf.spec.services.iter().cloned());
+        merged
+            .data
+            .module_exports
+            .extend(leaf.spec.data.module_exports.iter().cloned());
+        for (import_module, names) in &leaf.spec.data.module_imports {
+            let output_import_module = module_output_paths
+                .get(import_module)
+                .unwrap_or(import_module);
+            if output_import_module == module_path {
+                continue;
+            }
+            merged
+                .data
+                .module_imports
+                .entry(import_module.clone())
+                .or_default()
+                .extend(names.iter().cloned());
+        }
+        for (name, decl) in &leaf.spec.types {
+            if merged.types.insert(name.clone(), decl.clone()).is_some() {
+                return Err(Error::InvalidJsonSchema {
+                    path: leaf.source_path.clone(),
+                    reason: format!("duplicate planned type `{name}` in Go tree output"),
+                });
+            }
+        }
+    }
+
+    Ok(merged)
+}
+
+fn insert_generated_file(
+    files: &mut BTreeMap<PathBuf, String>,
+    path: PathBuf,
+    contents: String,
+) -> Result<()> {
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+    {
+        return Err(Error::InvalidGeneratedPath {
+            path,
+            reason: "generated Go tree paths must be relative and stay within the output directory"
+                .to_string(),
+        });
+    }
+    if files.insert(path.clone(), contents).is_some() {
+        return Err(Error::GeneratedFileConflict { path });
+    }
+    Ok(())
+}
+
+fn support_fragments_for_plans(
+    plans: &[&ApiSpecLeaf<PlannedTypeFamily>],
+    support: &SupportFiles,
+) -> Vec<SupportFragmentSpec> {
+    if !support.fragments.is_empty() {
+        return support.fragments.clone();
+    }
+    plans
+        .iter()
+        .flat_map(|leaf| leaf.spec.support.fragments_for_language(Language::Go))
+        .cloned()
+        .collect()
+}
+
+fn go_tree_module_output_paths(
+    leaves: &[&ApiSpecLeaf<PlannedTypeFamily>],
+) -> BTreeMap<ModulePath, ModulePath> {
+    let module_indices = leaves
+        .iter()
+        .enumerate()
+        .map(|(index, leaf)| (leaf.module_path.clone(), index))
+        .collect::<BTreeMap<_, _>>();
+    let mut edges = vec![Vec::<usize>::new(); leaves.len()];
+    for (index, leaf) in leaves.iter().enumerate() {
+        for target in leaf.spec.data.module_imports.keys() {
+            if let Some(target_index) = module_indices.get(target) {
+                edges[index].push(*target_index);
+            }
+        }
+    }
+
+    let mut output_paths = BTreeMap::new();
+    for component in strongly_connected_components(&edges) {
+        let output_path = if component.len() == 1 {
+            leaves[component[0]].module_path.clone()
+        } else {
+            common_module_path_for_modules(
+                &component
+                    .iter()
+                    .map(|index| &leaves[*index].module_path)
+                    .collect::<Vec<_>>(),
+            )
+        };
+        for index in component {
+            output_paths.insert(leaves[index].module_path.clone(), output_path.clone());
+        }
+    }
+    output_paths
+}
+
+fn common_module_path_for_modules(modules: &[&ModulePath]) -> ModulePath {
+    let mut segments = modules
+        .first()
+        .map(|module| module.0.clone())
+        .unwrap_or_default();
+    for module in modules.iter().skip(1) {
+        let common_len = segments
+            .iter()
+            .zip(&module.0)
+            .take_while(|(left, right)| left == right)
+            .count();
+        segments.truncate(common_len);
+    }
+    ModulePath(segments)
+}
+
+fn strongly_connected_components(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    struct Tarjan<'a> {
+        edges: &'a [Vec<usize>],
+        index: usize,
+        indices: Vec<Option<usize>>,
+        lowlinks: Vec<usize>,
+        stack: Vec<usize>,
+        on_stack: Vec<bool>,
+        components: Vec<Vec<usize>>,
+    }
+
+    impl Tarjan<'_> {
+        fn visit(&mut self, node: usize) {
+            self.indices[node] = Some(self.index);
+            self.lowlinks[node] = self.index;
+            self.index += 1;
+            self.stack.push(node);
+            self.on_stack[node] = true;
+
+            for target in &self.edges[node] {
+                if self.indices[*target].is_none() {
+                    self.visit(*target);
+                    self.lowlinks[node] = self.lowlinks[node].min(self.lowlinks[*target]);
+                } else if self.on_stack[*target] {
+                    self.lowlinks[node] = self.lowlinks[node].min(self.indices[*target].unwrap());
+                }
+            }
+
+            if self.lowlinks[node] == self.indices[node].unwrap() {
+                let mut component = Vec::new();
+                loop {
+                    let item = self
+                        .stack
+                        .pop()
+                        .expect("Tarjan stack should contain current component");
+                    self.on_stack[item] = false;
+                    component.push(item);
+                    if item == node {
+                        break;
+                    }
+                }
+                component.sort_unstable();
+                self.components.push(component);
+            }
+        }
+    }
+
+    let mut tarjan = Tarjan {
+        edges,
+        index: 0,
+        indices: vec![None; edges.len()],
+        lowlinks: vec![0; edges.len()],
+        stack: Vec::new(),
+        on_stack: vec![false; edges.len()],
+        components: Vec::new(),
+    };
+    for node in 0..edges.len() {
+        if tarjan.indices[node].is_none() {
+            tarjan.visit(node);
+        }
+    }
+    tarjan.components.sort();
+    tarjan.components
+}
+
+fn collect_leaf_specs<'a>(
+    branch: &'a ApiSpecBranch<PlannedTypeFamily>,
+    leaves: &mut Vec<&'a ApiSpecLeaf<PlannedTypeFamily>>,
+) {
+    for child in branch.children.values() {
+        match child {
+            ApiSpecNode::Leaf(leaf) => leaves.push(leaf),
+            ApiSpecNode::Branch(branch) => collect_leaf_specs(branch, leaves),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct GoModelFragments {
+    imports: BTreeSet<String>,
+    body: String,
+}
+
+enum GoExternalModels {
+    Json(json::ModelBackend),
+    Proto(proto::ModelBackend),
+}
+
+impl GoExternalModels {
+    fn new(api_plan: &PlannedSpec, package: GoPackageContext, mode: GenerationMode) -> Self {
+        if api_plan
+            .external_types()
+            .any(|(_, binding)| matches!(binding.external_type, ExternalTypeSpec::Json(_)))
+        {
+            Self::Json(json::ModelBackend::new(
+                package,
+                mode == GenerationMode::NativeApi,
+            ))
+        } else {
+            Self::Proto(proto::ModelBackend::new(package))
+        }
+    }
+
+    fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+        match self {
+            Self::Json(backend) => backend.prepare(api_plan),
+            Self::Proto(backend) => backend.prepare(api_plan),
+        }
+    }
+
+    fn render_models(&self) -> Result<GoModelFragments> {
+        match self {
+            Self::Json(backend) => {
+                let fragments = backend.render_models()?;
+                Ok(GoModelFragments {
+                    imports: fragments.imports,
+                    body: fragments.body,
+                })
+            }
+            Self::Proto(backend) => {
+                let _ = backend.render_models()?;
+                Ok(GoModelFragments::default())
+            }
+        }
+    }
+
+    fn imports(&self) -> Vec<(String, String)> {
+        match self {
+            Self::Json(backend) => backend.imports(),
+            Self::Proto(backend) => backend
+                .imports()
+                .paths()
+                .map(|(path, alias)| (path.clone(), alias.clone()))
+                .collect(),
+        }
+    }
+
+    fn model_type_annotation(&self, model_type: &PlannedValueType) -> Option<String> {
+        match self {
+            Self::Json(backend) => backend.model_type_annotation(model_type),
+            Self::Proto(backend) => backend.model_type_annotation(model_type),
+        }
+    }
+
+    fn has_message_wire_type(&self, message: &PlannedMessageType) -> bool {
+        match self {
+            Self::Json(backend) => backend.has_message_wire_type(message),
+            Self::Proto(backend) => backend.has_message_wire_type(message),
+        }
+    }
+
+    fn record_model(&mut self, key: &str, message: &PlannedMessageType) {
+        if let Self::Proto(backend) = self {
+            backend.record_model(key, message);
+        }
+    }
+
+    fn populate_model_wire_conversions(
+        &mut self,
+        api_plan: &PlannedSpec,
+        models: &IndexMap<String, RenderedModel>,
+    ) -> Result<()> {
+        match self {
+            Self::Json(_) => Ok(()),
+            Self::Proto(backend) => backend.populate_model_wire_conversions(api_plan, models),
+        }
+    }
+
+    fn populate_operation_bindings(
+        &self,
+        api_plan: &PlannedSpec,
+        services: &mut [RenderedService<'_>],
+    ) -> Result<()> {
+        match self {
+            Self::Json(_) => Ok(()),
+            Self::Proto(backend) => backend.populate_operation_bindings(api_plan, services),
+        }
+    }
+
+    fn render_model_wire_methods(&self, output: &mut String, key: &str, model: &RenderedModel) {
+        if let Self::Proto(backend) = self {
+            backend.render_model_wire_methods(output, key, model);
+        }
+    }
+
+    fn renders_operation_references(&self) -> bool {
+        matches!(self, Self::Json(_))
+    }
+
+    fn render_operation_references(
+        &self,
+        api_plan: &PlannedSpec,
+        package: &GoPackageContext,
+    ) -> Result<Option<String>> {
+        match self {
+            Self::Json(backend) if backend.is_active() => {
+                Ok(Some(backend.render_services(api_plan, package)?))
+            }
+            _ => Ok(None),
+        }
+    }
 }
 
 struct ApiPlanner<'a> {
     api_plan: &'a PlannedSpec,
+    mode: GenerationMode,
     package: GoPackageContext,
     imports: BTreeSet<String>,
-    external_models: proto::ModelBackend,
+    external_models: GoExternalModels,
     enums: IndexMap<String, RenderedEnum>,
     flags: IndexMap<String, RenderedFlags>,
     variants: IndexMap<String, RenderedVariant>,
@@ -583,7 +1109,7 @@ struct ApiPlanner<'a> {
 }
 
 impl<'a> ApiPlanner<'a> {
-    fn new(api_plan: &'a PlannedSpec, options: &GoOptions) -> Result<Self> {
+    fn new(api_plan: &'a PlannedSpec, options: &GoOptions, mode: GenerationMode) -> Result<Self> {
         let package = GoPackageContext::new(api_plan, options);
         let mut imports = BTreeSet::new();
 
@@ -595,12 +1121,12 @@ impl<'a> ApiPlanner<'a> {
         collect_imports_from_plan(api_plan, &mut imports);
         imports.retain(|import_path| !package.is_self_import(import_path));
 
-        let mut external_models = proto::ModelBackend::new(package.clone());
+        let mut external_models = GoExternalModels::new(api_plan, package.clone(), mode);
         external_models.prepare(api_plan)?;
-        let _ = external_models.render_models()?;
 
         Ok(Self {
             api_plan,
+            mode,
             package,
             imports,
             external_models,
@@ -613,29 +1139,24 @@ impl<'a> ApiPlanner<'a> {
 
     fn generate(mut self, support_fragments: &[SupportFragmentSpec]) -> Result<GeneratedFiles> {
         let mut services = Vec::new();
-        for service in &self.api_plan.services {
-            let endpoint =
-                service
-                    .endpoint
-                    .clone()
-                    .ok_or_else(|| Error::MissingServiceEndpoint {
-                        service: service.name.clone(),
-                    })?;
-            let mut operations = Vec::new();
-            for operation in &service.operations {
-                operations.push(self.resolve_operation(operation)?);
-            }
+        if !self.external_models.renders_operation_references() {
+            for service in &self.api_plan.services {
+                let mut operations = Vec::new();
+                for operation in &service.operations {
+                    operations.push(self.resolve_operation(operation)?);
+                }
 
-            services.push(RenderedService {
-                wire_name: &service.wire_name,
-                endpoint,
-                operations,
-                resources: service
-                    .resources
-                    .iter()
-                    .map(|resource| resource.data.clone())
-                    .collect(),
-            });
+                services.push(RenderedService {
+                    wire_name: &service.wire_name,
+                    endpoint: service.endpoint.clone(),
+                    operations,
+                    resources: service
+                        .resources
+                        .iter()
+                        .map(|resource| resource.data.clone())
+                        .collect(),
+                });
+            }
         }
 
         for service in &services {
@@ -683,11 +1204,39 @@ impl<'a> ApiPlanner<'a> {
             self.imports.insert("runtime".to_string());
             self.imports.insert("strings".to_string());
         }
-        let proto_imports = self.external_models.imports();
+        let model_fragments = self.external_models.render_models()?;
+        self.imports.extend(model_fragments.imports);
+        if self.mode == GenerationMode::NativeApi
+            && self.external_models.renders_operation_references()
+            && !self.api_plan.services.is_empty()
+            && !self
+                .package
+                .is_self_import("github.com/nexus-rpc/sdk-go/nexus")
+        {
+            self.imports
+                .insert("github.com/nexus-rpc/sdk-go/nexus".to_string());
+        }
+        if self.mode == GenerationMode::NativeApi
+            && self.external_models.renders_operation_references()
+            && !self.api_plan.services.is_empty()
+            && !self.package.is_self_import("go.temporal.io/sdk/workflow")
+        {
+            self.imports
+                .insert("go.temporal.io/sdk/workflow".to_string());
+        }
+        let external_imports = self.external_models.imports();
         let output = render_file(
             &self.package,
             &self.imports,
-            &proto_imports,
+            &external_imports,
+            &model_fragments.body,
+            if self.mode == GenerationMode::NativeApi {
+                self.external_models
+                    .render_operation_references(self.api_plan, &self.package)?
+            } else {
+                None
+            }
+            .as_deref(),
             self.enums.values().collect::<Vec<_>>().as_slice(),
             self.flags.values().collect::<Vec<_>>().as_slice(),
             self.variants.values().collect::<Vec<_>>().as_slice(),
@@ -700,7 +1249,12 @@ impl<'a> ApiPlanner<'a> {
         );
 
         let mut files = BTreeMap::new();
-        files.insert(go_api_file_name(self.api_plan), output);
+        let file_name = if self.external_models.renders_operation_references() {
+            PathBuf::from(format!("{}.go", self.package.package_name))
+        } else {
+            go_api_file_name(self.api_plan)
+        };
+        files.insert(file_name, output);
 
         // Emit hand-written support fragments (e.g. proto converter functions)
         // in one support file. Like the TypeScript backend, all fragments are
@@ -872,6 +1426,9 @@ impl<'a> ApiPlanner<'a> {
 
     fn resolve_message_types(&mut self, message: &PlannedMessageType) -> Result<()> {
         if message.replacement.is_some() || message.authored_type.is_some() {
+            return Ok(());
+        }
+        if message.source == PlannedMessageSource::Json {
             return Ok(());
         }
 
@@ -1516,8 +2073,8 @@ pub(in crate::generator) struct RenderedService<'a> {
     /// `"temporal.api.workflowservice.v1.WorkflowService"`), so the generated
     /// `ServiceName` constant must use it rather than `name`.
     pub(in crate::generator) wire_name: &'a str,
-    /// Nexus endpoint identifier (e.g. `"type-showcase"`).
-    pub(in crate::generator) endpoint: String,
+    /// Nexus endpoint identifier (e.g. `"type-showcase"`), when authored.
+    pub(in crate::generator) endpoint: Option<String>,
     /// Operations belonging to this service.
     pub(in crate::generator) operations: Vec<RenderedOperation<'a>>,
     /// Resources belonging to this service.
@@ -2105,7 +2662,7 @@ fn field_kind_is_flattened_message(kind: &PlannedFieldKind, api_plan: &PlannedSp
 
 fn resolve_message_go_type(
     message: &PlannedMessageType,
-    external_models: &proto::ModelBackend,
+    external_models: &GoExternalModels,
 ) -> String {
     external_models
         .model_type_annotation(&PlannedValueType::Message(message.clone()))
@@ -2586,13 +3143,15 @@ fn is_go_keyword(name: &str) -> bool {
 fn render_file(
     package: &GoPackageContext,
     imports: &BTreeSet<String>,
-    proto_imports: &proto::GoImportCollector,
+    external_imports: &[(String, String)],
+    external_model_body: &str,
+    operation_references: Option<&str>,
     enums: &[&RenderedEnum],
     flags: &[&RenderedFlags],
     variants: &[&RenderedVariant],
     models: &[(&String, &RenderedModel)],
     services: &[RenderedService<'_>],
-    external_models: &proto::ModelBackend,
+    external_models: &GoExternalModels,
     api_plan: &PlannedSpec,
     visibility: &GoVisibility,
     needs_future_helpers: bool,
@@ -2604,7 +3163,7 @@ fn render_file(
     output.push_str(&package.package_name);
     output.push('\n');
 
-    if !imports.is_empty() || !proto_imports.is_empty() {
+    if !imports.is_empty() || !external_imports.is_empty() {
         // Separate stdlib imports (no '.') from third-party imports (contain '.')
         let stdlib: Vec<_> = imports.iter().filter(|p| !p.contains('.')).collect();
         // Exclude any third-party path that is also emitted (aliased) by the
@@ -2612,7 +3171,11 @@ fn render_file(
         let third_party: Vec<_> = imports
             .iter()
             .filter(|p| p.contains('.'))
-            .filter(|p| !proto_imports.contains_path(p))
+            .filter(|p| {
+                !external_imports
+                    .iter()
+                    .any(|(external_path, _)| external_path == *p)
+            })
             .collect();
 
         output.push_str("\nimport (\n");
@@ -2623,7 +3186,7 @@ fn render_file(
             output.push('"');
             output.push('\n');
         }
-        if !stdlib.is_empty() && (!third_party.is_empty() || !proto_imports.is_empty()) {
+        if !stdlib.is_empty() && (!third_party.is_empty() || !external_imports.is_empty()) {
             output.push('\n');
         }
         for import_path in &third_party {
@@ -2633,9 +3196,7 @@ fn render_file(
             output.push('"');
             output.push('\n');
         }
-        // Aliased proto imports, emitted as `alias "path"` when the alias
-        // differs from the path's final segment.
-        for (path, alias) in proto_imports.paths() {
+        for (path, alias) in external_imports {
             output.push('\t');
             let default_alias = path.rsplit('/').next().unwrap_or(path);
             if alias != default_alias {
@@ -2650,8 +3211,37 @@ fn render_file(
         output.push_str(")\n");
     }
 
-    if needs_future_helpers {
+    if let Some(operation_references) = operation_references {
+        if !operation_references.is_empty() {
+            output.push('\n');
+            output.push_str(operation_references);
+        }
+        if !external_model_body.is_empty() {
+            output.push_str(external_model_body);
+        }
+        return output;
+    }
+    if !external_model_body.is_empty()
+        && services.is_empty()
+        && enums.is_empty()
+        && flags.is_empty()
+        && variants.is_empty()
+        && models.is_empty()
+    {
+        output.push('\n');
+        output.push_str(external_model_body);
+        return output;
+    }
+
+    let has_operations = services.iter().any(|s| !s.operations.is_empty());
+    if needs_future_helpers || has_operations {
         output.push_str("\n// --- Helpers ---\n");
+    }
+    if has_operations {
+        output.push('\n');
+        render_nexus_client_helper(&mut output, package);
+    }
+    if needs_future_helpers {
         output.push('\n');
         render_generated_future_helpers(&mut output, package);
     }
@@ -2712,8 +3302,8 @@ fn render_file(
                 render_resource(&mut output, resource, api_plan, package, visibility);
                 render_resource_methods(
                     &mut output,
+                    service,
                     resource,
-                    &service.operations,
                     api_plan,
                     package,
                     visibility,
@@ -2723,7 +3313,6 @@ fn render_file(
     }
 
     // --- Operations (internal) ---
-    let has_operations = services.iter().any(|s| !s.operations.is_empty());
     if has_operations {
         output.push_str("\n// --- Operations (internal) ---\n");
         for service in services {
@@ -2731,6 +3320,15 @@ fn render_file(
                 output.push('\n');
                 render_operation_function(&mut output, service, operation, package);
             }
+        }
+    }
+
+    // --- Service clients ---
+    if has_operations {
+        output.push_str("\n// --- Service clients ---\n");
+        for service in services {
+            output.push('\n');
+            render_service_client(&mut output, service, package, visibility);
         }
     }
 
@@ -2760,7 +3358,11 @@ fn render_file(
         || !public_variants.is_empty()
         || !public_models.is_empty();
 
-    if has_operations || has_public_datatypes {
+    let has_endpoint_operations = services
+        .iter()
+        .any(|service| service.endpoint.is_some() && !service.operations.is_empty());
+
+    if has_endpoint_operations || has_public_datatypes {
         output.push_str("\n// --- Operations (public API) ---\n");
         for enumeration in public_enums {
             output.push('\n');
@@ -2779,6 +3381,9 @@ fn render_file(
             render_model(&mut output, key, model, external_models);
         }
         for service in services {
+            if service.endpoint.is_none() {
+                continue;
+            }
             for operation in &service.operations {
                 if let Some(params) = &operation.unpacked_input {
                     let has_optional = params.iter().any(|p| !p.required);
@@ -2787,11 +3392,19 @@ fn render_file(
                         render_options_struct(&mut output, operation, params);
                     }
                     output.push('\n');
-                    render_convenience_wrapper(&mut output, operation, params, package, visibility);
+                    render_convenience_wrapper(
+                        &mut output,
+                        service,
+                        operation,
+                        params,
+                        package,
+                        visibility,
+                    );
                     if primary_varargs_args_param(params).is_some() {
                         output.push('\n');
                         render_with_args_convenience_wrapper(
                             &mut output,
+                            service,
                             operation,
                             params,
                             package,
@@ -2801,7 +3414,7 @@ fn render_file(
                 } else {
                     // External input type — generate a simple forwarding wrapper
                     output.push('\n');
-                    render_forwarding_wrapper(&mut output, operation, package);
+                    render_forwarding_wrapper(&mut output, service, operation, package);
                 }
             }
         }
@@ -3042,7 +3655,7 @@ fn render_model(
     output: &mut String,
     key: &str,
     model: &RenderedModel,
-    external_models: &proto::ModelBackend,
+    external_models: &GoExternalModels,
 ) {
     output.push_str("type ");
     output.push_str(&model.name);
@@ -3236,12 +3849,15 @@ fn resolve_resource_value_type_with_struct_flag(
 /// Methods bound to `Stub` emit a panic placeholder.
 fn render_resource_methods(
     output: &mut String,
+    service: &RenderedService<'_>,
     resource: &PlannedResource,
-    operations: &[RenderedOperation<'_>],
     api_plan: &PlannedSpec,
     package: &GoPackageContext,
     visibility: &GoVisibility,
 ) {
+    let Some(endpoint) = &service.endpoint else {
+        return;
+    };
     for method in &resource.methods {
         output.push('\n');
         let method_name = go_field_name(&method.name);
@@ -3252,7 +3868,8 @@ fn render_resource_methods(
                 request_plan,
                 ..
             } => {
-                let operation = operations
+                let operation = service
+                    .operations
                     .iter()
                     .find(|op| op.name == operation_name)
                     .expect("bound resource operation should exist on the service");
@@ -3302,6 +3919,8 @@ fn render_resource_methods(
                 output.push_str("\treturn ");
                 output.push_str(&operation.func_name);
                 output.push_str("(ctx, ");
+                output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
+                output.push_str(", ");
                 output.push_str(&request_expr);
                 output.push_str(")\n");
                 output.push_str("}\n");
@@ -3453,6 +4072,79 @@ pub(in crate::generator) fn render_operation_future_adapter(
     output.push_str("\t}}\n");
 }
 
+fn render_nexus_client_helper(output: &mut String, package: &GoPackageContext) {
+    output.push_str("func nexGenNewNexusClient(endpoint string, service string) ");
+    output.push_str(&package.workflow_nexus_client_type());
+    output.push_str(" {\n\treturn ");
+    output.push_str(&package.new_nexus_client());
+    output.push_str("(endpoint, service)\n}\n");
+}
+
+fn new_nexus_client_expr(
+    endpoint: &str,
+    service_name: &str,
+    _package: &GoPackageContext,
+) -> String {
+    format!(
+        "nexGenNewNexusClient({}, {})",
+        go_string_literal(endpoint),
+        go_string_literal(service_name)
+    )
+}
+
+fn render_service_client(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+) {
+    let service_name = service_client_name(service);
+    output.push_str("type ");
+    output.push_str(&service_name);
+    output.push_str(" struct {\n\tclient ");
+    output.push_str(&package.workflow_nexus_client_type());
+    output.push_str("\n}\n\n");
+
+    output.push_str("func New");
+    output.push_str(&service_name);
+    output.push_str("(endpoint string) *");
+    output.push_str(&service_name);
+    output.push_str(" {\n\treturn &");
+    output.push_str(&service_name);
+    output.push_str("{client: nexGenNewNexusClient(endpoint, ");
+    output.push_str(&go_string_literal(service.wire_name));
+    output.push_str(")}\n}\n");
+
+    for operation in &service.operations {
+        output.push('\n');
+        if let Some(params) = &operation.unpacked_input {
+            if !required_function_type_parameters(params, package, visibility).is_empty() {
+                continue;
+            }
+            render_client_convenience_method(
+                output, service, operation, params, package, visibility,
+            );
+            if primary_varargs_args_param(params).is_some() {
+                output.push('\n');
+                render_client_with_args_convenience_method(
+                    output, service, operation, params, package, visibility,
+                );
+            }
+        } else {
+            render_client_forwarding_method(output, service, operation, package);
+        }
+    }
+}
+
+fn service_client_name(service: &RenderedService<'_>) -> String {
+    let base_name = service
+        .wire_name
+        .rsplit(['.', ':', '/'])
+        .next()
+        .unwrap_or(service.wire_name);
+    format!("{}Client", go_field_name(base_name))
+}
+
 /// Renders an unexported operation wrapper function that creates a Nexus
 /// client and executes the operation.
 ///
@@ -3484,31 +4176,25 @@ fn render_operation_function(
     package: &GoPackageContext,
 ) {
     if let Some(binding) = &operation.wire_binding {
-        proto::render_operation_function_proto(output, service, operation, binding, package);
+        proto::render_operation_function_proto(output, operation, binding, package);
         return;
     }
 
-    let endpoint = go_string_literal(&service.endpoint);
-    let service_name = go_string_literal(service.wire_name);
     let operation_name = go_string_literal(operation.wire_name);
 
     output.push_str("func ");
     output.push_str(&operation.func_name);
     output.push_str("(ctx ");
     output.push_str(&package.workflow_context_type());
+    output.push_str(", client ");
+    output.push_str(&package.workflow_nexus_client_type());
     output.push_str(", request ");
     output.push_str(&operation.input_type);
     output.push_str(") ");
     render_operation_future_return_type(output, package);
     output.push_str(" {\n");
-    output.push_str("\tc := ");
-    output.push_str(&package.new_nexus_client());
-    output.push('(');
-    output.push_str(&endpoint);
-    output.push_str(", ");
-    output.push_str(&service_name);
-    output.push_str(")\n");
-    output.push_str("\tfut := c.ExecuteOperation(ctx, ");
+    let _ = service;
+    output.push_str("\tfut := client.ExecuteOperation(ctx, ");
     output.push_str(&operation_name);
     output.push_str(", request, ");
     output.push_str(&package.nexus_operation_options());
@@ -3813,6 +4499,7 @@ fn wrapper_input_docs<'a>(
 /// ```
 fn render_convenience_wrapper(
     output: &mut String,
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     params: &[RenderedUnpackedParam],
     package: &GoPackageContext,
@@ -3895,9 +4582,16 @@ fn render_convenience_wrapper(
     // sourcing required fields from positional args and optional fields from
     // opts.
     render_function_name_inlining(output, params);
+    let endpoint = service
+        .endpoint
+        .as_deref()
+        .expect("public package wrappers require an authored endpoint");
+    output.push_str("\tclient := ");
+    output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
+    output.push('\n');
     output.push_str("\treturn ");
     output.push_str(&operation.func_name);
-    output.push_str("(ctx, ");
+    output.push_str("(ctx, client, ");
     output.push_str(&operation.input_type);
     output.push_str("{\n");
     for param in params {
@@ -3925,8 +4619,129 @@ fn render_convenience_wrapper(
     output.push_str("}\n");
 }
 
+fn render_client_convenience_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    params: &[RenderedUnpackedParam],
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+) {
+    let method_name = go_field_name(operation.name);
+    let has_optional = params.iter().any(|p| !p.required);
+    let type_params = required_function_type_parameters(params, package, visibility);
+    let input_docs = wrapper_input_docs(params.iter().filter(|p| p.required));
+    render_operation_doc_comment(output, operation, &input_docs);
+
+    let mut signature_params: Vec<(String, String)> = params
+        .iter()
+        .filter(|p| p.required)
+        .map(|p| {
+            let ty = if p.function.is_some() {
+                function_type_parameter_name(p)
+            } else {
+                p.go_type.clone()
+            };
+            (p.param_name.clone(), ty)
+        })
+        .collect();
+    if has_optional {
+        signature_params.push(("opts".to_string(), format!("{method_name}Options")));
+    }
+
+    output.push_str("func (c *");
+    output.push_str(&service_client_name(service));
+    output.push_str(") ");
+    output.push_str(&method_name);
+    if !type_params.is_empty() {
+        output.push('[');
+        for (index, (name, constraint)) in type_params.iter().enumerate() {
+            if index > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(constraint);
+        }
+        output.push(']');
+    }
+    render_operation_params(output, &signature_params, package);
+    output.push(' ');
+    render_operation_wrapper_return_type(output, package);
+    output.push_str(" {\n");
+
+    render_function_name_inlining(output, params);
+    output.push_str("\treturn ");
+    output.push_str(&operation.func_name);
+    output.push_str("(ctx, c.client, ");
+    render_request_struct_literal(output, operation, params);
+    output.push_str("\t})\n");
+    output.push_str("}\n");
+}
+
+fn render_operation_params(
+    output: &mut String,
+    signature_params: &[(String, String)],
+    package: &GoPackageContext,
+) {
+    let multiline_signature = signature_params.len() + 1 > 3;
+    if multiline_signature {
+        output.push_str("(\n\tctx ");
+        output.push_str(&package.workflow_context_type());
+        output.push_str(",\n");
+        for (name, ty) in signature_params {
+            output.push('\t');
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(ty);
+            output.push_str(",\n");
+        }
+        output.push(')');
+    } else {
+        output.push_str("(ctx ");
+        output.push_str(&package.workflow_context_type());
+        for (name, ty) in signature_params {
+            output.push_str(", ");
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(ty);
+        }
+        output.push(')');
+    }
+}
+
+fn render_request_struct_literal(
+    output: &mut String,
+    operation: &RenderedOperation<'_>,
+    params: &[RenderedUnpackedParam],
+) {
+    output.push_str(&operation.input_type);
+    output.push_str("{\n");
+    for param in params {
+        output.push_str("\t\t");
+        output.push_str(&param.field_name);
+        output.push_str(": ");
+        if param.required {
+            if param.function.is_some() {
+                output.push_str(&function_name_local_var(param));
+            } else {
+                output.push_str(&param.param_name);
+            }
+        } else if param.embed_in_options {
+            output.push('&');
+            output.push_str("opts.");
+            output.push_str(&param.field_name);
+        } else {
+            output.push_str("opts.");
+            output.push_str(&param.field_name);
+        }
+        output.push_str(",\n");
+    }
+}
+
 fn render_with_args_convenience_wrapper(
     output: &mut String,
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     params: &[RenderedUnpackedParam],
     package: &GoPackageContext,
@@ -4017,9 +4832,16 @@ fn render_with_args_convenience_wrapper(
     output.push_str("\t}\n");
 
     render_function_name_inlining(output, params);
+    let endpoint = service
+        .endpoint
+        .as_deref()
+        .expect("public package wrappers require an authored endpoint");
+    output.push_str("\tclient := ");
+    output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
+    output.push('\n');
     output.push_str("\treturn ");
     output.push_str(&operation.func_name);
-    output.push_str("(ctx, ");
+    output.push_str("(ctx, client, ");
     output.push_str(&operation.input_type);
     output.push_str("{\n");
     for param in params {
@@ -4049,6 +4871,108 @@ fn render_with_args_convenience_wrapper(
     output.push_str("}\n");
 }
 
+fn render_client_with_args_convenience_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    params: &[RenderedUnpackedParam],
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+) {
+    let method_name = format!("{}WithArgs", go_field_name(operation.name));
+    let base_method_name = go_field_name(operation.name);
+    let args_param = primary_varargs_args_param(params)
+        .expect("WithArgs wrapper requires a primary varargs args param");
+    let vararg_type = go_variadic_element_type(&args_param.go_type);
+    let type_params = required_function_type_parameters(params, package, visibility);
+
+    let input_docs = wrapper_input_docs(
+        params
+            .iter()
+            .filter(|p| p.required)
+            .chain(std::iter::once(args_param)),
+    );
+    render_operation_doc_comment(output, operation, &input_docs);
+
+    let mut signature_params: Vec<(String, String)> = params
+        .iter()
+        .filter(|p| p.required)
+        .map(|p| {
+            let ty = if p.function.is_some() {
+                function_type_parameter_name(p)
+            } else {
+                p.go_type.clone()
+            };
+            (p.param_name.clone(), ty)
+        })
+        .collect();
+    signature_params.push(("opts".to_string(), format!("{base_method_name}Options")));
+    signature_params.push(("args".to_string(), format!("...{vararg_type}")));
+
+    output.push_str("func (c *");
+    output.push_str(&service_client_name(service));
+    output.push_str(") ");
+    output.push_str(&method_name);
+    if !type_params.is_empty() {
+        output.push('[');
+        for (index, (name, constraint)) in type_params.iter().enumerate() {
+            if index > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(constraint);
+        }
+        output.push(']');
+    }
+    render_operation_params(output, &signature_params, package);
+    output.push(' ');
+    render_operation_wrapper_return_type(output, package);
+    output.push_str(" {\n");
+
+    output.push_str("\tif len(args) > 0 && opts.");
+    output.push_str(&args_param.field_name);
+    output.push_str(" != nil {\n");
+    render_with_args_conflict_return(output);
+    output.push_str("\t}\n");
+    output.push_str("\tif len(args) == 0 {\n");
+    output.push_str("\t\targs = opts.");
+    output.push_str(&args_param.field_name);
+    output.push('\n');
+    output.push_str("\t}\n");
+
+    render_function_name_inlining(output, params);
+    output.push_str("\treturn ");
+    output.push_str(&operation.func_name);
+    output.push_str("(ctx, c.client, ");
+    output.push_str(&operation.input_type);
+    output.push_str("{\n");
+    for param in params {
+        output.push_str("\t\t");
+        output.push_str(&param.field_name);
+        output.push_str(": ");
+        if param.field_name == args_param.field_name {
+            output.push_str("args");
+        } else if param.required {
+            if param.function.is_some() {
+                output.push_str(&function_name_local_var(param));
+            } else {
+                output.push_str(&param.param_name);
+            }
+        } else if param.embed_in_options {
+            output.push('&');
+            output.push_str("opts.");
+            output.push_str(&param.field_name);
+        } else {
+            output.push_str("opts.");
+            output.push_str(&param.field_name);
+        }
+        output.push_str(",\n");
+    }
+    output.push_str("\t})\n");
+    output.push_str("}\n");
+}
+
 /// Renders an exported forwarding wrapper for operations whose input type is
 /// an external/replacement type (no model to unpack). The wrapper simply
 /// forwards to the unexported operation function.
@@ -4060,6 +4984,7 @@ fn render_with_args_convenience_wrapper(
 /// ```
 fn render_forwarding_wrapper(
     output: &mut String,
+    service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     package: &GoPackageContext,
 ) {
@@ -4077,8 +5002,41 @@ fn render_forwarding_wrapper(
     render_operation_wrapper_return_type(output, package);
 
     output.push_str(" {\n");
+    let endpoint = service
+        .endpoint
+        .as_deref()
+        .expect("public package wrappers require an authored endpoint");
+    output.push_str("\tclient := ");
+    output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
+    output.push('\n');
     output.push_str("\treturn ");
     output.push_str(&operation.func_name);
-    output.push_str("(ctx, request)\n");
+    output.push_str("(ctx, client, request)\n");
+    output.push_str("}\n");
+}
+
+fn render_client_forwarding_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    package: &GoPackageContext,
+) {
+    let method_name = go_field_name(operation.name);
+
+    render_operation_doc_comment(output, operation, &[]);
+    output.push_str("func (c *");
+    output.push_str(&service_client_name(service));
+    output.push_str(") ");
+    output.push_str(&method_name);
+    output.push_str("(ctx ");
+    output.push_str(&package.workflow_context_type());
+    output.push_str(", request ");
+    output.push_str(&operation.input_type);
+    output.push_str(") ");
+    render_operation_wrapper_return_type(output, package);
+    output.push_str(" {\n");
+    output.push_str("\treturn ");
+    output.push_str(&operation.func_name);
+    output.push_str("(ctx, c.client, request)\n");
     output.push_str("}\n");
 }

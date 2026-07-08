@@ -12,6 +12,10 @@ import (
 
 // --- Helpers ---
 
+func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient {
+	return workflow.NewNexusClient(endpoint, service)
+}
+
 type nexGenNexusOperationFuture struct {
 	operation workflow.NexusOperationFuture
 	result    workflow.Future
@@ -97,34 +101,39 @@ type executeNamedVarargsFunctionRequest struct {
 
 // --- Operations (internal) ---
 
-func executeFunction(ctx workflow.Context, request executeFunctionRequest) workflow.NexusOperationFuture {
-	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
-	fut := c.ExecuteOperation(ctx, "ExecuteFunction", request, workflow.NexusOperationOptions{})
+func executeFunction(ctx workflow.Context, client workflow.NexusClient, request executeFunctionRequest) workflow.NexusOperationFuture {
+	fut := client.ExecuteOperation(ctx, "ExecuteFunction", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func executeCountedFunction(ctx workflow.Context, request executeCountedFunctionRequest) workflow.NexusOperationFuture {
-	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
-	fut := c.ExecuteOperation(ctx, "ExecuteCountedFunction", request, workflow.NexusOperationOptions{})
+func executeCountedFunction(ctx workflow.Context, client workflow.NexusClient, request executeCountedFunctionRequest) workflow.NexusOperationFuture {
+	fut := client.ExecuteOperation(ctx, "ExecuteCountedFunction", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func executeNamedFunction(ctx workflow.Context, request executeNamedFunctionRequest) workflow.NexusOperationFuture {
-	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
-	fut := c.ExecuteOperation(ctx, "ExecuteNamedFunction", request, workflow.NexusOperationOptions{})
+func executeNamedFunction(ctx workflow.Context, client workflow.NexusClient, request executeNamedFunctionRequest) workflow.NexusOperationFuture {
+	fut := client.ExecuteOperation(ctx, "ExecuteNamedFunction", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func executeVarargsFunction(ctx workflow.Context, request executeVarargsFunctionRequest) workflow.NexusOperationFuture {
-	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
-	fut := c.ExecuteOperation(ctx, "ExecuteVarargsFunction", request, workflow.NexusOperationOptions{})
+func executeVarargsFunction(ctx workflow.Context, client workflow.NexusClient, request executeVarargsFunctionRequest) workflow.NexusOperationFuture {
+	fut := client.ExecuteOperation(ctx, "ExecuteVarargsFunction", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func executeNamedVarargsFunction(ctx workflow.Context, request executeNamedVarargsFunctionRequest) workflow.NexusOperationFuture {
-	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
-	fut := c.ExecuteOperation(ctx, "ExecuteNamedVarargsFunction", request, workflow.NexusOperationOptions{})
+func executeNamedVarargsFunction(ctx workflow.Context, client workflow.NexusClient, request executeNamedVarargsFunctionRequest) workflow.NexusOperationFuture {
+	fut := client.ExecuteOperation(ctx, "ExecuteNamedVarargsFunction", request, workflow.NexusOperationOptions{})
 	return fut
+}
+
+// --- Service clients ---
+
+type FunctionExecutionClient struct {
+	client workflow.NexusClient
+}
+
+func NewFunctionExecutionClient(endpoint string) *FunctionExecutionClient {
+	return &FunctionExecutionClient{client: nexGenNewNexusClient(endpoint, "FunctionExecution")}
 }
 
 // --- Operations (public API) ---
@@ -176,7 +185,8 @@ func ExecuteFunction[FunctionF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return executeFunction(ctx, executeFunctionRequest{
+	client := nexGenNewNexusClient("function-execution", "FunctionExecution")
+	return executeFunction(ctx, client, executeFunctionRequest{
 		Function: functionName,
 		Name:     name,
 		Enabled:  enabled,
@@ -205,7 +215,8 @@ func ExecuteCountedFunction[FunctionF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return executeCountedFunction(ctx, executeCountedFunctionRequest{
+	client := nexGenNewNexusClient("function-execution", "FunctionExecution")
+	return executeCountedFunction(ctx, client, executeCountedFunctionRequest{
 		Function: functionName,
 		Name:     name,
 		Count:    count,
@@ -234,7 +245,8 @@ func ExecuteNamedFunction[FunctionF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return executeNamedFunction(ctx, executeNamedFunctionRequest{
+	client := nexGenNewNexusClient("function-execution", "FunctionExecution")
+	return executeNamedFunction(ctx, client, executeNamedFunctionRequest{
 		Function: functionName,
 		Name:     name,
 		Enabled:  enabled,
@@ -261,7 +273,8 @@ func ExecuteVarargsFunction[FunctionF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
+	client := nexGenNewNexusClient("function-execution", "FunctionExecution")
+	return executeVarargsFunction(ctx, client, executeVarargsFunctionRequest{
 		Function: functionName,
 		Args:     opts.Args,
 	})
@@ -294,7 +307,8 @@ func ExecuteVarargsFunctionWithArgs[FunctionF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
+	client := nexGenNewNexusClient("function-execution", "FunctionExecution")
+	return executeVarargsFunction(ctx, client, executeVarargsFunctionRequest{
 		Function: functionName,
 		Args:     args,
 	})
@@ -320,7 +334,8 @@ func ExecuteNamedVarargsFunction[FunctionF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
+	client := nexGenNewNexusClient("function-execution", "FunctionExecution")
+	return executeNamedVarargsFunction(ctx, client, executeNamedVarargsFunctionRequest{
 		Function: functionName,
 		Args:     opts.Args,
 	})
@@ -353,7 +368,8 @@ func ExecuteNamedVarargsFunctionWithArgs[FunctionF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
+	client := nexGenNewNexusClient("function-execution", "FunctionExecution")
+	return executeNamedVarargsFunction(ctx, client, executeNamedVarargsFunctionRequest{
 		Function: functionName,
 		Args:     args,
 	})

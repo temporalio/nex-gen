@@ -50,7 +50,8 @@ func (s *UserServiceTestSuite) TestGetUser() {
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		return getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, "user-123"))
+		client := userservice.NewUserServiceClient("user-service")
+		return getFutureResult[userservice.User](ctx, client.GetUser(ctx, "user-123"))
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -75,9 +76,10 @@ func (s *UserServiceTestSuite) TestUpdateEmail() {
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
+		client := userservice.NewUserServiceClient("user-service")
 		return getFutureResult[userservice.User](
 			ctx,
-			userservice.UpdateEmail(ctx, "user-123", "new@example.com"),
+			client.UpdateEmail(ctx, "user-123", "new@example.com"),
 		)
 	})
 
@@ -103,8 +105,11 @@ func (s *UserServiceTestSuite) TestUserUpdateEmailMethod() {
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user := &userservice.User{UserId: "user-123", Email: "old@example.com"}
-		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "updated@example.com"))
+		client := userservice.NewUserServiceClient("user-service")
+		return getFutureResult[userservice.User](
+			ctx,
+			client.UpdateEmail(ctx, "user-123", "updated@example.com"),
+		)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -141,11 +146,15 @@ func (s *UserServiceTestSuite) TestGetUserThenUpdateEmail() {
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user, err := getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, "user-123"))
+		client := userservice.NewUserServiceClient("user-service")
+		user, err := getFutureResult[userservice.User](ctx, client.GetUser(ctx, "user-123"))
 		if err != nil {
 			return nil, err
 		}
-		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "new@example.com"))
+		return getFutureResult[userservice.User](
+			ctx,
+			client.UpdateEmail(ctx, user.UserId, "new@example.com"),
+		)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -168,7 +177,8 @@ func (s *UserServiceTestSuite) TestGetUserError() {
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		return getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, "nonexistent"))
+		client := userservice.NewUserServiceClient("user-service")
+		return getFutureResult[userservice.User](ctx, client.GetUser(ctx, "nonexistent"))
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -216,7 +226,8 @@ func TestUserServiceIntegrationSuite(t *testing.T) {
 
 func (s *UserServiceIntegrationSuite) TestGetUser() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		return getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, "user-123"))
+		client := userservice.NewUserServiceClient("user-service")
+		return getFutureResult[userservice.User](ctx, client.GetUser(ctx, "user-123"))
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -232,9 +243,10 @@ func (s *UserServiceIntegrationSuite) TestGetUser() {
 
 func (s *UserServiceIntegrationSuite) TestUpdateEmail() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
+		client := userservice.NewUserServiceClient("user-service")
 		return getFutureResult[userservice.User](
 			ctx,
-			userservice.UpdateEmail(ctx, "user-123", "new@example.com"),
+			client.UpdateEmail(ctx, "user-123", "new@example.com"),
 		)
 	})
 
@@ -251,8 +263,11 @@ func (s *UserServiceIntegrationSuite) TestUpdateEmail() {
 
 func (s *UserServiceIntegrationSuite) TestUserUpdateEmailMethod() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user := &userservice.User{UserId: "user-123", Email: "old@example.com"}
-		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "updated@example.com"))
+		client := userservice.NewUserServiceClient("user-service")
+		return getFutureResult[userservice.User](
+			ctx,
+			client.UpdateEmail(ctx, "user-123", "updated@example.com"),
+		)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -268,11 +283,15 @@ func (s *UserServiceIntegrationSuite) TestUserUpdateEmailMethod() {
 
 func (s *UserServiceIntegrationSuite) TestGetUserThenUpdateEmail() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user, err := getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, "user-123"))
+		client := userservice.NewUserServiceClient("user-service")
+		user, err := getFutureResult[userservice.User](ctx, client.GetUser(ctx, "user-123"))
 		if err != nil {
 			return nil, err
 		}
-		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "new@example.com"))
+		return getFutureResult[userservice.User](
+			ctx,
+			client.UpdateEmail(ctx, user.UserId, "new@example.com"),
+		)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())

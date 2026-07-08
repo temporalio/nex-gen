@@ -5,6 +5,12 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+// --- Helpers ---
+
+func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient {
+	return workflow.NewNexusClient(endpoint, service)
+}
+
 // --- Datatypes ---
 
 type getUserRequest struct {
@@ -28,34 +34,36 @@ type User struct {
 	Email string
 }
 
-func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.NexusOperationFuture {
-	return updateEmail(ctx, updateEmailRequest{UserId: u.UserId, Email: email})
-}
-
 // --- Operations (internal) ---
 
-func getUser(ctx workflow.Context, request getUserRequest) workflow.NexusOperationFuture {
-	c := workflow.NewNexusClient("user-service", "UserService")
-	fut := c.ExecuteOperation(ctx, "GetUser", request, workflow.NexusOperationOptions{})
+func getUser(ctx workflow.Context, client workflow.NexusClient, request getUserRequest) workflow.NexusOperationFuture {
+	fut := client.ExecuteOperation(ctx, "GetUser", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.NexusOperationFuture {
-	c := workflow.NewNexusClient("user-service", "UserService")
-	fut := c.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
+func updateEmail(ctx workflow.Context, client workflow.NexusClient, request updateEmailRequest) workflow.NexusOperationFuture {
+	fut := client.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-// --- Operations (public API) ---
+// --- Service clients ---
 
-func GetUser(ctx workflow.Context, userId string) workflow.NexusOperationFuture {
-	return getUser(ctx, getUserRequest{
+type UserServiceClient struct {
+	client workflow.NexusClient
+}
+
+func NewUserServiceClient(endpoint string) *UserServiceClient {
+	return &UserServiceClient{client: nexGenNewNexusClient(endpoint, "UserService")}
+}
+
+func (c *UserServiceClient) GetUser(ctx workflow.Context, userId string) workflow.NexusOperationFuture {
+	return getUser(ctx, c.client, getUserRequest{
 		UserId: userId,
 	})
 }
 
-func UpdateEmail(ctx workflow.Context, userId string, email string) workflow.NexusOperationFuture {
-	return updateEmail(ctx, updateEmailRequest{
+func (c *UserServiceClient) UpdateEmail(ctx workflow.Context, userId string, email string) workflow.NexusOperationFuture {
+	return updateEmail(ctx, c.client, updateEmailRequest{
 		UserId: userId,
 		Email:  email,
 	})

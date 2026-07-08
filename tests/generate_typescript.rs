@@ -2,16 +2,17 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nex_gen::SupportFiles;
-use nex_gen::generate_to_string_with_inputs;
 use nex_gen::generator::generate_files;
 use nex_gen::spec::SupportFragmentSpec;
+use nex_gen::{GenerateRequest, SupportFiles, generate_to_file};
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const START_WORKFLOW_EXAMPLE_ID: &str = "start-workflow";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
+static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -135,6 +136,36 @@ fn read_typescript_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
     files
 }
 
+fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
+    files
+        .into_iter()
+        .map(|(path, contents)| format!("### {}\n{contents}", path.display()))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBuf]) -> String {
+    let temp_dir = unique_output_path("typescript-rendered");
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        language: nex_gen::language::Language::TypeScript,
+        input_paths: input_paths.to_vec(),
+        support_paths: Vec::new(),
+        descriptor_paths: descriptor_paths.to_vec(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: true,
+    })
+    .unwrap();
+    let rendered = if output_path.is_file() {
+        fs::read_to_string(&output_path).unwrap()
+    } else {
+        render_output_files(read_typescript_output_files(&output_path))
+    };
+    fs::remove_dir_all(temp_dir).unwrap();
+    rendered
+}
+
 fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_path: &Path) {
     ensure_typescript_dependencies(root);
 
@@ -221,7 +252,8 @@ fn unique_output_path(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}"))
+    let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}-{counter}"))
 }
 
 #[test]
@@ -356,12 +388,10 @@ fn typescript_example_suite_typechecks_and_tests() {
 #[test]
 fn typescript_renders_required_fields_and_custom_message_types() {
     let root = project_root();
-    let rendered = generate_to_string_with_inputs(
-        nex_gen::language::Language::TypeScript,
+    let rendered = generate_typescript_to_string(
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
         &[descriptor_path(&root)],
-    )
-    .unwrap();
+    );
 
     assert!(!rendered.contains("type _RequestWithFunctionField<"));
     assert!(!rendered.contains("type _RequestWithArgumentsField<"));
@@ -529,24 +559,20 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(!rendered.contains("signalWithStartWorkflowExecution("));
     assert!(!rendered.contains("from './temporal_model_converters.ts'"));
 
-    let start_workflow_rendered = generate_to_string_with_inputs(
-        nex_gen::language::Language::TypeScript,
+    let start_workflow_rendered = generate_typescript_to_string(
         &example_input_paths(&root, START_WORKFLOW_EXAMPLE_ID),
         &[descriptor_path(&root)],
-    )
-    .unwrap();
+    );
     assert!(
         start_workflow_rendered
             .contains("export type CancelWorkflowResponse = Record<string, never>;")
     );
     assert!(!start_workflow_rendered.contains("export interface CancelWorkflowResponse {}"));
 
-    let type_roundtrip_rendered = generate_to_string_with_inputs(
-        nex_gen::language::Language::TypeScript,
+    let type_roundtrip_rendered = generate_typescript_to_string(
         &example_input_paths(&root, TYPE_ROUNDTRIP_EXAMPLE_ID),
         &[descriptor_path(&root)],
-    )
-    .unwrap();
+    );
     assert!(type_roundtrip_rendered.contains("retryPolicy: common.RetryPolicy;"));
     assert!(type_roundtrip_rendered.contains("request: common.RetryPolicy,"));
 }

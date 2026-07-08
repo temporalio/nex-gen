@@ -2,14 +2,16 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nex_gen::generate_to_string_with_inputs;
+use nex_gen::{GenerateRequest, generate_to_file};
 
 const WORKFLOW_SERVICE_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_SHOWCASE_EXAMPLE_ID: &str = "type-showcase";
 static DOTNET_COMMAND_LOCK: Mutex<()> = Mutex::new(());
+static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -130,6 +132,36 @@ fn read_dotnet_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
     files
 }
 
+fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
+    files
+        .into_iter()
+        .map(|(path, contents)| format!("### {}\n{contents}", path.display()))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn generate_dotnet_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBuf]) -> String {
+    let temp_dir = unique_output_path("dotnet-rendered");
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        language: nex_gen::language::Language::Dotnet,
+        input_paths: input_paths.to_vec(),
+        support_paths: Vec::new(),
+        descriptor_paths: descriptor_paths.to_vec(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: true,
+    })
+    .unwrap();
+    let rendered = if output_path.is_file() {
+        fs::read_to_string(&output_path).unwrap()
+    } else {
+        render_output_files(read_dotnet_output_files(&output_path))
+    };
+    fs::remove_dir_all(temp_dir).unwrap();
+    rendered
+}
+
 fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
@@ -182,7 +214,8 @@ fn unique_output_path(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}"))
+    let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}-{counter}"))
 }
 
 fn dotnet_msbuild_dir(path: &Path) -> String {
@@ -338,12 +371,10 @@ fn dotnet_json_schema_runtime_checks_pass() {
 #[test]
 fn dotnet_renders_nexus_service_interface_and_resources() {
     let root = project_root();
-    let rendered = generate_to_string_with_inputs(
-        nex_gen::language::Language::Dotnet,
+    let rendered = generate_dotnet_to_string(
         &example_input_paths(&root, TYPE_SHOWCASE_EXAMPLE_ID),
         &[descriptor_path(&root)],
-    )
-    .unwrap();
+    );
 
     assert!(rendered.contains("[NexusService(\"TypeShowcase\")]"));
     assert!(rendered.contains("internal interface ITypeShowcase"));
@@ -387,12 +418,10 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
 #[test]
 fn dotnet_renders_proto_backed_temporal_types() {
     let root = project_root();
-    let rendered = generate_to_string_with_inputs(
-        nex_gen::language::Language::Dotnet,
+    let rendered = generate_dotnet_to_string(
         &example_input_paths(&root, WORKFLOW_SERVICE_EXAMPLE_ID),
         &[descriptor_path(&root)],
-    )
-    .unwrap();
+    );
 
     assert!(rendered.contains("internal interface IWorkflowService"));
     assert!(rendered.contains("namespace Temporalio.Workflows\n{"));
@@ -607,9 +636,7 @@ interface workflow-service {
     .unwrap();
 
     let input_paths = vec![input_path];
-    let rendered =
-        generate_to_string_with_inputs(nex_gen::language::Language::Dotnet, &input_paths, &[])
-            .unwrap();
+    let rendered = generate_dotnet_to_string(&input_paths, &[]);
 
     assert!(rendered.contains("namespace Temporalio.Workflows\n{"));
     assert!(rendered.contains("public static partial class Workflow"));

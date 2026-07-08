@@ -160,6 +160,29 @@ pub fn generate_files_for_tree_with_mode(
     support: &SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
+    generate_files_for_tree_with_mode_and_options(
+        language,
+        tree,
+        descriptors,
+        support,
+        mode,
+        GenerateFilesOptions::default(),
+    )
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct GenerateFilesOptions {
+    pub(crate) go_import_root: Option<String>,
+}
+
+pub(crate) fn generate_files_for_tree_with_mode_and_options(
+    language: Language,
+    tree: ApiSpecTree,
+    descriptors: &DescriptorIndex,
+    support: &SupportFiles,
+    mode: GenerationMode,
+    options: GenerateFilesOptions,
+) -> Result<GeneratedFiles> {
     validate_tree_specs(&tree.root, descriptors, language)?;
     let planned_tree = match tree.root {
         ApiSpecNode::Leaf(leaf) => {
@@ -177,7 +200,7 @@ pub fn generate_files_for_tree_with_mode(
             build_api_plans_for_tree_with_mode(tree, descriptors, planning_mode(mode))?
         }
     };
-    generate_files_from_planned_tree(language, &planned_tree, support, mode)
+    generate_files_from_planned_tree(language, &planned_tree, support, mode, options)
 }
 
 fn validate_tree_specs(
@@ -204,10 +227,11 @@ fn generate_files_from_planned_tree(
     tree: &ApiSpecTree<PlannedTypeFamily>,
     support: &SupportFiles,
     mode: GenerationMode,
+    options: GenerateFilesOptions,
 ) -> Result<GeneratedFiles> {
     let mut generated = match language {
         Language::Dotnet => dotnet::generate(tree, support, mode),
-        Language::Go => generate_go_tree(tree, support),
+        Language::Go => generate_go_tree(tree, support, mode, options),
         Language::Python => python::generate(tree, support, mode),
         Language::TypeScript => typescript::generate(tree, support, mode),
         language => Err(Error::UnsupportedLanguage { language }),
@@ -223,15 +247,18 @@ fn generate_files_from_planned_tree(
 fn generate_go_tree(
     tree: &ApiSpecTree<PlannedTypeFamily>,
     support: &SupportFiles,
+    mode: GenerationMode,
+    options: GenerateFilesOptions,
 ) -> Result<GeneratedFiles> {
-    match &tree.root {
-        ApiSpecNode::Leaf(leaf) => {
-            go::generate(&leaf.spec, &support.fragments, &go::GoOptions::default())
-        }
-        ApiSpecNode::Branch(_) => Err(Error::UnsupportedLanguage {
-            language: Language::Go,
-        }),
-    }
+    go::generate_tree(
+        tree,
+        support,
+        &go::GoOptions {
+            import_root: options.go_import_root,
+            ..go::GoOptions::default()
+        },
+        mode,
+    )
 }
 
 fn planning_mode(mode: GenerationMode) -> PlanningMode {
