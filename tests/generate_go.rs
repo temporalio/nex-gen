@@ -480,21 +480,18 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
 
     // Required public function fields accept string names only when the WIT
     // directive declares an alternate type.
-    assert!(
-        rendered
-            .contains("func ExecuteFunction[FunctionF interface{ ~func(string, bool) string }](")
-    );
     assert!(rendered.contains(
-        "func ExecuteCountedFunction[FunctionF interface{ ~func(string, int32) string }]("
+        "func ExecuteFunction(\n\tctx workflow.Context,\n\topts ExecuteFunctionOptions,\n\tfunction func(string, bool) string,\n"
+    ));
+    assert!(rendered.contains(
+        "func ExecuteCountedFunction(\n\tctx workflow.Context,\n\topts ExecuteCountedFunctionOptions,\n\tfunction func(string, int32) string,\n"
     ));
     assert!(rendered.contains(
         "func ExecuteNamedFunction[FunctionF interface{ ~string | func(string, bool) string }]("
     ));
-    assert!(
-        rendered.contains(
-            "func ExecuteVarargsFunction[FunctionF interface{ ~func(...string) string }]("
-        )
-    );
+    assert!(rendered.contains(
+        "func ExecuteVarargsFunction(\n\tctx workflow.Context,\n\topts ExecuteVarargsFunctionOptions,\n\tfunction func(...string) string,\n"
+    ));
     assert!(rendered.contains(
         "func ExecuteNamedVarargsFunction[FunctionF interface{ ~string | func(...string) string }]("
     ));
@@ -506,13 +503,11 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
 
     // Function-adjacent args stay positional and do not enter the options struct.
     assert!(rendered.contains("type ExecuteVarargsFunctionOptions struct {\n}"));
-    assert!(
-        rendered.contains(
-            "func ExecuteVarargsFunction[FunctionF interface{ ~func(...string) string }]("
-        )
-    );
+    assert!(rendered.contains(
+        "func ExecuteVarargsFunction(\n\tctx workflow.Context,\n\topts ExecuteVarargsFunctionOptions,\n\tfunction func(...string) string,\n"
+    ));
     assert!(rendered.contains("\topts ExecuteVarargsFunctionOptions,\n"));
-    assert!(rendered.contains("\tfunction FunctionF,\n"));
+    assert!(rendered.contains("\tfunction func(...string) string,\n"));
     assert!(rendered.contains("\targs ...string,\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
 

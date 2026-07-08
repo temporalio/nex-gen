@@ -116,10 +116,10 @@ type ExecuteFunctionOptions struct {
 
 // Input name: The name argument for the function.
 // Input enabled: The enabled argument for the function.
-func ExecuteFunction[FunctionF interface{ ~func(string, bool) string }](
+func ExecuteFunction(
 	ctx workflow.Context,
 	opts ExecuteFunctionOptions,
-	function FunctionF,
+	function func(string, bool) string,
 	name string,
 	enabled bool,
 ) workflow.NexusOperationFuture {
@@ -147,10 +147,10 @@ type ExecuteCountedFunctionOptions struct {
 
 // Input name: The name argument for the function.
 // Input count: The count argument for the function.
-func ExecuteCountedFunction[FunctionF interface{ ~func(string, int32) string }](
+func ExecuteCountedFunction(
 	ctx workflow.Context,
 	opts ExecuteCountedFunctionOptions,
-	function FunctionF,
+	function func(string, int32) string,
 	name string,
 	count int32,
 ) workflow.NexusOperationFuture {
@@ -210,10 +210,10 @@ type ExecuteVarargsFunctionOptions struct {
 }
 
 // Input args: Arguments for the function.
-func ExecuteVarargsFunction[FunctionF interface{ ~func(...string) string }](
+func ExecuteVarargsFunction(
 	ctx workflow.Context,
 	opts ExecuteVarargsFunctionOptions,
-	function FunctionF,
+	function func(...string) string,
 	args ...string,
 ) workflow.NexusOperationFuture {
 	functionName := ""

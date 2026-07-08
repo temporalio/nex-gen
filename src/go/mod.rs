@@ -5549,7 +5549,7 @@ fn function_type_parameters(
                 function_type_parameter_name(param),
                 go_unary_function_constraint(param, function, package, visibility),
             ));
-        } else {
+        } else if function.alternate_type.is_some() {
             type_params.push((
                 function_type_parameter_name(param),
                 go_function_constraint(function, params, package, visibility),
@@ -5566,6 +5566,21 @@ struct WrapperMode<'a> {
 }
 
 fn go_function_constraint(
+    function: &FunctionFieldSpec,
+    params: &[RenderedUnpackedParam],
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+) -> String {
+    let function_constraint = go_function_type_expr(function, params, package, visibility);
+    if let Some(alternate_type) = &function.alternate_type {
+        let alternate_type = go_authored_function_type_expr(alternate_type, package, visibility);
+        format!("interface{{ ~{alternate_type} | {function_constraint} }}")
+    } else {
+        format!("interface{{ ~{function_constraint} }}")
+    }
+}
+
+fn go_function_type_expr(
     function: &FunctionFieldSpec,
     params: &[RenderedUnpackedParam],
     package: &GoPackageContext,
@@ -5617,13 +5632,7 @@ fn go_function_constraint(
             .map(|result| visibility.rewrite_go_expr(&result))
             .unwrap_or_else(|| "any".to_string()),
     };
-    let function_constraint = format!("func({}) {}", args.join(", "), result_type);
-    if let Some(alternate_type) = &function.alternate_type {
-        let alternate_type = go_authored_function_type_expr(alternate_type, package, visibility);
-        format!("interface{{ ~{alternate_type} | {function_constraint} }}")
-    } else {
-        format!("interface{{ ~{function_constraint} }}")
-    }
+    format!("func({}) {}", args.join(", "), result_type)
 }
 
 fn go_unary_function_constraint(
@@ -5896,13 +5905,31 @@ fn public_option_request_expr(param: &RenderedUnpackedParam) -> String {
     }
 }
 
-fn positional_param_type(param: &RenderedUnpackedParam, mode: WrapperMode<'_>) -> Option<String> {
+fn positional_param_type(
+    param: &RenderedUnpackedParam,
+    mode: WrapperMode<'_>,
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+    params: &[RenderedUnpackedParam],
+) -> Option<String> {
     if param.function.is_some() {
         if mode
             .with_args_primary_function
             .is_some_and(|primary| primary.field_name == param.field_name)
         {
             Some("any".to_string())
+        } else if mode
+            .unary_primary
+            .is_some_and(|primary| primary.field_name == param.field_name)
+        {
+            Some(function_type_parameter_name(param))
+        } else if param
+            .function
+            .as_ref()
+            .is_some_and(|function| function.alternate_type.is_none())
+        {
+            let function = param.function.as_ref().unwrap();
+            Some(go_function_type_expr(function, params, package, visibility))
         } else {
             Some(function_type_parameter_name(param))
         }
@@ -6054,7 +6081,7 @@ fn render_convenience_wrapper(
             .filter_map(|p| {
                 Some((
                     positional_param_name(p, mode),
-                    positional_param_type(p, mode)?,
+                    positional_param_type(p, mode, package, visibility, params)?,
                 ))
             }),
     );
@@ -6121,7 +6148,7 @@ fn render_with_args_convenience_wrapper(
             .filter_map(|p| {
                 Some((
                     positional_param_name(p, mode),
-                    positional_param_type(p, mode)?,
+                    positional_param_type(p, mode, package, visibility, params)?,
                 ))
             }),
     );
