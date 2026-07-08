@@ -2,31 +2,51 @@
 
 import "./models";
 import * as nexus from "nexus-rpc";
+import * as workflow from "@temporalio/workflow";
 import type { GetUserRequest, UpdateEmailRequest } from "./models";
 import type { User } from "./resources";
-import { getUserRequest as userService_getUserRequest } from "./operations/get-user";
-import { updateEmailRequest as userService_updateEmailRequest } from "./operations/update-email";
+import { bindUserClient } from "./resources";
+import { nexusValue } from "../nex-gen-runtime";
 
 export const userService = nexus.service("UserService", {
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
 });
 
-export class UserService {
-  public constructor(private readonly endpoint: string) {}
+export class UserServiceClient {
+  private readonly client: workflow.NexusServiceClient<typeof userService>;
+
+  public constructor(endpoint: string) {
+    this.client = workflow.createNexusServiceClient({
+      service: userService,
+      endpoint,
+    });
+  }
 
   /**
    * @param request - Request for the operation.
    */
   public async getUser(request: GetUserRequest): Promise<User> {
-    return await userService_getUserRequest(this.endpoint, request);
+    const requestProto = nexusValue("user-service.get-user-request", request);
+    const handle = await this.client.startOperation(
+      userService.operations.getUser,
+      requestProto,
+    );
+    const resource = await handle.result();
+    return bindUserClient(resource, this.client);
   }
 
   /**
    * @param request - Request for the operation.
    */
   public async updateEmail(request: UpdateEmailRequest): Promise<User> {
-    return await userService_updateEmailRequest(this.endpoint, request);
+    const requestProto = nexusValue("user-service.update-email-request", request);
+    const handle = await this.client.startOperation(
+      userService.operations.updateEmail,
+      requestProto,
+    );
+    const resource = await handle.result();
+    return bindUserClient(resource, this.client);
   }
 }
 

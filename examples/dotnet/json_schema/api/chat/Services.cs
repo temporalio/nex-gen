@@ -5,7 +5,10 @@
 
 using System;
 using System.CodeDom.Compiler;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using NexusRpc;
+using Temporalio.Workflows;
 
 namespace NexGen.ChatService
 {
@@ -34,6 +37,47 @@ namespace NexGen.ChatService
         [GeneratedCode("nex-gen", null)]
         [NexusOperation("Ping")]
         void Ping();
+
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    public class ChatServiceClient
+    {
+        private readonly NexusWorkflowClient<IChatService> _client;
+
+        public ChatServiceClient(string endpoint)
+        {
+            _client = Workflow.CreateNexusWorkflowClient<IChatService>(endpoint);
+        }
+
+        /// <summary>
+        /// Post a message to a room.
+        /// </summary>
+        [GeneratedCode("nex-gen", null)]
+        public async Task<SendMessageOutput> SendMessageAsync(SendMessageInput request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<SendMessageOutput>(svc => svc.SendMessage(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <summary>
+        /// Look up a room by id.
+        /// </summary>
+        [GeneratedCode("nex-gen", null)]
+        public async Task<Room> GetRoomAsync(GetRoomInput request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<Room>(svc => svc.GetRoom(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <summary>
+        /// Liveness probe.
+        /// </summary>
+        [GeneratedCode("nex-gen", null)]
+        public async Task PingAsync()
+        {
+            await _client.ExecuteNexusOperationAsync(svc => svc.Ping()).ConfigureAwait(true);
+        }
 
     }
 

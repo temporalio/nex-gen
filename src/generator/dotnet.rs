@@ -110,9 +110,24 @@ impl<'a> ApiPlanner<'a> {
         output
     }
 
-    fn render_service_file(&self, namespace: &str) -> String {
+    fn render_service_file(&self, namespace: &str, include_native_api: bool) -> String {
         let module_imports = dotnet_module_imports(self.api_plan);
-        let mut imports = vec!["System", "System.CodeDom.Compiler", "NexusRpc"];
+        let mut imports = vec![
+            "System",
+            "System.CodeDom.Compiler",
+            "System.Collections.Generic",
+            "System.Threading.Tasks",
+            "NexusRpc",
+        ];
+        if include_native_api
+            && self
+                .api_plan
+                .services
+                .iter()
+                .any(|service| service.endpoint.is_none() && !service.operations.is_empty())
+        {
+            imports.push("Temporalio.Workflows");
+        }
         imports.extend(module_imports.iter().map(String::as_str));
         let mut output = generated_file_prelude(namespace, &imports);
         for service in &self.api_plan.services {
@@ -129,6 +144,13 @@ impl<'a> ApiPlanner<'a> {
                 self.render_service_operation(&mut output, operation);
             }
             output.push_str("}\n\n");
+            if include_native_api && service.endpoint.is_none() {
+                for operation in &service.operations {
+                    self.render_operation_options_type(&mut output, operation);
+                }
+                let service_type = format!("I{}", csharp_type_name(&service.name));
+                self.render_endpoint_service_class(&mut output, service, &service_type);
+            }
         }
         close_namespace(&mut output);
         output
@@ -163,6 +185,7 @@ impl<'a> ApiPlanner<'a> {
             "System.CodeDom.Compiler",
             "System.Collections.Generic",
             "System.Threading.Tasks",
+            "Temporalio.Workflows",
         ];
         let module_imports = dotnet_module_imports(self.api_plan);
         imports.extend(module_imports.iter().map(String::as_str));
@@ -197,6 +220,9 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn render_operations_class(&self, output: &mut String, service: &PlannedService) {
+        if service.endpoint.is_none() {
+            return;
+        }
         let service_type = format!("I{}", csharp_type_name(&service.name));
         for operation in &service.operations {
             self.render_operation_options_type(output, operation);
@@ -205,18 +231,11 @@ impl<'a> ApiPlanner<'a> {
             .operations_class
             .for_language(Language::Dotnet)
             .is_some();
-        if service.endpoint.is_none() {
-            self.render_endpoint_service_class(output, service, &service_type);
-        }
         if !explicit_operations_class {
             output.push_str(GENERATED_CODE_ATTRIBUTE);
             output.push('\n');
         }
-        if service.endpoint.is_none() {
-            output.push_str("internal static ");
-        } else {
-            output.push_str("public static ");
-        }
+        output.push_str("public static ");
         if explicit_operations_class {
             output.push_str("partial ");
         }
@@ -251,17 +270,21 @@ impl<'a> ApiPlanner<'a> {
         service: &PlannedService,
         service_type: &str,
     ) {
-        let service_class_name = csharp_type_name(&service.name);
+        let service_class_name = dotnet_endpoint_service_class_name(service);
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("public class ");
         output.push_str(&service_class_name);
         output.push_str("\n{\n");
-        output.push_str("    private readonly string _endpoint;\n\n");
+        output.push_str("    private readonly NexusWorkflowClient<");
+        output.push_str(service_type);
+        output.push_str("> _client;\n\n");
         output.push_str("    public ");
         output.push_str(&service_class_name);
         output.push_str("(string endpoint)\n    {\n");
-        output.push_str("        _endpoint = endpoint;\n");
+        output.push_str("        _client = Workflow.CreateNexusWorkflowClient<");
+        output.push_str(service_type);
+        output.push_str(">(endpoint);\n");
         output.push_str("    }\n\n");
         for operation in &service.operations {
             self.render_endpoint_service_operation(output, operation, service_type);
@@ -309,19 +332,24 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(" { get; }\n");
         }
         if service.endpoint.is_none() {
-            output.push_str("\n    internal string? NexGenEndpoint { get; set; }\n");
+            output.push_str("\n    internal NexusWorkflowClient<I");
+            output.push_str(&csharp_type_name(&service.name));
+            output.push_str(">? NexGenClient { get; set; }\n");
             output.push_str("\n    internal static ");
             output.push_str(&type_name);
-            output.push_str(" BindEndpoint(");
+            output.push_str(" BindClient(");
             output.push_str(&type_name);
-            output.push_str(" resource, string endpoint)\n    {\n");
-            output.push_str("        resource.NexGenEndpoint = endpoint;\n");
+            output.push_str(" resource, NexusWorkflowClient<I");
+            output.push_str(&csharp_type_name(&service.name));
+            output.push_str("> client)\n    {\n");
+            output.push_str("        resource.NexGenClient = client;\n");
             output.push_str("        return resource;\n");
             output.push_str("    }\n");
-            output.push_str("\n    private string RequireNexGenEndpoint()\n    {\n");
-            output.push_str(
-                "        return NexGenEndpoint ?? throw new InvalidOperationException(\"",
-            );
+            output.push_str("\n    private NexusWorkflowClient<I");
+            output.push_str(&csharp_type_name(&service.name));
+            output.push_str("> RequireNexGenClient()\n    {\n");
+            output
+                .push_str("        return NexGenClient ?? throw new InvalidOperationException(\"");
             output.push_str(&type_name);
             output.push_str(" methods require a service endpoint.\");\n");
             output.push_str("    }\n");
@@ -353,6 +381,14 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("    public ");
+        if service.endpoint.is_none()
+            && matches!(
+                method.binding,
+                PlannedResourceMethodBindingSpec::Operation { .. }
+            )
+        {
+            output.push_str("async ");
+        }
         output.push_str(&return_type);
         output.push(' ');
         output.push_str(&csharp_type_name(&method.name));
@@ -376,17 +412,22 @@ impl<'a> ApiPlanner<'a> {
                 let operation =
                     operation.expect("bound resource operation should exist on the service");
                 output.push_str("\n    {\n");
-                render_resource_method_operation_body(
-                    output,
-                    service,
-                    operation,
-                    request_plan,
-                    self.api_plan,
-                    service
-                        .endpoint
-                        .is_none()
-                        .then_some("RequireNexGenEndpoint()"),
-                );
+                if service.endpoint.is_none() {
+                    self.render_resource_method_inline_operation_body(
+                        output,
+                        operation,
+                        request_plan,
+                    );
+                } else {
+                    render_resource_method_operation_body(
+                        output,
+                        service,
+                        operation,
+                        request_plan,
+                        self.api_plan,
+                        None,
+                    );
+                }
                 output.push_str("    }\n\n");
             }
             PlannedResourceMethodBindingSpec::Stub => {
@@ -531,6 +572,7 @@ impl<'a> ApiPlanner<'a> {
                 &raw_return,
                 &high_level_return,
                 endpoint_parameter,
+                false,
                 None,
                 endpoint_parameter.then_some("endpoint"),
             );
@@ -597,8 +639,9 @@ impl<'a> ApiPlanner<'a> {
                 &raw_return,
                 &high_level_return,
                 false,
-                Some("Operations"),
-                Some("_endpoint"),
+                true,
+                None,
+                None,
             );
         }
     }
@@ -615,19 +658,17 @@ impl<'a> ApiPlanner<'a> {
         high_level_return: &str,
         request_kind: RequestArgumentKind,
     ) {
-        if self.operation_request_method_access(operation, request_kind) != "public" {
-            return;
-        }
-
         render_operation_xml_doc(output, "    ", operation, self.api_plan, false);
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
-        output.push_str("    public ");
+        output.push_str("    ");
+        output.push_str(self.operation_request_method_access(operation, request_kind));
+        output.push(' ');
         if raw_return == "void" {
-            output.push_str("Task ");
+            output.push_str("async Task ");
         } else {
-            output.push_str("Task<");
+            output.push_str("async Task<");
             output.push_str(high_level_return);
             output.push_str("> ");
         }
@@ -638,14 +679,77 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(" request");
         }
         output.push_str(")\n    {\n");
-        output.push_str("        return Operations.");
-        output.push_str(method_name);
-        output.push_str("(_endpoint");
-        if has_input {
-            output.push_str(", request");
-        }
-        output.push_str(");\n");
+        self.render_endpoint_service_request_body(
+            output,
+            operation,
+            has_input,
+            raw_return,
+            request_kind,
+        );
         output.push_str("    }\n\n");
+    }
+
+    fn render_endpoint_service_request_body(
+        &self,
+        output: &mut String,
+        operation: &PlannedOperation,
+        has_input: bool,
+        raw_return: &str,
+        request_kind: RequestArgumentKind,
+    ) {
+        if matches!(request_kind, RequestArgumentKind::HighLevel) {
+            output.push_str("        var wireRequest = ");
+            output.push_str(&self.operation_request_wire_expr(operation, "request"));
+            output.push_str(";\n");
+        }
+        if raw_return == "void" {
+            output.push_str("        await _client.ExecuteNexusOperationAsync(svc => svc.");
+        } else {
+            output.push_str("        var result = await _client.ExecuteNexusOperationAsync<");
+            output.push_str(raw_return);
+            output.push_str(">(svc => svc.");
+        }
+        output.push_str(&csharp_type_name(&operation.name));
+        output.push('(');
+        if has_input {
+            if matches!(request_kind, RequestArgumentKind::HighLevel) {
+                output.push_str("wireRequest");
+            } else {
+                output.push_str("request");
+            }
+        }
+        output.push(')');
+        output.push_str(").ConfigureAwait(true);\n");
+        if raw_return == "void" {
+            return;
+        }
+        if operation.output_transform.is_some() || operation.data.output_resource_return.is_some() {
+            let expression = operation_transform_expression(
+                operation,
+                "request",
+                "wireRequest",
+                "result",
+                self.api_plan,
+            );
+            output.push_str("        return ");
+            if let Some(resource) = &operation.data.output_resource_return {
+                output.push_str(&csharp_type_name(&resource.resource_type_name));
+                output.push_str(".BindClient(");
+                output.push_str(&expression);
+                output.push_str(", _client)");
+            } else {
+                output.push_str(&expression);
+            }
+            output.push_str(";\n");
+        } else if let Some(resource_type_name) =
+            self.resource_type_name_for_return_type(&self.operation_return_type(operation))
+        {
+            output.push_str("        return ");
+            output.push_str(&resource_type_name);
+            output.push_str(".BindClient(result, _client);\n");
+        } else {
+            output.push_str("        return result;\n");
+        }
     }
 
     fn render_model_constructor(
@@ -779,9 +883,9 @@ impl<'a> ApiPlanner<'a> {
             output.push_str("        return ");
             if endpoint_parameter && let Some(resource) = &operation.data.output_resource_return {
                 output.push_str(&csharp_type_name(&resource.resource_type_name));
-                output.push_str(".BindEndpoint(");
+                output.push_str(".BindClient(");
                 output.push_str(&expression);
-                output.push_str(", endpoint)");
+                output.push_str(", client)");
             } else {
                 output.push_str(&expression);
             }
@@ -793,7 +897,7 @@ impl<'a> ApiPlanner<'a> {
             {
                 output.push_str("        return ");
                 output.push_str(&resource_type_name);
-                output.push_str(".BindEndpoint(result, endpoint);\n");
+                output.push_str(".BindClient(result, client);\n");
             } else {
                 output.push_str("        return result;\n");
             }
@@ -824,6 +928,92 @@ impl<'a> ApiPlanner<'a> {
             .wire_conversion(model_type, planned_record)
             .map(|conversion| conversion.to_wire_expr(request_expr))
             .unwrap_or_else(|| request_expr.to_string())
+    }
+
+    fn render_resource_method_inline_operation_body(
+        &self,
+        output: &mut String,
+        operation: &PlannedOperation,
+        request_plan: &RequestPlan,
+    ) {
+        let raw_return = self.operation_raw_return_type(operation);
+        let has_input = self.operation_has_input(operation);
+        if has_input {
+            let request_expr = resource_method_request_model_init_expr(
+                request_plan,
+                self.api_plan,
+                None,
+                ResourceMethodRequestInitKind::AllFields,
+            )
+            .or_else(|| {
+                resource_method_operation_call_args(operation, request_plan, self.api_plan)
+                    .and_then(|args| (args.len() == 1).then(|| args[0].clone()))
+            })
+            .expect("bound resource operation should have a renderable request plan");
+            output.push_str("        var request = ");
+            output.push_str(&request_expr);
+            output.push_str(";\n");
+            let wire_request = self.operation_request_wire_expr(operation, "request");
+            if wire_request != "request" {
+                output.push_str("        var wireRequest = ");
+                output.push_str(&wire_request);
+                output.push_str(";\n");
+            }
+        }
+        let input_expr =
+            if has_input && self.operation_request_wire_expr(operation, "request") != "request" {
+                "wireRequest"
+            } else {
+                "request"
+            };
+        if raw_return == "void" {
+            output.push_str(
+                "        await RequireNexGenClient().ExecuteNexusOperationAsync(svc => svc.",
+            );
+        } else {
+            output.push_str(
+                "        var result = await RequireNexGenClient().ExecuteNexusOperationAsync<",
+            );
+            output.push_str(&raw_return);
+            output.push_str(">(svc => svc.");
+        }
+        output.push_str(&csharp_type_name(&operation.name));
+        output.push('(');
+        if has_input {
+            output.push_str(input_expr);
+        }
+        output.push(')');
+        output.push_str(").ConfigureAwait(true);\n");
+        if raw_return == "void" {
+            return;
+        }
+        if operation.output_transform.is_some() || operation.data.output_resource_return.is_some() {
+            let expression = operation_transform_expression(
+                operation,
+                "request",
+                "wireRequest",
+                "result",
+                self.api_plan,
+            );
+            output.push_str("        return ");
+            if let Some(resource) = &operation.data.output_resource_return {
+                output.push_str(&csharp_type_name(&resource.resource_type_name));
+                output.push_str(".BindClient(");
+                output.push_str(&expression);
+                output.push_str(", RequireNexGenClient())");
+            } else {
+                output.push_str(&expression);
+            }
+            output.push_str(";\n");
+        } else if let Some(resource_type_name) =
+            self.resource_type_name_for_return_type(&self.operation_return_type(operation))
+        {
+            output.push_str("        return ");
+            output.push_str(&resource_type_name);
+            output.push_str(".BindClient(result, RequireNexGenClient());\n");
+        } else {
+            output.push_str("        return result;\n");
+        }
     }
 
     fn operation_request_method_access(
@@ -1334,6 +1524,7 @@ impl<'a> ApiPlanner<'a> {
         raw_return: &str,
         high_level_return: &str,
         endpoint_parameter: bool,
+        instance_method: bool,
         operation_call_target: Option<&str>,
         endpoint_expr: Option<&str>,
     ) {
@@ -1347,6 +1538,7 @@ impl<'a> ApiPlanner<'a> {
                 high_level_return,
                 &overload,
                 endpoint_parameter,
+                instance_method,
                 operation_call_target,
                 endpoint_expr,
             );
@@ -1363,6 +1555,7 @@ impl<'a> ApiPlanner<'a> {
         high_level_return: &str,
         overload: &FlattenedOverload,
         endpoint_parameter: bool,
+        instance_method: bool,
         operation_call_target: Option<&str>,
         endpoint_expr: Option<&str>,
     ) {
@@ -1375,7 +1568,7 @@ impl<'a> ApiPlanner<'a> {
             model,
             overload,
             endpoint_parameter,
-            operation_call_target.is_some(),
+            instance_method,
         );
         render_flattened_method_body(
             output,
@@ -1750,14 +1943,14 @@ fn generate_leaf(
     if !api_plan.services.is_empty() {
         files.insert(
             "Services.cs".into(),
-            generator.render_service_file(&namespace),
+            generator.render_service_file(&namespace, mode == GenerationMode::NativeApi),
         );
     }
     if mode == GenerationMode::NativeApi
         && api_plan
             .services
             .iter()
-            .any(|service| !service.operations.is_empty())
+            .any(|service| service.endpoint.is_some() && !service.operations.is_empty())
     {
         files.insert(
             "Operations.cs".into(),
@@ -3537,6 +3730,10 @@ fn dotnet_operations_class_name(service: &PlannedService) -> String {
         .for_language(Language::Dotnet)
         .map(csharp_type_name)
         .unwrap_or_else(|| "Operations".to_string())
+}
+
+fn dotnet_endpoint_service_class_name(service: &PlannedService) -> String {
+    format!("{}Client", csharp_type_name(&service.name))
 }
 
 fn service_endpoint_constant_name(service: &PlannedService) -> String {

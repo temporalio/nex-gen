@@ -6,9 +6,6 @@ import type { GetCategoryTreeInput, GetPageInput, PutBlockOutput } from "./model
 import type { Block } from "../content/block/models";
 import type { Page } from "../content/page/models";
 import type { Category } from "../tree/category/models";
-import { getPageRequest as knowledgeBaseService_getPageRequest } from "./operations/get-page";
-import { putBlockRequest as knowledgeBaseService_putBlockRequest } from "./operations/put-block";
-import { getCategoryTreeRequest as knowledgeBaseService_getCategoryTreeRequest } from "./operations/get-category-tree";
 
 /**
  * Fetch and update pages, blocks, and the category tree.
@@ -36,8 +33,15 @@ export const knowledgeBaseService = nexus.service(
 /**
  * Fetch and update pages, blocks, and the category tree.
  */
-export class KnowledgeBaseService {
-  public constructor(private readonly endpoint: string) {}
+export class KnowledgeBaseServiceClient {
+  private readonly client: workflow.NexusServiceClient<typeof knowledgeBaseService>;
+
+  public constructor(endpoint: string) {
+    this.client = workflow.createNexusServiceClient({
+      service: knowledgeBaseService,
+      endpoint,
+    });
+  }
 
   /**
    * Fetch a page by id.
@@ -47,7 +51,10 @@ export class KnowledgeBaseService {
   public async getPage(
     request: GetPageInput,
   ): Promise<workflow.NexusOperationHandle<Page>> {
-    return await knowledgeBaseService_getPageRequest(this.endpoint, request);
+    return await this.client.startOperation(
+      knowledgeBaseService.operations.getPage,
+      request,
+    );
   }
 
   /**
@@ -58,7 +65,10 @@ export class KnowledgeBaseService {
   public async putBlock(
     request: Block,
   ): Promise<workflow.NexusOperationHandle<PutBlockOutput>> {
-    return await knowledgeBaseService_putBlockRequest(this.endpoint, request);
+    return await this.client.startOperation(
+      knowledgeBaseService.operations.putBlock,
+      request,
+    );
   }
 
   /**
@@ -69,7 +79,10 @@ export class KnowledgeBaseService {
   public async getCategoryTree(
     request: GetCategoryTreeInput,
   ): Promise<workflow.NexusOperationHandle<Category>> {
-    return await knowledgeBaseService_getCategoryTreeRequest(this.endpoint, request);
+    return await this.client.startOperation(
+      knowledgeBaseService.operations.getCategoryTree,
+      request,
+    );
   }
 }
 

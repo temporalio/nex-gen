@@ -14,7 +14,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from json_schema.api.kb import Block as ApiBlock
 from json_schema.api.kb import Category as ApiCategory
-from json_schema.api.kb import KnowledgeBaseService
+from json_schema.api.kb import KnowledgeBaseServiceClient
 from json_schema.api.kb import Page as ApiPage
 from json_schema.api.kb.kb import models as api_kb_models
 from json_schema.api.kb.kb import services as api_kb_services
@@ -91,7 +91,7 @@ class KnowledgeBaseServiceHandler:
 class KnowledgeBaseCallerWorkflow:
     @workflow.run
     async def run(self) -> dict[str, object]:
-        service = KnowledgeBaseService("knowledge-base")
+        service = KnowledgeBaseServiceClient("knowledge-base")
 
         page_handle = await service.get_page(
             api_kb_models.GetPageInput(pageId="page-1")

@@ -2,48 +2,11 @@
 
 from __future__ import annotations
 
+from .services import ChatServiceClient
 from . import services as _services
-from .operations.send_message import (
-    send_message_request as _ChatService_send_message_request,
-)
-from .operations.get_room import get_room_request as _ChatService_get_room_request
-from .operations.ping import ping_request as _ChatService_ping_request
-import typing
-
-if typing.TYPE_CHECKING:
-    import temporalio.workflow
-    from .models import (
-        GetRoomInput,
-        Room,
-        SendMessageInput,
-        SendMessageOutput,
-    )
-
-
-class ChatService:
-    def __init__(self, endpoint: str) -> None:
-        self.endpoint: str = endpoint
-
-    async def send_message(
-        self,
-        request: SendMessageInput,
-    ) -> temporalio.workflow.NexusOperationHandle[SendMessageOutput]:
-        return await _ChatService_send_message_request(self.endpoint, request)
-
-    async def get_room(
-        self,
-        request: GetRoomInput,
-    ) -> temporalio.workflow.NexusOperationHandle[Room]:
-        return await _ChatService_get_room_request(self.endpoint, request)
-
-    async def ping(
-        self,
-    ) -> temporalio.workflow.NexusOperationHandle[None]:
-        return await _ChatService_ping_request(self.endpoint)
-
 
 __all__ = [
-    "ChatService",
+    "ChatServiceClient",
 ]
 
 

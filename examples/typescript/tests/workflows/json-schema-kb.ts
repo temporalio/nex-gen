@@ -1,4 +1,4 @@
-import { KnowledgeBaseService } from "../../json_schema/api/kb/kb/index.ts";
+import { KnowledgeBaseServiceClient } from "../../json_schema/api/kb/kb/index.ts";
 
 export async function jsonSchemaKbCaller(): Promise<{
   blockId: string;
@@ -6,7 +6,7 @@ export async function jsonSchemaKbCaller(): Promise<{
   pageId: string;
   revision: number;
 }> {
-  const service = new KnowledgeBaseService("knowledge-base");
+  const service = new KnowledgeBaseServiceClient("knowledge-base");
 
   const pageHandle = await service.getPage({ pageId: "page-1" });
   const page = await pageHandle.result();

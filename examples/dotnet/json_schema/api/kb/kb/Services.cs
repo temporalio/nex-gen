@@ -5,7 +5,10 @@
 
 using System;
 using System.CodeDom.Compiler;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using NexusRpc;
+using Temporalio.Workflows;
 using NexGen.Generated.Content.Block;
 using NexGen.Generated.Content.Page;
 using NexGen.Generated.Tree.Category;
@@ -37,6 +40,48 @@ namespace NexGen.Generated.Kb
         [GeneratedCode("nex-gen", null)]
         [NexusOperation("GetCategoryTree")]
         Category GetCategoryTree(GetCategoryTreeInput request);
+
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    public class KnowledgeBaseServiceClient
+    {
+        private readonly NexusWorkflowClient<IKnowledgeBaseService> _client;
+
+        public KnowledgeBaseServiceClient(string endpoint)
+        {
+            _client = Workflow.CreateNexusWorkflowClient<IKnowledgeBaseService>(endpoint);
+        }
+
+        /// <summary>
+        /// Fetch a page by id.
+        /// </summary>
+        [GeneratedCode("nex-gen", null)]
+        public async Task<Page> GetPageAsync(GetPageInput request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<Page>(svc => svc.GetPage(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <summary>
+        /// Create or update a content block.
+        /// </summary>
+        [GeneratedCode("nex-gen", null)]
+        public async Task<PutBlockOutput> PutBlockAsync(Block request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<PutBlockOutput>(svc => svc.PutBlock(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <summary>
+        /// Fetch the category tree rooted at a category.
+        /// </summary>
+        [GeneratedCode("nex-gen", null)]
+        public async Task<Category> GetCategoryTreeAsync(GetCategoryTreeInput request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<Category>(svc => svc.GetCategoryTree(request)).ConfigureAwait(true);
+            return result;
+        }
 
     }
 

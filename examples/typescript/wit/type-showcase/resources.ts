@@ -16,15 +16,18 @@ export class User {
   ) {}
 
   public async updateEmail(email: string): Promise<User> {
-    return await updateEmail({ userId: this.userId, email: email });
+    const request = { userId: this.userId, email: email };
+    return await updateEmail(request);
   }
 
   public async rename(displayName: string): Promise<User> {
-    return await rename({ userId: this.userId, displayName: displayName });
+    const request = { userId: this.userId, displayName: displayName };
+    return await rename(request);
   }
 
   public async deactivate(reason?: string): Promise<void> {
-    const handle = await deactivate({ userId: this.userId, reason: reason });
+    const request = { userId: this.userId, reason: reason };
+    const handle = await deactivate(request);
     await handle.result();
   }
 }

@@ -3,9 +3,6 @@
 import * as nexus from "nexus-rpc";
 import * as workflow from "@temporalio/workflow";
 import type { GetRoomInput, Room, SendMessageInput, SendMessageOutput } from "./models";
-import { sendMessageRequest as chatService_sendMessageRequest } from "./operations/send-message";
-import { getRoomRequest as chatService_getRoomRequest } from "./operations/get-room";
-import { pingRequest as chatService_pingRequest } from "./operations/ping";
 
 /**
  * Send messages and look up rooms.
@@ -30,8 +27,15 @@ export const chatService = nexus.service("example.chat.v1.ChatService", {
 /**
  * Send messages and look up rooms.
  */
-export class ChatService {
-  public constructor(private readonly endpoint: string) {}
+export class ChatServiceClient {
+  private readonly client: workflow.NexusServiceClient<typeof chatService>;
+
+  public constructor(endpoint: string) {
+    this.client = workflow.createNexusServiceClient({
+      service: chatService,
+      endpoint,
+    });
+  }
 
   /**
    * Post a message to a room.
@@ -41,7 +45,10 @@ export class ChatService {
   public async sendMessage(
     request: SendMessageInput,
   ): Promise<workflow.NexusOperationHandle<SendMessageOutput>> {
-    return await chatService_sendMessageRequest(this.endpoint, request);
+    return await this.client.startOperation(
+      chatService.operations.sendMessage,
+      request,
+    );
   }
 
   /**
@@ -52,14 +59,14 @@ export class ChatService {
   public async getRoom(
     request: GetRoomInput,
   ): Promise<workflow.NexusOperationHandle<Room>> {
-    return await chatService_getRoomRequest(this.endpoint, request);
+    return await this.client.startOperation(chatService.operations.getRoom, request);
   }
 
   /**
    * Liveness probe.
    */
   public async ping(): Promise<workflow.NexusOperationHandle<void>> {
-    return await chatService_pingRequest(this.endpoint);
+    return await this.client.startOperation(chatService.operations.ping, undefined);
   }
 }
 

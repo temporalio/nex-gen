@@ -7,62 +7,14 @@ from .models import (
     GetPageInput,
     PutBlockOutput,
 )
+from .services import KnowledgeBaseServiceClient
 from . import services as _services
-from .operations.get_page import (
-    get_page_request as _KnowledgeBaseService_get_page_request,
-)
-from .operations.put_block import (
-    put_block_request as _KnowledgeBaseService_put_block_request,
-)
-from .operations.get_category_tree import (
-    get_category_tree_request as _KnowledgeBaseService_get_category_tree_request,
-)
-import typing
-
-if typing.TYPE_CHECKING:
-    import temporalio.workflow
-    from .._models import (
-        Block,
-        Page,
-    )
-    from ..tree.category.models import Category
-    from .models import (
-        GetCategoryTreeInput,
-        GetPageInput,
-        PutBlockOutput,
-    )
-
-
-class KnowledgeBaseService:
-    def __init__(self, endpoint: str) -> None:
-        self.endpoint: str = endpoint
-
-    async def get_page(
-        self,
-        request: GetPageInput,
-    ) -> temporalio.workflow.NexusOperationHandle[Page]:
-        return await _KnowledgeBaseService_get_page_request(self.endpoint, request)
-
-    async def put_block(
-        self,
-        request: Block,
-    ) -> temporalio.workflow.NexusOperationHandle[PutBlockOutput]:
-        return await _KnowledgeBaseService_put_block_request(self.endpoint, request)
-
-    async def get_category_tree(
-        self,
-        request: GetCategoryTreeInput,
-    ) -> temporalio.workflow.NexusOperationHandle[Category]:
-        return await _KnowledgeBaseService_get_category_tree_request(
-            self.endpoint, request
-        )
-
 
 __all__ = [
     "GetCategoryTreeInput",
     "GetPageInput",
     "PutBlockOutput",
-    "KnowledgeBaseService",
+    "KnowledgeBaseServiceClient",
 ]
 
 

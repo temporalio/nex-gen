@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
+import typing
+import temporalio.workflow
+
 from .models import (
     GetUserRequest,
     UpdateEmailRequest,
 )
-from ._resources.user import User
+from ._resources.user import (
+    User,
+    bind_user_client,
+)
+
+if typing.TYPE_CHECKING:
+    from ._resources import User
 
 
 @service
@@ -21,3 +30,45 @@ class UserService:
         UpdateEmailRequest,
         User,
     ] = Operation(name="UpdateEmail")
+
+
+class UserServiceClient:
+    def __init__(self, endpoint: str) -> None:
+        self._nexus_client: typing.Any = temporalio.workflow.create_nexus_client(
+            service="UserService",
+            endpoint=endpoint,
+        )
+
+    async def get_user(
+        self,
+        *,
+        user_id: str,
+    ) -> User:
+        request = GetUserRequest(
+            user_id=user_id,
+        )
+        handle = await self._nexus_client.start_operation(
+            operation="GetUser",
+            input=request,
+            output_type=User,
+        )
+        resource = await handle
+        return bind_user_client(resource, self._nexus_client)
+
+    async def update_email(
+        self,
+        *,
+        user_id: str,
+        email: str,
+    ) -> User:
+        request = UpdateEmailRequest(
+            user_id=user_id,
+            email=email,
+        )
+        handle = await self._nexus_client.start_operation(
+            operation="UpdateEmail",
+            input=request,
+            output_type=User,
+        )
+        resource = await handle
+        return bind_user_client(resource, self._nexus_client)

@@ -49,7 +49,7 @@ namespace NexGen.DotNetExamples.Tests
             [WorkflowRun]
             public async Task<KnowledgeBaseWorkflowResult> RunAsync()
             {
-                var service = new Kb.KnowledgeBaseService("knowledge-base");
+                var service = new Kb.KnowledgeBaseServiceClient("knowledge-base");
                 var page = await service.GetPageAsync(new Kb.GetPageInput("page-1"));
                 var block = page.Blocks is { Count: > 0 }
                     ? page.Blocks[0]

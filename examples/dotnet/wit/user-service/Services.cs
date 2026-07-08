@@ -5,7 +5,10 @@
 
 using System;
 using System.CodeDom.Compiler;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using NexusRpc;
+using Temporalio.Workflows;
 
 namespace NexGen.UserService
 {
@@ -21,6 +24,72 @@ namespace NexGen.UserService
         [GeneratedCode("nex-gen", null)]
         [NexusOperation("UpdateEmail")]
         User UpdateEmail(UpdateEmailRequest request);
+
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    public class GetUserOptions
+    {
+        public GetUserOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    public class UpdateEmailOptions
+    {
+        public UpdateEmailOptions(string userId, string email)
+        {
+            UserId = userId;
+            Email = email;
+        }
+
+        public string UserId { get; set; }
+        public string Email { get; set; }
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    public class UserServiceClient
+    {
+        private readonly NexusWorkflowClient<IUserService> _client;
+
+        public UserServiceClient(string endpoint)
+        {
+            _client = Workflow.CreateNexusWorkflowClient<IUserService>(endpoint);
+        }
+
+        [GeneratedCode("nex-gen", null)]
+        private async Task<User> GetUserAsync(GetUserRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<User>(svc => svc.GetUser(request)).ConfigureAwait(true);
+            return User.BindClient(result, _client);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
+        public Task<User> GetUserAsync(GetUserOptions options)
+        {
+            var request = new GetUserRequest(options.UserId);
+            return GetUserAsync(request);
+        }
+
+        [GeneratedCode("nex-gen", null)]
+        private async Task<User> UpdateEmailAsync(UpdateEmailRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
+            return User.BindClient(result, _client);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
+        public Task<User> UpdateEmailAsync(UpdateEmailOptions options)
+        {
+            var request = new UpdateEmailRequest(options.UserId, options.Email);
+            return UpdateEmailAsync(request);
+        }
 
     }
 

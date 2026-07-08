@@ -2795,6 +2795,9 @@ fn render_module_files(
     }
     if mode == GenerationMode::NativeApi {
         for service in services {
+            if service.endpoint.is_none() {
+                continue;
+            }
             for operation in &service.operations {
                 files.insert(
                     format!("operations/{}.ts", operation_file_name(operation)).into(),
@@ -3098,7 +3101,7 @@ fn render_index_module(services: &[RenderedService<'_>]) -> String {
             }
         } else {
             body.push_str("export { ");
-            body.push_str(service.name);
+            body.push_str(&endpoint_service_class_name(service));
             body.push_str(" } from './services';\n");
         }
     }
@@ -3127,14 +3130,28 @@ fn render_endpoint_service_class(output: &mut String, service: &RenderedService<
     let doc_tags = experimental_doc_tag(service.experimental);
     render_typescript_doc_comment(output, "", service.doc.as_deref(), &doc_tags);
     output.push_str("export class ");
-    output.push_str(service.name);
+    output.push_str(&endpoint_service_class_name(service));
     output.push_str(" {\n");
-    output.push_str("  public constructor(private readonly endpoint: string) {}\n");
+    output.push_str("  private readonly client: workflow.NexusServiceClient<typeof ");
+    output.push_str(&service.attr_name);
+    output.push_str(">;\n\n");
+    output.push_str("  public constructor(endpoint: string) {\n");
+    output.push_str("    this.client = workflow.createNexusServiceClient({\n");
+    output.push_str("      service: ");
+    output.push_str(&service.attr_name);
+    output.push_str(",\n");
+    output.push_str("      endpoint,\n");
+    output.push_str("    });\n");
+    output.push_str("  }\n");
     for operation in &service.operations {
         output.push('\n');
         render_endpoint_service_operation_method(output, service, operation);
     }
     output.push_str("}\n");
+}
+
+fn endpoint_service_class_name(service: &RenderedService<'_>) -> String {
+    format!("{}Client", service.name)
 }
 
 fn render_endpoint_service_operation_method(
@@ -3172,25 +3189,80 @@ fn render_endpoint_service_operation_method(
         service, operation,
     ));
     output.push_str("> {\n");
-    output.push_str("    return await ");
-    output.push_str(&endpoint_service_operation_import_name(service, operation));
-    output.push_str("(this.endpoint");
-    if operation.input.is_some() {
-        output.push_str(", request");
-    }
-    output.push_str(");\n");
+    render_endpoint_service_operation_body(output, service, operation);
     output.push_str("  }\n");
 }
 
-fn endpoint_service_operation_import_name(
+fn render_endpoint_service_operation_body(
+    output: &mut String,
     service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
-) -> String {
-    format!(
-        "{}_{}",
-        service.attr_name,
-        typescript_operation_function_name(service, operation)
-    )
+) {
+    let returns_direct = operation.output_transform_expr.is_some()
+        || operation.output_resource_return.is_some()
+        || operation.output_direct_result;
+    if !returns_direct {
+        output.push_str("    return await this.client.startOperation(\n");
+        output.push_str("      ");
+        output.push_str(&service.attr_name);
+        output.push_str(".operations.");
+        output.push_str(&operation.attr_name);
+        output.push_str(",\n");
+        output.push_str("      ");
+        output.push_str(&typescript_operation_input_expr(operation));
+        output.push_str(",\n");
+        output.push_str("    );\n");
+        return;
+    }
+
+    output.push_str("    const requestProto = ");
+    output.push_str(&typescript_operation_input_expr(operation));
+    output.push_str(";\n");
+    output.push_str("    const handle = await this.client.startOperation(\n");
+    output.push_str("      ");
+    output.push_str(&service.attr_name);
+    output.push_str(".operations.");
+    output.push_str(&operation.attr_name);
+    output.push_str(",\n");
+    output.push_str("      requestProto,\n");
+    output.push_str("    );\n");
+    if let Some(transform_expr) = &operation.output_transform_expr {
+        output.push_str("    const result = await handle.result();\n");
+        output.push_str("    return ");
+        output.push_str(transform_expr);
+        output.push_str(";\n");
+    } else if let Some(resource_return) = &operation.output_resource_return {
+        output.push_str("    const result = await handle.result();\n");
+        output.push_str("    return ");
+        output.push_str(&resource_client_bind_function_name_for_type(
+            &resource_return.resource_type_name,
+        ));
+        output.push_str("(\n");
+        output.push_str("      new ");
+        output.push_str(&resource_return.resource_type_name);
+        output.push_str("(\n");
+        for binding in &resource_return.bindings {
+            output.push_str("        ");
+            output.push_str(&resource_return_binding_expr_typescript(binding));
+            output.push_str(",\n");
+        }
+        output.push_str("      ),\n");
+        output.push_str("      this.client,\n");
+        output.push_str("    );\n");
+    } else if operation.output_direct_result {
+        if let Some(resource) = service
+            .resources
+            .iter()
+            .find(|resource| resource.type_name == operation.output_annotation)
+        {
+            output.push_str("    const resource = await handle.result();\n");
+            output.push_str("    return ");
+            output.push_str(&resource_client_bind_function_name(resource));
+            output.push_str("(resource, this.client);\n");
+        } else {
+            output.push_str("    return await handle.result();\n");
+        }
+    }
 }
 
 fn render_operation_registry_module(services: &[RenderedService<'_>]) -> String {
@@ -3413,6 +3485,14 @@ fn relative_module_path(from_dir: &std::path::Path, target: &std::path::Path) ->
     }
 }
 
+fn typescript_relative_runtime_module(module_path: &ModulePath) -> String {
+    if module_path.is_root() {
+        "../nex-gen-runtime".to_string()
+    } else {
+        relative_module_path(&module_path.to_path_buf(), Path::new("nex-gen-runtime"))
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_service_module(
     enums: &[&RenderedEnum],
@@ -3472,28 +3552,21 @@ fn render_service_module(
         "./resources",
         &used_import_names(&body, &resource_type_names(services)),
     );
-    for service in services
+    let resource_client_binders = services
         .iter()
         .filter(|service| include_native_api && service.endpoint.is_none())
-    {
-        for operation in &service.operations {
-            if !contains_identifier(
-                &body,
-                &endpoint_service_operation_import_name(service, operation),
-            ) {
-                continue;
-            }
-            render_value_imports(
-                &mut imports,
-                &format!("./operations/{}", operation_file_name(operation)),
-                &[format!(
-                    "{} as {}",
-                    typescript_operation_function_name(service, operation),
-                    endpoint_service_operation_import_name(service, operation)
-                )],
-            );
-        }
-    }
+        .flat_map(|service| service.resources.iter())
+        .filter(|resource| {
+            contains_identifier(&body, &resource_client_bind_function_name(resource))
+        })
+        .map(resource_client_bind_function_name)
+        .collect::<Vec<_>>();
+    render_value_imports(&mut imports, "./resources", &resource_client_binders);
+    render_value_imports(
+        &mut imports,
+        &typescript_relative_runtime_module(&api_plan.module_path),
+        &used_import_names(&body, &["nexusValue".to_string()]),
+    );
     render_generated_module(imports, body)
 }
 
@@ -3519,7 +3592,12 @@ fn render_resources_module(
     }
     render_nexus_type_registrations(&mut body, services, api_plan);
     let mut imports = String::new();
-    render_typescript_namespace_imports(&mut imports, &body, language_imports, &[]);
+    render_typescript_namespace_imports(
+        &mut imports,
+        &body,
+        language_imports,
+        &[("workflow", "@temporalio/workflow")],
+    );
     render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
     render_value_imports(
         &mut imports,
@@ -3528,6 +3606,7 @@ fn render_resources_module(
             &body,
             &[
                 "markNexusResource".to_string(),
+                "nexusValue".to_string(),
                 "registerNexusType".to_string(),
             ],
         ),
@@ -3548,14 +3627,24 @@ fn render_resources_module(
     );
     render_support_imports(&mut imports, support_exports, "./support", &body);
     for service in services {
-        for operation in &service.operations {
-            let operation_function_name = typescript_operation_function_name(service, operation);
-            if contains_identifier(&body, &operation_function_name) {
-                render_value_imports(
-                    &mut imports,
-                    &format!("./operations/{}", operation_file_name(operation)),
-                    std::slice::from_ref(&operation_function_name),
-                );
+        if contains_identifier(&body, &service.attr_name) {
+            render_value_imports(
+                &mut imports,
+                "./services",
+                std::slice::from_ref(&service.attr_name),
+            );
+        }
+        if service.endpoint.is_some() {
+            for operation in &service.operations {
+                let operation_function_name =
+                    typescript_operation_function_name(service, operation);
+                if contains_identifier(&body, &operation_function_name) {
+                    render_value_imports(
+                        &mut imports,
+                        &format!("./operations/{}", operation_file_name(operation)),
+                        std::slice::from_ref(&operation_function_name),
+                    );
+                }
             }
         }
     }
@@ -3622,20 +3711,20 @@ fn render_operation_module(
         .filter(|resource| !value_resources.contains(resource))
         .cloned()
         .collect::<Vec<_>>();
-    let resource_endpoint_binders = services
+    let resource_client_binders = services
         .iter()
         .filter(|service| service.endpoint.is_none())
         .flat_map(|service| service.resources.iter())
         .filter(|resource| {
-            contains_identifier(&body, &resource_endpoint_bind_function_name(resource))
+            contains_identifier(&body, &resource_client_bind_function_name(resource))
         })
-        .map(resource_endpoint_bind_function_name)
+        .map(resource_client_bind_function_name)
         .collect::<Vec<_>>();
     if !type_resources.is_empty() {
         imports.push_str("import '../resources';\n");
     }
     let mut resource_value_imports = value_resources;
-    resource_value_imports.extend(resource_endpoint_binders);
+    resource_value_imports.extend(resource_client_binders);
     render_value_imports(&mut imports, "../resources", &resource_value_imports);
     render_type_imports(&mut imports, "../resources", &type_resources);
     if operation
@@ -4739,33 +4828,33 @@ fn typescript_resource_type_id(
     format!("{}::resource::{}", service.name, resource.name)
 }
 
-fn resource_endpoint_symbol_name(resource: &PlannedResource) -> String {
+fn resource_client_symbol_name(resource: &PlannedResource) -> String {
     format!(
-        "{}Endpoint",
+        "{}Client",
         typescript_ident(&resource.type_name.to_lower_camel_case())
     )
 }
 
-fn resource_endpoint_bind_function_name(resource: &PlannedResource) -> String {
-    resource_endpoint_bind_function_name_for_type(&resource.type_name)
+fn resource_client_bind_function_name(resource: &PlannedResource) -> String {
+    resource_client_bind_function_name_for_type(&resource.type_name)
 }
 
-fn resource_endpoint_bind_function_name_for_type(resource_type_name: &str) -> String {
-    format!("bind{resource_type_name}Endpoint")
+fn resource_client_bind_function_name_for_type(resource_type_name: &str) -> String {
+    format!("bind{resource_type_name}Client")
 }
 
-fn resource_endpoint_require_function_name(resource: &PlannedResource) -> String {
-    format!("require{}Endpoint", resource.type_name)
+fn resource_client_require_function_name(resource: &PlannedResource) -> String {
+    format!("require{}Client", resource.type_name)
 }
 
 fn render_resource(output: &mut String, resource: &PlannedResource, service: &RenderedService<'_>) {
-    let endpoint_symbol_name = resource_endpoint_symbol_name(resource);
+    let client_symbol_name = resource_client_symbol_name(resource);
     if service.endpoint.is_none() {
         output.push_str("const ");
-        output.push_str(&endpoint_symbol_name);
+        output.push_str(&client_symbol_name);
         output.push_str(" = Symbol(");
         output.push_str(&typescript_string_literal(&format!(
-            "nex-gen.{}.endpoint",
+            "nex-gen.{}.client",
             resource.type_name
         )));
         output.push_str(");\n\n");
@@ -4776,8 +4865,10 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
     if service.endpoint.is_none() {
         output.push_str("  ");
         output.push_str("[");
-        output.push_str(&endpoint_symbol_name);
-        output.push_str("]: string | undefined;\n\n");
+        output.push_str(&client_symbol_name);
+        output.push_str("]: workflow.NexusServiceClient<typeof ");
+        output.push_str(&service.attr_name);
+        output.push_str("> | undefined;\n\n");
     }
     output.push_str("  public constructor(\n");
     for field in &resource.fields {
@@ -4834,19 +4925,19 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                     .expect("bound operation should exist on the resource service");
                 let branchable_params =
                     branchable_request_method_params(method, request_plan, operation);
-                let operation_function_name =
-                    typescript_operation_function_name(service, operation);
-                let endpoint_expr = service.endpoint.is_none().then(|| {
-                    format!(
-                        "{}(this)",
-                        resource_endpoint_require_function_name(resource)
-                    )
-                });
+                let endpoint_expr = None;
+                let client_expr = service
+                    .endpoint
+                    .is_none()
+                    .then(|| format!("{}(this)", resource_client_require_function_name(resource)));
                 if *direct_return {
                     output.push_str(&render_resource_method_operation_body(
                         4,
-                        &operation_function_name,
+                        service,
+                        resource,
+                        operation,
                         endpoint_expr,
+                        client_expr,
                         &result_annotation,
                         request_plan,
                         &branchable_params,
@@ -4855,8 +4946,11 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                 } else {
                     output.push_str(&render_resource_method_operation_body(
                         4,
-                        &operation_function_name,
+                        service,
+                        resource,
+                        operation,
                         endpoint_expr,
+                        client_expr,
                         &result_annotation,
                         request_plan,
                         &branchable_params,
@@ -4881,26 +4975,30 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
     if service.endpoint.is_none() {
         output.push('\n');
         output.push_str("export function ");
-        output.push_str(&resource_endpoint_bind_function_name(resource));
+        output.push_str(&resource_client_bind_function_name(resource));
         output.push_str("(resource: ");
         output.push_str(&resource.type_name);
-        output.push_str(", endpoint: string): ");
+        output.push_str(", client: workflow.NexusServiceClient<typeof ");
+        output.push_str(&service.attr_name);
+        output.push_str(">): ");
         output.push_str(&resource.type_name);
         output.push_str(" {\n");
         output.push_str("  resource[");
-        output.push_str(&endpoint_symbol_name);
-        output.push_str("] = endpoint;\n");
+        output.push_str(&client_symbol_name);
+        output.push_str("] = client;\n");
         output.push_str("  return resource;\n");
         output.push_str("}\n\n");
         output.push_str("function ");
-        output.push_str(&resource_endpoint_require_function_name(resource));
+        output.push_str(&resource_client_require_function_name(resource));
         output.push_str("(resource: ");
         output.push_str(&resource.type_name);
-        output.push_str("): string {\n");
-        output.push_str("  const endpoint = resource[");
-        output.push_str(&endpoint_symbol_name);
+        output.push_str("): workflow.NexusServiceClient<typeof ");
+        output.push_str(&service.attr_name);
+        output.push_str("> {\n");
+        output.push_str("  const client = resource[");
+        output.push_str(&client_symbol_name);
         output.push_str("];\n");
-        output.push_str("  if (endpoint == null) {\n");
+        output.push_str("  if (client == null) {\n");
         output.push_str("    throw new Error(");
         output.push_str(&typescript_string_literal(&format!(
             "{} methods require a service endpoint.",
@@ -4908,7 +5006,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
         )));
         output.push_str(");\n");
         output.push_str("  }\n");
-        output.push_str("  return endpoint;\n");
+        output.push_str("  return client;\n");
         output.push_str("}\n");
     }
 }
@@ -5131,8 +5229,11 @@ fn collect_request_plan_method_params(plan: &RequestPlan, params: &mut BTreeSet<
 
 fn render_resource_method_operation_body(
     indent: usize,
-    operation_attr_name: &str,
+    service: &RenderedService<'_>,
+    resource: &PlannedResource,
+    operation: &RenderedOperation<'_>,
     endpoint_expr: Option<String>,
+    client_expr: Option<String>,
     result_annotation: &str,
     request_plan: &RequestPlan,
     branchable_params: &[String],
@@ -5148,8 +5249,11 @@ fn render_resource_method_operation_body(
         output.push_str(" === \"string\") {\n");
         output.push_str(&render_resource_method_operation_body(
             indent + 2,
-            operation_attr_name,
+            service,
+            resource,
+            operation,
             endpoint_expr.clone(),
+            client_expr.clone(),
             result_annotation,
             request_plan,
             remaining,
@@ -5159,8 +5263,11 @@ fn render_resource_method_operation_body(
         output.push_str("} else {\n");
         output.push_str(&render_resource_method_operation_body(
             indent + 2,
-            operation_attr_name,
+            service,
+            resource,
+            operation,
             endpoint_expr,
+            client_expr,
             result_annotation,
             request_plan,
             remaining,
@@ -5173,32 +5280,132 @@ fn render_resource_method_operation_body(
 
     let request_expr = render_request_plan_typescript(request_plan);
     let mut output = String::new();
-    if direct_return {
+    output.push_str(&indent_str);
+    output.push_str("const request = ");
+    output.push_str(&request_expr);
+    output.push_str(";\n");
+    let Some(client_expr) = client_expr else {
+        if direct_return {
+            output.push_str(&indent_str);
+            if result_annotation == "void" {
+                output.push_str("await ");
+            } else {
+                output.push_str("return await ");
+            }
+            output.push_str(&typescript_operation_function_name(service, operation));
+            output.push('(');
+            if let Some(endpoint_expr) = &endpoint_expr {
+                output.push_str(endpoint_expr);
+                output.push_str(", ");
+            }
+            output.push_str("request");
+            output.push_str(");\n");
+        } else {
+            output.push_str(&indent_str);
+            output.push_str("const handle = await ");
+            output.push_str(&typescript_operation_function_name(service, operation));
+            output.push('(');
+            if let Some(endpoint_expr) = &endpoint_expr {
+                output.push_str(endpoint_expr);
+                output.push_str(", ");
+            }
+            output.push_str("request");
+            output.push_str(");\n");
+            output.push_str(&indent_str);
+            if result_annotation == "void" {
+                output.push_str("await handle.result();\n");
+            } else {
+                output.push_str("return await handle.result();\n");
+            }
+        }
+        return output;
+    };
+
+    let returns_direct = operation.output_transform_expr.is_some()
+        || operation.output_resource_return.is_some()
+        || operation.output_direct_result;
+    if !returns_direct && direct_return {
         output.push_str(&indent_str);
         if result_annotation == "void" {
             output.push_str("await ");
         } else {
             output.push_str("return await ");
         }
-        output.push_str(operation_attr_name);
-        output.push('(');
-        if let Some(endpoint_expr) = &endpoint_expr {
-            output.push_str(endpoint_expr);
-            output.push_str(", ");
+        render_resource_start_operation(&mut output, service, operation, &client_expr, "request");
+        return output;
+    }
+
+    if returns_direct {
+        output.push_str(&indent_str);
+        output.push_str("const requestProto = ");
+        output.push_str(&typescript_operation_input_expr(operation));
+        output.push_str(";\n");
+        output.push_str(&indent_str);
+        output.push_str("const handle = await ");
+        render_resource_start_operation(
+            &mut output,
+            service,
+            operation,
+            &client_expr,
+            "requestProto",
+        );
+        if let Some(transform_expr) = &operation.output_transform_expr {
+            output.push_str(&indent_str);
+            output.push_str("const result = await handle.result();\n");
+            output.push_str(&indent_str);
+            output.push_str("return ");
+            output.push_str(transform_expr);
+            output.push_str(";\n");
+        } else if let Some(resource_return) = &operation.output_resource_return {
+            output.push_str(&indent_str);
+            output.push_str("const result = await handle.result();\n");
+            output.push_str(&indent_str);
+            output.push_str("return ");
+            output.push_str(&resource_client_bind_function_name_for_type(
+                &resource_return.resource_type_name,
+            ));
+            output.push_str("(\n");
+            output.push_str(&indent_str);
+            output.push_str("  new ");
+            output.push_str(&resource_return.resource_type_name);
+            output.push_str("(\n");
+            for binding in &resource_return.bindings {
+                output.push_str(&indent_str);
+                output.push_str("    ");
+                output.push_str(&resource_return_binding_expr_typescript(binding));
+                output.push_str(",\n");
+            }
+            output.push_str(&indent_str);
+            output.push_str("  ),\n");
+            output.push_str(&indent_str);
+            output.push_str("  ");
+            output.push_str(&client_expr);
+            output.push_str(",\n");
+            output.push_str(&indent_str);
+            output.push_str(");\n");
+        } else if operation.output_direct_result {
+            if let Some(returned_resource) = service
+                .resources
+                .iter()
+                .find(|candidate| candidate.type_name == operation.output_annotation)
+            {
+                output.push_str(&indent_str);
+                output.push_str("const resource = await handle.result();\n");
+                output.push_str(&indent_str);
+                output.push_str("return ");
+                output.push_str(&resource_client_bind_function_name(returned_resource));
+                output.push_str("(resource, ");
+                output.push_str(&client_expr);
+                output.push_str(");\n");
+            } else {
+                output.push_str(&indent_str);
+                output.push_str("return await handle.result();\n");
+            }
         }
-        output.push_str(&request_expr);
-        output.push_str(");\n");
     } else {
         output.push_str(&indent_str);
         output.push_str("const handle = await ");
-        output.push_str(operation_attr_name);
-        output.push('(');
-        if let Some(endpoint_expr) = &endpoint_expr {
-            output.push_str(endpoint_expr);
-            output.push_str(", ");
-        }
-        output.push_str(&request_expr);
-        output.push_str(");\n");
+        render_resource_start_operation(&mut output, service, operation, &client_expr, "request");
         output.push_str(&indent_str);
         if result_annotation == "void" {
             output.push_str("await handle.result();\n");
@@ -5207,6 +5414,26 @@ fn render_resource_method_operation_body(
         }
     }
     output
+}
+
+fn render_resource_start_operation(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    client_expr: &str,
+    input_expr: &str,
+) {
+    output.push_str(client_expr);
+    output.push_str(".startOperation(\n");
+    output.push_str("      ");
+    output.push_str(&service.attr_name);
+    output.push_str(".operations.");
+    output.push_str(&operation.attr_name);
+    output.push_str(",\n");
+    output.push_str("      ");
+    output.push_str(input_expr);
+    output.push_str(",\n");
+    output.push_str("    );\n");
 }
 
 fn render_request_plan_typescript(plan: &RequestPlan) -> String {
@@ -5393,7 +5620,7 @@ fn render_operation_function(
         output.push_str("  const result = await handle.result();\n");
         if service.endpoint.is_none() {
             output.push_str("  return ");
-            output.push_str(&resource_endpoint_bind_function_name_for_type(
+            output.push_str(&resource_client_bind_function_name_for_type(
                 &resource_return.resource_type_name,
             ));
             output.push('(');
@@ -5422,7 +5649,7 @@ fn render_operation_function(
         {
             output.push_str("  const resource = await handle.result();\n");
             output.push_str("  return ");
-            output.push_str(&resource_endpoint_bind_function_name(resource));
+            output.push_str(&resource_client_bind_function_name(resource));
             output.push_str("(resource, endpoint);\n");
         } else {
             output.push_str("  return await handle.result();\n");
@@ -6056,14 +6283,15 @@ interface example-service {
             &SupportFiles::default(),
         )
         .unwrap();
-        assert!(output.contains("public constructor(private readonly endpoint: string)"));
+        assert!(output.contains("public constructor(endpoint: string)"));
+        assert!(!output.contains("private readonly endpoint"));
         assert!(output.contains(
-            "return await exampleService_exampleOperationRequest(this.endpoint, request);"
+            "private readonly client: workflow.NexusServiceClient<typeof exampleService>;"
         ));
-        assert!(
-            output.contains("return await exampleService_pingRequest(this.endpoint, request);")
-        );
-        assert!(output.contains("    endpoint: endpoint,\n"));
+        assert!(output.contains("return await this.client.startOperation("));
+        assert!(output.contains("exampleService.operations.exampleOperation"));
+        assert!(output.contains("exampleService.operations.ping"));
+        assert!(output.contains("      endpoint,\n"));
         assert!(!output.contains("request: void"));
     }
 }

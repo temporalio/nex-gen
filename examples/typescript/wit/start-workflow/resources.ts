@@ -13,10 +13,11 @@ export class StartedWorkflow {
   ) {}
 
   public async cancel(reason?: string): Promise<void> {
-    const handle = await cancelWorkflow({
+    const request = {
       workflowExecution: { workflowId: this.workflowId, runId: this.runId },
       reason: reason,
-    });
+    };
+    const handle = await cancelWorkflow(request);
     await handle.result();
   }
 
@@ -25,17 +26,19 @@ export class StartedWorkflow {
     taskQueue: string,
   ): Promise<StartedWorkflow> {
     if (typeof workflow === "string") {
-      return await restartWorkflow({
+      const request = {
         workflowId: this.workflowId,
         workflow: workflow,
         taskQueue: taskQueue,
-      });
+      };
+      return await restartWorkflow(request);
     } else {
-      return await restartWorkflow({
+      const request = {
         workflowId: this.workflowId,
         workflow: workflow,
         taskQueue: taskQueue,
-      });
+      };
+      return await restartWorkflow(request);
     }
   }
 

@@ -22,7 +22,7 @@ namespace NexGen.DotNetExamples.Tests
             [WorkflowRun]
             public async Task<UserServiceExample.User> RunAsync()
             {
-                var service = new UserServiceExample.UserService("user-service");
+                var service = new UserServiceExample.UserServiceClient("user-service");
                 var user = await service.GetUserAsync(new UserServiceExample.GetUserOptions("user-123"));
                 return await user.UpdateEmailAsync("new@example.com");
             }

@@ -7,6 +7,7 @@ using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Temporalio.Workflows;
 
 namespace NexGen.UserService
 {
@@ -23,24 +24,25 @@ namespace NexGen.UserService
         public string UserId { get; }
         public string Email { get; }
 
-        internal string? NexGenEndpoint { get; set; }
+        internal NexusWorkflowClient<IUserService>? NexGenClient { get; set; }
 
-        internal static User BindEndpoint(User resource, string endpoint)
+        internal static User BindClient(User resource, NexusWorkflowClient<IUserService> client)
         {
-            resource.NexGenEndpoint = endpoint;
+            resource.NexGenClient = client;
             return resource;
         }
 
-        private string RequireNexGenEndpoint()
+        private NexusWorkflowClient<IUserService> RequireNexGenClient()
         {
-            return NexGenEndpoint ?? throw new InvalidOperationException("User methods require a service endpoint.");
+            return NexGenClient ?? throw new InvalidOperationException("User methods require a service endpoint.");
         }
 
         [GeneratedCode("nex-gen", null)]
-        public Task<User> UpdateEmailAsync(string email)
+        public async Task<User> UpdateEmailAsync(string email)
         {
-            var request = new UpdateEmailOptions(UserId, email);
-            return Operations.UpdateEmailAsync(RequireNexGenEndpoint(), request);
+            var request = new UpdateEmailRequest(UserId, email);
+            var result = await RequireNexGenClient().ExecuteNexusOperationAsync<User>(svc => svc.UpdateEmail(request)).ConfigureAwait(true);
+            return User.BindClient(result, RequireNexGenClient());
         }
 
     }

@@ -66,7 +66,7 @@ class UserServiceHandler:
 class UserServiceCallerWorkflow:
     @workflow.run
     async def run(self) -> User:
-        service = user_service.UserService("user-service")
+        service = user_service.UserServiceClient("user-service")
         user = await service.get_user(user_id="user-123")
         return await user.update_email("new@example.com")
 
@@ -81,7 +81,7 @@ def test_generated_metadata() -> None:
     assert isinstance(UPDATE_EMAIL_OPERATION, Operation)
     assert UPDATE_EMAIL_OPERATION.name == "UpdateEmail"
     assert registry[("UserService", "UpdateEmail")] is UPDATE_EMAIL_OPERATION
-    assert hasattr(user_service, "UserService")
+    assert hasattr(user_service, "UserServiceClient")
     assert not hasattr(user_service, "get_user")
     assert not hasattr(user_service, "update_email")
     assert not hasattr(user_service, "User")
