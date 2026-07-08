@@ -255,14 +255,14 @@ pub(crate) fn generate(
     let mut files = BTreeMap::new();
     files.insert(go_api_file_name(api_plan), output);
 
-    // Emit hand-written support fragments (e.g. proto converter functions) as
-    // additional Go files in the same package. Like the Python and TypeScript
-    // backends, all fragments are emitted unconditionally, even when nothing
-    // in the generated code references them.
-    for fragment in support_fragments {
-        let file_name = support_file_name(fragment)?;
-        let contents = rewrite_support_package(&fragment.contents, &package.package_name);
-        files.insert(PathBuf::from(file_name), contents);
+    // Emit hand-written support fragments (e.g. proto converter functions) in
+    // one support file. Like the TypeScript backend, all fragments are emitted
+    // unconditionally, even when nothing in the generated code references them.
+    if !support_fragments.is_empty() {
+        files.insert(
+            PathBuf::from("support.go"),
+            render_support_file(support_fragments, &package.package_name),
+        );
     }
 
     Ok(GeneratedFiles::directory(files))
@@ -330,17 +330,47 @@ fn go_api_file_name(api_plan: &ApiPlan) -> PathBuf {
     PathBuf::from(format!("{stem}.go"))
 }
 
-/// Derives the output file name for a Go support fragment from its source path
-/// (e.g. `go/model_overrides.go` -> `model_overrides.go`).
-fn support_file_name(fragment: &SupportFragmentSpec) -> Result<String> {
-    std::path::Path::new(&fragment.path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_string)
-        .ok_or_else(|| Error::InvalidGeneratedPath {
-            path: std::path::PathBuf::from(&fragment.path),
-            reason: "support fragment path has no file name".to_string(),
-        })
+fn render_support_file(fragments: &[SupportFragmentSpec], package_name: &str) -> String {
+    if let [fragment] = fragments {
+        return rewrite_support_package(&fragment.contents, package_name);
+    }
+
+    let mut prelude = String::new();
+    let mut imports = BTreeSet::new();
+    let mut bodies = Vec::new();
+    for fragment in fragments {
+        let parsed = parse_support_fragment(&fragment.contents);
+        if prelude.is_empty() {
+            prelude = parsed.prelude;
+        } else if !parsed.prelude.trim().is_empty() {
+            bodies.push(parsed.prelude.trim().to_string());
+        }
+        imports.extend(parsed.imports);
+        if !parsed.body.trim().is_empty() {
+            bodies.push(parsed.body.trim().to_string());
+        }
+    }
+
+    let mut output = String::new();
+    if !prelude.trim().is_empty() {
+        output.push_str(prelude.trim_end());
+        output.push('\n');
+    }
+    output.push_str("package ");
+    output.push_str(package_name);
+    output.push_str("\n\n");
+    if !imports.is_empty() {
+        output.push_str("import (\n");
+        for import in imports {
+            output.push('\t');
+            output.push_str(&import);
+            output.push('\n');
+        }
+        output.push_str(")\n\n");
+    }
+    output.push_str(&bodies.join("\n\n"));
+    output.push('\n');
+    output
 }
 
 /// Replaces the `package <name>` declaration in a Go support fragment with the
@@ -360,6 +390,65 @@ fn rewrite_support_package(contents: &str, package_name: &str) -> String {
         result.push('\n');
     }
     result
+}
+
+#[derive(Default)]
+struct ParsedSupportFragment {
+    prelude: String,
+    imports: BTreeSet<String>,
+    body: String,
+}
+
+fn parse_support_fragment(contents: &str) -> ParsedSupportFragment {
+    let lines = contents.lines().collect::<Vec<_>>();
+    let Some(package_index) = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("package "))
+    else {
+        return ParsedSupportFragment {
+            body: contents.to_string(),
+            ..Default::default()
+        };
+    };
+
+    let mut parsed = ParsedSupportFragment {
+        prelude: lines[..package_index].join("\n"),
+        ..Default::default()
+    };
+    let mut index = package_index + 1;
+    skip_blank_lines(&lines, &mut index);
+
+    while index < lines.len() {
+        let line = lines[index].trim_start();
+        if line == "import (" {
+            index += 1;
+            while index < lines.len() && lines[index].trim() != ")" {
+                let import = lines[index].trim();
+                if !import.is_empty() {
+                    parsed.imports.insert(import.to_string());
+                }
+                index += 1;
+            }
+            if index < lines.len() {
+                index += 1;
+            }
+        } else if let Some(import) = line.strip_prefix("import ") {
+            parsed.imports.insert(import.trim().to_string());
+            index += 1;
+        } else {
+            break;
+        }
+        skip_blank_lines(&lines, &mut index);
+    }
+
+    parsed.body = lines[index..].join("\n");
+    parsed
+}
+
+fn skip_blank_lines(lines: &[&str], index: &mut usize) {
+    while *index < lines.len() && lines[*index].trim().is_empty() {
+        *index += 1;
+    }
 }
 
 /// Walks every field and method parameter of a resource to ensure their

@@ -177,7 +177,7 @@ fn cli_generates_go_support_file_from_parameter() {
     // The explicit support file is emitted even though the WIT-direct
     // user-service package performs no proto conversion, and its package
     // declaration is rewritten to the generated package name.
-    let support_contents = fs::read_to_string(output_path.join("custom_support.go")).unwrap();
+    let support_contents = fs::read_to_string(output_path.join("support.go")).unwrap();
     assert!(support_contents.starts_with("package userservice\n"));
     assert!(support_contents.contains("func CustomSupportHook() string"));
     assert!(output_path.join("userservice.go").is_file());
@@ -438,12 +438,12 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     let service_rendered = rendered
         .split("### functionexecution.go")
         .nth(1)
-        .and_then(|contents| contents.split("### model_overrides.go").next())
+        .and_then(|contents| contents.split("### support.go").next())
         .expect("functionexecution.go should be rendered");
     let support_rendered = rendered
-        .split("### model_overrides.go")
+        .split("### support.go")
         .nth(1)
-        .expect("model_overrides.go should be rendered");
+        .expect("support.go should be rendered");
 
     assert!(service_rendered.contains("\"reflect\""));
     assert!(service_rendered.contains("\"runtime\""));
@@ -794,7 +794,7 @@ fn go_type_roundtrip_generates_proto_conversions() {
 
     // The hand-written support fragment is emitted alongside the generated
     // service file with the pointer-in/pointer-out converter contract.
-    assert!(rendered.contains("### model_overrides.go"));
+    assert!(rendered.contains("### support.go"));
     assert!(
         rendered.contains("func retryPolicyToProto(_ workflow.Context, p *temporal.RetryPolicy) (*common.RetryPolicy, error) {")
     );
