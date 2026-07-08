@@ -478,16 +478,25 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
         )
     );
 
-    // Required public function fields accept either a string name or the exact
-    // WIT-derived Go function signature.
+    // Required public function fields accept string names only when the WIT
+    // directive declares an alternate type.
+    assert!(
+        rendered
+            .contains("func ExecuteFunction[FunctionF interface{ ~func(string, bool) string }](")
+    );
     assert!(rendered.contains(
-        "func ExecuteFunction[FunctionF interface{ ~string | func(string, bool) string }]("
+        "func ExecuteCountedFunction[FunctionF interface{ ~func(string, int32) string }]("
     ));
     assert!(rendered.contains(
-        "func ExecuteCountedFunction[FunctionF interface{ ~string | func(string, int32) string }]("
+        "func ExecuteNamedFunction[FunctionF interface{ ~string | func(string, bool) string }]("
     ));
+    assert!(
+        rendered.contains(
+            "func ExecuteVarargsFunction[FunctionF interface{ ~func(...string) string }]("
+        )
+    );
     assert!(rendered.contains(
-        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }]"
+        "func ExecuteNamedVarargsFunction[FunctionF interface{ ~string | func(...string) string }]("
     ));
     assert!(rendered.contains("\tfunction FunctionF,\n"));
     assert!(rendered.contains("\t\tFunction: functionName,\n"));
@@ -497,32 +506,30 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
 
     // Function-adjacent args stay positional and do not enter the options struct.
     assert!(rendered.contains("type ExecuteVarargsFunctionOptions struct {\n}"));
-    assert!(rendered.contains(
-        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }]("
-    ));
+    assert!(
+        rendered.contains(
+            "func ExecuteVarargsFunction[FunctionF interface{ ~func(...string) string }]("
+        )
+    );
     assert!(rendered.contains("\topts ExecuteVarargsFunctionOptions,\n"));
     assert!(rendered.contains("\tfunction FunctionF,\n"));
-    assert!(rendered.contains("\targs []string,\n"));
+    assert!(rendered.contains("\targs ...string,\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
 
-    // Primary varargs function fields also get a trailing-args convenience
-    // wrapper; args are positional only, never options fields.
-    assert!(rendered.contains(
-        "func ExecuteVarargsFunctionWithArgs[FunctionF interface{ ~string | func(...string) string }]("
-    ));
-    assert!(rendered.contains(
-        "func ExecuteNamedVarargsFunctionWithArgs[FunctionF interface{ ~string | func(...string) string }]("
-    ));
-    assert!(rendered.contains("\targs ...string,\n"));
+    // Primary base varargs collapse into the default wrapper; args are
+    // positional only, never options fields.
+    assert!(!rendered.contains("func ExecuteVarargsFunctionWithArgs"));
+    assert!(!rendered.contains("func ExecuteNamedVarargsFunctionWithArgs"));
     assert!(!rendered.contains("cannot specify both positional arguments and args"));
     assert!(!rendered.contains("opts.Args"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
     assert!(rendered.contains(
         "// Input name: The name argument for the function.\n// Input enabled: The enabled argument for the function.\nfunc ExecuteFunction"
     ));
-    assert!(rendered.contains(
-        "// Input args: Arguments for the function.\nfunc ExecuteVarargsFunctionWithArgs"
-    ));
+    assert!(
+        rendered
+            .contains("// Input args: Arguments for the function.\nfunc ExecuteVarargsFunction")
+    );
 
     let user_rendered = generate_to_string_with_inputs(
         nex_gen::language::Language::Go,
@@ -714,9 +721,10 @@ fn go_type_showcase_generates_expected_types() {
         "func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.NexusOperationFuture"
     ));
     // The request struct is always constructed across multiple lines.
-    assert!(rendered.contains(
-        "updateEmailRequest{\n\t\tUserId: opts.UserId,\n\t\tEmail: opts.Email,\n\t}"
-    ));
+    assert!(
+        rendered
+            .contains("updateEmailRequest{\n\t\tUserId: opts.UserId,\n\t\tEmail: opts.Email,\n\t}")
+    );
     // Required and optional public fields share the options struct; optional
     // primitive fields default-pun to nil internally.
     assert!(rendered.contains("type GetUserOptions struct"));
@@ -846,6 +854,9 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     ));
     assert!(rendered.contains(
         "func StartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface{ ~func(workflow.Context, WorkflowArg) WorkflowResult }]("
+    ));
+    assert!(rendered.contains(
+        "type StartWorkflowOptions struct {\n\t// Required.\n\tWorkflowId string\n\t// Required.\n\tTaskQueue string\n\t// Optional.\n\tWorkflowStartDelay time.Duration\n}"
     ));
     assert!(rendered.contains(
         "func StartWorkflowWithArgs(\n\tctx workflow.Context,\n\topts StartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"

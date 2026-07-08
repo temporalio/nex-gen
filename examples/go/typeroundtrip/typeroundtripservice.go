@@ -199,11 +199,14 @@ func RetryPolicyOperation(ctx workflow.Context, opts RetryPolicyOperationOptions
 }
 
 type ActivityOptionsOperationOptions struct {
+	// Optional.
 	TaskQueue string
 	// Required.
-	RetryPolicy            temporal.RetryPolicy
+	RetryPolicy temporal.RetryPolicy
+	// Optional.
 	ScheduleToCloseTimeout time.Duration
-	Priority               *temporal.Priority
+	// Optional.
+	Priority *temporal.Priority
 }
 
 func ActivityOptionsOperation(ctx workflow.Context, opts ActivityOptionsOperationOptions) workflow.NexusOperationFuture {

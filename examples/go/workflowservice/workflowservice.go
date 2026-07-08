@@ -322,36 +322,50 @@ type SignalWithStartWorkflowOptions struct {
 	Id string
 	// Required. Task queue to run the workflow on.
 	TaskQueue string
+	// Optional.
 	// Total workflow execution timeout, including retries and continue-as-new.
 	ExecutionTimeout time.Duration
+	// Optional.
 	// Timeout of a single workflow run.
 	RunTimeout time.Duration
+	// Optional.
 	// Timeout of a single workflow task.
 	TaskTimeout time.Duration
+	// Optional.
 	// Request ID used to deduplicate workflow start requests.
 	RequestId string
+	// Optional.
 	// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
 	IdReusePolicy enums.WorkflowIdReusePolicy
+	// Optional.
 	// Behavior when a workflow is currently running with the same ID. Set to use-existing
 	// for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is
 	// terminate-if-running.
 	IdConflictPolicy enums.WorkflowIdConflictPolicy
+	// Optional.
 	// Retry policy for the workflow.
 	RetryPolicy *temporal.RetryPolicy
+	// Optional.
 	// Cron schedule for recurring workflow executions. See
 	// https://docs.temporal.io/cron-job.
 	CronSchedule string
+	// Optional.
 	// Memo for the workflow.
 	Memo map[string]any
+	// Optional.
 	// Typed search attributes for the workflow.
 	SearchAttributes temporal.SearchAttributes
+	// Optional.
 	// Priority of the workflow execution.
 	Priority *temporal.Priority
+	// Optional.
 	// Override for workflow versioning behavior.
 	VersioningOverride client.VersioningOverride
+	// Optional.
 	// Amount of time to wait before starting the workflow. This does not work with
 	// cron-schedule.
 	StartDelay time.Duration
+	// Optional.
 	UserMetadata
 }
 

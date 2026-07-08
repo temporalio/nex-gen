@@ -4396,7 +4396,9 @@ fn render_file(
                     render_options_struct(&mut output, operation, params);
                     output.push('\n');
                     render_convenience_wrapper(&mut output, operation, params, package, visibility);
-                    if primary_varargs_args_param(params).is_some() {
+                    if primary_varargs_args_param(params).is_some()
+                        && primary_base_varargs_args_param(params).is_none()
+                    {
                         output.push('\n');
                         render_with_args_convenience_wrapper(
                             &mut output,
@@ -5481,7 +5483,7 @@ fn render_options_struct(
     output.push_str(&go_field_name(operation.name));
     output.push_str("Options struct {\n");
     for param in params.iter().filter(|p| param_belongs_in_options(p)) {
-        render_field_doc_comment(output, "\t", param.doc.as_deref(), param.required);
+        render_options_field_doc_comment(output, param);
         output.push('\t');
         if param.embed_in_options {
             output.push_str(param.public_go_type.trim_start_matches('*'));
@@ -5493,6 +5495,17 @@ fn render_options_struct(
         output.push('\n');
     }
     output.push_str("}\n");
+}
+
+fn render_options_field_doc_comment(output: &mut String, param: &RenderedUnpackedParam) {
+    if param.required {
+        render_field_doc_comment(output, "\t", param.doc.as_deref(), true);
+    } else {
+        render_go_doc_comment(output, "\t", "Optional.");
+        if let Some(doc) = param.doc.as_deref() {
+            render_go_doc_comment(output, "\t", doc);
+        }
+    }
 }
 
 fn render_empty_options_struct(output: &mut String, operation: &RenderedOperation<'_>) {
@@ -5604,11 +5617,13 @@ fn go_function_constraint(
             .map(|result| visibility.rewrite_go_expr(&result))
             .unwrap_or_else(|| "any".to_string()),
     };
-    format!(
-        "interface{{ ~string | func({}) {} }}",
-        args.join(", "),
-        result_type
-    )
+    let function_constraint = format!("func({}) {}", args.join(", "), result_type);
+    if let Some(alternate_type) = &function.alternate_type {
+        let alternate_type = go_authored_function_type_expr(alternate_type, package, visibility);
+        format!("interface{{ ~{alternate_type} | {function_constraint} }}")
+    } else {
+        format!("interface{{ ~{function_constraint} }}")
+    }
 }
 
 fn go_unary_function_constraint(
@@ -5697,6 +5712,20 @@ fn primary_varargs_args_param(params: &[RenderedUnpackedParam]) -> Option<&Rende
                 .as_ref()
                 .is_some_and(|function| function == primary_function)
     })
+}
+
+fn primary_base_varargs_args_param(
+    params: &[RenderedUnpackedParam],
+) -> Option<&RenderedUnpackedParam> {
+    if unary_primary_varargs_function_param(params).is_some() {
+        return None;
+    }
+    let args_param = primary_varargs_args_param(params)?;
+    if go_variadic_element_type(&args_param.go_type) == "string" {
+        Some(args_param)
+    } else {
+        None
+    }
 }
 
 fn primary_varargs_function_param(
@@ -6002,6 +6031,7 @@ fn render_convenience_wrapper(
 ) {
     let exported_name = go_field_name(operation.name);
     let unary_primary = unary_primary_varargs_function_param(params);
+    let default_varargs_param = primary_base_varargs_args_param(params);
     let mode = WrapperMode {
         unary_primary,
         with_args_primary_function: None,
@@ -6017,6 +6047,10 @@ fn render_convenience_wrapper(
         params
             .iter()
             .filter(|p| param_is_positional(p))
+            .filter(|p| {
+                !default_varargs_param
+                    .is_some_and(|args_param| args_param.field_name == p.field_name)
+            })
             .filter_map(|p| {
                 Some((
                     positional_param_name(p, mode),
@@ -6024,6 +6058,12 @@ fn render_convenience_wrapper(
                 ))
             }),
     );
+    if let Some(args_param) = default_varargs_param {
+        signature_params.push((
+            "args".to_string(),
+            format!("...{}", go_variadic_element_type(&args_param.go_type)),
+        ));
+    }
 
     render_signature(
         output,
@@ -6037,7 +6077,7 @@ fn render_convenience_wrapper(
     render_operation_wrapper_return_type(output, package);
     output.push_str(" {\n");
 
-    render_operation_request_call(output, operation, params, mode, None);
+    render_operation_request_call(output, operation, params, mode, default_varargs_param);
     output.push_str("}\n");
 }
 

@@ -213,7 +213,8 @@ type Result[T, E any] struct {
 
 type GetUserOptions struct {
 	// Required.
-	UserId           string
+	UserId string
+	// Optional.
 	ConsistencyToken string
 }
 
@@ -287,6 +288,7 @@ func RecordSync(ctx workflow.Context, opts RecordSyncOptions) workflow.NexusOper
 type DeactivateOptions struct {
 	// Required.
 	UserId string
+	// Optional.
 	Reason string
 }
 

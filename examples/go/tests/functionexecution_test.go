@@ -95,8 +95,9 @@ func (s *FunctionExecutionTestSuite) TestExecuteVarargsFunction() {
 		return getFutureResult[functionexecution.ExecuteVarargsFunctionResult](ctx, functionexecution.ExecuteVarargsFunction(
 			ctx,
 			functionexecution.ExecuteVarargsFunctionOptions{},
-			"valid-varargs-function",
-			[]string{"one", "two"},
+			validVarargsFunction,
+			"one",
+			"two",
 		))
 	})
 
@@ -121,7 +122,7 @@ func (s *FunctionExecutionTestSuite) TestExecuteFunctionError() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteFunctionResult](
 			ctx,
-			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, "missing-function", "one", false),
+			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, validFunction, "one", false),
 		)
 	})
 
@@ -191,7 +192,7 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteFunctionResult](
 			ctx,
-			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, "valid-function", "one", true),
+			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, validFunction, "one", true),
 		)
 	})
 
@@ -247,7 +248,8 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunction() {
 			ctx,
 			functionexecution.ExecuteVarargsFunctionOptions{},
 			validVarargsFunction,
-			[]string{"one", "two"},
+			"one",
+			"two",
 		))
 	})
 
@@ -263,36 +265,14 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunction() {
 	s.Equal([]string{"one", "two"}, stringSliceField(s.calls[0].Input, "Args"))
 }
 
-func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunctionWithArgsStringName() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteVarargsFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteVarargsFunctionResult](ctx, functionexecution.ExecuteVarargsFunctionWithArgs(
-			ctx,
-			functionexecution.ExecuteVarargsFunctionOptions{},
-			"valid-varargs-function",
-			"one",
-			"two",
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteVarargsFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("varargs", result.Value)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("ExecuteVarargsFunction", s.calls[0].Operation)
-	s.Equal("valid-varargs-function", stringField(s.calls[0].Input, "Function"))
-	s.Equal([]string{"one", "two"}, stringSliceField(s.calls[0].Input, "Args"))
-}
-
 func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunction() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteNamedVarargsFunctionResult, error) {
 		return getFutureResult[functionexecution.ExecuteNamedVarargsFunctionResult](ctx, functionexecution.ExecuteNamedVarargsFunction(
 			ctx,
 			functionexecution.ExecuteNamedVarargsFunctionOptions{},
 			"named-varargs-function",
-			[]string{"one", "two"},
+			"one",
+			"two",
 		))
 	})
 
@@ -308,9 +288,9 @@ func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunction() {
 	s.Equal([]string{"one", "two"}, stringSliceField(s.calls[0].Input, "Args"))
 }
 
-func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunctionWithArgsFunctionPointer() {
+func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunctionFunctionPointer() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteNamedVarargsFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteNamedVarargsFunctionResult](ctx, functionexecution.ExecuteNamedVarargsFunctionWithArgs(
+		return getFutureResult[functionexecution.ExecuteNamedVarargsFunctionResult](ctx, functionexecution.ExecuteNamedVarargsFunction(
 			ctx,
 			functionexecution.ExecuteNamedVarargsFunctionOptions{},
 			validVarargsFunction,

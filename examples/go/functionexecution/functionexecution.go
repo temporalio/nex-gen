@@ -116,9 +116,7 @@ type ExecuteFunctionOptions struct {
 
 // Input name: The name argument for the function.
 // Input enabled: The enabled argument for the function.
-func ExecuteFunction[FunctionF interface {
-	~string | func(string, bool) string
-}](
+func ExecuteFunction[FunctionF interface{ ~func(string, bool) string }](
 	ctx workflow.Context,
 	opts ExecuteFunctionOptions,
 	function FunctionF,
@@ -149,9 +147,7 @@ type ExecuteCountedFunctionOptions struct {
 
 // Input name: The name argument for the function.
 // Input count: The count argument for the function.
-func ExecuteCountedFunction[FunctionF interface {
-	~string | func(string, int32) string
-}](
+func ExecuteCountedFunction[FunctionF interface{ ~func(string, int32) string }](
 	ctx workflow.Context,
 	opts ExecuteCountedFunctionOptions,
 	function FunctionF,
@@ -214,36 +210,7 @@ type ExecuteVarargsFunctionOptions struct {
 }
 
 // Input args: Arguments for the function.
-func ExecuteVarargsFunction[FunctionF interface {
-	~string | func(...string) string
-}](
-	ctx workflow.Context,
-	opts ExecuteVarargsFunctionOptions,
-	function FunctionF,
-	args []string,
-) workflow.NexusOperationFuture {
-	functionName := ""
-	switch rv := reflect.ValueOf(function); rv.Kind() {
-	case reflect.String:
-		functionName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		functionName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
-	}
-	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
-		Function: functionName,
-		Args:     args,
-	})
-}
-
-// Input args: Arguments for the function.
-func ExecuteVarargsFunctionWithArgs[FunctionF interface {
-	~string | func(...string) string
-}](
+func ExecuteVarargsFunction[FunctionF interface{ ~func(...string) string }](
 	ctx workflow.Context,
 	opts ExecuteVarargsFunctionOptions,
 	function FunctionF,
@@ -272,33 +239,6 @@ type ExecuteNamedVarargsFunctionOptions struct {
 
 // Input args: Arguments for the function.
 func ExecuteNamedVarargsFunction[FunctionF interface {
-	~string | func(...string) string
-}](
-	ctx workflow.Context,
-	opts ExecuteNamedVarargsFunctionOptions,
-	function FunctionF,
-	args []string,
-) workflow.NexusOperationFuture {
-	functionName := ""
-	switch rv := reflect.ValueOf(function); rv.Kind() {
-	case reflect.String:
-		functionName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		functionName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
-	}
-	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
-		Function: functionName,
-		Args:     args,
-	})
-}
-
-// Input args: Arguments for the function.
-func ExecuteNamedVarargsFunctionWithArgs[FunctionF interface {
 	~string | func(...string) string
 }](
 	ctx workflow.Context,

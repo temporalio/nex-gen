@@ -294,7 +294,8 @@ type StartWorkflowOptions struct {
 	// Required.
 	WorkflowId string
 	// Required.
-	TaskQueue          string
+	TaskQueue string
+	// Optional.
 	WorkflowStartDelay time.Duration
 }
 
@@ -368,7 +369,8 @@ type RestartWorkflowOptions struct {
 	// Required.
 	WorkflowId string
 	// Required.
-	TaskQueue          string
+	TaskQueue string
+	// Optional.
 	WorkflowStartDelay time.Duration
 }
 
@@ -441,7 +443,8 @@ func RestartWorkflowWithArgs(
 type CancelWorkflowOptions struct {
 	// Required.
 	WorkflowExecution WorkflowExecution
-	Reason            string
+	// Optional.
+	Reason string
 }
 
 func CancelWorkflow(ctx workflow.Context, opts CancelWorkflowOptions) workflow.NexusOperationFuture {
