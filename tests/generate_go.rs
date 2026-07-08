@@ -551,25 +551,25 @@ fn go_temporal_function_constraints_use_workflow_context_prefix() {
     .unwrap();
 
     assert!(rendered.contains(
-        "func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface{ ~func(workflow.Context, WorkflowArg) WorkflowResult }, SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
+        "func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface{ ~func(workflow.Context, WorkflowArg) WorkflowResult }]("
     ));
-    assert!(rendered.contains(
-        "func SignalWithStartWorkflowWithArgs[SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
-    ));
+    assert!(rendered.contains("func SignalWithStartWorkflowWithArgs("));
+    assert!(!rendered.contains("SignalF interface"));
     assert!(rendered.contains("\topts SignalWithStartWorkflowOptions,\n"));
-    assert!(rendered.contains("\tworkflow WorkflowF,\n"));
-    assert!(rendered.contains("\targ WorkflowArg,\n"));
-    assert!(rendered.contains("\tworkflow any,\n"));
-    assert!(rendered.contains("\tsignal SignalF,\n"));
-    assert!(rendered.contains("\tsignalArgs []any,\n"));
+    assert!(rendered.contains(
+        "\tsignal string,\n\tsignalArg any,\n\tworkflow WorkflowF,\n\targ WorkflowArg,\n"
+    ));
+    assert!(
+        rendered.contains("\tsignal string,\n\tsignalArg any,\n\tworkflow any,\n\targs ...any,\n")
+    );
     assert!(rendered.contains("\targs ...any,\n"));
     assert!(rendered.contains("switch rv := reflect.ValueOf(workflow); rv.Kind()"));
-    assert!(rendered.contains("switch rv := reflect.ValueOf(signal); rv.Kind()"));
+    assert!(!rendered.contains("switch rv := reflect.ValueOf(signal); rv.Kind()"));
     assert!(rendered.contains("\t\tWorkflow: workflowName,\n"));
-    assert!(rendered.contains("\t\tSignal: signalName,\n"));
+    assert!(rendered.contains("\t\tSignal: signal,\n"));
     assert!(rendered.contains("\t\tArgs: []any{arg},\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
-    assert!(rendered.contains("\t\tSignalArgs: signalArgs,\n"));
+    assert!(rendered.contains("\t\tSignalArgs: []any{signalArg},\n"));
 }
 
 #[test]

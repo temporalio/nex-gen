@@ -277,9 +277,13 @@ fn service_uses_generated_future_helpers(service: &RenderedService<'_>) -> bool 
 fn service_uses_function_name_inlining(service: &RenderedService<'_>) -> bool {
     service.operations.iter().any(|operation| {
         operation.unpacked_input.as_ref().is_some_and(|params| {
-            params
-                .iter()
-                .any(|param| param.required && param.function.is_some())
+            params.iter().any(|param| {
+                param.required
+                    && param
+                        .function
+                        .as_ref()
+                        .is_some_and(|function| !is_go_signal_function(function))
+            })
         })
     })
 }
@@ -5536,6 +5540,9 @@ fn function_type_parameters(
     let unary_primary = mode.unary_primary;
     for param in params.iter().filter(|param| param.function.is_some()) {
         let function = param.function.as_ref().unwrap();
+        if is_go_signal_function(function) {
+            continue;
+        }
         if mode
             .with_args_primary_function
             .is_some_and(|primary| primary.field_name == param.field_name)
@@ -5664,6 +5671,66 @@ fn primary_result_type_parameter_name(param: &RenderedUnpackedParam) -> String {
     format!("{}Result", param.field_name)
 }
 
+fn is_go_signal_function(function: &FunctionFieldSpec) -> bool {
+    // Temporal Go signals are name strings with one interface{} input, not
+    // callable definitions. Keep this Go-specific adjustment out of the
+    // language-neutral function metadata.
+    !function.primary
+        && function.args_field == "signal_input"
+        && matches!(
+            function.alternate_type.as_ref(),
+            Some(AuthoredFieldTypeSpec::String)
+        )
+}
+
+fn is_go_signal_param(param: &RenderedUnpackedParam) -> bool {
+    param.function.as_ref().is_some_and(is_go_signal_function)
+}
+
+fn is_go_signal_args_param(param: &RenderedUnpackedParam) -> bool {
+    param
+        .function_args
+        .as_ref()
+        .is_some_and(is_go_signal_function)
+}
+
+fn signal_args_param_for<'a>(
+    params: &'a [RenderedUnpackedParam],
+    signal_param: &RenderedUnpackedParam,
+) -> Option<&'a RenderedUnpackedParam> {
+    let signal_function = signal_param.function.as_ref()?;
+    params
+        .iter()
+        .find(|param| param.function_args.as_ref() == Some(signal_function))
+}
+
+fn ordered_positional_params(params: &[RenderedUnpackedParam]) -> Vec<&RenderedUnpackedParam> {
+    let mut ordered = Vec::new();
+    for param in params.iter().filter(|param| is_go_signal_param(param)) {
+        ordered.push(param);
+        if let Some(args_param) = signal_args_param_for(params, param) {
+            ordered.push(args_param);
+        }
+    }
+    for param in params.iter().filter(|param| param_is_positional(param)) {
+        if !ordered
+            .iter()
+            .any(|ordered_param| ordered_param.field_name == param.field_name)
+        {
+            ordered.push(param);
+        }
+    }
+    ordered
+}
+
+fn signal_args_public_param_name(param: &RenderedUnpackedParam) -> String {
+    param
+        .param_name
+        .strip_suffix("Args")
+        .map(|prefix| format!("{prefix}Arg"))
+        .unwrap_or_else(|| param.param_name.clone())
+}
+
 fn go_variadic_element_type(go_type: &str) -> String {
     go_type
         .strip_prefix("[]")
@@ -5772,7 +5839,11 @@ fn render_operation_wrapper_return_type(output: &mut String, package: &GoPackage
 
 fn render_function_name_inlining(output: &mut String, params: &[RenderedUnpackedParam]) {
     for param in params {
-        if param.function.is_some() {
+        if param
+            .function
+            .as_ref()
+            .is_some_and(|function| !is_go_signal_function(function))
+        {
             render_function_name_inline_assignment(output, param);
         }
     }
@@ -5818,7 +5889,12 @@ fn wrapper_input_docs<'a>(
             if doc.is_empty() {
                 None
             } else {
-                Some((param.param_name.clone(), doc.to_string()))
+                let param_name = if is_go_signal_args_param(param) {
+                    signal_args_public_param_name(param)
+                } else {
+                    param.param_name.clone()
+                };
+                Some((param_name, doc.to_string()))
             }
         })
         .collect()
@@ -5912,7 +5988,11 @@ fn positional_param_type(
     visibility: &GoVisibility,
     params: &[RenderedUnpackedParam],
 ) -> Option<String> {
-    if param.function.is_some() {
+    if is_go_signal_param(param) {
+        Some("string".to_string())
+    } else if is_go_signal_args_param(param) {
+        Some("any".to_string())
+    } else if param.function.is_some() {
         if mode
             .with_args_primary_function
             .is_some_and(|primary| primary.field_name == param.field_name)
@@ -5945,7 +6025,9 @@ fn positional_param_type(
 }
 
 fn positional_param_name(param: &RenderedUnpackedParam, mode: WrapperMode<'_>) -> String {
-    if mode.unary_primary.is_some()
+    if is_go_signal_args_param(param) {
+        signal_args_public_param_name(param)
+    } else if mode.unary_primary.is_some()
         && primary_varargs_args_field_matches(param, mode.unary_primary.unwrap())
     {
         "arg".to_string()
@@ -5972,7 +6054,15 @@ fn request_expr_for_param(
     mode: WrapperMode<'_>,
     with_args_param: Option<&RenderedUnpackedParam>,
 ) -> String {
-    if param.function.is_some() {
+    if is_go_signal_param(param) {
+        param.param_name.clone()
+    } else if is_go_signal_args_param(param) {
+        format!(
+            "{}{{{}}}",
+            param.go_type,
+            signal_args_public_param_name(param)
+        )
+    } else if param.function.is_some() {
         function_name_local_var(param)
     } else if let Some(primary) = mode.unary_primary {
         if primary_varargs_args_field_matches(param, primary) {
@@ -6064,15 +6154,17 @@ fn render_convenience_wrapper(
         with_args_primary_function: None,
     };
     let type_params = function_type_parameters(params, package, visibility, mode);
+    let positional_params = ordered_positional_params(params);
 
-    let input_docs = wrapper_input_docs(params.iter().filter(|p| param_is_positional(p)));
+    let input_docs = wrapper_input_docs(positional_params.iter().copied());
     render_operation_doc_comment(output, operation, &input_docs);
 
     let mut signature_params: Vec<(String, String)> =
         vec![("opts".to_string(), format!("{exported_name}Options"))];
     signature_params.extend(
-        params
+        positional_params
             .iter()
+            .copied()
             .filter(|p| param_is_positional(p))
             .filter(|p| {
                 !default_varargs_param
@@ -6130,10 +6222,12 @@ fn render_with_args_convenience_wrapper(
         },
     };
     let type_params = function_type_parameters(params, package, visibility, mode);
+    let positional_params = ordered_positional_params(params);
 
     let input_docs = wrapper_input_docs(
-        params
+        positional_params
             .iter()
+            .copied()
             .filter(|p| param_is_positional(p) && p.field_name != args_param.field_name)
             .chain(std::iter::once(args_param)),
     );
@@ -6142,8 +6236,9 @@ fn render_with_args_convenience_wrapper(
     let mut signature_params: Vec<(String, String)> =
         vec![("opts".to_string(), format!("{base_exported_name}Options"))];
     signature_params.extend(
-        params
+        positional_params
             .iter()
+            .copied()
             .filter(|p| param_is_positional(p) && p.field_name != args_param.field_name)
             .filter_map(|p| {
                 Some((

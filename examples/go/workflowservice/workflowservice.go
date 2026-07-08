@@ -371,21 +371,19 @@ type SignalWithStartWorkflowOptions struct {
 
 // Signal a workflow, starting it first if needed.
 //
+// Input signalArg: Arguments for the signal.
 // Input args: Arguments for the workflow.
-// Input signalArgs: Arguments for the signal.
 //
 // Returns: A workflow handle to the started workflow.
 func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	~func(workflow.Context, WorkflowArg) WorkflowResult
-}, SignalF interface {
-	~string | func(workflow.Context, ...any) any
 }](
 	ctx workflow.Context,
 	opts SignalWithStartWorkflowOptions,
+	signal string,
+	signalArg any,
 	workflow WorkflowF,
 	arg WorkflowArg,
-	signal SignalF,
-	signalArgs []any,
 ) workflow.NexusOperationFuture {
 	var executionTimeout *time.Duration
 	if opts.ExecutionTimeout != 0 {
@@ -431,25 +429,13 @@ func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF inte
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	signalName := ""
-	switch rv := reflect.ValueOf(signal); rv.Kind() {
-	case reflect.String:
-		signalName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		signalName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
-	}
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               []any{arg},
 		Id:                 opts.Id,
 		TaskQueue:          opts.TaskQueue,
-		Signal:             signalName,
-		SignalArgs:         signalArgs,
+		Signal:             signal,
+		SignalArgs:         []any{signalArg},
 		ExecutionTimeout:   executionTimeout,
 		RunTimeout:         runTimeout,
 		TaskTimeout:        taskTimeout,
@@ -469,18 +455,16 @@ func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF inte
 
 // Signal a workflow, starting it first if needed.
 //
-// Input signalArgs: Arguments for the signal.
+// Input signalArg: Arguments for the signal.
 // Input args: Arguments for the workflow.
 //
 // Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflowWithArgs[SignalF interface {
-	~string | func(workflow.Context, ...any) any
-}](
+func SignalWithStartWorkflowWithArgs(
 	ctx workflow.Context,
 	opts SignalWithStartWorkflowOptions,
+	signal string,
+	signalArg any,
 	workflow any,
-	signal SignalF,
-	signalArgs []any,
 	args ...any,
 ) workflow.NexusOperationFuture {
 	var executionTimeout *time.Duration
@@ -527,25 +511,13 @@ func SignalWithStartWorkflowWithArgs[SignalF interface {
 	default:
 		panic("nex-gen function name requires string or function")
 	}
-	signalName := ""
-	switch rv := reflect.ValueOf(signal); rv.Kind() {
-	case reflect.String:
-		signalName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		signalName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
-	}
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
 		Id:                 opts.Id,
 		TaskQueue:          opts.TaskQueue,
-		Signal:             signalName,
-		SignalArgs:         signalArgs,
+		Signal:             signal,
+		SignalArgs:         []any{signalArg},
 		ExecutionTimeout:   executionTimeout,
 		RunTimeout:         runTimeout,
 		TaskTimeout:        taskTimeout,
