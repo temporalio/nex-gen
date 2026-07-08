@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub(crate) mod dotnet;
+pub(crate) mod go;
 pub(crate) mod json;
 pub(crate) mod proto;
 pub(crate) mod python;
@@ -10,7 +11,6 @@ pub(crate) mod typescript;
 use crate::SupportFiles;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
-use crate::go::{self, GoOptions};
 use crate::language::Language;
 use crate::planning::{
     PlannedSpec, PlannedType, PlannedTypeFamily, PlanningMode, build_api_plan_with_mode,
@@ -226,7 +226,7 @@ fn generate_go_tree(
 ) -> Result<GeneratedFiles> {
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
-            go::generate(&leaf.spec, &support.fragments, &GoOptions::default())
+            go::generate(&leaf.spec, &support.fragments, &go::GoOptions::default())
         }
         ApiSpecNode::Branch(_) => Err(Error::UnsupportedLanguage {
             language: Language::Go,

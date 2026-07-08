@@ -4,7 +4,6 @@ pub mod add_rpc;
 pub mod descriptors;
 pub mod error;
 pub mod generator;
-pub mod go;
 pub mod language;
 pub mod parser;
 pub mod resources;
@@ -18,6 +17,7 @@ use std::process::Command;
 
 use descriptors::DescriptorIndex;
 use error::Result;
+use generator::go;
 use generator::{
     GeneratedFiles, GeneratedOutputLayout, GenerationMode, generate_files_for_tree_with_mode,
 };
