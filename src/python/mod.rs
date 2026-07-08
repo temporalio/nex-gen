@@ -6653,7 +6653,7 @@ interface workflow-service {
     /// @nexus.proto-field "request_id"
     static-summary: string,
     user-metadata: option<user-metadata>,
-    /// @nexus.source "workflow_namespace"
+    /// @nexus.source "workflow_namespace()"
     namespace: option<string>,
     /// @nexus.omit
     workflow-execution-timeout: placeholder,

@@ -252,7 +252,7 @@ interface namespace-service {
   /// @nexus.proto "temporal.api.namespace.v1.NamespaceInfo"
   record namespace-info {
     name: option<string>,
-    /// @nexus.source go="NamespaceData"
+    /// @nexus.source go="NamespaceData()"
     data: option<map<string, string>>,
     /// @nexus.omit
     state: placeholder,
@@ -866,7 +866,7 @@ interface workflow-service {
 
   /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest"
   record cancel-request {
-    /// @nexus.source go="workflowNamespace"
+    /// @nexus.source go="workflowNamespace()"
     namespace: string,
     /// @nexus.omit
     workflow-execution: placeholder,

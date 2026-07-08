@@ -2479,20 +2479,18 @@ fn build_source_call(
         });
     };
 
-    if is_valid_support_helper_call(helper_name) {
-        return Ok(Some(helper_name.to_string()));
-    }
-
-    if !is_valid_support_helper_path(helper_name) {
+    if !is_valid_support_helper_call(helper_name) {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
             context: context.to_string(),
             directive: "@nexus.source".to_string(),
-            reason: format!("invalid support helper name `{helper_name}`"),
+            reason: format!(
+                "invalid support helper call `{helper_name}`; expected `helper()` or `helper(arg, ...)`"
+            ),
         });
     }
 
-    Ok(Some(format!("{helper_name}()")))
+    Ok(Some(helper_name.to_string()))
 }
 
 fn is_valid_support_helper_call(name: &str) -> bool {
@@ -2504,11 +2502,13 @@ fn is_valid_support_helper_call(name: &str) -> bool {
     }
     let helper = &name[..open_paren];
     let args = &name[open_paren + 1..name.len() - 1];
+    let args = args.trim();
     is_valid_support_helper_path(helper)
-        && args
-            .split(',')
-            .map(str::trim)
-            .all(|arg| arg.is_empty() || is_valid_support_helper_path(arg))
+        && (args.is_empty()
+            || args
+                .split(',')
+                .map(str::trim)
+                .all(|arg| !arg.is_empty() && is_valid_support_helper_path(arg)))
 }
 
 fn is_valid_support_helper_name(name: &str) -> bool {
@@ -4238,7 +4238,7 @@ interface workflow-service {
   record request {
     /// @nexus.proto-field "workflow_id_reuse_policy"
     /// @nexus.default "allow-duplicate"
-    /// @nexus.source "workflow_id_reuse_policy"
+    /// @nexus.source "workflow_id_reuse_policy()"
     id-reuse-policy: workflow-id-reuse-policy,
   }
 }
@@ -4280,7 +4280,7 @@ interface workflow-service {
     task-queue: string,
     /// @nexus.proto-field "signal_name"
     signal: signal-function,
-    /// @nexus.source "workflow_namespace"
+    /// @nexus.source "workflow_namespace()"
     namespace: option<string>,
     /// @nexus.omit
     header: placeholder,
@@ -4571,6 +4571,70 @@ interface workflow-service {
                 .field_source("namespace"),
             Some("TemporalWorkflowContext.WorkflowNamespace()")
         );
+    }
+
+    #[test]
+    fn rejects_source_helper_without_call_parentheses() {
+        let wit = r#"
+package temporal:nexus@1.0.0;
+
+world system {
+  export workflow-service;
+}
+
+interface workflow-service {
+  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
+  record request {
+    /// @nexus.source "workflow_namespace"
+    namespace: option<string>,
+  }
+}
+"#;
+
+        let error = ApiSpec::parse_for_language(Language::Python, wit, PathBuf::from("inline.wit"))
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("invalid support helper call `workflow_namespace`")
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_source_helper_calls() {
+        for helper_call in [
+            "workflowNamespace(,ctx)",
+            "workflowNamespace(ctx,)",
+            "workflowNamespace(ctx,,request.id)",
+            "workflowNamespace(ctx",
+        ] {
+            let wit = format!(
+                r#"
+package temporal:nexus@1.0.0;
+
+world system {{
+  export workflow-service;
+}}
+
+interface workflow-service {{
+  /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest"
+  record request {{
+    /// @nexus.source go="{helper_call}"
+    namespace: option<string>,
+  }}
+}}
+"#
+            );
+
+            let error =
+                ApiSpec::parse_for_language(Language::Go, &wit, PathBuf::from("inline.wit"))
+                    .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("invalid support helper call `{helper_call}`"))
+            );
+        }
     }
 
     #[test]
@@ -5218,7 +5282,7 @@ interface workflow-service {
     task-queue: task-queue,
     /// @nexus.proto-field "signal_name"
     signal: signal-function,
-    /// @nexus.source "workflow_namespace"
+    /// @nexus.source "workflow_namespace()"
     namespace: option<string>,
     /// @nexus.omit
     workflow-execution-timeout: placeholder,

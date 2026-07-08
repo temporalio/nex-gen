@@ -240,7 +240,7 @@ interface workflow-service {
     task-queue: task-queue,
     /// @nexus.proto-field "signal_name"
     signal: signal-function,
-    /// @nexus.source "workflow_namespace"
+    /// @nexus.source "workflow_namespace()"
     namespace: option<string>,
   }
 
