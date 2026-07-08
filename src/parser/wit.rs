@@ -1937,16 +1937,7 @@ fn build_source_call(
         });
     };
 
-    if !is_valid_support_helper_path(helper_name) {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.source".to_string(),
-            reason: format!("invalid support helper name `{helper_name}`"),
-        });
-    }
-
-    Ok(Some(format!("{helper_name}()")))
+    Ok(Some(helper_name.to_string()))
 }
 
 fn is_valid_support_helper_name(name: &str) -> bool {
@@ -3887,10 +3878,7 @@ interface workflow-service {
                 .to_type_string(),
             "string"
         );
-        assert_eq!(
-            model.field_source("namespace"),
-            Some("workflow_namespace()")
-        );
+        assert_eq!(model.field_source("namespace"), Some("workflow_namespace"));
 
         let dotnet_model = dotnet
             .record_for_proto(
@@ -4008,7 +3996,7 @@ interface workflow-service {
                 )
                 .unwrap()
                 .field_source("namespace"),
-            Some("workflow_namespace()")
+            Some("workflow_namespace")
         );
         assert_eq!(
             typescript
@@ -4017,7 +4005,7 @@ interface workflow-service {
                 )
                 .unwrap()
                 .field_source("namespace"),
-            Some("workflowNamespace()")
+            Some("workflowNamespace")
         );
         assert_eq!(
             dotnet
@@ -4026,7 +4014,7 @@ interface workflow-service {
                 )
                 .unwrap()
                 .field_source("namespace"),
-            Some("TemporalWorkflowContext.WorkflowNamespace()")
+            Some("TemporalWorkflowContext.WorkflowNamespace")
         );
     }
 

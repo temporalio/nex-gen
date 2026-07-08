@@ -4,6 +4,7 @@ pub mod add_rpc;
 pub mod descriptors;
 pub mod error;
 pub mod generator;
+pub mod go;
 pub mod language;
 pub mod parser;
 pub mod resources;
@@ -126,7 +127,7 @@ pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let use_default_languages = request.languages.is_empty();
     let languages = if use_default_languages {
-        vec![Language::Python, Language::TypeScript]
+        vec![Language::Python, Language::TypeScript, Language::Go]
     } else {
         request.languages.clone()
     };
@@ -287,6 +288,7 @@ fn formatter_command(
 ) -> Result<(&'static str, Vec<String>)> {
     let output_path = output_path.to_string_lossy().into_owned();
     match language {
+        Language::Go => Ok(("gofmt", vec!["-w".to_string(), output_path])),
         Language::Python => Ok((
             "ruff",
             vec![
@@ -412,7 +414,9 @@ fn discover_example_ids(repo_root: &Path, language: Language) -> Result<Vec<Stri
             } else {
                 return None;
             };
-            if example_output_path(repo_root, language, &example_id).is_dir() {
+            if !example_is_excluded(language, &example_id)
+                && example_output_path(repo_root, language, &example_id).is_dir()
+            {
                 Some(example_id)
             } else {
                 None
@@ -421,6 +425,10 @@ fn discover_example_ids(repo_root: &Path, language: Language) -> Result<Vec<Stri
         .collect::<Vec<_>>();
     ids.sort();
     Ok(ids)
+}
+
+fn example_is_excluded(language: Language, example_id: &str) -> bool {
+    language == Language::Go && example_id == "user-service"
 }
 
 fn validate_example_ids(
@@ -664,8 +672,7 @@ fn example_linked_input_paths(repo_root: &Path) -> Vec<PathBuf> {
 
 fn example_output_path(repo_root: &Path, language: Language, example_id: &str) -> PathBuf {
     match language {
-        Language::Python => example_language_root(repo_root, language)
-            .join("wit")
+        Language::Go => example_language_root(repo_root, language)
             .join(example_directory_name(language, example_id)),
         _ => example_language_root(repo_root, language)
             .join("wit")
@@ -691,6 +698,7 @@ fn json_example_output_path(
 
 fn example_directory_name(language: Language, example_id: &str) -> String {
     match language {
+        Language::Go => go::go_package_name(example_id),
         Language::Python => python_example_package_name(example_id),
         _ => example_id.to_string(),
     }
@@ -703,6 +711,11 @@ fn python_example_package_name(example_id: &str) -> String {
 fn format_example_output(repo_root: &Path, language: Language, output_path: &Path) -> Result<()> {
     let (cwd, program, args): (PathBuf, &str, Vec<String>) = match language {
         Language::Dotnet => return Ok(()),
+        Language::Go => (
+            example_language_root(repo_root, language),
+            "gofmt",
+            vec!["-w".to_string(), output_path.to_string_lossy().into_owned()],
+        ),
         Language::Python => (
             example_language_root(repo_root, language),
             "uv",

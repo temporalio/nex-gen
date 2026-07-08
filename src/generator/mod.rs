@@ -10,6 +10,7 @@ pub(crate) mod typescript;
 use crate::SupportFiles;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
+use crate::go::{self, GoOptions};
 use crate::language::Language;
 use crate::planning::{
     PlannedSpec, PlannedType, PlannedTypeFamily, PlanningMode, build_api_plan_with_mode,
@@ -206,6 +207,7 @@ fn generate_files_from_planned_tree(
 ) -> Result<GeneratedFiles> {
     let mut generated = match language {
         Language::Dotnet => dotnet::generate(tree, support, mode),
+        Language::Go => generate_go_tree(tree, support),
         Language::Python => python::generate(tree, support, mode),
         Language::TypeScript => typescript::generate(tree, support, mode),
         language => Err(Error::UnsupportedLanguage { language }),
@@ -216,6 +218,20 @@ fn generate_files_from_planned_tree(
         Vec::new()
     };
     Ok(generated)
+}
+
+fn generate_go_tree(
+    tree: &ApiSpecTree<PlannedTypeFamily>,
+    support: &SupportFiles,
+) -> Result<GeneratedFiles> {
+    match &tree.root {
+        ApiSpecNode::Leaf(leaf) => {
+            go::generate(&leaf.spec, &support.fragments, &GoOptions::default())
+        }
+        ApiSpecNode::Branch(_) => Err(Error::UnsupportedLanguage {
+            language: Language::Go,
+        }),
+    }
 }
 
 fn planning_mode(mode: GenerationMode) -> PlanningMode {
