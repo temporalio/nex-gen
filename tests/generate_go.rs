@@ -445,20 +445,27 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
         .nth(1)
         .expect("model_overrides.go should be rendered");
 
-    assert!(!service_rendered.contains("\"reflect\""));
-    assert!(!service_rendered.contains("\"runtime\""));
-    assert!(!service_rendered.contains("\"strings\""));
+    assert!(service_rendered.contains("\"reflect\""));
+    assert!(service_rendered.contains("\"runtime\""));
+    assert!(service_rendered.contains("\"strings\""));
     assert!(service_rendered.contains("\"errors\""));
     assert!(!service_rendered.contains("func nexGenFunctionName[F any](value F) string"));
-    assert!(!service_rendered.contains("type nexGenNexusOperationFuture struct"));
+    assert!(service_rendered.contains("functionName = strings.TrimSuffix(shortName, \"-fm\")"));
+    assert!(service_rendered.contains("switch rv := reflect.ValueOf(function); rv.Kind()"));
+    assert!(service_rendered.contains("functionName = strings.TrimSuffix(shortName, \"-fm\")"));
+    assert!(!service_rendered.contains("func nexGenWorkflowDataConverter"));
+    assert!(!service_rendered.contains("func getWorkflowDataConverter"));
+    assert!(service_rendered.contains("type nexGenNexusOperationFuture struct"));
+    assert!(service_rendered.contains("func nexGenFailedNexusOperationFuture"));
     assert!(support_rendered.contains("\"reflect\""));
-    assert!(support_rendered.contains("\"runtime\""));
-    assert!(support_rendered.contains("\"strings\""));
-    assert!(support_rendered.contains("\"errors\""));
-    assert!(support_rendered.contains("func nexGenFunctionName[F any](value F) string"));
-    assert!(support_rendered.contains("return strings.TrimSuffix(shortName, \"-fm\")"));
-    assert!(support_rendered.contains("type nexGenNexusOperationFuture struct"));
-    assert!(support_rendered.contains("func nexGenFailedNexusOperationFuture"));
+    assert!(!support_rendered.contains("\"runtime\""));
+    assert!(!support_rendered.contains("\"strings\""));
+    assert!(!support_rendered.contains("\"errors\""));
+    assert!(!support_rendered.contains("func nexGenFunctionName[F any](value F) string"));
+    assert!(!support_rendered.contains("func nexGenWorkflowDataConverter"));
+    assert!(support_rendered.contains("func getWorkflowDataConverter"));
+    assert!(!support_rendered.contains("type nexGenNexusOperationFuture struct"));
+    assert!(!support_rendered.contains("func nexGenFailedNexusOperationFuture"));
 
     // Internal request structs remain wire-shaped.
     assert!(
@@ -483,7 +490,7 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
         "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }]"
     ));
     assert!(rendered.contains("\tfunction FunctionF,\n"));
-    assert!(rendered.contains("\t\tFunction: nexGenFunctionName(function),\n"));
+    assert!(rendered.contains("\t\tFunction: functionName,\n"));
     assert!(!rendered.contains("func ExecuteFunctionWithArgs"));
     assert!(!rendered.contains("func ExecuteCountedFunctionWithArgs"));
     assert!(!rendered.contains("func ExecuteNamedFunctionWithArgs"));
@@ -524,6 +531,7 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     )
     .unwrap();
     assert!(!user_rendered.contains("nexGenFunctionName"));
+    assert!(!user_rendered.contains("getWorkflowDataConverter"));
     assert!(!user_rendered.contains("\"reflect\""));
     assert!(!user_rendered.contains("\"runtime\""));
     assert!(!user_rendered.contains("\"strings\""));
@@ -549,8 +557,10 @@ fn go_temporal_function_constraints_use_workflow_context_prefix() {
     assert!(rendered.contains("\tworkflow WorkflowF,\n"));
     assert!(rendered.contains("\tsignal SignalF,\n"));
     assert!(rendered.contains("\targs ...any,\n"));
-    assert!(rendered.contains("\t\tWorkflow: nexGenFunctionName(workflow),\n"));
-    assert!(rendered.contains("\t\tSignal: nexGenFunctionName(signal),\n"));
+    assert!(rendered.contains("switch rv := reflect.ValueOf(workflow); rv.Kind()"));
+    assert!(rendered.contains("switch rv := reflect.ValueOf(signal); rv.Kind()"));
+    assert!(rendered.contains("\t\tWorkflow: workflowName,\n"));
+    assert!(rendered.contains("\t\tSignal: signalName,\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
     assert!(rendered.contains("\t\tSignalArgs: opts.SignalArgs,\n"));
 }

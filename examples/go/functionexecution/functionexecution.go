@@ -3,9 +3,54 @@ package functionexecution
 
 import (
 	"errors"
+	"reflect"
+	"runtime"
+	"strings"
 
 	"go.temporal.io/sdk/workflow"
 )
+
+// --- Helpers ---
+
+type nexGenNexusOperationFuture struct {
+	operation workflow.NexusOperationFuture
+	result    workflow.Future
+	execution workflow.Future
+	get       func(workflow.Context, any) error
+}
+
+func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
+	if f.get != nil {
+		return f.get(ctx, valuePtr)
+	}
+	return f.result.Get(ctx, valuePtr)
+}
+
+func (f *nexGenNexusOperationFuture) IsReady() bool {
+	if f.operation != nil {
+		return f.operation.IsReady()
+	}
+	return f.result.IsReady()
+}
+
+func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
+	if f.operation != nil {
+		return f.operation.GetNexusOperationExecution()
+	}
+	return f.execution
+}
+
+func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
+	result, resultSettable := workflow.NewFuture(ctx)
+	resultSettable.SetError(err)
+	execution, executionSettable := workflow.NewFuture(ctx)
+	executionSettable.SetError(err)
+	return &nexGenNexusOperationFuture{result: result, execution: execution}
+}
+
+func nexGenFutureResultTypeError() error {
+	return errors.New("nex-gen future result pointer has unexpected type")
+}
 
 // --- Datatypes ---
 
@@ -119,8 +164,20 @@ func ExecuteFunction[FunctionF interface {
 	name string,
 	enabled bool,
 ) workflow.NexusOperationFuture {
+	functionName := ""
+	switch rv := reflect.ValueOf(function); rv.Kind() {
+	case reflect.String:
+		functionName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		functionName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
 	return executeFunction(ctx, executeFunctionRequest{
-		Function: nexGenFunctionName(function),
+		Function: functionName,
 		Name:     name,
 		Enabled:  enabled,
 	})
@@ -136,8 +193,20 @@ func ExecuteCountedFunction[FunctionF interface {
 	name string,
 	count int32,
 ) workflow.NexusOperationFuture {
+	functionName := ""
+	switch rv := reflect.ValueOf(function); rv.Kind() {
+	case reflect.String:
+		functionName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		functionName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
 	return executeCountedFunction(ctx, executeCountedFunctionRequest{
-		Function: nexGenFunctionName(function),
+		Function: functionName,
 		Name:     name,
 		Count:    count,
 	})
@@ -153,8 +222,20 @@ func ExecuteNamedFunction[FunctionF interface {
 	name string,
 	enabled bool,
 ) workflow.NexusOperationFuture {
+	functionName := ""
+	switch rv := reflect.ValueOf(function); rv.Kind() {
+	case reflect.String:
+		functionName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		functionName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
 	return executeNamedFunction(ctx, executeNamedFunctionRequest{
-		Function: nexGenFunctionName(function),
+		Function: functionName,
 		Name:     name,
 		Enabled:  enabled,
 	})
@@ -168,8 +249,20 @@ type ExecuteVarargsFunctionOptions struct {
 func ExecuteVarargsFunction[FunctionF interface {
 	~string | func(...string) string
 }](ctx workflow.Context, function FunctionF, opts ExecuteVarargsFunctionOptions) workflow.NexusOperationFuture {
+	functionName := ""
+	switch rv := reflect.ValueOf(function); rv.Kind() {
+	case reflect.String:
+		functionName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		functionName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
 	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
-		Function: nexGenFunctionName(function),
+		Function: functionName,
 		Args:     opts.Args,
 	})
 }
@@ -189,8 +282,20 @@ func ExecuteVarargsFunctionWithArgs[FunctionF interface {
 	if len(args) == 0 {
 		args = opts.Args
 	}
+	functionName := ""
+	switch rv := reflect.ValueOf(function); rv.Kind() {
+	case reflect.String:
+		functionName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		functionName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
 	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
-		Function: nexGenFunctionName(function),
+		Function: functionName,
 		Args:     args,
 	})
 }
@@ -203,8 +308,20 @@ type ExecuteNamedVarargsFunctionOptions struct {
 func ExecuteNamedVarargsFunction[FunctionF interface {
 	~string | func(...string) string
 }](ctx workflow.Context, function FunctionF, opts ExecuteNamedVarargsFunctionOptions) workflow.NexusOperationFuture {
+	functionName := ""
+	switch rv := reflect.ValueOf(function); rv.Kind() {
+	case reflect.String:
+		functionName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		functionName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
 	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
-		Function: nexGenFunctionName(function),
+		Function: functionName,
 		Args:     opts.Args,
 	})
 }
@@ -224,8 +341,20 @@ func ExecuteNamedVarargsFunctionWithArgs[FunctionF interface {
 	if len(args) == 0 {
 		args = opts.Args
 	}
+	functionName := ""
+	switch rv := reflect.ValueOf(function); rv.Kind() {
+	case reflect.String:
+		functionName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		functionName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
 	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
-		Function: nexGenFunctionName(function),
+		Function: functionName,
 		Args:     args,
 	})
 }

@@ -3,6 +3,9 @@ package temporalsystem
 
 import (
 	"errors"
+	"reflect"
+	"runtime"
+	"strings"
 	"time"
 
 	enums "go.temporal.io/api/enums/v1"
@@ -12,6 +15,48 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
+
+// --- Helpers ---
+
+type nexGenNexusOperationFuture struct {
+	operation workflow.NexusOperationFuture
+	result    workflow.Future
+	execution workflow.Future
+	get       func(workflow.Context, any) error
+}
+
+func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
+	if f.get != nil {
+		return f.get(ctx, valuePtr)
+	}
+	return f.result.Get(ctx, valuePtr)
+}
+
+func (f *nexGenNexusOperationFuture) IsReady() bool {
+	if f.operation != nil {
+		return f.operation.IsReady()
+	}
+	return f.result.IsReady()
+}
+
+func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
+	if f.operation != nil {
+		return f.operation.GetNexusOperationExecution()
+	}
+	return f.execution
+}
+
+func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
+	result, resultSettable := workflow.NewFuture(ctx)
+	resultSettable.SetError(err)
+	execution, executionSettable := workflow.NewFuture(ctx)
+	executionSettable.SetError(err)
+	return &nexGenNexusOperationFuture{result: result, execution: execution}
+}
+
+func nexGenFutureResultTypeError() error {
+	return errors.New("nex-gen future result pointer has unexpected type")
+}
 
 // --- Datatypes ---
 
@@ -328,12 +373,36 @@ func SignalWithStartWorkflow[WorkflowF interface {
 	signal SignalF,
 	opts SignalWithStartWorkflowOptions,
 ) workflow.NexusOperationFuture {
+	workflowName := ""
+	switch rv := reflect.ValueOf(workflow); rv.Kind() {
+	case reflect.String:
+		workflowName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
+	signalName := ""
+	switch rv := reflect.ValueOf(signal); rv.Kind() {
+	case reflect.String:
+		signalName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		signalName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
-		Workflow:           nexGenFunctionName(workflow),
+		Workflow:           workflowName,
 		Args:               opts.Args,
 		Id:                 id,
 		TaskQueue:          taskQueue,
-		Signal:             nexGenFunctionName(signal),
+		Signal:             signalName,
 		SignalArgs:         opts.SignalArgs,
 		ExecutionTimeout:   opts.ExecutionTimeout,
 		RunTimeout:         opts.RunTimeout,
@@ -378,12 +447,36 @@ func SignalWithStartWorkflowWithArgs[WorkflowF interface {
 	if len(args) == 0 {
 		args = opts.Args
 	}
+	workflowName := ""
+	switch rv := reflect.ValueOf(workflow); rv.Kind() {
+	case reflect.String:
+		workflowName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
+	signalName := ""
+	switch rv := reflect.ValueOf(signal); rv.Kind() {
+	case reflect.String:
+		signalName = rv.String()
+	case reflect.Func:
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		signalName = strings.TrimSuffix(shortName, "-fm")
+	default:
+		panic("nex-gen function name requires string or function")
+	}
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
-		Workflow:           nexGenFunctionName(workflow),
+		Workflow:           workflowName,
 		Args:               args,
 		Id:                 id,
 		TaskQueue:          taskQueue,
-		Signal:             nexGenFunctionName(signal),
+		Signal:             signalName,
 		SignalArgs:         opts.SignalArgs,
 		ExecutionTimeout:   opts.ExecutionTimeout,
 		RunTimeout:         opts.RunTimeout,

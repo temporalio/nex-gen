@@ -18,11 +18,8 @@
 package temporalsystem
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
-	"runtime"
-	"strings"
 	"time"
 
 	common "go.temporal.io/api/common/v1"
@@ -36,21 +33,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
-
-func nexGenFunctionName[F any](value F) string {
-	rv := reflect.ValueOf(value)
-	switch rv.Kind() {
-	case reflect.String:
-		return rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		return strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
-	}
-}
 
 // --- Duration (google.protobuf.Duration) ---
 
@@ -167,7 +149,7 @@ func workflowTypeFromProto(_ workflow.Context, t *common.WorkflowType) (*string,
 
 // --- Payload / Payloads (temporal.api.common.v1.Payload[s]) ---
 func payloadToProto(ctx workflow.Context, value any) (*common.Payload, error) {
-	return nexGenWorkflowDataConverter(ctx).ToPayload(value)
+	return getWorkflowDataConverter(ctx).ToPayload(value)
 }
 
 func payloadFromProto(ctx workflow.Context, payload *common.Payload) (any, error) {
@@ -175,7 +157,7 @@ func payloadFromProto(ctx workflow.Context, payload *common.Payload) (any, error
 		return nil, nil
 	}
 	var value any
-	if err := nexGenWorkflowDataConverter(ctx).FromPayload(payload, &value); err != nil {
+	if err := getWorkflowDataConverter(ctx).FromPayload(payload, &value); err != nil {
 		return nil, err
 	}
 	return value, nil
@@ -185,7 +167,7 @@ func payloadsToProto(ctx workflow.Context, values []any) (*common.Payloads, erro
 	if len(values) == 0 {
 		return nil, nil
 	}
-	payloads, err := nexGenWorkflowDataConverter(ctx).ToPayloads(values...)
+	payloads, err := getWorkflowDataConverter(ctx).ToPayloads(values...)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +189,7 @@ func payloadsFromProto(ctx workflow.Context, payloads *common.Payloads) ([]any, 
 	return values, nil
 }
 
-func nexGenWorkflowDataConverter(ctx workflow.Context) converter.DataConverter {
+func getWorkflowDataConverter(ctx workflow.Context) converter.DataConverter {
 	dataConverter := converter.GetDefaultDataConverter()
 	if options := ctx.Value("wfEnvOptions"); options != nil {
 		optionsValue := reflect.ValueOf(options)
@@ -339,44 +321,4 @@ func workflowNamespace(ctx workflow.Context) string {
 		}
 	}
 	return ""
-}
-
-type nexGenNexusOperationFuture struct {
-	operation workflow.NexusOperationFuture
-	result    workflow.Future
-	execution workflow.Future
-	get       func(workflow.Context, any) error
-}
-
-func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
-	if f.get != nil {
-		return f.get(ctx, valuePtr)
-	}
-	return f.result.Get(ctx, valuePtr)
-}
-
-func (f *nexGenNexusOperationFuture) IsReady() bool {
-	if f.operation != nil {
-		return f.operation.IsReady()
-	}
-	return f.result.IsReady()
-}
-
-func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
-	if f.operation != nil {
-		return f.operation.GetNexusOperationExecution()
-	}
-	return f.execution
-}
-
-func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
-	result, resultSettable := workflow.NewFuture(ctx)
-	resultSettable.SetError(err)
-	execution, executionSettable := workflow.NewFuture(ctx)
-	executionSettable.SetError(err)
-	return &nexGenNexusOperationFuture{result: result, execution: execution}
-}
-
-func nexGenFutureResultTypeError() error {
-	return errors.New("nex-gen future result pointer has unexpected type")
 }
