@@ -9,9 +9,5 @@
     "allowImportingTsExtensions": true,
     "esModuleInterop": true
   },
-  "include": [
-    "json_schema/**/*.ts",
-    "wit/**/*.ts",
-    "tests/**/*.ts"
-  ]
+  "include": ["json_schema/**/*.ts", "wit/**/*.ts", "tests/**/*.ts"]
 }

@@ -89,9 +89,7 @@ describe("json-schema chat generated definitions", () => {
       }),
     ).toThrow(ValidationError);
 
-    expect(() => parseMessage({ kind: "image", body: "hi" })).toThrow(
-      ValidationError,
-    );
+    expect(() => parseMessage({ kind: "image", body: "hi" })).toThrow(ValidationError);
 
     expect(() => parseSendMessageOutput({})).toThrow(ValidationError);
   });
