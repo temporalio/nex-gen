@@ -456,6 +456,7 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!service_rendered.contains("\"errors\""));
     assert!(!service_rendered.contains("func nexGenFunctionName[F any](value F) string"));
     assert!(service_rendered.contains("functionName = strings.TrimSuffix(shortName, \"-fm\")"));
+    assert!(service_rendered.contains("rv := reflect.ValueOf(function)"));
     assert!(service_rendered.contains("switch rv := reflect.ValueOf(function); rv.Kind()"));
     assert!(service_rendered.contains("functionName = strings.TrimSuffix(shortName, \"-fm\")"));
     assert!(!service_rendered.contains("func nexGenWorkflowDataConverter"));
@@ -473,21 +474,18 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!support_rendered.contains("type nexGenOperationFuture struct"));
     assert!(!support_rendered.contains("func nexGenFailedOperationFuture"));
 
-    // Internal request structs remain wire-shaped.
-    assert!(
-        rendered
-            .contains("type executeFunctionRequest struct {\n\t// Required.\n\tFunction string")
-    );
-    assert!(
-        rendered.contains(
-            "type executeNamedFunctionRequest struct {\n\t// Required.\n\tFunction string"
-        )
-    );
+    // Internal request structs remain wire-shaped without public API docs.
+    assert!(rendered.contains("type executeFunctionRequest struct {\n\tFunction string"));
+    assert!(rendered.contains("type executeNamedFunctionRequest struct {\n\tFunction string"));
+    assert!(!rendered.contains("type executeFunctionRequest struct {\n\t// Required."));
 
     // Required public function fields accept string names only when the WIT
     // directive declares an alternate type.
     assert!(rendered.contains(
         "func ExecuteFunction(\n\tctx workflow.Context,\n\topts ExecuteFunctionOptions,\n\tfunction func(string, bool) string,\n"
+    ));
+    assert!(rendered.contains(
+        "functionName := \"\"\n\t{\n\t\trv := reflect.ValueOf(function)\n\t\tfullName := runtime.FuncForPC(rv.Pointer()).Name()"
     ));
     assert!(rendered.contains(
         "func ExecuteCountedFunction(\n\tctx workflow.Context,\n\topts ExecuteCountedFunctionOptions,\n\tfunction func(string, int32) string,\n"
@@ -544,6 +542,65 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!user_rendered.contains("\"runtime\""));
     assert!(!user_rendered.contains("\"strings\""));
     assert!(!user_rendered.contains("\"errors\""));
+}
+
+#[test]
+fn go_function_name_locals_do_not_collide_with_authored_parameters() {
+    let temp_dir = unique_output_path("go-function-local-collisions");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("collision-service.wit");
+    fs::write(
+        &wit_path,
+        r#"
+package test:function-local-collisions@1.0.0;
+
+world test-world {
+  export collision-service;
+}
+
+interface functions {
+  type placeholder = string;
+  function-call: func(name: string, enabled: bool) -> string;
+
+  /// @nexus.function
+  ///   signature="function-call"
+  type executable-function = placeholder;
+}
+
+/// @nexus.endpoint "collision-endpoint"
+interface collision-service {
+  use functions.{executable-function};
+
+  record execute-request {
+    function: executable-function,
+    function-name: string,
+    rv: string,
+    full-name: string,
+    elements: string,
+    short-name: string,
+  }
+
+  execute: func(request: execute-request);
+}
+"#,
+    )
+    .unwrap();
+
+    let rendered =
+        generate_to_string_with_inputs(nex_gen::language::Language::Go, &[wit_path], &[]).unwrap();
+
+    // The result local is allocated around the authored `functionName`
+    // parameter. Extraction-only locals can keep simple names because their
+    // block scope safely shadows the authored parameters.
+    assert!(rendered.contains("\tfunctionName2 := \"\"\n\t{"));
+    assert!(rendered.contains("\t\trv := reflect.ValueOf(function)"));
+    assert!(rendered.contains("\t\tfullName := runtime.FuncForPC(rv.Pointer()).Name()"));
+    assert!(rendered.contains("\t\telements := strings.Split(fullName, \".\")"));
+    assert!(rendered.contains("\t\tshortName := elements[len(elements)-1]"));
+    assert!(rendered.contains("\t\tfunctionName2 = strings.TrimSuffix(shortName, \"-fm\")"));
+    assert!(rendered.contains("\t\tFunction: functionName2,"));
+
+    fs::remove_dir_all(temp_dir).unwrap();
 }
 
 #[test]
@@ -1000,18 +1057,18 @@ interface doc-service {
     let rendered =
         generate_to_string_with_inputs(nex_gen::language::Language::Go, &[wit_path], &[]).unwrap();
 
-    // Field docs become godoc comments above the request struct fields.
-    // Required fields fold a `Required.` prefix into the doc comment.
-    // (Assertions use the un-gofmt'd output, so fields are single-space
-    // separated.)
+    // Internal wire structs have no field docs; exported request types retain
+    // their public API docs.
+    assert!(rendered.contains("type greetRequest struct {\n\tName string"));
+    assert!(!rendered.contains("type greetRequest struct {\n\t// Required."));
     assert!(rendered.contains("\t// Required. Name of the person to greet.\n\tName string"));
 
     // Required fields without any doc text get a bare `// Required.` comment.
     assert!(rendered.contains("\t// Required.\n\tMessage string"));
 
-    // The `go=` override wins over the default text, on both the request
-    // struct and the options struct; the default-only doc falls through.
-    assert!(rendered.contains("\t// Go-specific greeting doc.\n\tGreeting *string"));
+    // The `go=` override wins over the default text on the public options
+    // struct; the default-only doc falls through.
+    assert!(rendered.contains("\t// Go-specific greeting doc.\n\tGreeting string"));
     assert!(!rendered.contains("Default greeting doc."));
 
     // Per-language docs without a default or `go=` key are omitted from Go.
@@ -1019,7 +1076,7 @@ interface doc-service {
 
     // Long docs wrap across comment lines.
     assert!(rendered.contains(
-        "\t// A very long field doc that has to be wrapped because it exceeds the generated\n\t// comment line width by a comfortable margin for testing.\n\tSalutation *string"
+        "\t// A very long field doc that has to be wrapped because it exceeds the generated\n\t// comment line width by a comfortable margin for testing.\n\tSalutation string"
     ));
 
     // Operation docs render on the exported convenience wrapper, with the

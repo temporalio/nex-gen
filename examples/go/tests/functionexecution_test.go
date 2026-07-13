@@ -130,6 +130,42 @@ func (s *FunctionExecutionTestSuite) TestExecuteFunctionError() {
 	s.Error(s.env.GetWorkflowError())
 }
 
+func (s *FunctionExecutionTestSuite) TestOperationFutureCanBeSelected() {
+	s.env.OnNexusOperation(
+		functionExecutionServiceName,
+		nexus.NewOperationReference[any, functionexecution.ExecuteFunctionResult]("ExecuteFunction"),
+		mock.Anything,
+		mock.Anything,
+	).Return(
+		&nexus.HandlerStartOperationResultSync[functionexecution.ExecuteFunctionResult]{
+			Value: functionexecution.ExecuteFunctionResult{Value: "selected"},
+		},
+		nil,
+	)
+
+	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
+		future := functionexecution.ExecuteFunction(
+			ctx,
+			functionexecution.ExecuteFunctionOptions{},
+			validFunction,
+			"one",
+			true,
+		)
+		var result functionexecution.ExecuteFunctionResult
+		var resultErr error
+		workflow.NewSelector(ctx).AddFuture(future, func(ready workflow.Future) {
+			resultErr = ready.Get(ctx, &result)
+		}).Select(ctx)
+		return &result, resultErr
+	})
+
+	s.True(s.env.IsWorkflowCompleted())
+	s.NoError(s.env.GetWorkflowError())
+	var result functionexecution.ExecuteFunctionResult
+	s.NoError(s.env.GetWorkflowResult(&result))
+	s.Equal("selected", result.Value)
+}
+
 // --- Integration tests ---
 
 type FunctionExecutionIntegrationSuite struct {

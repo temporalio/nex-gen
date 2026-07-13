@@ -20,44 +20,31 @@ type OperationFuture interface {
 // --- Datatypes ---
 
 type executeFunctionRequest struct {
-	// Required.
 	Function string
-	// Required. The name argument for the function.
-	Name string
-	// Required. The enabled argument for the function.
-	Enabled bool
+	Name     string
+	Enabled  bool
 }
 
 type executeCountedFunctionRequest struct {
-	// Required.
 	Function string
-	// Required. The name argument for the function.
-	Name string
-	// Required. The count argument for the function.
-	Count int32
+	Name     string
+	Count    int32
 }
 
 type executeNamedFunctionRequest struct {
-	// Required.
 	Function string
-	// Required. The name argument for the function.
-	Name string
-	// Required. The enabled argument for the function.
-	Enabled bool
+	Name     string
+	Enabled  bool
 }
 
 type executeVarargsFunctionRequest struct {
-	// Required.
 	Function string
-	// Arguments for the function.
-	Args []string
+	Args     []string
 }
 
 type executeNamedVarargsFunctionRequest struct {
-	// Required.
 	Function string
-	// Arguments for the function.
-	Args []string
+	Args     []string
 }
 
 // --- Operations (internal) ---
@@ -132,16 +119,12 @@ func ExecuteFunction(
 	enabled bool,
 ) OperationFuture {
 	functionName := ""
-	switch rv := reflect.ValueOf(function); rv.Kind() {
-	case reflect.String:
-		functionName = rv.String()
-	case reflect.Func:
+	{
+		rv := reflect.ValueOf(function)
 		fullName := runtime.FuncForPC(rv.Pointer()).Name()
 		elements := strings.Split(fullName, ".")
 		shortName := elements[len(elements)-1]
 		functionName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
 	}
 	return executeFunction(ctx, executeFunctionRequest{
 		Function: functionName,
@@ -163,16 +146,12 @@ func ExecuteCountedFunction(
 	count int32,
 ) OperationFuture {
 	functionName := ""
-	switch rv := reflect.ValueOf(function); rv.Kind() {
-	case reflect.String:
-		functionName = rv.String()
-	case reflect.Func:
+	{
+		rv := reflect.ValueOf(function)
 		fullName := runtime.FuncForPC(rv.Pointer()).Name()
 		elements := strings.Split(fullName, ".")
 		shortName := elements[len(elements)-1]
 		functionName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
 	}
 	return executeCountedFunction(ctx, executeCountedFunctionRequest{
 		Function: functionName,
@@ -196,16 +175,18 @@ func ExecuteNamedFunction[FunctionF interface {
 	enabled bool,
 ) OperationFuture {
 	functionName := ""
-	switch rv := reflect.ValueOf(function); rv.Kind() {
-	case reflect.String:
-		functionName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		functionName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	{
+		switch rv := reflect.ValueOf(function); rv.Kind() {
+		case reflect.String:
+			functionName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			functionName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
 	}
 	return executeNamedFunction(ctx, executeNamedFunctionRequest{
 		Function: functionName,
@@ -225,16 +206,12 @@ func ExecuteVarargsFunction(
 	args ...string,
 ) OperationFuture {
 	functionName := ""
-	switch rv := reflect.ValueOf(function); rv.Kind() {
-	case reflect.String:
-		functionName = rv.String()
-	case reflect.Func:
+	{
+		rv := reflect.ValueOf(function)
 		fullName := runtime.FuncForPC(rv.Pointer()).Name()
 		elements := strings.Split(fullName, ".")
 		shortName := elements[len(elements)-1]
 		functionName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
 	}
 	return executeVarargsFunction(ctx, executeVarargsFunctionRequest{
 		Function: functionName,
@@ -255,16 +232,18 @@ func ExecuteNamedVarargsFunction[FunctionF interface {
 	args ...string,
 ) OperationFuture {
 	functionName := ""
-	switch rv := reflect.ValueOf(function); rv.Kind() {
-	case reflect.String:
-		functionName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		functionName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	{
+		switch rv := reflect.ValueOf(function); rv.Kind() {
+		case reflect.String:
+			functionName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			functionName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
 	}
 	return executeNamedVarargsFunction(ctx, executeNamedVarargsFunctionRequest{
 		Function: functionName,

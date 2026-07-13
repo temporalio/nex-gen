@@ -56,13 +56,9 @@ func nexGenFutureResultTypeError() error {
 // --- Datatypes ---
 
 type startWorkflowRequest struct {
-	// Required.
-	Workflow string
-	// Arguments for the workflow.
-	Args []any
-	// Required.
-	WorkflowId string
-	// Required.
+	Workflow           string
+	Args               []any
+	WorkflowId         string
 	TaskQueue          string
 	WorkflowStartDelay *time.Duration
 }
@@ -103,7 +99,6 @@ func (m startWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.St
 }
 
 type cancelWorkflowRequest struct {
-	// Required.
 	WorkflowExecution WorkflowExecution
 	Reason            *string
 }
@@ -311,16 +306,18 @@ func StartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 		workflowStartDelay = &opts.WorkflowStartDelay
 	}
 	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	{
+		switch rv := reflect.ValueOf(workflow); rv.Kind() {
+		case reflect.String:
+			workflowName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			workflowName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
 	}
 	return startWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
@@ -343,16 +340,18 @@ func StartWorkflowWithArgs(
 		workflowStartDelay = &opts.WorkflowStartDelay
 	}
 	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	{
+		switch rv := reflect.ValueOf(workflow); rv.Kind() {
+		case reflect.String:
+			workflowName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			workflowName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
 	}
 	return startWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
@@ -386,16 +385,18 @@ func RestartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 		workflowStartDelay = &opts.WorkflowStartDelay
 	}
 	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	{
+		switch rv := reflect.ValueOf(workflow); rv.Kind() {
+		case reflect.String:
+			workflowName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			workflowName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
 	}
 	return restartWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
@@ -418,16 +419,18 @@ func RestartWorkflowWithArgs(
 		workflowStartDelay = &opts.WorkflowStartDelay
 	}
 	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	{
+		switch rv := reflect.ValueOf(workflow); rv.Kind() {
+		case reflect.String:
+			workflowName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			workflowName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
 	}
 	return restartWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,

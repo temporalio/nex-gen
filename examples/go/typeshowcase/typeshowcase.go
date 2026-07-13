@@ -16,41 +16,31 @@ type OperationFuture interface {
 // --- Datatypes ---
 
 type getUserRequest struct {
-	// Required.
 	UserId           string
 	ConsistencyToken *string
 }
 
 type updateEmailRequest struct {
-	// Required.
 	UserId string
-	// Required.
-	Email string
+	Email  string
 }
 
 type renameRequest struct {
-	// Required.
-	UserId string
-	// Required.
+	UserId      string
 	DisplayName string
 }
 
 type setProfileRequest struct {
-	// Required.
-	UserId string
-	// Required.
+	UserId  string
 	Profile UserProfile
 }
 
 type recordSyncRequest struct {
-	// Required.
 	UserId string
-	// Required.
 	Report SyncReport
 }
 
 type deactivateRequest struct {
-	// Required.
 	UserId string
 	Reason *string
 }

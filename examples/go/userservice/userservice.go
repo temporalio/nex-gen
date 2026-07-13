@@ -16,15 +16,12 @@ type OperationFuture interface {
 // --- Datatypes ---
 
 type getUserRequest struct {
-	// Required.
 	UserId string
 }
 
 type updateEmailRequest struct {
-	// Required.
 	UserId string
-	// Required.
-	Email string
+	Email  string
 }
 
 // --- Resources ---

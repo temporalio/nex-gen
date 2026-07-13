@@ -4316,7 +4316,7 @@ fn render_file(
         }
         for model in private_models {
             output.push('\n');
-            render_model(&mut output, model, package);
+            render_model(&mut output, model, package, false);
         }
     }
 
@@ -4394,7 +4394,7 @@ fn render_file(
         }
         for model in public_models {
             output.push('\n');
-            render_model(&mut output, model, package);
+            render_model(&mut output, model, package, true);
         }
         for service in services {
             for operation in &service.operations {
@@ -4657,7 +4657,12 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
 ///     Reason string
 /// }
 /// ```
-fn render_model(output: &mut String, model: &RenderedModel, package: &GoPackageContext) {
+fn render_model(
+    output: &mut String,
+    model: &RenderedModel,
+    package: &GoPackageContext,
+    render_field_docs: bool,
+) {
     output.push_str("type ");
     output.push_str(&model.name);
     output.push_str(" struct {\n");
@@ -4666,7 +4671,9 @@ fn render_model(output: &mut String, model: &RenderedModel, package: &GoPackageC
         output.push_str("}\n");
     } else {
         for field in &model.fields {
-            render_field_doc_comment(output, "\t", field.doc.as_deref(), field.required);
+            if render_field_docs {
+                render_field_doc_comment(output, "\t", field.doc.as_deref(), field.required);
+            }
             output.push('\t');
             output.push_str(&field.name);
             output.push(' ');
@@ -5839,39 +5846,96 @@ fn render_function_name_inlining(output: &mut String, params: &[RenderedUnpacked
             .as_ref()
             .is_some_and(|function| !is_go_signal_function(function))
         {
-            render_function_name_inline_assignment(output, param);
+            render_function_name_inline_assignment(output, param, params);
         }
     }
 }
 
-fn render_function_name_inline_assignment(output: &mut String, param: &RenderedUnpackedParam) {
-    let name_var = function_name_local_var(param);
+fn render_function_name_inline_assignment(
+    output: &mut String,
+    param: &RenderedUnpackedParam,
+    params: &[RenderedUnpackedParam],
+) {
+    let name_var = function_name_local_var(param, params);
+    let accepts_alternate_type = param
+        .function
+        .as_ref()
+        .is_some_and(|function| function.alternate_type.is_some());
     output.push('\t');
     output.push_str(&name_var);
     output.push_str(" := \"\"\n");
-    output.push_str("\tswitch rv := reflect.ValueOf(");
+    output.push_str("\t{\n");
+    if accepts_alternate_type {
+        output.push_str("\t\tswitch rv := reflect.ValueOf(");
+    } else {
+        output.push_str("\t\trv := reflect.ValueOf(");
+    }
     output.push_str(&param.param_name);
-    output.push_str("); rv.Kind() {\n");
-    output.push_str("\tcase reflect.String:\n");
-    output.push('\t');
-    output.push('\t');
-    output.push_str(&name_var);
-    output.push_str(" = rv.String()\n");
-    output.push_str("\tcase reflect.Func:\n");
+    if accepts_alternate_type {
+        output.push_str("); rv.Kind() {\n");
+        output.push_str("\t\tcase reflect.String:\n");
+        output.push_str("\t\t\t");
+        output.push_str(&name_var);
+        output.push_str(" = rv.String()\n");
+        output.push_str("\t\tcase reflect.Func:\n");
+        output.push_str("\t");
+    } else {
+        output.push_str(")\n");
+    }
     output.push_str("\t\tfullName := runtime.FuncForPC(rv.Pointer()).Name()\n");
     output.push_str("\t\telements := strings.Split(fullName, \".\")\n");
     output.push_str("\t\tshortName := elements[len(elements)-1]\n");
-    output.push('\t');
-    output.push('\t');
+    output.push_str("\t\t");
+    if accepts_alternate_type {
+        output.push('\t');
+    }
     output.push_str(&name_var);
     output.push_str(" = strings.TrimSuffix(shortName, \"-fm\")\n");
-    output.push_str("\tdefault:\n");
-    output.push_str("\t\tpanic(\"nex-gen function name requires string or function\")\n");
+    if accepts_alternate_type {
+        output.push_str("\t\tdefault:\n");
+        output.push_str("\t\t\tpanic(\"nex-gen function name requires string or function\")\n");
+        output.push_str("\t\t}\n");
+    }
     output.push_str("\t}\n");
 }
 
-fn function_name_local_var(param: &RenderedUnpackedParam) -> String {
-    format!("{}Name", param.param_name)
+fn function_name_local_var(
+    target: &RenderedUnpackedParam,
+    params: &[RenderedUnpackedParam],
+) -> String {
+    let mut occupied = BTreeSet::from([
+        "ctx".to_string(),
+        "opts".to_string(),
+        "arg".to_string(),
+        "args".to_string(),
+    ]);
+    for param in params {
+        occupied.insert(param.param_name.clone());
+        if is_go_signal_args_param(param) {
+            occupied.insert(signal_args_public_param_name(param));
+        }
+    }
+
+    for param in params.iter().filter(|param| {
+        param
+            .function
+            .as_ref()
+            .is_some_and(|function| !is_go_signal_function(function))
+    }) {
+        let base = format!("{}Name", param.param_name);
+        let mut candidate = base.clone();
+        let mut suffix = 2;
+        while occupied.contains(&candidate) {
+            candidate = format!("{base}{suffix}");
+            suffix += 1;
+        }
+        occupied.insert(candidate.clone());
+        if param.field_name == target.field_name {
+            return candidate;
+        }
+    }
+
+    unreachable!("function-name local requested for a non-function parameter")
 }
 
 fn wrapper_input_docs<'a>(
@@ -6046,6 +6110,7 @@ fn primary_varargs_args_field_matches(
 
 fn request_expr_for_param(
     param: &RenderedUnpackedParam,
+    params: &[RenderedUnpackedParam],
     mode: WrapperMode<'_>,
     with_args_param: Option<&RenderedUnpackedParam>,
 ) -> String {
@@ -6058,7 +6123,7 @@ fn request_expr_for_param(
             signal_args_public_param_name(param)
         )
     } else if param.function.is_some() {
-        function_name_local_var(param)
+        function_name_local_var(param, params)
     } else if let Some(primary) = mode.unary_primary {
         if primary_varargs_args_field_matches(param, primary) {
             return format!("{}{{arg}}", param.go_type);
@@ -6094,7 +6159,12 @@ fn render_operation_request_call(
         output.push_str("\t\t");
         output.push_str(&param.field_name);
         output.push_str(": ");
-        output.push_str(&request_expr_for_param(param, mode, with_args_param));
+        output.push_str(&request_expr_for_param(
+            param,
+            params,
+            mode,
+            with_args_param,
+        ));
         output.push_str(",\n");
     }
     output.push_str("\t})\n");
