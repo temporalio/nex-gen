@@ -158,11 +158,7 @@ func payloadsToProto(ctx workflow.Context, values []any) (*common.Payloads, erro
 	if len(values) == 0 {
 		return nil, nil
 	}
-	payloads, err := getWorkflowDataConverter(ctx).ToPayloads(values...)
-	if err != nil {
-		return nil, err
-	}
-	return payloads, nil
+	return getWorkflowDataConverter(ctx).ToPayloads(values...)
 }
 
 func payloadsFromProto(ctx workflow.Context, payloads *common.Payloads) ([]any, error) {
@@ -405,17 +401,5 @@ func workflowStartNamespace(ctx workflow.Context) string {
 // --- Workflow namespace (sourced field) ---
 
 func workflowNamespace(ctx workflow.Context) string {
-	if options := ctx.Value("wfEnvOptions"); options != nil {
-		optionsValue := reflect.ValueOf(options)
-		if optionsValue.Kind() == reflect.Pointer && !optionsValue.IsNil() {
-			optionsValue = optionsValue.Elem()
-		}
-		if optionsValue.Kind() == reflect.Struct {
-			field := optionsValue.FieldByName("Namespace")
-			if field.IsValid() && field.Kind() == reflect.String {
-				return field.String()
-			}
-		}
-	}
-	return ""
+	return workflow.GetInfo(ctx).Namespace
 }
