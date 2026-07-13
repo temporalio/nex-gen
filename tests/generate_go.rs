@@ -735,6 +735,7 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("\t// Required.\n\tDisplayName string"));
     assert!(rendered.contains("\t// Required.\n\tStatus UserStatus"));
     assert!(rendered.contains("\t// Required.\n\tProfile UserProfile"));
+    assert!(rendered.contains("func NewUser("));
 
     // Resource methods
     assert!(rendered.contains(
@@ -902,14 +903,14 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
         "fut := c.ExecuteOperation(ctx, \"StartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains("\tvar result workflowservice.StartWorkflowExecutionResponse\n"));
-    assert!(rendered.contains("\tnamespace := requestProto.GetNamespace()\n"));
-    assert!(rendered.contains("\trunIdValue := result.GetRunId()\n"));
-    assert!(rendered.contains("\tvar runId *string\n"));
-    assert!(rendered.contains("\t\tNamespace: namespace,\n"));
-    assert!(rendered.contains("\t\tWorkflowId: request.WorkflowId,\n"));
-    assert!(rendered.contains("\t\tRunId: runId,\n"));
+    assert!(rendered.contains(
+        "value := NewStartedWorkflow(requestProto.GetNamespace(), request.WorkflowId, result.GetRunId())"
+    ));
     assert!(rendered.contains(
         "type StartedWorkflow struct {\n\t// Required.\n\tNamespace string\n\t// Required.\n\tWorkflowId string\n\t// Optional.\n\tRunId *string\n}"
+    ));
+    assert!(rendered.contains(
+        "func NewStartedWorkflow(namespace string, workflowId string, runId string) *StartedWorkflow"
     ));
     assert!(rendered.contains(
         "fut := c.ExecuteOperation(ctx, \"RestartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
@@ -996,11 +997,10 @@ interface workflow-service {
     )
     .unwrap();
 
-    assert!(rendered.contains("\tnamespace := requestProto.GetNamespace()\n"));
-    assert!(rendered.contains("\tstartedValue := result.GetStarted()\n"));
-    assert!(rendered.contains("\tvar started *bool\n"));
-    assert!(rendered.contains("\tif startedValue != false {\n"));
-    assert!(rendered.contains("\t\tStarted: started,\n"));
+    assert!(
+        rendered
+            .contains("value := NewSignalResult(requestProto.GetNamespace(), result.GetStarted())")
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

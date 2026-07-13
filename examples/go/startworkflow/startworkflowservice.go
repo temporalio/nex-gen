@@ -2,7 +2,7 @@
 package temporalsystem
 
 import (
-	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
@@ -42,8 +42,8 @@ func nexGenFailedOperationFuture(ctx workflow.Context, err error) OperationFutur
 	return &nexGenOperationFuture{get: result.Get, isReady: result.IsReady}
 }
 
-func nexGenFutureResultTypeError() error {
-	return errors.New("nex-gen future result pointer has unexpected type")
+func nexGenFutureResultTypeError(expected string) error {
+	return fmt.Errorf("nex-gen future result pointer has unexpected type: expected %s", expected)
 }
 
 // --- Datatypes ---
@@ -123,6 +123,18 @@ type StartedWorkflow struct {
 	RunId *string
 }
 
+func NewStartedWorkflow(namespace string, workflowId string, runId string) *StartedWorkflow {
+	var runIdPtr *string
+	if runId != "" {
+		runIdPtr = &runId
+	}
+	return &StartedWorkflow{
+		Namespace:  namespace,
+		WorkflowId: workflowId,
+		RunId:      runIdPtr,
+	}
+}
+
 func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) OperationFuture {
 	var reasonPtr *string
 	if reason != "" {
@@ -170,22 +182,14 @@ func startWorkflow(ctx workflow.Context, request startWorkflowRequest) Operation
 		if err := fut.Get(ctx, &result); err != nil {
 			return err
 		}
-		namespace := requestProto.GetNamespace()
-		runIdValue := result.GetRunId()
-		var runId *string
-		if runIdValue != "" {
-			runId = &runIdValue
-		}
-		value := StartedWorkflow{
-			Namespace:  namespace,
-			WorkflowId: request.WorkflowId,
-			RunId:      runId,
-		}
+		value := NewStartedWorkflow(requestProto.GetNamespace(), request.WorkflowId, result.GetRunId())
 		typedValue, ok := valuePtr.(*StartedWorkflow)
 		if !ok {
-			return nexGenFutureResultTypeError()
+			return nexGenFutureResultTypeError("*StartedWorkflow")
 		}
-		*typedValue = value
+		if value != nil {
+			*typedValue = *value
+		}
 		return nil
 	}, isReady: fut.IsReady}
 }
@@ -205,22 +209,14 @@ func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) Operati
 		if err := fut.Get(ctx, &result); err != nil {
 			return err
 		}
-		namespace := requestProto.GetNamespace()
-		runIdValue := result.GetRunId()
-		var runId *string
-		if runIdValue != "" {
-			runId = &runIdValue
-		}
-		value := StartedWorkflow{
-			Namespace:  namespace,
-			WorkflowId: request.WorkflowId,
-			RunId:      runId,
-		}
+		value := NewStartedWorkflow(requestProto.GetNamespace(), request.WorkflowId, result.GetRunId())
 		typedValue, ok := valuePtr.(*StartedWorkflow)
 		if !ok {
-			return nexGenFutureResultTypeError()
+			return nexGenFutureResultTypeError("*StartedWorkflow")
 		}
-		*typedValue = value
+		if value != nil {
+			*typedValue = *value
+		}
 		return nil
 	}, isReady: fut.IsReady}
 }
@@ -246,7 +242,7 @@ func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) Operati
 		}
 		typedValue, ok := valuePtr.(*CancelWorkflowResponse)
 		if !ok {
-			return nexGenFutureResultTypeError()
+			return nexGenFutureResultTypeError("*CancelWorkflowResponse")
 		}
 		*typedValue = value
 		return nil

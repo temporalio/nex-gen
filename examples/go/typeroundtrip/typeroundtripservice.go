@@ -2,7 +2,7 @@
 package temporalsystem
 
 import (
-	"errors"
+	"fmt"
 	"time"
 
 	activity "go.temporal.io/api/activity/v1"
@@ -40,8 +40,8 @@ func nexGenFailedOperationFuture(ctx workflow.Context, err error) OperationFutur
 	return &nexGenOperationFuture{get: result.Get, isReady: result.IsReady}
 }
 
-func nexGenFutureResultTypeError() error {
-	return errors.New("nex-gen future result pointer has unexpected type")
+func nexGenFutureResultTypeError(expected string) error {
+	return fmt.Errorf("nex-gen future result pointer has unexpected type: expected %s", expected)
 }
 
 // --- Operations (internal) ---
@@ -67,7 +67,7 @@ func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) Op
 		}
 		typedValue, ok := valuePtr.(*temporal.RetryPolicy)
 		if !ok {
-			return nexGenFutureResultTypeError()
+			return nexGenFutureResultTypeError("*temporal.RetryPolicy")
 		}
 		if value != nil {
 			*typedValue = *value
@@ -97,7 +97,7 @@ func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) Ope
 		}
 		typedValue, ok := valuePtr.(*ActivityOptions)
 		if !ok {
-			return nexGenFutureResultTypeError()
+			return nexGenFutureResultTypeError("*ActivityOptions")
 		}
 		*typedValue = value
 		return nil

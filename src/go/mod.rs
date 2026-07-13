@@ -220,7 +220,7 @@ pub(crate) fn generate(
         imports.insert("go.temporal.io/sdk/workflow".to_string());
     }
     if needs_future_helpers {
-        imports.insert("errors".to_string());
+        imports.insert("fmt".to_string());
     }
     if needs_function_name_inlining {
         imports.insert("reflect".to_string());
@@ -718,7 +718,6 @@ struct RenderedResourceReturn {
 
 #[derive(Debug)]
 struct RenderedResourceFieldInitializer {
-    field_name: String,
     expr: String,
 }
 
@@ -1705,7 +1704,7 @@ fn build_rendered_resource_return(
                     binding.field_name
                 ),
             })?;
-        let expr = match &binding.source {
+        let (mut expr, constructor_needs_pointer_unpack) = match &binding.source {
             ResolvedResourceBindingSource::RequestField {
                 field_name,
                 proto_field_name,
@@ -1728,9 +1727,9 @@ fn build_rendered_resource_return(
                         reason,
                     })?;
                     local_lines.extend(lines);
-                    expr
+                    (expr, false)
                 } else {
-                    format!("request.{}", go_field_name(field_name))
+                    (format!("request.{}", go_field_name(field_name)), true)
                 }
             }
             ResolvedResourceBindingSource::ResultField {
@@ -1752,14 +1751,28 @@ fn build_rendered_resource_return(
                     reason,
                 })?;
                 local_lines.extend(lines);
-                expr
+                (expr, false)
             }
         };
 
-        field_initializers.push(RenderedResourceFieldInitializer {
-            field_name: go_field_name(&binding.field_name),
-            expr,
-        });
+        let internal_type = resolve_resource_field_kind(&field.kind, field.optional, package);
+        if constructor_needs_pointer_unpack
+            && field.optional
+            && public_default_punning_zero_for_field(&field.kind, &internal_type).is_some()
+        {
+            let value_type = internal_type.trim_start_matches('*');
+            let constructor_value = format!(
+                "{}ConstructorValue",
+                resource_return_local_name(&field.name)
+            );
+            local_lines.push(format!("var {constructor_value} {value_type}"));
+            local_lines.push(format!("if {expr} != nil {{"));
+            local_lines.push(format!("\t{constructor_value} = *{expr}"));
+            local_lines.push("}".to_string());
+            expr = constructor_value;
+        }
+
+        field_initializers.push(RenderedResourceFieldInitializer { expr });
     }
 
     Ok(RenderedResourceReturn {
@@ -1780,7 +1793,11 @@ fn resource_return_proto_field_source(
     let local = resource_return_local_name(&field.name);
     let proto_field = go_proto_field_name(proto_field_name);
     let getter = format!("{source}.Get{proto_field}()");
-    let native_type = resolve_resource_field_kind(&field.kind, field.optional, package);
+    let mut native_type = resolve_resource_field_kind(&field.kind, field.optional, package);
+    if field.optional && public_default_punning_zero_for_field(&field.kind, &native_type).is_some()
+    {
+        native_type = native_type.trim_start_matches('*').to_string();
+    }
 
     match &field.kind {
         PlannedFieldKind::Singular(value) => {
@@ -1912,6 +1929,15 @@ fn resource_return_singular_proto_source(
 ) -> (Vec<String>, String) {
     let converted = (conversion.from_proto)(getter);
     let uses_pointer = field.optional && native_type.starts_with('*');
+
+    if matches!(
+        conversion.kind,
+        GoConversionKind::Scalar | GoConversionKind::Enum
+    ) && !uses_pointer
+        && !conversion.fallible
+    {
+        return (Vec::new(), converted);
+    }
 
     match conversion.kind {
         GoConversionKind::OverrideConverter => {
@@ -4793,28 +4819,94 @@ fn render_resource(
 
     if resource.fields.is_empty() {
         output.push_str("}\n");
-        return;
+    } else {
+        for field in &resource.fields {
+            let field_name = go_field_name(&field.name);
+            let go_type = visibility.rewrite_go_expr(&resolve_resource_field_kind(
+                &field.kind,
+                field.optional,
+                package,
+            ));
+            if field.optional {
+                render_go_doc_comment(output, "\t", "Optional.");
+            } else {
+                render_field_doc_comment(output, "\t", None, true);
+            }
+            output.push('\t');
+            output.push_str(&field_name);
+            output.push(' ');
+            output.push_str(&go_type);
+            output.push('\n');
+        }
+        output.push_str("}\n");
     }
 
-    for field in &resource.fields {
-        let field_name = go_field_name(&field.name);
-        let go_type = visibility.rewrite_go_expr(&resolve_resource_field_kind(
-            &field.kind,
-            field.optional,
-            package,
-        ));
-        if field.optional {
-            render_go_doc_comment(output, "\t", "Optional.");
-        } else {
-            render_field_doc_comment(output, "\t", None, true);
+    output.push_str("\nfunc New");
+    output.push_str(&resource.type_name);
+    output.push('(');
+    for (index, field) in resource.fields.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
         }
-        output.push('\t');
-        output.push_str(&field_name);
+        let param_name = go_unexported_name(&go_field_name(&field.name));
+        let internal_type = resolve_resource_field_kind(&field.kind, field.optional, package);
+        let public_type = if field.optional
+            && public_default_punning_zero_for_field(&field.kind, &internal_type).is_some()
+        {
+            internal_type.trim_start_matches('*').to_string()
+        } else {
+            internal_type
+        };
+        output.push_str(&param_name);
         output.push(' ');
-        output.push_str(&go_type);
-        output.push('\n');
+        output.push_str(&visibility.rewrite_go_expr(&public_type));
     }
-    output.push_str("}\n");
+    output.push_str(") *");
+    output.push_str(&resource.type_name);
+    output.push_str(" {\n");
+    for field in &resource.fields {
+        if !field.optional {
+            continue;
+        }
+        let param_name = go_unexported_name(&go_field_name(&field.name));
+        let internal_type = resolve_resource_field_kind(&field.kind, true, package);
+        if let Some(zero) = public_default_punning_zero_for_field(&field.kind, &internal_type) {
+            output.push_str("\tvar ");
+            output.push_str(&param_name);
+            output.push_str("Ptr ");
+            output.push_str(&visibility.rewrite_go_expr(&internal_type));
+            output.push_str("\n\tif ");
+            output.push_str(&param_name);
+            output.push_str(" != ");
+            output.push_str(&zero);
+            output.push_str(" {\n\t\t");
+            output.push_str(&param_name);
+            output.push_str("Ptr = &");
+            output.push_str(&param_name);
+            output.push_str("\n\t}\n");
+        }
+    }
+    output.push_str("\treturn &");
+    output.push_str(&resource.type_name);
+    output.push_str("{\n");
+    for field in &resource.fields {
+        let param_name = go_unexported_name(&go_field_name(&field.name));
+        let field_name = go_field_name(&field.name);
+        let internal_type = resolve_resource_field_kind(&field.kind, field.optional, package);
+        let value = if field.optional
+            && public_default_punning_zero_for_field(&field.kind, &internal_type).is_some()
+        {
+            format!("{param_name}Ptr")
+        } else {
+            param_name.clone()
+        };
+        output.push_str("\t\t");
+        output.push_str(&field_name);
+        output.push_str(": ");
+        output.push_str(&value);
+        output.push_str(",\n");
+    }
+    output.push_str("\t}\n}\n");
 }
 
 /// Resolves a resource field's [`PlannedFieldKind`] to a Go type expression,
@@ -5213,8 +5305,8 @@ fn render_generated_future_helpers(output: &mut String, package: &GoPackageConte
     output.push_str("\treturn &nexGenOperationFuture{get: result.Get, isReady: result.IsReady}\n");
     output.push_str("}\n\n");
 
-    output.push_str("func nexGenFutureResultTypeError() error {\n");
-    output.push_str("\treturn errors.New(\"nex-gen future result pointer has unexpected type\")\n");
+    output.push_str("func nexGenFutureResultTypeError(expected string) error {\n");
+    output.push_str("\treturn fmt.Errorf(\"nex-gen future result pointer has unexpected type: expected %s\", expected)\n");
     output.push_str("}\n");
 }
 
@@ -5232,7 +5324,9 @@ fn render_future_value_assignment(
     output.push_str(result_type);
     output.push_str(")\n");
     output.push_str("\t\tif !ok {\n");
-    output.push_str("\t\t\treturn nexGenFutureResultTypeError()\n");
+    output.push_str("\t\t\treturn nexGenFutureResultTypeError(\"*");
+    output.push_str(result_type);
+    output.push_str("\")\n");
     output.push_str("\t\t}\n");
     if value_is_pointer {
         output.push_str("\t\tif ");
@@ -5484,7 +5578,7 @@ fn render_operation_function_proto(
             output,
             package,
             &resource_return.resource_type_name,
-            false,
+            true,
             |output| {
                 output.push_str("\t\tvar result ");
                 output.push_str(proto_value_type);
@@ -5497,17 +5591,16 @@ fn render_operation_function_proto(
                     output.push_str(line);
                     output.push('\n');
                 }
-                output.push_str("\t\tvalue := ");
+                output.push_str("\t\tvalue := New");
                 output.push_str(&resource_return.resource_type_name);
-                output.push_str("{\n");
-                for initializer in &resource_return.field_initializers {
-                    output.push_str("\t\t\t");
-                    output.push_str(&initializer.field_name);
-                    output.push_str(": ");
+                output.push('(');
+                for (index, initializer) in resource_return.field_initializers.iter().enumerate() {
+                    if index > 0 {
+                        output.push_str(", ");
+                    }
                     output.push_str(&initializer.expr);
-                    output.push_str(",\n");
                 }
-                output.push_str("\t\t}\n");
+                output.push_str(")\n");
             },
         );
     } else {

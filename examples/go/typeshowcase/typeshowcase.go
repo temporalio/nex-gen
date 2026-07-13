@@ -60,6 +60,16 @@ type User struct {
 	Profile UserProfile
 }
 
+func NewUser(userId string, email string, displayName string, status UserStatus, profile UserProfile) *User {
+	return &User{
+		UserId:      userId,
+		Email:       email,
+		DisplayName: displayName,
+		Status:      status,
+		Profile:     profile,
+	}
+}
+
 func (u *User) UpdateEmail(ctx workflow.Context, email string) OperationFuture {
 	return updateEmail(ctx, updateEmailRequest{UserId: u.UserId, Email: email})
 }

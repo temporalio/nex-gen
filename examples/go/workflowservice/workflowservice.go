@@ -2,7 +2,7 @@
 package temporalsystem
 
 import (
-	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
@@ -44,8 +44,8 @@ func nexGenFailedOperationFuture(ctx workflow.Context, err error) OperationFutur
 	return &nexGenOperationFuture{get: result.Get, isReady: result.IsReady}
 }
 
-func nexGenFutureResultTypeError() error {
-	return errors.New("nex-gen future result pointer has unexpected type")
+func nexGenFutureResultTypeError(expected string) error {
+	return fmt.Errorf("nex-gen future result pointer has unexpected type: expected %s", expected)
 }
 
 // --- Datatypes ---
@@ -191,7 +191,7 @@ func signalWithStartWorkflow(ctx workflow.Context, request signalWithStartWorkfl
 		}
 		typedValue, ok := valuePtr.(*SignalWithStartWorkflowResponse)
 		if !ok {
-			return nexGenFutureResultTypeError()
+			return nexGenFutureResultTypeError("*SignalWithStartWorkflowResponse")
 		}
 		*typedValue = value
 		return nil

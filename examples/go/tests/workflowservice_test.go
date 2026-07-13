@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -252,6 +253,8 @@ func (s *WorkflowServiceIntegrationSuite) TestTransformedFutureRejectsWrongResul
 		var wrongResult string
 		if err := fut.Get(ctx, &wrongResult); err == nil {
 			return errors.New("transformed future accepted wrong result type")
+		} else if message := err.Error(); !strings.Contains(message, "expected *SignalWithStartWorkflowResponse") {
+			return errors.New("future type error did not report the expected type: " + message)
 		}
 		if !fut.IsReady() {
 			return errors.New("completed transformed future is not ready")

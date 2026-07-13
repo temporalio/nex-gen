@@ -44,7 +44,7 @@ func (s *UserServiceTestSuite) TestGetUser() {
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: userservice.User{UserId: "user-123", Email: "alice@example.com"},
+			Value: *userservice.NewUser("user-123", "alice@example.com"),
 		},
 		nil,
 	)
@@ -57,8 +57,7 @@ func (s *UserServiceTestSuite) TestGetUser() {
 	s.NoError(s.env.GetWorkflowError())
 	var result userservice.User
 	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("user-123", result.UserId)
-	s.Equal("alice@example.com", result.Email)
+	s.Equal(*userservice.NewUser("user-123", "alice@example.com"), result)
 }
 
 func (s *UserServiceTestSuite) TestUpdateEmail() {
@@ -69,7 +68,7 @@ func (s *UserServiceTestSuite) TestUpdateEmail() {
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: userservice.User{UserId: "user-123", Email: "new@example.com"},
+			Value: *userservice.NewUser("user-123", "new@example.com"),
 		},
 		nil,
 	)
@@ -85,8 +84,7 @@ func (s *UserServiceTestSuite) TestUpdateEmail() {
 	s.NoError(s.env.GetWorkflowError())
 	var result userservice.User
 	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("user-123", result.UserId)
-	s.Equal("new@example.com", result.Email)
+	s.Equal(*userservice.NewUser("user-123", "new@example.com"), result)
 }
 
 func (s *UserServiceTestSuite) TestUserUpdateEmailMethod() {
@@ -97,13 +95,13 @@ func (s *UserServiceTestSuite) TestUserUpdateEmailMethod() {
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: userservice.User{UserId: "user-123", Email: "updated@example.com"},
+			Value: *userservice.NewUser("user-123", "updated@example.com"),
 		},
 		nil,
 	)
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user := &userservice.User{UserId: "user-123", Email: "old@example.com"}
+		user := userservice.NewUser("user-123", "old@example.com")
 		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "updated@example.com"))
 	})
 
@@ -111,8 +109,7 @@ func (s *UserServiceTestSuite) TestUserUpdateEmailMethod() {
 	s.NoError(s.env.GetWorkflowError())
 	var result userservice.User
 	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("user-123", result.UserId)
-	s.Equal("updated@example.com", result.Email)
+	s.Equal(*userservice.NewUser("user-123", "updated@example.com"), result)
 }
 
 func (s *UserServiceTestSuite) TestGetUserThenUpdateEmail() {
@@ -123,7 +120,7 @@ func (s *UserServiceTestSuite) TestGetUserThenUpdateEmail() {
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: userservice.User{UserId: "user-123", Email: "old@example.com"},
+			Value: *userservice.NewUser("user-123", "old@example.com"),
 		},
 		nil,
 	)
@@ -135,7 +132,7 @@ func (s *UserServiceTestSuite) TestGetUserThenUpdateEmail() {
 		mock.Anything,
 	).Return(
 		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: userservice.User{UserId: "user-123", Email: "new@example.com"},
+			Value: *userservice.NewUser("user-123", "new@example.com"),
 		},
 		nil,
 	)
@@ -152,8 +149,7 @@ func (s *UserServiceTestSuite) TestGetUserThenUpdateEmail() {
 	s.NoError(s.env.GetWorkflowError())
 	var result userservice.User
 	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("user-123", result.UserId)
-	s.Equal("new@example.com", result.Email)
+	s.Equal(*userservice.NewUser("user-123", "new@example.com"), result)
 }
 
 func (s *UserServiceTestSuite) TestGetUserError() {
@@ -196,13 +192,13 @@ func (s *UserServiceIntegrationSuite) SetupTest() {
 	getUser := nexus.NewSyncOperation("GetUser",
 		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (userservice.User, error) {
 			s.calls = append(s.calls, testCall{"GetUser", input})
-			return userservice.User{UserId: stringField(input, "UserId"), Email: "alice@example.com"}, nil
+			return *userservice.NewUser(stringField(input, "UserId"), "alice@example.com"), nil
 		})
 
 	updateEmail := nexus.NewSyncOperation("UpdateEmail",
 		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (userservice.User, error) {
 			s.calls = append(s.calls, testCall{"UpdateEmail", input})
-			return userservice.User{UserId: stringField(input, "UserId"), Email: stringField(input, "Email")}, nil
+			return *userservice.NewUser(stringField(input, "UserId"), stringField(input, "Email")), nil
 		})
 
 	service := nexus.NewService(userServiceName)
@@ -223,8 +219,7 @@ func (s *UserServiceIntegrationSuite) TestGetUser() {
 	s.NoError(s.env.GetWorkflowError())
 	var result userservice.User
 	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("user-123", result.UserId)
-	s.Equal("alice@example.com", result.Email)
+	s.Equal(*userservice.NewUser("user-123", "alice@example.com"), result)
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("GetUser", s.calls[0].Operation)
@@ -242,8 +237,7 @@ func (s *UserServiceIntegrationSuite) TestUpdateEmail() {
 	s.NoError(s.env.GetWorkflowError())
 	var result userservice.User
 	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("user-123", result.UserId)
-	s.Equal("new@example.com", result.Email)
+	s.Equal(*userservice.NewUser("user-123", "new@example.com"), result)
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("UpdateEmail", s.calls[0].Operation)
@@ -251,7 +245,7 @@ func (s *UserServiceIntegrationSuite) TestUpdateEmail() {
 
 func (s *UserServiceIntegrationSuite) TestUserUpdateEmailMethod() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user := &userservice.User{UserId: "user-123", Email: "old@example.com"}
+		user := userservice.NewUser("user-123", "old@example.com")
 		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "updated@example.com"))
 	})
 
@@ -259,8 +253,7 @@ func (s *UserServiceIntegrationSuite) TestUserUpdateEmailMethod() {
 	s.NoError(s.env.GetWorkflowError())
 	var result userservice.User
 	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("user-123", result.UserId)
-	s.Equal("updated@example.com", result.Email)
+	s.Equal(*userservice.NewUser("user-123", "updated@example.com"), result)
 
 	s.Require().Len(s.calls, 1)
 	s.Equal("UpdateEmail", s.calls[0].Operation)
@@ -279,8 +272,7 @@ func (s *UserServiceIntegrationSuite) TestGetUserThenUpdateEmail() {
 	s.NoError(s.env.GetWorkflowError())
 	var result userservice.User
 	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("user-123", result.UserId)
-	s.Equal("new@example.com", result.Email)
+	s.Equal(*userservice.NewUser("user-123", "new@example.com"), result)
 
 	s.Require().Len(s.calls, 2)
 	s.Equal("GetUser", s.calls[0].Operation)
