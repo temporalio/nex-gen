@@ -20,7 +20,7 @@ import (
 // --- Duration (google.protobuf.Duration) ---
 
 func durationToProto(_ workflow.Context, d *time.Duration) (*durationpb.Duration, error) {
-	if d == nil || *d == 0 {
+	if d == nil {
 		return nil, nil
 	}
 	return durationpb.New(*d), nil
@@ -54,7 +54,7 @@ func taskQueueFromProto(_ workflow.Context, tq *taskqueue.TaskQueue) (*string, e
 // --- RetryPolicy (temporal.api.common.v1.RetryPolicy) ---
 
 func retryPolicyToProto(_ workflow.Context, p *temporal.RetryPolicy) (*common.RetryPolicy, error) {
-	if p == nil || retryPolicyIsZero(*p) {
+	if p == nil {
 		return nil, nil
 	}
 	proto := &common.RetryPolicy{
@@ -69,14 +69,6 @@ func retryPolicyToProto(_ workflow.Context, p *temporal.RetryPolicy) (*common.Re
 		proto.MaximumInterval = durationpb.New(p.MaximumInterval)
 	}
 	return proto, nil
-}
-
-func retryPolicyIsZero(p temporal.RetryPolicy) bool {
-	return p.InitialInterval == 0 &&
-		p.BackoffCoefficient == 0 &&
-		p.MaximumInterval == 0 &&
-		p.MaximumAttempts == 0 &&
-		len(p.NonRetryableErrorTypes) == 0
 }
 
 func retryPolicyFromProto(_ workflow.Context, p *common.RetryPolicy) (*temporal.RetryPolicy, error) {
@@ -100,7 +92,7 @@ func retryPolicyFromProto(_ workflow.Context, p *common.RetryPolicy) (*temporal.
 // --- Priority (temporal.api.common.v1.Priority) ---
 
 func priorityToProto(_ workflow.Context, p *temporal.Priority) (*common.Priority, error) {
-	if p == nil || *p == (temporal.Priority{}) {
+	if p == nil {
 		return nil, nil
 	}
 	return &common.Priority{
@@ -155,9 +147,6 @@ func payloadFromProto(ctx workflow.Context, payload *common.Payload) (any, error
 }
 
 func payloadsToProto(ctx workflow.Context, values []any) (*common.Payloads, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
 	return getWorkflowDataConverter(ctx).ToPayloads(values...)
 }
 
@@ -233,7 +222,7 @@ func memoFromProto(ctx workflow.Context, memo *common.Memo) (map[string]any, err
 // --- SearchAttributes (temporal.api.common.v1.SearchAttributes) ---
 
 func searchAttributesToProto(_ workflow.Context, searchAttributes *temporal.SearchAttributes) (*common.SearchAttributes, error) {
-	if searchAttributes == nil || searchAttributes.Size() == 0 {
+	if searchAttributes == nil {
 		return nil, nil
 	}
 

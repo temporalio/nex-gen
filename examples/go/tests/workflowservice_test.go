@@ -8,8 +8,10 @@ import (
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/suite"
+	common "go.temporal.io/api/common/v1"
 	enums "go.temporal.io/api/enums/v1"
 	workflowservicepb "go.temporal.io/api/workflowservice/v1"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
@@ -21,6 +23,17 @@ const workflowServiceName = "temporal.api.workflowservice.v1.WorkflowService"
 
 func signalWithStartWorkflow(ctx workflow.Context, input string) string {
 	return input
+}
+
+type emptyPayloadsDataConverter struct {
+	converter.DataConverter
+}
+
+func (c emptyPayloadsDataConverter) ToPayloads(values ...interface{}) (*common.Payloads, error) {
+	if len(values) == 0 {
+		return &common.Payloads{}, nil
+	}
+	return c.DataConverter.ToPayloads(values...)
 }
 
 type WorkflowServiceIntegrationSuite struct {
@@ -75,6 +88,10 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowEncodesSing
 	s.Len(request.GetSignalInput().GetPayloads(), 1)
 	s.Require().NotNil(request.GetInput())
 	s.Len(request.GetInput().GetPayloads(), 1)
+	s.Require().NotNil(request.RetryPolicy)
+	s.Require().NotNil(request.Priority)
+	s.Require().NotNil(request.SearchAttributes)
+	s.Empty(request.SearchAttributes.IndexedFields)
 }
 
 func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowWithArgsEncodesNilSignalArg() {
@@ -104,6 +121,29 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowWithArgsEnc
 	s.Len(request.GetSignalInput().GetPayloads(), 1)
 	s.Require().NotNil(request.GetInput())
 	s.Len(request.GetInput().GetPayloads(), 2)
+}
+
+func (s *WorkflowServiceIntegrationSuite) TestEmptyPayloadsAreDelegatedToDataConverter() {
+	s.env.SetDataConverter(emptyPayloadsDataConverter{converter.GetDefaultDataConverter()})
+	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*ws.SignalWithStartWorkflowResponse, error) {
+		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
+			ID:        "workflow-id",
+			TaskQueue: "task-queue",
+		})
+		return getFutureResult[ws.SignalWithStartWorkflowResponse](ctx, ws.SignalWithStartWorkflowWithArgs(
+			ctx,
+			ws.SignalWithStartWorkflowOptions{},
+			"wake-up",
+			"signal-value",
+			"ExampleWorkflow",
+		))
+	})
+
+	s.True(s.env.IsWorkflowCompleted())
+	s.NoError(s.env.GetWorkflowError())
+	s.Require().Len(s.calls, 1)
+	s.NotNil(s.calls[0].Input)
+	s.Empty(s.calls[0].Input.Payloads)
 }
 
 func (s *WorkflowServiceIntegrationSuite) TestWorkflowContextOptionsAreReadFromContext() {
