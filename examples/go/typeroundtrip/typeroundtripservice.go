@@ -107,11 +107,14 @@ func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) Ope
 // --- Operations (public API) ---
 
 type ActivityOptions struct {
+	// Optional.
 	TaskQueue *string
 	// Required.
-	RetryPolicy            temporal.RetryPolicy
+	RetryPolicy temporal.RetryPolicy
+	// Optional.
 	ScheduleToCloseTimeout *time.Duration
-	Priority               *temporal.Priority
+	// Optional.
+	Priority *temporal.Priority
 }
 
 func (m ActivityOptions) toProto(ctx workflow.Context) (*activity.ActivityOptions, error) {

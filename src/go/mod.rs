@@ -4512,8 +4512,16 @@ fn render_field_doc_comment(output: &mut String, indent: &str, doc: Option<&str>
             render_go_doc_comment(output, indent, &combined);
         }
         (true, None) => render_go_doc_comment(output, indent, "Required."),
-        (false, Some(doc)) => render_go_doc_comment(output, indent, doc),
-        (false, None) => {}
+        (false, Some(doc)) => {
+            let trimmed = doc.trim();
+            let combined = if trimmed.is_empty() {
+                "Optional.".to_string()
+            } else {
+                format!("Optional. {trimmed}")
+            };
+            render_go_doc_comment(output, indent, &combined);
+        }
+        (false, None) => render_go_doc_comment(output, indent, "Optional."),
     }
 }
 

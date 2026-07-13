@@ -254,7 +254,8 @@ func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) Operati
 type WorkflowExecution struct {
 	// Required.
 	WorkflowId string
-	RunId      *string
+	// Optional.
+	RunId *string
 }
 
 func (m WorkflowExecution) toProto(ctx workflow.Context) (*common.WorkflowExecution, error) {

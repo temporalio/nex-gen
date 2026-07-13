@@ -201,12 +201,12 @@ func signalWithStartWorkflow(ctx workflow.Context, request signalWithStartWorkfl
 // --- Operations (public API) ---
 
 type UserMetadata struct {
-	// Single-line fixed summary for the workflow execution that may appear in UI and CLI.
-	// This can be in single-line Temporal Markdown format.
+	// Optional. Single-line fixed summary for the workflow execution that may appear in UI
+	// and CLI. This can be in single-line Temporal Markdown format.
 	StaticSummary any
-	// General fixed details for the workflow execution that may appear in UI and CLI. This
-	// can be in Temporal Markdown format and can span multiple lines. This value is fixed
-	// on the workflow execution and cannot be updated.
+	// Optional. General fixed details for the workflow execution that may appear in UI and
+	// CLI. This can be in Temporal Markdown format and can span multiple lines. This value
+	// is fixed on the workflow execution and cannot be updated.
 	StaticDetails any
 }
 

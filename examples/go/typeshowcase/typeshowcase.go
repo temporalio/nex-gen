@@ -173,7 +173,8 @@ type UserProfile struct {
 	SyncState SyncState
 	// Required.
 	NotificationTarget NotificationTarget
-	Address            *PostalAddress
+	// Optional.
+	Address *PostalAddress
 }
 
 type SyncState struct {
@@ -189,7 +190,8 @@ type PostalAddress struct {
 	// Required.
 	City string
 	// Required.
-	Country     string
+	Country string
+	// Optional.
 	Coordinates *Coordinates
 }
 
@@ -210,13 +212,17 @@ type SyncReport struct {
 }
 
 type Tuple2[T1, T2 any] struct {
-	First  T1
+	// Optional.
+	First T1
+	// Optional.
 	Second T2
 }
 
 type Result[T, E any] struct {
+	// Optional.
 	Result T
-	Error  E
+	// Optional.
+	Error E
 }
 
 type GetUserOptions struct {

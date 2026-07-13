@@ -831,6 +831,11 @@ fn go_type_roundtrip_generates_proto_conversions() {
     assert!(rendered
         .contains("func (m ActivityOptions) toProto(ctx workflow.Context) (*activity.ActivityOptions, error) {"));
     assert!(rendered.contains("message := &activity.ActivityOptions{}"));
+    assert!(
+        rendered.contains("type ActivityOptions struct {\n\t// Optional.\n\tTaskQueue *string")
+    );
+    assert!(rendered.contains("\t// Optional.\n\tScheduleToCloseTimeout *time.Duration"));
+    assert!(rendered.contains("\t// Optional.\n\tPriority *temporal.Priority"));
     // Optional override fields pass the pointer straight to the nil-safe
     // converter; the required field passes its address.
     assert!(rendered.contains("converted, err := retryPolicyToProto(ctx, &m.RetryPolicy)"));
@@ -1074,8 +1079,8 @@ interface doc-service {
     assert!(rendered.contains("\t// Required.\n\tMessage string"));
 
     // The `go=` override wins over the default text on the public options
-    // struct; the default-only doc falls through.
-    assert!(rendered.contains("\t// Go-specific greeting doc.\n\tGreeting string"));
+    // type; the default-only doc falls through.
+    assert!(rendered.contains("\t// Optional.\n\t// Go-specific greeting doc.\n\tGreeting string"));
     assert!(!rendered.contains("Default greeting doc."));
 
     // Per-language docs without a default or `go=` key are omitted from Go.
@@ -1083,7 +1088,7 @@ interface doc-service {
 
     // Long docs wrap across comment lines.
     assert!(rendered.contains(
-        "\t// A very long field doc that has to be wrapped because it exceeds the generated\n\t// comment line width by a comfortable margin for testing.\n\tSalutation string"
+        "\t// Optional.\n\t// A very long field doc that has to be wrapped because it exceeds the generated\n\t// comment line width by a comfortable margin for testing.\n\tSalutation string"
     ));
 
     // Operation docs render on the exported convenience wrapper, with the
