@@ -929,6 +929,12 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     assert!(rendered.contains(
         "func RestartWorkflowWithArgs(\n\tctx workflow.Context,\n\topts RestartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
     ));
+    assert!(rendered.contains(
+        "func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) OperationFuture"
+    ));
+    assert!(rendered.contains(
+        "return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})"
+    ));
     assert!(rendered.contains("\t\tArgs: []any{arg},\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
     assert!(!rendered.contains("opts.Args"));

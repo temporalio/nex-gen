@@ -4994,6 +4994,12 @@ fn render_resource_methods(
                         )
                     })
                     .collect::<Vec<_>>();
+                let primary_varargs_function = method.params.iter().find(|param| {
+                    param.function.as_ref().is_some_and(|function| {
+                        function.primary
+                            && matches!(function.args, FunctionArgsSpec::Varargs { .. })
+                    })
+                });
 
                 // Method signature: func (u *Type) Method(ctx workflow.Context, params...) (return)
                 output.push_str("func (u *");
@@ -5002,23 +5008,62 @@ fn render_resource_methods(
                 output.push_str(&method_name);
                 output.push_str("(ctx ");
                 output.push_str(&package.workflow_context_type());
-                for (_authored_name, param_name, _internal_type, public_type, _zero) in
-                    &rendered_params
+                for (index, (_authored_name, param_name, _internal_type, public_type, _zero)) in
+                    rendered_params.iter().enumerate()
                 {
+                    if primary_varargs_function
+                        .is_some_and(|primary| primary.name == method.params[index].name)
+                    {
+                        continue;
+                    }
                     output.push_str(", ");
                     output.push_str(param_name);
                     output.push(' ');
                     output.push_str(&visibility.rewrite_go_expr(public_type));
+                }
+                if let Some(primary) = primary_varargs_function {
+                    output.push_str(", ");
+                    output.push_str(&go_unexported_name(&go_field_name(&primary.name)));
+                    output.push_str(" any, args ...any");
                 }
                 output.push_str(") ");
 
                 render_operation_future_return_type(output, package);
                 output.push_str(" {\n");
 
+                let function_name_var = primary_varargs_function.map(|primary| {
+                    let param_name = go_unexported_name(&go_field_name(&primary.name));
+                    let mut occupied = rendered_params
+                        .iter()
+                        .map(|(_, name, _, _, _)| name.clone())
+                        .chain(["ctx".to_string(), "args".to_string()])
+                        .collect::<BTreeSet<_>>();
+                    let base = format!("{param_name}Name");
+                    let mut candidate = base.clone();
+                    let mut suffix = 2;
+                    while occupied.contains(&candidate) {
+                        candidate = format!("{base}{suffix}");
+                        suffix += 1;
+                    }
+                    occupied.insert(candidate.clone());
+                    render_function_value_name_assignment(
+                        output,
+                        &param_name,
+                        &candidate,
+                        primary.function.as_ref().unwrap(),
+                    );
+                    candidate
+                });
+
                 let method_param_sources = rendered_params
                     .iter()
                     .map(
                         |(authored_name, param_name, internal_type, _public_type, zero)| {
+                            if primary_varargs_function
+                                .is_some_and(|primary| primary.name == *authored_name)
+                            {
+                                return (authored_name.clone(), function_name_var.clone().unwrap());
+                            }
                             if let Some(zero) = zero {
                                 let pointer_name = format!("{param_name}Ptr");
                                 output.push_str("\tvar ");
@@ -5044,7 +5089,7 @@ fn render_resource_methods(
                     .collect::<BTreeMap<_, _>>();
 
                 // Body: construct request and delegate
-                let request_expr = render_request_plan(
+                let mut request_expr = render_request_plan(
                     request_plan,
                     go_field_name,
                     |name, value| format!("{name}: {value}"),
@@ -5070,6 +5115,16 @@ fn render_resource_methods(
                             .unwrap_or_else(|| go_unexported_name(&go_field_name(name)))
                     },
                 );
+                if let Some(primary) = primary_varargs_function
+                    && let Some(args_param) = operation.unpacked_input.as_ref().and_then(|params| {
+                        params
+                            .iter()
+                            .find(|param| param.function_args.as_ref() == primary.function.as_ref())
+                    })
+                    && let Some(prefix) = request_expr.strip_suffix('}')
+                {
+                    request_expr = format!("{prefix}, {}: args}}", args_param.field_name);
+                }
 
                 output.push_str("\treturn ");
                 output.push_str(&operation.func_name);
@@ -5846,10 +5901,21 @@ fn render_function_name_inline_assignment(
     params: &[RenderedUnpackedParam],
 ) {
     let name_var = function_name_local_var(param, params);
-    let accepts_alternate_type = param
-        .function
-        .as_ref()
-        .is_some_and(|function| function.alternate_type.is_some());
+    render_function_value_name_assignment(
+        output,
+        &param.param_name,
+        &name_var,
+        param.function.as_ref().unwrap(),
+    );
+}
+
+fn render_function_value_name_assignment(
+    output: &mut String,
+    param_name: &str,
+    name_var: &str,
+    function: &FunctionFieldSpec,
+) {
+    let accepts_alternate_type = function.alternate_type.is_some();
     output.push('\t');
     output.push_str(&name_var);
     output.push_str(" := \"\"\n");
@@ -5859,7 +5925,7 @@ fn render_function_name_inline_assignment(
     } else {
         output.push_str("\t\trv := reflect.ValueOf(");
     }
-    output.push_str(&param.param_name);
+    output.push_str(param_name);
     if accepts_alternate_type {
         output.push_str("); rv.Kind() {\n");
         output.push_str("\t\tcase reflect.String:\n");

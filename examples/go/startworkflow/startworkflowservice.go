@@ -131,8 +131,22 @@ func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) OperationF
 	return cancelWorkflow(ctx, cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reasonPtr})
 }
 
-func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string, taskQueue string) OperationFuture {
-	return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflow, TaskQueue: taskQueue})
+func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) OperationFuture {
+	workflowName := ""
+	{
+		switch rv := reflect.ValueOf(workflow); rv.Kind() {
+		case reflect.String:
+			workflowName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			workflowName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
+	}
+	return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})
 }
 
 func (u *StartedWorkflow) GetResult(ctx workflow.Context) OperationFuture {
