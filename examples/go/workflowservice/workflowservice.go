@@ -285,14 +285,12 @@ type SignalWithStartWorkflowOptions struct {
 // WithWorkflowContextOptions.
 //
 // Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
-	~func(workflow.Context, WorkflowArg) WorkflowResult
-}](
+func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any](
 	ctx workflow.Context,
 	opts SignalWithStartWorkflowOptions,
 	signal string,
 	signalArg any,
-	workflow WorkflowF,
+	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
 	arg WorkflowArg,
 ) OperationFuture {
 	var requestId *string
@@ -309,17 +307,11 @@ func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF inte
 	}
 	workflowName := ""
 	{
-		switch rv := reflect.ValueOf(workflow); rv.Kind() {
-		case reflect.String:
-			workflowName = rv.String()
-		case reflect.Func:
-			fullName := runtime.FuncForPC(rv.Pointer()).Name()
-			elements := strings.Split(fullName, ".")
-			shortName := elements[len(elements)-1]
-			workflowName = strings.TrimSuffix(shortName, "-fm")
-		default:
-			panic("nex-gen function name requires string or function")
-		}
+		rv := reflect.ValueOf(workflow)
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
 	}
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,

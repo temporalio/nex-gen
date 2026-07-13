@@ -297,12 +297,10 @@ type StartWorkflowOptions struct {
 	WorkflowStartDelay time.Duration
 }
 
-func StartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
-	~func(workflow.Context, WorkflowArg) WorkflowResult
-}](
+func StartWorkflow[WorkflowArg any, WorkflowResult any](
 	ctx workflow.Context,
 	opts StartWorkflowOptions,
-	workflow WorkflowF,
+	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
 	arg WorkflowArg,
 ) OperationFuture {
 	var workflowStartDelay *time.Duration
@@ -311,17 +309,11 @@ func StartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	}
 	workflowName := ""
 	{
-		switch rv := reflect.ValueOf(workflow); rv.Kind() {
-		case reflect.String:
-			workflowName = rv.String()
-		case reflect.Func:
-			fullName := runtime.FuncForPC(rv.Pointer()).Name()
-			elements := strings.Split(fullName, ".")
-			shortName := elements[len(elements)-1]
-			workflowName = strings.TrimSuffix(shortName, "-fm")
-		default:
-			panic("nex-gen function name requires string or function")
-		}
+		rv := reflect.ValueOf(workflow)
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
 	}
 	return startWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
@@ -374,12 +366,10 @@ type RestartWorkflowOptions struct {
 	WorkflowStartDelay time.Duration
 }
 
-func RestartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
-	~func(workflow.Context, WorkflowArg) WorkflowResult
-}](
+func RestartWorkflow[WorkflowArg any, WorkflowResult any](
 	ctx workflow.Context,
 	opts RestartWorkflowOptions,
-	workflow WorkflowF,
+	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
 	arg WorkflowArg,
 ) OperationFuture {
 	var workflowStartDelay *time.Duration
@@ -388,17 +378,11 @@ func RestartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	}
 	workflowName := ""
 	{
-		switch rv := reflect.ValueOf(workflow); rv.Kind() {
-		case reflect.String:
-			workflowName = rv.String()
-		case reflect.Func:
-			fullName := runtime.FuncForPC(rv.Pointer()).Name()
-			elements := strings.Split(fullName, ".")
-			shortName := elements[len(elements)-1]
-			workflowName = strings.TrimSuffix(shortName, "-fm")
-		default:
-			panic("nex-gen function name requires string or function")
-		}
+		rv := reflect.ValueOf(workflow)
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
 	}
 	return restartWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,

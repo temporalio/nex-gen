@@ -4962,6 +4962,7 @@ fn render_resource_methods(
                         &param_name,
                         &candidate,
                         primary.function.as_ref().unwrap(),
+                        false,
                     );
                     candidate
                 });
@@ -5510,10 +5511,6 @@ fn function_type_parameters(
         if unary_primary.is_some_and(|primary| primary.field_name == param.field_name) {
             type_params.push((primary_arg_type_parameter_name(param), "any".to_string()));
             type_params.push((primary_result_type_parameter_name(param), "any".to_string()));
-            type_params.push((
-                function_type_parameter_name(param),
-                go_unary_function_constraint(param, function, package, visibility),
-            ));
         } else if function.alternate_type.is_some() {
             type_params.push((
                 function_type_parameter_name(param),
@@ -5600,7 +5597,7 @@ fn go_function_type_expr(
     format!("func({}) {}", args.join(", "), result_type)
 }
 
-fn go_unary_function_constraint(
+fn go_unary_function_type_expr(
     param: &RenderedUnpackedParam,
     function: &FunctionFieldSpec,
     package: &GoPackageContext,
@@ -5618,7 +5615,7 @@ fn go_unary_function_constraint(
     };
     args.push(primary_arg_type_parameter_name(param));
     let result_type = primary_result_type_parameter_name(param);
-    format!("interface{{ ~func({}) {} }}", args.join(", "), result_type)
+    format!("func({}) {}", args.join(", "), result_type)
 }
 
 fn primary_arg_type_parameter_name(param: &RenderedUnpackedParam) -> String {
@@ -5795,14 +5792,26 @@ fn render_operation_wrapper_return_type(output: &mut String, package: &GoPackage
     render_operation_future_return_type(output, package);
 }
 
-fn render_function_name_inlining(output: &mut String, params: &[RenderedUnpackedParam]) {
+fn render_function_name_inlining(
+    output: &mut String,
+    params: &[RenderedUnpackedParam],
+    mode: WrapperMode<'_>,
+) {
     for param in params {
         if param
             .function
             .as_ref()
             .is_some_and(|function| !is_go_signal_function(function))
         {
-            render_function_name_inline_assignment(output, param, params);
+            let statically_function_typed = mode
+                .unary_primary
+                .is_some_and(|primary| primary.field_name == param.field_name);
+            render_function_name_inline_assignment(
+                output,
+                param,
+                params,
+                statically_function_typed,
+            );
         }
     }
 }
@@ -5811,6 +5820,7 @@ fn render_function_name_inline_assignment(
     output: &mut String,
     param: &RenderedUnpackedParam,
     params: &[RenderedUnpackedParam],
+    statically_function_typed: bool,
 ) {
     let name_var = function_name_local_var(param, params);
     render_function_value_name_assignment(
@@ -5818,6 +5828,7 @@ fn render_function_name_inline_assignment(
         &param.param_name,
         &name_var,
         param.function.as_ref().unwrap(),
+        statically_function_typed,
     );
 }
 
@@ -5826,8 +5837,9 @@ fn render_function_value_name_assignment(
     param_name: &str,
     name_var: &str,
     function: &FunctionFieldSpec,
+    statically_function_typed: bool,
 ) {
-    let accepts_alternate_type = function.alternate_type.is_some();
+    let accepts_alternate_type = function.alternate_type.is_some() && !statically_function_typed;
     output.push('\t');
     output.push_str(&name_var);
     output.push_str(" := \"\"\n");
@@ -6028,7 +6040,12 @@ fn positional_param_type(
             .unary_primary
             .is_some_and(|primary| primary.field_name == param.field_name)
         {
-            Some(function_type_parameter_name(param))
+            Some(go_unary_function_type_expr(
+                param,
+                param.function.as_ref().unwrap(),
+                package,
+                visibility,
+            ))
         } else if param
             .function
             .as_ref()
@@ -6116,7 +6133,7 @@ fn render_operation_request_call(
     with_args_param: Option<&RenderedUnpackedParam>,
 ) {
     render_public_default_punning_locals(output, params);
-    render_function_name_inlining(output, params);
+    render_function_name_inlining(output, params, mode);
     output.push_str("\treturn ");
     output.push_str(&operation.func_name);
     output.push_str("(ctx, ");
