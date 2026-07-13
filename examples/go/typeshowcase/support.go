@@ -7,11 +7,11 @@
 // wire-compatible with the Python and TypeScript bindings.
 //
 // Converters are pure structural translations: a `nil` input always produces a
-// `nil` output. They never invent zero values for absent data. The generated
-// service file owns all presence/optionality logic -- it passes a pointer for
-// required values and dereferences results with a zero fallback, and it stores
-// optional values directly as pointers so that "unset" and "set to zero" remain
-// distinguishable.
+// `nil` output. The generated service file owns most presence/optionality logic:
+// it passes pointers for required values and stores optional values directly as
+// pointers. Workflow option values sourced from workflow.Context use SDK zero
+// values for absent options, so converters for pointer-shaped proto fields also
+// treat the corresponding Go zero value as absent.
 //
 // The `package` declaration below is replaced with the generated package name
 // when this file is emitted alongside the generated service file.
@@ -37,7 +37,7 @@ import (
 // --- Duration (google.protobuf.Duration) ---
 
 func durationToProto(_ workflow.Context, d *time.Duration) (*durationpb.Duration, error) {
-	if d == nil {
+	if d == nil || *d == 0 {
 		return nil, nil
 	}
 	return durationpb.New(*d), nil
@@ -71,7 +71,7 @@ func taskQueueFromProto(_ workflow.Context, tq *taskqueue.TaskQueue) (*string, e
 // --- RetryPolicy (temporal.api.common.v1.RetryPolicy) ---
 
 func retryPolicyToProto(_ workflow.Context, p *temporal.RetryPolicy) (*common.RetryPolicy, error) {
-	if p == nil {
+	if p == nil || retryPolicyIsZero(*p) {
 		return nil, nil
 	}
 	proto := &common.RetryPolicy{
@@ -86,6 +86,14 @@ func retryPolicyToProto(_ workflow.Context, p *temporal.RetryPolicy) (*common.Re
 		proto.MaximumInterval = durationpb.New(p.MaximumInterval)
 	}
 	return proto, nil
+}
+
+func retryPolicyIsZero(p temporal.RetryPolicy) bool {
+	return p.InitialInterval == 0 &&
+		p.BackoffCoefficient == 0 &&
+		p.MaximumInterval == 0 &&
+		p.MaximumAttempts == 0 &&
+		len(p.NonRetryableErrorTypes) == 0
 }
 
 func retryPolicyFromProto(_ workflow.Context, p *common.RetryPolicy) (*temporal.RetryPolicy, error) {
@@ -109,7 +117,7 @@ func retryPolicyFromProto(_ workflow.Context, p *common.RetryPolicy) (*temporal.
 // --- Priority (temporal.api.common.v1.Priority) ---
 
 func priorityToProto(_ workflow.Context, p *temporal.Priority) (*common.Priority, error) {
-	if p == nil {
+	if p == nil || *p == (temporal.Priority{}) {
 		return nil, nil
 	}
 	return &common.Priority{
@@ -303,6 +311,112 @@ func versioningOverrideToProto(_ workflow.Context, versioningOverride *client.Ve
 	default:
 		return nil, nil
 	}
+}
+
+// --- Workflow context options (sourced fields) ---
+
+// WorkflowContextOptions configures a workflow started from workflow code.
+type WorkflowContextOptions struct {
+	// Namespace is the namespace in which to start or signal the workflow.
+	// The current workflow's namespace is used when this is empty.
+	Namespace string
+	// ID is the required workflow ID.
+	ID string
+	// TaskQueue is the required task queue for a newly started workflow.
+	TaskQueue string
+	// WorkflowExecutionTimeout is the end-to-end timeout, including retries and continue-as-new.
+	WorkflowExecutionTimeout time.Duration
+	// WorkflowRunTimeout is the timeout for a single workflow run.
+	WorkflowRunTimeout time.Duration
+	// WorkflowTaskTimeout is the timeout for a single workflow task.
+	WorkflowTaskTimeout time.Duration
+	// WorkflowIDReusePolicy controls reuse of an ID from a closed workflow.
+	WorkflowIDReusePolicy enums.WorkflowIdReusePolicy
+	// RetryPolicy configures retries for the workflow.
+	RetryPolicy *temporal.RetryPolicy
+	// CronSchedule starts the workflow on the given cron schedule.
+	CronSchedule string
+	// Memo is the non-indexed information attached to the workflow.
+	Memo map[string]any
+	// SearchAttributes contains the typed search attributes attached to the workflow.
+	SearchAttributes temporal.SearchAttributes
+	// Priority configures the workflow's task priority.
+	Priority temporal.Priority
+}
+
+type workflowContextOptionsKey struct{}
+
+// WithWorkflowContextOptions returns a context carrying options for starting a workflow.
+func WithWorkflowContextOptions(ctx workflow.Context, options WorkflowContextOptions) workflow.Context {
+	return workflow.WithValue(ctx, workflowContextOptionsKey{}, options)
+}
+
+func workflowContextOptions(ctx workflow.Context) WorkflowContextOptions {
+	options, _ := ctx.Value(workflowContextOptionsKey{}).(WorkflowContextOptions)
+	return options
+}
+
+func workflowStartWorkflowID(ctx workflow.Context) string {
+	id := workflowContextOptions(ctx).ID
+	if id == "" {
+		panic("workflow ID is required in WorkflowContextOptions")
+	}
+	return id
+}
+
+func workflowStartTaskQueue(ctx workflow.Context) string {
+	taskQueue := workflowContextOptions(ctx).TaskQueue
+	if taskQueue == "" {
+		panic("task queue is required in WorkflowContextOptions")
+	}
+	return taskQueue
+}
+
+func workflowStartExecutionTimeout(ctx workflow.Context) time.Duration {
+	return workflowContextOptions(ctx).WorkflowExecutionTimeout
+}
+
+func workflowStartRunTimeout(ctx workflow.Context) time.Duration {
+	return workflowContextOptions(ctx).WorkflowRunTimeout
+}
+
+func workflowStartTaskTimeout(ctx workflow.Context) time.Duration {
+	return workflowContextOptions(ctx).WorkflowTaskTimeout
+}
+
+func workflowStartIDReusePolicy(ctx workflow.Context) enums.WorkflowIdReusePolicy {
+	return workflowContextOptions(ctx).WorkflowIDReusePolicy
+}
+
+func workflowStartRetryPolicy(ctx workflow.Context) temporal.RetryPolicy {
+	if retryPolicy := workflowContextOptions(ctx).RetryPolicy; retryPolicy != nil {
+		return *retryPolicy
+	}
+	return temporal.RetryPolicy{}
+}
+
+func workflowStartCronSchedule(ctx workflow.Context) string {
+	return workflowContextOptions(ctx).CronSchedule
+}
+
+func workflowStartMemo(ctx workflow.Context) map[string]any {
+	return workflowContextOptions(ctx).Memo
+}
+
+func workflowStartSearchAttributes(ctx workflow.Context) temporal.SearchAttributes {
+	return workflowContextOptions(ctx).SearchAttributes
+}
+
+func workflowStartPriority(ctx workflow.Context) temporal.Priority {
+	return workflowContextOptions(ctx).Priority
+}
+
+func workflowStartNamespace(ctx workflow.Context) string {
+	namespace := workflowContextOptions(ctx).Namespace
+	if namespace != "" {
+		return namespace
+	}
+	return workflowNamespace(ctx)
 }
 
 // --- Workflow namespace (sourced field) ---

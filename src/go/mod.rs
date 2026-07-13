@@ -4095,6 +4095,8 @@ fn build_sourced_conversion(
     package: &GoPackageContext,
 ) -> GoConversionResult<RenderedSourcedField> {
     let proto_field = go_proto_field_name(&sourced.proto_name);
+    let source_local = format!("sourced{proto_field}");
+    let converted_local = format!("converted{proto_field}");
     let source_expr = &sourced.source_expr;
     match &sourced.kind {
         PlannedFieldKind::Singular(value) => {
@@ -4105,19 +4107,19 @@ fn build_sourced_conversion(
                 // call expression).
                 GoConversionKind::OverrideConverter => {
                     let arg = if conversion.to_proto_takes_pointer {
-                        "&sourced"
+                        format!("&{source_local}")
                     } else {
-                        "sourced"
+                        source_local.clone()
                     };
-                    let converted = (conversion.to_proto)(arg);
-                    let mut to_proto_lines = vec![format!("sourced := {source_expr}")];
+                    let converted = (conversion.to_proto)(&arg);
+                    let mut to_proto_lines = vec![format!("{source_local} := {source_expr}")];
                     if conversion.fallible {
                         to_proto_lines.extend([
-                            format!("converted, err := {converted}"),
+                            format!("{converted_local}, err := {converted}"),
                             "if err != nil {".to_string(),
                             "\treturn nil, err".to_string(),
                             "}".to_string(),
-                            format!("message.{proto_field} = converted"),
+                            format!("message.{proto_field} = {converted_local}"),
                         ]);
                     } else {
                         to_proto_lines.push(format!("message.{proto_field} = {converted}"));
@@ -4129,11 +4131,11 @@ fn build_sourced_conversion(
                     if conversion.fallible {
                         Ok(RenderedSourcedField {
                             to_proto_lines: vec![
-                                format!("converted, err := {converted}"),
+                                format!("{converted_local}, err := {converted}"),
                                 "if err != nil {".to_string(),
                                 "\treturn nil, err".to_string(),
                                 "}".to_string(),
-                                format!("message.{proto_field} = converted"),
+                                format!("message.{proto_field} = {converted_local}"),
                             ],
                         })
                     } else {
