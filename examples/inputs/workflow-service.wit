@@ -36,6 +36,7 @@ interface workflow-service {
     ///   python="Workflow type name or callable identifying the workflow to start."
     ///   typescript="Workflow type name or workflow function identifying the workflow to start."
     ///   dotnet="Workflow type name or workflow expression identifying the workflow to start."
+    ///   go="Workflow function identifying the workflow to start."
     /// @nexus.proto-field "workflow_type"
     workflow: workflow-function,
     /// @nexus.doc "Unique identifier for the workflow execution."
@@ -49,6 +50,7 @@ interface workflow-service {
     ///   python="Signal name or callable to send with the start request."
     ///   typescript="Signal name or signal definition to send with the start request."
     ///   dotnet="Signal name or signal expression to send with the start request."
+    ///   go="Signal name to send with the start request."
     /// @nexus.proto-field "signal_name"
     signal: signal-function,
     /// @nexus.doc "Total workflow execution timeout, including retries and continue-as-new."

@@ -1024,8 +1024,13 @@ fn go_flatten_in_api_embeds_options_value() {
     assert!(rendered.contains("\tUserMetadata\n}\n\n// Signal a workflow"));
     assert!(!rendered.contains("\tUserMetadata *UserMetadata\n}\n\n// Signal a workflow"));
     assert!(rendered.contains("\t\tUserMetadata: &opts.UserMetadata,\n"));
-    assert!(rendered.contains("\tStaticSummary any"));
-    assert!(rendered.contains("\tStaticDetails any"));
+    assert!(rendered.contains("\tStaticSummary string"));
+    assert!(rendered.contains("\tStaticDetails string"));
+    assert!(rendered.contains("// Input signal: Signal name to send with the start request."));
+    assert!(
+        rendered
+            .contains("// Input workflow: Workflow function identifying the workflow to start.")
+    );
 }
 
 #[test]

@@ -2544,29 +2544,41 @@ fn build_field(
 ) -> Result<RenderedField> {
     let field_name = go_field_name(&field.authored_name);
 
-    let go_type = match &field.kind {
-        PlannedFieldKind::Map { key, value } => {
-            let key_type =
-                resolve_planned_value_type(key, api_plan, enums, flags, variants, models, package)?;
-            let value_type = resolve_planned_value_type(
-                value, api_plan, enums, flags, variants, models, package,
-            )?;
-            format!("map[{}]{}", key_type.type_expr, value_type.type_expr)
-        }
-        PlannedFieldKind::Repeated(value) => {
-            let element_type = resolve_planned_value_type(
-                value, api_plan, enums, flags, variants, models, package,
-            )?;
-            format!("[]{}", element_type.type_expr)
-        }
-        PlannedFieldKind::Singular(value) => {
-            let resolved = resolve_planned_value_type(
-                value, api_plan, enums, flags, variants, models, package,
-            )?;
-            if !field.required && type_needs_pointer_when_optional(value, &resolved.type_expr) {
-                format!("*{}", resolved.type_expr)
-            } else {
-                resolved.type_expr
+    let annotated_go_type = field
+        .flattened_annotation_override
+        .as_ref()
+        .or(field.annotation_override.as_ref())
+        .and_then(|annotation| annotation.for_language(Language::Go))
+        .map(|annotation| package.go_type_expr(annotation));
+
+    let go_type = if let Some(annotated_go_type) = annotated_go_type {
+        annotated_go_type
+    } else {
+        match &field.kind {
+            PlannedFieldKind::Map { key, value } => {
+                let key_type = resolve_planned_value_type(
+                    key, api_plan, enums, flags, variants, models, package,
+                )?;
+                let value_type = resolve_planned_value_type(
+                    value, api_plan, enums, flags, variants, models, package,
+                )?;
+                format!("map[{}]{}", key_type.type_expr, value_type.type_expr)
+            }
+            PlannedFieldKind::Repeated(value) => {
+                let element_type = resolve_planned_value_type(
+                    value, api_plan, enums, flags, variants, models, package,
+                )?;
+                format!("[]{}", element_type.type_expr)
+            }
+            PlannedFieldKind::Singular(value) => {
+                let resolved = resolve_planned_value_type(
+                    value, api_plan, enums, flags, variants, models, package,
+                )?;
+                if !field.required && type_needs_pointer_when_optional(value, &resolved.type_expr) {
+                    format!("*{}", resolved.type_expr)
+                } else {
+                    resolved.type_expr
+                }
             }
         }
     };
@@ -3446,13 +3458,39 @@ fn build_field_conversion(
                 field_is_pointer,
                 "return nil, err",
             );
-            let from_lines = singular_from_proto_lines(
+            let mut from_lines = singular_from_proto_lines(
                 &conversion,
                 &proto_field,
                 &go_field,
                 field_is_pointer,
                 "return value, err",
             );
+            if field
+                .flattened_annotation_override
+                .as_ref()
+                .and_then(|annotation| annotation.for_language(Language::Go))
+                .is_some()
+                && !conversion.from_proto_returns_pointer
+            {
+                from_lines = vec![
+                    format!("if proto.Get{proto_field}() != nil {{"),
+                    format!(
+                        "\tconverted, err := {}",
+                        (conversion.from_proto)(&format!("proto.Get{proto_field}()"))
+                    ),
+                    "\tif err != nil {".to_string(),
+                    "\t\treturn value, err".to_string(),
+                    "\t}".to_string(),
+                    format!("\ttyped, ok := converted.({native_go_type})"),
+                    "\tif !ok {".to_string(),
+                    format!(
+                        "\t\treturn value, fmt.Errorf(\"nex-gen decoded field {go_field} has unexpected type %T\", converted)"
+                    ),
+                    "\t}".to_string(),
+                    format!("\tvalue.{go_field} = typed"),
+                    "}".to_string(),
+                ];
+            }
             Ok(RenderedFieldConversion {
                 to_proto_lines: to_lines,
                 from_proto_lines: from_lines,

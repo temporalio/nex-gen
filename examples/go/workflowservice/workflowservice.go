@@ -203,11 +203,11 @@ func signalWithStartWorkflow(ctx workflow.Context, request signalWithStartWorkfl
 type UserMetadata struct {
 	// Optional. Single-line fixed summary for the workflow execution that may appear in UI
 	// and CLI. This can be in single-line Temporal Markdown format.
-	StaticSummary any
+	StaticSummary string
 	// Optional. General fixed details for the workflow execution that may appear in UI and
 	// CLI. This can be in Temporal Markdown format and can span multiple lines. This value
 	// is fixed on the workflow execution and cannot be updated.
-	StaticDetails any
+	StaticDetails string
 }
 
 func (m UserMetadata) toProto(ctx workflow.Context) (*sdk.UserMetadata, error) {
@@ -231,19 +231,27 @@ func (m UserMetadata) toProto(ctx workflow.Context) (*sdk.UserMetadata, error) {
 
 func userMetadataFromProto(ctx workflow.Context, proto *sdk.UserMetadata) (UserMetadata, error) {
 	value := UserMetadata{}
-	{
+	if proto.GetSummary() != nil {
 		converted, err := payloadFromProto(ctx, proto.GetSummary())
 		if err != nil {
 			return value, err
 		}
-		value.StaticSummary = converted
+		typed, ok := converted.(string)
+		if !ok {
+			return value, fmt.Errorf("nex-gen decoded field StaticSummary has unexpected type %T", converted)
+		}
+		value.StaticSummary = typed
 	}
-	{
+	if proto.GetDetails() != nil {
 		converted, err := payloadFromProto(ctx, proto.GetDetails())
 		if err != nil {
 			return value, err
 		}
-		value.StaticDetails = converted
+		typed, ok := converted.(string)
+		if !ok {
+			return value, fmt.Errorf("nex-gen decoded field StaticDetails has unexpected type %T", converted)
+		}
+		value.StaticDetails = typed
 	}
 	return value, nil
 }
@@ -283,6 +291,9 @@ type SignalWithStartWorkflowOptions struct {
 
 // Signal a workflow, starting it first if needed. Configure workflow start fields with
 // WithWorkflowContextOptions.
+//
+// Input signal: Signal name to send with the start request.
+// Input workflow: Workflow function identifying the workflow to start.
 //
 // Returns: A workflow handle to the started workflow.
 func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any](
@@ -328,6 +339,9 @@ func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any](
 
 // Signal a workflow, starting it first if needed. Configure workflow start fields with
 // WithWorkflowContextOptions.
+//
+// Input signal: Signal name to send with the start request.
+// Input workflow: Workflow function identifying the workflow to start.
 //
 // Returns: A workflow handle to the started workflow.
 func SignalWithStartWorkflowWithArgs(

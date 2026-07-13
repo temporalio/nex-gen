@@ -276,6 +276,7 @@ pub(crate) struct PlannedField {
     pub(crate) authored_name: String,
     pub(crate) doc: Option<LanguageStringSpec>,
     pub(crate) annotation_override: Option<crate::spec::LanguageStringSpec>,
+    pub(crate) flattened_annotation_override: Option<crate::spec::LanguageStringSpec>,
     pub(crate) default_value: Option<PlannedFieldDefault>,
     pub(crate) required: bool,
     pub(crate) has_presence: bool,
@@ -1156,6 +1157,9 @@ fn plan_field(
         annotation_override: generated_model
             .and_then(|generated_model| generated_model.field_annotation(&proto_name))
             .cloned(),
+        flattened_annotation_override: generated_model
+            .and_then(|generated_model| generated_model.field_flattened_annotation(&proto_name))
+            .cloned(),
         default_value: generated_model
             .and_then(|generated_model| generated_model.field_default(&proto_name))
             .map(|field_default| PlannedFieldDefault {
@@ -1198,6 +1202,10 @@ fn plan_wit_field(
             .to_string(),
         doc: record.generated_model.field_doc(field_name).cloned(),
         annotation_override: record.generated_model.field_annotation(field_name).cloned(),
+        flattened_annotation_override: record
+            .generated_model
+            .field_flattened_annotation(field_name)
+            .cloned(),
         default_value: record
             .generated_model
             .field_default(field_name)
