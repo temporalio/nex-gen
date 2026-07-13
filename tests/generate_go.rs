@@ -909,6 +909,9 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     assert!(rendered.contains("\t\tWorkflowId: request.WorkflowId,\n"));
     assert!(rendered.contains("\t\tRunId: runId,\n"));
     assert!(rendered.contains(
+        "type StartedWorkflow struct {\n\t// Required.\n\tNamespace string\n\t// Required.\n\tWorkflowId string\n\t// Optional.\n\tRunId *string\n}"
+    ));
+    assert!(rendered.contains(
         "fut := c.ExecuteOperation(ctx, \"RestartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains(

@@ -119,7 +119,8 @@ type StartedWorkflow struct {
 	Namespace string
 	// Required.
 	WorkflowId string
-	RunId      *string
+	// Optional.
+	RunId *string
 }
 
 func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) OperationFuture {

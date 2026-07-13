@@ -4803,7 +4803,11 @@ fn render_resource(
             field.optional,
             package,
         ));
-        render_field_doc_comment(output, "\t", None, !field.optional);
+        if field.optional {
+            render_go_doc_comment(output, "\t", "Optional.");
+        } else {
+            render_field_doc_comment(output, "\t", None, true);
+        }
         output.push('\t');
         output.push_str(&field_name);
         output.push(' ');
