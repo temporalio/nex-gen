@@ -690,21 +690,15 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("\t// Required.\n\tStreet string"));
     assert!(rendered.contains("\t// Required.\n\tCity string"));
     assert!(rendered.contains("\t// Required.\n\tCountry string"));
-    // Tuple field generates a named struct with ordinal fields
-    assert!(rendered.contains("Coordinates *Coordinates"));
-    assert!(rendered.contains("type Coordinates struct"));
-    assert!(rendered.contains("\t// Required.\n\tFirst float64"));
-    assert!(rendered.contains("\t// Required.\n\tSecond float64"));
+    assert!(rendered.contains("Coordinates *Tuple2[float64, float64]"));
+    assert!(!rendered.contains("type Coordinates struct"));
 
     assert!(rendered.contains("type UserProfile struct"));
     assert!(rendered.contains("\t// Required.\n\tTags []string"));
     assert!(rendered.contains("\t// Required.\n\tMetadata map[string]string"));
     assert!(rendered.contains("\t// Required.\n\tCapabilities UserCapability"));
-    // Result field generates a named struct
-    assert!(rendered.contains("\t// Required.\n\tSyncState SyncState"));
-    assert!(rendered.contains("type SyncState struct"));
-    assert!(rendered.contains("\t// Required.\n\tResult string"));
-    assert!(rendered.contains("\t// Required.\n\tError string"));
+    assert!(rendered.contains("\t// Required.\n\tSyncState Result[string, string]"));
+    assert!(!rendered.contains("type SyncState struct"));
     // Variant interface field
     assert!(rendered.contains("\t// Required.\n\tNotificationTarget NotificationTarget"));
     // Optional struct field keeps pointer and is not marked required.
@@ -724,8 +718,8 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("\t// Required.\n\tAttempts []Result[string, string]"));
     assert!(rendered.contains("\t// Required.\n\tRegionStatus map[string]Result[string, string]"));
     assert!(rendered.contains("type Tuple2[T1, T2 any] struct {"));
-    assert!(rendered.contains("First T1"));
-    assert!(rendered.contains("Second T2"));
+    assert!(rendered.contains("\t// Required.\n\tFirst T1"));
+    assert!(rendered.contains("\t// Required.\n\tSecond T2"));
     assert!(rendered.contains("type Result[T, E any] struct {"));
     assert!(rendered.contains("Result T"));
     assert!(rendered.contains("Error E"));

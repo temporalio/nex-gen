@@ -2115,9 +2115,8 @@ fn resolve_message_types(
 /// newly-encountered compound types (enums, flags, variants, models) in the
 /// corresponding `IndexMap` collections along the way.
 ///
-/// Tuples are not supported in this context (inside lists, maps, or other
-/// containers). They are only supported as direct record fields, where
-/// [`build_field`] generates a named struct before calling this function.
+/// Anonymous tuples and results use shared generic helper types in every
+/// context, including direct record fields and nested containers.
 fn resolve_planned_value_type(
     value_type: &PlannedValueType,
     api_plan: &ApiPlan,
@@ -2232,9 +2231,7 @@ fn resolve_planned_value_type(
                 is_struct: true,
             })
         }
-        // Tuples and results inside containers (lists, maps, variant payloads,
-        // resource fields) instantiate shared generic helper types; direct
-        // record fields keep their field-named structs (see `build_field`).
+        // Tuples and results instantiate shared generic helper types.
         PlannedValueType::Tuple(items) => {
             let type_name = ensure_generic_tuple(items.len(), models)?;
             let args = items
@@ -2534,8 +2531,8 @@ fn ensure_rendered_model(
 /// - Optional scalar/enum/flags/interface fields use the plain type (the zero
 ///   value represents absence).
 /// - Maps and slices are always reference-like and need no pointer.
-/// - Tuple fields generate a named struct with ordinal field names (`First`,
-///   `Second`, etc.) and are treated as struct types for optionality purposes.
+/// - Tuple and result fields use shared generic helper types and are treated as
+///   struct types for optionality purposes.
 fn build_field(
     field: &PlannedField,
     api_plan: &ApiPlan,
@@ -2561,41 +2558,6 @@ fn build_field(
                 value, api_plan, enums, flags, variants, models, package,
             )?;
             format!("[]{}", element_type.type_expr)
-        }
-        PlannedFieldKind::Singular(PlannedValueType::Tuple(items)) => {
-            let struct_name = build_tuple_struct(
-                &field_name,
-                items,
-                api_plan,
-                enums,
-                flags,
-                variants,
-                models,
-                package,
-            )?;
-            if !field.required {
-                format!("*{struct_name}")
-            } else {
-                struct_name
-            }
-        }
-        PlannedFieldKind::Singular(PlannedValueType::Result { ok, err }) => {
-            let struct_name = build_result_struct(
-                &field_name,
-                ok.as_deref(),
-                err.as_deref(),
-                api_plan,
-                enums,
-                flags,
-                variants,
-                models,
-                package,
-            )?;
-            if !field.required {
-                format!("*{struct_name}")
-            } else {
-                struct_name
-            }
         }
         PlannedFieldKind::Singular(value) => {
             let resolved = resolve_planned_value_type(
@@ -2682,7 +2644,7 @@ fn ensure_generic_tuple(
                 name: TUPLE_FIELD_NAMES[index].to_string(),
                 doc: None,
                 go_type: format!("T{}", index + 1),
-                required: false,
+                required: true,
                 conversion: None,
             })
             .collect();
@@ -2731,157 +2693,6 @@ fn ensure_generic_result(models: &mut IndexMap<String, RenderedModel>) {
             },
         );
     }
-}
-
-/// Generates a named Go struct for a tuple type, using ordinal field names
-/// (`First`, `Second`, ..., `Tenth`). The struct name is derived from the
-/// parent field name.
-///
-/// Returns an error if the tuple has more than 10 elements or if a struct with
-/// the same name but different fields already exists.
-fn build_tuple_struct(
-    field_name: &str,
-    items: &[PlannedValueType],
-    api_plan: &ApiPlan,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-    package: &GoPackageContext,
-) -> Result<String> {
-    if items.len() > TUPLE_FIELD_NAMES.len() {
-        return Err(Error::UnsupportedGoType {
-            context: format!("tuple with {} elements", items.len()),
-            reason: format!(
-                "Go code generation supports tuples with at most {} elements",
-                TUPLE_FIELD_NAMES.len()
-            ),
-        });
-    }
-
-    let struct_name = field_name.to_string();
-
-    let fields = items
-        .iter()
-        .zip(TUPLE_FIELD_NAMES.iter())
-        .map(|(item, &ordinal_name)| {
-            let resolved = resolve_planned_value_type(
-                item, api_plan, enums, flags, variants, models, package,
-            )?;
-            Ok(RenderedField {
-                name: ordinal_name.to_string(),
-                doc: None,
-                go_type: resolved.type_expr,
-                required: true,
-                conversion: None,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    // Check for conflicts: same name but different field types.
-    if let Some(existing) = models.get(&struct_name) {
-        let existing_types: Vec<&str> =
-            existing.fields.iter().map(|f| f.go_type.as_str()).collect();
-        let new_types: Vec<&str> = fields.iter().map(|f| f.go_type.as_str()).collect();
-        if existing_types != new_types {
-            return Err(Error::UnsupportedGoType {
-                context: format!("tuple struct `{struct_name}`"),
-                reason: format!(
-                    "a tuple struct named `{struct_name}` already exists with different element types"
-                ),
-            });
-        }
-    } else {
-        models.insert(
-            struct_name.clone(),
-            RenderedModel {
-                name: struct_name.clone(),
-                fields,
-                proto_info: None,
-                proto: None,
-                sourced_fields: Vec::new(),
-            },
-        );
-    }
-
-    Ok(struct_name)
-}
-
-/// Generates a named Go struct for a WIT `result<ok, err>` type. The struct
-/// name is derived from the parent field name. The `Result` field holds the
-/// ok value and the `Error` field holds the error value. When no error type
-/// is specified in the WIT, the Go built-in `error` interface is used.
-///
-/// Returns an error if a struct with the same name but different fields
-/// already exists.
-fn build_result_struct(
-    field_name: &str,
-    ok: Option<&PlannedValueType>,
-    err: Option<&PlannedValueType>,
-    api_plan: &ApiPlan,
-    enums: &mut IndexMap<String, RenderedEnum>,
-    flags: &mut IndexMap<String, RenderedFlags>,
-    variants: &mut IndexMap<String, RenderedVariant>,
-    models: &mut IndexMap<String, RenderedModel>,
-    package: &GoPackageContext,
-) -> Result<String> {
-    let struct_name = field_name.to_string();
-
-    let mut fields = Vec::new();
-
-    if let Some(ok_type) = ok {
-        let resolved =
-            resolve_planned_value_type(ok_type, api_plan, enums, flags, variants, models, package)?;
-        fields.push(RenderedField {
-            name: "Result".to_string(),
-            doc: None,
-            go_type: resolved.type_expr,
-            required: true,
-            conversion: None,
-        });
-    }
-
-    let error_type = if let Some(err_type) = err {
-        resolve_planned_value_type(err_type, api_plan, enums, flags, variants, models, package)?
-            .type_expr
-    } else {
-        "error".to_string()
-    };
-    fields.push(RenderedField {
-        name: "Error".to_string(),
-        doc: None,
-        go_type: error_type,
-        required: true,
-        conversion: None,
-    });
-
-    // Check for conflicts: same name but different field types.
-    if let Some(existing) = models.get(&struct_name) {
-        let existing_types: Vec<&str> =
-            existing.fields.iter().map(|f| f.go_type.as_str()).collect();
-        let new_types: Vec<&str> = fields.iter().map(|f| f.go_type.as_str()).collect();
-        if existing_types != new_types {
-            return Err(Error::UnsupportedGoType {
-                context: format!("result struct `{struct_name}`"),
-                reason: format!(
-                    "a result struct named `{struct_name}` already exists with different element types"
-                ),
-            });
-        }
-    } else {
-        models.insert(
-            struct_name.clone(),
-            RenderedModel {
-                name: struct_name.clone(),
-                fields,
-                proto_info: None,
-                proto: None,
-                sourced_fields: Vec::new(),
-            },
-        );
-    }
-
-    Ok(struct_name)
 }
 
 /// Converts a PascalCase name to an unexported Go identifier by lowercasing

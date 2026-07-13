@@ -170,18 +170,18 @@ type UserProfile struct {
 	// Required.
 	Capabilities UserCapability
 	// Required.
-	SyncState SyncState
+	SyncState Result[string, string]
 	// Required.
 	NotificationTarget NotificationTarget
 	// Optional.
 	Address *PostalAddress
 }
 
-type SyncState struct {
-	// Required.
-	Result string
-	// Required.
-	Error string
+type Result[T, E any] struct {
+	// Optional.
+	Result T
+	// Optional.
+	Error E
 }
 
 type PostalAddress struct {
@@ -192,14 +192,14 @@ type PostalAddress struct {
 	// Required.
 	Country string
 	// Optional.
-	Coordinates *Coordinates
+	Coordinates *Tuple2[float64, float64]
 }
 
-type Coordinates struct {
+type Tuple2[T1, T2 any] struct {
 	// Required.
-	First float64
+	First T1
 	// Required.
-	Second float64
+	Second T2
 }
 
 type SyncReport struct {
@@ -209,20 +209,6 @@ type SyncReport struct {
 	Attempts []Result[string, string]
 	// Required.
 	RegionStatus map[string]Result[string, string]
-}
-
-type Tuple2[T1, T2 any] struct {
-	// Optional.
-	First T1
-	// Optional.
-	Second T2
-}
-
-type Result[T, E any] struct {
-	// Optional.
-	Result T
-	// Optional.
-	Error E
 }
 
 type GetUserOptions struct {
