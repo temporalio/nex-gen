@@ -285,7 +285,6 @@ type StartWorkflowOptions struct {
 	WorkflowStartDelay time.Duration
 }
 
-// Input args: Arguments for the workflow.
 func StartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	~func(workflow.Context, WorkflowArg) WorkflowResult
 }](
@@ -321,7 +320,6 @@ func StartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	})
 }
 
-// Input args: Arguments for the workflow.
 func StartWorkflowWithArgs(
 	ctx workflow.Context,
 	opts StartWorkflowOptions,
@@ -364,7 +362,6 @@ type RestartWorkflowOptions struct {
 	WorkflowStartDelay time.Duration
 }
 
-// Input args: Arguments for the workflow.
 func RestartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	~func(workflow.Context, WorkflowArg) WorkflowResult
 }](
@@ -400,7 +397,6 @@ func RestartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	})
 }
 
-// Input args: Arguments for the workflow.
 func RestartWorkflowWithArgs(
 	ctx workflow.Context,
 	opts RestartWorkflowOptions,

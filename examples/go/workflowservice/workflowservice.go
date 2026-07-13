@@ -284,9 +284,6 @@ type SignalWithStartWorkflowOptions struct {
 // Signal a workflow, starting it first if needed. Configure workflow start fields with
 // WithWorkflowContextOptions.
 //
-// Input signalArg: Arguments for the signal.
-// Input args: Arguments for the workflow.
-//
 // Returns: A workflow handle to the started workflow.
 func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	~func(workflow.Context, WorkflowArg) WorkflowResult
@@ -339,9 +336,6 @@ func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF inte
 
 // Signal a workflow, starting it first if needed. Configure workflow start fields with
 // WithWorkflowContextOptions.
-//
-// Input signalArg: Arguments for the signal.
-// Input args: Arguments for the workflow.
 //
 // Returns: A workflow handle to the started workflow.
 func SignalWithStartWorkflowWithArgs(
