@@ -293,7 +293,9 @@ type SignalWithStartWorkflowOptions struct {
 // WithWorkflowContextOptions.
 //
 // Input signal: Signal name to send with the start request.
+// Input signalArg: Arguments for the signal.
 // Input workflow: Workflow function identifying the workflow to start.
+// Input args: Arguments for the workflow.
 //
 // Returns: A workflow handle to the started workflow.
 func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any](
@@ -341,7 +343,9 @@ func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any](
 // WithWorkflowContextOptions.
 //
 // Input signal: Signal name to send with the start request.
+// Input signalArg: Arguments for the signal.
 // Input workflow: Workflow function identifying the workflow to start.
+// Input args: Arguments for the workflow.
 //
 // Returns: A workflow handle to the started workflow.
 func SignalWithStartWorkflowWithArgs(

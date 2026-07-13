@@ -109,6 +109,8 @@ type ExecuteNamedVarargsFunctionResult struct {
 type ExecuteFunctionOptions struct {
 }
 
+// Input name: The name argument for the function.
+// Input enabled: The enabled argument for the function.
 func ExecuteFunction(
 	ctx workflow.Context,
 	opts ExecuteFunctionOptions,
@@ -134,6 +136,8 @@ func ExecuteFunction(
 type ExecuteCountedFunctionOptions struct {
 }
 
+// Input name: The name argument for the function.
+// Input count: The count argument for the function.
 func ExecuteCountedFunction(
 	ctx workflow.Context,
 	opts ExecuteCountedFunctionOptions,
@@ -159,6 +163,8 @@ func ExecuteCountedFunction(
 type ExecuteNamedFunctionOptions struct {
 }
 
+// Input name: The name argument for the function.
+// Input enabled: The enabled argument for the function.
 func ExecuteNamedFunction[FunctionF interface {
 	~string | func(string, bool) string
 }](
@@ -192,6 +198,7 @@ func ExecuteNamedFunction[FunctionF interface {
 type ExecuteVarargsFunctionOptions struct {
 }
 
+// Input args: Arguments for the function.
 func ExecuteVarargsFunction(
 	ctx workflow.Context,
 	opts ExecuteVarargsFunctionOptions,
@@ -215,6 +222,7 @@ func ExecuteVarargsFunction(
 type ExecuteNamedVarargsFunctionOptions struct {
 }
 
+// Input args: Arguments for the function.
 func ExecuteNamedVarargsFunction[FunctionF interface {
 	~string | func(...string) string
 }](

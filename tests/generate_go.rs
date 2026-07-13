@@ -525,8 +525,13 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!rendered.contains("cannot specify both positional arguments and args"));
     assert!(!rendered.contains("opts.Args"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
-    assert!(!rendered.contains("The name argument for the function."));
-    assert!(!rendered.contains("Arguments for the function."));
+    assert!(rendered.contains(
+        "// Input name: The name argument for the function.\n// Input enabled: The enabled argument for the function.\nfunc ExecuteFunction"
+    ));
+    assert!(
+        rendered
+            .contains("// Input args: Arguments for the function.\nfunc ExecuteVarargsFunction")
+    );
 
     let user_rendered = generate_to_string_with_inputs(
         nex_gen::language::Language::Go,

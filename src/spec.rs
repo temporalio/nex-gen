@@ -1960,6 +1960,7 @@ fn build_generated_model_from_record(
         }
 
         if let Some(flattened_function_type) = flattened_function_type {
+            let arg_field_count = flattened_function_type.arg_fields.len();
             for arg_field in flattened_function_type.arg_fields {
                 if !authored_proto_fields.insert(arg_field.field_name.clone()) {
                     return Err(Error::InvalidWit {
@@ -1972,6 +1973,11 @@ fn build_generated_model_from_record(
                 }
                 declared_fields.push(arg_field.field_name.clone());
                 field_names.insert(arg_field.field_name.clone(), arg_field.args_name.clone());
+                field_docs
+                    .entry(arg_field.field_name.clone())
+                    .or_insert_with(|| {
+                        generated_function_arg_doc(&field.name, &arg_field, arg_field_count)
+                    });
                 if arg_field.required {
                     required_fields.insert(arg_field.field_name.clone());
                 }
@@ -2002,6 +2008,36 @@ fn build_generated_model_from_record(
             functions,
         },
     ))
+}
+
+fn generated_function_arg_doc(
+    function_field_name: &str,
+    arg_field: &FlattenedFunctionArgSpec,
+    arg_field_count: usize,
+) -> LanguageStringSpec {
+    let function_name = human_field_name(function_field_name);
+    let arg_name = human_field_name(&arg_field.args_name);
+    let doc = if arg_field_count == 1
+        && (matches!(
+            arg_field.field_type.without_option(),
+            AuthoredFieldTypeSpec::List(_)
+        ) || arg_name.ends_with("args")
+            || arg_name.ends_with("arguments"))
+    {
+        format!("Arguments for the {function_name}.")
+    } else {
+        format!("The {arg_name} argument for the {function_name}.")
+    };
+    LanguageStringSpec {
+        default: Some(doc),
+        by_language: BTreeMap::new(),
+        default_import: None,
+        imports: BTreeMap::new(),
+    }
+}
+
+fn human_field_name(name: &str) -> String {
+    name.replace(['-', '_'], " ")
 }
 
 fn build_type_replacement(
@@ -4767,7 +4803,13 @@ interface function-execution {
             model.field_wit_type("name").unwrap().to_wit_string(),
             "string"
         );
-        assert!(model.field_doc("name").is_none());
+        assert_eq!(
+            model
+                .field_doc("name")
+                .unwrap()
+                .for_language(Language::Python),
+            Some("The name argument for the function.")
+        );
         assert_eq!(
             model.field_wit_type("enabled").unwrap().to_wit_string(),
             "bool"
@@ -4845,7 +4887,13 @@ interface function-execution {
             model.field_wit_type("args").unwrap().to_wit_string(),
             "list<string>"
         );
-        assert!(model.field_doc("args").is_none());
+        assert_eq!(
+            model
+                .field_doc("args")
+                .unwrap()
+                .for_language(Language::Python),
+            Some("Arguments for the function.")
+        );
         assert_eq!(
             model.function("function").unwrap().args,
             FunctionArgsSpec::Varargs {
