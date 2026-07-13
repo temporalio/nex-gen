@@ -96,10 +96,6 @@ impl GoPackageContext {
         self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Context")
     }
 
-    fn workflow_future_type(&self) -> String {
-        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Future")
-    }
-
     fn new_future(&self) -> String {
         self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.NewFuture")
     }
@@ -5132,31 +5128,20 @@ fn render_operation_future_interface(output: &mut String, package: &GoPackageCon
 fn render_generated_future_helpers(output: &mut String, package: &GoPackageContext) {
     let context_type = package.workflow_context_type();
     output.push_str("type nexGenOperationFuture struct {\n");
-    output.push_str("\toperation ");
-    output.push_str(&package.workflow_future_type());
-    output.push('\n');
-    output.push_str("\tresult ");
-    output.push_str(&package.workflow_future_type());
-    output.push('\n');
     output.push_str("\tget func(");
     output.push_str(&context_type);
     output.push_str(", any) error\n");
+    output.push_str("\tisReady func() bool\n");
     output.push_str("}\n\n");
 
     output.push_str("func (f *nexGenOperationFuture) Get(ctx ");
     output.push_str(&context_type);
     output.push_str(", valuePtr any) error {\n");
-    output.push_str("\tif f.get != nil {\n");
-    output.push_str("\t\treturn f.get(ctx, valuePtr)\n");
-    output.push_str("\t}\n");
-    output.push_str("\treturn f.result.Get(ctx, valuePtr)\n");
+    output.push_str("\treturn f.get(ctx, valuePtr)\n");
     output.push_str("}\n\n");
 
     output.push_str("func (f *nexGenOperationFuture) IsReady() bool {\n");
-    output.push_str("\tif f.operation != nil {\n");
-    output.push_str("\t\treturn f.operation.IsReady()\n");
-    output.push_str("\t}\n");
-    output.push_str("\treturn f.result.IsReady()\n");
+    output.push_str("\treturn f.isReady()\n");
     output.push_str("}\n\n");
 
     output.push_str("func nexGenFailedOperationFuture(ctx ");
@@ -5166,7 +5151,7 @@ fn render_generated_future_helpers(output: &mut String, package: &GoPackageConte
     output.push_str(&package.new_future());
     output.push_str("(ctx)\n");
     output.push_str("\tresultSettable.SetError(err)\n");
-    output.push_str("\treturn &nexGenOperationFuture{result: result}\n");
+    output.push_str("\treturn &nexGenOperationFuture{get: result.Get, isReady: result.IsReady}\n");
     output.push_str("}\n\n");
 
     output.push_str("func nexGenFutureResultTypeError() error {\n");
@@ -5212,7 +5197,7 @@ fn render_operation_future_adapter(
     value_is_pointer: bool,
     get_body: impl FnOnce(&mut String),
 ) {
-    output.push_str("\treturn &nexGenOperationFuture{operation: fut, get: func(ctx ");
+    output.push_str("\treturn &nexGenOperationFuture{get: func(ctx ");
     output.push_str(&package.workflow_context_type());
     output.push_str(", valuePtr any) error {\n");
     output.push_str("\t\tif valuePtr == nil {\n");
@@ -5221,7 +5206,7 @@ fn render_operation_future_adapter(
     get_body(output);
     render_future_value_assignment(output, result_type, "value", value_is_pointer);
     output.push_str("\t\treturn nil\n");
-    output.push_str("\t}}\n");
+    output.push_str("\t}, isReady: fut.IsReady}\n");
 }
 
 /// Renders an unexported operation wrapper function that creates a Nexus

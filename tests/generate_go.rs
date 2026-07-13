@@ -400,7 +400,10 @@ interface sample-service {
     assert!(rendered.contains(
         "func getHandle(ctx workflow.Context, request transformRequest) OperationFuture {"
     ));
-    assert!(rendered.contains("return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {"));
+    assert!(rendered.contains(
+        "return &nexGenOperationFuture{get: func(ctx workflow.Context, valuePtr any) error {"
+    ));
+    assert!(rendered.contains("}, isReady: fut.IsReady}"));
     assert!(rendered.contains("\tvar result transformResponse\n"));
     assert!(rendered.contains("\t\tif err := fut.Get(ctx, &result); err != nil {\n"));
     assert!(

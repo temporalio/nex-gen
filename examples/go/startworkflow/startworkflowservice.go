@@ -24,29 +24,22 @@ type OperationFuture interface {
 // --- Helpers ---
 
 type nexGenOperationFuture struct {
-	operation workflow.Future
-	result    workflow.Future
-	get       func(workflow.Context, any) error
+	get     func(workflow.Context, any) error
+	isReady func() bool
 }
 
 func (f *nexGenOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
-	if f.get != nil {
-		return f.get(ctx, valuePtr)
-	}
-	return f.result.Get(ctx, valuePtr)
+	return f.get(ctx, valuePtr)
 }
 
 func (f *nexGenOperationFuture) IsReady() bool {
-	if f.operation != nil {
-		return f.operation.IsReady()
-	}
-	return f.result.IsReady()
+	return f.isReady()
 }
 
 func nexGenFailedOperationFuture(ctx workflow.Context, err error) OperationFuture {
 	result, resultSettable := workflow.NewFuture(ctx)
 	resultSettable.SetError(err)
-	return &nexGenOperationFuture{result: result}
+	return &nexGenOperationFuture{get: result.Get, isReady: result.IsReady}
 }
 
 func nexGenFutureResultTypeError() error {
@@ -154,7 +147,7 @@ func startWorkflow(ctx workflow.Context, request startWorkflowRequest) Operation
 	}
 	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
 	fut := c.ExecuteOperation(ctx, "StartWorkflow", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -179,7 +172,7 @@ func startWorkflow(ctx workflow.Context, request startWorkflowRequest) Operation
 		}
 		*typedValue = value
 		return nil
-	}}
+	}, isReady: fut.IsReady}
 }
 
 func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) OperationFuture {
@@ -189,7 +182,7 @@ func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) Operati
 	}
 	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
 	fut := c.ExecuteOperation(ctx, "RestartWorkflow", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -214,7 +207,7 @@ func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) Operati
 		}
 		*typedValue = value
 		return nil
-	}}
+	}, isReady: fut.IsReady}
 }
 
 func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) OperationFuture {
@@ -224,7 +217,7 @@ func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) Operati
 	}
 	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
 	fut := c.ExecuteOperation(ctx, "CancelWorkflow", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -242,7 +235,7 @@ func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) Operati
 		}
 		*typedValue = value
 		return nil
-	}}
+	}, isReady: fut.IsReady}
 }
 
 // --- Operations (public API) ---

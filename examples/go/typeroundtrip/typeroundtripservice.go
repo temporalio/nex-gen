@@ -22,29 +22,22 @@ type OperationFuture interface {
 // --- Helpers ---
 
 type nexGenOperationFuture struct {
-	operation workflow.Future
-	result    workflow.Future
-	get       func(workflow.Context, any) error
+	get     func(workflow.Context, any) error
+	isReady func() bool
 }
 
 func (f *nexGenOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
-	if f.get != nil {
-		return f.get(ctx, valuePtr)
-	}
-	return f.result.Get(ctx, valuePtr)
+	return f.get(ctx, valuePtr)
 }
 
 func (f *nexGenOperationFuture) IsReady() bool {
-	if f.operation != nil {
-		return f.operation.IsReady()
-	}
-	return f.result.IsReady()
+	return f.isReady()
 }
 
 func nexGenFailedOperationFuture(ctx workflow.Context, err error) OperationFuture {
 	result, resultSettable := workflow.NewFuture(ctx)
 	resultSettable.SetError(err)
-	return &nexGenOperationFuture{result: result}
+	return &nexGenOperationFuture{get: result.Get, isReady: result.IsReady}
 }
 
 func nexGenFutureResultTypeError() error {
@@ -60,7 +53,7 @@ func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) Op
 	}
 	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
 	fut := c.ExecuteOperation(ctx, "RetryPolicyOperation", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -80,7 +73,7 @@ func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) Op
 			*typedValue = *value
 		}
 		return nil
-	}}
+	}, isReady: fut.IsReady}
 }
 
 func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) OperationFuture {
@@ -90,7 +83,7 @@ func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) Ope
 	}
 	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
 	fut := c.ExecuteOperation(ctx, "ActivityOptionsOperation", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -108,7 +101,7 @@ func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) Ope
 		}
 		*typedValue = value
 		return nil
-	}}
+	}, isReady: fut.IsReady}
 }
 
 // --- Operations (public API) ---
