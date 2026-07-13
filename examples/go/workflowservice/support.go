@@ -1,20 +1,3 @@
-// Hand-written proto converter functions for Temporal semantic types.
-//
-// The generated service file references these converters by name when a WIT type is
-// replaced with a native Temporal Go SDK type (via `@nexus.type go=...`). Each
-// function translates between the native value and the protobuf message that
-// the Temporal SDK serializes onto the wire, keeping the Go bindings
-// wire-compatible with the Python and TypeScript bindings.
-//
-// Converters are pure structural translations: a `nil` input always produces a
-// `nil` output. The generated service file owns most presence/optionality logic:
-// it passes pointers for required values and stores optional values directly as
-// pointers. Workflow option values sourced from workflow.Context use SDK zero
-// values for absent options, so converters for pointer-shaped proto fields also
-// treat the corresponding Go zero value as absent.
-//
-// The `package` declaration below is replaced with the generated package name
-// when this file is emitted alongside the generated service file.
 package temporalsystem
 
 import (

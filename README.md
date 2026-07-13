@@ -10,27 +10,12 @@ The WIT definition is the source of truth for the public API. Protobuf descripto
 
 ## Contents
 
-- [Current Status](#current-status)
 - [Examples](#examples)
 - [WIT-Direct Generation](#wit-direct-generation)
 - [WIT Directives](#wit-directives)
 - [Runtimes](#runtimes)
 - [Proto Backing](#proto-backing)
 - [Validation](#validation)
-
-## Current Status
-
-| Feature | What it covers | Python | TypeScript | Go | .NET |
-| --- | --- | :-: | :-: | :-: | :-: |
-| Core API generation | WIT types become native data types; WIT functions and resources become wrappers that invoke Nexus operations from Temporal workflows | ✅ | ✅ | ✅ | ✅ |
-| Service definitions | Generated service and operation descriptors, used to register operation handlers and to mock operations in tests | ✅ | ✅ | ❌ | ✅ |
-| Proto backing | Generated models convert to and from Temporal's protobuf messages at the Nexus boundary (`@nexus.proto` and related directives) | ✅ | ✅ | ✅ | ✅ |
-| Ergonomics directives | `@nexus` directives that polish the generated API: transforming raw responses into workflow handles, flattening nested parameters, accepting typed workflow/signal functions, doc comments | ✅ | ✅ | ✅ | ✅ |
-| `json/nexus` runtime | Serialization shim that lets non-proto (WIT-direct) values round-trip through a Temporal server using a wire format shared across languages | ✅ | ✅ | ❌ | ❌ |
-
-Because Go and .NET have no `json/nexus` runtime, only the proto-backed Go and
-.NET examples share a wire format with the Python and TypeScript bindings;
-WIT-direct Go and .NET models serialize with each SDK's default converter.
 
 ## Examples
 
