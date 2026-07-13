@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -181,4 +182,43 @@ func (s *WorkflowServiceIntegrationSuite) TestCanceledContextDoesNotScheduleOper
 
 	s.Error(s.env.GetWorkflowError())
 	s.Empty(s.calls)
+}
+
+func (s *WorkflowServiceIntegrationSuite) TestConversionFailureReturnsReadyFuture() {
+	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
+			ID:        "workflow-id",
+			TaskQueue: "task-queue",
+			Memo:      map[string]any{"invalid": func() {}},
+		})
+		fut := ws.SignalWithStartWorkflow(ctx, ws.SignalWithStartWorkflowOptions{}, "wake-up", "signal-value", signalWithStartWorkflow, "workflow-input")
+		if !fut.IsReady() {
+			return errors.New("conversion failure future is not ready")
+		}
+		if err := fut.Get(ctx, nil); err == nil {
+			return errors.New("conversion failure future returned no error")
+		}
+		return nil
+	})
+
+	s.NoError(s.env.GetWorkflowError())
+	s.Empty(s.calls)
+}
+
+func (s *WorkflowServiceIntegrationSuite) TestTransformedFutureRejectsWrongResultType() {
+	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{ID: "workflow-id", TaskQueue: "task-queue"})
+		fut := ws.SignalWithStartWorkflow(ctx, ws.SignalWithStartWorkflowOptions{}, "wake-up", "signal-value", signalWithStartWorkflow, "workflow-input")
+		var wrongResult string
+		if err := fut.Get(ctx, &wrongResult); err == nil {
+			return errors.New("transformed future accepted wrong result type")
+		}
+		if !fut.IsReady() {
+			return errors.New("completed transformed future is not ready")
+		}
+		return nil
+	})
+
+	s.NoError(s.env.GetWorkflowError())
+	s.Len(s.calls, 1)
 }

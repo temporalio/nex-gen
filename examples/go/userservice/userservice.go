@@ -5,6 +5,14 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+// --- Futures ---
+
+// OperationFuture represents the result of a generated operation.
+type OperationFuture interface {
+	Get(ctx workflow.Context, valuePtr any) error
+	IsReady() bool
+}
+
 // --- Datatypes ---
 
 type getUserRequest struct {
@@ -28,19 +36,19 @@ type User struct {
 	Email string
 }
 
-func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.NexusOperationFuture {
+func (u *User) UpdateEmail(ctx workflow.Context, email string) OperationFuture {
 	return updateEmail(ctx, updateEmailRequest{UserId: u.UserId, Email: email})
 }
 
 // --- Operations (internal) ---
 
-func getUser(ctx workflow.Context, request getUserRequest) workflow.NexusOperationFuture {
+func getUser(ctx workflow.Context, request getUserRequest) OperationFuture {
 	c := workflow.NewNexusClient("user-service", "UserService")
 	fut := c.ExecuteOperation(ctx, "GetUser", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.NexusOperationFuture {
+func updateEmail(ctx workflow.Context, request updateEmailRequest) OperationFuture {
 	c := workflow.NewNexusClient("user-service", "UserService")
 	fut := c.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
 	return fut
@@ -53,7 +61,7 @@ type GetUserOptions struct {
 	UserId string
 }
 
-func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.NexusOperationFuture {
+func GetUser(ctx workflow.Context, opts GetUserOptions) OperationFuture {
 	return getUser(ctx, getUserRequest{
 		UserId: opts.UserId,
 	})
@@ -66,7 +74,7 @@ type UpdateEmailOptions struct {
 	Email string
 }
 
-func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.NexusOperationFuture {
+func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) OperationFuture {
 	return updateEmail(ctx, updateEmailRequest{
 		UserId: opts.UserId,
 		Email:  opts.Email,

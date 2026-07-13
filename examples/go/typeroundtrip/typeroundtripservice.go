@@ -11,42 +11,40 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+// --- Futures ---
+
+// OperationFuture represents the result of a generated operation.
+type OperationFuture interface {
+	Get(ctx workflow.Context, valuePtr any) error
+	IsReady() bool
+}
+
 // --- Helpers ---
 
-type nexGenNexusOperationFuture struct {
-	operation workflow.NexusOperationFuture
+type nexGenOperationFuture struct {
+	operation workflow.Future
 	result    workflow.Future
-	execution workflow.Future
 	get       func(workflow.Context, any) error
 }
 
-func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
+func (f *nexGenOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
 	if f.get != nil {
 		return f.get(ctx, valuePtr)
 	}
 	return f.result.Get(ctx, valuePtr)
 }
 
-func (f *nexGenNexusOperationFuture) IsReady() bool {
+func (f *nexGenOperationFuture) IsReady() bool {
 	if f.operation != nil {
 		return f.operation.IsReady()
 	}
 	return f.result.IsReady()
 }
 
-func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
-	if f.operation != nil {
-		return f.operation.GetNexusOperationExecution()
-	}
-	return f.execution
-}
-
-func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
+func nexGenFailedOperationFuture(ctx workflow.Context, err error) OperationFuture {
 	result, resultSettable := workflow.NewFuture(ctx)
 	resultSettable.SetError(err)
-	execution, executionSettable := workflow.NewFuture(ctx)
-	executionSettable.SetError(err)
-	return &nexGenNexusOperationFuture{result: result, execution: execution}
+	return &nexGenOperationFuture{result: result}
 }
 
 func nexGenFutureResultTypeError() error {
@@ -55,14 +53,14 @@ func nexGenFutureResultTypeError() error {
 
 // --- Operations (internal) ---
 
-func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) workflow.NexusOperationFuture {
+func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) OperationFuture {
 	requestProto, err := retryPolicyToProto(ctx, &request)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		return nexGenFailedOperationFuture(ctx, err)
 	}
 	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
 	fut := c.ExecuteOperation(ctx, "RetryPolicyOperation", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -85,14 +83,14 @@ func retryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) wo
 	}}
 }
 
-func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) workflow.NexusOperationFuture {
+func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) OperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		return nexGenFailedOperationFuture(ctx, err)
 	}
 	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
 	fut := c.ExecuteOperation(ctx, "ActivityOptionsOperation", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -194,7 +192,7 @@ func activityOptionsFromProto(ctx workflow.Context, proto *activity.ActivityOpti
 type RetryPolicyOperationOptions struct {
 }
 
-func RetryPolicyOperation(ctx workflow.Context, opts RetryPolicyOperationOptions, request temporal.RetryPolicy) workflow.NexusOperationFuture {
+func RetryPolicyOperation(ctx workflow.Context, opts RetryPolicyOperationOptions, request temporal.RetryPolicy) OperationFuture {
 	return retryPolicyOperation(ctx, request)
 }
 
@@ -209,7 +207,7 @@ type ActivityOptionsOperationOptions struct {
 	Priority *temporal.Priority
 }
 
-func ActivityOptionsOperation(ctx workflow.Context, opts ActivityOptionsOperationOptions) workflow.NexusOperationFuture {
+func ActivityOptionsOperation(ctx workflow.Context, opts ActivityOptionsOperationOptions) OperationFuture {
 	var taskQueue *string
 	if opts.TaskQueue != "" {
 		taskQueue = &opts.TaskQueue

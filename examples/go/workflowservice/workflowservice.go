@@ -15,42 +15,40 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+// --- Futures ---
+
+// OperationFuture represents the result of a generated operation.
+type OperationFuture interface {
+	Get(ctx workflow.Context, valuePtr any) error
+	IsReady() bool
+}
+
 // --- Helpers ---
 
-type nexGenNexusOperationFuture struct {
-	operation workflow.NexusOperationFuture
+type nexGenOperationFuture struct {
+	operation workflow.Future
 	result    workflow.Future
-	execution workflow.Future
 	get       func(workflow.Context, any) error
 }
 
-func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
+func (f *nexGenOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
 	if f.get != nil {
 		return f.get(ctx, valuePtr)
 	}
 	return f.result.Get(ctx, valuePtr)
 }
 
-func (f *nexGenNexusOperationFuture) IsReady() bool {
+func (f *nexGenOperationFuture) IsReady() bool {
 	if f.operation != nil {
 		return f.operation.IsReady()
 	}
 	return f.result.IsReady()
 }
 
-func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
-	if f.operation != nil {
-		return f.operation.GetNexusOperationExecution()
-	}
-	return f.execution
-}
-
-func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
+func nexGenFailedOperationFuture(ctx workflow.Context, err error) OperationFuture {
 	result, resultSettable := workflow.NewFuture(ctx)
 	resultSettable.SetError(err)
-	execution, executionSettable := workflow.NewFuture(ctx)
-	executionSettable.SetError(err)
-	return &nexGenNexusOperationFuture{result: result, execution: execution}
+	return &nexGenOperationFuture{result: result}
 }
 
 func nexGenFutureResultTypeError() error {
@@ -190,14 +188,14 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 
 // --- Operations (internal) ---
 
-func signalWithStartWorkflow(ctx workflow.Context, request signalWithStartWorkflowRequest) workflow.NexusOperationFuture {
+func signalWithStartWorkflow(ctx workflow.Context, request signalWithStartWorkflowRequest) OperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		return nexGenFailedOperationFuture(ctx, err)
 	}
 	c := workflow.NewNexusClient("temporal-system", "temporal.api.workflowservice.v1.WorkflowService")
 	fut := c.ExecuteOperation(ctx, "SignalWithStartWorkflowExecution", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -317,7 +315,7 @@ func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF inte
 	signalArg any,
 	workflow WorkflowF,
 	arg WorkflowArg,
-) workflow.NexusOperationFuture {
+) OperationFuture {
 	var requestId *string
 	if opts.RequestId != "" {
 		requestId = &opts.RequestId
@@ -369,7 +367,7 @@ func SignalWithStartWorkflowWithArgs(
 	signalArg any,
 	workflow any,
 	args ...any,
-) workflow.NexusOperationFuture {
+) OperationFuture {
 	var requestId *string
 	if opts.RequestId != "" {
 		requestId = &opts.RequestId

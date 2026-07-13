@@ -13,42 +13,40 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+// --- Futures ---
+
+// OperationFuture represents the result of a generated operation.
+type OperationFuture interface {
+	Get(ctx workflow.Context, valuePtr any) error
+	IsReady() bool
+}
+
 // --- Helpers ---
 
-type nexGenNexusOperationFuture struct {
-	operation workflow.NexusOperationFuture
+type nexGenOperationFuture struct {
+	operation workflow.Future
 	result    workflow.Future
-	execution workflow.Future
 	get       func(workflow.Context, any) error
 }
 
-func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
+func (f *nexGenOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
 	if f.get != nil {
 		return f.get(ctx, valuePtr)
 	}
 	return f.result.Get(ctx, valuePtr)
 }
 
-func (f *nexGenNexusOperationFuture) IsReady() bool {
+func (f *nexGenOperationFuture) IsReady() bool {
 	if f.operation != nil {
 		return f.operation.IsReady()
 	}
 	return f.result.IsReady()
 }
 
-func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
-	if f.operation != nil {
-		return f.operation.GetNexusOperationExecution()
-	}
-	return f.execution
-}
-
-func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
+func nexGenFailedOperationFuture(ctx workflow.Context, err error) OperationFuture {
 	result, resultSettable := workflow.NewFuture(ctx)
 	resultSettable.SetError(err)
-	execution, executionSettable := workflow.NewFuture(ctx)
-	executionSettable.SetError(err)
-	return &nexGenNexusOperationFuture{result: result, execution: execution}
+	return &nexGenOperationFuture{result: result}
 }
 
 func nexGenFutureResultTypeError() error {
@@ -136,7 +134,7 @@ type StartedWorkflow struct {
 	RunId      *string
 }
 
-func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) workflow.NexusOperationFuture {
+func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) OperationFuture {
 	var reasonPtr *string
 	if reason != "" {
 		reasonPtr = &reason
@@ -144,24 +142,24 @@ func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) workflow.N
 	return cancelWorkflow(ctx, cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reasonPtr})
 }
 
-func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string, taskQueue string) workflow.NexusOperationFuture {
+func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string, taskQueue string) OperationFuture {
 	return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflow, TaskQueue: taskQueue})
 }
 
-func (u *StartedWorkflow) GetResult(ctx workflow.Context) workflow.NexusOperationFuture {
+func (u *StartedWorkflow) GetResult(ctx workflow.Context) OperationFuture {
 	panic("StartedWorkflow.GetResult is not yet implemented")
 }
 
 // --- Operations (internal) ---
 
-func startWorkflow(ctx workflow.Context, request startWorkflowRequest) workflow.NexusOperationFuture {
+func startWorkflow(ctx workflow.Context, request startWorkflowRequest) OperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		return nexGenFailedOperationFuture(ctx, err)
 	}
 	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
 	fut := c.ExecuteOperation(ctx, "StartWorkflow", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -189,14 +187,14 @@ func startWorkflow(ctx workflow.Context, request startWorkflowRequest) workflow.
 	}}
 }
 
-func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) workflow.NexusOperationFuture {
+func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) OperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		return nexGenFailedOperationFuture(ctx, err)
 	}
 	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
 	fut := c.ExecuteOperation(ctx, "RestartWorkflow", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -224,14 +222,14 @@ func restartWorkflow(ctx workflow.Context, request startWorkflowRequest) workflo
 	}}
 }
 
-func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) workflow.NexusOperationFuture {
+func cancelWorkflow(ctx workflow.Context, request cancelWorkflowRequest) OperationFuture {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		return nexGenFailedOperationFuture(ctx, err)
 	}
 	c := workflow.NewNexusClient("temporal-system", "StartWorkflowService")
 	fut := c.ExecuteOperation(ctx, "CancelWorkflow", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
+	return &nexGenOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
 		if valuePtr == nil {
 			return fut.Get(ctx, nil)
 		}
@@ -307,7 +305,7 @@ func StartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	opts StartWorkflowOptions,
 	workflow WorkflowF,
 	arg WorkflowArg,
-) workflow.NexusOperationFuture {
+) OperationFuture {
 	var workflowStartDelay *time.Duration
 	if opts.WorkflowStartDelay != 0 {
 		workflowStartDelay = &opts.WorkflowStartDelay
@@ -339,7 +337,7 @@ func StartWorkflowWithArgs(
 	opts StartWorkflowOptions,
 	workflow any,
 	args ...any,
-) workflow.NexusOperationFuture {
+) OperationFuture {
 	var workflowStartDelay *time.Duration
 	if opts.WorkflowStartDelay != 0 {
 		workflowStartDelay = &opts.WorkflowStartDelay
@@ -382,7 +380,7 @@ func RestartWorkflow[WorkflowArg any, WorkflowResult any, WorkflowF interface {
 	opts RestartWorkflowOptions,
 	workflow WorkflowF,
 	arg WorkflowArg,
-) workflow.NexusOperationFuture {
+) OperationFuture {
 	var workflowStartDelay *time.Duration
 	if opts.WorkflowStartDelay != 0 {
 		workflowStartDelay = &opts.WorkflowStartDelay
@@ -414,7 +412,7 @@ func RestartWorkflowWithArgs(
 	opts RestartWorkflowOptions,
 	workflow any,
 	args ...any,
-) workflow.NexusOperationFuture {
+) OperationFuture {
 	var workflowStartDelay *time.Duration
 	if opts.WorkflowStartDelay != 0 {
 		workflowStartDelay = &opts.WorkflowStartDelay
@@ -447,7 +445,7 @@ type CancelWorkflowOptions struct {
 	Reason string
 }
 
-func CancelWorkflow(ctx workflow.Context, opts CancelWorkflowOptions) workflow.NexusOperationFuture {
+func CancelWorkflow(ctx workflow.Context, opts CancelWorkflowOptions) OperationFuture {
 	var reason *string
 	if opts.Reason != "" {
 		reason = &opts.Reason
