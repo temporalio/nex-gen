@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
@@ -31,148 +30,11 @@ func validVarargsFunction(args ...string) string {
 	return args[0]
 }
 
-// --- Mock tests ---
-
-type FunctionExecutionTestSuite struct {
-	suite.Suite
-	testsuite.WorkflowTestSuite
-	env *testsuite.TestWorkflowEnvironment
-}
-
-func (s *FunctionExecutionTestSuite) SetupTest() {
-	s.env = s.NewTestWorkflowEnvironment()
-}
-
-func (s *FunctionExecutionTestSuite) AfterTest(suiteName, testName string) {
-	s.env.AssertExpectations(s.T())
-}
-
-func TestFunctionExecutionSuite(t *testing.T) {
-	suite.Run(t, new(FunctionExecutionTestSuite))
-}
-
-func (s *FunctionExecutionTestSuite) TestExecuteFunction() {
-	s.env.OnNexusOperation(
-		functionExecutionServiceName,
-		nexus.NewOperationReference[any, functionexecution.ExecuteFunctionResult]("ExecuteFunction"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		&nexus.HandlerStartOperationResultSync[functionexecution.ExecuteFunctionResult]{
-			Value: functionexecution.ExecuteFunctionResult{Value: "one,true"},
-		},
-		nil,
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteFunctionResult](
-			ctx,
-			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, validFunction, "one", true),
-		)
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("one,true", result.Value)
-}
-
-func (s *FunctionExecutionTestSuite) TestExecuteVarargsFunction() {
-	s.env.OnNexusOperation(
-		functionExecutionServiceName,
-		nexus.NewOperationReference[any, functionexecution.ExecuteVarargsFunctionResult]("ExecuteVarargsFunction"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		&nexus.HandlerStartOperationResultSync[functionexecution.ExecuteVarargsFunctionResult]{
-			Value: functionexecution.ExecuteVarargsFunctionResult{Value: "one,two"},
-		},
-		nil,
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteVarargsFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteVarargsFunctionResult](ctx, functionexecution.ExecuteVarargsFunction(
-			ctx,
-			functionexecution.ExecuteVarargsFunctionOptions{},
-			validVarargsFunction,
-			"one",
-			"two",
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteVarargsFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("one,two", result.Value)
-}
-
-func (s *FunctionExecutionTestSuite) TestExecuteFunctionError() {
-	s.env.OnNexusOperation(
-		functionExecutionServiceName,
-		nexus.NewOperationReference[any, functionexecution.ExecuteFunctionResult]("ExecuteFunction"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		nil,
-		nexus.NewOperationFailedError("function not found"),
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteFunctionResult](
-			ctx,
-			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, validFunction, "one", false),
-		)
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.Error(s.env.GetWorkflowError())
-}
-
-func (s *FunctionExecutionTestSuite) TestOperationFutureCanBeSelected() {
-	s.env.OnNexusOperation(
-		functionExecutionServiceName,
-		nexus.NewOperationReference[any, functionexecution.ExecuteFunctionResult]("ExecuteFunction"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		&nexus.HandlerStartOperationResultSync[functionexecution.ExecuteFunctionResult]{
-			Value: functionexecution.ExecuteFunctionResult{Value: "selected"},
-		},
-		nil,
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
-		future := functionexecution.ExecuteFunction(
-			ctx,
-			functionexecution.ExecuteFunctionOptions{},
-			validFunction,
-			"one",
-			true,
-		)
-		var result functionexecution.ExecuteFunctionResult
-		var resultErr error
-		workflow.NewSelector(ctx).AddFuture(future, func(ready workflow.Future) {
-			resultErr = ready.Get(ctx, &result)
-		}).Select(ctx)
-		return &result, resultErr
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("selected", result.Value)
-}
-
-// --- Integration tests ---
-
 type FunctionExecutionIntegrationSuite struct {
 	suite.Suite
 	testsuite.WorkflowTestSuite
 	env   *testsuite.TestWorkflowEnvironment
-	calls []testCall
+	calls []nexusCall
 }
 
 func (s *FunctionExecutionIntegrationSuite) SetupTest() {
@@ -181,31 +43,31 @@ func (s *FunctionExecutionIntegrationSuite) SetupTest() {
 
 	executeFunction := nexus.NewSyncOperation("ExecuteFunction",
 		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteFunctionResult, error) {
-			s.calls = append(s.calls, testCall{"ExecuteFunction", input})
+			s.calls = append(s.calls, nexusCall{"ExecuteFunction", input})
 			return functionexecution.ExecuteFunctionResult{Value: "executed"}, nil
 		})
 
 	executeCountedFunction := nexus.NewSyncOperation("ExecuteCountedFunction",
 		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteCountedFunctionResult, error) {
-			s.calls = append(s.calls, testCall{"ExecuteCountedFunction", input})
+			s.calls = append(s.calls, nexusCall{"ExecuteCountedFunction", input})
 			return functionexecution.ExecuteCountedFunctionResult{Value: "counted"}, nil
 		})
 
 	executeNamedFunction := nexus.NewSyncOperation("ExecuteNamedFunction",
 		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteNamedFunctionResult, error) {
-			s.calls = append(s.calls, testCall{"ExecuteNamedFunction", input})
+			s.calls = append(s.calls, nexusCall{"ExecuteNamedFunction", input})
 			return functionexecution.ExecuteNamedFunctionResult{Value: "named"}, nil
 		})
 
 	executeVarargsFunction := nexus.NewSyncOperation("ExecuteVarargsFunction",
 		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteVarargsFunctionResult, error) {
-			s.calls = append(s.calls, testCall{"ExecuteVarargsFunction", input})
+			s.calls = append(s.calls, nexusCall{"ExecuteVarargsFunction", input})
 			return functionexecution.ExecuteVarargsFunctionResult{Value: "varargs"}, nil
 		})
 
 	executeNamedVarargsFunction := nexus.NewSyncOperation("ExecuteNamedVarargsFunction",
 		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (functionexecution.ExecuteNamedVarargsFunctionResult, error) {
-			s.calls = append(s.calls, testCall{"ExecuteNamedVarargsFunction", input})
+			s.calls = append(s.calls, nexusCall{"ExecuteNamedVarargsFunction", input})
 			return functionexecution.ExecuteNamedVarargsFunctionResult{Value: "named-varargs"}, nil
 		})
 
@@ -221,130 +83,89 @@ func (s *FunctionExecutionIntegrationSuite) SetupTest() {
 }
 
 func TestFunctionExecutionIntegrationSuite(t *testing.T) {
-	suite.Run(t, new(FunctionExecutionIntegrationSuite))
+	suite.Run(t, &FunctionExecutionIntegrationSuite{})
 }
 
-func (s *FunctionExecutionIntegrationSuite) TestExecuteFunction() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteFunctionResult](
-			ctx,
-			functionexecution.ExecuteFunction(ctx, functionexecution.ExecuteFunctionOptions{}, validFunction, "one", true),
+func (s *FunctionExecutionIntegrationSuite) TestFunctionArgumentForms() {
+	s.env.ExecuteWorkflow(func(ctx workflow.Context) ([]string, error) {
+		values := make([]string, 0, 6)
+
+		// Invoke Public APIs
+		var direct functionexecution.ExecuteFunctionResult
+		if err := functionexecution.ExecuteFunction(
+			ctx, functionexecution.ExecuteFunctionOptions{}, validFunction, "one", true,
+		).Get(ctx, &direct); err != nil {
+			return nil, err
+		}
+		values = append(values, direct.Value)
+
+		var counted functionexecution.ExecuteCountedFunctionResult
+		if err := functionexecution.ExecuteCountedFunction(
+			ctx, functionexecution.ExecuteCountedFunctionOptions{}, validCountedFunction, "one", 7,
+		).Get(ctx, &counted); err != nil {
+			return nil, err
+		}
+		values = append(values, counted.Value)
+
+		var named functionexecution.ExecuteNamedFunctionResult
+		var namedErr error
+		namedFuture := functionexecution.ExecuteNamedFunction(
+			ctx, functionexecution.ExecuteNamedFunctionOptions{}, validFunction, "one", true,
 		)
+
+		// Verify that our futures work with selectors and other standard workflow APIs.
+		workflow.NewSelector(ctx).AddFuture(namedFuture, func(ready workflow.Future) {
+			namedErr = ready.Get(ctx, &named)
+		}).Select(ctx)
+		if namedErr != nil {
+			return nil, namedErr
+		}
+		values = append(values, named.Value)
+
+		var varargs functionexecution.ExecuteVarargsFunctionResult
+		if err := functionexecution.ExecuteVarargsFunction(
+			ctx, functionexecution.ExecuteVarargsFunctionOptions{}, validVarargsFunction, "one", "two",
+		).Get(ctx, &varargs); err != nil {
+			return nil, err
+		}
+		values = append(values, varargs.Value)
+
+		var namedVarargs functionexecution.ExecuteNamedVarargsFunctionResult
+		if err := functionexecution.ExecuteNamedVarargsFunction(
+			ctx, functionexecution.ExecuteNamedVarargsFunctionOptions{}, "named-varargs-function", "one", "two",
+		).Get(ctx, &namedVarargs); err != nil {
+			return nil, err
+		}
+		values = append(values, namedVarargs.Value)
+
+		var functionVarargs functionexecution.ExecuteNamedVarargsFunctionResult
+		if err := functionexecution.ExecuteNamedVarargsFunction(
+			ctx, functionexecution.ExecuteNamedVarargsFunctionOptions{}, validVarargsFunction, "one", "two",
+		).Get(ctx, &functionVarargs); err != nil {
+			return nil, err
+		}
+		return append(values, functionVarargs.Value), nil
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("executed", result.Value)
+	var values []string
+	s.NoError(s.env.GetWorkflowResult(&values))
+	s.Equal([]string{"executed", "counted", "named", "varargs", "named-varargs", "named-varargs"}, values)
 
-	s.Require().Len(s.calls, 1)
-	s.Equal("ExecuteFunction", s.calls[0].Operation)
-}
-
-func (s *FunctionExecutionIntegrationSuite) TestExecuteCountedFunction() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteCountedFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteCountedFunctionResult](
-			ctx,
-			functionexecution.ExecuteCountedFunction(ctx, functionexecution.ExecuteCountedFunctionOptions{}, validCountedFunction, "one", 7),
-		)
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteCountedFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("counted", result.Value)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("ExecuteCountedFunction", s.calls[0].Operation)
-}
-
-func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedFunction() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteNamedFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteNamedFunctionResult](
-			ctx,
-			functionexecution.ExecuteNamedFunction(ctx, functionexecution.ExecuteNamedFunctionOptions{}, validFunction, "one", true),
-		)
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteNamedFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("named", result.Value)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("ExecuteNamedFunction", s.calls[0].Operation)
-}
-
-func (s *FunctionExecutionIntegrationSuite) TestExecuteVarargsFunction() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteVarargsFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteVarargsFunctionResult](ctx, functionexecution.ExecuteVarargsFunction(
-			ctx,
-			functionexecution.ExecuteVarargsFunctionOptions{},
-			validVarargsFunction,
-			"one",
-			"two",
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteVarargsFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("varargs", result.Value)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("ExecuteVarargsFunction", s.calls[0].Operation)
-	s.Equal("validVarargsFunction", stringField(s.calls[0].Input, "Function"))
-	s.Equal([]string{"one", "two"}, stringSliceField(s.calls[0].Input, "Args"))
-}
-
-func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunction() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteNamedVarargsFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteNamedVarargsFunctionResult](ctx, functionexecution.ExecuteNamedVarargsFunction(
-			ctx,
-			functionexecution.ExecuteNamedVarargsFunctionOptions{},
-			"named-varargs-function",
-			"one",
-			"two",
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteNamedVarargsFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("named-varargs", result.Value)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("ExecuteNamedVarargsFunction", s.calls[0].Operation)
-	s.Equal("named-varargs-function", stringField(s.calls[0].Input, "Function"))
-	s.Equal([]string{"one", "two"}, stringSliceField(s.calls[0].Input, "Args"))
-}
-
-func (s *FunctionExecutionIntegrationSuite) TestExecuteNamedVarargsFunctionFunctionPointer() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*functionexecution.ExecuteNamedVarargsFunctionResult, error) {
-		return getFutureResult[functionexecution.ExecuteNamedVarargsFunctionResult](ctx, functionexecution.ExecuteNamedVarargsFunction(
-			ctx,
-			functionexecution.ExecuteNamedVarargsFunctionOptions{},
-			validVarargsFunction,
-			"one",
-			"two",
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result functionexecution.ExecuteNamedVarargsFunctionResult
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal("named-varargs", result.Value)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("ExecuteNamedVarargsFunction", s.calls[0].Operation)
-	s.Equal("validVarargsFunction", stringField(s.calls[0].Input, "Function"))
-	s.Equal([]string{"one", "two"}, stringSliceField(s.calls[0].Input, "Args"))
+	s.Require().Len(s.calls, 6)
+	s.Equal([]string{
+		"ExecuteFunction",
+		"ExecuteCountedFunction",
+		"ExecuteNamedFunction",
+		"ExecuteVarargsFunction",
+		"ExecuteNamedVarargsFunction",
+		"ExecuteNamedVarargsFunction",
+	}, operationNames(s.calls))
+	s.Equal("validVarargsFunction", stringField(s.calls[3].Input, "Function"))
+	s.Equal([]string{"one", "two"}, stringSliceField(s.calls[3].Input, "Args"))
+	s.Equal("named-varargs-function", stringField(s.calls[4].Input, "Function"))
+	s.Equal("validVarargsFunction", stringField(s.calls[5].Input, "Function"))
 }
 
 func stringSliceField(value any, name string) []string {

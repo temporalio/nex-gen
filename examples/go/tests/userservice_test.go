@@ -2,11 +2,9 @@ package tests
 
 import (
 	"context"
-	"reflect"
 	"testing"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
@@ -16,173 +14,11 @@ import (
 
 const userServiceName = "UserService"
 
-// --- Mock tests ---
-
-type UserServiceTestSuite struct {
-	suite.Suite
-	testsuite.WorkflowTestSuite
-	env *testsuite.TestWorkflowEnvironment
-}
-
-func (s *UserServiceTestSuite) SetupTest() {
-	s.env = s.NewTestWorkflowEnvironment()
-}
-
-func (s *UserServiceTestSuite) AfterTest(suiteName, testName string) {
-	s.env.AssertExpectations(s.T())
-}
-
-func TestUserServiceSuite(t *testing.T) {
-	suite.Run(t, new(UserServiceTestSuite))
-}
-
-func (s *UserServiceTestSuite) TestGetUser() {
-	s.env.OnNexusOperation(
-		userServiceName,
-		nexus.NewOperationReference[any, userservice.User]("GetUser"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: *userservice.NewUser("user-123", "alice@example.com"),
-		},
-		nil,
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		return getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, userservice.GetUserOptions{UserId: "user-123"}))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result userservice.User
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal(*userservice.NewUser("user-123", "alice@example.com"), result)
-}
-
-func (s *UserServiceTestSuite) TestUpdateEmail() {
-	s.env.OnNexusOperation(
-		userServiceName,
-		nexus.NewOperationReference[any, userservice.User]("UpdateEmail"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: *userservice.NewUser("user-123", "new@example.com"),
-		},
-		nil,
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		return getFutureResult[userservice.User](
-			ctx,
-			userservice.UpdateEmail(ctx, userservice.UpdateEmailOptions{UserId: "user-123", Email: "new@example.com"}),
-		)
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result userservice.User
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal(*userservice.NewUser("user-123", "new@example.com"), result)
-}
-
-func (s *UserServiceTestSuite) TestUserUpdateEmailMethod() {
-	s.env.OnNexusOperation(
-		userServiceName,
-		nexus.NewOperationReference[any, userservice.User]("UpdateEmail"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: *userservice.NewUser("user-123", "updated@example.com"),
-		},
-		nil,
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user := userservice.NewUser("user-123", "old@example.com")
-		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "updated@example.com"))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result userservice.User
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal(*userservice.NewUser("user-123", "updated@example.com"), result)
-}
-
-func (s *UserServiceTestSuite) TestGetUserThenUpdateEmail() {
-	s.env.OnNexusOperation(
-		userServiceName,
-		nexus.NewOperationReference[any, userservice.User]("GetUser"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: *userservice.NewUser("user-123", "old@example.com"),
-		},
-		nil,
-	)
-
-	s.env.OnNexusOperation(
-		userServiceName,
-		nexus.NewOperationReference[any, userservice.User]("UpdateEmail"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		&nexus.HandlerStartOperationResultSync[userservice.User]{
-			Value: *userservice.NewUser("user-123", "new@example.com"),
-		},
-		nil,
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user, err := getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, userservice.GetUserOptions{UserId: "user-123"}))
-		if err != nil {
-			return nil, err
-		}
-		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "new@example.com"))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result userservice.User
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal(*userservice.NewUser("user-123", "new@example.com"), result)
-}
-
-func (s *UserServiceTestSuite) TestGetUserError() {
-	s.env.OnNexusOperation(
-		userServiceName,
-		nexus.NewOperationReference[any, userservice.User]("GetUser"),
-		mock.Anything,
-		mock.Anything,
-	).Return(
-		nil,
-		nexus.NewOperationFailedError("user not found"),
-	)
-
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		return getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, userservice.GetUserOptions{UserId: "nonexistent"}))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.Error(s.env.GetWorkflowError())
-}
-
-// --- Integration tests ---
-
-type testCall struct {
-	Operation string
-	Input     any
-}
-
 type UserServiceIntegrationSuite struct {
 	suite.Suite
 	testsuite.WorkflowTestSuite
 	env   *testsuite.TestWorkflowEnvironment
-	calls []testCall
+	calls []nexusCall
 }
 
 func (s *UserServiceIntegrationSuite) SetupTest() {
@@ -191,13 +27,17 @@ func (s *UserServiceIntegrationSuite) SetupTest() {
 
 	getUser := nexus.NewSyncOperation("GetUser",
 		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (userservice.User, error) {
-			s.calls = append(s.calls, testCall{"GetUser", input})
-			return *userservice.NewUser(stringField(input, "UserId"), "alice@example.com"), nil
+			s.calls = append(s.calls, nexusCall{"GetUser", input})
+			userID := stringField(input, "UserId")
+			if userID == "missing" {
+				return userservice.User{}, nexus.NewOperationFailedError("user not found")
+			}
+			return *userservice.NewUser(userID, "alice@example.com"), nil
 		})
 
 	updateEmail := nexus.NewSyncOperation("UpdateEmail",
 		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (userservice.User, error) {
-			s.calls = append(s.calls, testCall{"UpdateEmail", input})
+			s.calls = append(s.calls, nexusCall{"UpdateEmail", input})
 			return *userservice.NewUser(stringField(input, "UserId"), stringField(input, "Email")), nil
 		})
 
@@ -207,97 +47,51 @@ func (s *UserServiceIntegrationSuite) SetupTest() {
 }
 
 func TestUserServiceIntegrationSuite(t *testing.T) {
-	suite.Run(t, new(UserServiceIntegrationSuite))
+	suite.Run(t, &UserServiceIntegrationSuite{})
 }
 
-func (s *UserServiceIntegrationSuite) TestGetUser() {
+func (s *UserServiceIntegrationSuite) TestOperationsAndResourceMethod() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		return getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, userservice.GetUserOptions{UserId: "user-123"}))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result userservice.User
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal(*userservice.NewUser("user-123", "alice@example.com"), result)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("GetUser", s.calls[0].Operation)
-}
-
-func (s *UserServiceIntegrationSuite) TestUpdateEmail() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		return getFutureResult[userservice.User](
-			ctx,
-			userservice.UpdateEmail(ctx, userservice.UpdateEmailOptions{UserId: "user-123", Email: "new@example.com"}),
-		)
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result userservice.User
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal(*userservice.NewUser("user-123", "new@example.com"), result)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("UpdateEmail", s.calls[0].Operation)
-}
-
-func (s *UserServiceIntegrationSuite) TestUserUpdateEmailMethod() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user := userservice.NewUser("user-123", "old@example.com")
-		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "updated@example.com"))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	var result userservice.User
-	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal(*userservice.NewUser("user-123", "updated@example.com"), result)
-
-	s.Require().Len(s.calls, 1)
-	s.Equal("UpdateEmail", s.calls[0].Operation)
-}
-
-func (s *UserServiceIntegrationSuite) TestGetUserThenUpdateEmail() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*userservice.User, error) {
-		user, err := getFutureResult[userservice.User](ctx, userservice.GetUser(ctx, userservice.GetUserOptions{UserId: "user-123"}))
-		if err != nil {
+		var user userservice.User
+		if err := userservice.GetUser(ctx, userservice.GetUserOptions{UserId: "user-123"}).Get(ctx, &user); err != nil {
 			return nil, err
 		}
-		return getFutureResult[userservice.User](ctx, user.UpdateEmail(ctx, "new@example.com"))
+
+		var updated userservice.User
+		if err := userservice.UpdateEmail(ctx, userservice.UpdateEmailOptions{
+			UserId: "user-123",
+			Email:  "direct@example.com",
+		}).Get(ctx, &updated); err != nil {
+			return nil, err
+		}
+
+		// A WIT resource retains its identity fields. The generated receiver method
+		// supplies UserId from user, leaving only the new email at the call site.
+		var resourceUpdated userservice.User
+		return &resourceUpdated, user.UpdateEmail(ctx, "resource@example.com").Get(ctx, &resourceUpdated)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.NoError(s.env.GetWorkflowError())
 	var result userservice.User
 	s.NoError(s.env.GetWorkflowResult(&result))
-	s.Equal(*userservice.NewUser("user-123", "new@example.com"), result)
+	s.Equal(*userservice.NewUser("user-123", "resource@example.com"), result)
 
-	s.Require().Len(s.calls, 2)
-	s.Equal("GetUser", s.calls[0].Operation)
-	s.Equal("UpdateEmail", s.calls[1].Operation)
+	s.Require().Len(s.calls, 3)
+	s.Equal([]string{"GetUser", "UpdateEmail", "UpdateEmail"}, operationNames(s.calls))
+	s.Equal("direct@example.com", stringField(s.calls[1].Input, "Email"))
+	s.Equal("user-123", stringField(s.calls[2].Input, "UserId"))
+	s.Equal("resource@example.com", stringField(s.calls[2].Input, "Email"))
 }
 
-func stringField(value any, name string) string {
-	reflected := reflect.ValueOf(value)
-	if reflected.Kind() == reflect.Pointer {
-		reflected = reflected.Elem()
-	}
-	if reflected.Kind() == reflect.Struct {
-		field := reflected.FieldByName(name)
-		if field.IsValid() && field.Kind() == reflect.String {
-			return field.String()
-		}
-	}
-	if reflected.Kind() == reflect.Map && reflected.Type().Key().Kind() == reflect.String {
-		mapValue := reflected.MapIndex(reflect.ValueOf(name))
-		if mapValue.IsValid() && mapValue.Kind() == reflect.Interface {
-			mapValue = mapValue.Elem()
-		}
-		if mapValue.IsValid() && mapValue.Kind() == reflect.String {
-			return mapValue.String()
-		}
-	}
-	return ""
+func (s *UserServiceIntegrationSuite) TestOperationFailure() {
+	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		var result userservice.User
+		return userservice.GetUser(ctx, userservice.GetUserOptions{UserId: "missing"}).Get(ctx, &result)
+	})
+
+	s.True(s.env.IsWorkflowCompleted())
+	s.Error(s.env.GetWorkflowError())
+	s.Require().Len(s.calls, 1)
+	s.Equal("GetUser", s.calls[0].Operation)
 }

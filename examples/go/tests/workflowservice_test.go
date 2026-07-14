@@ -60,99 +60,15 @@ func (s *WorkflowServiceIntegrationSuite) SetupTest() {
 }
 
 func TestWorkflowServiceIntegrationSuite(t *testing.T) {
-	suite.Run(t, new(WorkflowServiceIntegrationSuite))
+	suite.Run(t, &WorkflowServiceIntegrationSuite{})
 }
 
-func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowEncodesSingleSignalArg() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*ws.SignalWithStartWorkflowResponse, error) {
-		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
-			ID:        "workflow-id",
-			TaskQueue: "task-queue",
-		})
-		return getFutureResult[ws.SignalWithStartWorkflowResponse](ctx, ws.SignalWithStartWorkflow(
-			ctx,
-			ws.SignalWithStartWorkflowOptions{},
-			"wake-up",
-			"signal-value",
-			signalWithStartWorkflow,
-			"workflow-input",
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-
-	s.Require().Len(s.calls, 1)
-	request := s.calls[0]
-	s.Equal("wake-up", request.GetSignalName())
-	s.Require().NotNil(request.GetSignalInput())
-	s.Len(request.GetSignalInput().GetPayloads(), 1)
-	s.Require().NotNil(request.GetInput())
-	s.Len(request.GetInput().GetPayloads(), 1)
-	s.Require().NotNil(request.RetryPolicy)
-	s.Require().NotNil(request.Priority)
-	s.Require().NotNil(request.SearchAttributes)
-	s.Empty(request.SearchAttributes.IndexedFields)
-}
-
-func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowWithArgsEncodesNilSignalArg() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*ws.SignalWithStartWorkflowResponse, error) {
-		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
-			ID:        "workflow-id",
-			TaskQueue: "task-queue",
-		})
-		return getFutureResult[ws.SignalWithStartWorkflowResponse](ctx, ws.SignalWithStartWorkflowWithArgs(
-			ctx,
-			ws.SignalWithStartWorkflowOptions{},
-			"wake-up",
-			nil,
-			"ExampleWorkflow",
-			"one",
-			"two",
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-
-	s.Require().Len(s.calls, 1)
-	request := s.calls[0]
-	s.Equal("wake-up", request.GetSignalName())
-	s.Require().NotNil(request.GetSignalInput())
-	s.Len(request.GetSignalInput().GetPayloads(), 1)
-	s.Require().NotNil(request.GetInput())
-	s.Len(request.GetInput().GetPayloads(), 2)
-}
-
-func (s *WorkflowServiceIntegrationSuite) TestEmptyPayloadsAreDelegatedToDataConverter() {
-	s.env.SetDataConverter(emptyPayloadsDataConverter{converter.GetDefaultDataConverter()})
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*ws.SignalWithStartWorkflowResponse, error) {
-		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
-			ID:        "workflow-id",
-			TaskQueue: "task-queue",
-		})
-		return getFutureResult[ws.SignalWithStartWorkflowResponse](ctx, ws.SignalWithStartWorkflowWithArgs(
-			ctx,
-			ws.SignalWithStartWorkflowOptions{},
-			"wake-up",
-			"signal-value",
-			"ExampleWorkflow",
-		))
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	s.Require().Len(s.calls, 1)
-	s.NotNil(s.calls[0].Input)
-	s.Empty(s.calls[0].Input.Payloads)
-}
-
-func (s *WorkflowServiceIntegrationSuite) TestWorkflowContextOptionsAreReadFromContext() {
+func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms() {
 	retryPolicy := &temporal.RetryPolicy{MaximumAttempts: 3}
 	searchKey := temporal.NewSearchAttributeKeyKeyword("CustomKeyword")
 	searchAttributes := temporal.NewSearchAttributes(searchKey.ValueSet("search-value"))
 
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*ws.SignalWithStartWorkflowResponse, error) {
+	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
 		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
 			Namespace:                "target-namespace",
 			ID:                       "workflow-id",
@@ -167,28 +83,89 @@ func (s *WorkflowServiceIntegrationSuite) TestWorkflowContextOptionsAreReadFromC
 			SearchAttributes:         searchAttributes,
 			Priority:                 temporal.Priority{PriorityKey: 7},
 		})
-		return getFutureResult[ws.SignalWithStartWorkflowResponse](ctx, ws.SignalWithStartWorkflow(
-			ctx, ws.SignalWithStartWorkflowOptions{}, "wake-up", "signal-value",
-			signalWithStartWorkflow, "workflow-input",
-		))
+
+		// This is the workflow-side counterpart of
+		// client.Client.SignalWithStartWorkflow. Start fields normally held in
+		// client.StartWorkflowOptions are sourced from WorkflowContextOptions.
+		var typedResult ws.SignalWithStartWorkflowResponse
+		typedFuture := ws.SignalWithStartWorkflow(
+			ctx,
+			ws.SignalWithStartWorkflowOptions{},
+			"wake-up",
+			"signal-value",
+			signalWithStartWorkflow,
+			"workflow-input",
+		)
+		if err := typedFuture.Get(ctx, &typedResult); err != nil {
+			return err
+		}
+
+		var variadicResult ws.SignalWithStartWorkflowResponse
+		return ws.SignalWithStartWorkflowWithArgs(
+			ctx,
+			ws.SignalWithStartWorkflowOptions{},
+			"wake-up",
+			nil,
+			"ExampleWorkflow",
+			"one",
+			"two",
+		).Get(ctx, &variadicResult)
+	})
+
+	s.True(s.env.IsWorkflowCompleted())
+	s.NoError(s.env.GetWorkflowError())
+	s.Require().Len(s.calls, 2)
+
+	typedRequest := s.calls[0]
+	s.Equal("wake-up", typedRequest.GetSignalName())
+	s.Require().NotNil(typedRequest.GetSignalInput())
+	s.Len(typedRequest.GetSignalInput().GetPayloads(), 1)
+	s.Require().NotNil(typedRequest.GetInput())
+	s.Len(typedRequest.GetInput().GetPayloads(), 1)
+	s.Equal("target-namespace", typedRequest.GetNamespace())
+	s.Equal("workflow-id", typedRequest.GetWorkflowId())
+	s.Equal("task-queue", typedRequest.GetTaskQueue().GetName())
+	s.Equal(3*time.Hour, typedRequest.GetWorkflowExecutionTimeout().AsDuration())
+	s.Equal(2*time.Hour, typedRequest.GetWorkflowRunTimeout().AsDuration())
+	s.Equal(time.Minute, typedRequest.GetWorkflowTaskTimeout().AsDuration())
+	s.Equal(enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE, typedRequest.GetWorkflowIdReusePolicy())
+	s.Equal(int32(3), typedRequest.GetRetryPolicy().GetMaximumAttempts())
+	s.Equal("0 * * * *", typedRequest.GetCronSchedule())
+	s.Contains(typedRequest.GetMemo().GetFields(), "memo-key")
+	s.Contains(typedRequest.GetSearchAttributes().GetIndexedFields(), "CustomKeyword")
+	s.Equal(int32(7), typedRequest.GetPriority().GetPriorityKey())
+
+	variadicRequest := s.calls[1]
+	// A nil signal argument is still one argument and therefore one payload;
+	// it does not mean that the signal has no arguments.
+	s.Require().NotNil(variadicRequest.GetSignalInput())
+	s.Len(variadicRequest.GetSignalInput().GetPayloads(), 1)
+	s.Require().NotNil(variadicRequest.GetInput())
+	s.Len(variadicRequest.GetInput().GetPayloads(), 2)
+}
+
+func (s *WorkflowServiceIntegrationSuite) TestEmptyPayloadsAreDelegatedToDataConverter() {
+	s.env.SetDataConverter(emptyPayloadsDataConverter{converter.GetDefaultDataConverter()})
+	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*ws.SignalWithStartWorkflowResponse, error) {
+		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
+			ID:        "workflow-id",
+			TaskQueue: "task-queue",
+		})
+		var result ws.SignalWithStartWorkflowResponse
+		return &result, ws.SignalWithStartWorkflowWithArgs(
+			ctx,
+			ws.SignalWithStartWorkflowOptions{},
+			"wake-up",
+			"signal-value",
+			"ExampleWorkflow",
+		).Get(ctx, &result)
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.NoError(s.env.GetWorkflowError())
 	s.Require().Len(s.calls, 1)
-	request := s.calls[0]
-	s.Equal("target-namespace", request.GetNamespace())
-	s.Equal("workflow-id", request.GetWorkflowId())
-	s.Equal("task-queue", request.GetTaskQueue().GetName())
-	s.Equal(3*time.Hour, request.GetWorkflowExecutionTimeout().AsDuration())
-	s.Equal(2*time.Hour, request.GetWorkflowRunTimeout().AsDuration())
-	s.Equal(time.Minute, request.GetWorkflowTaskTimeout().AsDuration())
-	s.Equal(enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE, request.GetWorkflowIdReusePolicy())
-	s.Equal(int32(3), request.GetRetryPolicy().GetMaximumAttempts())
-	s.Equal("0 * * * *", request.GetCronSchedule())
-	s.Contains(request.GetMemo().GetFields(), "memo-key")
-	s.Contains(request.GetSearchAttributes().GetIndexedFields(), "CustomKeyword")
-	s.Equal(int32(7), request.GetPriority().GetPriorityKey())
+	s.NotNil(s.calls[0].Input)
+	s.Empty(s.calls[0].Input.Payloads)
 }
 
 func (s *WorkflowServiceIntegrationSuite) TestWorkflowContextOptionsRequireWorkflowID() {
