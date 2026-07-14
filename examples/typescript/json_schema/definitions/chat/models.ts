@@ -3,16 +3,8 @@
 import type { Violation } from "./json";
 import { ValidationError, isPlainObject, collect } from "./json";
 
-// ---------------------------------------------------------------------------
-// Generated constants.
-// ---------------------------------------------------------------------------
-
 const KIND_CONST = "text";
 export const DEFAULT_PRIORITY = 0;
-
-// ---------------------------------------------------------------------------
-// Models.
-// ---------------------------------------------------------------------------
 
 export interface GetRoomInput {
   roomId: string;

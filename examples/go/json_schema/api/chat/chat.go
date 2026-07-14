@@ -13,10 +13,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// ---------------------------------------------------------------------------
-// Service binding.
-// ---------------------------------------------------------------------------
-
 // Send messages and look up rooms.
 var ChatService = struct {
 	ServiceName string
@@ -56,10 +52,6 @@ func (c *ChatServiceClient) GetRoom(ctx workflow.Context, request GetRoomInput) 
 func (c *ChatServiceClient) Ping(ctx workflow.Context) workflow.NexusOperationFuture {
 	return c.client.ExecuteOperation(ctx, ChatService.Ping, nil, workflow.NexusOperationOptions{})
 }
-
-// ---------------------------------------------------------------------------
-// Shared validator core.
-// ---------------------------------------------------------------------------
 
 // Violation is a single constraint failure. Path is the JSON member path
 // (dotted for nested members); Reason is a human-readable message.
@@ -229,17 +221,9 @@ func marshalField(out map[string]json.RawMessage, key string, v any, errs *[]Vio
 	out[key] = b
 }
 
-// ---------------------------------------------------------------------------
-// const discriminators
-// ---------------------------------------------------------------------------
-
 type MessageKind = string
 
 const MessageKindText = MessageKind("text")
-
-// ---------------------------------------------------------------------------
-// GetRoomInput
-// ---------------------------------------------------------------------------
 
 type GetRoomInput struct {
 	RoomId string `json:"roomId"`
@@ -292,10 +276,6 @@ func (m GetRoomInput) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-
-// ---------------------------------------------------------------------------
-// Labels
-// ---------------------------------------------------------------------------
 
 // Arbitrary string key/value labels.
 type Labels struct {
@@ -351,10 +331,6 @@ func (m Labels) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-
-// ---------------------------------------------------------------------------
-// Message
-// ---------------------------------------------------------------------------
 
 // A chat message.
 type Message struct {
@@ -447,10 +423,6 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-
-// ---------------------------------------------------------------------------
-// Room
-// ---------------------------------------------------------------------------
 
 // A chat room. Open to forward-compatible extension.
 type Room struct {
@@ -554,10 +526,6 @@ func (m Room) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// ---------------------------------------------------------------------------
-// SendMessageInput
-// ---------------------------------------------------------------------------
-
 // Request to post a message.
 type SendMessageInput struct {
 	RoomId  string  `json:"roomId"`
@@ -620,10 +588,6 @@ func (m SendMessageInput) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-
-// ---------------------------------------------------------------------------
-// SendMessageOutput
-// ---------------------------------------------------------------------------
 
 type SendMessageOutput struct {
 	MessageId string `json:"messageId"`

@@ -127,13 +127,9 @@ fn render_external_models(
 
     let mut output = String::new();
     render_default_constants(&mut output, json_models)?;
-    output.push_str(
-        "\n// ---------------------------------------------------------------------------\n",
-    );
-    output.push_str("// Models.\n");
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n",
-    );
+    if !output.is_empty() {
+        output.push('\n');
+    }
 
     for model in json_models {
         output.push('\n');
@@ -186,13 +182,6 @@ fn render_json_runtime_module() -> String {
 }
 
 fn render_validator_core(output: &mut String) {
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n",
-    );
-    output.push_str("// Shared validator core.\n");
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n\n",
-    );
     output.push_str("/** A single constraint failure, located by JSON path. */\n");
     output.push_str("export interface Violation {\n");
     output.push_str("  readonly path: string;\n");
@@ -280,13 +269,7 @@ fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) ->
         });
     }
 
-    output.push_str(
-        "\n// ---------------------------------------------------------------------------\n",
-    );
-    output.push_str("// Generated constants.\n");
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n\n",
-    );
+    output.push('\n');
     for constant in constants {
         if constant.exported {
             output.push_str("export ");

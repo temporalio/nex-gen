@@ -7,10 +7,6 @@ import (
 	nexgenjson "examples/go/json_schema/api/kb"
 )
 
-// ---------------------------------------------------------------------------
-// Block
-// ---------------------------------------------------------------------------
-
 // A content block. The other half of the Page <-> Block cross-file cycle. The `page` back-reference is optional + nullable, which terminates the cycle so it is satisfiable.
 type Block struct {
 	BlockId string `json:"blockId"`
@@ -113,10 +109,6 @@ func (m Block) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// ---------------------------------------------------------------------------
-// BlockStyle
-// ---------------------------------------------------------------------------
-
 // Non-cyclic helper; stays in the content_block module. All members optional.
 type BlockStyle struct {
 	Bold   *bool  `json:"bold,omitempty"`
@@ -181,10 +173,6 @@ func (m BlockStyle) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
 
 // A page. One half of the Page <-> Block cross-file cycle. Because the cycle spans two input files, Page and Block hoist together into Python's _recursive.py; the non-cyclic PageMeta helper stays in this module.
 type Page struct {
@@ -264,10 +252,6 @@ func (m Page) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-
-// ---------------------------------------------------------------------------
-// PageMeta
-// ---------------------------------------------------------------------------
 
 // Non-cyclic helper. Referenced only by Page, references nothing recursive, so it stays in the content_page module even though Page is hoisted.
 type PageMeta struct {

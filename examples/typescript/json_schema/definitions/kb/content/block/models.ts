@@ -5,10 +5,6 @@ import { ValidationError, isPlainObject, collect } from "../../json";
 import { parsePage, serializePage } from "../page/models";
 import type { Page } from "../page/models";
 
-// ---------------------------------------------------------------------------
-// Models.
-// ---------------------------------------------------------------------------
-
 /**
  * A content block. The other half of the Page <-> Block cross-file cycle. The `page` back-reference is optional + nullable, which terminates the cycle so it is satisfiable.
  */

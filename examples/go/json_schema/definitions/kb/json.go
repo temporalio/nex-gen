@@ -10,10 +10,6 @@ import (
 	"strings"
 )
 
-// ---------------------------------------------------------------------------
-// Shared validator core.
-// ---------------------------------------------------------------------------
-
 // Violation is a single constraint failure. Path is the JSON member path
 // (dotted for nested members); Reason is a human-readable message.
 type Violation struct {

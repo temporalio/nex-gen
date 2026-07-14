@@ -14,10 +14,6 @@ export function requiredField<T>(
   return value;
 }
 
-// ---------------------------------------------------------------------------
-// Models.
-// ---------------------------------------------------------------------------
-
 /**
  * A node in a self-recursive category tree. The root of this file is itself a type (pure JSON Schema file), named Category from the basename.
  */

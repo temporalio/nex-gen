@@ -210,13 +210,6 @@ impl ModelBackend {
             return Ok(String::new());
         }
         let mut output = String::new();
-        output.push_str(
-            "// ---------------------------------------------------------------------------\n",
-        );
-        output.push_str("// Service binding.\n");
-        output.push_str(
-            "// ---------------------------------------------------------------------------\n\n",
-        );
         for service in &api_plan.services {
             render_go_doc_comment(
                 &mut output,
@@ -514,13 +507,6 @@ fn qualify_shared_runtime_references(output: &mut String) {
 }
 
 fn render_validator_core(output: &mut String) {
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n",
-    );
-    output.push_str("// Shared validator core.\n");
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n\n",
-    );
     output.push_str("// Violation is a single constraint failure. Path is the JSON member path\n");
     output.push_str("// (dotted for nested members); Reason is a human-readable message.\n");
     output.push_str("type Violation struct {\n\tPath   string\n\tReason string\n}\n\n");
@@ -601,13 +587,6 @@ fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType])
     if constants.is_empty() {
         return Ok(());
     }
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n",
-    );
-    output.push_str("// const discriminators\n");
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n\n",
-    );
     for (type_name, const_name, value) in constants {
         output.push_str("type ");
         output.push_str(&type_name);
@@ -630,15 +609,6 @@ fn render_model(
     model_names: &BTreeMap<String, String>,
 ) -> Result<()> {
     let schema = decode_schema(model)?;
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n",
-    );
-    output.push_str("// ");
-    output.push_str(&model.model_name);
-    output.push('\n');
-    output.push_str(
-        "// ---------------------------------------------------------------------------\n\n",
-    );
     render_go_doc_comment(output, "", schema.description.as_deref());
     output.push_str("type ");
     output.push_str(&model.model_name);

@@ -3,10 +3,6 @@
 import type { Violation } from "../json";
 import { ValidationError, isPlainObject } from "../json";
 
-// ---------------------------------------------------------------------------
-// Models.
-// ---------------------------------------------------------------------------
-
 export interface GetCategoryTreeInput {
   rootId: string;
 }

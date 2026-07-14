@@ -3,10 +3,6 @@
 import type { Violation } from "../../json";
 import { ValidationError, isPlainObject, collect } from "../../json";
 
-// ---------------------------------------------------------------------------
-// Models.
-// ---------------------------------------------------------------------------
-
 /**
  * A node in a self-recursive category tree. The root of this file is itself a type (pure JSON Schema file), named Category from the basename.
  */

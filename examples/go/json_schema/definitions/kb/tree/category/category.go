@@ -7,10 +7,6 @@ import (
 	nexgenjson "examples/go/json_schema/definitions/kb"
 )
 
-// ---------------------------------------------------------------------------
-// Category
-// ---------------------------------------------------------------------------
-
 // A node in a self-recursive category tree. The root of this file is itself a type (pure JSON Schema file), named Category from the basename.
 type Category struct {
 	Id   string `json:"id"`
@@ -79,10 +75,6 @@ func (m Category) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-
-// ---------------------------------------------------------------------------
-// Palette
-// ---------------------------------------------------------------------------
 
 // A dead $def - defined but never referenced anywhere. Still generated and exported as intended reusable API surface (see the $ref spec).
 type Palette struct {

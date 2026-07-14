@@ -14,10 +14,6 @@ export function requiredField<T>(
   return value;
 }
 
-// ---------------------------------------------------------------------------
-// Models.
-// ---------------------------------------------------------------------------
-
 export interface GetCategoryTreeInput {
   rootId: string;
 }

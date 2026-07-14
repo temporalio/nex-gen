@@ -11,10 +11,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// ---------------------------------------------------------------------------
-// Service binding.
-// ---------------------------------------------------------------------------
-
 // Fetch and update pages, blocks, and the category tree.
 var KnowledgeBaseService = struct {
 	ServiceName string
@@ -54,10 +50,6 @@ func (c *KnowledgeBaseServiceClient) PutBlock(ctx workflow.Context, request cont
 func (c *KnowledgeBaseServiceClient) GetCategoryTree(ctx workflow.Context, request GetCategoryTreeInput) workflow.NexusOperationFuture {
 	return c.client.ExecuteOperation(ctx, KnowledgeBaseService.GetCategoryTree, request, workflow.NexusOperationOptions{})
 }
-
-// ---------------------------------------------------------------------------
-// GetCategoryTreeInput
-// ---------------------------------------------------------------------------
 
 type GetCategoryTreeInput struct {
 	RootId string `json:"rootId"`
@@ -111,10 +103,6 @@ func (m GetCategoryTreeInput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// ---------------------------------------------------------------------------
-// GetPageInput
-// ---------------------------------------------------------------------------
-
 type GetPageInput struct {
 	PageId string `json:"pageId"`
 }
@@ -166,10 +154,6 @@ func (m GetPageInput) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-
-// ---------------------------------------------------------------------------
-// PutBlockOutput
-// ---------------------------------------------------------------------------
 
 type PutBlockOutput struct {
 	BlockId  string `json:"blockId"`

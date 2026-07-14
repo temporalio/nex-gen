@@ -16,10 +16,6 @@ export function requiredField<T>(
   return value;
 }
 
-// ---------------------------------------------------------------------------
-// Models.
-// ---------------------------------------------------------------------------
-
 /**
  * A page. One half of the Page <-> Block cross-file cycle. Because the cycle spans two input files, Page and Block hoist together into Python's _recursive.py; the non-cyclic PageMeta helper stays in this module.
  */

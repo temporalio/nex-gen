@@ -5,10 +5,6 @@ import { ValidationError, isPlainObject, collect } from "../../json";
 import { parseBlock } from "../block/models";
 import type { Block } from "../block/models";
 
-// ---------------------------------------------------------------------------
-// Models.
-// ---------------------------------------------------------------------------
-
 /**
  * A page. One half of the Page <-> Block cross-file cycle. Because the cycle spans two input files, Page and Block hoist together into Python's _recursive.py; the non-cyclic PageMeta helper stays in this module.
  */

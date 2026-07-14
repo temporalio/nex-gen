@@ -7,10 +7,6 @@ import (
 	nexgenjson "examples/go/json_schema/definitions/kb"
 )
 
-// ---------------------------------------------------------------------------
-// GetCategoryTreeInput
-// ---------------------------------------------------------------------------
-
 type GetCategoryTreeInput struct {
 	RootId string `json:"rootId"`
 }
@@ -63,10 +59,6 @@ func (m GetCategoryTreeInput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// ---------------------------------------------------------------------------
-// GetPageInput
-// ---------------------------------------------------------------------------
-
 type GetPageInput struct {
 	PageId string `json:"pageId"`
 }
@@ -118,10 +110,6 @@ func (m GetPageInput) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-
-// ---------------------------------------------------------------------------
-// PutBlockOutput
-// ---------------------------------------------------------------------------
 
 type PutBlockOutput struct {
 	BlockId  string `json:"blockId"`
