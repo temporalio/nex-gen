@@ -233,6 +233,12 @@ pub(in crate::generator) fn tree_model_hoists(
         PathBuf::from("_models.py"),
         render_hoisted_models_module(&plan)?,
     );
+    hoists.add_exported_names(
+        plan.hoisted_models
+            .iter()
+            .map(|model| model.model_name.clone())
+            .collect(),
+    );
     Ok(hoists)
 }
 
