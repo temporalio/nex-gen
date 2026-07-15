@@ -5,28 +5,6 @@ with examples in Python and TypeScript. It covers every type mapping, the
 resource name-binding mechanism (including edge cases), and a complete glossary
 of `@nexus` directives.
 
-> [!NOTE]
-> Go generation supports proto-backed models. Generated Go models gain
-> `ToProto`/`FromProto` methods that convert between native Go values and the
-> Temporal Go SDK's protobuf structs, keeping the wire format compatible with
-> the Python and TypeScript bindings.
->
-> Converters for type-replaced SDK types live in a hand-written
-> `model_overrides.go` support fragment and follow a strict pointer contract:
-> `XToProto(*Native) *Proto` and `XFromProto(*Proto) *Native`, each returning
-> `nil` for `nil` input. Converters never invent zero values -- the generated
-> `api.go` owns all nil/presence handling. Optional fields are rendered as
-> pointers (`*T`) so that an unset value (`nil`) stays distinct from a value
-> that was explicitly set to the zero value; required fields stay values and are
-> dereferenced from the converter's pointer result with a nil guard.
->
-> Payload, memo, search-attribute, and versioning-override conversions are
-> partial: the codegen is in place but their converters are placeholders pending
-> full Temporal Go SDK data-converter integration.
->
-> `@nexus.doc` text (including `go=`/`go-returns=` overrides) renders as godoc
-> comments on generated struct fields and exported wrapper functions.
-
 ## Contents
 
 - [Quick Start](#quick-start)
@@ -39,10 +17,6 @@ of `@nexus` directives.
   - [Tuples](#tuples)
   - [Option Types](#option-types)
   - [Lists and Maps](#lists-and-maps)
-- [Operations](#operations)
-  - [Internal Function + Convenience Wrapper](#internal-function--convenience-wrapper)
-  - [Forwarding Wrappers](#forwarding-wrappers)
-  - [Void Operations](#void-operations)
 - [Resources](#resources)
   - [Resource Declaration](#resource-declaration)
   - [Name-Binding: How Resource Methods Find Operations](#name-binding-how-resource-methods-find-operations)
@@ -135,7 +109,6 @@ export interface PostalAddress {
   city: string;
   country: string;
 }
-export const PostalAddress = {};
 ```
 
 TypeScript always emits a companion `const` alongside the interface. For
@@ -318,143 +291,6 @@ metadata?: Record<string, string>;
 Whether a field is required or optional is determined by the WIT `option<>`
 wrapper (for WIT-direct fields) or proto field presence semantics (for
 proto-backed fields).
-
----
-
-## Operations
-
-Every WIT function in the interface becomes a Nexus operation. The generator
-produces multiple layers of wrappers.
-
-### Internal Function + Convenience Wrapper
-
-For operations whose input is a generated record, the generator produces:
-
-1. An **internal function** that takes the raw request object
-2. A **convenience wrapper** that unpacks the record's fields into individual
-   parameters
-
-Given:
-
-```wit
-record get-user-request {
-  user-id: string,
-  consistency-token: option<string>,
-}
-
-get-user: func(request: get-user-request) -> user-result;
-```
-
-**Python:**
-```python
-# Internal: takes the request object directly
-async def _get_user(request: GetUserRequest) -> User:
-    nexus_client = workflow.create_nexus_client(
-        service="UserService", endpoint="user-service",
-    )
-    handle = await nexus_client.start_operation(
-        operation="GetUser", input=request, output_type=User,
-    )
-    return await handle
-
-# Convenience: unpacks fields into keyword-only arguments
-async def get_user(*, user_id: str, consistency_token: str | None = None) -> User:
-    request = GetUserRequest(user_id=user_id, consistency_token=consistency_token)
-    return await _get_user(request)
-```
-
-In Python, the convenience wrapper uses `*` to force keyword-only arguments.
-Optional record fields become optional keyword arguments with `= None` defaults.
-
-**TypeScript:**
-```typescript
-// Single function that takes the request interface
-export async function getUser(request: GetUserRequest): Promise<User> {
-    const client = workflow.createNexusServiceClient({
-        service: UserService, endpoint: "user-service",
-    });
-    const requestProto = nexusValue("user-service.get-user-request", request);
-    const handle = await client.startOperation(
-        UserService.operations.getUser, requestProto,
-    );
-    return await handle.result();
-}
-```
-
-TypeScript relies on the interface definition itself for the ergonomic API,
-so it does not need a separate convenience wrapper.
-
-### Forwarding Wrappers
-
-When the input type is an external type (set via `@nexus.type`) rather than a
-generated record, there are no fields to unpack. The generator produces a simple
-forwarding wrapper that accepts the external type directly.
-
-```wit
-retry-policy-operation: func(request: retry-policy) -> retry-policy;
-```
-
-Where `retry-policy` has `@nexus.type python="temporalio.common.RetryPolicy"`.
-
-**Python:**
-```python
-async def retry_policy_operation(
-    request: temporalio.common.RetryPolicy,
-) -> workflow.NexusOperationHandle[temporalio.api.common.v1.message_pb2.RetryPolicy]:
-    nexus_client = workflow.create_nexus_client(
-        service="TypeRoundtripService", endpoint="temporal-system",
-    )
-    return await nexus_client.start_operation(
-        operation="RetryPolicyOperation",
-        input=retry_policy_to_proto(request),
-        output_type=temporalio.api.common.v1.message_pb2.RetryPolicy,
-    )
-```
-
-No convenience wrapper is generated because there is only one parameter and no
-record to unpack.
-
-### Void Operations
-
-Operations with no return type produce wrappers that return a handle instead of
-a result.
-
-```wit
-deactivate: func(request: deactivate-request);
-```
-
-**Python:**
-```python
-# Standalone wrapper returns the handle
-async def deactivate(
-    *, user_id: str, reason: str | None = None,
-) -> workflow.NexusOperationHandle[None,]:
-    request = DeactivateRequest(user_id=user_id, reason=reason)
-    return await _deactivate(request)
-```
-
-**TypeScript:**
-```typescript
-export async function deactivate(
-    request: DeactivateRequest,
-): Promise<workflow.NexusOperationHandle<void>> {
-    const client = workflow.createNexusServiceClient({ ... });
-    return await client.startOperation(
-        TypeShowcase.operations.deactivate,
-        nexusValue("type-showcase.deactivate-request", request),
-    );
-}
-```
-
-Note that resource instance methods calling void operations do await the handle:
-
-```python
-# Resource method awaits the handle and returns None
-async def deactivate(self, reason: str | None = None) -> None:
-    request = DeactivateRequest(user_id=self.user_id, reason=reason)
-    handle = await _deactivate(request)
-    await handle
-```
 
 ---
 
@@ -812,7 +648,7 @@ raise a `ValueError` (Python) or throw an `Error` (TypeScript).
 
 ### Sourced Fields
 
-Fields annotated with `@nexus.source` are not exposed in the generated API.
+Fields annotated with `@nexus.source` are not exposed in the user-facing API.
 Instead, the `to_proto()` method calls a support function to obtain the value.
 
 ```wit
@@ -1239,24 +1075,6 @@ language-prefixed keys such as `python-result` and `typescript-result` when it
 does not. Do not combine these result overrides with `signature` on a type
 alias.
 
-### TypeScript Companion: `@nexus.typescript-with-arguments`
-
-`@nexus.typescript-with-arguments` is not a Python feature, but it often appears
-beside `@nexus.function` because TypeScript SDK objects can carry their own
-argument types. It lets TypeScript accept values such as
-`workflow.SignalDefinition<any[]>` and infer `signalArgs` from that definition.
-
-```wit
-/// @nexus.typescript-with-arguments
-///   signature="signal-call"
-///   args-field="signal-input"
-///   alternate-type="string"
-///   value-type="workflow.SignalDefinition<any[]>"
-///   args-type="Value extends workflow.SignalDefinition<infer Args, any> ? Args : never"
-///   name-expr="value.name"
-///   typescript-package="@temporalio/workflow"
-type signal-function = placeholder;
-```
 
 ### Option Summary
 
@@ -1599,37 +1417,6 @@ Marks the final signature parameter as a variable argument list. See
 ///   param="args"
 workflow-call: async func(callable-prefix: callable-prefix, args: payloads) -> workflow-result;
 ```
-
----
-
-### @nexus.typescript-with-arguments
-
-**Placement:** Type alias or record field
-**Syntax:**
-```
-@nexus.typescript-with-arguments
-  signature="<wit-function>"
-  args-field="<proto-field>"
-  value-type="<ts-type>"
-  args-type="<ts-conditional-type>"
-  name-expr="<ts-expr>"
-```
-
-TypeScript-specific. Generates type-safe overloaded methods that accept typed
-signal/workflow definition objects. Uses TypeScript conditional types to infer
-argument types from the definition.
-
-```wit
-/// @nexus.typescript-with-arguments
-///   signature="signal-call"
-///   args-field="signal-input"
-///   value-type="workflow.SignalDefinition<any[]>"
-///   args-type="Value extends workflow.SignalDefinition<infer Args, any> ? Args : never"
-///   name-expr="value.name"
-type signal-function = placeholder;
-```
-
-All five keys are required.
 
 ---
 
