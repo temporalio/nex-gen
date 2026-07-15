@@ -6,10 +6,12 @@ import collections.abc
 import typing
 import typing_extensions
 import datetime
-import temporalio.api.workflowservice.v1.request_response_pb2
 import temporalio.workflow
 
-from ..models import StartWorkflowRequest
+from ..models import (
+    StartWorkflowRequest,
+    StartWorkflowResult,
+)
 from .._resources import StartedWorkflow
 
 
@@ -20,19 +22,18 @@ WorkflowArgs = typing_extensions.TypeVarTuple("WorkflowArgs")
 async def _start_workflow(
     request: StartWorkflowRequest,
 ) -> StartedWorkflow:
-    wire_input = request.to_proto()
     nexus_client = temporalio.workflow.create_nexus_client(
         service="StartWorkflowService",
         endpoint="temporal-system",
     )
     handle = await nexus_client.start_operation(
         operation="StartWorkflow",
-        input=wire_input,
-        output_type=temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
+        input=request,
+        output_type=StartWorkflowResult,
     )
     result = await handle
     return StartedWorkflow(
-        namespace=wire_input.namespace,
+        namespace=request.namespace,
         workflow_id=request.workflow_id,
         run_id=result.run_id or None,
     )

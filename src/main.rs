@@ -20,7 +20,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Generate(GenerateArgs),
-    #[command(about = "Rebuild the checked-in Python and TypeScript example outputs")]
+    #[command(about = "Rebuild the checked-in WIT example outputs")]
     BuildExamples(BuildExamplesArgs),
     #[command(about = "Rebuild the checked-in JSON schema example outputs")]
     BuildJsonExamples(BuildExamplesArgs),

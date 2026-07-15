@@ -7,11 +7,12 @@ import dataclasses
 import typing
 import typing_extensions
 import datetime
-import temporalio.api.workflowservice.v1.request_response_pb2
 import temporalio.workflow
 
 from ..models import (
     CancelWorkflowRequest,
+    CancelWorkflowResponse,
+    RestartWorkflowResult,
     StartWorkflowRequest,
     WorkflowExecution,
 )
@@ -61,17 +62,15 @@ class StartedWorkflow:
 
 async def _cancel_workflow(
     request: CancelWorkflowRequest,
-) -> temporalio.workflow.NexusOperationHandle[
-    temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
-]:
+) -> temporalio.workflow.NexusOperationHandle[CancelWorkflowResponse,]:
     nexus_client = temporalio.workflow.create_nexus_client(
         service="StartWorkflowService",
         endpoint="temporal-system",
     )
     return await nexus_client.start_operation(
         operation="CancelWorkflow",
-        input=request.to_proto(),
-        output_type=temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
+        input=request,
+        output_type=CancelWorkflowResponse,
     )
 
 
@@ -79,9 +78,7 @@ async def cancel_workflow(
     *,
     workflow_execution: WorkflowExecution,
     reason: str | None = None,
-) -> temporalio.workflow.NexusOperationHandle[
-    temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
-]:
+) -> temporalio.workflow.NexusOperationHandle[CancelWorkflowResponse,]:
     request = CancelWorkflowRequest(
         workflow_execution=workflow_execution,
         reason=reason,
@@ -92,19 +89,18 @@ async def cancel_workflow(
 async def _restart_workflow(
     request: StartWorkflowRequest,
 ) -> StartedWorkflow:
-    wire_input = request.to_proto()
     nexus_client = temporalio.workflow.create_nexus_client(
         service="StartWorkflowService",
         endpoint="temporal-system",
     )
     handle = await nexus_client.start_operation(
         operation="RestartWorkflow",
-        input=wire_input,
-        output_type=temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
+        input=request,
+        output_type=RestartWorkflowResult,
     )
     result = await handle
     return StartedWorkflow(
-        namespace=wire_input.namespace,
+        namespace=request.namespace,
         workflow_id=request.workflow_id,
         run_id=result.run_id or None,
     )

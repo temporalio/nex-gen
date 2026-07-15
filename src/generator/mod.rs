@@ -68,12 +68,13 @@ pub(crate) struct ModelWireCapabilities {
 }
 
 impl ModelWireCapabilities {
-    pub(crate) const BIDIRECTIONAL: Self = Self {
-        from_wire: true,
+    pub(crate) const TO_WIRE: Self = Self {
+        from_wire: false,
         to_wire: true,
     };
-    pub(crate) const TO_WIRE_ONLY: Self = Self {
-        from_wire: false,
+
+    pub(crate) const BIDIRECTIONAL: Self = Self {
+        from_wire: true,
         to_wire: true,
     };
 
@@ -186,7 +187,8 @@ pub(crate) fn generate_files_for_tree_with_mode_and_options(
     validate_tree_specs(&tree.root, descriptors, language)?;
     let planned_tree = match tree.root {
         ApiSpecNode::Leaf(leaf) => {
-            let planned = build_api_plan_with_mode(leaf.spec, descriptors, planning_mode(mode))?;
+            let planned =
+                build_api_plan_with_mode(leaf.spec, descriptors, planning_mode(mode), language)?;
             ApiSpecTree {
                 root: ApiSpecNode::Leaf(crate::workspace::ApiSpecLeaf {
                     module_path: leaf.module_path,
@@ -197,7 +199,7 @@ pub(crate) fn generate_files_for_tree_with_mode_and_options(
             }
         }
         ApiSpecNode::Branch(_) => {
-            build_api_plans_for_tree_with_mode(tree, descriptors, planning_mode(mode))?
+            build_api_plans_for_tree_with_mode(tree, descriptors, planning_mode(mode), language)?
         }
     };
     generate_files_from_planned_tree(language, &planned_tree, support, mode, options)

@@ -15,7 +15,7 @@
 //
 // The `package` declaration below is replaced with the generated package name
 // when this file is emitted alongside the generated service file.
-package temporalsystem
+package startworkflow
 
 import (
 	"fmt"

@@ -1,8 +1,5 @@
 import type * as common from "@temporalio/common";
-import {
-  activityOptionsOperation,
-  retryPolicyOperation,
-} from "../../wit/type-roundtrip/index.ts";
+import { activityOptionsOperation } from "../../wit/type-roundtrip/index.ts";
 
 const TASK_QUEUE = "demo-task-queue";
 
@@ -33,9 +30,6 @@ export async function typeRoundtripCaller(): Promise<{
   taskQueue: string | undefined;
 }> {
   const retryPolicy: common.RetryPolicy = { maximumAttempts: 3 };
-  const retryHandle = await retryPolicyOperation(retryPolicy);
-  const retryRoundTrip = await retryHandle.result();
-
   const activityHandle = await activityOptionsOperation({
     taskQueue: TASK_QUEUE,
     scheduleToCloseTimeout: "7 seconds",
@@ -51,7 +45,7 @@ export async function typeRoundtripCaller(): Promise<{
 
   return {
     priorityKey: activityRoundTrip.priority?.priorityKey ?? undefined,
-    retryMaximumAttempts: retryRoundTrip.maximumAttempts ?? undefined,
+    retryMaximumAttempts: activityRoundTrip.retryPolicy?.maximumAttempts ?? undefined,
     scheduleToCloseTimeout: durationSecondsToMillis(scheduleToCloseSeconds),
     taskQueue: activityRoundTrip.taskQueue?.name ?? undefined,
   };

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime
 import temporalio.common
-import temporalio.api.activity.v1.message_pb2
 import temporalio.workflow
 
 from ..models import ActivityOptions
@@ -12,17 +11,15 @@ from ..models import ActivityOptions
 
 async def _activity_options_operation(
     request: ActivityOptions,
-) -> temporalio.workflow.NexusOperationHandle[
-    temporalio.api.activity.v1.message_pb2.ActivityOptions,
-]:
+) -> temporalio.workflow.NexusOperationHandle[ActivityOptions,]:
     nexus_client = temporalio.workflow.create_nexus_client(
         service="TypeRoundtripService",
         endpoint="temporal-system",
     )
     return await nexus_client.start_operation(
         operation="ActivityOptionsOperation",
-        input=request.to_proto(),
-        output_type=temporalio.api.activity.v1.message_pb2.ActivityOptions,
+        input=request,
+        output_type=ActivityOptions,
     )
 
 
@@ -32,9 +29,7 @@ async def activity_options_operation(
     retry_policy: temporalio.common.RetryPolicy,
     schedule_to_close_timeout: datetime.timedelta | None = None,
     priority: temporalio.common.Priority | None = None,
-) -> temporalio.workflow.NexusOperationHandle[
-    temporalio.api.activity.v1.message_pb2.ActivityOptions,
-]:
+) -> temporalio.workflow.NexusOperationHandle[ActivityOptions,]:
     request = ActivityOptions(
         task_queue=task_queue,
         retry_policy=retry_policy,

@@ -429,7 +429,7 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("namespace NexusApiGen."));
     assert!(!rendered.contains("namespace Temporalio.Workflows;"));
     assert!(!rendered.contains("namespace NexGen.Support;"));
-    assert!(rendered.contains("Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse SignalWithStartWorkflow(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest request);"));
+    assert!(rendered.contains("SignalWithStartWorkflowResponse SignalWithStartWorkflow(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest request);"));
     assert!(!rendered.contains("NexGenOperationRegistry"));
     assert!(!rendered.contains("ServiceDefinition.FromType"));
     assert!(!rendered.contains("OperationDefinition"));

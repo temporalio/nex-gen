@@ -4978,8 +4978,8 @@ fn render_client_with_args_convenience_method(
 /// forwards to the unexported operation function.
 ///
 /// ```go
-/// func RetryPolicyOperation(ctx workflow.Context, request temporal.RetryPolicy) (*temporal.RetryPolicy, error) {
-///     return retryPolicyOperation(ctx, request)
+/// func ExampleOperation(ctx workflow.Context, request SomeExternalType) (*SomeExternalType, error) {
+///     return exampleOperation(ctx, request)
 /// }
 /// ```
 fn render_forwarding_wrapper(

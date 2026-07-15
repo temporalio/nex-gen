@@ -3,20 +3,14 @@
 from __future__ import annotations
 
 from . import services as _services
-from .operations.retry_policy_operation import retry_policy_operation
 from .operations.activity_options_operation import activity_options_operation
 
 __all__ = [
     "activity_options_operation",
-    "retry_policy_operation",
 ]
 
 
 __nexus_operation_registry__ = {
-    (
-        "TypeRoundtripService",
-        "RetryPolicyOperation",
-    ): _services.TypeRoundtripService.retry_policy_operation,
     (
         "TypeRoundtripService",
         "ActivityOptionsOperation",

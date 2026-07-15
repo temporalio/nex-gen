@@ -38,33 +38,25 @@ namespace NexGen.TypeRoundtripService
         private const string TypeRoundtripServiceEndpoint = "temporal-system";
 
         [GeneratedCode("nex-gen", null)]
-        public static async Task<Temporalio.Common.RetryPolicy> RetryPolicyOperationAsync(Temporalio.Common.RetryPolicy request)
+        public static async Task<ActivityOptions> ActivityOptionsOperationAsync(Temporalio.Api.Activity.V1.ActivityOptions request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
-            var result = await client.ExecuteNexusOperationAsync<Temporalio.Common.RetryPolicy>(svc => svc.RetryPolicyOperation(request)).ConfigureAwait(true);
+            var result = await client.ExecuteNexusOperationAsync<ActivityOptions>(svc => svc.ActivityOptionsOperation(request)).ConfigureAwait(true);
             return result;
         }
 
         [GeneratedCode("nex-gen", null)]
-        public static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(Temporalio.Api.Activity.V1.ActivityOptions request)
-        {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
-            var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(request)).ConfigureAwait(true);
-            return result;
-        }
-
-        [GeneratedCode("nex-gen", null)]
-        private static async Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptions request)
+        private static async Task<ActivityOptions> ActivityOptionsOperationAsync(ActivityOptions request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
             var wireRequest = request.ToProto();
-            var result = await client.ExecuteNexusOperationAsync<Temporalio.Api.Activity.V1.ActivityOptions>(svc => svc.ActivityOptionsOperation(wireRequest)).ConfigureAwait(true);
+            var result = await client.ExecuteNexusOperationAsync<ActivityOptions>(svc => svc.ActivityOptionsOperation(wireRequest)).ConfigureAwait(true);
             return result;
         }
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nex-gen", null)]
-        public static Task<Temporalio.Api.Activity.V1.ActivityOptions> ActivityOptionsOperationAsync(ActivityOptionsOperationOptions options)
+        public static Task<ActivityOptions> ActivityOptionsOperationAsync(ActivityOptionsOperationOptions options)
         {
             var request = new ActivityOptions(options.RetryPolicy)
             {

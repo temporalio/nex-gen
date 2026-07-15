@@ -209,4 +209,27 @@ namespace Temporalio.Workflows
 
     }
 
+    /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
+    [GeneratedCode("nex-gen", null)]
+    internal class SignalWithStartWorkflowResponse
+    {
+        public string? RunId { get; init; }
+        public bool? Started { get; init; }
+
+        public Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse ToProto()
+        {
+            var proto = new Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse();
+            if (RunId is { } runId)
+            {
+                proto.RunId = runId;
+            }
+            if (Started is { } started)
+            {
+                proto.Started = started;
+            }
+            return proto;
+        }
+
+    }
+
 }

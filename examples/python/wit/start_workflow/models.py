@@ -8,12 +8,17 @@ import typing
 import datetime
 import temporalio.api.common.v1.message_pb2
 import temporalio.api.workflowservice.v1.request_response_pb2
+import temporalio.converter
 
 from ._support import (
+    duration_from_proto,
     duration_to_proto,
+    payloads_from_proto,
     payloads_to_proto,
+    task_queue_from_proto,
     task_queue_to_proto,
     workflow_namespace,
+    workflow_type_from_proto,
     workflow_type_to_proto,
 )
 
@@ -25,38 +30,265 @@ class StartWorkflowRequest:
     workflow_id: str
     task_queue: str
     workflow_start_delay: datetime.timedelta | None = None
+    namespace: str = dataclasses.field(default_factory=workflow_namespace)
+
+    @classmethod
+    def from_proto(
+        cls,
+        proto: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> StartWorkflowRequest:
+        _ = payload_converter
+        if not proto.HasField("workflow_type"):
+            raise ValueError("missing required field StartWorkflowRequest.workflow")
+        workflow = workflow_type_from_proto(
+            proto.workflow_type, payload_converter=payload_converter
+        )
+        if not proto.workflow_id:
+            raise ValueError("missing required field StartWorkflowRequest.workflow_id")
+        workflow_id = proto.workflow_id
+        if not proto.HasField("task_queue"):
+            raise ValueError("missing required field StartWorkflowRequest.task_queue")
+        task_queue = task_queue_from_proto(
+            proto.task_queue, payload_converter=payload_converter
+        )
+        return cls(
+            workflow=workflow,
+            args=payloads_from_proto(proto.input, payload_converter=payload_converter)
+            if proto.HasField("input")
+            else None,
+            workflow_id=workflow_id,
+            task_queue=task_queue,
+            workflow_start_delay=duration_from_proto(
+                proto.workflow_start_delay, payload_converter=payload_converter
+            )
+            if proto.HasField("workflow_start_delay")
+            else None,
+            namespace=proto.namespace,
+        )
+
+    @classmethod
+    def _temporal_wire_type(
+        cls,
+    ) -> type[
+        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest
+    ]:
+        return temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest
+
+    @classmethod
+    def _temporal_from_wire(
+        cls,
+        wire: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> StartWorkflowRequest:
+        return cls.from_proto(wire, payload_converter=payload_converter)
 
     def to_proto(
         self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
     ) -> temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest:
+        _ = payload_converter
         message = temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest()
-        message.workflow_type.CopyFrom(workflow_type_to_proto(self.workflow))
+        message.workflow_type.CopyFrom(
+            workflow_type_to_proto(self.workflow, payload_converter=payload_converter)
+        )
         if self.args is not None:
-            message.input.CopyFrom(payloads_to_proto(self.args))
+            message.input.CopyFrom(
+                payloads_to_proto(self.args, payload_converter=payload_converter)
+            )
         message.workflow_id = self.workflow_id
-        message.task_queue.CopyFrom(task_queue_to_proto(self.task_queue))
+        message.task_queue.CopyFrom(
+            task_queue_to_proto(self.task_queue, payload_converter=payload_converter)
+        )
         if self.workflow_start_delay is not None:
             message.workflow_start_delay.CopyFrom(
-                duration_to_proto(self.workflow_start_delay)
+                duration_to_proto(
+                    self.workflow_start_delay, payload_converter=payload_converter
+                )
             )
-        message.namespace = workflow_namespace()
+        message.namespace = self.namespace
         return message
+
+    def _temporal_to_wire(
+        self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest:
+        return self.to_proto(payload_converter=payload_converter)
 
 
 @dataclasses.dataclass(slots=True)
-class CancelWorkflowRequest:
-    workflow_execution: WorkflowExecution
-    reason: str | None = None
+class StartWorkflowResult:
+    run_id: str | None = None
+
+    @classmethod
+    def from_proto(
+        cls,
+        proto: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> StartWorkflowResult:
+        _ = payload_converter
+        return cls(
+            run_id=proto.run_id if bool(proto.run_id) else None,
+        )
+
+    @classmethod
+    def _temporal_wire_type(
+        cls,
+    ) -> type[
+        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
+    ]:
+        return temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
+
+    @classmethod
+    def _temporal_from_wire(
+        cls,
+        wire: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> StartWorkflowResult:
+        return cls.from_proto(wire, payload_converter=payload_converter)
 
     def to_proto(
         self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse:
+        _ = payload_converter
+        message = temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse()
+        if self.run_id is not None:
+            message.run_id = self.run_id
+        return message
+
+    def _temporal_to_wire(
+        self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse:
+        return self.to_proto(payload_converter=payload_converter)
+
+
+@dataclasses.dataclass(slots=True)
+class RestartWorkflowResult:
+    run_id: str | None = None
+
+    @classmethod
+    def from_proto(
+        cls,
+        proto: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> RestartWorkflowResult:
+        _ = payload_converter
+        return cls(
+            run_id=proto.run_id if bool(proto.run_id) else None,
+        )
+
+    @classmethod
+    def _temporal_wire_type(
+        cls,
+    ) -> type[
+        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
+    ]:
+        return temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
+
+    @classmethod
+    def _temporal_from_wire(
+        cls,
+        wire: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> RestartWorkflowResult:
+        return cls.from_proto(wire, payload_converter=payload_converter)
+
+    def to_proto(
+        self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse:
+        _ = payload_converter
+        message = temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse()
+        if self.run_id is not None:
+            message.run_id = self.run_id
+        return message
+
+    def _temporal_to_wire(
+        self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse:
+        return self.to_proto(payload_converter=payload_converter)
+
+
+@dataclasses.dataclass(slots=True, kw_only=True)
+class CancelWorkflowRequest:
+    namespace: str = dataclasses.field(default_factory=workflow_namespace)
+    workflow_execution: WorkflowExecution
+    reason: str | None = None
+
+    @classmethod
+    def from_proto(
+        cls,
+        proto: temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> CancelWorkflowRequest:
+        _ = payload_converter
+        if not proto.HasField("workflow_execution"):
+            raise ValueError(
+                "missing required field CancelWorkflowRequest.workflow_execution"
+            )
+        workflow_execution = WorkflowExecution.from_proto(
+            proto.workflow_execution, payload_converter=payload_converter
+        )
+        return cls(
+            namespace=proto.namespace,
+            workflow_execution=workflow_execution,
+            reason=proto.reason if bool(proto.reason) else None,
+        )
+
+    @classmethod
+    def _temporal_wire_type(
+        cls,
+    ) -> type[
+        temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest
+    ]:
+        return temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest
+
+    @classmethod
+    def _temporal_from_wire(
+        cls,
+        wire: temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> CancelWorkflowRequest:
+        return cls.from_proto(wire, payload_converter=payload_converter)
+
+    def to_proto(
+        self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
     ) -> temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest:
+        _ = payload_converter
         message = temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest()
-        message.workflow_execution.CopyFrom(self.workflow_execution.to_proto())
+        message.namespace = self.namespace
+        message.workflow_execution.CopyFrom(
+            self.workflow_execution.to_proto(payload_converter=payload_converter)
+        )
         if self.reason is not None:
             message.reason = self.reason
-        message.namespace = workflow_namespace()
         return message
+
+    def _temporal_to_wire(
+        self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest:
+        return self.to_proto(payload_converter=payload_converter)
 
 
 @dataclasses.dataclass(slots=True)
@@ -68,21 +300,51 @@ class WorkflowExecution:
     def from_proto(
         cls,
         proto: temporalio.api.common.v1.message_pb2.WorkflowExecution,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
     ) -> WorkflowExecution:
+        _ = payload_converter
         if not proto.workflow_id:
             raise ValueError("missing required field WorkflowExecution.workflow_id")
         workflow_id = proto.workflow_id
         return cls(
             workflow_id=workflow_id,
-            run_id=proto.run_id,
+            run_id=proto.run_id if bool(proto.run_id) else None,
         )
 
-    def to_proto(self) -> temporalio.api.common.v1.message_pb2.WorkflowExecution:
+    @classmethod
+    def _temporal_wire_type(
+        cls,
+    ) -> type[temporalio.api.common.v1.message_pb2.WorkflowExecution]:
+        return temporalio.api.common.v1.message_pb2.WorkflowExecution
+
+    @classmethod
+    def _temporal_from_wire(
+        cls,
+        wire: temporalio.api.common.v1.message_pb2.WorkflowExecution,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> WorkflowExecution:
+        return cls.from_proto(wire, payload_converter=payload_converter)
+
+    def to_proto(
+        self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> temporalio.api.common.v1.message_pb2.WorkflowExecution:
+        _ = payload_converter
         message = temporalio.api.common.v1.message_pb2.WorkflowExecution()
         message.workflow_id = self.workflow_id
         if self.run_id is not None:
             message.run_id = self.run_id
         return message
+
+    def _temporal_to_wire(
+        self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> temporalio.api.common.v1.message_pb2.WorkflowExecution:
+        return self.to_proto(payload_converter=payload_converter)
 
 
 @dataclasses.dataclass(slots=True)
@@ -91,11 +353,41 @@ class CancelWorkflowResponse:
     def from_proto(
         cls,
         _proto: temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
     ) -> CancelWorkflowResponse:
+        _ = payload_converter
         return cls()
+
+    @classmethod
+    def _temporal_wire_type(
+        cls,
+    ) -> type[
+        temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse
+    ]:
+        return temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse
+
+    @classmethod
+    def _temporal_from_wire(
+        cls,
+        wire: temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> CancelWorkflowResponse:
+        return cls.from_proto(wire, payload_converter=payload_converter)
 
     def to_proto(
         self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
     ) -> temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse:
+        _ = payload_converter
         message = temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse()
         return message
+
+    def _temporal_to_wire(
+        self,
+        *,
+        payload_converter: temporalio.converter.PayloadConverter | None = None,
+    ) -> temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse:
+        return self.to_proto(payload_converter=payload_converter)

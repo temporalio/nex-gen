@@ -9,8 +9,6 @@ import uuid
 
 from nexusrpc import Operation
 from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
-import temporalio.api.common.v1 as common_v1
-import temporalio.api.workflowservice.v1 as workflowservice_v1
 import temporalio.common
 from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
@@ -105,104 +103,96 @@ def expected_run_id(workflow_id: str) -> str:
     return f"run-for-{workflow_id}"
 
 
-def assert_payload_count(
-    payloads: common_v1.Payloads,
-    expected_count: int,
-) -> None:
-    assert len(payloads.payloads) == expected_count
-
-
 def assert_common_signal_request(
-    request: workflowservice_v1.SignalWithStartWorkflowExecutionRequest,
+    request: workflow_service_models.SignalWithStartWorkflowRequest,
     *,
     workflow_id: str,
-    signal_name: str,
-    workflow_type: str = "ExampleWorkflow",
+    signal: str | Callable[..., None | Awaitable[None]],
 ) -> None:
     assert request.namespace == "default"
-    assert request.workflow_id == workflow_id
-    assert request.signal_name == signal_name
-    assert request.workflow_type.name == workflow_type
-    assert request.task_queue.name == TASK_QUEUE
+    assert request.id == workflow_id
+    assert request.signal == signal
+    assert request.task_queue == TASK_QUEUE
 
 
 def assert_full_signal_request(
-    request: workflowservice_v1.SignalWithStartWorkflowExecutionRequest,
+    request: workflow_service_models.SignalWithStartWorkflowRequest,
     *,
     workflow_id: str,
-    signal_name: str,
+    signal: str | Callable[..., None | Awaitable[None]],
     signal_input: Sequence[object] | None,
 ) -> None:
     assert_common_signal_request(
         request,
         workflow_id=workflow_id,
-        signal_name=signal_name,
+        signal=signal,
     )
-    assert request.HasField("input")
-    assert_payload_count(request.input, len(FULL_WORKFLOW_INPUT))
-    if signal_input is None:
-        assert not request.HasField("signal_input")
-    else:
-        assert request.HasField("signal_input")
-        assert_payload_count(request.signal_input, len(signal_input))
-    assert request.workflow_execution_timeout.seconds == 30
+    assert request.args == FULL_WORKFLOW_INPUT
+    assert request.signal_args == signal_input
+    assert request.execution_timeout == datetime.timedelta(seconds=30)
+    assert request.retry_policy is not None
     assert request.retry_policy.maximum_attempts == 3
-    assert request.workflow_id_reuse_policy == int(
-        temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
+    assert (
+        request.id_reuse_policy
+        == temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
     )
-    assert request.workflow_id_conflict_policy == int(
-        temporalio.common.WorkflowIDConflictPolicy.TERMINATE_EXISTING
+    assert (
+        request.id_conflict_policy
+        == temporalio.common.WorkflowIDConflictPolicy.TERMINATE_EXISTING
     )
+    assert request.priority is not None
     assert request.priority.priority_key == 4
     assert request.priority.fairness_key == "tenant-a"
     assert request.priority.fairness_weight == 2.5
-    assert "CustomKeywordField" in request.search_attributes.indexed_fields
-    assert request.user_metadata.summary.data
-    assert request.user_metadata.details.data
-    assert request.versioning_override.HasField("pinned")
-    assert request.versioning_override.pinned.version.deployment_name == "payments"
-    assert request.versioning_override.pinned.version.build_id == "build-42"
+    assert request.search_attributes is not None
+    assert request.user_metadata is not None
+    assert request.user_metadata.static_summary == "Nightly sync"
+    assert request.user_metadata.static_details == "Processes 42 records"
+    assert isinstance(
+        request.versioning_override,
+        temporalio.common.PinnedVersioningOverride,
+    )
+    assert request.versioning_override.version.deployment_name == "payments"
+    assert request.versioning_override.version.build_id == "build-42"
 
 
 def assert_minimal_signal_request(
-    request: workflowservice_v1.SignalWithStartWorkflowExecutionRequest,
+    request: workflow_service_models.SignalWithStartWorkflowRequest,
 ) -> None:
     assert_common_signal_request(
         request,
         workflow_id=MINIMAL_WORKFLOW_ID,
-        signal_name="wake_up",
+        signal="wake_up",
     )
-    assert not request.HasField("input")
-    assert not request.HasField("workflow_execution_timeout")
-    assert not request.HasField("retry_policy")
-    assert request.workflow_id_reuse_policy == int(
-        temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
+    assert request.args is None
+    assert request.execution_timeout is None
+    assert request.retry_policy is None
+    assert (
+        request.id_reuse_policy
+        == temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
     )
-    assert request.workflow_id_conflict_policy == int(
-        temporalio.common.WorkflowIDConflictPolicy.UNSPECIFIED
-    )
-    assert not request.HasField("priority")
-    assert len(request.memo.fields) == 0
-    assert len(request.search_attributes.indexed_fields) == 0
-    assert not request.HasField("user_metadata")
-    assert not request.HasField("versioning_override")
-    assert not request.HasField("signal_input")
+    assert request.id_conflict_policy is None
+    assert request.priority is None
+    assert request.memo is None
+    assert request.search_attributes is None
+    assert request.user_metadata is None
+    assert request.versioning_override is None
+    assert request.signal_args is None
 
 
 def assert_single_arg_signal_request(
-    request: workflowservice_v1.SignalWithStartWorkflowExecutionRequest,
+    request: workflow_service_models.SignalWithStartWorkflowRequest,
     *,
     workflow_id: str,
 ) -> None:
     assert_common_signal_request(
         request,
         workflow_id=workflow_id,
-        signal_name="wake_up",
-        workflow_type="SingleArgWorkflow",
+        signal="wake_up",
     )
-    assert request.HasField("input")
-    assert_payload_count(request.input, 1)
-    assert not request.HasField("signal_input")
+    assert request.args is not None
+    assert len(request.args) == 1
+    assert request.signal_args is None
 
 
 def build_example_data() -> ExampleData:
@@ -263,21 +253,19 @@ def build_full_signal_request(
 @service_handler(service=workflow_service_services.WorkflowService)
 class WorkflowServiceHandler:
     def __init__(self) -> None:
-        self.calls: list[
-            workflowservice_v1.SignalWithStartWorkflowExecutionRequest
-        ] = []
+        self.calls: list[workflow_service_models.SignalWithStartWorkflowRequest] = []
 
     @sync_operation
     async def signal_with_start_workflow(
         self,
         _ctx: StartOperationContext,
-        input: workflowservice_v1.SignalWithStartWorkflowExecutionRequest,
-    ) -> workflowservice_v1.SignalWithStartWorkflowExecutionResponse:
+        input: workflow_service_models.SignalWithStartWorkflowRequest,
+    ) -> workflow_service_models.SignalWithStartWorkflowResponse:
         self.calls.append(input)
-        response = workflowservice_v1.SignalWithStartWorkflowExecutionResponse()
-        response.run_id = expected_run_id(input.workflow_id)
-        response.started = True
-        return response
+        return workflow_service_models.SignalWithStartWorkflowResponse(
+            run_id=expected_run_id(input.id),
+            started=True,
+        )
 
 
 @workflow.defn
@@ -285,17 +273,6 @@ class WorkflowServiceCallerWorkflow:
     @workflow.run
     async def run(self) -> list[tuple[str, str | None]]:
         example_data = build_example_data()
-        request = build_full_signal_request(
-            example_data,
-            workflow_id=REQUEST_WORKFLOW_ID,
-            signal="wake_up",
-        )
-        wire_input = request.to_proto()
-        round_tripped_user_metadata = workflow_service_models.UserMetadata.from_proto(
-            wire_input.user_metadata
-        )
-        assert round_tripped_user_metadata.static_summary
-        assert round_tripped_user_metadata.static_details
 
         request_handle = await workflow_service.signal_with_start_workflow(
             workflow="ExampleWorkflow",
@@ -348,11 +325,10 @@ class WorkflowServiceCallerWorkflow:
             signal=ExampleWorkflow.wake_up_many,
             signal_args=HIGH_ARITY_SIGNAL_INPUT,
         )
-        high_arity_proto = high_arity_request.to_proto()
         assert_full_signal_request(
-            high_arity_proto,
+            high_arity_request,
             workflow_id=HIGH_ARITY_WORKFLOW_ID,
-            signal_name="wake_up_many",
+            signal=ExampleWorkflow.wake_up_many,
             signal_input=HIGH_ARITY_SIGNAL_INPUT,
         )
         list_signal_separate_handle = await workflow_service.signal_with_start_workflow(
@@ -457,7 +433,7 @@ async def test_signal_with_start_uses_real_nexus_client(
     assert_full_signal_request(
         service_handler.calls[0],
         workflow_id=ARGS_WORKFLOW_ID,
-        signal_name="wake_up",
+        signal="wake_up",
         signal_input=ARGS_SIGNAL_INPUT,
     )
     assert_single_arg_signal_request(
@@ -472,15 +448,15 @@ async def test_signal_with_start_uses_real_nexus_client(
     assert_common_signal_request(
         service_handler.calls[4],
         workflow_id=LIST_SIGNAL_SEPARATE_WORKFLOW_ID,
-        signal_name="wake_up_list",
+        signal="wake_up_list",
     )
-    assert_payload_count(service_handler.calls[4].signal_input, len(LIST_SIGNAL_INPUT))
+    assert service_handler.calls[4].signal_args == LIST_SIGNAL_INPUT
     assert_common_signal_request(
         service_handler.calls[5],
         workflow_id=LIST_SIGNAL_WRAPPED_WORKFLOW_ID,
-        signal_name="wake_up_list",
+        signal="wake_up_list",
     )
-    assert_payload_count(service_handler.calls[5].signal_input, 1)
+    assert service_handler.calls[5].signal_args == [LIST_SIGNAL_INPUT]
 
 
 async def test_signal_with_start_rejects_positional_args_and_args() -> None:

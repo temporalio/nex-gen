@@ -12,9 +12,9 @@ namespace NexGen.TypeRoundtripService
 {
 
     [GeneratedCode("nex-gen", null)]
-    internal class ActivityOptions
+    public class ActivityOptions
     {
-        internal ActivityOptions(Temporalio.Common.RetryPolicy retryPolicy)
+        public ActivityOptions(Temporalio.Common.RetryPolicy retryPolicy)
         {
             RetryPolicy = retryPolicy;
         }

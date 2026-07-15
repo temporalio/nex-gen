@@ -3,18 +3,12 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
-import temporalio.api.activity.v1.message_pb2
-import temporalio.api.common.v1.message_pb2
+from .models import ActivityOptions
 
 
 @service
 class TypeRoundtripService:
-    retry_policy_operation: Operation[
-        temporalio.api.common.v1.message_pb2.RetryPolicy,
-        temporalio.api.common.v1.message_pb2.RetryPolicy,
-    ] = Operation(name="RetryPolicyOperation")
-
     activity_options_operation: Operation[
-        temporalio.api.activity.v1.message_pb2.ActivityOptions,
-        temporalio.api.activity.v1.message_pb2.ActivityOptions,
+        ActivityOptions,
+        ActivityOptions,
     ] = Operation(name="ActivityOptionsOperation")

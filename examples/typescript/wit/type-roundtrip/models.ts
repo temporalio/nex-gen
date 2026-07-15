@@ -3,13 +3,9 @@
 import type * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import {
-  retryPolicyFromProto,
   retryPolicyToProto,
-  taskQueueFromProto,
   taskQueueToProto,
-  durationFromProto,
   durationToProto,
-  priorityFromProto,
   priorityToProto,
 } from "./support";
 
@@ -29,30 +25,6 @@ export interface ActivityOptions {
   retryPolicy: common.RetryPolicy;
   scheduleToCloseTimeout?: common.Duration;
   priority?: common.Priority;
-}
-
-export function activityOptionsFromProto(
-  proto: temporal.api.activity.v1.IActivityOptions | null | undefined,
-): ActivityOptions | undefined {
-  if (proto == null) {
-    return undefined;
-  }
-  return {
-    taskQueue:
-      proto.taskQueue == null ? undefined : taskQueueFromProto(proto.taskQueue),
-    retryPolicy: requiredField(
-      retryPolicyFromProto(
-        requiredField(proto.retryPolicy, "ActivityOptions", "retryPolicy"),
-      ),
-      "ActivityOptions",
-      "retryPolicy",
-    ),
-    scheduleToCloseTimeout:
-      proto.scheduleToCloseTimeout == null
-        ? undefined
-        : durationFromProto(proto.scheduleToCloseTimeout),
-    priority: proto.priority == null ? undefined : priorityFromProto(proto.priority),
-  };
 }
 
 export function activityOptionsToProto(

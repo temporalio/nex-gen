@@ -7,6 +7,7 @@ use prost_types::FileOptions;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::generator::ModelWireCapabilities;
+use crate::language::Language;
 use crate::resources::{
     RequestPlan, ResolvedResourceBindingSource, ResolvedResourceMethodBinding,
     ResolvedResourceReturnSpec, ResolvedResourceSpec, resolve_service_resources,
@@ -14,8 +15,9 @@ use crate::resources::{
 use crate::spec::{
     ApiSpec, AuthoredNames, AuthoredResourceType, ExternalTypeSpec, FunctionArgSpec,
     FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, JsonModelSpec, LanguageStringSpec,
-    ModulePath, OperationSpec, RecordSpec, ResourceFieldSpec, ServiceSpec, TypeDeclSpec,
-    TypeNameFamily, TypeNameMapper, TypeReplacementSpec, TypeSpec, VariantSpec,
+    ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
+    ResourceFieldSpec, ServiceSpec, Symbol, TypeDeclSpec, TypeNameFamily, TypeNameMapper,
+    TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
@@ -80,6 +82,7 @@ pub(super) struct ApiPlanner<'a> {
     spec: ApiSpec,
     spec_data: PlannedSpecData,
     mode: PlanningMode,
+    language: Language,
     descriptors: &'a DescriptorIndex,
     root_model_capabilities: BTreeMap<String, ModelWireCapabilities>,
     resource_data: IndexMap<String, PlannedResource>,
@@ -255,17 +258,27 @@ pub(crate) fn build_api_plan_with_mode(
     spec: ApiSpec,
     descriptors: &DescriptorIndex,
     mode: PlanningMode,
+    language: Language,
 ) -> Result<PlannedSpec> {
-    ApiPlanner::new(spec, PlannedSpecData::default(), descriptors, mode)?.build()
+    ApiPlanner::new(
+        spec,
+        PlannedSpecData::default(),
+        descriptors,
+        mode,
+        language,
+    )?
+    .build()
 }
 
 pub(crate) fn build_api_plans_for_tree_with_mode(
     tree: ApiSpecTree,
     descriptors: &DescriptorIndex,
     mode: PlanningMode,
+    language: Language,
 ) -> Result<ApiSpecTree<PlannedTypeFamily>> {
     let import_index = module_import_index(&tree);
-    plan_tree_node(tree.root, &import_index, descriptors, mode).map(|root| ApiSpecTree { root })
+    plan_tree_node(tree.root, &import_index, descriptors, mode, language)
+        .map(|root| ApiSpecTree { root })
 }
 
 fn plan_tree_node(
@@ -273,6 +286,7 @@ fn plan_tree_node(
     import_index: &BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
     descriptors: &DescriptorIndex,
     mode: PlanningMode,
+    language: Language,
 ) -> Result<ApiSpecNode<PlannedTypeFamily>> {
     match node {
         ApiSpecNode::Leaf(leaf) => {
@@ -283,7 +297,8 @@ fn plan_tree_node(
                     .unwrap_or_default(),
                 module_exports: module_export_names(&leaf.spec),
             };
-            let planned = ApiPlanner::new(leaf.spec, spec_data, descriptors, mode)?.build()?;
+            let planned =
+                ApiPlanner::new(leaf.spec, spec_data, descriptors, mode, language)?.build()?;
             Ok(ApiSpecNode::Leaf(ApiSpecLeaf {
                 module_path: leaf.module_path,
                 source_root: leaf.source_root,
@@ -298,7 +313,7 @@ fn plan_tree_node(
                 .map(|(name, child)| {
                     Ok((
                         name,
-                        plan_tree_node(child, import_index, descriptors, mode)?,
+                        plan_tree_node(child, import_index, descriptors, mode, language)?,
                     ))
                 })
                 .collect::<Result<BTreeMap<_, _>>>()?;
@@ -554,12 +569,14 @@ impl<'a> ApiPlanner<'a> {
         spec_data: PlannedSpecData,
         descriptors: &'a DescriptorIndex,
         mode: PlanningMode,
+        language: Language,
     ) -> Result<Self> {
-        let root_model_capabilities = root_model_capabilities(&spec, descriptors)?;
+        let root_model_capabilities = root_model_capabilities(&spec, descriptors, language)?;
         Ok(Self {
             spec,
             spec_data,
             mode,
+            language,
             descriptors,
             root_model_capabilities,
             resource_data: IndexMap::new(),
@@ -798,7 +815,7 @@ impl<'a> ApiPlanner<'a> {
                     self.root_model_capabilities
                         .get(&input_message.full_name)
                         .copied()
-                        .unwrap_or(ModelWireCapabilities::TO_WIRE_ONLY),
+                        .unwrap_or_else(|| self.operation_proto_input_capabilities()),
                     self,
                 )))
             }
@@ -850,22 +867,14 @@ impl<'a> ApiPlanner<'a> {
                             operation: operation.name.clone(),
                             type_name: output_proto.as_str().to_string(),
                         })?;
-                if operation.output_transform().is_none() && output_resource_return.is_none() {
-                    let _ = proto::planned_type_for_message(
-                        output_message,
-                        self.root_model_capabilities
-                            .get(&output_message.full_name)
-                            .copied()
-                            .unwrap_or(ModelWireCapabilities::BIDIRECTIONAL),
-                        self,
-                    );
-                }
-                Ok(Some(TypeSpec::External(ExternalTypeSpec::Proto(
-                    PlannedProtoType::Message(proto::planned_message_reference(
-                        output_message,
-                        self,
-                    )),
-                ))))
+                Ok(Some(proto::planned_type_for_message(
+                    output_message,
+                    self.root_model_capabilities
+                        .get(&output_message.full_name)
+                        .copied()
+                        .unwrap_or_else(|| self.operation_proto_output_capabilities()),
+                    self,
+                )))
             }
             Some(TypeSpec::External(ExternalTypeSpec::Json(json_type))) => Ok(Some(
                 TypeSpec::External(ExternalTypeSpec::Json(self.map_json_type(json_type))),
@@ -885,9 +894,22 @@ impl<'a> ApiPlanner<'a> {
                     ModelWireCapabilities::default(),
                 ))))
             }
-            Some(TypeSpec::Resource(resource_name)) => Ok(Some(TypeSpec::Resource(
-                self.plan_operation_resource_type(service, operation, resource_name)?,
-            ))),
+            Some(TypeSpec::Resource(resource_name)) => {
+                if let Some(output_resource_return) = output_resource_return
+                    && let Some(resource_output) = self.plan_operation_resource_output_record(
+                        service,
+                        operation,
+                        resource_name,
+                        output_resource_return,
+                    )?
+                {
+                    Ok(Some(resource_output))
+                } else {
+                    Ok(Some(TypeSpec::Resource(
+                        self.plan_operation_resource_type(service, operation, resource_name)?,
+                    )))
+                }
+            }
             Some(_) => Err(Error::InvalidWit {
                 path: std::path::PathBuf::from("<api-plan>"),
                 reason: format!("operation `{}` output must be a named type", operation.name),
@@ -939,6 +961,97 @@ impl<'a> ApiPlanner<'a> {
             type_name: resource.as_str().to_upper_camel_case(),
             wire_type: Some(wire_type),
         })
+    }
+
+    fn plan_operation_resource_output_record(
+        &mut self,
+        service: &ServiceSpec,
+        operation: &OperationSpec,
+        resource: &AuthoredResourceType,
+        resource_return: &ResolvedResourceReturnSpec,
+    ) -> Result<Option<PlannedType>> {
+        let Some(ExternalTypeSpec::Proto(output_proto)) = resource.wire_type.as_ref() else {
+            return Ok(None);
+        };
+        let output_message = self
+            .descriptors
+            .message(output_proto.as_str())
+            .ok_or_else(|| Error::UnknownOperationOutputProto {
+                service: service.name.clone(),
+                operation: operation.name.clone(),
+                type_name: output_proto.as_str().to_string(),
+            })?;
+
+        let record_name = format!("{}Result", operation.name.to_upper_camel_case());
+        let record_full_name = format!("__generated.{}.{}", service.name, record_name);
+        if !self.spec.types.contains_key(&record_full_name) {
+            let mut fields = IndexMap::new();
+            for binding in &resource_return.bindings {
+                let ResolvedResourceBindingSource::ResultField {
+                    field_name,
+                    proto_field_name,
+                } = &binding.source
+                else {
+                    continue;
+                };
+                fields.insert(
+                    proto_field_name.clone(),
+                    RecordFieldSpec {
+                        name: field_name.clone(),
+                        doc: None,
+                        annotation: None,
+                        flattened_annotation: None,
+                        field_type: TypeSpec::String,
+                        default_value: None,
+                        required: false,
+                        visibility: RecordFieldVisibility::Public,
+                        function: None,
+                        data: (),
+                    },
+                );
+            }
+
+            self.spec.types.insert(
+                record_full_name.clone(),
+                TypeDeclSpec::Record(RecordSpec {
+                    name: record_name,
+                    full_name: record_full_name.clone(),
+                    doc: LanguageStringSpec::default(),
+                    source_type: Some(ExternalTypeSpec::Proto(Symbol::new(
+                        output_message.full_name.clone(),
+                    ))),
+                    experimental: operation.experimental,
+                    flatten_in_api: false,
+                    fields,
+                    data: (),
+                }),
+            );
+        }
+        let record = self
+            .spec
+            .record(&record_full_name)
+            .cloned()
+            .expect("generated resource output record should exist");
+        Ok(Some(TypeSpec::Record(self.plan_record_type(
+            &record,
+            self.operation_proto_output_capabilities(),
+        ))))
+    }
+
+    fn operation_proto_input_capabilities(&self) -> ModelWireCapabilities {
+        if self.language == Language::Python {
+            ModelWireCapabilities::BIDIRECTIONAL
+        } else {
+            ModelWireCapabilities::TO_WIRE
+        }
+    }
+
+    fn operation_proto_output_capabilities(&self) -> ModelWireCapabilities {
+        if matches!(self.language, Language::Go | Language::Python) {
+            ModelWireCapabilities::BIDIRECTIONAL
+        } else {
+            ModelWireCapabilities::TO_WIRE
+        }
     }
 
     fn plan_resource(
@@ -1078,13 +1191,10 @@ impl<'a> ApiPlanner<'a> {
         requested_capabilities: ModelWireCapabilities,
     ) {
         let field_types = record
-            .public_fields()
-            .map(|(field_name, field)| (field_name, &field.field_type))
-            .chain(
-                record
-                    .sourced_fields()
-                    .map(|(field_name, field, _)| (field_name, &field.field_type)),
-            )
+            .fields
+            .iter()
+            .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+            .map(|(field_name, field)| (field_name.as_str(), &field.field_type))
             .map(|(field_name, field_type)| {
                 proto::planned_record_field_type(record, field_name, requested_capabilities, self)
                     .unwrap_or_else(|| self.planned_type_from_authored(field_type))
@@ -1644,58 +1754,37 @@ impl PlannedProtoType {
 fn root_model_capabilities(
     spec: &ApiSpec,
     descriptors: &DescriptorIndex,
+    language: Language,
 ) -> Result<BTreeMap<String, ModelWireCapabilities>> {
     let mut capabilities: BTreeMap<String, ModelWireCapabilities> = BTreeMap::new();
 
     for service in &spec.services {
         for operation in &service.operations {
-            let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_proto))) =
-                operation.input_type()
-            else {
-                continue;
-            };
-            let Some(input_message) = descriptors.message(input_proto.as_str()) else {
-                continue;
-            };
-            capabilities
-                .entry(input_message.full_name.clone())
-                .or_default()
-                .merge(ModelWireCapabilities::TO_WIRE_ONLY);
-
-            if operation.output_transform().is_some()
-                || operation_output_resource_name(service, operation).is_some()
+            if language == Language::Python
+                && let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_proto))) =
+                    operation.input_type()
+                && let Some(input_message) = descriptors.message(input_proto.as_str())
             {
-                continue;
+                capabilities
+                    .entry(input_message.full_name.clone())
+                    .or_default()
+                    .merge(ModelWireCapabilities::BIDIRECTIONAL);
             }
 
-            let Some(TypeSpec::External(ExternalTypeSpec::Proto(output_proto))) =
-                operation.output_type()
-            else {
-                continue;
-            };
-            let Some(output_message) = descriptors.message(output_proto.as_str()) else {
-                continue;
-            };
-            capabilities
-                .entry(output_message.full_name.clone())
-                .or_default()
-                .merge(ModelWireCapabilities::BIDIRECTIONAL);
+            if matches!(language, Language::Go | Language::Python)
+                && let Some(TypeSpec::External(ExternalTypeSpec::Proto(output_proto))) =
+                    operation.output_type()
+                && let Some(output_message) = descriptors.message(output_proto.as_str())
+            {
+                capabilities
+                    .entry(output_message.full_name.clone())
+                    .or_default()
+                    .merge(ModelWireCapabilities::BIDIRECTIONAL);
+            }
         }
     }
 
     Ok(capabilities)
-}
-
-fn operation_output_resource_name<'a>(
-    service: &'a ServiceSpec,
-    operation: &'a OperationSpec,
-) -> Option<&'a str> {
-    let TypeSpec::Resource(resource_name) = operation.output_type()? else {
-        return None;
-    };
-    service
-        .resource(resource_name.as_str())
-        .map(|_| resource_name.as_str())
 }
 
 fn plan_operation_resource_return(
@@ -1766,8 +1855,13 @@ mod tests {
         )
         .unwrap();
 
-        let plan =
-            build_api_plan_with_mode(spec, &descriptors, PlanningMode::DefinitionsOnly).unwrap();
+        let plan = build_api_plan_with_mode(
+            spec,
+            &descriptors,
+            PlanningMode::DefinitionsOnly,
+            Language::Python,
+        )
+        .unwrap();
 
         assert!(plan.records().next().is_none());
         let operation = &plan.services[0].operations[0];

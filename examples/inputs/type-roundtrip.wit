@@ -28,7 +28,5 @@ interface type-roundtrip-service {
     heartbeat-timeout: placeholder,
   }
 
-  retry-policy-operation: func(request: retry-policy) -> retry-policy;
-
   activity-options-operation: func(request: activity-options) -> activity-options;
 }

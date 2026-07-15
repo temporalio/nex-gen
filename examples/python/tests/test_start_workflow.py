@@ -7,7 +7,6 @@ import uuid
 from nexusrpc import Operation
 from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
 import pytest
-import temporalio.api.workflowservice.v1 as workflowservice_v1
 from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
@@ -48,49 +47,43 @@ class StartWorkflowServiceHandler:
     async def start_workflow(
         self,
         _ctx: StartOperationContext,
-        input: workflowservice_v1.StartWorkflowExecutionRequest,
-    ) -> workflowservice_v1.StartWorkflowExecutionResponse:
+        input: start_workflow_models.StartWorkflowRequest,
+    ) -> start_workflow_models.StartWorkflowResult:
         self.calls.append(("StartWorkflow", input))
         assert input.namespace == "default"
         assert input.workflow_id == "workflow-id"
-        assert input.workflow_type.name == "ExampleWorkflow"
-        assert input.task_queue.name == TASK_QUEUE
-        assert len(input.input.payloads) == 1
+        assert input.workflow == "ExampleWorkflow"
+        assert input.task_queue == TASK_QUEUE
+        assert input.args == ["customer-123"]
 
-        response = workflowservice_v1.StartWorkflowExecutionResponse()
-        response.run_id = "run-123"
-        response.started = True
-        return response
+        return start_workflow_models.StartWorkflowResult(run_id="run-123")
 
     @sync_operation
     async def restart_workflow(
         self,
         _ctx: StartOperationContext,
-        input: workflowservice_v1.StartWorkflowExecutionRequest,
-    ) -> workflowservice_v1.StartWorkflowExecutionResponse:
+        input: start_workflow_models.StartWorkflowRequest,
+    ) -> start_workflow_models.RestartWorkflowResult:
         self.calls.append(("RestartWorkflow", input))
         assert input.namespace == "default"
         assert input.workflow_id == "workflow-id"
-        assert input.workflow_type.name == "ExampleWorkflow"
-        assert input.task_queue.name == TASK_QUEUE
-        assert not input.HasField("input")
+        assert input.workflow == "ExampleWorkflow"
+        assert input.task_queue == TASK_QUEUE
+        assert input.args is None
 
-        response = workflowservice_v1.StartWorkflowExecutionResponse()
-        response.run_id = "run-456"
-        response.started = True
-        return response
+        return start_workflow_models.RestartWorkflowResult(run_id="run-456")
 
     @sync_operation
     async def cancel_workflow(
         self,
         _ctx: StartOperationContext,
-        input: workflowservice_v1.RequestCancelWorkflowExecutionRequest,
-    ) -> workflowservice_v1.RequestCancelWorkflowExecutionResponse:
+        input: start_workflow_models.CancelWorkflowRequest,
+    ) -> start_workflow_models.CancelWorkflowResponse:
         self.calls.append(("CancelWorkflow", input))
         assert input.namespace == "default"
         assert input.workflow_execution.workflow_id == "workflow-id"
         assert input.workflow_execution.run_id == "run-123"
-        return workflowservice_v1.RequestCancelWorkflowExecutionResponse()
+        return start_workflow_models.CancelWorkflowResponse()
 
 
 @workflow.defn
@@ -180,16 +173,13 @@ async def test_start_workflow_returns_wrapper_handle(
     assert len(service_handler.calls) == 3
     start_operation, start_request = service_handler.calls[0]
     assert start_operation == "StartWorkflow"
-    assert isinstance(start_request, workflowservice_v1.StartWorkflowExecutionRequest)
+    assert isinstance(start_request, start_workflow_models.StartWorkflowRequest)
     cancel_operation, cancel_request = service_handler.calls[1]
     assert cancel_operation == "CancelWorkflow"
-    assert isinstance(
-        cancel_request,
-        workflowservice_v1.RequestCancelWorkflowExecutionRequest,
-    )
+    assert isinstance(cancel_request, start_workflow_models.CancelWorkflowRequest)
     restart_operation, restart_request = service_handler.calls[2]
     assert restart_operation == "RestartWorkflow"
-    assert isinstance(restart_request, workflowservice_v1.StartWorkflowExecutionRequest)
+    assert isinstance(restart_request, start_workflow_models.StartWorkflowRequest)
 
     result_error: pytest.ExceptionInfo[NotImplementedError]
     with pytest.raises(NotImplementedError) as result_error:

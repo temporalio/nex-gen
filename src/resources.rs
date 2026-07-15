@@ -45,6 +45,7 @@ pub enum ResolvedResourceMethodBinding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedResourceReturnSpec {
     pub resource_name: String,
+    pub output_message_name: String,
     pub bindings: Vec<ResolvedResourceFieldBinding>,
 }
 
@@ -174,33 +175,30 @@ pub(crate) fn resolve_service_resources(
                     operation.name
                 ),
             })?;
+        let Some(input_message_name) = operation_input_message_name(operation, descriptors) else {
+            return Err(Error::InvalidResource {
+                service: service.name.clone(),
+                resource: resource.name.to_upper_camel_case(),
+                reason: format!(
+                    "operation `{}` returns a resource directly and does not need field bindings",
+                    operation.name
+                ),
+            });
+        };
+        let Some(output_message_name) = operation_output_resource_message_name(operation) else {
+            return Err(Error::InvalidResource {
+                service: service.name.clone(),
+                resource: resource.name.to_upper_camel_case(),
+                reason: format!(
+                    "operation `{}` returns a resource directly and does not need field bindings",
+                    operation.name
+                ),
+            });
+        };
         let bindings = resource
             .fields
             .iter()
             .map(|field| {
-                let Some(input_message_name) =
-                    operation_input_message_name(operation, descriptors)
-                else {
-                    return Err(Error::InvalidResource {
-                        service: service.name.clone(),
-                        resource: resource.name.to_upper_camel_case(),
-                        reason: format!(
-                            "operation `{}` returns a resource directly and does not need field bindings",
-                            operation.name
-                        ),
-                    });
-                };
-                let Some(output_message_name) = operation_output_resource_message_name(operation)
-                else {
-                    return Err(Error::InvalidResource {
-                        service: service.name.clone(),
-                        resource: resource.name.to_upper_camel_case(),
-                        reason: format!(
-                            "operation `{}` returns a resource directly and does not need field bindings",
-                            operation.name
-                        ),
-                    });
-                };
                 let source = bind_resource_return_field(
                     spec,
                     &service.name,
@@ -221,6 +219,7 @@ pub(crate) fn resolve_service_resources(
             operation.name.clone(),
             ResolvedResourceReturnSpec {
                 resource_name: resource.name.clone(),
+                output_message_name: output_message_name.to_string(),
                 bindings,
             },
         );

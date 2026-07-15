@@ -5,7 +5,7 @@ use crate::generator::ExternalModelBackend;
 use crate::generator::python::{
     PythonFieldDefaultKind, PythonImports, RenderedField, RenderedModel, RenderedModelFragments,
     RenderedRecordWireBlock, ResolvedFieldKind, ResolvedFieldType, WireValueConversion,
-    enum_default_expr, python_authored_type_annotation, python_string_literal,
+    python_authored_type_annotation, python_string_literal,
 };
 use crate::language::Language;
 use crate::planning::{
@@ -96,12 +96,11 @@ impl ModelBackend {
         render_record_wire_block(model, planned_model)
     }
 
-    pub(in crate::generator) fn service_model_ref(
+    pub(in crate::generator) fn service_wire_model_ref(
         &self,
         model_type: &PlannedType,
-        api_plan: &PlannedSpec,
     ) -> Option<PythonReference> {
-        service_message_python_ref(model_type, api_plan)
+        external_message_python_ref(model_type)
     }
 
     pub(in crate::generator) fn enum_field_type(
@@ -147,21 +146,6 @@ pub(crate) fn external_message_python_ref(model_type: &PlannedType) -> Option<Py
     }
 }
 
-pub(crate) fn service_message_python_ref(
-    model_type: &PlannedType,
-    api_plan: &PlannedSpec,
-) -> Option<PythonReference> {
-    external_message_python_ref(model_type).or_else(|| {
-        let PlannedType::Record(record) = model_type else {
-            return None;
-        };
-        api_plan
-            .record(&record.full_name)
-            .and_then(|record| record.data.proto.as_ref())
-            .and_then(message_python_ref)
-    })
-}
-
 fn record_python_ref(planned_model: &RecordSpec<PlannedTypeFamily>) -> Option<PythonReference> {
     planned_model
         .data
@@ -183,8 +167,8 @@ fn message_override_conversion(model_type: &PlannedType) -> Option<WireValueConv
         let to_proto = python_to_proto_converter(&proto.proto.full_name, language_override);
         return Some(WireValueConversion {
             annotation: type_name,
-            from_wire: format!("{from_proto}({{wire}})"),
-            to_wire: format!("{to_proto}({{value}})"),
+            from_wire: format!("{from_proto}({{wire}}, payload_converter=payload_converter)"),
+            to_wire: format!("{to_proto}({{value}}, payload_converter=payload_converter)"),
             imports: PythonImports::default(),
             supports_unpacked_input: false,
         });
@@ -194,8 +178,8 @@ fn message_override_conversion(model_type: &PlannedType) -> Option<WireValueConv
         let to_proto = python_default_to_proto_name(&proto.proto.full_name);
         return Some(WireValueConversion {
             annotation: python_authored_type_annotation(authored_type),
-            from_wire: format!("{from_proto}({{wire}})"),
-            to_wire: format!("{to_proto}({{value}})"),
+            from_wire: format!("{from_proto}({{wire}}, payload_converter=payload_converter)"),
+            to_wire: format!("{to_proto}({{value}}, payload_converter=payload_converter)"),
             imports: PythonImports::default(),
             supports_unpacked_input: false,
         });
@@ -225,8 +209,10 @@ fn generated_wire_conversion(
     if let Some(model_name) = generated_message_model_name(model_type, planned_model) {
         return Some(WireValueConversion {
             annotation: model_name.clone(),
-            from_wire: format!("{model_name}.from_proto({{wire}})"),
-            to_wire: "{value}.to_proto()".to_string(),
+            from_wire: format!(
+                "{model_name}.from_proto({{wire}}, payload_converter=payload_converter)"
+            ),
+            to_wire: "{value}.to_proto(payload_converter=payload_converter)".to_string(),
             imports: PythonImports::default(),
             supports_unpacked_input: true,
         });
@@ -338,7 +324,7 @@ fn field_read(
         }
         WireReadPolicy::Optional => RenderedWireRead {
             setup_lines: Vec::new(),
-            expr: optional_from_proto_expr(field, proto_name, value_expr),
+            expr: optional_from_proto_expr(field, resolved_value_type, proto_name, value_expr),
         },
         WireReadPolicy::Default { default_expr } => RenderedWireRead {
             setup_lines: Vec::new(),
@@ -374,7 +360,7 @@ fn function_field_write(
     resolved_type: &ResolvedFieldType,
     optional_guard: bool,
 ) -> RenderedWireWrite {
-    let converted_value = format!("{converter}({value_expr})");
+    let converted_value = format!("{converter}({value_expr}, payload_converter=payload_converter)");
     let mut lines = Vec::new();
     if optional_guard {
         lines.push(format!("if {value_expr} is not None:"));
@@ -395,13 +381,36 @@ fn field_has_proto_presence(field: &RecordFieldSpec<PlannedTypeFamily>) -> bool 
 
 fn optional_from_proto_expr(
     field: &RecordFieldSpec<PlannedTypeFamily>,
+    resolved_type: &ResolvedFieldType,
     proto_name: &str,
     value_expr: String,
 ) -> String {
     if field_has_proto_presence(field) {
         format!("{value_expr} if proto.HasField(\"{proto_name}\") else None")
+    } else if let Some(present_expr) =
+        no_presence_default_value_present_expr(field, resolved_type, proto_name)
+    {
+        format!("{value_expr} if {present_expr} else None")
     } else {
         value_expr
+    }
+}
+
+fn no_presence_default_value_present_expr(
+    field: &RecordFieldSpec<PlannedTypeFamily>,
+    resolved_type: &ResolvedFieldType,
+    proto_name: &str,
+) -> Option<String> {
+    match resolved_type.kind {
+        ResolvedFieldKind::Enum => Some(format!("proto.{proto_name} != 0")),
+        ResolvedFieldKind::Scalar => match field.field_type.without_option() {
+            PlannedType::Bool | PlannedType::String | PlannedType::Bytes => {
+                Some(format!("bool(proto.{proto_name})"))
+            }
+            PlannedType::Int(_) | PlannedType::Float => Some(format!("proto.{proto_name} != 0")),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -644,21 +653,32 @@ fn render_record_wire_block(
         });
         output.push_str(&proto_ref.type_ref);
         output.push_str(",\n");
+        output.push_str("        *,\n");
+        output.push_str(
+            "        payload_converter: temporalio.converter.PayloadConverter | None = None,\n",
+        );
         output.push_str("    ) -> ");
         output.push_str(&model.name);
         output.push_str(":\n");
+        output.push_str("        _ = payload_converter\n");
         if model.fields.is_empty() {
             output.push_str("        return cls()\n");
         } else {
-            for ((field_name, planned_field), rendered_field) in
-                planned_model.public_fields().zip(model.fields.iter())
+            for ((field_name, planned_field), rendered_field) in planned_model
+                .fields
+                .iter()
+                .filter(|(_, field)| {
+                    field.visibility != crate::spec::RecordFieldVisibility::Omitted
+                })
+                .map(|(name, field)| (name.as_str(), field))
+                .zip(model.fields.iter())
             {
                 let read = field_read(
                     field_name,
                     &rendered_field.attr_name,
                     planned_field,
                     &rendered_field.wire_value_type,
-                    field_read_policy(&model.name, rendered_field, planned_field),
+                    field_read_policy(&model.name, rendered_field),
                 );
                 for line in &read.setup_lines {
                     output.push_str("        ");
@@ -668,15 +688,21 @@ fn render_record_wire_block(
             }
 
             output.push_str("        return cls(\n");
-            for ((field_name, planned_field), rendered_field) in
-                planned_model.public_fields().zip(model.fields.iter())
+            for ((field_name, planned_field), rendered_field) in planned_model
+                .fields
+                .iter()
+                .filter(|(_, field)| {
+                    field.visibility != crate::spec::RecordFieldVisibility::Omitted
+                })
+                .map(|(name, field)| (name.as_str(), field))
+                .zip(model.fields.iter())
             {
                 let read = field_read(
                     field_name,
                     &rendered_field.attr_name,
                     planned_field,
                     &rendered_field.wire_value_type,
-                    field_read_policy(&model.name, rendered_field, planned_field),
+                    field_read_policy(&model.name, rendered_field),
                 );
                 output.push_str("            ");
                 output.push_str(&rendered_field.attr_name);
@@ -686,6 +712,45 @@ fn render_record_wire_block(
             }
             output.push_str("        )\n");
         }
+        wrote_method = true;
+    }
+    if model.capabilities.from_wire || model.capabilities.to_wire {
+        if model.fields.is_empty() {
+            if wrote_method {
+                output.push('\n');
+            }
+        } else {
+            output.push('\n');
+            if wrote_method {
+                output.push('\n');
+            }
+        }
+        output.push_str("    @classmethod\n");
+        output.push_str("    def _temporal_wire_type(cls) -> type[");
+        output.push_str(&proto_ref.type_ref);
+        output.push_str("]:\n");
+        output.push_str("        return ");
+        output.push_str(&proto_ref.type_ref);
+        output.push('\n');
+        wrote_method = true;
+    }
+    if model.capabilities.from_wire {
+        output.push('\n');
+        output.push_str("    @classmethod\n");
+        output.push_str("    def _temporal_from_wire(\n");
+        output.push_str("        cls,\n");
+        output.push_str("        wire: ");
+        output.push_str(&proto_ref.type_ref);
+        output.push_str(",\n");
+        output.push_str("        *,\n");
+        output.push_str(
+            "        payload_converter: temporalio.converter.PayloadConverter | None = None,\n",
+        );
+        output.push_str("    ) -> ");
+        output.push_str(&model.name);
+        output.push_str(":\n");
+        output
+            .push_str("        return cls.from_proto(wire, payload_converter=payload_converter)\n");
         wrote_method = true;
     }
     if model.capabilities.to_wire {
@@ -699,14 +764,25 @@ fn render_record_wire_block(
                 output.push('\n');
             }
         }
-        output.push_str("    def to_proto(self) -> ");
+        output.push_str("    def to_proto(\n");
+        output.push_str("        self,\n");
+        output.push_str("        *,\n");
+        output.push_str(
+            "        payload_converter: temporalio.converter.PayloadConverter | None = None,\n",
+        );
+        output.push_str("    ) -> ");
         output.push_str(&proto_ref.type_ref);
         output.push_str(":\n");
+        output.push_str("        _ = payload_converter\n");
         output.push_str("        message = ");
         output.push_str(&proto_ref.type_ref);
         output.push_str("()\n");
-        for ((field_name, planned_field), rendered_field) in
-            planned_model.public_fields().zip(model.fields.iter())
+        for ((field_name, planned_field), rendered_field) in planned_model
+            .fields
+            .iter()
+            .filter(|(_, field)| field.visibility != crate::spec::RecordFieldVisibility::Omitted)
+            .map(|(name, field)| (name.as_str(), field))
+            .zip(model.fields.iter())
         {
             let value_expr = format!("self.{}", rendered_field.attr_name);
             let write = field_write_for_rendered_field(
@@ -721,37 +797,33 @@ fn render_record_wire_block(
                 output.push('\n');
             }
         }
-        for field in &model.sourced_fields {
-            let write = field_write(
-                &field.field_name,
-                &field.field,
-                &field.source_expr,
-                &field.wire_value_type,
-                false,
-            );
-            for line in &write.lines {
-                output.push_str("        ");
-                output.push_str(line);
-                output.push('\n');
-            }
-        }
         output.push_str("        return message\n");
+
+        output.push('\n');
+        output.push_str("    def _temporal_to_wire(\n");
+        output.push_str("        self,\n");
+        output.push_str("        *,\n");
+        output.push_str(
+            "        payload_converter: temporalio.converter.PayloadConverter | None = None,\n",
+        );
+        output.push_str("    ) -> ");
+        output.push_str(&proto_ref.type_ref);
+        output.push_str(":\n");
+        output.push_str("        return self.to_proto(payload_converter=payload_converter)\n");
     }
 
     Some(RenderedRecordWireBlock {
         imports: PythonImports {
-            module_imports: [proto_ref.module_path].into_iter().collect(),
+            module_imports: [proto_ref.module_path, "temporalio.converter".to_string()]
+                .into_iter()
+                .collect(),
             ..PythonImports::default()
         },
         class_body_lines: output.lines().map(str::to_string).collect(),
     })
 }
 
-fn field_read_policy(
-    model_name: &str,
-    rendered_field: &RenderedField,
-    planned_field: &RecordFieldSpec<PlannedTypeFamily>,
-) -> WireReadPolicy {
+fn field_read_policy(model_name: &str, rendered_field: &RenderedField) -> WireReadPolicy {
     match &rendered_field.default_kind {
         PythonFieldDefaultKind::Required => {
             let missing_error = python_string_literal(&format!(
@@ -767,15 +839,8 @@ fn field_read_policy(
         PythonFieldDefaultKind::EmptyList => WireReadPolicy::Default {
             default_expr: "[]".to_string(),
         },
-        PythonFieldDefaultKind::Expression(_) => WireReadPolicy::Default {
-            default_expr: enum_default_expr(
-                &rendered_field.wire_value_type,
-                &planned_field
-                    .default_value
-                    .as_ref()
-                    .expect("expression default should have planned default")
-                    .enum_case,
-            ),
+        PythonFieldDefaultKind::Expression(default_expr) => WireReadPolicy::Default {
+            default_expr: default_expr.clone(),
         },
     }
 }

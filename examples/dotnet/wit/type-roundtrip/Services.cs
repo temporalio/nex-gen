@@ -17,12 +17,8 @@ namespace NexGen.TypeRoundtripService
     internal interface ITypeRoundtripService
     {
         [GeneratedCode("nex-gen", null)]
-        [NexusOperation("RetryPolicyOperation")]
-        Temporalio.Common.RetryPolicy RetryPolicyOperation(Temporalio.Common.RetryPolicy request);
-
-        [GeneratedCode("nex-gen", null)]
         [NexusOperation("ActivityOptionsOperation")]
-        Temporalio.Api.Activity.V1.ActivityOptions ActivityOptionsOperation(Temporalio.Api.Activity.V1.ActivityOptions request);
+        ActivityOptions ActivityOptionsOperation(Temporalio.Api.Activity.V1.ActivityOptions request);
 
     }
 

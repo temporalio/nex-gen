@@ -6,8 +6,6 @@ import uuid
 
 from nexusrpc import Operation
 from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
-import temporalio.api.activity.v1 as activity_v1
-import temporalio.api.common.v1
 import temporalio.common
 from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
@@ -16,14 +14,10 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 import wit.type_roundtrip as type_roundtrip
 import wit.type_roundtrip.models as type_roundtrip_models
 import wit.type_roundtrip.services as type_roundtrip_services
-import wit.type_roundtrip._support as type_roundtrip_support
 
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "wit" / "type_roundtrip"
 TASK_QUEUE = "demo-task-queue"
 
-RETRY_POLICY_OPERATION = type_roundtrip.__nexus_operation_registry__[
-    ("TypeRoundtripService", "RetryPolicyOperation")
-]
 ACTIVITY_OPTIONS_OPERATION = type_roundtrip.__nexus_operation_registry__[
     ("TypeRoundtripService", "ActivityOptionsOperation")
 ]
@@ -35,42 +29,25 @@ class TypeRoundtripServiceHandler:
         self.calls: list[tuple[str, object]] = []
 
     @sync_operation
-    async def retry_policy_operation(
-        self,
-        _ctx: StartOperationContext,
-        input: temporalio.api.common.v1.RetryPolicy,
-    ) -> temporalio.api.common.v1.RetryPolicy:
-        self.calls.append(("RetryPolicyOperation", input))
-        response = temporalio.api.common.v1.RetryPolicy()
-        response.CopyFrom(input)
-        return response
-
-    @sync_operation
     async def activity_options_operation(
         self,
         _ctx: StartOperationContext,
-        input: activity_v1.ActivityOptions,
-    ) -> activity_v1.ActivityOptions:
+        input: type_roundtrip_models.ActivityOptions,
+    ) -> type_roundtrip_models.ActivityOptions:
         self.calls.append(("ActivityOptionsOperation", input))
-        assert input.HasField("retry_policy")
-        assert input.task_queue.name == TASK_QUEUE
-        assert input.schedule_to_close_timeout.seconds == 7
-        assert input.priority.priority_key == 4
-        response = activity_v1.ActivityOptions()
-        response.CopyFrom(input)
-        return response
+        proto = input.to_proto()
+        assert proto.HasField("retry_policy")
+        assert proto.task_queue.name == TASK_QUEUE
+        assert proto.schedule_to_close_timeout.seconds == 7
+        assert proto.priority.priority_key == 4
+        return input
 
 
 @workflow.defn
 class TypeRoundtripCallerWorkflow:
     @workflow.run
-    async def run(self) -> tuple[int, str | None, int | None, int | None]:
+    async def run(self) -> tuple[str | None, int | None, int | None]:
         retry_policy = temporalio.common.RetryPolicy(maximum_attempts=3)
-        retry_handle = await type_roundtrip.retry_policy_operation(retry_policy)
-        retry_round_trip = type_roundtrip_support.retry_policy_from_proto(
-            await retry_handle
-        )
-
         activity_handle = await type_roundtrip.activity_options_operation(
             task_queue=TASK_QUEUE,
             schedule_to_close_timeout=datetime.timedelta(seconds=7),
@@ -81,11 +58,8 @@ class TypeRoundtripCallerWorkflow:
                 fairness_weight=2.5,
             ),
         )
-        activity_response = type_roundtrip_models.ActivityOptions.from_proto(
-            await activity_handle
-        )
+        activity_response = await activity_handle
         return (
-            retry_round_trip.maximum_attempts,
             activity_response.task_queue,
             int(activity_response.schedule_to_close_timeout.total_seconds())
             if activity_response.schedule_to_close_timeout is not None
@@ -110,14 +84,7 @@ def priority() -> temporalio.common.Priority:
 
 def test_generated_metadata() -> None:
     assert OUTPUT_PATH.exists(), f"expected generated package at {OUTPUT_PATH}"
-    assert isinstance(RETRY_POLICY_OPERATION, Operation)
     assert isinstance(ACTIVITY_OPTIONS_OPERATION, Operation)
-    assert (
-        type_roundtrip.__nexus_operation_registry__[
-            ("TypeRoundtripService", "RetryPolicyOperation")
-        ]
-        is RETRY_POLICY_OPERATION
-    )
     assert (
         type_roundtrip.__nexus_operation_registry__[
             ("TypeRoundtripService", "ActivityOptionsOperation")
@@ -175,12 +142,8 @@ async def test_operations_use_real_nexus_client(env: WorkflowEnvironment) -> Non
         finally:
             await env.delete_nexus_endpoint(endpoint)
 
-    assert result == (3, TASK_QUEUE, 7, 4)
-    assert len(service_handler.calls) == 2
-    retry_operation, retry_request = service_handler.calls[0]
-    assert retry_operation == "RetryPolicyOperation"
-    assert isinstance(retry_request, temporalio.api.common.v1.RetryPolicy)
-    assert retry_request.maximum_attempts == 3
-    activity_operation, activity_request = service_handler.calls[1]
+    assert result == (TASK_QUEUE, 7, 4)
+    assert len(service_handler.calls) == 1
+    activity_operation, activity_request = service_handler.calls[0]
     assert activity_operation == "ActivityOptionsOperation"
-    assert isinstance(activity_request, activity_v1.ActivityOptions)
+    assert isinstance(activity_request, type_roundtrip_models.ActivityOptions)

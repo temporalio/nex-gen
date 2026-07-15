@@ -12,6 +12,40 @@ namespace NexGen.StartWorkflowService
 {
 
     [GeneratedCode("nex-gen", null)]
+    internal class RestartWorkflowResult
+    {
+        public string? RunId { get; init; }
+
+        public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse ToProto()
+        {
+            var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse();
+            if (RunId is { } runId)
+            {
+                proto.RunId = runId;
+            }
+            return proto;
+        }
+
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    internal class StartWorkflowResult
+    {
+        public string? RunId { get; init; }
+
+        public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse ToProto()
+        {
+            var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse();
+            if (RunId is { } runId)
+            {
+                proto.RunId = runId;
+            }
+            return proto;
+        }
+
+    }
+
+    [GeneratedCode("nex-gen", null)]
     internal class CancelWorkflowRequest
     {
         internal CancelWorkflowRequest(WorkflowExecution workflowExecution)
@@ -37,7 +71,7 @@ namespace NexGen.StartWorkflowService
     }
 
     [GeneratedCode("nex-gen", null)]
-    internal class CancelWorkflowResponse
+    public class CancelWorkflowResponse
     {
         public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse ToProto()
         {

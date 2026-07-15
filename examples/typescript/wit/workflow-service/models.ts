@@ -55,6 +55,28 @@ function requestArgsToPayloads(
   return payloads == null ? undefined : { payloads };
 }
 
+/**
+ * @experimental This API is experimental and subject to change.
+ */
+export interface SignalWithStartWorkflowResponse {
+  runId?: string;
+  started?: boolean;
+}
+
+export function signalWithStartWorkflowResponseToProto(
+  model: SignalWithStartWorkflowResponse | null | undefined,
+):
+  | temporal.api.workflowservice.v1.ISignalWithStartWorkflowExecutionResponse
+  | undefined {
+  if (model == null) {
+    return undefined;
+  }
+  return {
+    runId: model.runId,
+    started: model.started,
+  };
+}
+
 export type ReplaceSignalWithStartWorkflowRequest<Base, New> = Omit<
   Base,
   "args" | "signal" | "signalArgs" | "workflow"

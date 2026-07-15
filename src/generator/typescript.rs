@@ -5296,7 +5296,7 @@ fn render_operation_function(
         output.push_str("> {\n");
     } else {
         output.push_str("): Promise<workflow.NexusOperationHandle<");
-        output.push_str(&operation.output_annotation);
+        output.push_str(&operation.output_operation_annotation);
         output.push_str(">> {\n");
         output.push_str("  const client = workflow.createNexusServiceClient({\n");
         output.push_str("    service: ");
@@ -5449,7 +5449,7 @@ fn typescript_operation_public_return_annotation(
     } else {
         format!(
             "workflow.NexusOperationHandle<{}>",
-            operation.output_annotation
+            operation.output_operation_annotation
         )
     }
 }
@@ -5833,8 +5833,7 @@ mod tests {
         .unwrap();
         assert!(type_roundtrip_output.contains("retryPolicy: common.RetryPolicy;"));
         assert!(type_roundtrip_output.contains("requiredField(model.retryPolicy"));
-        assert!(type_roundtrip_output.contains("request: common.RetryPolicy"));
-        assert!(type_roundtrip_output.contains("retryPolicyToProto(request)"));
+        assert!(!type_roundtrip_output.contains("retryPolicyOperation"));
     }
 
     #[test]

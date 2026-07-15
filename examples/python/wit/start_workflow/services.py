@@ -3,22 +3,28 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
-import temporalio.api.workflowservice.v1.request_response_pb2
+from .models import (
+    CancelWorkflowRequest,
+    CancelWorkflowResponse,
+    RestartWorkflowResult,
+    StartWorkflowRequest,
+    StartWorkflowResult,
+)
 
 
 @service
 class StartWorkflowService:
     start_workflow: Operation[
-        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest,
-        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
+        StartWorkflowRequest,
+        StartWorkflowResult,
     ] = Operation(name="StartWorkflow")
 
     restart_workflow: Operation[
-        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest,
-        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
+        StartWorkflowRequest,
+        RestartWorkflowResult,
     ] = Operation(name="RestartWorkflow")
 
     cancel_workflow: Operation[
-        temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest,
-        temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
+        CancelWorkflowRequest,
+        CancelWorkflowResponse,
     ] = Operation(name="CancelWorkflow")

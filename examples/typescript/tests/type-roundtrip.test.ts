@@ -15,9 +15,6 @@ const workflowsPath = fileURLToPath(
 describe("type-roundtrip generated output", () => {
   test("exposes type roundtrip service metadata", () => {
     expect(typeRoundtripService.name).toBe("TypeRoundtripService");
-    expect(typeRoundtripService.operations.retryPolicyOperation.name).toBe(
-      "RetryPolicyOperation",
-    );
     expect(typeRoundtripService.operations.activityOptionsOperation.name).toBe(
       "ActivityOptionsOperation",
     );
@@ -44,10 +41,6 @@ describe("type-roundtrip generated output", () => {
     await withWorkflowEnvironment(async (env) => {
       const calls: Array<[string, unknown]> = [];
       const handler = nexus.serviceHandler(typeRoundtripService, {
-        async retryPolicyOperation(_ctx, input) {
-          calls.push(["RetryPolicyOperation", input]);
-          return input;
-        },
         async activityOptionsOperation(_ctx, input) {
           calls.push(["ActivityOptionsOperation", input]);
           return input;
@@ -72,14 +65,9 @@ describe("type-roundtrip generated output", () => {
         scheduleToCloseTimeout: 7_000,
         taskQueue: "demo-task-queue",
       });
-      expect(calls).toHaveLength(2);
+      expect(calls).toHaveLength(1);
 
-      const retryRequest = calls[0]?.[1] as
-        | temporal.api.common.v1.IRetryPolicy
-        | undefined;
-      expect(retryRequest?.maximumAttempts).toBe(3);
-
-      const activityRequest = calls[1]?.[1] as
+      const activityRequest = calls[0]?.[1] as
         | temporal.api.activity.v1.IActivityOptions
         | undefined;
       expect(activityRequest?.taskQueue?.name).toBe("demo-task-queue");

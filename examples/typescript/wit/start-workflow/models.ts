@@ -44,6 +44,21 @@ function requestArgsToPayloads(
   return payloads == null ? undefined : { payloads };
 }
 
+export interface StartWorkflowResult {
+  runId?: string;
+}
+
+export function startWorkflowResultToProto(
+  model: StartWorkflowResult | null | undefined,
+): temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse | undefined {
+  if (model == null) {
+    return undefined;
+  }
+  return {
+    runId: model.runId,
+  };
+}
+
 export type ReplaceStartWorkflowRequest<Base, New> = Omit<Base, "args" | "workflow"> &
   New;
 
@@ -113,6 +128,32 @@ export function startWorkflowRequestToProto<
   };
 }
 
+export interface RestartWorkflowResult {
+  runId?: string;
+}
+
+export function restartWorkflowResultToProto(
+  model: RestartWorkflowResult | null | undefined,
+): temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse | undefined {
+  if (model == null) {
+    return undefined;
+  }
+  return {
+    runId: model.runId,
+  };
+}
+
+export type CancelWorkflowResponse = Record<string, never>;
+
+export function cancelWorkflowResponseToProto(
+  model: CancelWorkflowResponse | null | undefined,
+): temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse | undefined {
+  if (model == null) {
+    return undefined;
+  }
+  return {};
+}
+
 export interface CancelWorkflowRequest {
   workflowExecution: WorkflowExecution;
   reason?: string;
@@ -169,27 +210,4 @@ export function workflowExecutionToProto(
     workflowId: requiredField(model.workflowId, "WorkflowExecution", "workflowId"),
     runId: model.runId,
   };
-}
-
-export type CancelWorkflowResponse = Record<string, never>;
-
-export function cancelWorkflowResponseFromProto(
-  proto:
-    | temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse
-    | null
-    | undefined,
-): CancelWorkflowResponse | undefined {
-  if (proto == null) {
-    return undefined;
-  }
-  return {};
-}
-
-export function cancelWorkflowResponseToProto(
-  model: CancelWorkflowResponse | null | undefined,
-): temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse | undefined {
-  if (model == null) {
-    return undefined;
-  }
-  return {};
 }

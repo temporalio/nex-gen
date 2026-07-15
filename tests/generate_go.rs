@@ -504,12 +504,15 @@ interface sample-service {
 fn go_examples_generation_matches_checked_in_output() {
     let root = project_root();
     for example_id in go_example_ids(&root) {
-        let output_path = unique_output_path(&format!("go-{example_id}"));
+        let temp_dir = unique_output_path(&format!("go-{example_id}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+        fs::write(temp_dir.join("go.mod"), "module examples/go\n\ngo 1.24.0\n").unwrap();
+        let output_path = temp_dir.join(go_package_name(&example_id));
         generate_formatted_go_output(&root, &example_id, &output_path);
         let rendered = read_go_output_files(&output_path);
         let expected = read_go_output_files(&go_output_path(&root, &example_id));
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
-        fs::remove_dir_all(output_path).unwrap();
+        fs::remove_dir_all(temp_dir).unwrap();
     }
 }
 
@@ -926,7 +929,7 @@ fn go_type_roundtrip_generates_proto_conversions() {
         rendered.contains("converted, err := retryPolicyFromProto(ctx, proto.GetRetryPolicy())")
     );
     assert!(rendered.contains("value.RetryPolicy = *converted"));
-    assert!(rendered.contains("\t\t*typedValue = *value\n"));
+    assert!(rendered.contains("\t\t*typedValue = value\n"));
 
     // Operation functions convert the request to proto before the SDK call and
     // decode the proto response afterwards.
@@ -936,17 +939,6 @@ fn go_type_roundtrip_generates_proto_conversions() {
     ));
     assert!(rendered.contains("var result activity.ActivityOptions"));
     assert!(rendered.contains("value, err := activityOptionsFromProto(ctx, &result)"));
-
-    // Replacement-typed operations (request is a native SDK value) convert via
-    // the hand-written converter (passing the address) and return the proto
-    // response converted to a pointer directly.
-    assert!(rendered.contains("requestProto, err := retryPolicyToProto(ctx, &request)"));
-    assert!(rendered.contains(
-        "fut := client.ExecuteOperation(ctx, \"RetryPolicyOperation\", requestProto, workflow.NexusOperationOptions{})"
-    ));
-    assert!(rendered.contains("var result common.RetryPolicy"));
-    assert!(rendered.contains("value, err := retryPolicyFromProto(ctx, &result)"));
-    assert!(rendered.contains("return value, nil"));
 
     // The hand-written support fragment is emitted alongside the generated
     // service file with the pointer-in/pointer-out converter contract.

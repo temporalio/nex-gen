@@ -470,7 +470,7 @@ fn python_example_suite_type_checks_and_runs() {
 }
 
 #[test]
-fn python_request_models_are_write_only() {
+fn python_request_models_are_bidirectional_wire_models() {
     let root = project_root();
     let spec = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
         nex_gen::language::Language::Python,
@@ -512,7 +512,9 @@ fn python_request_models_are_write_only() {
     assert!(!rendered.contains("typing.Unpack["));
     assert!(!rendered.contains("namespace: str | None = None"));
     assert!(!rendered.contains("namespace: str | None"));
-    assert!(rendered.contains("message.namespace = workflow_namespace()"));
+    assert!(rendered.contains("namespace: str = ("));
+    assert!(rendered.contains("dataclasses.field(default_factory=workflow_namespace)"));
+    assert!(rendered.contains("message.namespace = self.namespace"));
     assert!(rendered.contains("result = await handle"));
     assert!(rendered.contains(
         "from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )"
@@ -610,7 +612,9 @@ fn python_request_models_are_write_only() {
     assert!(rendered.contains("signal_args=normalized_signal_args,"));
     assert!(rendered.contains("user_metadata=user_metadata,"));
     assert!(rendered.contains("return await _signal_with_start_workflow(request)"));
-    assert!(rendered.contains("message.input.CopyFrom(payloads_to_proto(self.args))"));
+    assert!(rendered.contains("payloads_to_proto(self.args, payload_converter=payload_converter)"));
+    assert!(models.contains("def from_proto("));
+    assert!(models.contains("def _temporal_from_wire("));
     assert!(models.contains("from ._support import ("));
     assert!(models.contains("retry_policy_to_proto,"));
 

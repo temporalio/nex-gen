@@ -574,5 +574,5 @@ fn typescript_renders_required_fields_and_custom_message_types() {
         &[descriptor_path(&root)],
     );
     assert!(type_roundtrip_rendered.contains("retryPolicy: common.RetryPolicy;"));
-    assert!(type_roundtrip_rendered.contains("request: common.RetryPolicy,"));
+    assert!(!type_roundtrip_rendered.contains("retryPolicyOperation"));
 }

@@ -7,13 +7,13 @@ import typing
 import typing_extensions
 import datetime
 import temporalio.common
-import temporalio.api.workflowservice.v1.request_response_pb2
 
 if typing.TYPE_CHECKING:
     from temporalio.workflow import ExternalWorkflowHandle
 
 from ..models import (
     SignalWithStartWorkflowRequest,
+    SignalWithStartWorkflowResponse,
     UserMetadata,
 )
 
@@ -32,15 +32,14 @@ async def _signal_with_start_workflow(
         get_external_workflow_handle,
     )
 
-    wire_input = request.to_proto()
     nexus_client = create_nexus_client(
         service="temporal.api.workflowservice.v1.WorkflowService",
         endpoint="temporal-system",
     )
     handle = await nexus_client.start_operation(
         operation="SignalWithStartWorkflowExecution",
-        input=wire_input,
-        output_type=temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionResponse,
+        input=request,
+        output_type=SignalWithStartWorkflowResponse,
     )
     result = await handle
     return get_external_workflow_handle(request.id, run_id=result.run_id)

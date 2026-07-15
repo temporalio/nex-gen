@@ -21,7 +21,8 @@ use crate::resources::{RequestPlan, ResolvedResourceBindingSource, render_reques
 use crate::spec::{
     EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec,
     LanguageImportSpec, LanguageImportStyle, LanguageStringSpec, ModulePath, OperationSpec,
-    RecordFieldSpec, RecordSpec, SupportFragmentSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    RecordFieldSpec, RecordFieldVisibility, RecordSpec, SupportFragmentSpec, TypeReplacementSpec,
+    TypeSpec, VariantSpec,
 };
 use crate::workspace::{ApiSpecBranch, ApiSpecNode};
 
@@ -351,10 +352,22 @@ impl PythonExternalModels {
         native_module: &str,
         api_plan: &PlannedSpec,
     ) -> (String, Option<String>) {
-        if let Some(reference) = self.proto.service_model_ref(model_type, api_plan) {
-            return (reference.type_ref, Some(reference.module_path));
-        }
         match model_type {
+            PlannedType::External(ExternalTypeSpec::Proto(_)) => {
+                if let Some(conversion) = self.proto.wire_conversion(model_type, None) {
+                    return (
+                        conversion.annotation.clone(),
+                        python_qualified_module_paths(&conversion.annotation)
+                            .into_iter()
+                            .next(),
+                    );
+                }
+                let reference = self
+                    .proto
+                    .service_wire_model_ref(model_type)
+                    .expect("proto wire model ref should exist");
+                (reference.type_ref, Some(reference.module_path))
+            }
             PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
                 let type_name = self
                     .json
@@ -423,6 +436,9 @@ impl ExternalModelBackend for PythonExternalModels {
     fn model_type_annotation(&self, model_type: &PlannedType) -> Option<String> {
         match model_type {
             PlannedType::External(ExternalTypeSpec::Proto(_)) | PlannedType::Record(_) => {
+                if let Some(conversion) = self.proto.wire_conversion(model_type, None) {
+                    return Some(conversion.annotation);
+                }
                 self.proto.model_type_annotation(model_type)
             }
             PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
@@ -1077,7 +1093,6 @@ impl<'a> ApiPlanner<'a> {
                 type_ref,
                 module_path,
                 annotation: input_conversion.annotation.clone(),
-                wire_expr: input_conversion.to_wire_expr("request"),
                 supports_unpacked: input_conversion.supports_unpacked_input(),
             }
         });
@@ -1108,12 +1123,14 @@ impl<'a> ApiPlanner<'a> {
             }
             Some(PlannedType::Resource(resource)) => {
                 if let Some(output) = &resource.wire_type {
-                    let output = PlannedType::External(output.clone());
+                    let output = planned_record_for_external_source(self.api_plan, output)
+                        .map(planned_record_type)
+                        .unwrap_or_else(|| PlannedType::External(output.clone()));
                     let (output_ref, output_module_path) =
                         self.external_models
                             .service_model_ref(&output, "models", self.api_plan);
-                    let annotation = self.resolve_output_annotation(&output);
-                    (output_ref, output_module_path, annotation)
+                    let conversion = self.resolve_message_value_conversion(&output);
+                    (output_ref, output_module_path, conversion.annotation)
                 } else {
                     (
                         resource.type_name.clone(),
@@ -1139,7 +1156,7 @@ impl<'a> ApiPlanner<'a> {
                     .as_ref()
                     .map(|resource| resource.resource_type_name.clone())
             })
-            .unwrap_or(output_annotation_default);
+            .unwrap_or_else(|| output_annotation_default.clone());
         let unpacked_input = if let (Some(input), Some(rendered_input)) = (input, &rendered_input) {
             if rendered_input.supports_unpacked {
                 Some(self.build_unpacked_input(match input {
@@ -1160,11 +1177,10 @@ impl<'a> ApiPlanner<'a> {
             .collect::<BTreeSet<_>>();
         let output_annotation =
             erase_python_type_parameters(&overload_output_annotation, &output_type_parameters);
-        let output_type_expr = if output_transform.is_some() || output_resource_return.is_some() {
-            output_ref.clone()
-        } else {
-            output_annotation.clone()
-        };
+        let output_type_expr = erase_python_type_parameters(
+            &local_python_model_type_expr(&output_ref),
+            &output_type_parameters,
+        );
         Ok(RenderedOperation {
             name: operation.name.as_str(),
             wire_name: operation.wire_name.as_str(),
@@ -1245,9 +1261,15 @@ impl<'a> ApiPlanner<'a> {
         let mut flattened_messages = Vec::new();
         let mut parameter_sources = BTreeMap::<String, String>::new();
 
-        for ((_field_name, planned_field), rendered_field) in
-            planned_model.public_fields().zip(model.fields.iter())
+        for ((_field_name, planned_field), rendered_field) in planned_model
+            .fields
+            .iter()
+            .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+            .zip(model.fields.iter())
         {
+            if planned_field.visibility != RecordFieldVisibility::Public {
+                continue;
+            }
             if let Some(flattened) = self.build_flattened_message(planned_field, rendered_field) {
                 request_fields.push(RenderedUnpackedRequestField {
                     attr_name: flattened.local_name.clone(),
@@ -1363,8 +1385,11 @@ impl<'a> ApiPlanner<'a> {
             model_name: nested_rendered_model.name.clone(),
             required: planned_field.required,
             fields: nested_planned_model
-                .public_fields()
+                .fields
+                .iter()
+                .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
                 .zip(nested_rendered_model.fields.iter())
+                .filter(|((_, field), _)| field.visibility == RecordFieldVisibility::Public)
                 .map(
                     |((nested_field_name, nested_planned_field), nested_rendered_field)| {
                         RenderedFlattenedMessageField {
@@ -1418,19 +1443,19 @@ impl<'a> ApiPlanner<'a> {
                 capabilities: planned_model.data.capabilities,
                 experimental: planned_model.experimental,
                 fields: Vec::new(),
-                sourced_fields: Vec::new(),
             },
         );
 
         let fields = planned_model
-            .public_fields()
-            .map(|(field_name, field)| self.build_field(planned_model, field_name, field))
-            .collect();
-
-        let sourced_fields = planned_model
-            .sourced_fields()
-            .map(|(field_name, field, source_expr)| {
-                self.build_sourced_field(field_name, field, source_expr)
+            .fields
+            .iter()
+            .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+            .map(|(field_name, field)| {
+                if let RecordFieldVisibility::Sourced { source_expr } = &field.visibility {
+                    self.build_public_sourced_field(planned_model, field_name, field, source_expr)
+                } else {
+                    self.build_field(planned_model, field_name, field)
+                }
             })
             .collect();
 
@@ -1438,10 +1463,6 @@ impl<'a> ApiPlanner<'a> {
             .get_mut(full_name)
             .expect("model should be inserted before recursive field resolution")
             .fields = fields;
-        self.models
-            .get_mut(full_name)
-            .expect("model should be inserted before recursive field resolution")
-            .sourced_fields = sourced_fields;
     }
 
     fn ensure_rendered_enum(&mut self, enum_spec: &EnumSpec) {
@@ -1604,42 +1625,17 @@ impl<'a> ApiPlanner<'a> {
         }
     }
 
-    fn build_sourced_field(
+    fn build_public_sourced_field(
         &mut self,
+        record: &RecordSpec<PlannedTypeFamily>,
         field_name: &str,
         field: &RecordFieldSpec<PlannedTypeFamily>,
         source_expr: &str,
-    ) -> RenderedSourcedField {
-        if let PlannedType::Map(_, value) = &field.field_type {
-            let value_type = self.resolve_planned_value_type(value);
-            return RenderedSourcedField {
-                field_name: field_name.to_string(),
-                field: field.clone(),
-                source_expr: source_expr.to_string(),
-                wire_value_type: value_type,
-            };
-        }
-
-        let (resolved_type, repeated) = match &field.field_type {
-            PlannedType::List(value) => (self.resolve_planned_value_type(value), true),
-            PlannedType::Map(_, _) => unreachable!("handled above"),
-            value => (self.resolve_planned_value_type(value), false),
-        };
-        if repeated {
-            return RenderedSourcedField {
-                field_name: field_name.to_string(),
-                field: field.clone(),
-                source_expr: source_expr.to_string(),
-                wire_value_type: resolved_type,
-            };
-        }
-
-        RenderedSourcedField {
-            field_name: field_name.to_string(),
-            field: field.clone(),
-            source_expr: source_expr.to_string(),
-            wire_value_type: resolved_type,
-        }
+    ) -> RenderedField {
+        let mut rendered = self.build_field(record, field_name, field);
+        rendered.default_kind = PythonFieldDefaultKind::Expression(source_expr.to_string());
+        rendered.default_expr = Some(python_dataclass_source_default_expr(source_expr));
+        rendered
     }
 
     fn resolve_planned_value_type(&mut self, value_type: &PlannedType) -> ResolvedFieldType {
@@ -1824,14 +1820,15 @@ fn collect_python_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageImport
                 collect_python_import(annotation, &mut imports);
             }
         }
-        for (_, field) in record.public_fields() {
+        for (_, field) in record
+            .fields
+            .iter()
+            .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+        {
             if let Some(function) = &field.function {
                 collect_function_imports(function, &mut imports);
             }
             collect_value_type_imports(&field.field_type, &mut imports);
-        }
-        for (_, sourced_field, _) in record.sourced_fields() {
-            collect_value_type_imports(&sourced_field.field_type, &mut imports);
         }
     }
     for service in &api_plan.services {
@@ -2298,7 +2295,6 @@ struct RenderedOperationInput {
     type_ref: String,
     module_path: Option<String>,
     annotation: String,
-    wire_expr: String,
     supports_unpacked: bool,
 }
 
@@ -2350,7 +2346,6 @@ pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) capabilities: ModelWireCapabilities,
     pub(in crate::generator) experimental: bool,
     pub(in crate::generator) fields: Vec<RenderedField>,
-    pub(in crate::generator) sourced_fields: Vec<RenderedSourcedField>,
 }
 
 #[derive(Debug)]
@@ -2361,14 +2356,6 @@ pub(in crate::generator) struct RenderedField {
     pub(in crate::generator) default_expr: Option<String>,
     pub(in crate::generator) wire_value_type: ResolvedFieldType,
     pub(in crate::generator) imports: PythonImports,
-}
-
-#[derive(Debug)]
-pub(in crate::generator) struct RenderedSourcedField {
-    pub(in crate::generator) field_name: String,
-    pub(in crate::generator) field: RecordFieldSpec<PlannedTypeFamily>,
-    pub(in crate::generator) source_expr: String,
-    pub(in crate::generator) wire_value_type: ResolvedFieldType,
 }
 
 #[derive(Debug, Default)]
@@ -4421,14 +4408,13 @@ fn render_endpoint_service_object_operation_body(
             return;
         }
 
-        output.push_str("        wire_input = ");
-        output.push_str(operation_input_wire_expr(operation));
-        output.push('\n');
         output.push_str("        handle = await self._nexus_client.start_operation(\n");
         output.push_str("            operation=");
         output.push_str(&python_string_literal(operation.wire_name));
         output.push_str(",\n");
-        output.push_str("            input=wire_input,\n");
+        output.push_str("            input=");
+        output.push_str(operation_input_wire_expr(operation));
+        output.push_str(",\n");
         if !operation.output_none {
             output.push_str("            output_type=");
             output.push_str(&operation.output_type_expr);
@@ -4546,6 +4532,14 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
 fn service_type_ref(type_ref: &str) -> String {
     type_ref
         .strip_prefix("models.")
+        .unwrap_or(type_ref)
+        .to_string()
+}
+
+fn local_python_model_type_expr(type_ref: &str) -> String {
+    type_ref
+        .strip_prefix("models.")
+        .or_else(|| type_ref.strip_prefix("_models."))
         .unwrap_or(type_ref)
         .to_string()
 }
@@ -4706,11 +4700,12 @@ fn render_resource_method_inline_operation_body(
             return;
         }
 
-        output.push_str("        wire_input = ");
-        output.push_str(operation_input_wire_expr(operation));
-        output.push('\n');
         output.push_str("        handle = await ");
-        render_resource_nexus_start_operation(output, operation, "wire_input");
+        render_resource_nexus_start_operation(
+            output,
+            operation,
+            operation_input_wire_expr(operation),
+        );
         if let Some(transform_expr) = &operation.output_transform_expr {
             output.push_str("        result = await handle\n");
             output.push_str("        return ");
@@ -4882,11 +4877,11 @@ fn resource_return_binding_expr_python(binding: &PlannedOperationResourceFieldBi
     match &binding.source {
         ResolvedResourceBindingSource::RequestField {
             field_name,
-            proto_field_name,
+            proto_field_name: _,
             hidden,
         } => {
             if *hidden {
-                let expr = format!("wire_input.{proto_field_name}");
+                let expr = format!("request.{}", python_field_name(field_name));
                 if binding.optional {
                     format!("{expr} or None")
                 } else {
@@ -5932,8 +5927,55 @@ fn operation_input_wire_expr<'a>(operation: &'a RenderedOperation<'_>) -> &'a st
     operation
         .input
         .as_ref()
-        .map(|input| input.wire_expr.as_str())
+        .map(|_| "request")
         .unwrap_or("None")
+}
+
+fn planned_record_for_external_source<'a>(
+    api_plan: &'a PlannedSpec,
+    external: &ExternalTypeSpec<PlannedTypeFamily>,
+) -> Option<&'a RecordSpec<PlannedTypeFamily>> {
+    api_plan.records().map(|(_, record)| record).find(|record| {
+        record
+            .source_type
+            .as_ref()
+            .is_some_and(|source_type| planned_external_sources_match(source_type, external))
+    })
+}
+
+fn planned_external_sources_match(
+    left: &ExternalTypeSpec<PlannedTypeFamily>,
+    right: &ExternalTypeSpec<PlannedTypeFamily>,
+) -> bool {
+    match (left, right) {
+        (
+            ExternalTypeSpec::Proto(PlannedProtoType::Message(left)),
+            ExternalTypeSpec::Proto(PlannedProtoType::Message(right)),
+        ) => left.proto.full_name == right.proto.full_name,
+        (
+            ExternalTypeSpec::Proto(PlannedProtoType::Enum(left)),
+            ExternalTypeSpec::Proto(PlannedProtoType::Enum(right)),
+        ) => left.proto.full_name == right.proto.full_name,
+        (ExternalTypeSpec::Json(left), ExternalTypeSpec::Json(right)) => {
+            left.full_name == right.full_name
+        }
+        (
+            ExternalTypeSpec::Alias {
+                name: left_name, ..
+            },
+            ExternalTypeSpec::Alias {
+                name: right_name, ..
+            },
+        ) => left_name == right_name,
+        _ => false,
+    }
+}
+
+fn planned_record_type(record: &RecordSpec<PlannedTypeFamily>) -> PlannedType {
+    PlannedType::Record(PlannedRecordType {
+        full_name: record.full_name.clone(),
+        model_name: record.name.clone(),
+    })
 }
 
 fn render_endpoint_parameter(output: &mut String, service: &RenderedService<'_>) {
@@ -6053,15 +6095,14 @@ fn render_request_only_operation_function(
         return;
     }
 
-    output.push_str("    wire_input = ");
-    output.push_str(operation_input_wire_expr(operation));
-    output.push('\n');
     render_inline_nexus_client(output, service, "    ");
     output.push_str("    handle = await nexus_client.start_operation(\n");
     output.push_str("        operation=");
     output.push_str(&python_string_literal(operation.wire_name));
     output.push_str(",\n");
-    output.push_str("        input=wire_input,\n");
+    output.push_str("        input=");
+    output.push_str(operation_input_wire_expr(operation));
+    output.push_str(",\n");
     if !operation.output_none {
         output.push_str("        output_type=");
         output.push_str(&operation.output_type_expr);
@@ -6789,6 +6830,17 @@ fn python_parameter_default_expr(default_kind: &PythonFieldDefaultKind) -> Optio
     }
 }
 
+fn python_dataclass_source_default_expr(source_expr: &str) -> String {
+    if let Some(function_name) = source_expr.strip_suffix("()")
+        && function_name
+            .chars()
+            .all(|character| is_python_identifier_char(character) || character == '.')
+    {
+        return format!("dataclasses.field(default_factory={function_name})");
+    }
+    source_expr.to_string()
+}
+
 pub(in crate::generator) fn render_python_default_expr(
     output: &mut String,
     default_expr: &str,
@@ -7133,7 +7185,8 @@ class Example(enum.Enum):
         assert!(output.contains("class SignalWithStartWorkflowRequest:"));
         assert!(output.contains("args: list[typing.Any] | None = None"));
         assert!(!output.contains("namespace: str | None = None"));
-        assert!(output.contains("message.namespace = workflow_namespace()"));
+        assert!(output.contains("dataclasses.field(default_factory=workflow_namespace)"));
+        assert!(output.contains("message.namespace = self.namespace"));
         assert!(output.contains("result = await handle"));
         assert!(output.contains(
             "from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )"
@@ -7165,7 +7218,9 @@ class Example(enum.Enum):
         assert!(output.contains("workflow_id_reuse_policy_to_proto(self.id_reuse_policy)"));
         assert!(output.contains("if self.id_conflict_policy is not None:"));
         assert!(output.contains("workflow_id_conflict_policy_to_proto(self.id_conflict_policy)"));
-        assert!(output.contains("message.input.CopyFrom(payloads_to_proto(self.args))"));
+        assert!(output.contains(
+            "message.input.CopyFrom(payloads_to_proto(self.args, payload_converter=payload_converter))"
+        ));
         assert!(!output.contains("header:"));
         assert!(!output.contains("header_to_proto("));
         assert!(!output.contains("links:"));
@@ -7299,12 +7354,12 @@ class Example(enum.Enum):
             )
         );
         assert!(type_roundtrip_output.contains("if not proto.HasField(\"retry_policy\"):\n            raise ValueError(\"missing required field ActivityOptions.retry_policy\")"));
+        assert!(type_roundtrip_output.contains("retry_policy_from_proto("));
         assert!(
             type_roundtrip_output
-                .contains("retry_policy = retry_policy_from_proto(proto.retry_policy)")
+                .contains("proto.retry_policy, payload_converter=payload_converter")
         );
-        assert!(type_roundtrip_output.contains("request: temporalio.common.RetryPolicy"));
-        assert!(type_roundtrip_output.contains("retry_policy_to_proto(request)"));
+        assert!(!type_roundtrip_output.contains("async def retry_policy_operation("));
         assert!(type_roundtrip_output.contains("async def activity_options_operation("));
         assert!(type_roundtrip_output.contains("task_queue: str | None = None,"));
         assert!(type_roundtrip_output.contains("retry_policy: temporalio.common.RetryPolicy,"));
@@ -7437,8 +7492,10 @@ interface example-service {
             "if typing.TYPE_CHECKING:\n    from temporalio.workflow import ExternalWorkflowHandle\n"
         ));
         assert!(get_handle.contains(
-            ") -> ExternalWorkflowHandle[str]:\n    from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )\n    wire_input = request\n    nexus_client = create_nexus_client("
+            "    from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )\n"
         ));
+        assert!(get_handle.contains("    nexus_client = create_nexus_client("));
+        assert!(get_handle.contains("input=request,"));
         assert!(get_handle.contains("return get_external_workflow_handle(request.id)\n"));
     }
 
