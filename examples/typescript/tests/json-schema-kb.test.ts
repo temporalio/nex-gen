@@ -3,15 +3,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
 
-import {
-  BlockMapper,
-} from "../json_schema/definitions/kb/content/block/models.ts";
-import {
-  PageMapper,
-} from "../json_schema/definitions/kb/content/page/models.ts";
-import {
-  CategoryMapper,
-} from "../json_schema/definitions/kb/tree/category/models.ts";
+import { BlockMapper } from "../json_schema/definitions/kb/content/block/models.ts";
+import { PageMapper } from "../json_schema/definitions/kb/content/page/models.ts";
+import { CategoryMapper } from "../json_schema/definitions/kb/tree/category/models.ts";
 import {
   GetCategoryTreeInputMapper,
   GetPageInputMapper,
