@@ -463,6 +463,7 @@ pub(in crate::generator) fn render_external_models(
             .iter()
             .map(|model| model.model_name.clone())
             .collect(),
+        allows_private_wire_access: false,
     })
 }
 

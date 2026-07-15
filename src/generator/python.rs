@@ -1920,6 +1920,12 @@ fn render_record_models(
         module_imports,
         relative_imports: BTreeMap::new(),
         exported_names: models.iter().map(|model| model.name.clone()).collect(),
+        allows_private_wire_access: wire_blocks.values().any(|wire_block| {
+            wire_block
+                .class_body_lines
+                .iter()
+                .any(|line| line.contains("._temporal_"))
+        }),
     }
 }
 
@@ -2500,6 +2506,7 @@ pub(in crate::generator) struct RenderedModelFragments {
     pub(in crate::generator) module_imports: BTreeSet<String>,
     pub(in crate::generator) relative_imports: BTreeMap<String, BTreeSet<String>>,
     pub(in crate::generator) exported_names: BTreeSet<String>,
+    pub(in crate::generator) allows_private_wire_access: bool,
 }
 
 impl RenderedModelFragments {
@@ -2518,6 +2525,7 @@ impl RenderedModelFragments {
                 .push_str(&other.post_model_statements);
         }
         self.module_imports.extend(other.module_imports);
+        self.allows_private_wire_access |= other.allows_private_wire_access;
         for (module, names) in other.relative_imports {
             self.relative_imports
                 .entry(module)
@@ -3503,6 +3511,10 @@ fn render_models_module(
 
     let mut output = String::new();
     render_generated_file_header(&mut output);
+    if model_fragments.allows_private_wire_access {
+        output.push('\n');
+        output.push_str("# pyright: reportPrivateUsage=false\n");
+    }
     output.push('\n');
     let import_scan_body = if model_hoists.is_none() && api_plan.data.module_imports.is_empty() {
         body.clone()

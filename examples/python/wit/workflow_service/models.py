@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+# pyright: reportPrivateUsage=false
+
 import collections.abc
 import dataclasses
 import typing
@@ -73,7 +75,7 @@ class SignalWithStartWorkflowRequest:
     namespace: str = dataclasses.field(default_factory=workflow_namespace)
 
     @classmethod
-    def from_proto(
+    def _temporal_from_wire(
         cls,
         proto: temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionRequest,
         *,
@@ -168,7 +170,7 @@ class SignalWithStartWorkflowRequest:
             )
             if proto.HasField("workflow_start_delay")
             else None,
-            user_metadata=UserMetadata.from_proto(
+            user_metadata=UserMetadata._temporal_from_wire(
                 proto.user_metadata, payload_converter=payload_converter
             )
             if proto.HasField("user_metadata")
@@ -176,16 +178,7 @@ class SignalWithStartWorkflowRequest:
             namespace=proto.namespace,
         )
 
-    @classmethod
-    def _temporal_from_wire(
-        cls,
-        wire: temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionRequest,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
-    ) -> SignalWithStartWorkflowRequest:
-        return cls.from_proto(wire, payload_converter=payload_converter)
-
-    def to_proto(
+    def _temporal_to_wire(
         self,
         *,
         payload_converter: temporalio.converter.PayloadConverter | None = None,
@@ -269,17 +262,12 @@ class SignalWithStartWorkflowRequest:
             )
         if self.user_metadata is not None:
             message.user_metadata.CopyFrom(
-                self.user_metadata.to_proto(payload_converter=payload_converter)
+                self.user_metadata._temporal_to_wire(
+                    payload_converter=payload_converter
+                )
             )
         message.namespace = self.namespace
         return message
-
-    def _temporal_to_wire(
-        self,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
-    ) -> temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionRequest:
-        return self.to_proto(payload_converter=payload_converter)
 
 
 @dataclasses.dataclass(slots=True)
@@ -288,7 +276,7 @@ class UserMetadata:
     static_details: typing.Any | None = None
 
     @classmethod
-    def from_proto(
+    def _temporal_from_wire(
         cls,
         proto: temporalio.api.sdk.v1.user_metadata_pb2.UserMetadata,
         *,
@@ -308,16 +296,7 @@ class UserMetadata:
             else None,
         )
 
-    @classmethod
-    def _temporal_from_wire(
-        cls,
-        wire: temporalio.api.sdk.v1.user_metadata_pb2.UserMetadata,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
-    ) -> UserMetadata:
-        return cls.from_proto(wire, payload_converter=payload_converter)
-
-    def to_proto(
+    def _temporal_to_wire(
         self,
         *,
         payload_converter: temporalio.converter.PayloadConverter | None = None,
@@ -338,13 +317,6 @@ class UserMetadata:
             )
         return message
 
-    def _temporal_to_wire(
-        self,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
-    ) -> temporalio.api.sdk.v1.user_metadata_pb2.UserMetadata:
-        return self.to_proto(payload_converter=payload_converter)
-
 
 @dataclasses.dataclass(slots=True)
 class SignalWithStartWorkflowResponse:
@@ -357,7 +329,7 @@ class SignalWithStartWorkflowResponse:
     started: bool | None = None
 
     @classmethod
-    def from_proto(
+    def _temporal_from_wire(
         cls,
         proto: temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionResponse,
         *,
@@ -369,16 +341,7 @@ class SignalWithStartWorkflowResponse:
             started=proto.started if bool(proto.started) else None,
         )
 
-    @classmethod
-    def _temporal_from_wire(
-        cls,
-        wire: temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionResponse,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
-    ) -> SignalWithStartWorkflowResponse:
-        return cls.from_proto(wire, payload_converter=payload_converter)
-
-    def to_proto(
+    def _temporal_to_wire(
         self,
         *,
         payload_converter: temporalio.converter.PayloadConverter | None = None,
@@ -390,10 +353,3 @@ class SignalWithStartWorkflowResponse:
         if self.started is not None:
             message.started = self.started
         return message
-
-    def _temporal_to_wire(
-        self,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
-    ) -> temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionResponse:
-        return self.to_proto(payload_converter=payload_converter)

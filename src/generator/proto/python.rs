@@ -210,9 +210,9 @@ fn generated_wire_conversion(
         return Some(WireValueConversion {
             annotation: model_name.clone(),
             from_wire: format!(
-                "{model_name}.from_proto({{wire}}, payload_converter=payload_converter)"
+                "{model_name}._temporal_from_wire({{wire}}, payload_converter=payload_converter)"
             ),
-            to_wire: "{value}.to_proto(payload_converter=payload_converter)".to_string(),
+            to_wire: "{value}._temporal_to_wire(payload_converter=payload_converter)".to_string(),
             imports: PythonImports::default(),
             supports_unpacked_input: true,
         });
@@ -644,10 +644,10 @@ fn render_record_wire_block(
             output.push('\n');
         }
         output.push_str("    @classmethod\n");
-        output.push_str("    def from_proto(\n");
+        output.push_str("    def _temporal_from_wire(\n");
         output.push_str("        cls,\n");
         output.push_str(if model.fields.is_empty() {
-            "        _proto: "
+            "        _wire: "
         } else {
             "        proto: "
         });
@@ -714,25 +714,6 @@ fn render_record_wire_block(
         }
         wrote_method = true;
     }
-    if model.capabilities.from_wire {
-        output.push('\n');
-        output.push_str("    @classmethod\n");
-        output.push_str("    def _temporal_from_wire(\n");
-        output.push_str("        cls,\n");
-        output.push_str("        wire: ");
-        output.push_str(&proto_ref.type_ref);
-        output.push_str(",\n");
-        output.push_str("        *,\n");
-        output.push_str(
-            "        payload_converter: temporalio.converter.PayloadConverter | None = None,\n",
-        );
-        output.push_str("    ) -> ");
-        output.push_str(&model.name);
-        output.push_str(":\n");
-        output
-            .push_str("        return cls.from_proto(wire, payload_converter=payload_converter)\n");
-        wrote_method = true;
-    }
     if model.capabilities.to_wire {
         if model.fields.is_empty() {
             if wrote_method {
@@ -744,7 +725,7 @@ fn render_record_wire_block(
                 output.push('\n');
             }
         }
-        output.push_str("    def to_proto(\n");
+        output.push_str("    def _temporal_to_wire(\n");
         output.push_str("        self,\n");
         output.push_str("        *,\n");
         output.push_str(
@@ -778,18 +759,6 @@ fn render_record_wire_block(
             }
         }
         output.push_str("        return message\n");
-
-        output.push('\n');
-        output.push_str("    def _temporal_to_wire(\n");
-        output.push_str("        self,\n");
-        output.push_str("        *,\n");
-        output.push_str(
-            "        payload_converter: temporalio.converter.PayloadConverter | None = None,\n",
-        );
-        output.push_str("    ) -> ");
-        output.push_str(&proto_ref.type_ref);
-        output.push_str(":\n");
-        output.push_str("        return self.to_proto(payload_converter=payload_converter)\n");
     }
 
     Some(RenderedRecordWireBlock {

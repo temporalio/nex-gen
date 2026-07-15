@@ -28,7 +28,7 @@ class ActivityOptions:
     priority: temporalio.common.Priority | None = None
 
     @classmethod
-    def from_proto(
+    def _temporal_from_wire(
         cls,
         proto: temporalio.api.activity.v1.message_pb2.ActivityOptions,
         *,
@@ -59,16 +59,7 @@ class ActivityOptions:
             else None,
         )
 
-    @classmethod
-    def _temporal_from_wire(
-        cls,
-        wire: temporalio.api.activity.v1.message_pb2.ActivityOptions,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
-    ) -> ActivityOptions:
-        return cls.from_proto(wire, payload_converter=payload_converter)
-
-    def to_proto(
+    def _temporal_to_wire(
         self,
         *,
         payload_converter: temporalio.converter.PayloadConverter | None = None,
@@ -97,10 +88,3 @@ class ActivityOptions:
                 priority_to_proto(self.priority, payload_converter=payload_converter)
             )
         return message
-
-    def _temporal_to_wire(
-        self,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
-    ) -> temporalio.api.activity.v1.message_pb2.ActivityOptions:
-        return self.to_proto(payload_converter=payload_converter)

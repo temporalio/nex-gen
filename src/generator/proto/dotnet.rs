@@ -234,10 +234,17 @@ impl ModelBackend {
             ))
             | PlannedType::Record(_)) => {
                 if planned_record.is_some_and(|model| self.model_needs_wire_method(model)) {
+                    let raw_type = dotnet_proto_type_name_for_info(
+                        planned_record
+                            .and_then(|model| model.data.proto.as_ref())
+                            .expect("wire method model should have proto backing"),
+                    );
                     if let Some(payload_converter_expr) = payload_converter_expr {
-                        format!("{source_expr}.ToProto({payload_converter_expr})")
+                        format!(
+                            "({raw_type}){source_expr}.TemporalToWire({payload_converter_expr})"
+                        )
                     } else {
-                        format!("{source_expr}.ToProto()")
+                        format!("({raw_type}){source_expr}.TemporalToWire()")
                     }
                 } else {
                     self.message_to_wire_expr(
@@ -442,11 +449,7 @@ fn render_model_to_proto_method(
     );
     let backend = ModelBackend;
     render_model_from_wire_method(output, model, api_plan, support_namespace, &raw_type);
-    output.push_str("    public ");
-    output.push_str(&raw_type);
-    output.push_str(
-        " ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n",
-    );
+    output.push_str("    public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n");
     output.push_str("        var proto = new ");
     output.push_str(&raw_type);
     output.push_str("();\n");
@@ -477,12 +480,6 @@ fn render_model_to_proto_method(
     }
     output.push_str("        return proto;\n");
     output.push_str("    }\n\n");
-    output.push_str("    object ");
-    output.push_str(&qualify_dotnet_support_reference(
-        "ITemporalWire",
-        support_namespace,
-    ));
-    output.push_str(".TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);\n\n");
 }
 
 fn render_model_from_wire_method(

@@ -34,7 +34,7 @@ namespace NexGen.TypeRoundtripService
             };
         }
 
-        public Temporalio.Api.Activity.V1.ActivityOptions ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.Activity.V1.ActivityOptions();
             if (TaskQueue is { } taskQueue)
@@ -52,8 +52,6 @@ namespace NexGen.TypeRoundtripService
             }
             return proto;
         }
-
-        object NexGen.Support.ITemporalWire.TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);
 
     }
 

@@ -24,7 +24,7 @@ namespace NexGen.StartWorkflowService
             };
         }
 
-        public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse();
             if (RunId is { } runId)
@@ -33,8 +33,6 @@ namespace NexGen.StartWorkflowService
             }
             return proto;
         }
-
-        object NexGen.Support.ITemporalWire.TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);
 
     }
 
@@ -51,7 +49,7 @@ namespace NexGen.StartWorkflowService
             };
         }
 
-        public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse();
             if (RunId is { } runId)
@@ -60,8 +58,6 @@ namespace NexGen.StartWorkflowService
             }
             return proto;
         }
-
-        object NexGen.Support.ITemporalWire.TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);
 
     }
 
@@ -90,19 +86,17 @@ namespace NexGen.StartWorkflowService
             };
         }
 
-        public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest();
             proto.Namespace = Namespace;
-            proto.WorkflowExecution = WorkflowExecution.ToProto(payloadConverter);
+            proto.WorkflowExecution = (Temporalio.Api.Common.V1.WorkflowExecution)WorkflowExecution.TemporalToWire(payloadConverter);
             if (Reason is { } reason)
             {
                 proto.Reason = reason;
             }
             return proto;
         }
-
-        object NexGen.Support.ITemporalWire.TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);
 
     }
 
@@ -114,13 +108,11 @@ namespace NexGen.StartWorkflowService
             return new CancelWorkflowResponse();
         }
 
-        public Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionResponse();
             return proto;
         }
-
-        object NexGen.Support.ITemporalWire.TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);
 
     }
 
@@ -158,7 +150,7 @@ namespace NexGen.StartWorkflowService
             };
         }
 
-        public Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest();
             proto.Namespace = Namespace;
@@ -175,8 +167,6 @@ namespace NexGen.StartWorkflowService
             }
             return proto;
         }
-
-        object NexGen.Support.ITemporalWire.TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);
 
     }
 
@@ -199,7 +189,7 @@ namespace NexGen.StartWorkflowService
             };
         }
 
-        public Temporalio.Api.Common.V1.WorkflowExecution ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.Common.V1.WorkflowExecution();
             proto.WorkflowId = WorkflowId;
@@ -209,8 +199,6 @@ namespace NexGen.StartWorkflowService
             }
             return proto;
         }
-
-        object NexGen.Support.ITemporalWire.TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);
 
     }
 
