@@ -2,7 +2,7 @@
 
 import type { Violation } from "../../json";
 import { ValidationError, isPlainObject, collect } from "../../json";
-import { parseBlock } from "../block/models";
+import { BlockMapper } from "../block/models";
 import type { Block } from "../block/models";
 
 /**
@@ -26,143 +26,147 @@ export interface PageMeta {
   wordCount?: number;
 }
 
-export function parsePage(raw: unknown): Page {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
+export class PageMapper {
+  public fromIntermediate(raw: unknown): Page {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
 
-  let pageId: string = undefined as unknown as string;
-  if (raw.pageId === undefined || raw.pageId === null) {
-    violations.push({ path: "pageId", reason: "required" });
-  } else {
-    if (typeof raw.pageId !== "string") {
-      violations.push({ path: "pageId", reason: "expected string" });
+    let pageId: string = undefined as unknown as string;
+    if (raw.pageId === undefined || raw.pageId === null) {
+      violations.push({ path: "pageId", reason: "required" });
     } else {
-      pageId = raw.pageId;
+      if (typeof raw.pageId !== "string") {
+        violations.push({ path: "pageId", reason: "expected string" });
+      } else {
+        pageId = raw.pageId;
+      }
     }
-  }
 
-  let title: string = undefined as unknown as string;
-  if (raw.title === undefined || raw.title === null) {
-    violations.push({ path: "title", reason: "required" });
-  } else {
-    if (typeof raw.title !== "string") {
-      violations.push({ path: "title", reason: "expected string" });
+    let title: string = undefined as unknown as string;
+    if (raw.title === undefined || raw.title === null) {
+      violations.push({ path: "title", reason: "required" });
     } else {
-      title = raw.title;
+      if (typeof raw.title !== "string") {
+        violations.push({ path: "title", reason: "expected string" });
+      } else {
+        title = raw.title;
+      }
     }
-  }
 
-  let meta: PageMeta = undefined as unknown as PageMeta;
-  if (raw.meta === undefined || raw.meta === null) {
-    violations.push({ path: "meta", reason: "required" });
-  } else {
-    try {
-      meta = parsePageMeta(raw.meta);
-    } catch (error) {
-      collect(violations, "meta", error);
-    }
-  }
-
-  let blocks: Block[] | undefined = undefined as unknown as Block[] | undefined;
-  if (raw.blocks === null) {
-    violations.push({ path: "blocks", reason: "explicit null not allowed" });
-  } else if (raw.blocks !== undefined) {
-    if (!Array.isArray(raw.blocks)) {
-      violations.push({ path: "blocks", reason: "expected array" });
+    let meta: PageMeta = undefined as unknown as PageMeta;
+    if (raw.meta === undefined || raw.meta === null) {
+      violations.push({ path: "meta", reason: "required" });
     } else {
-      blocks = [];
-      raw.blocks.forEach((element: unknown, index: number) => {
-        let item: Block = undefined as unknown as Block;
-        try {
-          item = parseBlock(element);
-        } catch (error) {
-          collect(violations, `blocks[${index}]`, error);
-        }
-        if (item !== undefined) {
-          blocks!.push(item);
-        }
-      });
+      try {
+        meta = new PageMetaMapper().fromIntermediate(raw.meta);
+      } catch (error) {
+        collect(violations, "meta", error);
+      }
     }
+
+    let blocks: Block[] | undefined = undefined as unknown as Block[] | undefined;
+    if (raw.blocks === null) {
+      violations.push({ path: "blocks", reason: "explicit null not allowed" });
+    } else if (raw.blocks !== undefined) {
+      if (!Array.isArray(raw.blocks)) {
+        violations.push({ path: "blocks", reason: "expected array" });
+      } else {
+        blocks = [];
+        raw.blocks.forEach((element: unknown, index: number) => {
+          let item: Block = undefined as unknown as Block;
+          try {
+            item = new BlockMapper().fromIntermediate(element);
+          } catch (error) {
+            collect(violations, `blocks[${index}]`, error);
+          }
+          if (item !== undefined) {
+            blocks!.push(item);
+          }
+        });
+      }
+    }
+
+    for (const key of Object.keys(raw)) {
+      if (key !== "pageId" && key !== "title" && key !== "meta" && key !== "blocks") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: Page = { pageId, title, meta };
+    if (blocks !== undefined) {
+      out.blocks = blocks;
+    }
+    return out;
   }
 
-  for (const key of Object.keys(raw)) {
-    if (key !== "pageId" && key !== "title" && key !== "meta" && key !== "blocks") {
-      violations.push({ path: key, reason: "unknown field" });
+  public toIntermediate(value: Page): unknown {
+    const out: Record<string, unknown> = {};
+    out.pageId = value.pageId;
+    out.title = value.title;
+    out.meta = new PageMetaMapper().toIntermediate(value.meta);
+    if (value.blocks !== undefined) {
+      out.blocks = value.blocks;
     }
+    return out;
   }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: Page = { pageId, title, meta };
-  if (blocks !== undefined) {
-    out.blocks = blocks;
-  }
-  return out;
 }
 
-export function serializePage(value: Page): unknown {
-  const out: Record<string, unknown> = {};
-  out.pageId = value.pageId;
-  out.title = value.title;
-  out.meta = serializePageMeta(value.meta);
-  if (value.blocks !== undefined) {
-    out.blocks = value.blocks;
-  }
-  return out;
-}
+export class PageMetaMapper {
+  public fromIntermediate(raw: unknown): PageMeta {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
 
-export function parsePageMeta(raw: unknown): PageMeta {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let author: string = undefined as unknown as string;
-  if (raw.author === undefined || raw.author === null) {
-    violations.push({ path: "author", reason: "required" });
-  } else {
-    if (typeof raw.author !== "string") {
-      violations.push({ path: "author", reason: "expected string" });
+    let author: string = undefined as unknown as string;
+    if (raw.author === undefined || raw.author === null) {
+      violations.push({ path: "author", reason: "required" });
     } else {
-      author = raw.author;
+      if (typeof raw.author !== "string") {
+        violations.push({ path: "author", reason: "expected string" });
+      } else {
+        author = raw.author;
+      }
     }
-  }
 
-  let wordCount: number | undefined = undefined as unknown as number | undefined;
-  if (raw.wordCount === null) {
-    violations.push({ path: "wordCount", reason: "explicit null not allowed" });
-  } else if (raw.wordCount !== undefined) {
-    if (typeof raw.wordCount !== "number" || !Number.isSafeInteger(raw.wordCount)) {
-      violations.push({ path: "wordCount", reason: "expected integer" });
-    } else {
-      wordCount = raw.wordCount;
+    let wordCount: number | undefined = undefined as unknown as number | undefined;
+    if (raw.wordCount === null) {
+      violations.push({ path: "wordCount", reason: "explicit null not allowed" });
+    } else if (raw.wordCount !== undefined) {
+      if (typeof raw.wordCount !== "number" || !Number.isSafeInteger(raw.wordCount)) {
+        violations.push({ path: "wordCount", reason: "expected integer" });
+      } else {
+        wordCount = raw.wordCount;
+      }
     }
-  }
 
-  for (const key of Object.keys(raw)) {
-    if (key !== "author" && key !== "wordCount") {
-      violations.push({ path: key, reason: "unknown field" });
+    for (const key of Object.keys(raw)) {
+      if (key !== "author" && key !== "wordCount") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
     }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: PageMeta = { author };
+    if (wordCount !== undefined) {
+      out.wordCount = wordCount;
+    }
+    return out;
   }
 
-  if (violations.length) {
-    throw new ValidationError(violations);
+  public toIntermediate(value: PageMeta): unknown {
+    const out: Record<string, unknown> = {};
+    out.author = value.author;
+    if (value.wordCount !== undefined) {
+      out.wordCount = value.wordCount;
+    }
+    return out;
   }
-  const out: PageMeta = { author };
-  if (wordCount !== undefined) {
-    out.wordCount = wordCount;
-  }
-  return out;
-}
-
-export function serializePageMeta(value: PageMeta): unknown {
-  const out: Record<string, unknown> = {};
-  out.author = value.author;
-  if (value.wordCount !== undefined) {
-    out.wordCount = value.wordCount;
-  }
-  return out;
 }

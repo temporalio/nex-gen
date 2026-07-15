@@ -43,7 +43,8 @@ type PlannedVariant = VariantSpec<PlannedTypeFamily>;
 pub(in crate::generator) struct RenderedExternalModelFragments {
     pub(in crate::generator) imports: String,
     pub(in crate::generator) body: String,
-    pub(in crate::generator) exported_names: BTreeSet<String>,
+    pub(in crate::generator) type_exported_names: BTreeSet<String>,
+    pub(in crate::generator) value_exported_names: BTreeSet<String>,
 }
 
 impl RenderedExternalModelFragments {
@@ -60,7 +61,8 @@ impl RenderedExternalModelFragments {
             }
             self.body.push_str(&other.body);
         }
-        self.exported_names.extend(other.exported_names);
+        self.type_exported_names.extend(other.type_exported_names);
+        self.value_exported_names.extend(other.value_exported_names);
     }
 }
 
@@ -2720,14 +2722,18 @@ fn render_module_files(
 ) -> Result<GeneratedFiles> {
     let support_source = support_source.filter(|source| !source.trim().is_empty());
     let support_exports = support_source.map(support_exports);
-    let module_model_names = model_fragments.exported_names.iter().cloned().collect();
+    let module_model_names = model_fragments
+        .type_exported_names
+        .iter()
+        .cloned()
+        .collect();
     let mut files = BTreeMap::<PathBuf, String>::new();
     files.insert(
         "index.ts".into(),
         if mode == GenerationMode::NativeApi {
             render_index_module(services)
         } else {
-            render_definitions_only_index_module(services)
+            render_definitions_only_index_module(services, &model_fragments.value_exported_names)
         },
     );
     files.insert(
@@ -3056,12 +3062,26 @@ fn render_generated_module(imports: String, body: String) -> String {
     output
 }
 
-fn render_definitions_only_index_module(services: &[RenderedService<'_>]) -> String {
+fn render_definitions_only_index_module(
+    services: &[RenderedService<'_>],
+    model_value_exports: &BTreeSet<String>,
+) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
     output.push_str("\n\n");
     if !services.is_empty() {
         output.push_str("export * from './services';\n");
+    }
+    if !model_value_exports.is_empty() {
+        output.push_str("export { ");
+        output.push_str(
+            &model_value_exports
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        output.push_str(" } from './models';\n");
     }
     output.push_str("export type * from './models';\n");
     if services.iter().any(|service| !service.resources.is_empty()) {
@@ -3425,7 +3445,7 @@ fn render_cross_module_model_value_imports(
     for (module_path, names) in &api_plan.data.module_imports {
         let candidates = names
             .iter()
-            .flat_map(|name| [format!("parse{name}"), format!("serialize{name}")])
+            .map(|name| format!("{name}Mapper"))
             .collect::<Vec<_>>();
         let used_names = used_import_names(source, &candidates);
         if !used_names.is_empty() {

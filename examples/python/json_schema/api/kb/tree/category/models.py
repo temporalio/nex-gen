@@ -70,4 +70,3 @@ class Palette(pydantic.BaseModel):
 
 
 _ = Category.model_rebuild()
-_ = Palette.model_rebuild()

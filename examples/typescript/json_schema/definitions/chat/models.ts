@@ -63,362 +63,379 @@ export interface SendMessageOutput {
   messageId: string;
 }
 
-export function parseGetRoomInput(raw: unknown): GetRoomInput {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
+export class GetRoomInputMapper {
+  public fromIntermediate(raw: unknown): GetRoomInput {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
 
-  let roomId: string = undefined as unknown as string;
-  if (raw.roomId === undefined || raw.roomId === null) {
-    violations.push({ path: "roomId", reason: "required" });
-  } else {
-    if (typeof raw.roomId !== "string") {
-      violations.push({ path: "roomId", reason: "expected string" });
+    let roomId: string = undefined as unknown as string;
+    if (raw.roomId === undefined || raw.roomId === null) {
+      violations.push({ path: "roomId", reason: "required" });
     } else {
-      roomId = raw.roomId;
-    }
-  }
-
-  for (const key of Object.keys(raw)) {
-    if (key !== "roomId") {
-      violations.push({ path: key, reason: "unknown field" });
-    }
-  }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: GetRoomInput = { roomId };
-  return out;
-}
-
-export function serializeGetRoomInput(value: GetRoomInput): unknown {
-  const out: Record<string, unknown> = {};
-  out.roomId = value.roomId;
-  return out;
-}
-
-export function parseLabels(raw: unknown): Labels {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  const keys = Object.keys(raw);
-  if (keys.length > 50) {
-    violations.push({ path: "", reason: "maxProperties: at most 50 entries" });
-  }
-  const additionalProperties: Record<string, string> = {};
-  for (const key of keys) {
-    let entry: string | undefined = undefined;
-    if (typeof raw[key] !== "string") {
-      violations.push({ path: key, reason: "expected string" });
-    } else {
-      entry = raw[key];
-    }
-    if (entry !== undefined) {
-      additionalProperties[key] = entry;
-    }
-  }
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  return { additionalProperties };
-}
-
-export function serializeLabels(value: Labels): unknown {
-  const out: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
-    out[key] = entry;
-  }
-  return out;
-}
-
-export function parseMessage(raw: unknown): Message {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let kind: "text" | (string & {}) = undefined as unknown as "text" | (string & {});
-  if (raw.kind === undefined || raw.kind === null) {
-    violations.push({ path: "kind", reason: "required" });
-  } else {
-    if (typeof raw.kind !== "string") {
-      violations.push({ path: "kind", reason: "expected string" });
-    } else if (raw.kind !== KIND_CONST) {
-      violations.push({ path: "kind", reason: `must equal "${KIND_CONST}"` });
-    } else {
-      kind = raw.kind;
-    }
-  }
-
-  let body: string = undefined as unknown as string;
-  if (raw.body === undefined || raw.body === null) {
-    violations.push({ path: "body", reason: "required" });
-  } else {
-    if (typeof raw.body !== "string") {
-      violations.push({ path: "body", reason: "expected string" });
-    } else {
-      body = raw.body;
-    }
-  }
-
-  let replyToId: string | null | undefined = undefined as unknown as
-    | string
-    | null
-    | undefined;
-  if (raw.replyToId !== undefined) {
-    if (raw.replyToId === null) {
-      replyToId = null;
-    } else {
-      if (typeof raw.replyToId !== "string") {
-        violations.push({ path: "replyToId", reason: "expected string" });
+      if (typeof raw.roomId !== "string") {
+        violations.push({ path: "roomId", reason: "expected string" });
       } else {
-        replyToId = raw.replyToId;
+        roomId = raw.roomId;
       }
     }
-  }
 
-  let priority: number | undefined = undefined as unknown as number | undefined;
-  if (raw.priority === null) {
-    violations.push({ path: "priority", reason: "explicit null not allowed" });
-  } else if (raw.priority !== undefined) {
-    if (typeof raw.priority !== "number" || !Number.isSafeInteger(raw.priority)) {
-      violations.push({ path: "priority", reason: "expected integer" });
-    } else {
-      priority = raw.priority;
+    for (const key of Object.keys(raw)) {
+      if (key !== "roomId") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
     }
-  }
 
-  for (const key of Object.keys(raw)) {
-    if (key !== "kind" && key !== "body" && key !== "replyToId" && key !== "priority") {
-      violations.push({ path: key, reason: "unknown field" });
+    if (violations.length) {
+      throw new ValidationError(violations);
     }
+    const out: GetRoomInput = { roomId };
+    return out;
   }
 
-  if (violations.length) {
-    throw new ValidationError(violations);
+  public toIntermediate(value: GetRoomInput): unknown {
+    const out: Record<string, unknown> = {};
+    out.roomId = value.roomId;
+    return out;
   }
-  const out: Message = { kind, body };
-  if (replyToId !== undefined) {
-    out.replyToId = replyToId;
-  }
-  if (priority !== undefined) {
-    out.priority = priority;
-  }
-  return out;
 }
 
-export function serializeMessage(value: Message): unknown {
-  const out: Record<string, unknown> = {};
-  out.kind = value.kind;
-  out.body = value.body;
-  if (value.replyToId !== undefined) {
-    out.replyToId = value.replyToId;
+export class LabelsMapper {
+  public fromIntermediate(raw: unknown): Labels {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
+
+    const keys = Object.keys(raw);
+    if (keys.length > 50) {
+      violations.push({ path: "", reason: "maxProperties: at most 50 entries" });
+    }
+    const additionalProperties: Record<string, string> = {};
+    for (const key of keys) {
+      let entry: string | undefined = undefined;
+      if (typeof raw[key] !== "string") {
+        violations.push({ path: key, reason: "expected string" });
+      } else {
+        entry = raw[key];
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    return { additionalProperties };
   }
-  if (value.priority !== undefined) {
-    out.priority = value.priority;
+
+  public toIntermediate(value: Labels): unknown {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    return out;
   }
-  return out;
+}
+
+export class MessageMapper {
+  public fromIntermediate(raw: unknown): Message {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
+
+    let kind: "text" | (string & {}) = undefined as unknown as "text" | (string & {});
+    if (raw.kind === undefined || raw.kind === null) {
+      violations.push({ path: "kind", reason: "required" });
+    } else {
+      if (typeof raw.kind !== "string") {
+        violations.push({ path: "kind", reason: "expected string" });
+      } else if (raw.kind !== KIND_CONST) {
+        violations.push({ path: "kind", reason: `must equal "${KIND_CONST}"` });
+      } else {
+        kind = raw.kind;
+      }
+    }
+
+    let body: string = undefined as unknown as string;
+    if (raw.body === undefined || raw.body === null) {
+      violations.push({ path: "body", reason: "required" });
+    } else {
+      if (typeof raw.body !== "string") {
+        violations.push({ path: "body", reason: "expected string" });
+      } else {
+        body = raw.body;
+      }
+    }
+
+    let replyToId: string | null | undefined = undefined as unknown as
+      | string
+      | null
+      | undefined;
+    if (raw.replyToId !== undefined) {
+      if (raw.replyToId === null) {
+        replyToId = null;
+      } else {
+        if (typeof raw.replyToId !== "string") {
+          violations.push({ path: "replyToId", reason: "expected string" });
+        } else {
+          replyToId = raw.replyToId;
+        }
+      }
+    }
+
+    let priority: number | undefined = undefined as unknown as number | undefined;
+    if (raw.priority === null) {
+      violations.push({ path: "priority", reason: "explicit null not allowed" });
+    } else if (raw.priority !== undefined) {
+      if (typeof raw.priority !== "number" || !Number.isSafeInteger(raw.priority)) {
+        violations.push({ path: "priority", reason: "expected integer" });
+      } else {
+        priority = raw.priority;
+      }
+    }
+
+    for (const key of Object.keys(raw)) {
+      if (
+        key !== "kind" &&
+        key !== "body" &&
+        key !== "replyToId" &&
+        key !== "priority"
+      ) {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: Message = { kind, body };
+    if (replyToId !== undefined) {
+      out.replyToId = replyToId;
+    }
+    if (priority !== undefined) {
+      out.priority = priority;
+    }
+    return out;
+  }
+
+  public toIntermediate(value: Message): unknown {
+    const out: Record<string, unknown> = {};
+    out.kind = value.kind;
+    out.body = value.body;
+    if (value.replyToId !== undefined) {
+      out.replyToId = value.replyToId;
+    }
+    if (value.priority !== undefined) {
+      out.priority = value.priority;
+    }
+    return out;
+  }
 }
 
 const ROOM_DECLARED = new Set(["roomId", "displayName", "topic", "members", "labels"]);
 
-export function parseRoom(raw: unknown): Room {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let roomId: string = undefined as unknown as string;
-  if (raw.roomId === undefined || raw.roomId === null) {
-    violations.push({ path: "roomId", reason: "required" });
-  } else {
-    if (typeof raw.roomId !== "string") {
-      violations.push({ path: "roomId", reason: "expected string" });
-    } else {
-      roomId = raw.roomId;
+export class RoomMapper {
+  public fromIntermediate(raw: unknown): Room {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
     }
-  }
 
-  let displayName: string = undefined as unknown as string;
-  if (raw.displayName === undefined || raw.displayName === null) {
-    violations.push({ path: "displayName", reason: "required" });
-  } else {
-    if (typeof raw.displayName !== "string") {
-      violations.push({ path: "displayName", reason: "expected string" });
+    let roomId: string = undefined as unknown as string;
+    if (raw.roomId === undefined || raw.roomId === null) {
+      violations.push({ path: "roomId", reason: "required" });
     } else {
-      displayName = raw.displayName;
-    }
-  }
-
-  let topic: string | null = undefined as unknown as string | null;
-  if (raw.topic === undefined) {
-    violations.push({ path: "topic", reason: "required" });
-  } else {
-    if (raw.topic === null) {
-      topic = null;
-    } else {
-      if (typeof raw.topic !== "string") {
-        violations.push({ path: "topic", reason: "expected string" });
+      if (typeof raw.roomId !== "string") {
+        violations.push({ path: "roomId", reason: "expected string" });
       } else {
-        topic = raw.topic;
+        roomId = raw.roomId;
       }
     }
-  }
 
-  let members: string[] | undefined = undefined as unknown as string[] | undefined;
-  if (raw.members === null) {
-    violations.push({ path: "members", reason: "explicit null not allowed" });
-  } else if (raw.members !== undefined) {
-    if (!Array.isArray(raw.members)) {
-      violations.push({ path: "members", reason: "expected array" });
+    let displayName: string = undefined as unknown as string;
+    if (raw.displayName === undefined || raw.displayName === null) {
+      violations.push({ path: "displayName", reason: "required" });
     } else {
-      members = [];
-      raw.members.forEach((element: unknown, index: number) => {
-        let item: string = undefined as unknown as string;
-        if (typeof element !== "string") {
-          violations.push({ path: `members[${index}]`, reason: "expected element" });
+      if (typeof raw.displayName !== "string") {
+        violations.push({ path: "displayName", reason: "expected string" });
+      } else {
+        displayName = raw.displayName;
+      }
+    }
+
+    let topic: string | null = undefined as unknown as string | null;
+    if (raw.topic === undefined) {
+      violations.push({ path: "topic", reason: "required" });
+    } else {
+      if (raw.topic === null) {
+        topic = null;
+      } else {
+        if (typeof raw.topic !== "string") {
+          violations.push({ path: "topic", reason: "expected string" });
         } else {
-          item = element;
+          topic = raw.topic;
         }
-        if (item !== undefined) {
-          members!.push(item);
-        }
-      });
+      }
     }
+
+    let members: string[] | undefined = undefined as unknown as string[] | undefined;
+    if (raw.members === null) {
+      violations.push({ path: "members", reason: "explicit null not allowed" });
+    } else if (raw.members !== undefined) {
+      if (!Array.isArray(raw.members)) {
+        violations.push({ path: "members", reason: "expected array" });
+      } else {
+        members = [];
+        raw.members.forEach((element: unknown, index: number) => {
+          let item: string = undefined as unknown as string;
+          if (typeof element !== "string") {
+            violations.push({ path: `members[${index}]`, reason: "expected element" });
+          } else {
+            item = element;
+          }
+          if (item !== undefined) {
+            members!.push(item);
+          }
+        });
+      }
+    }
+
+    let labels: Labels | undefined = undefined as unknown as Labels | undefined;
+    if (raw.labels === null) {
+      violations.push({ path: "labels", reason: "explicit null not allowed" });
+    } else if (raw.labels !== undefined) {
+      try {
+        labels = new LabelsMapper().fromIntermediate(raw.labels);
+      } catch (error) {
+        collect(violations, "labels", error);
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!ROOM_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: Room = { roomId, displayName, topic, additionalProperties };
+    if (members !== undefined) {
+      out.members = members;
+    }
+    if (labels !== undefined) {
+      out.labels = labels;
+    }
+    return out;
   }
 
-  let labels: Labels | undefined = undefined as unknown as Labels | undefined;
-  if (raw.labels === null) {
-    violations.push({ path: "labels", reason: "explicit null not allowed" });
-  } else if (raw.labels !== undefined) {
-    try {
-      labels = parseLabels(raw.labels);
-    } catch (error) {
-      collect(violations, "labels", error);
+  public toIntermediate(value: Room): unknown {
+    const out: Record<string, unknown> = {};
+    out.roomId = value.roomId;
+    out.displayName = value.displayName;
+    out.topic = value.topic;
+    if (value.members !== undefined) {
+      out.members = value.members;
     }
-  }
-
-  const additionalProperties: Record<string, unknown> = {};
-  for (const key of Object.keys(raw)) {
-    if (!ROOM_DECLARED.has(key)) {
-      additionalProperties[key] = raw[key];
+    if (value.labels !== undefined) {
+      out.labels = new LabelsMapper().toIntermediate(value.labels);
     }
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    return out;
   }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: Room = { roomId, displayName, topic, additionalProperties };
-  if (members !== undefined) {
-    out.members = members;
-  }
-  if (labels !== undefined) {
-    out.labels = labels;
-  }
-  return out;
 }
 
-export function serializeRoom(value: Room): unknown {
-  const out: Record<string, unknown> = {};
-  out.roomId = value.roomId;
-  out.displayName = value.displayName;
-  out.topic = value.topic;
-  if (value.members !== undefined) {
-    out.members = value.members;
-  }
-  if (value.labels !== undefined) {
-    out.labels = serializeLabels(value.labels);
-  }
-  for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
-    out[key] = entry;
-  }
-  return out;
-}
+export class SendMessageInputMapper {
+  public fromIntermediate(raw: unknown): SendMessageInput {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
 
-export function parseSendMessageInput(raw: unknown): SendMessageInput {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let roomId: string = undefined as unknown as string;
-  if (raw.roomId === undefined || raw.roomId === null) {
-    violations.push({ path: "roomId", reason: "required" });
-  } else {
-    if (typeof raw.roomId !== "string") {
-      violations.push({ path: "roomId", reason: "expected string" });
+    let roomId: string = undefined as unknown as string;
+    if (raw.roomId === undefined || raw.roomId === null) {
+      violations.push({ path: "roomId", reason: "required" });
     } else {
-      roomId = raw.roomId;
+      if (typeof raw.roomId !== "string") {
+        violations.push({ path: "roomId", reason: "expected string" });
+      } else {
+        roomId = raw.roomId;
+      }
     }
-  }
 
-  let message: Message = undefined as unknown as Message;
-  if (raw.message === undefined || raw.message === null) {
-    violations.push({ path: "message", reason: "required" });
-  } else {
-    try {
-      message = parseMessage(raw.message);
-    } catch (error) {
-      collect(violations, "message", error);
-    }
-  }
-
-  for (const key of Object.keys(raw)) {
-    if (key !== "roomId" && key !== "message") {
-      violations.push({ path: key, reason: "unknown field" });
-    }
-  }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: SendMessageInput = { roomId, message };
-  return out;
-}
-
-export function serializeSendMessageInput(value: SendMessageInput): unknown {
-  const out: Record<string, unknown> = {};
-  out.roomId = value.roomId;
-  out.message = serializeMessage(value.message);
-  return out;
-}
-
-export function parseSendMessageOutput(raw: unknown): SendMessageOutput {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let messageId: string = undefined as unknown as string;
-  if (raw.messageId === undefined || raw.messageId === null) {
-    violations.push({ path: "messageId", reason: "required" });
-  } else {
-    if (typeof raw.messageId !== "string") {
-      violations.push({ path: "messageId", reason: "expected string" });
+    let message: Message = undefined as unknown as Message;
+    if (raw.message === undefined || raw.message === null) {
+      violations.push({ path: "message", reason: "required" });
     } else {
-      messageId = raw.messageId;
+      try {
+        message = new MessageMapper().fromIntermediate(raw.message);
+      } catch (error) {
+        collect(violations, "message", error);
+      }
     }
+
+    for (const key of Object.keys(raw)) {
+      if (key !== "roomId" && key !== "message") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: SendMessageInput = { roomId, message };
+    return out;
   }
 
-  for (const key of Object.keys(raw)) {
-    if (key !== "messageId") {
-      violations.push({ path: key, reason: "unknown field" });
-    }
+  public toIntermediate(value: SendMessageInput): unknown {
+    const out: Record<string, unknown> = {};
+    out.roomId = value.roomId;
+    out.message = new MessageMapper().toIntermediate(value.message);
+    return out;
   }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: SendMessageOutput = { messageId };
-  return out;
 }
 
-export function serializeSendMessageOutput(value: SendMessageOutput): unknown {
-  const out: Record<string, unknown> = {};
-  out.messageId = value.messageId;
-  return out;
+export class SendMessageOutputMapper {
+  public fromIntermediate(raw: unknown): SendMessageOutput {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
+
+    let messageId: string = undefined as unknown as string;
+    if (raw.messageId === undefined || raw.messageId === null) {
+      violations.push({ path: "messageId", reason: "required" });
+    } else {
+      if (typeof raw.messageId !== "string") {
+        violations.push({ path: "messageId", reason: "expected string" });
+      } else {
+        messageId = raw.messageId;
+      }
+    }
+
+    for (const key of Object.keys(raw)) {
+      if (key !== "messageId") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: SendMessageOutput = { messageId };
+    return out;
+  }
+
+  public toIntermediate(value: SendMessageOutput): unknown {
+    const out: Record<string, unknown> = {};
+    out.messageId = value.messageId;
+    return out;
+  }
 }

@@ -39,6 +39,18 @@ pub(in crate::generator) fn model_type_ref(json_type: &PlannedJsonType) -> Strin
     json_type.model_name.clone()
 }
 
+fn mapper_class_name(model_name: &str) -> String {
+    format!("{model_name}Mapper")
+}
+
+fn push_indented(output: &mut String, body: &str, indent: &str) {
+    for line in body.lines() {
+        output.push_str(indent);
+        output.push_str(line);
+        output.push('\n');
+    }
+}
+
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend {
     json_models: Vec<PlannedJsonType>,
@@ -138,9 +150,7 @@ fn render_external_models(
 
     for model in json_models {
         output.push('\n');
-        render_model_parser(&mut output, model, json_models)?;
-        output.push('\n');
-        render_model_serializer(&mut output, model)?;
+        render_model_mapper(&mut output, model, json_models)?;
     }
 
     let uses_refs = json_models
@@ -150,9 +160,13 @@ fn render_external_models(
     Ok(RenderedExternalModelFragments {
         imports: render_json_model_imports(uses_refs, runtime_import_module),
         body: output,
-        exported_names: json_models
+        type_exported_names: json_models
             .iter()
             .map(|model| model.model_name.clone())
+            .collect(),
+        value_exported_names: json_models
+            .iter()
+            .map(|model| mapper_class_name(&model.model_name))
             .collect(),
     })
 }
@@ -328,7 +342,7 @@ fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Resul
     Ok(())
 }
 
-fn render_model_parser(
+fn render_model_mapper(
     output: &mut String,
     model: &PlannedJsonType,
     models: &[&PlannedJsonType],
@@ -338,11 +352,38 @@ fn render_model_parser(
         render_declared_field_set(output, model, &schema);
         output.push('\n');
     }
-    output.push_str("export function parse");
-    output.push_str(&model.model_name);
-    output.push_str("(raw: unknown): ");
+
+    output.push_str("export class ");
+    output.push_str(&mapper_class_name(&model.model_name));
+    output.push_str(" {\n");
+    output.push_str("  public fromIntermediate(raw: unknown): ");
     output.push_str(&model.model_name);
     output.push_str(" {\n");
+
+    let mut parser_body = String::new();
+    render_model_parser_body(&mut parser_body, model, &schema, models)?;
+    push_indented(output, &parser_body, "  ");
+
+    output.push_str("  }\n\n");
+    output.push_str("  public toIntermediate(value: ");
+    output.push_str(&model.model_name);
+    output.push_str("): unknown {\n");
+
+    let mut serializer_body = String::new();
+    render_model_serializer_body(&mut serializer_body, model, &schema)?;
+    push_indented(output, &serializer_body, "  ");
+
+    output.push_str("  }\n");
+    output.push_str("}\n");
+    Ok(())
+}
+
+fn render_model_parser_body(
+    output: &mut String,
+    model: &PlannedJsonType,
+    schema: &Schema,
+    models: &[&PlannedJsonType],
+) -> Result<()> {
     output.push_str("  const violations: Violation[] = [];\n");
     output.push_str("  if (!isPlainObject(raw)) {\n");
     output.push_str("    throw new ValidationError([{ path: '', reason: 'expected object' }]);\n");
@@ -350,7 +391,6 @@ fn render_model_parser(
 
     if let Some(value_schema) = typed_map_value_schema(&schema)? {
         render_typed_map_parser_body(output, &schema, &value_schema);
-        output.push_str("}\n");
         return Ok(());
     }
 
@@ -414,17 +454,14 @@ fn render_model_parser(
         }
     }
     output.push_str("  return out;\n");
-    output.push_str("}\n");
     Ok(())
 }
 
-fn render_model_serializer(output: &mut String, model: &PlannedJsonType) -> Result<()> {
-    let schema = decode_schema(model)?;
-    output.push_str("export function serialize");
-    output.push_str(&model.model_name);
-    output.push_str("(value: ");
-    output.push_str(&model.model_name);
-    output.push_str("): unknown {\n");
+fn render_model_serializer_body(
+    output: &mut String,
+    _model: &PlannedJsonType,
+    schema: &Schema,
+) -> Result<()> {
     output.push_str("  const out: Record<string, unknown> = {};\n");
 
     if typed_map_value_schema(&schema)?.is_some() {
@@ -434,7 +471,6 @@ fn render_model_serializer(output: &mut String, model: &PlannedJsonType) -> Resu
         output.push_str("    out[key] = entry;\n");
         output.push_str("  }\n");
         output.push_str("  return out;\n");
-        output.push_str("}\n");
         return Ok(());
     }
 
@@ -470,7 +506,6 @@ fn render_model_serializer(output: &mut String, model: &PlannedJsonType) -> Resu
         output.push_str("  }\n");
     }
     output.push_str("  return out;\n");
-    output.push_str("}\n");
     Ok(())
 }
 
@@ -625,9 +660,9 @@ fn render_value_parser(
         output.push_str(indent);
         output.push_str("  ");
         output.push_str(target);
-        output.push_str(" = parse");
-        output.push_str(&model_name);
-        output.push('(');
+        output.push_str(" = new ");
+        output.push_str(&mapper_class_name(&model_name));
+        output.push_str("().fromIntermediate(");
         output.push_str(raw_expr);
         output.push_str(");\n");
         output.push_str(indent);
@@ -993,7 +1028,11 @@ fn render_collect_helper(output: &mut String) {
 
 fn serialize_expr(schema: &Schema, value_expr: &str) -> String {
     if let Some(reference) = &schema.reference {
-        return format!("serialize{}({value_expr})", reference_model_name(reference));
+        let model_name = reference_model_name(reference);
+        return format!(
+            "new {}().toIntermediate({value_expr})",
+            mapper_class_name(&model_name)
+        );
     }
     if let Some(branches) = &schema.one_of
         && branches

@@ -44,6 +44,3 @@ class PageMeta(pydantic.BaseModel):
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
         return emit_set_fields(self, handler)
-
-
-_ = PageMeta.model_rebuild()

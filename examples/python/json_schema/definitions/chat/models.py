@@ -193,11 +193,3 @@ class SendMessageOutput(pydantic.BaseModel):
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
         return emit_set_fields(self, handler)
-
-
-_ = GetRoomInput.model_rebuild()
-_ = Labels.model_rebuild()
-_ = Message.model_rebuild()
-_ = Room.model_rebuild()
-_ = SendMessageInput.model_rebuild()
-_ = SendMessageOutput.model_rebuild()

@@ -22,125 +22,131 @@ export interface Palette {
   swatches: string[];
 }
 
-export function parseCategory(raw: unknown): Category {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
+export class CategoryMapper {
+  public fromIntermediate(raw: unknown): Category {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
 
-  let id: string = undefined as unknown as string;
-  if (raw.id === undefined || raw.id === null) {
-    violations.push({ path: "id", reason: "required" });
-  } else {
-    if (typeof raw.id !== "string") {
-      violations.push({ path: "id", reason: "expected string" });
+    let id: string = undefined as unknown as string;
+    if (raw.id === undefined || raw.id === null) {
+      violations.push({ path: "id", reason: "required" });
     } else {
-      id = raw.id;
+      if (typeof raw.id !== "string") {
+        violations.push({ path: "id", reason: "expected string" });
+      } else {
+        id = raw.id;
+      }
     }
-  }
 
-  let name: string = undefined as unknown as string;
-  if (raw.name === undefined || raw.name === null) {
-    violations.push({ path: "name", reason: "required" });
-  } else {
-    if (typeof raw.name !== "string") {
-      violations.push({ path: "name", reason: "expected string" });
+    let name: string = undefined as unknown as string;
+    if (raw.name === undefined || raw.name === null) {
+      violations.push({ path: "name", reason: "required" });
     } else {
-      name = raw.name;
+      if (typeof raw.name !== "string") {
+        violations.push({ path: "name", reason: "expected string" });
+      } else {
+        name = raw.name;
+      }
     }
+
+    let children: Category[] | undefined = undefined as unknown as
+      | Category[]
+      | undefined;
+    if (raw.children === null) {
+      violations.push({ path: "children", reason: "explicit null not allowed" });
+    } else if (raw.children !== undefined) {
+      if (!Array.isArray(raw.children)) {
+        violations.push({ path: "children", reason: "expected array" });
+      } else {
+        children = [];
+        raw.children.forEach((element: unknown, index: number) => {
+          let item: Category = undefined as unknown as Category;
+          try {
+            item = new CategoryMapper().fromIntermediate(element);
+          } catch (error) {
+            collect(violations, `children[${index}]`, error);
+          }
+          if (item !== undefined) {
+            children!.push(item);
+          }
+        });
+      }
+    }
+
+    for (const key of Object.keys(raw)) {
+      if (key !== "id" && key !== "name" && key !== "children") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: Category = { id, name };
+    if (children !== undefined) {
+      out.children = children;
+    }
+    return out;
   }
 
-  let children: Category[] | undefined = undefined as unknown as Category[] | undefined;
-  if (raw.children === null) {
-    violations.push({ path: "children", reason: "explicit null not allowed" });
-  } else if (raw.children !== undefined) {
-    if (!Array.isArray(raw.children)) {
-      violations.push({ path: "children", reason: "expected array" });
-    } else {
-      children = [];
-      raw.children.forEach((element: unknown, index: number) => {
-        let item: Category = undefined as unknown as Category;
-        try {
-          item = parseCategory(element);
-        } catch (error) {
-          collect(violations, `children[${index}]`, error);
-        }
-        if (item !== undefined) {
-          children!.push(item);
-        }
-      });
+  public toIntermediate(value: Category): unknown {
+    const out: Record<string, unknown> = {};
+    out.id = value.id;
+    out.name = value.name;
+    if (value.children !== undefined) {
+      out.children = value.children;
     }
+    return out;
   }
-
-  for (const key of Object.keys(raw)) {
-    if (key !== "id" && key !== "name" && key !== "children") {
-      violations.push({ path: key, reason: "unknown field" });
-    }
-  }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: Category = { id, name };
-  if (children !== undefined) {
-    out.children = children;
-  }
-  return out;
 }
 
-export function serializeCategory(value: Category): unknown {
-  const out: Record<string, unknown> = {};
-  out.id = value.id;
-  out.name = value.name;
-  if (value.children !== undefined) {
-    out.children = value.children;
-  }
-  return out;
-}
+export class PaletteMapper {
+  public fromIntermediate(raw: unknown): Palette {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
 
-export function parsePalette(raw: unknown): Palette {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let swatches: string[] = undefined as unknown as string[];
-  if (raw.swatches === undefined || raw.swatches === null) {
-    violations.push({ path: "swatches", reason: "required" });
-  } else {
-    if (!Array.isArray(raw.swatches)) {
-      violations.push({ path: "swatches", reason: "expected array" });
+    let swatches: string[] = undefined as unknown as string[];
+    if (raw.swatches === undefined || raw.swatches === null) {
+      violations.push({ path: "swatches", reason: "required" });
     } else {
-      swatches = [];
-      raw.swatches.forEach((element: unknown, index: number) => {
-        let item: string = undefined as unknown as string;
-        if (typeof element !== "string") {
-          violations.push({ path: `swatches[${index}]`, reason: "expected element" });
-        } else {
-          item = element;
-        }
-        if (item !== undefined) {
-          swatches!.push(item);
-        }
-      });
+      if (!Array.isArray(raw.swatches)) {
+        violations.push({ path: "swatches", reason: "expected array" });
+      } else {
+        swatches = [];
+        raw.swatches.forEach((element: unknown, index: number) => {
+          let item: string = undefined as unknown as string;
+          if (typeof element !== "string") {
+            violations.push({ path: `swatches[${index}]`, reason: "expected element" });
+          } else {
+            item = element;
+          }
+          if (item !== undefined) {
+            swatches!.push(item);
+          }
+        });
+      }
     }
-  }
 
-  for (const key of Object.keys(raw)) {
-    if (key !== "swatches") {
-      violations.push({ path: key, reason: "unknown field" });
+    for (const key of Object.keys(raw)) {
+      if (key !== "swatches") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
     }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: Palette = { swatches };
+    return out;
   }
 
-  if (violations.length) {
-    throw new ValidationError(violations);
+  public toIntermediate(value: Palette): unknown {
+    const out: Record<string, unknown> = {};
+    out.swatches = value.swatches;
+    return out;
   }
-  const out: Palette = { swatches };
-  return out;
-}
-
-export function serializePalette(value: Palette): unknown {
-  const out: Record<string, unknown> = {};
-  out.swatches = value.swatches;
-  return out;
 }

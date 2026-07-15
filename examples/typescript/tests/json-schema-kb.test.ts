@@ -4,24 +4,18 @@ import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
 
 import {
-  parseBlock,
-  serializeBlock,
+  BlockMapper,
 } from "../json_schema/definitions/kb/content/block/models.ts";
 import {
-  parsePage,
-  serializePage,
+  PageMapper,
 } from "../json_schema/definitions/kb/content/page/models.ts";
 import {
-  parseCategory,
-  serializeCategory,
+  CategoryMapper,
 } from "../json_schema/definitions/kb/tree/category/models.ts";
 import {
-  parseGetCategoryTreeInput,
-  parseGetPageInput,
-  parsePutBlockOutput,
-  serializeGetCategoryTreeInput,
-  serializeGetPageInput,
-  serializePutBlockOutput,
+  GetCategoryTreeInputMapper,
+  GetPageInputMapper,
+  PutBlockOutputMapper,
 } from "../json_schema/definitions/kb/kb/models.ts";
 import type { Page } from "../json_schema/api/kb/content/page/models.ts";
 import type { PutBlockOutput } from "../json_schema/api/kb/kb/models.ts";
@@ -50,42 +44,56 @@ function expectRoundTrip<T>(
 }
 
 describe("json-schema KB generated output", () => {
-  test("roundtrips multi-file KB fixtures through parse and serialize helpers", () => {
-    const page = expectRoundTrip("page.json", parsePage, serializePage);
+  test("roundtrips multi-file KB fixtures through mapper helpers", () => {
+    const pageMapper = new PageMapper();
+    const page = expectRoundTrip(
+      "page.json",
+      (raw) => pageMapper.fromIntermediate(raw),
+      (value) => pageMapper.toIntermediate(value),
+    );
     expect(page.pageId).toBe("page-1");
     expect(page.blocks?.[0]?.blockId).toBe("block-1");
     expect(page.blocks?.[0]?.page).toBeNull();
     expect(page.blocks?.[0]?.style?.bold).toBe(true);
 
-    const block = expectRoundTrip("block.json", parseBlock, serializeBlock);
+    const blockMapper = new BlockMapper();
+    const block = expectRoundTrip(
+      "block.json",
+      (raw) => blockMapper.fromIntermediate(raw),
+      (value) => blockMapper.toIntermediate(value),
+    );
     expect(block.blockId).toBe("block-1");
     expect(block.page).toBeNull();
 
+    const categoryMapper = new CategoryMapper();
     const category = expectRoundTrip(
       "category-tree.json",
-      parseCategory,
-      serializeCategory,
+      (raw) => categoryMapper.fromIntermediate(raw),
+      (value) => categoryMapper.toIntermediate(value),
     );
     expect(category.children?.[0]?.id).toBe("child");
 
+    const getPageInputMapper = new GetPageInputMapper();
     const request = expectRoundTrip(
       "get-page-input.json",
-      parseGetPageInput,
-      serializeGetPageInput,
+      (raw) => getPageInputMapper.fromIntermediate(raw),
+      (value) => getPageInputMapper.toIntermediate(value),
     );
     expect(request.pageId).toBe("page-1");
 
+    const getCategoryTreeInputMapper = new GetCategoryTreeInputMapper();
     const categoryRequest = expectRoundTrip(
       "get-category-tree-input.json",
-      parseGetCategoryTreeInput,
-      serializeGetCategoryTreeInput,
+      (raw) => getCategoryTreeInputMapper.fromIntermediate(raw),
+      (value) => getCategoryTreeInputMapper.toIntermediate(value),
     );
     expect(categoryRequest.rootId).toBe("root");
 
+    const putBlockOutputMapper = new PutBlockOutputMapper();
     const response = expectRoundTrip(
       "put-block-output.json",
-      parsePutBlockOutput,
-      serializePutBlockOutput,
+      (raw) => putBlockOutputMapper.fromIntermediate(raw),
+      (value) => putBlockOutputMapper.toIntermediate(value),
     );
     expect(response.revision).toBe(7);
   });

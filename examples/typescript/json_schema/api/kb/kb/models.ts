@@ -27,122 +27,128 @@ export interface PutBlockOutput {
   revision: number;
 }
 
-export function parseGetCategoryTreeInput(raw: unknown): GetCategoryTreeInput {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
+export class GetCategoryTreeInputMapper {
+  public fromIntermediate(raw: unknown): GetCategoryTreeInput {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
 
-  let rootId: string = undefined as unknown as string;
-  if (raw.rootId === undefined || raw.rootId === null) {
-    violations.push({ path: "rootId", reason: "required" });
-  } else {
-    if (typeof raw.rootId !== "string") {
-      violations.push({ path: "rootId", reason: "expected string" });
+    let rootId: string = undefined as unknown as string;
+    if (raw.rootId === undefined || raw.rootId === null) {
+      violations.push({ path: "rootId", reason: "required" });
     } else {
-      rootId = raw.rootId;
+      if (typeof raw.rootId !== "string") {
+        violations.push({ path: "rootId", reason: "expected string" });
+      } else {
+        rootId = raw.rootId;
+      }
     }
+
+    for (const key of Object.keys(raw)) {
+      if (key !== "rootId") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: GetCategoryTreeInput = { rootId };
+    return out;
   }
 
-  for (const key of Object.keys(raw)) {
-    if (key !== "rootId") {
-      violations.push({ path: key, reason: "unknown field" });
-    }
+  public toIntermediate(value: GetCategoryTreeInput): unknown {
+    const out: Record<string, unknown> = {};
+    out.rootId = value.rootId;
+    return out;
   }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: GetCategoryTreeInput = { rootId };
-  return out;
 }
 
-export function serializeGetCategoryTreeInput(value: GetCategoryTreeInput): unknown {
-  const out: Record<string, unknown> = {};
-  out.rootId = value.rootId;
-  return out;
-}
+export class GetPageInputMapper {
+  public fromIntermediate(raw: unknown): GetPageInput {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
 
-export function parseGetPageInput(raw: unknown): GetPageInput {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let pageId: string = undefined as unknown as string;
-  if (raw.pageId === undefined || raw.pageId === null) {
-    violations.push({ path: "pageId", reason: "required" });
-  } else {
-    if (typeof raw.pageId !== "string") {
-      violations.push({ path: "pageId", reason: "expected string" });
+    let pageId: string = undefined as unknown as string;
+    if (raw.pageId === undefined || raw.pageId === null) {
+      violations.push({ path: "pageId", reason: "required" });
     } else {
-      pageId = raw.pageId;
+      if (typeof raw.pageId !== "string") {
+        violations.push({ path: "pageId", reason: "expected string" });
+      } else {
+        pageId = raw.pageId;
+      }
     }
+
+    for (const key of Object.keys(raw)) {
+      if (key !== "pageId") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: GetPageInput = { pageId };
+    return out;
   }
 
-  for (const key of Object.keys(raw)) {
-    if (key !== "pageId") {
-      violations.push({ path: key, reason: "unknown field" });
-    }
+  public toIntermediate(value: GetPageInput): unknown {
+    const out: Record<string, unknown> = {};
+    out.pageId = value.pageId;
+    return out;
   }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: GetPageInput = { pageId };
-  return out;
 }
 
-export function serializeGetPageInput(value: GetPageInput): unknown {
-  const out: Record<string, unknown> = {};
-  out.pageId = value.pageId;
-  return out;
-}
+export class PutBlockOutputMapper {
+  public fromIntermediate(raw: unknown): PutBlockOutput {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
 
-export function parsePutBlockOutput(raw: unknown): PutBlockOutput {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let blockId: string = undefined as unknown as string;
-  if (raw.blockId === undefined || raw.blockId === null) {
-    violations.push({ path: "blockId", reason: "required" });
-  } else {
-    if (typeof raw.blockId !== "string") {
-      violations.push({ path: "blockId", reason: "expected string" });
+    let blockId: string = undefined as unknown as string;
+    if (raw.blockId === undefined || raw.blockId === null) {
+      violations.push({ path: "blockId", reason: "required" });
     } else {
-      blockId = raw.blockId;
+      if (typeof raw.blockId !== "string") {
+        violations.push({ path: "blockId", reason: "expected string" });
+      } else {
+        blockId = raw.blockId;
+      }
     }
-  }
 
-  let revision: number = undefined as unknown as number;
-  if (raw.revision === undefined || raw.revision === null) {
-    violations.push({ path: "revision", reason: "required" });
-  } else {
-    if (typeof raw.revision !== "number" || !Number.isSafeInteger(raw.revision)) {
-      violations.push({ path: "revision", reason: "expected integer" });
+    let revision: number = undefined as unknown as number;
+    if (raw.revision === undefined || raw.revision === null) {
+      violations.push({ path: "revision", reason: "required" });
     } else {
-      revision = raw.revision;
+      if (typeof raw.revision !== "number" || !Number.isSafeInteger(raw.revision)) {
+        violations.push({ path: "revision", reason: "expected integer" });
+      } else {
+        revision = raw.revision;
+      }
     }
-  }
 
-  for (const key of Object.keys(raw)) {
-    if (key !== "blockId" && key !== "revision") {
-      violations.push({ path: key, reason: "unknown field" });
+    for (const key of Object.keys(raw)) {
+      if (key !== "blockId" && key !== "revision") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
     }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: PutBlockOutput = { blockId, revision };
+    return out;
   }
 
-  if (violations.length) {
-    throw new ValidationError(violations);
+  public toIntermediate(value: PutBlockOutput): unknown {
+    const out: Record<string, unknown> = {};
+    out.blockId = value.blockId;
+    out.revision = value.revision;
+    return out;
   }
-  const out: PutBlockOutput = { blockId, revision };
-  return out;
-}
-
-export function serializePutBlockOutput(value: PutBlockOutput): unknown {
-  const out: Record<string, unknown> = {};
-  out.blockId = value.blockId;
-  out.revision = value.revision;
-  return out;
 }

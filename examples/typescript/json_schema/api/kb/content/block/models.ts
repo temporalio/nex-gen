@@ -2,7 +2,7 @@
 
 import type { Violation } from "../../json";
 import { ValidationError, isPlainObject, collect } from "../../json";
-import { parsePage, serializePage } from "../page/models";
+import { PageMapper } from "../page/models";
 import type { Page } from "../page/models";
 
 export function requiredField<T>(
@@ -41,167 +41,172 @@ export interface BlockStyle {
   indent?: number;
 }
 
-export function parseBlock(raw: unknown): Block {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let blockId: string = undefined as unknown as string;
-  if (raw.blockId === undefined || raw.blockId === null) {
-    violations.push({ path: "blockId", reason: "required" });
-  } else {
-    if (typeof raw.blockId !== "string") {
-      violations.push({ path: "blockId", reason: "expected string" });
-    } else {
-      blockId = raw.blockId;
+export class BlockMapper {
+  public fromIntermediate(raw: unknown): Block {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
     }
-  }
 
-  let order: number = undefined as unknown as number;
-  if (raw.order === undefined || raw.order === null) {
-    violations.push({ path: "order", reason: "required" });
-  } else {
-    if (typeof raw.order !== "number" || !Number.isSafeInteger(raw.order)) {
-      violations.push({ path: "order", reason: "expected integer" });
+    let blockId: string = undefined as unknown as string;
+    if (raw.blockId === undefined || raw.blockId === null) {
+      violations.push({ path: "blockId", reason: "required" });
     } else {
-      order = raw.order;
-    }
-  }
-
-  let text: string | undefined = undefined as unknown as string | undefined;
-  if (raw.text === null) {
-    violations.push({ path: "text", reason: "explicit null not allowed" });
-  } else if (raw.text !== undefined) {
-    if (typeof raw.text !== "string") {
-      violations.push({ path: "text", reason: "expected string" });
-    } else {
-      text = raw.text;
-    }
-  }
-
-  let style: BlockStyle | undefined = undefined as unknown as BlockStyle | undefined;
-  if (raw.style === null) {
-    violations.push({ path: "style", reason: "explicit null not allowed" });
-  } else if (raw.style !== undefined) {
-    try {
-      style = parseBlockStyle(raw.style);
-    } catch (error) {
-      collect(violations, "style", error);
-    }
-  }
-
-  let page: Page | null | undefined = undefined as unknown as Page | null | undefined;
-  if (raw.page !== undefined) {
-    if (raw.page === null) {
-      page = null;
-    } else {
-      try {
-        page = parsePage(raw.page);
-      } catch (error) {
-        collect(violations, "page", error);
+      if (typeof raw.blockId !== "string") {
+        violations.push({ path: "blockId", reason: "expected string" });
+      } else {
+        blockId = raw.blockId;
       }
     }
-  }
 
-  for (const key of Object.keys(raw)) {
-    if (
-      key !== "blockId" &&
-      key !== "order" &&
-      key !== "text" &&
-      key !== "style" &&
-      key !== "page"
-    ) {
-      violations.push({ path: key, reason: "unknown field" });
-    }
-  }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: Block = { blockId, order };
-  if (text !== undefined) {
-    out.text = text;
-  }
-  if (style !== undefined) {
-    out.style = style;
-  }
-  if (page !== undefined) {
-    out.page = page;
-  }
-  return out;
-}
-
-export function serializeBlock(value: Block): unknown {
-  const out: Record<string, unknown> = {};
-  out.blockId = value.blockId;
-  out.order = value.order;
-  if (value.text !== undefined) {
-    out.text = value.text;
-  }
-  if (value.style !== undefined) {
-    out.style = serializeBlockStyle(value.style);
-  }
-  if (value.page !== undefined) {
-    out.page = value.page === null ? null : serializePage(value.page);
-  }
-  return out;
-}
-
-export function parseBlockStyle(raw: unknown): BlockStyle {
-  const violations: Violation[] = [];
-  if (!isPlainObject(raw)) {
-    throw new ValidationError([{ path: "", reason: "expected object" }]);
-  }
-
-  let bold: boolean | undefined = undefined as unknown as boolean | undefined;
-  if (raw.bold === null) {
-    violations.push({ path: "bold", reason: "explicit null not allowed" });
-  } else if (raw.bold !== undefined) {
-    if (typeof raw.bold !== "boolean") {
-      violations.push({ path: "bold", reason: "expected boolean" });
+    let order: number = undefined as unknown as number;
+    if (raw.order === undefined || raw.order === null) {
+      violations.push({ path: "order", reason: "required" });
     } else {
-      bold = raw.bold;
+      if (typeof raw.order !== "number" || !Number.isSafeInteger(raw.order)) {
+        violations.push({ path: "order", reason: "expected integer" });
+      } else {
+        order = raw.order;
+      }
     }
+
+    let text: string | undefined = undefined as unknown as string | undefined;
+    if (raw.text === null) {
+      violations.push({ path: "text", reason: "explicit null not allowed" });
+    } else if (raw.text !== undefined) {
+      if (typeof raw.text !== "string") {
+        violations.push({ path: "text", reason: "expected string" });
+      } else {
+        text = raw.text;
+      }
+    }
+
+    let style: BlockStyle | undefined = undefined as unknown as BlockStyle | undefined;
+    if (raw.style === null) {
+      violations.push({ path: "style", reason: "explicit null not allowed" });
+    } else if (raw.style !== undefined) {
+      try {
+        style = new BlockStyleMapper().fromIntermediate(raw.style);
+      } catch (error) {
+        collect(violations, "style", error);
+      }
+    }
+
+    let page: Page | null | undefined = undefined as unknown as Page | null | undefined;
+    if (raw.page !== undefined) {
+      if (raw.page === null) {
+        page = null;
+      } else {
+        try {
+          page = new PageMapper().fromIntermediate(raw.page);
+        } catch (error) {
+          collect(violations, "page", error);
+        }
+      }
+    }
+
+    for (const key of Object.keys(raw)) {
+      if (
+        key !== "blockId" &&
+        key !== "order" &&
+        key !== "text" &&
+        key !== "style" &&
+        key !== "page"
+      ) {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: Block = { blockId, order };
+    if (text !== undefined) {
+      out.text = text;
+    }
+    if (style !== undefined) {
+      out.style = style;
+    }
+    if (page !== undefined) {
+      out.page = page;
+    }
+    return out;
   }
 
-  let indent: number | undefined = undefined as unknown as number | undefined;
-  if (raw.indent === null) {
-    violations.push({ path: "indent", reason: "explicit null not allowed" });
-  } else if (raw.indent !== undefined) {
-    if (typeof raw.indent !== "number" || !Number.isSafeInteger(raw.indent)) {
-      violations.push({ path: "indent", reason: "expected integer" });
-    } else {
-      indent = raw.indent;
+  public toIntermediate(value: Block): unknown {
+    const out: Record<string, unknown> = {};
+    out.blockId = value.blockId;
+    out.order = value.order;
+    if (value.text !== undefined) {
+      out.text = value.text;
     }
-  }
-
-  for (const key of Object.keys(raw)) {
-    if (key !== "bold" && key !== "indent") {
-      violations.push({ path: key, reason: "unknown field" });
+    if (value.style !== undefined) {
+      out.style = new BlockStyleMapper().toIntermediate(value.style);
     }
+    if (value.page !== undefined) {
+      out.page =
+        value.page === null ? null : new PageMapper().toIntermediate(value.page);
+    }
+    return out;
   }
-
-  if (violations.length) {
-    throw new ValidationError(violations);
-  }
-  const out: BlockStyle = {};
-  if (bold !== undefined) {
-    out.bold = bold;
-  }
-  if (indent !== undefined) {
-    out.indent = indent;
-  }
-  return out;
 }
 
-export function serializeBlockStyle(value: BlockStyle): unknown {
-  const out: Record<string, unknown> = {};
-  if (value.bold !== undefined) {
-    out.bold = value.bold;
+export class BlockStyleMapper {
+  public fromIntermediate(raw: unknown): BlockStyle {
+    const violations: Violation[] = [];
+    if (!isPlainObject(raw)) {
+      throw new ValidationError([{ path: "", reason: "expected object" }]);
+    }
+
+    let bold: boolean | undefined = undefined as unknown as boolean | undefined;
+    if (raw.bold === null) {
+      violations.push({ path: "bold", reason: "explicit null not allowed" });
+    } else if (raw.bold !== undefined) {
+      if (typeof raw.bold !== "boolean") {
+        violations.push({ path: "bold", reason: "expected boolean" });
+      } else {
+        bold = raw.bold;
+      }
+    }
+
+    let indent: number | undefined = undefined as unknown as number | undefined;
+    if (raw.indent === null) {
+      violations.push({ path: "indent", reason: "explicit null not allowed" });
+    } else if (raw.indent !== undefined) {
+      if (typeof raw.indent !== "number" || !Number.isSafeInteger(raw.indent)) {
+        violations.push({ path: "indent", reason: "expected integer" });
+      } else {
+        indent = raw.indent;
+      }
+    }
+
+    for (const key of Object.keys(raw)) {
+      if (key !== "bold" && key !== "indent") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new ValidationError(violations);
+    }
+    const out: BlockStyle = {};
+    if (bold !== undefined) {
+      out.bold = bold;
+    }
+    if (indent !== undefined) {
+      out.indent = indent;
+    }
+    return out;
   }
-  if (value.indent !== undefined) {
-    out.indent = value.indent;
+
+  public toIntermediate(value: BlockStyle): unknown {
+    const out: Record<string, unknown> = {};
+    if (value.bold !== undefined) {
+      out.bold = value.bold;
+    }
+    if (value.indent !== undefined) {
+      out.indent = value.indent;
+    }
+    return out;
   }
-  return out;
 }
