@@ -56,36 +56,85 @@ namespace NexGen.Support
 
     internal static class ProtoExtensions
     {
-        internal static ApiCommon.WorkflowType ToWorkflowTypeProto(this string value) =>
+        internal static ApiCommon.WorkflowType ToWorkflowTypeProto(this string value, IPayloadConverter? payloadConverter = null) =>
             new() { Name = value };
 
-        internal static ApiTaskQueue.TaskQueue ToTaskQueueProto(this string value) =>
+        internal static string FromWorkflowTypeProto(ApiCommon.WorkflowType value, IPayloadConverter? payloadConverter = null) =>
+            value.Name;
+
+        internal static ApiTaskQueue.TaskQueue ToTaskQueueProto(this string value, IPayloadConverter? payloadConverter = null) =>
             new() { Name = value };
 
-        internal static ApiCommon.Payload ToPayload(object? value) =>
-            Workflow.PayloadConverter.ToPayload(value);
+        internal static string FromTaskQueueProto(ApiTaskQueue.TaskQueue value, IPayloadConverter? payloadConverter = null) =>
+            value.Name;
 
-        internal static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values)
+        internal static ApiCommon.Payload ToPayload(object? value, IPayloadConverter? payloadConverter = null) =>
+            (payloadConverter ?? Workflow.PayloadConverter).ToPayload(value);
+
+        internal static object? FromPayload(ApiCommon.Payload payload, IPayloadConverter? payloadConverter = null) =>
+            (payloadConverter ?? Workflow.PayloadConverter).ToValue<object?>(payload);
+
+        internal static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values, IPayloadConverter? payloadConverter = null)
         {
             var payloads = new ApiCommon.Payloads();
-            payloads.Payloads_.AddRange(Workflow.PayloadConverter.ToPayloads(values as IReadOnlyCollection<object?> ?? new List<object?>(values)));
+            payloads.Payloads_.AddRange((payloadConverter ?? Workflow.PayloadConverter).ToPayloads(values as IReadOnlyCollection<object?> ?? new List<object?>(values)));
             return payloads;
         }
 
-        internal static Duration ToProto(this TimeSpan value) =>
+        internal static IReadOnlyCollection<object?> FromPayloads(ApiCommon.Payloads payloads, IPayloadConverter? payloadConverter = null) =>
+            payloads.Payloads_.Select(payload => FromPayload(payload, payloadConverter)).ToArray();
+
+        internal static Duration ToProto(this TimeSpan value, IPayloadConverter? payloadConverter = null) =>
             Duration.FromTimeSpan(value);
 
-        internal static ApiCommon.RetryPolicy ToProto(this Temporalio.Common.RetryPolicy value) =>
+        internal static TimeSpan FromDurationProto(Duration value, IPayloadConverter? payloadConverter = null) =>
+            value.ToTimeSpan();
+
+        internal static ApiCommon.RetryPolicy ToProto(this Temporalio.Common.RetryPolicy value, IPayloadConverter? payloadConverter = null) =>
             ToRetryPolicy(value);
 
-        internal static ApiCommon.Memo ToProto(this IReadOnlyDictionary<string, object?> value) =>
-            ToMemo(value);
+        internal static Temporalio.Common.RetryPolicy FromRetryPolicyProto(ApiCommon.RetryPolicy value, IPayloadConverter? payloadConverter = null) =>
+            FromRetryPolicy(value);
 
-        internal static ApiCommon.Priority ToProto(this Temporalio.Common.Priority value) =>
+        internal static ApiCommon.Memo ToProto(this IReadOnlyDictionary<string, object?> value, IPayloadConverter? payloadConverter = null) =>
+            ToMemo(value, payloadConverter);
+
+        internal static IReadOnlyDictionary<string, object?> FromMemoProto(ApiCommon.Memo value, IPayloadConverter? payloadConverter = null) =>
+            value.Fields.ToDictionary(
+                item => item.Key,
+                item => FromPayload(item.Value, payloadConverter));
+
+        internal static ApiCommon.Priority ToProto(this Temporalio.Common.Priority value, IPayloadConverter? payloadConverter = null) =>
             ToPriority(value);
 
-        internal static ApiWorkflow.VersioningOverride ToProto(this Temporalio.Common.VersioningOverride value) =>
+        internal static Temporalio.Common.Priority FromPriorityProto(ApiCommon.Priority value, IPayloadConverter? payloadConverter = null) =>
+            new(
+                value.PriorityKey == 0 ? null : value.PriorityKey,
+                value.FairnessKey,
+                value.FairnessWeight == 0 ? null : (float)value.FairnessWeight);
+
+        internal static ApiWorkflow.VersioningOverride ToProto(this Temporalio.Common.VersioningOverride value, IPayloadConverter? payloadConverter = null) =>
             ToVersioningOverride(value);
+
+        internal static Temporalio.Common.SearchAttributeCollection FromSearchAttributesProto(ApiCommon.SearchAttributes value, IPayloadConverter? payloadConverter = null) =>
+            Temporalio.Common.SearchAttributeCollection.FromProto(value);
+
+        internal static Temporalio.Common.VersioningOverride? FromVersioningOverrideProto(ApiWorkflow.VersioningOverride versioningOverride, IPayloadConverter? payloadConverter = null)
+        {
+            if (versioningOverride.AutoUpgrade)
+            {
+                return new Temporalio.Common.VersioningOverride.AutoUpgrade();
+            }
+            if (versioningOverride.Pinned is { } pinned)
+            {
+                return new Temporalio.Common.VersioningOverride.Pinned(
+                    new Temporalio.Common.WorkerDeploymentVersion(
+                        pinned.Version.DeploymentName,
+                        pinned.Version.BuildId),
+                    (Temporalio.Common.VersioningOverride.PinnedOverrideBehavior)pinned.Behavior);
+            }
+            return null;
+        }
 
         private static ApiCommon.RetryPolicy ToRetryPolicy(Temporalio.Common.RetryPolicy policy)
         {
@@ -106,7 +155,26 @@ namespace NexGen.Support
             return proto;
         }
 
-        private static ApiCommon.Memo ToMemo(IReadOnlyDictionary<string, object?> memo)
+        private static Temporalio.Common.RetryPolicy FromRetryPolicy(ApiCommon.RetryPolicy policy)
+        {
+            var retryPolicy = new Temporalio.Common.RetryPolicy
+            {
+                InitialInterval = policy.InitialInterval?.ToTimeSpan() ?? TimeSpan.FromSeconds(1),
+                BackoffCoefficient = (float)policy.BackoffCoefficient,
+                MaximumAttempts = policy.MaximumAttempts,
+            };
+            if (policy.MaximumInterval is { } maximumInterval)
+            {
+                retryPolicy.MaximumInterval = maximumInterval.ToTimeSpan();
+            }
+            if (policy.NonRetryableErrorTypes.Count > 0)
+            {
+                retryPolicy.NonRetryableErrorTypes = policy.NonRetryableErrorTypes.ToArray();
+            }
+            return retryPolicy;
+        }
+
+        private static ApiCommon.Memo ToMemo(IReadOnlyDictionary<string, object?> memo, IPayloadConverter? payloadConverter)
         {
             var proto = new ApiCommon.Memo();
             foreach (var item in memo)
@@ -115,7 +183,7 @@ namespace NexGen.Support
                 {
                     throw new ArgumentException($"Memo value for {item.Key} is null", nameof(memo));
                 }
-                proto.Fields.Add(item.Key, Workflow.PayloadConverter.ToPayload(item.Value));
+                proto.Fields.Add(item.Key, ToPayload(item.Value, payloadConverter));
             }
             return proto;
         }

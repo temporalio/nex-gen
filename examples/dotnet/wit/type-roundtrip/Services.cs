@@ -18,7 +18,7 @@ namespace NexGen.TypeRoundtripService
     {
         [GeneratedCode("nex-gen", null)]
         [NexusOperation("ActivityOptionsOperation")]
-        ActivityOptions ActivityOptionsOperation(Temporalio.Api.Activity.V1.ActivityOptions request);
+        ActivityOptions ActivityOptionsOperation(ActivityOptions request);
 
     }
 

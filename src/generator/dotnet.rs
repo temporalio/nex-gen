@@ -213,7 +213,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(&csharp_type_name(&operation.name));
         output.push('(');
         if self.operation_has_input(operation) {
-            output.push_str(&self.operation_raw_input_type(operation.input_model()));
+            output.push_str(&self.operation_input_type(operation.input_model()));
             output.push_str(" request");
         }
         output.push_str(");\n\n");
@@ -478,6 +478,13 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(" class ");
         let type_name = csharp_type_name(&model.name);
         output.push_str(&type_name);
+        if let Some(wire_interface) = self
+            .external_models
+            .model_wire_interface(model, self.support_namespace)
+        {
+            output.push_str(" : ");
+            output.push_str(&wire_interface);
+        }
         output.push_str("\n{\n");
         self.render_model_constructor(output, access, &type_name, model);
         for (field_name, field) in model.public_fields() {
@@ -492,8 +499,38 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str(" { get; init; }\n");
             }
         }
+        for (_field_name, field, source_expr) in model.sourced_fields() {
+            render_field_xml_doc(output, "    ", field);
+            let property_name = field_property_name(field);
+            let backing_field_name = format!(
+                "_{}",
+                csharp_parameter_name(&field.name).trim_start_matches('@')
+            );
+            output.push_str("    private ");
+            output.push_str(&nullable_type(&self.field_type(field)));
+            output.push(' ');
+            output.push_str(&backing_field_name);
+            output.push_str(";\n");
+            output.push_str("    public ");
+            output.push_str(&self.field_type(field));
+            output.push(' ');
+            output.push_str(&property_name);
+            output.push_str("\n    {\n");
+            output.push_str("        get => ");
+            output.push_str(&backing_field_name);
+            output.push_str(" ?? ");
+            output.push_str(&qualify_dotnet_support_call(
+                source_expr,
+                self.support_namespace,
+            ));
+            output.push_str(";\n");
+            output.push_str("        init => ");
+            output.push_str(&backing_field_name);
+            output.push_str(" = value;\n");
+            output.push_str("    }\n");
+        }
         if self.external_models.model_needs_wire_method(model) {
-            if model.public_fields().next().is_some() {
+            if model.public_fields().next().is_some() || model.sourced_fields().next().is_some() {
                 output.push('\n');
             }
             self.external_models.render_model_wire_methods(
@@ -525,9 +562,7 @@ impl<'a> ApiPlanner<'a> {
             .then(|| self.operation_input_type(operation.input_model()))
             .unwrap_or_default();
 
-        if high_level_input_type == raw_input_type
-            || !operation_requires_high_level_request(operation)
-        {
+        if high_level_input_type == raw_input_type {
             self.render_operation_request_extension(
                 output,
                 operation,
@@ -596,9 +631,7 @@ impl<'a> ApiPlanner<'a> {
             .then(|| self.operation_input_type(operation.input_model()))
             .unwrap_or_default();
 
-        if high_level_input_type == raw_input_type
-            || !operation_requires_high_level_request(operation)
-        {
+        if high_level_input_type == raw_input_type {
             self.render_endpoint_service_request_method(
                 output,
                 operation,
@@ -679,13 +712,7 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(" request");
         }
         output.push_str(")\n    {\n");
-        self.render_endpoint_service_request_body(
-            output,
-            operation,
-            has_input,
-            raw_return,
-            request_kind,
-        );
+        self.render_endpoint_service_request_body(output, operation, has_input, raw_return);
         output.push_str("    }\n\n");
     }
 
@@ -695,13 +722,7 @@ impl<'a> ApiPlanner<'a> {
         operation: &PlannedOperation,
         has_input: bool,
         raw_return: &str,
-        request_kind: RequestArgumentKind,
     ) {
-        if matches!(request_kind, RequestArgumentKind::HighLevel) {
-            output.push_str("        var wireRequest = ");
-            output.push_str(&self.operation_request_wire_expr(operation, "request"));
-            output.push_str(";\n");
-        }
         if raw_return == "void" {
             output.push_str("        await _client.ExecuteNexusOperationAsync(svc => svc.");
         } else {
@@ -712,11 +733,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(&csharp_type_name(&operation.name));
         output.push('(');
         if has_input {
-            if matches!(request_kind, RequestArgumentKind::HighLevel) {
-                output.push_str("wireRequest");
-            } else {
-                output.push_str("request");
-            }
+            output.push_str("request");
         }
         output.push(')');
         output.push_str(").ConfigureAwait(true);\n");
@@ -724,13 +741,8 @@ impl<'a> ApiPlanner<'a> {
             return;
         }
         if operation.output_transform.is_some() || operation.data.output_resource_return.is_some() {
-            let expression = operation_transform_expression(
-                operation,
-                "request",
-                "wireRequest",
-                "result",
-                self.api_plan,
-            );
+            let expression =
+                operation_transform_expression(operation, "request", "result", self.api_plan);
             output.push_str("        return ");
             if let Some(resource) = &operation.data.output_resource_return {
                 output.push_str(&csharp_type_name(&resource.resource_type_name));
@@ -845,11 +857,6 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(endpoint_constant_name);
         }
         output.push_str(");\n");
-        if matches!(request_kind, RequestArgumentKind::HighLevel) {
-            output.push_str("        var wireRequest = ");
-            output.push_str(&self.operation_request_wire_expr(operation, "request"));
-            output.push_str(";\n");
-        }
         if raw_return == "void" {
             output.push_str("        await client.ExecuteNexusOperationAsync(svc => svc.");
         } else {
@@ -860,11 +867,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(&csharp_type_name(&operation.name));
         output.push('(');
         if has_input {
-            if matches!(request_kind, RequestArgumentKind::HighLevel) {
-                output.push_str("wireRequest");
-            } else {
-                output.push_str("request");
-            }
+            output.push_str("request");
         }
         output.push(')');
         output.push_str(").ConfigureAwait(true);\n");
@@ -873,13 +876,8 @@ impl<'a> ApiPlanner<'a> {
             return;
         }
         if operation.output_transform.is_some() || operation.data.output_resource_return.is_some() {
-            let expression = operation_transform_expression(
-                operation,
-                "request",
-                "wireRequest",
-                "result",
-                self.api_plan,
-            );
+            let expression =
+                operation_transform_expression(operation, "request", "result", self.api_plan);
             output.push_str("        return ");
             if endpoint_parameter && let Some(resource) = &operation.data.output_resource_return {
                 output.push_str(&csharp_type_name(&resource.resource_type_name));
@@ -914,22 +912,6 @@ impl<'a> ApiPlanner<'a> {
             .find(|resource_type_name| resource_type_name == return_type)
     }
 
-    fn operation_request_wire_expr(
-        &self,
-        operation: &PlannedOperation,
-        request_expr: &str,
-    ) -> String {
-        let model_type = operation.input_model();
-        let planned_record = match model_type {
-            PlannedType::Record(record) => self.api_plan.record(&record.full_name),
-            _ => None,
-        };
-        self.external_models
-            .wire_conversion(model_type, planned_record)
-            .map(|conversion| conversion.to_wire_expr(request_expr))
-            .unwrap_or_else(|| request_expr.to_string())
-    }
-
     fn render_resource_method_inline_operation_body(
         &self,
         output: &mut String,
@@ -953,19 +935,7 @@ impl<'a> ApiPlanner<'a> {
             output.push_str("        var request = ");
             output.push_str(&request_expr);
             output.push_str(";\n");
-            let wire_request = self.operation_request_wire_expr(operation, "request");
-            if wire_request != "request" {
-                output.push_str("        var wireRequest = ");
-                output.push_str(&wire_request);
-                output.push_str(";\n");
-            }
         }
-        let input_expr =
-            if has_input && self.operation_request_wire_expr(operation, "request") != "request" {
-                "wireRequest"
-            } else {
-                "request"
-            };
         if raw_return == "void" {
             output.push_str(
                 "        await RequireNexGenClient().ExecuteNexusOperationAsync(svc => svc.",
@@ -980,7 +950,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(&csharp_type_name(&operation.name));
         output.push('(');
         if has_input {
-            output.push_str(input_expr);
+            output.push_str("request");
         }
         output.push(')');
         output.push_str(").ConfigureAwait(true);\n");
@@ -988,13 +958,8 @@ impl<'a> ApiPlanner<'a> {
             return;
         }
         if operation.output_transform.is_some() || operation.data.output_resource_return.is_some() {
-            let expression = operation_transform_expression(
-                operation,
-                "request",
-                "wireRequest",
-                "result",
-                self.api_plan,
-            );
+            let expression =
+                operation_transform_expression(operation, "request", "result", self.api_plan);
             output.push_str("        return ");
             if let Some(resource) = &operation.data.output_resource_return {
                 output.push_str(&csharp_type_name(&resource.resource_type_name));
@@ -1093,29 +1058,20 @@ impl<'a> ApiPlanner<'a> {
         let high_level_input_type = has_input
             .then(|| self.operation_input_type(operation.input_model()))
             .unwrap_or_default();
-        if has_input
-            && (high_level_input_type == raw_input_type
-                || !operation_requires_high_level_request(operation))
-            && self.operation_request_method_access(operation, RequestArgumentKind::Raw) == "public"
-        {
-            collect_public_operation_input_models(
-                names,
-                operation.input_model(),
-                &raw_input_type,
-                self.api_plan,
-            );
-        }
-        if has_input
-            && high_level_input_type != raw_input_type
-            && self.operation_request_method_access(operation, RequestArgumentKind::HighLevel)
-                == "public"
-        {
-            collect_public_operation_input_models(
-                names,
-                operation.input_model(),
-                &high_level_input_type,
-                self.api_plan,
-            );
+        if has_input {
+            let request_kind = if high_level_input_type == raw_input_type {
+                RequestArgumentKind::Raw
+            } else {
+                RequestArgumentKind::HighLevel
+            };
+            if self.operation_request_method_access(operation, request_kind) == "public" {
+                collect_public_operation_input_models(
+                    names,
+                    operation.input_model(),
+                    &high_level_input_type,
+                    self.api_plan,
+                );
+            }
         }
 
         if let Some(
@@ -1744,6 +1700,14 @@ impl DotNetExternalModels {
 
     fn model_needs_wire_method(&self, model: &PlannedModel) -> bool {
         self.proto.model_needs_wire_method(model)
+    }
+
+    fn model_wire_interface(
+        &self,
+        model: &PlannedModel,
+        support_namespace: Option<&str>,
+    ) -> Option<String> {
+        self.proto.model_wire_interface(model, support_namespace)
     }
 
     fn model_uses_support_extensions(&self, model: &PlannedModel, api_plan: &PlannedSpec) -> bool {
@@ -2403,16 +2367,6 @@ enum RequestArgumentKind {
 pub(in crate::generator) struct WireValueConversion {
     pub(in crate::generator) annotation: String,
     pub(in crate::generator) to_wire: String,
-}
-
-impl WireValueConversion {
-    fn to_wire_expr(&self, value_expr: &str) -> String {
-        self.to_wire.replace("{value}", value_expr)
-    }
-}
-
-fn operation_requires_high_level_request(operation: &PlannedOperation) -> bool {
-    operation.output_transform.is_some() || operation.data.output_resource_return.is_some()
 }
 
 fn operation_has_flattened_convenience(
@@ -3438,7 +3392,6 @@ fn operation_has_input(operation: &PlannedOperation, api_plan: &PlannedSpec) -> 
 fn operation_transform_expression(
     operation: &PlannedOperation,
     request_expr: &str,
-    request_wire_expr: &str,
     result_expr: &str,
     api_plan: &PlannedSpec,
 ) -> String {
@@ -3454,14 +3407,7 @@ fn operation_transform_expression(
             .bindings
             .iter()
             .map(|binding| {
-                resource_return_binding_expr(
-                    resource,
-                    binding,
-                    request_expr,
-                    request_wire_expr,
-                    result_expr,
-                    api_plan,
-                )
+                resource_return_binding_expr(resource, binding, request_expr, result_expr, api_plan)
             })
             .collect::<Vec<_>>();
         return format!(
@@ -3477,18 +3423,17 @@ fn resource_return_binding_expr(
     resource: &crate::planning::PlannedOperationResourceReturn,
     binding: &PlannedOperationResourceFieldBinding,
     request_expr: &str,
-    request_wire_expr: &str,
     result_expr: &str,
     api_plan: &PlannedSpec,
 ) -> String {
     match &binding.source {
         ResolvedResourceBindingSource::RequestField {
             field_name,
-            proto_field_name: wire_field_name,
+            proto_field_name: _,
             hidden,
         } => {
             if *hidden {
-                let expr = format!("{request_wire_expr}.{}", csharp_type_name(wire_field_name));
+                let expr = format!("{request_expr}.{}", csharp_type_name(field_name));
                 optional_resource_binding_expr(resource, binding, expr, api_plan)
             } else {
                 format!("{request_expr}.{}", csharp_type_name(field_name))

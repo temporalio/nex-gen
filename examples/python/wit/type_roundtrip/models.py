@@ -60,12 +60,6 @@ class ActivityOptions:
         )
 
     @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[temporalio.api.activity.v1.message_pb2.ActivityOptions]:
-        return temporalio.api.activity.v1.message_pb2.ActivityOptions
-
-    @classmethod
     def _temporal_from_wire(
         cls,
         wire: temporalio.api.activity.v1.message_pb2.ActivityOptions,

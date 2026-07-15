@@ -12,7 +12,7 @@ namespace NexGen.TypeRoundtripService
 {
 
     [GeneratedCode("nex-gen", null)]
-    public class ActivityOptions
+    public class ActivityOptions : NexGen.Support.ITemporalWire
     {
         public ActivityOptions(Temporalio.Common.RetryPolicy retryPolicy)
         {
@@ -24,12 +24,22 @@ namespace NexGen.TypeRoundtripService
         public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
         public Temporalio.Common.Priority? Priority { get; init; }
 
-        public Temporalio.Api.Activity.V1.ActivityOptions ToProto()
+        public static ActivityOptions TemporalFromWire(Temporalio.Api.Activity.V1.ActivityOptions wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        {
+            return new ActivityOptions(NexGen.Support.ProtoExtensions.FromRetryPolicyProto(wire.RetryPolicy, payloadConverter))
+            {
+                TaskQueue = wire.TaskQueue == null ? null : NexGen.Support.ProtoExtensions.FromTaskQueueProto(wire.TaskQueue, payloadConverter),
+                ScheduleToCloseTimeout = wire.ScheduleToCloseTimeout == null ? null : NexGen.Support.ProtoExtensions.FromDurationProto(wire.ScheduleToCloseTimeout, payloadConverter),
+                Priority = wire.Priority == null ? null : NexGen.Support.ProtoExtensions.FromPriorityProto(wire.Priority, payloadConverter),
+            };
+        }
+
+        public Temporalio.Api.Activity.V1.ActivityOptions ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.Activity.V1.ActivityOptions();
             if (TaskQueue is { } taskQueue)
             {
-                proto.TaskQueue = NexGen.Support.ProtoExtensions.ToTaskQueueProto(taskQueue);
+                proto.TaskQueue = NexGen.Support.ProtoExtensions.ToTaskQueueProto(taskQueue, payloadConverter);
             }
             proto.RetryPolicy = RetryPolicy.ToProto();
             if (ScheduleToCloseTimeout is { } scheduleToCloseTimeout)
@@ -42,6 +52,8 @@ namespace NexGen.TypeRoundtripService
             }
             return proto;
         }
+
+        object NexGen.Support.ITemporalWire.TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);
 
     }
 

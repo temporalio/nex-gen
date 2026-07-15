@@ -70,7 +70,7 @@ class TemporalWirePayloadConverter(EncodingPayloadConverter, WithSerializationCo
     ) -> Any:
         wire_type_method = getattr(type_hint, "_temporal_wire_type", None)
         from_wire = getattr(type_hint, "_temporal_from_wire", None)
-        if wire_type_method is None or from_wire is None:
+        if from_wire is None:
             raise RuntimeError(
                 f"Payload with encoding {self.encoding} requires a Temporal wire type hint"
             )
@@ -88,9 +88,12 @@ class TemporalWirePayloadConverter(EncodingPayloadConverter, WithSerializationCo
             metadata=wire_metadata,
             data=payload.data,
         )
-        wire_value = self._inner_payload_converter.from_payload(
-            wire_payload, wire_type_method()
-        )
+        if wire_type_method is None:
+            wire_value = self._inner_payload_converter.from_payload(wire_payload)
+        else:
+            wire_value = self._inner_payload_converter.from_payload(
+                wire_payload, wire_type_method()
+            )
         return from_wire(wire_value, payload_converter=self._inner_payload_converter)
 
     @override
@@ -126,7 +129,7 @@ def _default_inner_encoding_payload_converters() -> tuple[
     return tuple(
         converter
         for converter in inner_converters
-        if converter.encoding != "binary/temporal-wire"
+        if converter.encoding not in {"binary/temporal-wire", "json/protobuf"}
     )
 
 

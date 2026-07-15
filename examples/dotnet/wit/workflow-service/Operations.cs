@@ -100,7 +100,8 @@ namespace Temporalio.Workflows
         public string? StaticDetails { get; set; }
     }
 
-    public static partial class Workflow
+    [GeneratedCode("nex-gen", null)]
+    public static class Operations
     {
         [GeneratedCode("nex-gen", null)]
         private const string WorkflowServiceEndpoint = "temporal-system";
@@ -115,8 +116,7 @@ namespace Temporalio.Workflows
         private static async Task<Temporalio.Workflows.ExternalWorkflowHandle> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IWorkflowService>(WorkflowServiceEndpoint);
-            var wireRequest = request.ToProto();
-            var result = await client.ExecuteNexusOperationAsync<SignalWithStartWorkflowResponse>(svc => svc.SignalWithStartWorkflow(wireRequest)).ConfigureAwait(true);
+            var result = await client.ExecuteNexusOperationAsync<SignalWithStartWorkflowResponse>(svc => svc.SignalWithStartWorkflow(request)).ConfigureAwait(true);
             return Temporalio.Workflows.Workflow.GetExternalWorkflowHandle(request.Id, result.RunId);
         }
 

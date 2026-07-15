@@ -38,19 +38,10 @@ namespace NexGen.TypeRoundtripService
         private const string TypeRoundtripServiceEndpoint = "temporal-system";
 
         [GeneratedCode("nex-gen", null)]
-        public static async Task<ActivityOptions> ActivityOptionsOperationAsync(Temporalio.Api.Activity.V1.ActivityOptions request)
-        {
-            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
-            var result = await client.ExecuteNexusOperationAsync<ActivityOptions>(svc => svc.ActivityOptionsOperation(request)).ConfigureAwait(true);
-            return result;
-        }
-
-        [GeneratedCode("nex-gen", null)]
         private static async Task<ActivityOptions> ActivityOptionsOperationAsync(ActivityOptions request)
         {
             var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
-            var wireRequest = request.ToProto();
-            var result = await client.ExecuteNexusOperationAsync<ActivityOptions>(svc => svc.ActivityOptionsOperation(wireRequest)).ConfigureAwait(true);
+            var result = await client.ExecuteNexusOperationAsync<ActivityOptions>(svc => svc.ActivityOptionsOperation(request)).ConfigureAwait(true);
             return result;
         }
 

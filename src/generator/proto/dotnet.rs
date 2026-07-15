@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::generator::dotnet::{
     WireValueConversion, csharp_parameter_name, csharp_type_name, field_property_name,
-    function_args_parameter_type, qualify_dotnet_support_call, qualify_dotnet_support_reference,
+    function_args_parameter_type, qualify_dotnet_support_reference,
 };
 use crate::language::Language;
 use crate::planning::{
@@ -67,6 +67,7 @@ impl ModelBackend {
                 "{value}",
                 false,
                 planned_record,
+                None,
                 None,
                 None,
             ),
@@ -151,6 +152,18 @@ impl ModelBackend {
             })
     }
 
+    pub(in crate::generator) fn model_wire_interface(
+        &self,
+        model: &RecordSpec<PlannedTypeFamily>,
+        support_namespace: Option<&str>,
+    ) -> Option<String> {
+        if !self.model_needs_wire_method(model) {
+            return None;
+        }
+        let interface_name = qualify_dotnet_support_reference("ITemporalWire", support_namespace);
+        Some(interface_name)
+    }
+
     pub(in crate::generator) fn render_model_wire_methods(
         &self,
         output: &mut String,
@@ -185,6 +198,7 @@ impl ModelBackend {
         optional: bool,
         api_plan: &PlannedSpec,
         support_namespace: Option<&str>,
+        payload_converter_expr: Option<&str>,
     ) -> String {
         match kind {
             PlannedType::List(_) | PlannedType::Map(_, _) => source_expr.to_string(),
@@ -198,6 +212,7 @@ impl ModelBackend {
                 },
                 Some(api_plan),
                 support_namespace,
+                payload_converter_expr,
             ),
         }
     }
@@ -210,6 +225,7 @@ impl ModelBackend {
         planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
         api_plan: Option<&PlannedSpec>,
         support_namespace: Option<&str>,
+        payload_converter_expr: Option<&str>,
     ) -> String {
         let _ = optional;
         match value {
@@ -218,9 +234,18 @@ impl ModelBackend {
             ))
             | PlannedType::Record(_)) => {
                 if planned_record.is_some_and(|model| self.model_needs_wire_method(model)) {
-                    format!("{source_expr}.ToProto()")
+                    if let Some(payload_converter_expr) = payload_converter_expr {
+                        format!("{source_expr}.ToProto({payload_converter_expr})")
+                    } else {
+                        format!("{source_expr}.ToProto()")
+                    }
                 } else {
-                    self.message_to_wire_expr(model_type, source_expr, support_namespace)
+                    self.message_to_wire_expr(
+                        model_type,
+                        source_expr,
+                        support_namespace,
+                        payload_converter_expr,
+                    )
                 }
             }
             PlannedType::Resource(_) => source_expr.to_string(),
@@ -238,6 +263,7 @@ impl ModelBackend {
                 },
                 api_plan,
                 support_namespace,
+                payload_converter_expr,
             ),
             _ => source_expr.to_string(),
         }
@@ -248,6 +274,7 @@ impl ModelBackend {
         model_type: &PlannedType,
         source_expr: &str,
         support_namespace: Option<&str>,
+        payload_converter_expr: Option<&str>,
     ) -> String {
         if matches!(
             model_type,
@@ -256,6 +283,9 @@ impl ModelBackend {
         {
             if let Some(converter) = dotnet_to_proto_converter(model_type) {
                 let converter = qualify_dotnet_support_reference(converter, support_namespace);
+                if let Some(payload_converter_expr) = payload_converter_expr {
+                    return format!("{converter}({source_expr}, {payload_converter_expr})");
+                }
                 return format!("{converter}({source_expr})");
             }
             format!("{source_expr}.ToProto()")
@@ -385,6 +415,18 @@ pub(crate) fn dotnet_to_proto_converter(model_type: &PlannedType) -> Option<&str
         .and_then(|replacement| replacement.to_proto.for_language(Language::Dotnet))
 }
 
+pub(crate) fn dotnet_from_proto_converter(model_type: &PlannedType) -> Option<&str> {
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) =
+        model_type
+    else {
+        return None;
+    };
+    proto
+        .replacement
+        .as_ref()
+        .and_then(|replacement| replacement.from_proto.for_language(Language::Dotnet))
+}
+
 fn render_model_to_proto_method(
     output: &mut String,
     model: &RecordSpec<PlannedTypeFamily>,
@@ -399,23 +441,27 @@ fn render_model_to_proto_method(
             .expect("model to proto method requires proto backing"),
     );
     let backend = ModelBackend;
+    render_model_from_wire_method(output, model, api_plan, support_namespace, &raw_type);
     output.push_str("    public ");
     output.push_str(&raw_type);
-    output.push_str(" ToProto()\n    {\n");
+    output.push_str(
+        " ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n",
+    );
     output.push_str("        var proto = new ");
     output.push_str(&raw_type);
     output.push_str("();\n");
-    for (field_name, sourced_field, source_expr) in model.sourced_fields() {
+    for (field_name, sourced_field, _source_expr) in model.sourced_fields() {
         output.push_str("        proto.");
         output.push_str(&csharp_type_name(field_name));
         output.push_str(" = ");
-        let source_expr = qualify_dotnet_support_call(source_expr, support_namespace);
+        let source_expr = crate::generator::dotnet::field_property_name(sourced_field);
         output.push_str(&backend.field_kind_to_wire_expr(
             &sourced_field.field_type,
             &source_expr,
             false,
             api_plan,
             support_namespace,
+            Some("payloadConverter"),
         ));
         output.push_str(";\n");
     }
@@ -431,6 +477,239 @@ fn render_model_to_proto_method(
     }
     output.push_str("        return proto;\n");
     output.push_str("    }\n\n");
+    output.push_str("    object ");
+    output.push_str(&qualify_dotnet_support_reference(
+        "ITemporalWire",
+        support_namespace,
+    ));
+    output.push_str(".TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter) => ToProto(payloadConverter);\n\n");
+}
+
+fn render_model_from_wire_method(
+    output: &mut String,
+    model: &RecordSpec<PlannedTypeFamily>,
+    api_plan: &PlannedSpec,
+    support_namespace: Option<&str>,
+    raw_type: &str,
+) {
+    let type_name = csharp_type_name(&model.name);
+    output.push_str("    public static ");
+    output.push_str(&type_name);
+    output.push_str(" TemporalFromWire(");
+    output.push_str(raw_type);
+    output.push_str(
+        " wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n",
+    );
+    let required_fields = model
+        .public_fields()
+        .filter(|(_, field)| field.required)
+        .collect::<Vec<_>>();
+    output.push_str("        return new ");
+    output.push_str(&type_name);
+    output.push('(');
+    for (index, (field_name, field)) in required_fields.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
+        }
+        output.push_str(&field_from_wire_expr(
+            model,
+            field_name,
+            field,
+            &format!("wire.{}", csharp_type_name(field_name)),
+            api_plan,
+            support_namespace,
+        ));
+    }
+    output.push(')');
+    let init_fields = model
+        .fields
+        .iter()
+        .filter(|(_, field)| !field.required)
+        .filter(|(_, field)| field.visibility != crate::spec::RecordFieldVisibility::Omitted)
+        .collect::<Vec<_>>();
+    if init_fields.is_empty() {
+        output.push_str(";\n");
+    } else {
+        output.push_str("\n        {\n");
+        for (field_name, field) in init_fields {
+            output.push_str("            ");
+            output.push_str(&field_property_name(field));
+            output.push_str(" = ");
+            output.push_str(&field_from_wire_expr(
+                model,
+                field_name,
+                field,
+                &format!("wire.{}", csharp_type_name(field_name)),
+                api_plan,
+                support_namespace,
+            ));
+            output.push_str(",\n");
+        }
+        output.push_str("        };\n");
+    }
+    output.push_str("    }\n\n");
+}
+
+fn field_from_wire_expr(
+    model: &RecordSpec<PlannedTypeFamily>,
+    field_name: &str,
+    field: &RecordFieldSpec<PlannedTypeFamily>,
+    source_expr: &str,
+    api_plan: &PlannedSpec,
+    support_namespace: Option<&str>,
+) -> String {
+    let optional = !field.required;
+    if function_args_field_uses_logical_storage(model, field_name, field) {
+        let converter = function_args_from_proto_converter(field)
+            .map(|converter| qualify_dotnet_support_reference(converter, support_namespace))
+            .unwrap_or_else(|| {
+                panic!(
+                    "function args field `{}` missing .NET from-proto converter",
+                    field_name
+                )
+            });
+        return optional_message_from_wire_expr(
+            source_expr,
+            &format!("{converter}({{value}}, payloadConverter)"),
+            optional,
+        );
+    }
+    value_from_wire_expr(
+        &field.field_type,
+        source_expr,
+        optional,
+        field.data.has_presence,
+        api_plan,
+        support_namespace,
+    )
+}
+
+fn value_from_wire_expr(
+    value: &PlannedType,
+    source_expr: &str,
+    optional: bool,
+    has_presence: Option<bool>,
+    api_plan: &PlannedSpec,
+    support_namespace: Option<&str>,
+) -> String {
+    match value {
+        PlannedType::Bool => optional_scalar_from_wire_expr(
+            source_expr,
+            source_expr,
+            optional,
+            has_presence,
+            "false",
+        ),
+        PlannedType::Int(_) => {
+            optional_scalar_from_wire_expr(source_expr, source_expr, optional, has_presence, "0")
+        }
+        PlannedType::Float => {
+            optional_scalar_from_wire_expr(source_expr, source_expr, optional, has_presence, "0")
+        }
+        PlannedType::String => {
+            if optional {
+                if has_presence == Some(true) {
+                    optional_presence_from_wire_expr(source_expr, source_expr)
+                } else {
+                    format!("string.IsNullOrEmpty({source_expr}) ? null : {source_expr}")
+                }
+            } else {
+                source_expr.to_string()
+            }
+        }
+        PlannedType::Bytes => source_expr.to_string(),
+        PlannedType::Enum(_)
+        | PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(_))) => {
+            if optional {
+                if has_presence == Some(true) {
+                    optional_presence_from_wire_expr(source_expr, source_expr)
+                } else {
+                    format!("(int){source_expr} == 0 ? null : {source_expr}")
+                }
+            } else {
+                source_expr.to_string()
+            }
+        }
+        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
+            proto_message_from_wire_expr(proto, source_expr, optional, support_namespace)
+        }
+        PlannedType::Record(record) => {
+            let model_name = api_plan
+                .record(&record.full_name)
+                .map(|record| csharp_type_name(&record.name))
+                .unwrap_or_else(|| csharp_type_name(&record.model_name));
+            optional_message_from_wire_expr(
+                source_expr,
+                &format!("{model_name}.TemporalFromWire({{value}}, payloadConverter)"),
+                optional,
+            )
+        }
+        PlannedType::External(ExternalTypeSpec::Alias { target, .. }) => value_from_wire_expr(
+            target,
+            source_expr,
+            optional,
+            has_presence,
+            api_plan,
+            support_namespace,
+        ),
+        _ => source_expr.to_string(),
+    }
+}
+
+fn proto_message_from_wire_expr(
+    proto: &PlannedProtoMessageType,
+    source_expr: &str,
+    optional: bool,
+    support_namespace: Option<&str>,
+) -> String {
+    let conversion = proto
+        .replacement
+        .as_ref()
+        .and_then(|replacement| replacement.from_proto.for_language(Language::Dotnet))
+        .map(|converter| {
+            let converter = qualify_dotnet_support_reference(converter, support_namespace);
+            format!("{converter}({{value}}, payloadConverter)")
+        })
+        .unwrap_or_else(|| "{value}".to_string());
+    optional_message_from_wire_expr(source_expr, &conversion, optional)
+}
+
+fn optional_message_from_wire_expr(source_expr: &str, conversion: &str, optional: bool) -> String {
+    let converted = conversion.replace("{value}", source_expr);
+    if optional {
+        format!("{source_expr} == null ? null : {converted}")
+    } else {
+        converted
+    }
+}
+
+fn optional_scalar_from_wire_expr(
+    source_expr: &str,
+    converted_expr: &str,
+    optional: bool,
+    has_presence: Option<bool>,
+    default_expr: &str,
+) -> String {
+    if !optional {
+        return converted_expr.to_string();
+    }
+    if has_presence == Some(true) {
+        optional_presence_from_wire_expr(source_expr, converted_expr)
+    } else {
+        format!("{source_expr} == {default_expr} ? null : {converted_expr}")
+    }
+}
+
+fn optional_presence_from_wire_expr(source_expr: &str, converted_expr: &str) -> String {
+    let Some((prefix, property_name)) = source_expr.rsplit_once('.') else {
+        return converted_expr.to_string();
+    };
+    format!(
+        "{}.Has{} ? {} : null",
+        prefix,
+        csharp_type_name(property_name),
+        converted_expr
+    )
 }
 
 fn render_field_to_proto_assignment(
@@ -496,7 +775,7 @@ fn field_to_proto_expr(
                     field_name
                 )
             });
-        return format!("{converter}({source_expr})");
+        return format!("{converter}({source_expr}, payloadConverter)");
     }
     ModelBackend.field_kind_to_wire_expr(
         &field.field_type,
@@ -504,6 +783,7 @@ fn field_to_proto_expr(
         !field.required,
         api_plan,
         support_namespace,
+        Some("payloadConverter"),
     )
 }
 
@@ -534,6 +814,15 @@ fn function_args_to_proto_converter(field: &RecordFieldSpec<PlannedTypeFamily>) 
         model_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
             _,
         ))) => dotnet_to_proto_converter(model_type),
+        _ => None,
+    }
+}
+
+fn function_args_from_proto_converter(field: &RecordFieldSpec<PlannedTypeFamily>) -> Option<&str> {
+    match &field.field_type {
+        model_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
+            _,
+        ))) => dotnet_from_proto_converter(model_type),
         _ => None,
     }
 }

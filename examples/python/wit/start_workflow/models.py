@@ -69,14 +69,6 @@ class StartWorkflowRequest:
         )
 
     @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[
-        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest
-    ]:
-        return temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest
-
-    @classmethod
     def _temporal_from_wire(
         cls,
         wire: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest,
@@ -137,14 +129,6 @@ class StartWorkflowResult:
         )
 
     @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[
-        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
-    ]:
-        return temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
-
-    @classmethod
     def _temporal_from_wire(
         cls,
         wire: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
@@ -187,14 +171,6 @@ class RestartWorkflowResult:
         return cls(
             run_id=proto.run_id if bool(proto.run_id) else None,
         )
-
-    @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[
-        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
-    ]:
-        return temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
 
     @classmethod
     def _temporal_from_wire(
@@ -252,14 +228,6 @@ class CancelWorkflowRequest:
         )
 
     @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[
-        temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest
-    ]:
-        return temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest
-
-    @classmethod
     def _temporal_from_wire(
         cls,
         wire: temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest,
@@ -313,12 +281,6 @@ class WorkflowExecution:
         )
 
     @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[temporalio.api.common.v1.message_pb2.WorkflowExecution]:
-        return temporalio.api.common.v1.message_pb2.WorkflowExecution
-
-    @classmethod
     def _temporal_from_wire(
         cls,
         wire: temporalio.api.common.v1.message_pb2.WorkflowExecution,
@@ -358,14 +320,6 @@ class CancelWorkflowResponse:
     ) -> CancelWorkflowResponse:
         _ = payload_converter
         return cls()
-
-    @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[
-        temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse
-    ]:
-        return temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse
 
     @classmethod
     def _temporal_from_wire(

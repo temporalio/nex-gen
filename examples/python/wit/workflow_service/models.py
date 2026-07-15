@@ -177,14 +177,6 @@ class SignalWithStartWorkflowRequest:
         )
 
     @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[
-        temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionRequest
-    ]:
-        return temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionRequest
-
-    @classmethod
     def _temporal_from_wire(
         cls,
         wire: temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionRequest,
@@ -317,12 +309,6 @@ class UserMetadata:
         )
 
     @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[temporalio.api.sdk.v1.user_metadata_pb2.UserMetadata]:
-        return temporalio.api.sdk.v1.user_metadata_pb2.UserMetadata
-
-    @classmethod
     def _temporal_from_wire(
         cls,
         wire: temporalio.api.sdk.v1.user_metadata_pb2.UserMetadata,
@@ -382,14 +368,6 @@ class SignalWithStartWorkflowResponse:
             run_id=proto.run_id if bool(proto.run_id) else None,
             started=proto.started if bool(proto.started) else None,
         )
-
-    @classmethod
-    def _temporal_wire_type(
-        cls,
-    ) -> type[
-        temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionResponse
-    ]:
-        return temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionResponse
 
     @classmethod
     def _temporal_from_wire(

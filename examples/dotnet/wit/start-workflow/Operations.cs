@@ -67,9 +67,8 @@ namespace NexGen.StartWorkflowService
         private static async Task<StartedWorkflow> StartWorkflowAsync(StartWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
-            var wireRequest = request.ToProto();
-            var result = await client.ExecuteNexusOperationAsync<StartWorkflowResult>(svc => svc.StartWorkflow(wireRequest)).ConfigureAwait(true);
-            return new StartedWorkflow(wireRequest.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
+            var result = await client.ExecuteNexusOperationAsync<StartWorkflowResult>(svc => svc.StartWorkflow(request)).ConfigureAwait(true);
+            return new StartedWorkflow(request.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
         }
 
         /// <param name="workflow">The workflow value.</param>
@@ -104,9 +103,8 @@ namespace NexGen.StartWorkflowService
         private static async Task<StartedWorkflow> RestartWorkflowAsync(StartWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
-            var wireRequest = request.ToProto();
-            var result = await client.ExecuteNexusOperationAsync<RestartWorkflowResult>(svc => svc.RestartWorkflow(wireRequest)).ConfigureAwait(true);
-            return new StartedWorkflow(wireRequest.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
+            var result = await client.ExecuteNexusOperationAsync<RestartWorkflowResult>(svc => svc.RestartWorkflow(request)).ConfigureAwait(true);
+            return new StartedWorkflow(request.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
         }
 
         /// <param name="workflow">The workflow value.</param>
@@ -138,19 +136,10 @@ namespace NexGen.StartWorkflowService
         }
 
         [GeneratedCode("nex-gen", null)]
-        public static async Task<CancelWorkflowResponse> CancelWorkflowAsync(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest request)
-        {
-            var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
-            var result = await client.ExecuteNexusOperationAsync<CancelWorkflowResponse>(svc => svc.CancelWorkflow(request)).ConfigureAwait(true);
-            return result;
-        }
-
-        [GeneratedCode("nex-gen", null)]
         private static async Task<CancelWorkflowResponse> CancelWorkflowAsync(CancelWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
-            var wireRequest = request.ToProto();
-            var result = await client.ExecuteNexusOperationAsync<CancelWorkflowResponse>(svc => svc.CancelWorkflow(wireRequest)).ConfigureAwait(true);
+            var result = await client.ExecuteNexusOperationAsync<CancelWorkflowResponse>(svc => svc.CancelWorkflow(request)).ConfigureAwait(true);
             return result;
         }
 

@@ -714,26 +714,6 @@ fn render_record_wire_block(
         }
         wrote_method = true;
     }
-    if model.capabilities.from_wire || model.capabilities.to_wire {
-        if model.fields.is_empty() {
-            if wrote_method {
-                output.push('\n');
-            }
-        } else {
-            output.push('\n');
-            if wrote_method {
-                output.push('\n');
-            }
-        }
-        output.push_str("    @classmethod\n");
-        output.push_str("    def _temporal_wire_type(cls) -> type[");
-        output.push_str(&proto_ref.type_ref);
-        output.push_str("]:\n");
-        output.push_str("        return ");
-        output.push_str(&proto_ref.type_ref);
-        output.push('\n');
-        wrote_method = true;
-    }
     if model.capabilities.from_wire {
         output.push('\n');
         output.push_str("    @classmethod\n");

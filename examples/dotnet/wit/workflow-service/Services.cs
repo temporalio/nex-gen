@@ -24,7 +24,7 @@ namespace Temporalio.Workflows
         /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
         [GeneratedCode("nex-gen", null)]
         [NexusOperation("SignalWithStartWorkflowExecution")]
-        SignalWithStartWorkflowResponse SignalWithStartWorkflow(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest request);
+        SignalWithStartWorkflowResponse SignalWithStartWorkflow(SignalWithStartWorkflowRequest request);
 
     }
 

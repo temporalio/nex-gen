@@ -18,15 +18,15 @@ namespace NexGen.StartWorkflowService
     {
         [GeneratedCode("nex-gen", null)]
         [NexusOperation("StartWorkflow")]
-        StartWorkflowResult StartWorkflow(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest request);
+        StartWorkflowResult StartWorkflow(StartWorkflowRequest request);
 
         [GeneratedCode("nex-gen", null)]
         [NexusOperation("RestartWorkflow")]
-        RestartWorkflowResult RestartWorkflow(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest request);
+        RestartWorkflowResult RestartWorkflow(StartWorkflowRequest request);
 
         [GeneratedCode("nex-gen", null)]
         [NexusOperation("CancelWorkflow")]
-        CancelWorkflowResponse CancelWorkflow(Temporalio.Api.WorkflowService.V1.RequestCancelWorkflowExecutionRequest request);
+        CancelWorkflowResponse CancelWorkflow(CancelWorkflowRequest request);
 
     }
 
