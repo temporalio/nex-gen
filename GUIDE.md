@@ -158,10 +158,10 @@ flags user-capability {
 
 **Python:**
 ```python
-class UserCapability(enum.IntFlag):
-    ReadProfile = 1 << 0
-    UpdateEmail = 1 << 1
-    Deactivate = 1 << 2
+UserCapability: typing.TypeAlias = int
+UserCapabilityReadProfile = 1 << 0
+UserCapabilityUpdateEmail = 1 << 1
+UserCapabilityDeactivate = 1 << 2
 ```
 
 **TypeScript:**
