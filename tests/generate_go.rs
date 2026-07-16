@@ -614,23 +614,16 @@ fn go_temporal_function_constraints_use_workflow_context_prefix() {
     )
     .unwrap();
 
-    assert!(
-        rendered.contains("func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any](")
-    );
-    assert!(rendered.contains("\tworkflow func(workflow.Context, WorkflowArg) WorkflowResult,"));
-    assert!(rendered.contains("func SignalWithStartWorkflowWithArgs("));
+    assert!(rendered.contains("func SignalWithStartWorkflow("));
+    assert!(rendered.contains("func SignalWithStartWorkflowTyped[WorkflowArg any]("));
+    assert!(!rendered.contains("WorkflowResult"));
+    assert!(!rendered.contains("func SignalWithStartWorkflowWithArgs("));
     assert!(!rendered.contains("SignalF interface"));
     assert!(rendered.contains("\topts SignalWithStartWorkflowOptions,\n"));
-    assert!(rendered.contains(
-        "\tsignal string,\n\tsignalArg any,\n\tworkflow func(workflow.Context, WorkflowArg) WorkflowResult,\n\targ WorkflowArg,\n"
-    ));
     assert!(
         rendered.contains("\tsignal string,\n\tsignalArg any,\n\tworkflow any,\n\targs ...any,\n")
     );
     assert!(rendered.contains("\targs ...any,\n"));
-    assert!(rendered.contains(
-        "workflowName := \"\"\n\t{\n\t\trv := reflect.ValueOf(workflow)\n\t\tfullName := runtime.FuncForPC(rv.Pointer()).Name()"
-    ));
     assert!(rendered.contains("switch rv := reflect.ValueOf(workflow); rv.Kind()"));
     assert_eq!(
         rendered
@@ -641,7 +634,6 @@ fn go_temporal_function_constraints_use_workflow_context_prefix() {
     assert!(!rendered.contains("switch rv := reflect.ValueOf(signal); rv.Kind()"));
     assert!(rendered.contains("\t\tWorkflow: workflowName,\n"));
     assert!(rendered.contains("\t\tSignal: signal,\n"));
-    assert!(rendered.contains("\t\tArgs: []any{arg},\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
     assert!(rendered.contains("\t\tSignalArgs: []any{signalArg},\n"));
 }
@@ -929,17 +921,16 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     assert!(rendered.contains(
         "fut := c.ExecuteOperation(ctx, \"RestartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
-    assert!(rendered.contains("func StartWorkflow[WorkflowArg any, WorkflowResult any]("));
-    assert!(rendered.contains("\tworkflow func(workflow.Context, WorkflowArg) WorkflowResult,"));
+    assert!(rendered.contains("func StartWorkflow("));
     assert!(rendered.contains(
         "type StartWorkflowOptions struct {\n\t// Required.\n\tWorkflowId string\n\t// Required.\n\tTaskQueue string\n\t// Optional.\n\tWorkflowStartDelay time.Duration\n}"
     ));
     assert!(rendered.contains(
-        "func StartWorkflowWithArgs(\n\tctx workflow.Context,\n\topts StartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
+        "func StartWorkflow(\n\tctx workflow.Context,\n\topts StartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
     ));
-    assert!(rendered.contains("func RestartWorkflow[WorkflowArg any, WorkflowResult any]("));
+    assert!(rendered.contains("func RestartWorkflow("));
     assert!(rendered.contains(
-        "func RestartWorkflowWithArgs(\n\tctx workflow.Context,\n\topts RestartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
+        "func RestartWorkflow(\n\tctx workflow.Context,\n\topts RestartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
     ));
     assert!(rendered.contains(
         "func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) workflow.Future"
@@ -947,7 +938,6 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     assert!(rendered.contains(
         "return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})"
     ));
-    assert!(rendered.contains("\t\tArgs: []any{arg},\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
     assert!(!rendered.contains("opts.Args"));
 }

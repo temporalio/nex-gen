@@ -53,7 +53,7 @@ func (m startWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.St
 		}
 		message.WorkflowStartDelay = converted
 	}
-	message.Namespace = workflowNamespace(ctx)
+	message.Namespace = workflow.GetInfo(ctx).Namespace
 	return message, nil
 }
 
@@ -74,7 +74,7 @@ func (m cancelWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.R
 	if m.Reason != nil {
 		message.Reason = (*m.Reason)
 	}
-	message.Namespace = workflowNamespace(ctx)
+	message.Namespace = workflow.GetInfo(ctx).Namespace
 	return message, nil
 }
 
@@ -252,35 +252,7 @@ type StartWorkflowOptions struct {
 }
 
 // Input args: Arguments for the workflow.
-func StartWorkflow[WorkflowArg any, WorkflowResult any](
-	ctx workflow.Context,
-	opts StartWorkflowOptions,
-	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
-	arg WorkflowArg,
-) workflow.Future {
-	var workflowStartDelay *time.Duration
-	if opts.WorkflowStartDelay != 0 {
-		workflowStartDelay = &opts.WorkflowStartDelay
-	}
-	workflowName := ""
-	{
-		rv := reflect.ValueOf(workflow)
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	}
-	return startWorkflow(ctx, startWorkflowRequest{
-		Workflow:           workflowName,
-		Args:               []any{arg},
-		WorkflowId:         opts.WorkflowId,
-		TaskQueue:          opts.TaskQueue,
-		WorkflowStartDelay: workflowStartDelay,
-	})
-}
-
-// Input args: Arguments for the workflow.
-func StartWorkflowWithArgs(
+func StartWorkflow(
 	ctx workflow.Context,
 	opts StartWorkflowOptions,
 	workflow any,
@@ -307,6 +279,34 @@ func StartWorkflowWithArgs(
 	return startWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
+	})
+}
+
+// Input args: Arguments for the workflow.
+func StartWorkflowTyped[WorkflowArg any](
+	ctx workflow.Context,
+	opts StartWorkflowOptions,
+	workflow func(workflow.Context, WorkflowArg) any,
+	arg WorkflowArg,
+) workflow.Future {
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
+	}
+	workflowName := ""
+	{
+		rv := reflect.ValueOf(workflow)
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
+	}
+	return startWorkflow(ctx, startWorkflowRequest{
+		Workflow:           workflowName,
+		Args:               []any{arg},
 		WorkflowId:         opts.WorkflowId,
 		TaskQueue:          opts.TaskQueue,
 		WorkflowStartDelay: workflowStartDelay,
@@ -323,35 +323,7 @@ type RestartWorkflowOptions struct {
 }
 
 // Input args: Arguments for the workflow.
-func RestartWorkflow[WorkflowArg any, WorkflowResult any](
-	ctx workflow.Context,
-	opts RestartWorkflowOptions,
-	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
-	arg WorkflowArg,
-) workflow.Future {
-	var workflowStartDelay *time.Duration
-	if opts.WorkflowStartDelay != 0 {
-		workflowStartDelay = &opts.WorkflowStartDelay
-	}
-	workflowName := ""
-	{
-		rv := reflect.ValueOf(workflow)
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	}
-	return restartWorkflow(ctx, startWorkflowRequest{
-		Workflow:           workflowName,
-		Args:               []any{arg},
-		WorkflowId:         opts.WorkflowId,
-		TaskQueue:          opts.TaskQueue,
-		WorkflowStartDelay: workflowStartDelay,
-	})
-}
-
-// Input args: Arguments for the workflow.
-func RestartWorkflowWithArgs(
+func RestartWorkflow(
 	ctx workflow.Context,
 	opts RestartWorkflowOptions,
 	workflow any,
@@ -378,6 +350,34 @@ func RestartWorkflowWithArgs(
 	return restartWorkflow(ctx, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
+	})
+}
+
+// Input args: Arguments for the workflow.
+func RestartWorkflowTyped[WorkflowArg any](
+	ctx workflow.Context,
+	opts RestartWorkflowOptions,
+	workflow func(workflow.Context, WorkflowArg) any,
+	arg WorkflowArg,
+) workflow.Future {
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
+	}
+	workflowName := ""
+	{
+		rv := reflect.ValueOf(workflow)
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
+	}
+	return restartWorkflow(ctx, startWorkflowRequest{
+		Workflow:           workflowName,
+		Args:               []any{arg},
 		WorkflowId:         opts.WorkflowId,
 		TaskQueue:          opts.TaskQueue,
 		WorkflowStartDelay: workflowStartDelay,

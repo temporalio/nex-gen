@@ -72,7 +72,7 @@ func (s *StartWorkflowIntegrationSuite) TestPublicOperationsAndResourceMethods()
 			return err
 		}
 		var startWithArgs sw.StartedWorkflow
-		if err := sw.StartWorkflowWithArgs(
+		if err := sw.StartWorkflow(
 			ctx, sw.StartWorkflowOptions{WorkflowId: "start-args-id", TaskQueue: "start-args-queue"}, "named-workflow", "one", "two",
 		).Get(ctx, &startWithArgs); err != nil {
 			return err
@@ -84,7 +84,7 @@ func (s *StartWorkflowIntegrationSuite) TestPublicOperationsAndResourceMethods()
 			return err
 		}
 		var restartWithArgs sw.StartedWorkflow
-		if err := sw.RestartWorkflowWithArgs(
+		if err := sw.RestartWorkflow(
 			ctx, sw.RestartWorkflowOptions{WorkflowId: "restart-args-id", TaskQueue: "restart-args-queue"}, "named-restart", "one", "two",
 		).Get(ctx, &restartWithArgs); err != nil {
 			return err

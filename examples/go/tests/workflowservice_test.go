@@ -25,6 +25,10 @@ func signalWithStartWorkflow(ctx workflow.Context, input string) string {
 	return input
 }
 
+func signalWithStartWorkflowAny(ctx workflow.Context, input string) any {
+	return signalWithStartWorkflow(ctx, input)
+}
+
 type emptyPayloadsDataConverter struct {
 	converter.DataConverter
 }
@@ -68,31 +72,26 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms()
 	searchAttributes := temporal.NewSearchAttributes(searchKey.ValueSet("search-value"))
 
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
-		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
-			Namespace:                "target-namespace",
-			ID:                       "workflow-id",
-			TaskQueue:                "task-queue",
-			WorkflowExecutionTimeout: 3 * time.Hour,
-			WorkflowRunTimeout:       2 * time.Hour,
-			WorkflowTaskTimeout:      time.Minute,
-			WorkflowIDReusePolicy:    enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
-			RetryPolicy:              retryPolicy,
-			CronSchedule:             "0 * * * *",
-			Memo:                     map[string]any{"memo-key": "memo-value"},
-			SearchAttributes:         searchAttributes,
-			Priority:                 temporal.Priority{PriorityKey: 7},
-		})
-
-		// This is the workflow-side counterpart of
-		// client.Client.SignalWithStartWorkflow. Start fields normally held in
-		// client.StartWorkflowOptions are sourced from WorkflowContextOptions.
+		priority := temporal.Priority{PriorityKey: 7}
+		opts := ws.SignalWithStartWorkflowOptions{
+			Id:               "workflow-id",
+			ExecutionTimeout: 3 * time.Hour,
+			RunTimeout:       2 * time.Hour,
+			TaskTimeout:      time.Minute,
+			IdReusePolicy:    enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+			RetryPolicy:      retryPolicy,
+			CronSchedule:     "0 * * * *",
+			Memo:             map[string]any{"memo-key": "memo-value"},
+			SearchAttributes: searchAttributes,
+			Priority:         &priority,
+		}
 		var typedResult ws.SignalWithStartWorkflowResponse
-		typedFuture := ws.SignalWithStartWorkflow(
+		typedFuture := ws.SignalWithStartWorkflowTyped(
 			ctx,
-			ws.SignalWithStartWorkflowOptions{},
+			opts,
 			"wake-up",
 			"signal-value",
-			signalWithStartWorkflow,
+			signalWithStartWorkflowAny,
 			"workflow-input",
 		)
 		selector := workflow.NewSelector(ctx)
@@ -110,9 +109,9 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms()
 		}
 
 		var variadicResult ws.SignalWithStartWorkflowResponse
-		return ws.SignalWithStartWorkflowWithArgs(
+		return ws.SignalWithStartWorkflow(
 			ctx,
-			ws.SignalWithStartWorkflowOptions{},
+			opts,
 			"wake-up",
 			nil,
 			"ExampleWorkflow",
@@ -131,9 +130,9 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms()
 	s.Len(typedRequest.GetSignalInput().GetPayloads(), 1)
 	s.Require().NotNil(typedRequest.GetInput())
 	s.Len(typedRequest.GetInput().GetPayloads(), 1)
-	s.Equal("target-namespace", typedRequest.GetNamespace())
+	s.Equal("default-test-namespace", typedRequest.GetNamespace())
 	s.Equal("workflow-id", typedRequest.GetWorkflowId())
-	s.Equal("task-queue", typedRequest.GetTaskQueue().GetName())
+	s.Equal("default-test-taskqueue", typedRequest.GetTaskQueue().GetName())
 	s.Equal(3*time.Hour, typedRequest.GetWorkflowExecutionTimeout().AsDuration())
 	s.Equal(2*time.Hour, typedRequest.GetWorkflowRunTimeout().AsDuration())
 	s.Equal(time.Minute, typedRequest.GetWorkflowTaskTimeout().AsDuration())
@@ -156,14 +155,10 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms()
 func (s *WorkflowServiceIntegrationSuite) TestEmptyPayloadsAreDelegatedToDataConverter() {
 	s.env.SetDataConverter(emptyPayloadsDataConverter{converter.GetDefaultDataConverter()})
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) (*ws.SignalWithStartWorkflowResponse, error) {
-		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
-			ID:        "workflow-id",
-			TaskQueue: "task-queue",
-		})
 		var result ws.SignalWithStartWorkflowResponse
-		return &result, ws.SignalWithStartWorkflowWithArgs(
+		return &result, ws.SignalWithStartWorkflow(
 			ctx,
-			ws.SignalWithStartWorkflowOptions{},
+			ws.SignalWithStartWorkflowOptions{Id: "workflow-id"},
 			"wake-up",
 			"signal-value",
 			"ExampleWorkflow",
@@ -177,34 +172,11 @@ func (s *WorkflowServiceIntegrationSuite) TestEmptyPayloadsAreDelegatedToDataCon
 	s.Empty(s.calls[0].Input.Payloads)
 }
 
-func (s *WorkflowServiceIntegrationSuite) TestWorkflowContextOptionsRequireWorkflowID() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
-		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{TaskQueue: "task-queue"})
-		ws.SignalWithStartWorkflow(ctx, ws.SignalWithStartWorkflowOptions{}, "wake-up", "signal-value", signalWithStartWorkflow, "workflow-input")
-		return nil
-	})
-
-	s.ErrorContains(s.env.GetWorkflowError(), "workflow ID is required in WorkflowContextOptions")
-	s.Empty(s.calls)
-}
-
-func (s *WorkflowServiceIntegrationSuite) TestWorkflowContextOptionsRequireTaskQueue() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
-		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{ID: "workflow-id"})
-		ws.SignalWithStartWorkflow(ctx, ws.SignalWithStartWorkflowOptions{}, "wake-up", "signal-value", signalWithStartWorkflow, "workflow-input")
-		return nil
-	})
-
-	s.ErrorContains(s.env.GetWorkflowError(), "task queue is required in WorkflowContextOptions")
-	s.Empty(s.calls)
-}
-
 func (s *WorkflowServiceIntegrationSuite) TestCanceledContextDoesNotScheduleOperation() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
-		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{ID: "workflow-id", TaskQueue: "task-queue"})
 		ctx, cancel := workflow.WithCancel(ctx)
 		cancel()
-		return ws.SignalWithStartWorkflow(ctx, ws.SignalWithStartWorkflowOptions{}, "wake-up", "signal-value", signalWithStartWorkflow, "workflow-input").Get(ctx, nil)
+		return ws.SignalWithStartWorkflow(ctx, ws.SignalWithStartWorkflowOptions{Id: "workflow-id"}, "wake-up", "signal-value", signalWithStartWorkflow, "workflow-input").Get(ctx, nil)
 	})
 
 	s.Error(s.env.GetWorkflowError())
@@ -213,12 +185,7 @@ func (s *WorkflowServiceIntegrationSuite) TestCanceledContextDoesNotScheduleOper
 
 func (s *WorkflowServiceIntegrationSuite) TestConversionFailureReturnsReadyFuture() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
-		ctx = ws.WithWorkflowContextOptions(ctx, ws.WorkflowContextOptions{
-			ID:        "workflow-id",
-			TaskQueue: "task-queue",
-			Memo:      map[string]any{"invalid": func() {}},
-		})
-		fut := ws.SignalWithStartWorkflow(ctx, ws.SignalWithStartWorkflowOptions{}, "wake-up", "signal-value", signalWithStartWorkflow, "workflow-input")
+		fut := ws.SignalWithStartWorkflow(ctx, ws.SignalWithStartWorkflowOptions{Id: "workflow-id", Memo: map[string]any{"invalid": func() {}}}, "wake-up", "signal-value", signalWithStartWorkflow, "workflow-input")
 		if !fut.IsReady() {
 			return errors.New("conversion failure future is not ready")
 		}

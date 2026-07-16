@@ -4282,9 +4282,34 @@ fn render_file(
                     output.push('\n');
                     render_options_struct(&mut output, operation, params);
                     output.push('\n');
-                    render_convenience_wrapper(&mut output, operation, params, package, visibility);
+                    if unary_primary_varargs_function_param(params).is_some() {
+                        render_with_args_convenience_wrapper(
+                            &mut output,
+                            operation,
+                            params,
+                            package,
+                            visibility,
+                        );
+                        output.push('\n');
+                        render_convenience_wrapper(
+                            &mut output,
+                            operation,
+                            params,
+                            package,
+                            visibility,
+                        );
+                    } else {
+                        render_convenience_wrapper(
+                            &mut output,
+                            operation,
+                            params,
+                            package,
+                            visibility,
+                        );
+                    }
                     if primary_varargs_args_param(params).is_some()
                         && primary_base_varargs_args_param(params).is_none()
+                        && unary_primary_varargs_function_param(params).is_none()
                     {
                         output.push('\n');
                         render_with_args_convenience_wrapper(
@@ -5522,7 +5547,6 @@ fn function_type_parameters(
         }
         if unary_primary.is_some_and(|primary| primary.field_name == param.field_name) {
             type_params.push((primary_arg_type_parameter_name(param), "any".to_string()));
-            type_params.push((primary_result_type_parameter_name(param), "any".to_string()));
         } else if function.alternate_type.is_some() {
             type_params.push((
                 function_type_parameter_name(param),
@@ -5626,16 +5650,11 @@ fn go_unary_function_type_expr(
             .collect::<Vec<_>>(),
     };
     args.push(primary_arg_type_parameter_name(param));
-    let result_type = primary_result_type_parameter_name(param);
-    format!("func({}) {}", args.join(", "), result_type)
+    format!("func({}) any", args.join(", "))
 }
 
 fn primary_arg_type_parameter_name(param: &RenderedUnpackedParam) -> String {
     format!("{}Arg", param.field_name)
-}
-
-fn primary_result_type_parameter_name(param: &RenderedUnpackedParam) -> String {
-    format!("{}Result", param.field_name)
 }
 
 fn is_go_signal_function(function: &FunctionFieldSpec) -> bool {
@@ -6207,8 +6226,13 @@ fn render_convenience_wrapper(
     package: &GoPackageContext,
     visibility: &GoVisibility,
 ) {
-    let exported_name = go_field_name(operation.name);
+    let base_exported_name = go_field_name(operation.name);
     let unary_primary = unary_primary_varargs_function_param(params);
+    let exported_name = if unary_primary.is_some() {
+        format!("{base_exported_name}Typed")
+    } else {
+        base_exported_name.clone()
+    };
     let default_varargs_param = primary_base_varargs_args_param(params);
     let mode = WrapperMode {
         unary_primary,
@@ -6221,7 +6245,7 @@ fn render_convenience_wrapper(
     render_operation_doc_comment(output, operation, &input_docs);
 
     let mut signature_params: Vec<(String, String)> =
-        vec![("opts".to_string(), format!("{exported_name}Options"))];
+        vec![("opts".to_string(), format!("{base_exported_name}Options"))];
     signature_params.extend(
         positional_params
             .iter()
@@ -6268,7 +6292,7 @@ fn render_with_args_convenience_wrapper(
     package: &GoPackageContext,
     visibility: &GoVisibility,
 ) {
-    let exported_name = format!("{}WithArgs", go_field_name(operation.name));
+    let exported_name = go_field_name(operation.name);
     let base_exported_name = go_field_name(operation.name);
     let args_param = primary_varargs_args_param(params)
         .expect("WithArgs wrapper requires a primary varargs args param");

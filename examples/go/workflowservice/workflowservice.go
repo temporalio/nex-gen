@@ -12,6 +12,7 @@ import (
 	sdk "go.temporal.io/api/sdk/v1"
 	workflowservice "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -20,10 +21,20 @@ import (
 type signalWithStartWorkflowRequest struct {
 	Workflow           string
 	Args               []any
+	Id                 string
 	Signal             string
 	SignalArgs         []any
+	ExecutionTimeout   *time.Duration
+	RunTimeout         *time.Duration
+	TaskTimeout        *time.Duration
 	RequestId          *string
+	IdReusePolicy      *enums.WorkflowIdReusePolicy
 	IdConflictPolicy   *enums.WorkflowIdConflictPolicy
+	RetryPolicy        *temporal.RetryPolicy
+	CronSchedule       *string
+	Memo               map[string]any
+	SearchAttributes   temporal.SearchAttributes
+	Priority           *temporal.Priority
 	VersioningOverride client.VersioningOverride
 	StartDelay         *time.Duration
 	UserMetadata       *UserMetadata
@@ -45,6 +56,7 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 		}
 		message.Input = converted
 	}
+	message.WorkflowId = m.Id
 	message.SignalName = m.Signal
 	{
 		converted, err := payloadsToProto(ctx, m.SignalArgs)
@@ -53,11 +65,66 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 		}
 		message.SignalInput = converted
 	}
+	{
+		converted, err := durationToProto(ctx, m.ExecutionTimeout)
+		if err != nil {
+			return nil, err
+		}
+		message.WorkflowExecutionTimeout = converted
+	}
+	{
+		converted, err := durationToProto(ctx, m.RunTimeout)
+		if err != nil {
+			return nil, err
+		}
+		message.WorkflowRunTimeout = converted
+	}
+	{
+		converted, err := durationToProto(ctx, m.TaskTimeout)
+		if err != nil {
+			return nil, err
+		}
+		message.WorkflowTaskTimeout = converted
+	}
 	if m.RequestId != nil {
 		message.RequestId = (*m.RequestId)
 	}
+	if m.IdReusePolicy != nil {
+		message.WorkflowIdReusePolicy = enums.WorkflowIdReusePolicy((*m.IdReusePolicy))
+	}
 	if m.IdConflictPolicy != nil {
 		message.WorkflowIdConflictPolicy = enums.WorkflowIdConflictPolicy((*m.IdConflictPolicy))
+	}
+	{
+		converted, err := retryPolicyToProto(ctx, m.RetryPolicy)
+		if err != nil {
+			return nil, err
+		}
+		message.RetryPolicy = converted
+	}
+	if m.CronSchedule != nil {
+		message.CronSchedule = (*m.CronSchedule)
+	}
+	{
+		converted, err := memoToProto(ctx, m.Memo)
+		if err != nil {
+			return nil, err
+		}
+		message.Memo = converted
+	}
+	{
+		converted, err := searchAttributesToProto(ctx, &m.SearchAttributes)
+		if err != nil {
+			return nil, err
+		}
+		message.SearchAttributes = converted
+	}
+	{
+		converted, err := priorityToProto(ctx, m.Priority)
+		if err != nil {
+			return nil, err
+		}
+		message.Priority = converted
 	}
 	{
 		converted, err := versioningOverrideToProto(ctx, &m.VersioningOverride)
@@ -80,58 +147,13 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 		}
 		message.UserMetadata = converted
 	}
-	message.WorkflowId = workflowStartWorkflowID(ctx)
-	sourcedTaskQueue := workflowStartTaskQueue(ctx)
+	sourcedTaskQueue := workflow.GetInfo(ctx).TaskQueueName
 	convertedTaskQueue, err := taskQueueToProto(ctx, &sourcedTaskQueue)
 	if err != nil {
 		return nil, err
 	}
 	message.TaskQueue = convertedTaskQueue
-	sourcedWorkflowExecutionTimeout := workflowStartExecutionTimeout(ctx)
-	convertedWorkflowExecutionTimeout, err := durationToProto(ctx, &sourcedWorkflowExecutionTimeout)
-	if err != nil {
-		return nil, err
-	}
-	message.WorkflowExecutionTimeout = convertedWorkflowExecutionTimeout
-	sourcedWorkflowRunTimeout := workflowStartRunTimeout(ctx)
-	convertedWorkflowRunTimeout, err := durationToProto(ctx, &sourcedWorkflowRunTimeout)
-	if err != nil {
-		return nil, err
-	}
-	message.WorkflowRunTimeout = convertedWorkflowRunTimeout
-	sourcedWorkflowTaskTimeout := workflowStartTaskTimeout(ctx)
-	convertedWorkflowTaskTimeout, err := durationToProto(ctx, &sourcedWorkflowTaskTimeout)
-	if err != nil {
-		return nil, err
-	}
-	message.WorkflowTaskTimeout = convertedWorkflowTaskTimeout
-	message.WorkflowIdReusePolicy = enums.WorkflowIdReusePolicy(workflowStartIDReusePolicy(ctx))
-	sourcedRetryPolicy := workflowStartRetryPolicy(ctx)
-	convertedRetryPolicy, err := retryPolicyToProto(ctx, &sourcedRetryPolicy)
-	if err != nil {
-		return nil, err
-	}
-	message.RetryPolicy = convertedRetryPolicy
-	message.CronSchedule = workflowStartCronSchedule(ctx)
-	sourcedMemo := workflowStartMemo(ctx)
-	convertedMemo, err := memoToProto(ctx, sourcedMemo)
-	if err != nil {
-		return nil, err
-	}
-	message.Memo = convertedMemo
-	sourcedSearchAttributes := workflowStartSearchAttributes(ctx)
-	convertedSearchAttributes, err := searchAttributesToProto(ctx, &sourcedSearchAttributes)
-	if err != nil {
-		return nil, err
-	}
-	message.SearchAttributes = convertedSearchAttributes
-	sourcedPriority := workflowStartPriority(ctx)
-	convertedPriority, err := priorityToProto(ctx, &sourcedPriority)
-	if err != nil {
-		return nil, err
-	}
-	message.Priority = convertedPriority
-	message.Namespace = workflowStartNamespace(ctx)
+	message.Namespace = workflow.GetInfo(ctx).Namespace
 	return message, nil
 }
 
@@ -235,14 +257,44 @@ func signalWithStartWorkflowResponseFromProto(ctx workflow.Context, proto *workf
 }
 
 type SignalWithStartWorkflowOptions struct {
+	// Required. Unique identifier for the workflow execution.
+	Id string
+	// Optional.
+	// Total workflow execution timeout, including retries and continue-as-new.
+	ExecutionTimeout time.Duration
+	// Optional.
+	// Timeout of a single workflow run.
+	RunTimeout time.Duration
+	// Optional.
+	// Timeout of a single workflow task.
+	TaskTimeout time.Duration
 	// Optional.
 	// Request ID used to deduplicate workflow start requests.
 	RequestId string
+	// Optional.
+	// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
+	IdReusePolicy enums.WorkflowIdReusePolicy
 	// Optional.
 	// Behavior when a workflow is currently running with the same ID. Set to use-existing
 	// for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is
 	// terminate-if-running.
 	IdConflictPolicy enums.WorkflowIdConflictPolicy
+	// Optional.
+	// Retry policy for the workflow.
+	RetryPolicy *temporal.RetryPolicy
+	// Optional.
+	// Cron schedule for recurring workflow executions. See
+	// https://docs.temporal.io/cron-job.
+	CronSchedule string
+	// Optional.
+	// Memo for the workflow.
+	Memo map[string]any
+	// Optional.
+	// Typed search attributes for the workflow.
+	SearchAttributes temporal.SearchAttributes
+	// Optional.
+	// Priority of the workflow execution.
+	Priority *temporal.Priority
 	// Optional.
 	// Override for workflow versioning behavior.
 	VersioningOverride client.VersioningOverride
@@ -254,8 +306,7 @@ type SignalWithStartWorkflowOptions struct {
 	UserMetadata
 }
 
-// Signal a workflow, starting it first if needed. Configure workflow start fields with
-// WithWorkflowContextOptions.
+// Signal a workflow, starting it first if needed.
 //
 // Input signal: Signal name to send with the start request.
 // Input signalArg: Arguments for the signal.
@@ -263,57 +314,7 @@ type SignalWithStartWorkflowOptions struct {
 // Input args: Arguments for the workflow.
 //
 // Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflow[WorkflowArg any, WorkflowResult any](
-	ctx workflow.Context,
-	opts SignalWithStartWorkflowOptions,
-	signal string,
-	signalArg any,
-	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
-	arg WorkflowArg,
-) workflow.Future {
-	var requestId *string
-	if opts.RequestId != "" {
-		requestId = &opts.RequestId
-	}
-	var idConflictPolicy *enums.WorkflowIdConflictPolicy
-	if opts.IdConflictPolicy != 0 {
-		idConflictPolicy = &opts.IdConflictPolicy
-	}
-	var startDelay *time.Duration
-	if opts.StartDelay != 0 {
-		startDelay = &opts.StartDelay
-	}
-	workflowName := ""
-	{
-		rv := reflect.ValueOf(workflow)
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	}
-	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
-		Workflow:           workflowName,
-		Args:               []any{arg},
-		Signal:             signal,
-		SignalArgs:         []any{signalArg},
-		RequestId:          requestId,
-		IdConflictPolicy:   idConflictPolicy,
-		VersioningOverride: opts.VersioningOverride,
-		StartDelay:         startDelay,
-		UserMetadata:       &opts.UserMetadata,
-	})
-}
-
-// Signal a workflow, starting it first if needed. Configure workflow start fields with
-// WithWorkflowContextOptions.
-//
-// Input signal: Signal name to send with the start request.
-// Input signalArg: Arguments for the signal.
-// Input workflow: Workflow function identifying the workflow to start.
-// Input args: Arguments for the workflow.
-//
-// Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflowWithArgs(
+func SignalWithStartWorkflow(
 	ctx workflow.Context,
 	opts SignalWithStartWorkflowOptions,
 	signal string,
@@ -321,13 +322,33 @@ func SignalWithStartWorkflowWithArgs(
 	workflow any,
 	args ...any,
 ) workflow.Future {
+	var executionTimeout *time.Duration
+	if opts.ExecutionTimeout != 0 {
+		executionTimeout = &opts.ExecutionTimeout
+	}
+	var runTimeout *time.Duration
+	if opts.RunTimeout != 0 {
+		runTimeout = &opts.RunTimeout
+	}
+	var taskTimeout *time.Duration
+	if opts.TaskTimeout != 0 {
+		taskTimeout = &opts.TaskTimeout
+	}
 	var requestId *string
 	if opts.RequestId != "" {
 		requestId = &opts.RequestId
 	}
+	var idReusePolicy *enums.WorkflowIdReusePolicy
+	if opts.IdReusePolicy != 0 {
+		idReusePolicy = &opts.IdReusePolicy
+	}
 	var idConflictPolicy *enums.WorkflowIdConflictPolicy
 	if opts.IdConflictPolicy != 0 {
 		idConflictPolicy = &opts.IdConflictPolicy
+	}
+	var cronSchedule *string
+	if opts.CronSchedule != "" {
+		cronSchedule = &opts.CronSchedule
 	}
 	var startDelay *time.Duration
 	if opts.StartDelay != 0 {
@@ -350,10 +371,99 @@ func SignalWithStartWorkflowWithArgs(
 	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
+		Id:                 opts.Id,
 		Signal:             signal,
 		SignalArgs:         []any{signalArg},
+		ExecutionTimeout:   executionTimeout,
+		RunTimeout:         runTimeout,
+		TaskTimeout:        taskTimeout,
 		RequestId:          requestId,
+		IdReusePolicy:      idReusePolicy,
 		IdConflictPolicy:   idConflictPolicy,
+		RetryPolicy:        opts.RetryPolicy,
+		CronSchedule:       cronSchedule,
+		Memo:               opts.Memo,
+		SearchAttributes:   opts.SearchAttributes,
+		Priority:           opts.Priority,
+		VersioningOverride: opts.VersioningOverride,
+		StartDelay:         startDelay,
+		UserMetadata:       &opts.UserMetadata,
+	})
+}
+
+// Signal a workflow, starting it first if needed.
+//
+// Input signal: Signal name to send with the start request.
+// Input signalArg: Arguments for the signal.
+// Input workflow: Workflow function identifying the workflow to start.
+// Input args: Arguments for the workflow.
+//
+// Returns: A workflow handle to the started workflow.
+func SignalWithStartWorkflowTyped[WorkflowArg any](
+	ctx workflow.Context,
+	opts SignalWithStartWorkflowOptions,
+	signal string,
+	signalArg any,
+	workflow func(workflow.Context, WorkflowArg) any,
+	arg WorkflowArg,
+) workflow.Future {
+	var executionTimeout *time.Duration
+	if opts.ExecutionTimeout != 0 {
+		executionTimeout = &opts.ExecutionTimeout
+	}
+	var runTimeout *time.Duration
+	if opts.RunTimeout != 0 {
+		runTimeout = &opts.RunTimeout
+	}
+	var taskTimeout *time.Duration
+	if opts.TaskTimeout != 0 {
+		taskTimeout = &opts.TaskTimeout
+	}
+	var requestId *string
+	if opts.RequestId != "" {
+		requestId = &opts.RequestId
+	}
+	var idReusePolicy *enums.WorkflowIdReusePolicy
+	if opts.IdReusePolicy != 0 {
+		idReusePolicy = &opts.IdReusePolicy
+	}
+	var idConflictPolicy *enums.WorkflowIdConflictPolicy
+	if opts.IdConflictPolicy != 0 {
+		idConflictPolicy = &opts.IdConflictPolicy
+	}
+	var cronSchedule *string
+	if opts.CronSchedule != "" {
+		cronSchedule = &opts.CronSchedule
+	}
+	var startDelay *time.Duration
+	if opts.StartDelay != 0 {
+		startDelay = &opts.StartDelay
+	}
+	workflowName := ""
+	{
+		rv := reflect.ValueOf(workflow)
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
+	}
+	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
+		Workflow:           workflowName,
+		Args:               []any{arg},
+		Id:                 opts.Id,
+		Signal:             signal,
+		SignalArgs:         []any{signalArg},
+		ExecutionTimeout:   executionTimeout,
+		RunTimeout:         runTimeout,
+		TaskTimeout:        taskTimeout,
+		RequestId:          requestId,
+		IdReusePolicy:      idReusePolicy,
+		IdConflictPolicy:   idConflictPolicy,
+		RetryPolicy:        opts.RetryPolicy,
+		CronSchedule:       cronSchedule,
+		Memo:               opts.Memo,
+		SearchAttributes:   opts.SearchAttributes,
+		Priority:           opts.Priority,
 		VersioningOverride: opts.VersioningOverride,
 		StartDelay:         startDelay,
 		UserMetadata:       &opts.UserMetadata,
