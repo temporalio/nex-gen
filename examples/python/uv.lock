@@ -62,7 +62,7 @@ requires-dist = [
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest-asyncio", specifier = ">=1.2.0" },
     { name = "ruff", specifier = ">=0.15.12" },
-    { name = "temporalio", specifier = "==1.26.0" },
+    { name = "temporalio", virtual = "../../../temporal-sdk-python" },
     { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
 
@@ -368,8 +368,8 @@ wheels = [
 
 [[package]]
 name = "temporalio"
-version = "1.26.0"
-source = { registry = "https://pypi.org/simple" }
+version = "1.30.0"
+source = { virtual = "../../../temporal-sdk-python" }
 dependencies = [
     { name = "nexus-rpc" },
     { name = "protobuf" },
@@ -377,13 +377,76 @@ dependencies = [
     { name = "types-protobuf" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/d4/fa21150a225393f87732ed6fef3cc9735d9e751edc6be415fe6e375105c6/temporalio-1.26.0.tar.gz", hash = "sha256:f4bfb35125e6f5e8c7f7ed1277c7354d812c6fac7ed5f8dbd50536cf289aaaa7", size = 2388994, upload-time = "2026-04-15T23:43:00.911Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/27/8c421c622d18cc8e034247d5d72b89e6456937344b5bec1de40abef3c085/temporalio-1.26.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:5489040c0cf621edeb36984199dd9e4fbd2b3a07d61a4f2a8da1f2cb9820ef26", size = 14221070, upload-time = "2026-04-15T23:42:26.21Z" },
-    { url = "https://files.pythonhosted.org/packages/49/7c/d2b691d16ec5db87198c2e08dbfba58e286c096faee15753613a581abdce/temporalio-1.26.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:b18dd85771509c19ef059a31908bcd4e6130d1f67037c4db519702f3f2ad6d4a", size = 13583991, upload-time = "2026-04-15T23:42:34.357Z" },
-    { url = "https://files.pythonhosted.org/packages/05/ca/b8728451320ca9d8bb6e1680b9bd23767118f86d5b8644edf2304d533f1b/temporalio-1.26.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:46187d5f82ca2ae81f35ea5916a76db0e2f067210dc6b1852c3749475721946e", size = 13808036, upload-time = "2026-04-15T23:42:42.757Z" },
-    { url = "https://files.pythonhosted.org/packages/cb/54/3113f5e0ac58655790abac64656373e06191b351d74bfb94692e81bd6784/temporalio-1.26.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:03300c3e5237443367ac61bb20bd726c656b3daa50310bdd436599d5bdc7cf97", size = 14336604, upload-time = "2026-04-15T23:42:49.851Z" },
-    { url = "https://files.pythonhosted.org/packages/fd/9b/c50840a26af3587c0c8d9af04d9976743e22496996dc1a377efc75dcd316/temporalio-1.26.0-cp310-abi3-win_amd64.whl", hash = "sha256:1c4a0d82f0a3796cbf78864c799f8dca0b94cdaec68e7b8b224c859005686ec4", size = 14525849, upload-time = "2026-04-15T23:42:57.589Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "aioboto3", marker = "extra == 'aioboto3'", specifier = ">=10.4.0" },
+    { name = "google-adk", marker = "extra == 'google-adk'", specifier = ">=2.2.0,<3" },
+    { name = "google-genai", marker = "extra == 'google-genai'", specifier = ">=2.10.0,<3.0.0" },
+    { name = "grpcio", marker = "extra == 'grpc'", specifier = ">=1.48.2,<2" },
+    { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=1.1.0" },
+    { name = "langsmith", marker = "extra == 'langsmith'", specifier = ">=0.7.34,<0.9" },
+    { name = "mcp", marker = "extra == 'openai-agents'", specifier = ">=1.9.4,<2" },
+    { name = "nexus-rpc", specifier = "==1.4.0" },
+    { name = "openai-agents", marker = "extra == 'openai-agents'", specifier = ">=0.17.5" },
+    { name = "opentelemetry-api", marker = "extra == 'lambda-worker-otel'", specifier = ">=1.11.1,<2" },
+    { name = "opentelemetry-api", marker = "extra == 'opentelemetry'", specifier = ">=1.11.1,<2" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'lambda-worker-otel'", specifier = ">=1.11.1,<2" },
+    { name = "opentelemetry-sdk", marker = "extra == 'lambda-worker-otel'", specifier = ">=1.11.1,<2" },
+    { name = "opentelemetry-sdk", marker = "extra == 'opentelemetry'", specifier = ">=1.11.1,<2" },
+    { name = "opentelemetry-sdk-extension-aws", marker = "extra == 'lambda-worker-otel'", specifier = ">=2.0.0,<3" },
+    { name = "opentelemetry-semantic-conventions", marker = "extra == 'lambda-worker-otel'", specifier = ">=0.40b0,<1" },
+    { name = "protobuf", specifier = ">=3.20,<8.0.0" },
+    { name = "pydantic", marker = "extra == 'pydantic'", specifier = ">=2.0.0,<3" },
+    { name = "python-dateutil", marker = "python_full_version < '3.11'", specifier = ">=2.8.2,<3" },
+    { name = "strands-agents", marker = "extra == 'strands-agents'", specifier = ">=1.39.0" },
+    { name = "types-aioboto3", extras = ["s3"], marker = "extra == 'aioboto3'", specifier = ">=10.4.0" },
+    { name = "types-protobuf", specifier = ">=3.20,<8.0.0" },
+    { name = "typing-extensions", specifier = ">=4.2.0,<5" },
+]
+provides-extras = ["grpc", "opentelemetry", "pydantic", "openai-agents", "google-adk", "langgraph", "langsmith", "lambda-worker-otel", "aioboto3", "google-genai", "strands-agents"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "async-timeout", marker = "python_full_version < '3.11'", specifier = ">=4.0,<6" },
+    { name = "basedpyright", specifier = "==1.34.0" },
+    { name = "cibuildwheel", specifier = ">=2.22.0,<3" },
+    { name = "googleapis-common-protos", specifier = ">=1.75.0,<2" },
+    { name = "grpcio-tools", specifier = ">=1.48.2,<2" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "langgraph", specifier = ">=1.1.0" },
+    { name = "langsmith", specifier = ">=0.7.34,<0.9" },
+    { name = "litellm", specifier = ">=1.83.0" },
+    { name = "maturin", specifier = ">=1.8.2" },
+    { name = "mcp", specifier = ">=1.9.4,<2" },
+    { name = "moto", extras = ["s3", "server"], specifier = ">=5" },
+    { name = "mypy", specifier = "==1.18.2" },
+    { name = "mypy-protobuf", specifier = ">=3.3.0,<4" },
+    { name = "openai-agents", marker = "python_full_version >= '3.14'", specifier = ">=0.14.0" },
+    { name = "openai-agents", extras = ["litellm"], marker = "python_full_version < '3.14'", specifier = ">=0.14.0" },
+    { name = "openinference-instrumentation-google-adk", specifier = ">=0.1.11" },
+    { name = "openinference-instrumentation-openai-agents", specifier = ">=0.1.0" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.11.1,<2" },
+    { name = "opentelemetry-sdk-extension-aws", specifier = ">=2.0.0,<3" },
+    { name = "opentelemetry-semantic-conventions", specifier = ">=0.40b0,<1" },
+    { name = "psutil", specifier = ">=5.9.3,<6" },
+    { name = "pydocstyle", specifier = ">=6.3.0,<7" },
+    { name = "pydoctor", specifier = ">=25.10.1,<26" },
+    { name = "pyright", specifier = "==1.1.403" },
+    { name = "pytest", specifier = "~=9.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21,<0.22" },
+    { name = "pytest-cov", specifier = ">=6.1.1" },
+    { name = "pytest-flakefinder", specifier = ">=1.1.0" },
+    { name = "pytest-pretty", specifier = ">=1.3.0" },
+    { name = "pytest-rerunfailures", specifier = ">=16.1" },
+    { name = "pytest-timeout", specifier = "~=2.2" },
+    { name = "pytest-xdist", specifier = ">=3.6,<4" },
+    { name = "ruff", specifier = ">=0.15.12,<0.16" },
+    { name = "setuptools", specifier = "<82" },
+    { name = "strands-agents", specifier = ">=1.39.0" },
+    { name = "strands-agents-tools", specifier = ">=0.5.2" },
+    { name = "toml", specifier = ">=0.10.2,<0.11" },
+    { name = "twine", specifier = ">=4.0.1,<5" },
 ]
 
 [[package]]

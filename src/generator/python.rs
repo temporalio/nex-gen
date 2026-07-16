@@ -6843,12 +6843,12 @@ fn python_parameter_default_expr(default_kind: &PythonFieldDefaultKind) -> Optio
 }
 
 fn python_dataclass_source_default_expr(source_expr: &str) -> String {
-    if let Some(function_name) = source_expr.strip_suffix("()")
-        && function_name
-            .chars()
-            .all(|character| is_python_identifier_char(character) || character == '.')
+    let source_provider = source_expr.strip_suffix("()").unwrap_or(source_expr);
+    if source_provider
+        .chars()
+        .all(|character| is_python_identifier_char(character) || character == '.')
     {
-        return format!("dataclasses.field(default_factory={function_name})");
+        return format!("dataclasses.field(default_factory={source_provider})");
     }
     source_expr.to_string()
 }
@@ -6990,6 +6990,18 @@ mod tests {
 
     fn sample_python_output_path(root: &std::path::Path) -> PathBuf {
         root.join("examples/python/wit/workflow_service")
+    }
+
+    #[test]
+    fn renders_source_provider_defaults_as_dataclass_factories() {
+        assert_eq!(
+            python_dataclass_source_default_expr("workflow_namespace"),
+            "dataclasses.field(default_factory=workflow_namespace)"
+        );
+        assert_eq!(
+            python_dataclass_source_default_expr("workflow_namespace()"),
+            "dataclasses.field(default_factory=workflow_namespace)"
+        );
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {
@@ -7230,9 +7242,7 @@ class Example(enum.Enum):
         assert!(output.contains("workflow_id_reuse_policy_to_proto(self.id_reuse_policy)"));
         assert!(output.contains("if self.id_conflict_policy is not None:"));
         assert!(output.contains("workflow_id_conflict_policy_to_proto(self.id_conflict_policy)"));
-        assert!(output.contains(
-            "message.input.CopyFrom(payloads_to_proto(self.args, payload_converter=payload_converter))"
-        ));
+        assert!(output.contains("message.input.CopyFrom(payloads_to_proto(self.args))"));
         assert!(!output.contains("header:"));
         assert!(!output.contains("header_to_proto("));
         assert!(!output.contains("links:"));
@@ -7367,10 +7377,7 @@ class Example(enum.Enum):
         );
         assert!(type_roundtrip_output.contains("if not proto.HasField(\"retry_policy\"):\n            raise ValueError(\"missing required field ActivityOptions.retry_policy\")"));
         assert!(type_roundtrip_output.contains("retry_policy_from_proto("));
-        assert!(
-            type_roundtrip_output
-                .contains("proto.retry_policy, payload_converter=payload_converter")
-        );
+        assert!(type_roundtrip_output.contains("proto.retry_policy"));
         assert!(!type_roundtrip_output.contains("async def retry_policy_operation("));
         assert!(type_roundtrip_output.contains("async def activity_options_operation("));
         assert!(type_roundtrip_output.contains("task_queue: str | None = None,"));

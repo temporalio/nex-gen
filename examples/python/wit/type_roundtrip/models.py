@@ -6,7 +6,6 @@ import dataclasses
 import datetime
 import temporalio.common
 import temporalio.api.activity.v1.message_pb2
-import temporalio.converter
 
 from ._support import (
     duration_from_proto,
@@ -31,60 +30,36 @@ class ActivityOptions:
     def _temporal_from_intermediate(
         cls,
         proto: temporalio.api.activity.v1.message_pb2.ActivityOptions,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
     ) -> ActivityOptions:
-        _ = payload_converter
         if not proto.HasField("retry_policy"):
             raise ValueError("missing required field ActivityOptions.retry_policy")
-        retry_policy = retry_policy_from_proto(
-            proto.retry_policy, payload_converter=payload_converter
-        )
+        retry_policy = retry_policy_from_proto(proto.retry_policy)
         return cls(
-            task_queue=task_queue_from_proto(
-                proto.task_queue, payload_converter=payload_converter
-            )
+            task_queue=task_queue_from_proto(proto.task_queue)
             if proto.HasField("task_queue")
             else None,
             retry_policy=retry_policy,
             schedule_to_close_timeout=duration_from_proto(
-                proto.schedule_to_close_timeout, payload_converter=payload_converter
+                proto.schedule_to_close_timeout
             )
             if proto.HasField("schedule_to_close_timeout")
             else None,
-            priority=priority_from_proto(
-                proto.priority, payload_converter=payload_converter
-            )
+            priority=priority_from_proto(proto.priority)
             if proto.HasField("priority")
             else None,
         )
 
     def _temporal_to_intermediate(
         self,
-        *,
-        payload_converter: temporalio.converter.PayloadConverter | None = None,
     ) -> temporalio.api.activity.v1.message_pb2.ActivityOptions:
-        _ = payload_converter
         message = temporalio.api.activity.v1.message_pb2.ActivityOptions()
         if self.task_queue is not None:
-            message.task_queue.CopyFrom(
-                task_queue_to_proto(
-                    self.task_queue, payload_converter=payload_converter
-                )
-            )
-        message.retry_policy.CopyFrom(
-            retry_policy_to_proto(
-                self.retry_policy, payload_converter=payload_converter
-            )
-        )
+            message.task_queue.CopyFrom(task_queue_to_proto(self.task_queue))
+        message.retry_policy.CopyFrom(retry_policy_to_proto(self.retry_policy))
         if self.schedule_to_close_timeout is not None:
             message.schedule_to_close_timeout.CopyFrom(
-                duration_to_proto(
-                    self.schedule_to_close_timeout, payload_converter=payload_converter
-                )
+                duration_to_proto(self.schedule_to_close_timeout)
             )
         if self.priority is not None:
-            message.priority.CopyFrom(
-                priority_to_proto(self.priority, payload_converter=payload_converter)
-            )
+            message.priority.CopyFrom(priority_to_proto(self.priority))
         return message

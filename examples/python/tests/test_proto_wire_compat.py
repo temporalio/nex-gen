@@ -8,7 +8,7 @@ from pathlib import Path
 from temporalio.api.common.v1 import Payload
 import temporalio.common
 
-from conftest import temporal_intermediate_data_converter
+from conftest import temporal_model_data_converter
 from wit.type_roundtrip.models import ActivityOptions
 
 
@@ -40,7 +40,7 @@ def assert_activity_options_model(decoded: object) -> None:
 
 
 def test_activity_options_intermediate_conversion_delegates_payload_encoding() -> None:
-    converter = temporal_intermediate_data_converter.payload_converter
+    converter = temporal_model_data_converter.payload_converter
     activity_options = ActivityOptions(
         retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
         task_queue="demo-task-queue",
@@ -68,7 +68,7 @@ def test_activity_options_intermediate_conversion_delegates_payload_encoding() -
 
 
 def test_activity_options_fixtures_decode_to_user_type() -> None:
-    converter = temporal_intermediate_data_converter.payload_converter
+    converter = temporal_model_data_converter.payload_converter
     for fixture_name in (
         "activity-options.python.payload.json",
         "activity-options.dotnet.payload.json",

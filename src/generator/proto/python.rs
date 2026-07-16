@@ -167,8 +167,8 @@ fn message_override_conversion(model_type: &PlannedType) -> Option<WireValueConv
         let to_proto = python_to_proto_converter(&proto.proto.full_name, language_override);
         return Some(WireValueConversion {
             annotation: type_name,
-            from_wire: format!("{from_proto}({{wire}}, payload_converter=payload_converter)"),
-            to_wire: format!("{to_proto}({{value}}, payload_converter=payload_converter)"),
+            from_wire: format!("{from_proto}({{wire}})"),
+            to_wire: format!("{to_proto}({{value}})"),
             imports: PythonImports::default(),
             supports_unpacked_input: false,
         });
@@ -178,8 +178,8 @@ fn message_override_conversion(model_type: &PlannedType) -> Option<WireValueConv
         let to_proto = python_default_to_proto_name(&proto.proto.full_name);
         return Some(WireValueConversion {
             annotation: python_authored_type_annotation(authored_type),
-            from_wire: format!("{from_proto}({{wire}}, payload_converter=payload_converter)"),
-            to_wire: format!("{to_proto}({{value}}, payload_converter=payload_converter)"),
+            from_wire: format!("{from_proto}({{wire}})"),
+            to_wire: format!("{to_proto}({{value}})"),
             imports: PythonImports::default(),
             supports_unpacked_input: false,
         });
@@ -209,11 +209,8 @@ fn generated_wire_conversion(
     if let Some(model_name) = generated_message_model_name(model_type, planned_model) {
         return Some(WireValueConversion {
             annotation: model_name.clone(),
-            from_wire: format!(
-                "{model_name}._temporal_from_intermediate({{wire}}, payload_converter=payload_converter)"
-            ),
-            to_wire: "{value}._temporal_to_intermediate(payload_converter=payload_converter)"
-                .to_string(),
+            from_wire: format!("{model_name}._temporal_from_intermediate({{wire}})"),
+            to_wire: "{value}._temporal_to_intermediate()".to_string(),
             imports: PythonImports::default(),
             supports_unpacked_input: true,
         });
@@ -361,7 +358,7 @@ fn function_field_write(
     resolved_type: &ResolvedFieldType,
     optional_guard: bool,
 ) -> RenderedWireWrite {
-    let converted_value = format!("{converter}({value_expr}, payload_converter=payload_converter)");
+    let converted_value = format!("{converter}({value_expr})");
     let mut lines = Vec::new();
     if optional_guard {
         lines.push(format!("if {value_expr} is not None:"));
@@ -654,14 +651,9 @@ fn render_record_wire_block(
         });
         output.push_str(&proto_ref.type_ref);
         output.push_str(",\n");
-        output.push_str("        *,\n");
-        output.push_str(
-            "        payload_converter: temporalio.converter.PayloadConverter | None = None,\n",
-        );
         output.push_str("    ) -> ");
         output.push_str(&model.name);
         output.push_str(":\n");
-        output.push_str("        _ = payload_converter\n");
         if model.fields.is_empty() {
             output.push_str("        return cls()\n");
         } else {
@@ -728,14 +720,9 @@ fn render_record_wire_block(
         }
         output.push_str("    def _temporal_to_intermediate(\n");
         output.push_str("        self,\n");
-        output.push_str("        *,\n");
-        output.push_str(
-            "        payload_converter: temporalio.converter.PayloadConverter | None = None,\n",
-        );
         output.push_str("    ) -> ");
         output.push_str(&proto_ref.type_ref);
         output.push_str(":\n");
-        output.push_str("        _ = payload_converter\n");
         output.push_str("        message = ");
         output.push_str(&proto_ref.type_ref);
         output.push_str("()\n");
@@ -764,9 +751,7 @@ fn render_record_wire_block(
 
     Some(RenderedRecordWireBlock {
         imports: PythonImports {
-            module_imports: [proto_ref.module_path, "temporalio.converter".to_string()]
-                .into_iter()
-                .collect(),
+            module_imports: [proto_ref.module_path].into_iter().collect(),
             ..PythonImports::default()
         },
         class_body_lines: output.lines().map(str::to_string).collect(),
