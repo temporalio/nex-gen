@@ -194,4 +194,3 @@ func (s *WorkflowServiceIntegrationSuite) TestConversionFailureReturnsReadyFutur
 	s.NoError(s.env.GetWorkflowError())
 	s.Empty(s.calls)
 }
-

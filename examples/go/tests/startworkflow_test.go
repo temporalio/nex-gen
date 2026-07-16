@@ -142,4 +142,3 @@ func (s *StartWorkflowIntegrationSuite) TestPublicOperationsAndResourceMethods()
 	s.Equal("start-run", resourceCancel.GetWorkflowExecution().GetRunId())
 	s.Equal("resource-cancel", resourceCancel.GetReason())
 }
-

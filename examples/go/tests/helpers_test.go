@@ -37,4 +37,3 @@ func stringField(value any, name string) string {
 	}
 	return ""
 }
-

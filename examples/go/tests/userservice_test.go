@@ -20,6 +20,7 @@ type UserServiceIntegrationSuite struct {
 	env   *testsuite.TestWorkflowEnvironment
 	calls []nexusCall
 }
+
 func (s *UserServiceIntegrationSuite) SetupTest() {
 	s.env = s.NewTestWorkflowEnvironment()
 	s.calls = nil
