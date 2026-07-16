@@ -35,7 +35,7 @@ class TypeRoundtripServiceHandler:
         input: type_roundtrip_models.ActivityOptions,
     ) -> type_roundtrip_models.ActivityOptions:
         self.calls.append(("ActivityOptionsOperation", input))
-        proto = input._temporal_to_intermediate()  # pyright: ignore[reportPrivateUsage]
+        proto = input._temporal_to_intermediate()
         assert proto.HasField("retry_policy")
         assert proto.task_queue.name == TASK_QUEUE
         assert proto.schedule_to_close_timeout.seconds == 7
@@ -102,13 +102,13 @@ def test_activity_options_round_trip() -> None:
         schedule_to_close_timeout=datetime.timedelta(seconds=7),
         priority=priority(),
     )
-    activity_proto = activity_options._temporal_to_intermediate()  # pyright: ignore[reportPrivateUsage]
+    activity_proto = activity_options._temporal_to_intermediate()
     assert activity_proto.HasField("retry_policy")
     assert activity_proto.task_queue.name == TASK_QUEUE
     assert activity_proto.schedule_to_close_timeout.seconds == 7
     assert activity_proto.priority.priority_key == 4
     round_tripped_activity = (
-        type_roundtrip_models.ActivityOptions._temporal_from_intermediate(  # pyright: ignore[reportPrivateUsage]
+        type_roundtrip_models.ActivityOptions._temporal_from_intermediate(
             activity_proto
         )
     )

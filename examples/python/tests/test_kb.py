@@ -164,9 +164,7 @@ def test_kb_wire_fixtures_roundtrip_through_pydantic_converter() -> None:
 
 
 async def test_kb_operations_use_real_nexus_client() -> None:
-    env = await WorkflowEnvironment.start_local(  # pyright: ignore[reportUnknownMemberType]
-        data_converter=pydantic_data_converter
-    )
+    env = await WorkflowEnvironment.start_local(data_converter=pydantic_data_converter)
     task_queue = str(uuid.uuid4())
     service_handler = KnowledgeBaseServiceHandler()
 

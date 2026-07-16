@@ -7,23 +7,23 @@ import temporalio.api.common.v1.message_pb2 as common_pb2
 import temporalio.api.enums.v1.workflow_pb2 as workflow_enums_pb2
 import temporalio.api.taskqueue.v1.message_pb2 as taskqueue_pb2
 import temporalio.api.workflow.v1
-import temporalio.converter
-import temporalio.common
+import temporalio.converter as temporalio_converter
+import temporalio.common as temporalio_common
 import temporalio.nexus.system
 
 
-def _current_payload_converter() -> temporalio.converter.PayloadConverter:
+def _current_payload_converter() -> temporalio_converter.PayloadConverter:
     return temporalio.nexus.system.current_user_payload_converter()
 
 
 def retry_policy_from_proto(
     proto: common_pb2.RetryPolicy,
-) -> temporalio.common.RetryPolicy:
-    return temporalio.common.RetryPolicy.from_proto(proto)
+) -> temporalio_common.RetryPolicy:
+    return temporalio_common.RetryPolicy.from_proto(proto)
 
 
 def retry_policy_to_proto(
-    retry_policy: temporalio.common.RetryPolicy,
+    retry_policy: temporalio_common.RetryPolicy,
 ) -> common_pb2.RetryPolicy:
     proto = common_pb2.RetryPolicy()
     retry_policy.apply_to_proto(proto)
@@ -33,7 +33,7 @@ def retry_policy_to_proto(
 def workflow_function_name(
     value: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],
 ) -> str:
-    from temporalio.workflow import _Definition  # pyright: ignore[reportPrivateUsage]
+    from temporalio.workflow import _Definition
 
     name, _result_type = _Definition.get_name_and_result_type(value)
     return name
@@ -42,9 +42,9 @@ def workflow_function_name(
 def signal_function_to_proto(
     value: str | collections.abc.Callable[..., typing.Any],
 ) -> str:
-    from temporalio.workflow import _SignalDefinition  # pyright: ignore[reportPrivateUsage]
+    from temporalio.workflow import _SignalDefinition
 
-    return _SignalDefinition.must_name_from_fn_or_str(value)  # pyright: ignore[reportUnknownMemberType]
+    return _SignalDefinition.must_name_from_fn_or_str(value)
 
 
 def workflow_type_to_proto(
@@ -161,24 +161,24 @@ def duration_to_proto(
 
 def workflow_id_reuse_policy_from_proto(
     policy: workflow_enums_pb2.WorkflowIdReusePolicy.ValueType,
-) -> temporalio.common.WorkflowIDReusePolicy:
-    return temporalio.common.WorkflowIDReusePolicy(int(policy))
+) -> temporalio_common.WorkflowIDReusePolicy:
+    return temporalio_common.WorkflowIDReusePolicy(int(policy))
 
 
 def workflow_id_reuse_policy_to_proto(
-    policy: temporalio.common.WorkflowIDReusePolicy,
+    policy: temporalio_common.WorkflowIDReusePolicy,
 ) -> workflow_enums_pb2.WorkflowIdReusePolicy.ValueType:
     return typing.cast(workflow_enums_pb2.WorkflowIdReusePolicy.ValueType, int(policy))
 
 
 def workflow_id_conflict_policy_from_proto(
     policy: workflow_enums_pb2.WorkflowIdConflictPolicy.ValueType,
-) -> temporalio.common.WorkflowIDConflictPolicy:
-    return temporalio.common.WorkflowIDConflictPolicy(int(policy))
+) -> temporalio_common.WorkflowIDConflictPolicy:
+    return temporalio_common.WorkflowIDConflictPolicy(int(policy))
 
 
 def workflow_id_conflict_policy_to_proto(
-    policy: temporalio.common.WorkflowIDConflictPolicy,
+    policy: temporalio_common.WorkflowIDConflictPolicy,
 ) -> workflow_enums_pb2.WorkflowIdConflictPolicy.ValueType:
     return typing.cast(
         workflow_enums_pb2.WorkflowIdConflictPolicy.ValueType, int(policy)
@@ -186,54 +186,54 @@ def workflow_id_conflict_policy_to_proto(
 
 
 def search_attributes_to_proto(
-    search_attributes: temporalio.common.TypedSearchAttributes,
+    search_attributes: temporalio_common.TypedSearchAttributes,
 ) -> common_pb2.SearchAttributes:
     proto = common_pb2.SearchAttributes()
-    temporalio.converter.encode_search_attributes(search_attributes, proto)
+    temporalio_converter.encode_search_attributes(search_attributes, proto)
     return proto
 
 
 def search_attributes_from_proto(
     proto: common_pb2.SearchAttributes,
-) -> temporalio.common.TypedSearchAttributes:
-    return temporalio.converter.decode_typed_search_attributes(proto)
+) -> temporalio_common.TypedSearchAttributes:
+    return temporalio_converter.decode_typed_search_attributes(proto)
 
 
 def priority_from_proto(
     proto: common_pb2.Priority,
-) -> temporalio.common.Priority:
-    return temporalio.common.Priority._from_proto(proto)  # pyright: ignore[reportPrivateUsage]
+) -> temporalio_common.Priority:
+    return temporalio_common.Priority._from_proto(proto)
 
 
 def priority_to_proto(
-    priority: temporalio.common.Priority,
+    priority: temporalio_common.Priority,
 ) -> common_pb2.Priority:
-    return priority._to_proto()  # pyright: ignore[reportPrivateUsage]
+    return priority._to_proto()
 
 
 def versioning_override_to_proto(
-    versioning_override: temporalio.common.VersioningOverride,
+    versioning_override: temporalio_common.VersioningOverride,
 ) -> temporalio.api.workflow.v1.VersioningOverride:
-    return versioning_override._to_proto()  # pyright: ignore[reportPrivateUsage]
+    return versioning_override._to_proto()
 
 
 def versioning_override_from_proto(
     proto: temporalio.api.workflow.v1.VersioningOverride,
-) -> temporalio.common.VersioningOverride:
+) -> temporalio_common.VersioningOverride:
     if proto.HasField("pinned") and proto.pinned.HasField("version"):
         version = proto.pinned.version
-        return temporalio.common.PinnedVersioningOverride(
-            temporalio.common.WorkerDeploymentVersion(
+        return temporalio_common.PinnedVersioningOverride(
+            temporalio_common.WorkerDeploymentVersion(
                 deployment_name=version.deployment_name,
                 build_id=version.build_id,
             )
         )
     if proto.pinned_version:
-        return temporalio.common.PinnedVersioningOverride(
-            temporalio.common.WorkerDeploymentVersion.from_canonical_string(
+        return temporalio_common.PinnedVersioningOverride(
+            temporalio_common.WorkerDeploymentVersion.from_canonical_string(
                 proto.pinned_version
             )
         )
     if proto.auto_upgrade:
-        return temporalio.common.AutoUpgradeVersioningOverride()
+        return temporalio_common.AutoUpgradeVersioningOverride()
     raise ValueError("unknown versioning override proto shape")

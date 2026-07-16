@@ -15,12 +15,9 @@ dependencies = [
 [tool.uv]
 package = false
 
-[tool.uv.sources]
-temporalio = { path = "../../../temporal-sdk-python" }
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-pythonpath = [".", "../../../temporal-sdk-python"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 88
@@ -28,7 +25,9 @@ target-version = "py310"
 
 [tool.basedpyright]
 exclude = [".venv"]
-extraPaths = ["../../../temporal-sdk-python"]
+stubPath = "typings"
 reportAny = false
 reportExplicitAny = false
+reportPrivateUsage = false
+reportUnknownMemberType = false
 reportUnnecessaryTypeIgnoreComment = "error"

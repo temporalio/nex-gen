@@ -6995,11 +6995,11 @@ mod tests {
     #[test]
     fn renders_source_provider_defaults_as_dataclass_factories() {
         assert_eq!(
-            python_dataclass_source_default_expr("workflow_namespace"),
+            super::python_dataclass_source_default_expr("workflow_namespace"),
             "dataclasses.field(default_factory=workflow_namespace)"
         );
         assert_eq!(
-            python_dataclass_source_default_expr("workflow_namespace()"),
+            super::python_dataclass_source_default_expr("workflow_namespace()"),
             "dataclasses.field(default_factory=workflow_namespace)"
         );
     }
