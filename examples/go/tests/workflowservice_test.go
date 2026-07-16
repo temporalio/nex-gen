@@ -95,8 +95,18 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms()
 			signalWithStartWorkflow,
 			"workflow-input",
 		)
-		if err := typedFuture.Get(ctx, &typedResult); err != nil {
-			return err
+		selector := workflow.NewSelector(ctx)
+		selected := false
+		var typedErr error
+		selector.AddFuture(typedFuture, func(ready workflow.Future) {
+			selected = true
+			typedErr = ready.Get(ctx, &typedResult)
+		}).Select(ctx)
+		if !selected {
+			return errors.New("selector did not select the transformed future")
+		}
+		if typedErr != nil {
+			return typedErr
 		}
 
 		var variadicResult ws.SignalWithStartWorkflowResponse

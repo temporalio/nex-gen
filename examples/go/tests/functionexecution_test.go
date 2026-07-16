@@ -108,17 +108,10 @@ func (s *FunctionExecutionIntegrationSuite) TestFunctionArgumentForms() {
 		values = append(values, counted.Value)
 
 		var named functionexecution.ExecuteNamedFunctionResult
-		var namedErr error
-		namedFuture := functionexecution.ExecuteNamedFunction(
+		if err := functionexecution.ExecuteNamedFunction(
 			ctx, functionexecution.ExecuteNamedFunctionOptions{}, validFunction, "one", true,
-		)
-
-		// Verify that our futures work with selectors and other standard workflow APIs.
-		workflow.NewSelector(ctx).AddFuture(namedFuture, func(ready workflow.Future) {
-			namedErr = ready.Get(ctx, &named)
-		}).Select(ctx)
-		if namedErr != nil {
-			return nil, namedErr
+		).Get(ctx, &named); err != nil {
+			return nil, err
 		}
 		values = append(values, named.Value)
 
