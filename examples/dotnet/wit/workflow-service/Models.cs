@@ -12,7 +12,7 @@ namespace Temporalio.Workflows
 {
 
     [GeneratedCode("nex-gen", null)]
-    internal class UserMetadata : NexGen.Support.ITemporalWire
+    internal class UserMetadata : NexGen.Support.ITemporalIntermediate
     {
         /// <summary>
         /// Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format.
@@ -23,7 +23,7 @@ namespace Temporalio.Workflows
         /// </summary>
         public object? StaticDetails { get; init; }
 
-        public static UserMetadata TemporalFromWire(Temporalio.Api.Sdk.V1.UserMetadata wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public static UserMetadata TemporalFromIntermediate(Temporalio.Api.Sdk.V1.UserMetadata wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             return new UserMetadata()
             {
@@ -32,7 +32,7 @@ namespace Temporalio.Workflows
             };
         }
 
-        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.Sdk.V1.UserMetadata();
             if (StaticSummary is { } staticSummary)
@@ -53,7 +53,7 @@ namespace Temporalio.Workflows
     /// </summary>
     /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
     [GeneratedCode("nex-gen", null)]
-    internal class SignalWithStartWorkflowRequest : NexGen.Support.ITemporalWire
+    internal class SignalWithStartWorkflowRequest : NexGen.Support.ITemporalIntermediate
     {
         internal SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal)
         {
@@ -147,7 +147,7 @@ namespace Temporalio.Workflows
             init => _namespace = value;
         }
 
-        public static SignalWithStartWorkflowRequest TemporalFromWire(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public static SignalWithStartWorkflowRequest TemporalFromIntermediate(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             return new SignalWithStartWorkflowRequest(NexGen.Support.ProtoExtensions.FromWorkflowTypeProto(wire.WorkflowType, payloadConverter), wire.WorkflowId, NexGen.Support.ProtoExtensions.FromTaskQueueProto(wire.TaskQueue, payloadConverter), wire.SignalName)
             {
@@ -166,11 +166,11 @@ namespace Temporalio.Workflows
                 Priority = wire.Priority == null ? null : NexGen.Support.ProtoExtensions.FromPriorityProto(wire.Priority, payloadConverter),
                 VersioningOverride = wire.VersioningOverride == null ? null : NexGen.Support.ProtoExtensions.FromVersioningOverrideProto(wire.VersioningOverride, payloadConverter),
                 StartDelay = wire.WorkflowStartDelay == null ? null : NexGen.Support.ProtoExtensions.FromDurationProto(wire.WorkflowStartDelay, payloadConverter),
-                UserMetadata = wire.UserMetadata == null ? null : UserMetadata.TemporalFromWire(wire.UserMetadata, payloadConverter),
+                UserMetadata = wire.UserMetadata == null ? null : UserMetadata.TemporalFromIntermediate(wire.UserMetadata, payloadConverter),
             };
         }
 
-        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest();
             proto.Namespace = Namespace;
@@ -240,7 +240,7 @@ namespace Temporalio.Workflows
             }
             if (UserMetadata is { } userMetadata)
             {
-                proto.UserMetadata = (Temporalio.Api.Sdk.V1.UserMetadata)userMetadata.TemporalToWire(payloadConverter);
+                proto.UserMetadata = (Temporalio.Api.Sdk.V1.UserMetadata)userMetadata.TemporalToIntermediate(payloadConverter);
             }
             return proto;
         }
@@ -249,12 +249,12 @@ namespace Temporalio.Workflows
 
     /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
     [GeneratedCode("nex-gen", null)]
-    internal class SignalWithStartWorkflowResponse : NexGen.Support.ITemporalWire
+    internal class SignalWithStartWorkflowResponse : NexGen.Support.ITemporalIntermediate
     {
         public string? RunId { get; init; }
         public bool? Started { get; init; }
 
-        public static SignalWithStartWorkflowResponse TemporalFromWire(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public static SignalWithStartWorkflowResponse TemporalFromIntermediate(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             return new SignalWithStartWorkflowResponse()
             {
@@ -263,7 +263,7 @@ namespace Temporalio.Workflows
             };
         }
 
-        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse();
             if (RunId is { } runId)

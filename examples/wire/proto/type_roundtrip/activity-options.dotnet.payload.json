@@ -1,8 +1,7 @@
 {
-  "data": "ChEKD2RlbW8tdGFzay1xdWV1ZRICCAcyDwoCCAERAAAAAAAAAEAgAzoRCAQSCHRlbmFudC1hHQAAIEA=",
+  "data": "eyAidGFza1F1ZXVlIjogeyAibmFtZSI6ICJkZW1vLXRhc2stcXVldWUiIH0sICJzY2hlZHVsZVRvQ2xvc2VUaW1lb3V0IjogIjdzIiwgInJldHJ5UG9saWN5IjogeyAiaW5pdGlhbEludGVydmFsIjogIjFzIiwgImJhY2tvZmZDb2VmZmljaWVudCI6IDIsICJtYXhpbXVtQXR0ZW1wdHMiOiAzIH0sICJwcmlvcml0eSI6IHsgInByaW9yaXR5S2V5IjogNCwgImZhaXJuZXNzS2V5IjogInRlbmFudC1hIiwgImZhaXJuZXNzV2VpZ2h0IjogMi41IH0gfQ==",
   "metadata": {
-    "encoding": "YmluYXJ5L3RlbXBvcmFsLXdpcmU=",
-    "temporal-wire-encoding": "YmluYXJ5L3Byb3RvYnVm",
-    "temporal-wire-metadata-messageType": "dGVtcG9yYWwuYXBpLmFjdGl2aXR5LnYxLkFjdGl2aXR5T3B0aW9ucw=="
+    "encoding": "anNvbi9wcm90b2J1Zg==",
+    "messageType": "dGVtcG9yYWwuYXBpLmFjdGl2aXR5LnYxLkFjdGl2aXR5T3B0aW9ucw=="
   }
 }

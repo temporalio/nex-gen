@@ -75,7 +75,7 @@ class SignalWithStartWorkflowRequest:
     namespace: str = dataclasses.field(default_factory=workflow_namespace)
 
     @classmethod
-    def _temporal_from_wire(
+    def _temporal_from_intermediate(
         cls,
         proto: temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionRequest,
         *,
@@ -170,7 +170,7 @@ class SignalWithStartWorkflowRequest:
             )
             if proto.HasField("workflow_start_delay")
             else None,
-            user_metadata=UserMetadata._temporal_from_wire(
+            user_metadata=UserMetadata._temporal_from_intermediate(
                 proto.user_metadata, payload_converter=payload_converter
             )
             if proto.HasField("user_metadata")
@@ -178,7 +178,7 @@ class SignalWithStartWorkflowRequest:
             namespace=proto.namespace,
         )
 
-    def _temporal_to_wire(
+    def _temporal_to_intermediate(
         self,
         *,
         payload_converter: temporalio.converter.PayloadConverter | None = None,
@@ -262,7 +262,7 @@ class SignalWithStartWorkflowRequest:
             )
         if self.user_metadata is not None:
             message.user_metadata.CopyFrom(
-                self.user_metadata._temporal_to_wire(
+                self.user_metadata._temporal_to_intermediate(
                     payload_converter=payload_converter
                 )
             )
@@ -276,7 +276,7 @@ class UserMetadata:
     static_details: typing.Any | None = None
 
     @classmethod
-    def _temporal_from_wire(
+    def _temporal_from_intermediate(
         cls,
         proto: temporalio.api.sdk.v1.user_metadata_pb2.UserMetadata,
         *,
@@ -296,7 +296,7 @@ class UserMetadata:
             else None,
         )
 
-    def _temporal_to_wire(
+    def _temporal_to_intermediate(
         self,
         *,
         payload_converter: temporalio.converter.PayloadConverter | None = None,
@@ -329,7 +329,7 @@ class SignalWithStartWorkflowResponse:
     started: bool | None = None
 
     @classmethod
-    def _temporal_from_wire(
+    def _temporal_from_intermediate(
         cls,
         proto: temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionResponse,
         *,
@@ -341,7 +341,7 @@ class SignalWithStartWorkflowResponse:
             started=proto.started if bool(proto.started) else None,
         )
 
-    def _temporal_to_wire(
+    def _temporal_to_intermediate(
         self,
         *,
         payload_converter: temporalio.converter.PayloadConverter | None = None,

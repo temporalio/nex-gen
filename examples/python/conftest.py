@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any, ClassVar, cast
+from collections.abc import AsyncIterator, Sequence
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
 import temporalio.api.common.v1
 from temporalio.client import Client
 from temporalio.converter import (
-    CompositePayloadConverter,
     DataConverter,
     DefaultPayloadConverter,
-    EncodingPayloadConverter,
     PayloadConverter,
 )
 from temporalio.converter import (
@@ -22,79 +20,66 @@ from temporalio.testing import WorkflowEnvironment
 from typing_extensions import Self, override
 
 
-class TemporalWirePayloadConverter(EncodingPayloadConverter, WithSerializationContext):
-    _inner_encoding_metadata_key: ClassVar[str] = "temporal-wire-encoding"
-    _inner_metadata_prefix: ClassVar[str] = "temporal-wire-metadata-"
+class TemporalIntermediatePayloadConverter(PayloadConverter, WithSerializationContext):
     _inner_payload_converter: PayloadConverter
 
     def __init__(self, inner_payload_converter: PayloadConverter | None = None) -> None:
         self._inner_payload_converter = (
-            inner_payload_converter
-            or CompositePayloadConverter(*_default_inner_encoding_payload_converters())
-        )
-
-    @property
-    @override
-    def encoding(self) -> str:
-        return "binary/temporal-wire"
-
-    @override
-    def to_payload(self, value: Any) -> temporalio.api.common.v1.Payload | None:
-        to_wire = getattr(value, "_temporal_to_wire", None)
-        if to_wire is None:
-            return None
-
-        wire_value = to_wire(payload_converter=self._inner_payload_converter)
-        wire_payload = self._inner_payload_converter.to_payload(wire_value)
-        inner_encoding = wire_payload.metadata.get("encoding")
-        if inner_encoding is None:
-            raise RuntimeError("Temporal wire payload missing inner encoding")
-        return temporalio.api.common.v1.Payload(
-            metadata={
-                "encoding": self.encoding.encode(),
-                self._inner_encoding_metadata_key: inner_encoding,
-                **{
-                    self._inner_metadata_prefix + key: metadata_value
-                    for key, metadata_value in wire_payload.metadata.items()
-                    if key != "encoding"
-                },
-            },
-            data=wire_payload.data,
+            inner_payload_converter or DefaultPayloadConverter()
         )
 
     @override
-    def from_payload(
+    def to_payloads(
+        self, values: Sequence[Any]
+    ) -> list[temporalio.api.common.v1.Payload]:
+        return self._inner_payload_converter.to_payloads(
+            [
+                to_intermediate(payload_converter=self._inner_payload_converter)
+                if (
+                    to_intermediate := getattr(value, "_temporal_to_intermediate", None)
+                )
+                is not None
+                else value
+                for value in values
+            ]
+        )
+
+    @override
+    def from_payloads(
         self,
-        payload: temporalio.api.common.v1.Payload,
-        type_hint: type | None = None,
-    ) -> Any:
-        wire_type_method = getattr(type_hint, "_temporal_wire_type", None)
-        from_wire = getattr(type_hint, "_temporal_from_wire", None)
-        if from_wire is None:
-            raise RuntimeError(
-                f"Payload with encoding {self.encoding} requires a Temporal wire type hint"
-            )
-
-        inner_encoding = payload.metadata.get(self._inner_encoding_metadata_key)
-        if inner_encoding is None:
-            raise RuntimeError("Temporal wire payload missing inner encoding")
-        wire_metadata = {
-            key.removeprefix(self._inner_metadata_prefix): metadata_value
-            for key, metadata_value in payload.metadata.items()
-            if key.startswith(self._inner_metadata_prefix)
-        }
-        wire_metadata["encoding"] = inner_encoding
-        wire_payload = temporalio.api.common.v1.Payload(
-            metadata=wire_metadata,
-            data=payload.data,
+        payloads: Sequence[temporalio.api.common.v1.Payload],
+        type_hints: list[type] | None = None,
+    ) -> list[Any]:
+        type_hints = type_hints or []
+        inner_type_hints = (
+            [
+                None
+                if getattr(type_hint, "_temporal_from_intermediate", None) is not None
+                else type_hint
+                for type_hint in type_hints
+            ]
+            if type_hints
+            else None
         )
-        if wire_type_method is None:
-            wire_value = self._inner_payload_converter.from_payload(wire_payload)
-        else:
-            wire_value = self._inner_payload_converter.from_payload(
-                wire_payload, wire_type_method()
+        intermediate_values = self._inner_payload_converter.from_payloads(
+            payloads,
+            cast("list[type] | None", inner_type_hints),
+        )
+        return [
+            from_intermediate(
+                intermediate_value, payload_converter=self._inner_payload_converter
             )
-        return from_wire(wire_value, payload_converter=self._inner_payload_converter)
+            if (
+                from_intermediate := getattr(
+                    type_hint, "_temporal_from_intermediate", None
+                )
+            )
+            is not None
+            else intermediate_value
+            for intermediate_value, type_hint in zip(
+                intermediate_values, type_hints or [None] * len(intermediate_values)
+            )
+        ]
 
     @override
     def with_context(self, context: SerializationContext) -> Self:
@@ -106,35 +91,13 @@ class TemporalWirePayloadConverter(EncodingPayloadConverter, WithSerializationCo
         return type(self)(inner_payload_converter)
 
 
-class TemporalWireDefaultPayloadConverter(CompositePayloadConverter):
+class TemporalIntermediateDefaultPayloadConverter(TemporalIntermediatePayloadConverter):
     def __init__(self) -> None:
-        inner_converters = _default_inner_encoding_payload_converters()
-        super().__init__(
-            *inner_converters[:2],
-            TemporalWirePayloadConverter(CompositePayloadConverter(*inner_converters)),
-            *inner_converters[2:],
-        )
+        super().__init__(DefaultPayloadConverter())
 
 
-def _default_inner_encoding_payload_converters() -> tuple[
-    EncodingPayloadConverter, ...
-]:
-    inner_converters = getattr(
-        DefaultPayloadConverter,
-        "default_inner_encoding_payload_converters",
-        None,
-    )
-    if inner_converters is None:
-        inner_converters = DefaultPayloadConverter.default_encoding_payload_converters
-    return tuple(
-        converter
-        for converter in inner_converters
-        if converter.encoding not in {"binary/temporal-wire", "json/protobuf"}
-    )
-
-
-temporal_wire_data_converter = DataConverter(
-    payload_converter_class=TemporalWireDefaultPayloadConverter
+temporal_intermediate_data_converter = DataConverter(
+    payload_converter_class=TemporalIntermediateDefaultPayloadConverter
 )
 
 
@@ -162,13 +125,13 @@ def env_type(request: pytest.FixtureRequest) -> str:
 async def env(env_type: str) -> AsyncIterator[WorkflowEnvironment]:
     if env_type == "local":
         workflow_environment = await WorkflowEnvironment.start_local(  # pyright: ignore[reportUnknownMemberType]
-            data_converter=temporal_wire_data_converter
+            data_converter=temporal_intermediate_data_converter
         )
     else:
         workflow_environment = WorkflowEnvironment.from_client(
             await Client.connect(
                 env_type,
-                data_converter=temporal_wire_data_converter,
+                data_converter=temporal_intermediate_data_converter,
             )
         )
 

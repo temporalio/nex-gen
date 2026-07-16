@@ -160,7 +160,8 @@ impl ModelBackend {
         if !self.model_needs_wire_method(model) {
             return None;
         }
-        let interface_name = qualify_dotnet_support_reference("ITemporalWire", support_namespace);
+        let interface_name =
+            qualify_dotnet_support_reference("ITemporalIntermediate", support_namespace);
         Some(interface_name)
     }
 
@@ -241,10 +242,10 @@ impl ModelBackend {
                     );
                     if let Some(payload_converter_expr) = payload_converter_expr {
                         format!(
-                            "({raw_type}){source_expr}.TemporalToWire({payload_converter_expr})"
+                            "({raw_type}){source_expr}.TemporalToIntermediate({payload_converter_expr})"
                         )
                     } else {
-                        format!("({raw_type}){source_expr}.TemporalToWire()")
+                        format!("({raw_type}){source_expr}.TemporalToIntermediate()")
                     }
                 } else {
                     self.message_to_wire_expr(
@@ -449,7 +450,7 @@ fn render_model_to_proto_method(
     );
     let backend = ModelBackend;
     render_model_from_wire_method(output, model, api_plan, support_namespace, &raw_type);
-    output.push_str("    public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n");
+    output.push_str("    public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n");
     output.push_str("        var proto = new ");
     output.push_str(&raw_type);
     output.push_str("();\n");
@@ -492,7 +493,7 @@ fn render_model_from_wire_method(
     let type_name = csharp_type_name(&model.name);
     output.push_str("    public static ");
     output.push_str(&type_name);
-    output.push_str(" TemporalFromWire(");
+    output.push_str(" TemporalFromIntermediate(");
     output.push_str(raw_type);
     output.push_str(
         " wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n",
@@ -637,7 +638,7 @@ fn value_from_wire_expr(
                 .unwrap_or_else(|| csharp_type_name(&record.model_name));
             optional_message_from_wire_expr(
                 source_expr,
-                &format!("{model_name}.TemporalFromWire({{value}}, payloadConverter)"),
+                &format!("{model_name}.TemporalFromIntermediate({{value}}, payloadConverter)"),
                 optional,
             )
         }

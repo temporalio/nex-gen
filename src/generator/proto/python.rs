@@ -210,9 +210,10 @@ fn generated_wire_conversion(
         return Some(WireValueConversion {
             annotation: model_name.clone(),
             from_wire: format!(
-                "{model_name}._temporal_from_wire({{wire}}, payload_converter=payload_converter)"
+                "{model_name}._temporal_from_intermediate({{wire}}, payload_converter=payload_converter)"
             ),
-            to_wire: "{value}._temporal_to_wire(payload_converter=payload_converter)".to_string(),
+            to_wire: "{value}._temporal_to_intermediate(payload_converter=payload_converter)"
+                .to_string(),
             imports: PythonImports::default(),
             supports_unpacked_input: true,
         });
@@ -644,7 +645,7 @@ fn render_record_wire_block(
             output.push('\n');
         }
         output.push_str("    @classmethod\n");
-        output.push_str("    def _temporal_from_wire(\n");
+        output.push_str("    def _temporal_from_intermediate(\n");
         output.push_str("        cls,\n");
         output.push_str(if model.fields.is_empty() {
             "        _wire: "
@@ -725,7 +726,7 @@ fn render_record_wire_block(
                 output.push('\n');
             }
         }
-        output.push_str("    def _temporal_to_wire(\n");
+        output.push_str("    def _temporal_to_intermediate(\n");
         output.push_str("        self,\n");
         output.push_str("        *,\n");
         output.push_str(

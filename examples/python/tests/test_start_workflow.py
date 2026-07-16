@@ -140,7 +140,7 @@ def test_generated_metadata() -> None:
 
 def test_workflow_execution_serializes() -> None:
     request = start_workflow_models.WorkflowExecution(workflow_id="workflow-id")
-    proto = request._temporal_to_wire()  # pyright: ignore[reportPrivateUsage]
+    proto = request._temporal_to_intermediate()  # pyright: ignore[reportPrivateUsage]
 
     assert proto.workflow_id == "workflow-id"
     assert proto.run_id == ""

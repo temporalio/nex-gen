@@ -12,7 +12,7 @@ namespace NexGen.TypeRoundtripService
 {
 
     [GeneratedCode("nex-gen", null)]
-    public class ActivityOptions : NexGen.Support.ITemporalWire
+    public class ActivityOptions : NexGen.Support.ITemporalIntermediate
     {
         public ActivityOptions(Temporalio.Common.RetryPolicy retryPolicy)
         {
@@ -24,7 +24,7 @@ namespace NexGen.TypeRoundtripService
         public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
         public Temporalio.Common.Priority? Priority { get; init; }
 
-        public static ActivityOptions TemporalFromWire(Temporalio.Api.Activity.V1.ActivityOptions wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public static ActivityOptions TemporalFromIntermediate(Temporalio.Api.Activity.V1.ActivityOptions wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             return new ActivityOptions(NexGen.Support.ProtoExtensions.FromRetryPolicyProto(wire.RetryPolicy, payloadConverter))
             {
@@ -34,7 +34,7 @@ namespace NexGen.TypeRoundtripService
             };
         }
 
-        public object TemporalToWire(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
         {
             var proto = new Temporalio.Api.Activity.V1.ActivityOptions();
             if (TaskQueue is { } taskQueue)

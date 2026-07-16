@@ -28,7 +28,7 @@ class ActivityOptions:
     priority: temporalio.common.Priority | None = None
 
     @classmethod
-    def _temporal_from_wire(
+    def _temporal_from_intermediate(
         cls,
         proto: temporalio.api.activity.v1.message_pb2.ActivityOptions,
         *,
@@ -59,7 +59,7 @@ class ActivityOptions:
             else None,
         )
 
-    def _temporal_to_wire(
+    def _temporal_to_intermediate(
         self,
         *,
         payload_converter: temporalio.converter.PayloadConverter | None = None,

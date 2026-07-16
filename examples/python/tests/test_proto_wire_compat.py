@@ -4,29 +4,26 @@ import base64
 import datetime
 import json
 from pathlib import Path
-import typing
 
-import temporalio.common
 from temporalio.api.common.v1 import Payload
+import temporalio.common
 
-from conftest import temporal_wire_data_converter
+from conftest import temporal_intermediate_data_converter
 from wit.type_roundtrip.models import ActivityOptions
 
 
-WIRE_FIXTURE_DIR = Path(__file__).resolve().parents[2] / "wire" / "proto"
+WIRE_FIXTURE_DIR = (
+    Path(__file__).resolve().parents[2] / "wire" / "proto" / "type_roundtrip"
+)
 
 
-def load_payload(example_id: str, name: str) -> Payload:
-    fixture = json.loads(
-        (WIRE_FIXTURE_DIR / example_id / name).read_text(encoding="utf-8")
-    )
-    metadata = {
-        key: base64.b64decode(value)
-        for key, value in typing.cast(dict[str, str], fixture["metadata"]).items()
-    }
+def read_payload(name: str) -> Payload:
+    fixture = json.loads((WIRE_FIXTURE_DIR / name).read_text(encoding="utf-8"))
     return Payload(
-        metadata=metadata,
-        data=base64.b64decode(typing.cast(str, fixture["data"])),
+        metadata={
+            key: base64.b64decode(value) for key, value in fixture["metadata"].items()
+        },
+        data=base64.b64decode(fixture["data"]),
     )
 
 
@@ -42,13 +39,45 @@ def assert_activity_options_model(decoded: object) -> None:
     )
 
 
-def test_activity_options_temporal_wire_fixtures_decode() -> None:
-    converter = temporal_wire_data_converter.payload_converter
+def test_activity_options_intermediate_conversion_delegates_payload_encoding() -> None:
+    converter = temporal_intermediate_data_converter.payload_converter
+    activity_options = ActivityOptions(
+        retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
+        task_queue="demo-task-queue",
+        schedule_to_close_timeout=datetime.timedelta(seconds=7),
+        priority=temporalio.common.Priority(
+            priority_key=4,
+            fairness_key="tenant-a",
+            fairness_weight=2.5,
+        ),
+    )
 
+    payload = converter.to_payloads([activity_options])[0]
+    assert payload.metadata["encoding"] == b"json/protobuf"
+    assert (
+        payload.metadata["messageType"] == b"temporal.api.activity.v1.ActivityOptions"
+    )
+    assert all("temporal-wire" not in key for key in payload.metadata)
+    assert all(b"temporal-wire" not in value for value in payload.metadata.values())
+    encoded = json.loads(payload.data)
+    assert encoded["taskQueue"]["name"] == "demo-task-queue"
+    assert encoded["retryPolicy"]["maximumAttempts"] == 3
+
+    decoded = converter.from_payloads([payload], [ActivityOptions])[0]
+    assert_activity_options_model(decoded)
+
+
+def test_activity_options_fixtures_decode_to_user_type() -> None:
+    converter = temporal_intermediate_data_converter.payload_converter
     for fixture_name in (
         "activity-options.python.payload.json",
         "activity-options.dotnet.payload.json",
     ):
-        payload = load_payload("type_roundtrip", fixture_name)
+        payload = read_payload(fixture_name)
+        assert payload.metadata["encoding"] == b"json/protobuf"
+        assert (
+            payload.metadata["messageType"]
+            == b"temporal.api.activity.v1.ActivityOptions"
+        )
         decoded = converter.from_payloads([payload], [ActivityOptions])[0]
         assert_activity_options_model(decoded)

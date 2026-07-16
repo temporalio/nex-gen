@@ -61,7 +61,7 @@ namespace NexGen.DotNetExamples.Tests
         {
             await using var env = await WorkflowEnvironment.StartLocalAsync(new());
             var dataConverter = new DataConverter(
-                new TemporalWirePayloadConverter(),
+                new TemporalIntermediatePayloadConverter(),
                 DataConverter.Default.FailureConverter,
                 DataConverter.Default.PayloadCodec);
             var client = new TemporalClient(

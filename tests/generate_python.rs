@@ -613,7 +613,7 @@ fn python_request_models_are_bidirectional_wire_models() {
     assert!(rendered.contains("user_metadata=user_metadata,"));
     assert!(rendered.contains("return await _signal_with_start_workflow(request)"));
     assert!(rendered.contains("payloads_to_proto(self.args, payload_converter=payload_converter)"));
-    assert!(models.contains("def _temporal_from_wire("));
+    assert!(models.contains("def _temporal_from_intermediate("));
     assert!(!models.contains("def from_proto("));
     assert!(models.contains("from ._support import ("));
     assert!(models.contains("retry_policy_to_proto,"));

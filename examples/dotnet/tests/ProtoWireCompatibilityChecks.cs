@@ -13,9 +13,9 @@ namespace NexGen.DotNetExamples.Tests
     public class ProtoWireCompatibilityChecks
     {
         [Fact]
-        public void ActivityOptionsTemporalWireFixturesDecode()
+        public void ActivityOptionsIntermediateFixturesDecodeToUserType()
         {
-            var converter = new TemporalWirePayloadConverter();
+            var converter = new TemporalIntermediatePayloadConverter();
 
             foreach (var fixtureName in new[]
             {
@@ -24,6 +24,13 @@ namespace NexGen.DotNetExamples.Tests
             })
             {
                 var payload = ReadPayload("type_roundtrip", fixtureName);
+                Assert.Equal("json/protobuf", payload.Metadata["encoding"].ToStringUtf8());
+                Assert.Equal(
+                    "temporal.api.activity.v1.ActivityOptions",
+                    payload.Metadata["messageType"].ToStringUtf8());
+                Assert.DoesNotContain(
+                    payload.Metadata,
+                    item => item.Key.Contains("temporal-wire", StringComparison.Ordinal));
                 AssertActivityOptionsModel(converter.ToValue(payload, typeof(ActivityOptions)));
             }
         }
