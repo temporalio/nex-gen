@@ -9,22 +9,17 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// --- Helpers ---
-
-func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient {
-	return workflow.NewNexusClient(endpoint, service)
-}
-
 // --- Operations (internal) ---
 
-func activityOptionsOperation(ctx workflow.Context, client workflow.NexusClient, request ActivityOptions) workflow.Future {
+func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) workflow.Future {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
 		result, resultSettable := workflow.NewFuture(ctx)
 		resultSettable.SetError(err)
 		return result
 	}
-	fut := client.ExecuteOperation(ctx, "ActivityOptionsOperation", requestProto, workflow.NexusOperationOptions{})
+	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
+	fut := c.ExecuteOperation(ctx, "ActivityOptionsOperation", requestProto, workflow.NexusOperationOptions{})
 	result, resultSettable := workflow.NewFuture(ctx)
 	workflow.Go(ctx, func(ctx workflow.Context) {
 		var result activity.ActivityOptions
@@ -40,16 +35,6 @@ func activityOptionsOperation(ctx workflow.Context, client workflow.NexusClient,
 		resultSettable.Set(value, nil)
 	})
 	return result
-}
-
-// --- Service clients ---
-
-type TypeRoundtripServiceClient struct {
-	client workflow.NexusClient
-}
-
-func NewTypeRoundtripServiceClient(endpoint string) *TypeRoundtripServiceClient {
-	return &TypeRoundtripServiceClient{client: nexGenNewNexusClient(endpoint, "TypeRoundtripService")}
 }
 
 // --- Operations (public API) ---
@@ -153,8 +138,7 @@ func ActivityOptionsOperation(ctx workflow.Context, opts ActivityOptionsOperatio
 	if opts.ScheduleToCloseTimeout != 0 {
 		scheduleToCloseTimeout = &opts.ScheduleToCloseTimeout
 	}
-	client := nexGenNewNexusClient("temporal-system", "TypeRoundtripService")
-	return activityOptionsOperation(ctx, client, ActivityOptions{
+	return activityOptionsOperation(ctx, ActivityOptions{
 		TaskQueue:              taskQueue,
 		RetryPolicy:            opts.RetryPolicy,
 		ScheduleToCloseTimeout: scheduleToCloseTimeout,

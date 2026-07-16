@@ -257,7 +257,7 @@ fn cli_generates_go_with_package_self_imports_removed() {
     assert!(!api.contains("type OperationFuture interface {"));
     assert!(
         api.contains(
-            "func getUser(ctx Context, client NexusClient, request getUserRequest) Future"
+            "func getUser(ctx Context, request getUserRequest) Future"
         )
     );
     assert!(!api.contains("const ServiceName"));
@@ -434,7 +434,7 @@ interface sample-service {
 
     assert!(rendered.contains("\"example.com/nexgen/handles\""));
     assert!(rendered.contains(
-        "func getHandle(ctx workflow.Context, client workflow.NexusClient, request transformRequest) workflow.Future {"
+        "func getHandle(ctx workflow.Context, request transformRequest) workflow.Future {"
     ));
     assert!(rendered.contains("result, resultSettable := workflow.NewFuture(ctx)"));
     assert!(rendered.contains("workflow.Go(ctx, func(ctx workflow.Context) {"));
@@ -878,18 +878,18 @@ fn go_type_showcase_generates_expected_types() {
     // Unexported operation wrapper functions
     assert!(
         rendered
-            .contains("func getUser(ctx workflow.Context, client workflow.NexusClient, request getUserRequest) workflow.Future")
+            .contains("func getUser(ctx workflow.Context, request getUserRequest) workflow.Future")
     );
     assert!(rendered.contains(
-        "func updateEmail(ctx workflow.Context, client workflow.NexusClient, request updateEmailRequest) workflow.Future"
+        "func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Future"
     ));
-    assert!(rendered.contains("nexGenNewNexusClient(\"type-showcase\", \"TypeShowcase\")"));
+    assert!(rendered.contains("workflow.NewNexusClient(\"type-showcase\", \"TypeShowcase\")"));
     assert!(rendered.contains(
-        "client.ExecuteOperation(ctx, \"GetUser\", request, workflow.NexusOperationOptions{})"
+        "c.ExecuteOperation(ctx, \"GetUser\", request, workflow.NexusOperationOptions{})"
     ));
     // Void operation
     assert!(rendered.contains(
-        "func deactivate(ctx workflow.Context, client workflow.NexusClient, request deactivateRequest) workflow.Future"
+        "func deactivate(ctx workflow.Context, request deactivateRequest) workflow.Future"
     ));
     assert!(rendered.contains("\treturn fut\n"));
 
@@ -984,7 +984,7 @@ fn go_type_roundtrip_generates_proto_conversions() {
     // decode the proto response afterwards.
     assert!(rendered.contains("requestProto, err := request.toProto(ctx)"));
     assert!(rendered.contains(
-        "fut := client.ExecuteOperation(ctx, \"ActivityOptionsOperation\", requestProto, workflow.NexusOperationOptions{})"
+        "fut := c.ExecuteOperation(ctx, \"ActivityOptionsOperation\", requestProto, workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains("var result activity.ActivityOptions"));
     assert!(rendered.contains("value, err := activityOptionsFromProto(ctx, &result)"));
@@ -1016,7 +1016,7 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
         "\tif err != nil {\n\t\tresult, resultSettable := workflow.NewFuture(ctx)\n\t\tresultSettable.SetError(err)\n\t\treturn result\n\t}\n"
     ));
     assert!(rendered.contains(
-        "fut := client.ExecuteOperation(ctx, \"StartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
+        "fut := c.ExecuteOperation(ctx, \"StartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains("\tvar result workflowservice.StartWorkflowExecutionResponse\n"));
     assert!(rendered.contains(
@@ -1029,7 +1029,7 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
         "func NewStartedWorkflow(namespace string, workflowId string, runId string) StartedWorkflow"
     ));
     assert!(rendered.contains(
-        "fut := client.ExecuteOperation(ctx, \"RestartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
+        "fut := c.ExecuteOperation(ctx, \"RestartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains("func StartWorkflow("));
     assert!(rendered.contains(
@@ -1046,7 +1046,7 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
         "func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) workflow.Future"
     ));
     assert!(rendered.contains(
-        "return restartWorkflow(ctx, nexGenNewNexusClient(\"temporal-system\", \"StartWorkflowService\"), startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})"
+        "return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})"
     ));
     assert!(rendered.contains("\t\tArgs: args,\n"));
     assert!(!rendered.contains("opts.Args"));

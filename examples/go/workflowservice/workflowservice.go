@@ -16,12 +16,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// --- Helpers ---
-
-func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient {
-	return workflow.NewNexusClient(endpoint, service)
-}
-
 // --- Datatypes ---
 
 type signalWithStartWorkflowRequest struct {
@@ -165,14 +159,15 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 
 // --- Operations (internal) ---
 
-func signalWithStartWorkflow(ctx workflow.Context, client workflow.NexusClient, request signalWithStartWorkflowRequest) workflow.Future {
+func signalWithStartWorkflow(ctx workflow.Context, request signalWithStartWorkflowRequest) workflow.Future {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
 		result, resultSettable := workflow.NewFuture(ctx)
 		resultSettable.SetError(err)
 		return result
 	}
-	fut := client.ExecuteOperation(ctx, "SignalWithStartWorkflowExecution", requestProto, workflow.NexusOperationOptions{})
+	c := workflow.NewNexusClient("temporal-system", "temporal.api.workflowservice.v1.WorkflowService")
+	fut := c.ExecuteOperation(ctx, "SignalWithStartWorkflowExecution", requestProto, workflow.NexusOperationOptions{})
 	result, resultSettable := workflow.NewFuture(ctx)
 	workflow.Go(ctx, func(ctx workflow.Context) {
 		var result workflowservice.SignalWithStartWorkflowExecutionResponse
@@ -188,16 +183,6 @@ func signalWithStartWorkflow(ctx workflow.Context, client workflow.NexusClient, 
 		resultSettable.Set(value, nil)
 	})
 	return result
-}
-
-// --- Service clients ---
-
-type WorkflowServiceClient struct {
-	client workflow.NexusClient
-}
-
-func NewWorkflowServiceClient(endpoint string) *WorkflowServiceClient {
-	return &WorkflowServiceClient{client: nexGenNewNexusClient(endpoint, "temporal.api.workflowservice.v1.WorkflowService")}
 }
 
 // --- Operations (public API) ---
@@ -403,8 +388,7 @@ func SignalWithStartWorkflow(
 			panic("nex-gen function name requires string or function")
 		}
 	}
-	client := nexGenNewNexusClient("temporal-system", "temporal.api.workflowservice.v1.WorkflowService")
-	return signalWithStartWorkflow(ctx, client, signalWithStartWorkflowRequest{
+	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
 		Id:                 opts.Id,
@@ -483,8 +467,7 @@ func SignalWithStartWorkflowTyped[WorkflowArg any, WorkflowResult any](
 		shortName := elements[len(elements)-1]
 		workflowName = strings.TrimSuffix(shortName, "-fm")
 	}
-	client := nexGenNewNexusClient("temporal-system", "temporal.api.workflowservice.v1.WorkflowService")
-	return signalWithStartWorkflow(ctx, client, signalWithStartWorkflowRequest{
+	return signalWithStartWorkflow(ctx, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               []any{arg},
 		Id:                 opts.Id,

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use heck::{ToSnakeCase, ToUpperCamelCase};
+use heck::{ToKebabCase, ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
 use crate::SupportFiles;
@@ -585,10 +585,6 @@ impl GoPackageContext {
         self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Context")
     }
 
-    pub(in crate::generator) fn workflow_nexus_client_type(&self) -> String {
-        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.NexusClient")
-    }
-
     fn workflow_future_type(&self) -> String {
         self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Future")
     }
@@ -1152,7 +1148,7 @@ impl<'a> ApiPlanner<'a> {
                     endpoint: service
                         .endpoint
                         .clone()
-                        .or_else(|| Some(service.name.clone())),
+                        .or_else(|| Some(service.name.to_kebab_case())),
                     operations,
                     resources: service
                         .resources
@@ -3174,13 +3170,6 @@ fn render_file(
     }
 
     let has_operations = services.iter().any(|s| !s.operations.is_empty());
-    if has_operations {
-        output.push_str("\n// --- Helpers ---\n");
-    }
-    if has_operations {
-        output.push('\n');
-        render_nexus_client_helper(&mut output, package);
-    }
 
     // --- Datatypes ---
     let private_enums = enums
@@ -3270,15 +3259,6 @@ fn render_file(
                 output.push('\n');
                 render_operation_function(&mut output, service, operation, package);
             }
-        }
-    }
-
-    // --- Service clients ---
-    if has_operations {
-        output.push_str("\n// --- Service clients ---\n");
-        for service in services {
-            output.push('\n');
-            render_service_client(&mut output, service, package, visibility);
         }
     }
 
@@ -3890,9 +3870,9 @@ fn render_resource_methods(
     package: &GoPackageContext,
     visibility: &GoVisibility,
 ) {
-    let Some(endpoint) = &service.endpoint else {
+    if service.endpoint.is_none() {
         return;
-    };
+    }
     for method in &resource.methods {
         output.push('\n');
         let method_name = go_field_name(&method.name);
@@ -4054,8 +4034,6 @@ fn render_resource_methods(
                 output.push_str("\treturn ");
                 output.push_str(&operation.func_name);
                 output.push_str("(ctx, ");
-                output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
-                output.push_str(", ");
                 output.push_str(&request_expr);
                 output.push_str(")\n");
                 output.push_str("}\n");
@@ -4137,66 +4115,13 @@ pub(in crate::generator) fn render_operation_future_adapter(
     output.push_str("\treturn result\n");
 }
 
-fn render_nexus_client_helper(output: &mut String, package: &GoPackageContext) {
-    output.push_str("func nexGenNewNexusClient(endpoint string, service string) ");
-    output.push_str(&package.workflow_nexus_client_type());
-    output.push_str(" {\n\treturn ");
-    output.push_str(&package.new_nexus_client());
-    output.push_str("(endpoint, service)\n}\n");
-}
-
-fn new_nexus_client_expr(
-    endpoint: &str,
-    service_name: &str,
-    _package: &GoPackageContext,
-) -> String {
+fn new_nexus_client_expr(endpoint: &str, service_name: &str, package: &GoPackageContext) -> String {
     format!(
-        "nexGenNewNexusClient({}, {})",
+        "{}({}, {})",
+        package.new_nexus_client(),
         go_string_literal(endpoint),
         go_string_literal(service_name)
     )
-}
-
-fn render_service_client(
-    output: &mut String,
-    service: &RenderedService<'_>,
-    package: &GoPackageContext,
-    _visibility: &GoVisibility,
-) {
-    let service_name = service_client_name(service);
-    output.push_str("type ");
-    output.push_str(&service_name);
-    output.push_str(" struct {\n\tclient ");
-    output.push_str(&package.workflow_nexus_client_type());
-    output.push_str("\n}\n\n");
-
-    output.push_str("func New");
-    output.push_str(&service_name);
-    output.push_str("(endpoint string) *");
-    output.push_str(&service_name);
-    output.push_str(" {\n\treturn &");
-    output.push_str(&service_name);
-    output.push_str("{client: nexGenNewNexusClient(endpoint, ");
-    output.push_str(&go_string_literal(service.wire_name));
-    output.push_str(")}\n}\n");
-
-    for operation in &service.operations {
-        output.push('\n');
-        if operation.unpacked_input.is_some() {
-            continue;
-        } else {
-            render_client_forwarding_method(output, service, operation, package);
-        }
-    }
-}
-
-fn service_client_name(service: &RenderedService<'_>) -> String {
-    let base_name = service
-        .wire_name
-        .rsplit(['.', ':', '/'])
-        .next()
-        .unwrap_or(service.wire_name);
-    format!("{}Client", go_field_name(base_name))
 }
 
 /// Renders an unexported operation wrapper function that creates a Nexus
@@ -4230,7 +4155,7 @@ fn render_operation_function(
     package: &GoPackageContext,
 ) {
     if let Some(binding) = &operation.wire_binding {
-        proto::render_operation_function_proto(output, operation, binding, package);
+        proto::render_operation_function_proto(output, service, operation, binding, package);
         return;
     }
 
@@ -4240,15 +4165,18 @@ fn render_operation_function(
     output.push_str(&operation.func_name);
     output.push_str("(ctx ");
     output.push_str(&package.workflow_context_type());
-    output.push_str(", client ");
-    output.push_str(&package.workflow_nexus_client_type());
     output.push_str(", request ");
     output.push_str(&operation.input_type);
     output.push_str(") ");
     render_operation_future_return_type(output, package);
     output.push_str(" {\n");
-    let _ = service;
-    output.push_str("\tfut := client.ExecuteOperation(ctx, ");
+    let endpoint = service
+        .endpoint
+        .as_deref()
+        .expect("operations require endpoint");
+    output.push_str("\tc := ");
+    output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
+    output.push_str("\n\tfut := c.ExecuteOperation(ctx, ");
     output.push_str(&operation_name);
     output.push_str(", request, ");
     output.push_str(&package.nexus_operation_options());
@@ -4718,7 +4646,7 @@ fn wrapper_input_docs<'a>(
 /// ```
 fn render_convenience_wrapper(
     output: &mut String,
-    service: &RenderedService<'_>,
+    _service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     params: &[RenderedUnpackedParam],
     package: &GoPackageContext,
@@ -4815,16 +4743,9 @@ fn render_convenience_wrapper(
     // opts.
     render_public_default_punning_locals(output, params);
     render_function_name_inlining(output, params);
-    let endpoint = service
-        .endpoint
-        .as_deref()
-        .expect("public package wrappers require an authored endpoint");
-    output.push_str("\tclient := ");
-    output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
-    output.push('\n');
     output.push_str("\treturn ");
     output.push_str(&operation.func_name);
-    output.push_str("(ctx, client, ");
+    output.push_str("(ctx, ");
     output.push_str(&operation.input_type);
     output.push_str("{\n");
     for param in params {
@@ -4925,7 +4846,7 @@ fn render_operation_params(
 
 fn render_typed_convenience_wrapper(
     output: &mut String,
-    service: &RenderedService<'_>,
+    _service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     params: &[RenderedUnpackedParam],
     package: &GoPackageContext,
@@ -4983,15 +4904,9 @@ fn render_typed_convenience_wrapper(
     output.push_str(" {\n");
     render_public_default_punning_locals(output, params);
     render_exact_function_name_assignment(output, primary);
-    let endpoint = service
-        .endpoint
-        .as_deref()
-        .expect("public wrappers require endpoint");
-    output.push_str("\tclient := ");
-    output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
-    output.push_str("\n\treturn ");
+    output.push_str("\treturn ");
     output.push_str(&operation.func_name);
-    output.push_str("(ctx, client, ");
+    output.push_str("(ctx, ");
     output.push_str(&operation.input_type);
     output.push_str("{\n");
     for param in params {
@@ -5035,7 +4950,7 @@ fn render_typed_convenience_wrapper(
 /// ```
 fn render_forwarding_wrapper(
     output: &mut String,
-    service: &RenderedService<'_>,
+    _service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     package: &GoPackageContext,
 ) {
@@ -5046,7 +4961,7 @@ fn render_forwarding_wrapper(
     output.push_str(&exported_name);
     output.push_str("(ctx ");
     output.push_str(&package.workflow_context_type());
-    output.push_str(", opts ");
+    output.push_str(", _ ");
     output.push_str(&exported_name);
     output.push_str("Options, request ");
     output.push_str(&operation.input_type);
@@ -5055,45 +4970,8 @@ fn render_forwarding_wrapper(
     render_operation_wrapper_return_type(output, package);
 
     output.push_str(" {\n");
-    output.push_str("\t_ = opts\n");
-    let endpoint = service
-        .endpoint
-        .as_deref()
-        .expect("public package wrappers require an authored endpoint");
-    output.push_str("\tclient := ");
-    output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
-    output.push('\n');
     output.push_str("\treturn ");
     output.push_str(&operation.func_name);
-    output.push_str("(ctx, client, request)\n");
-    output.push_str("}\n");
-}
-
-fn render_client_forwarding_method(
-    output: &mut String,
-    service: &RenderedService<'_>,
-    operation: &RenderedOperation<'_>,
-    package: &GoPackageContext,
-) {
-    let method_name = go_field_name(operation.name);
-
-    render_operation_doc_comment(output, operation, &[]);
-    output.push_str("func (c *");
-    output.push_str(&service_client_name(service));
-    output.push_str(") ");
-    output.push_str(&method_name);
-    output.push_str("(ctx ");
-    output.push_str(&package.workflow_context_type());
-    output.push_str(", opts ");
-    output.push_str(&method_name);
-    output.push_str("Options, request ");
-    output.push_str(&operation.input_type);
-    output.push_str(") ");
-    render_operation_wrapper_return_type(output, package);
-    output.push_str(" {\n");
-    output.push_str("\t_ = opts\n");
-    output.push_str("\treturn ");
-    output.push_str(&operation.func_name);
-    output.push_str("(ctx, c.client, request)\n");
+    output.push_str("(ctx, request)\n");
     output.push_str("}\n");
 }

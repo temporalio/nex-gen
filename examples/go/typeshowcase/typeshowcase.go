@@ -5,12 +5,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// --- Helpers ---
-
-func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient {
-	return workflow.NewNexusClient(endpoint, service)
-}
-
 // --- Datatypes ---
 
 type getUserRequest struct {
@@ -69,11 +63,11 @@ func NewUser(userId string, email string, displayName string, status UserStatus,
 }
 
 func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.Future {
-	return updateEmail(ctx, nexGenNewNexusClient("type-showcase", "TypeShowcase"), updateEmailRequest{UserId: u.UserId, Email: email})
+	return updateEmail(ctx, updateEmailRequest{UserId: u.UserId, Email: email})
 }
 
 func (u *User) Rename(ctx workflow.Context, displayName string) workflow.Future {
-	return rename(ctx, nexGenNewNexusClient("type-showcase", "TypeShowcase"), renameRequest{UserId: u.UserId, DisplayName: displayName})
+	return rename(ctx, renameRequest{UserId: u.UserId, DisplayName: displayName})
 }
 
 func (u *User) Deactivate(ctx workflow.Context, reason string) workflow.Future {
@@ -81,49 +75,45 @@ func (u *User) Deactivate(ctx workflow.Context, reason string) workflow.Future {
 	if reason != "" {
 		reasonPtr = &reason
 	}
-	return deactivate(ctx, nexGenNewNexusClient("type-showcase", "TypeShowcase"), deactivateRequest{UserId: u.UserId, Reason: reasonPtr})
+	return deactivate(ctx, deactivateRequest{UserId: u.UserId, Reason: reasonPtr})
 }
 
 // --- Operations (internal) ---
 
-func getUser(ctx workflow.Context, client workflow.NexusClient, request getUserRequest) workflow.Future {
-	fut := client.ExecuteOperation(ctx, "GetUser", request, workflow.NexusOperationOptions{})
+func getUser(ctx workflow.Context, request getUserRequest) workflow.Future {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "GetUser", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func updateEmail(ctx workflow.Context, client workflow.NexusClient, request updateEmailRequest) workflow.Future {
-	fut := client.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
+func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Future {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func rename(ctx workflow.Context, client workflow.NexusClient, request renameRequest) workflow.Future {
-	fut := client.ExecuteOperation(ctx, "Rename", request, workflow.NexusOperationOptions{})
+func rename(ctx workflow.Context, request renameRequest) workflow.Future {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "Rename", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func setProfile(ctx workflow.Context, client workflow.NexusClient, request setProfileRequest) workflow.Future {
-	fut := client.ExecuteOperation(ctx, "SetProfile", request, workflow.NexusOperationOptions{})
+func setProfile(ctx workflow.Context, request setProfileRequest) workflow.Future {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "SetProfile", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func recordSync(ctx workflow.Context, client workflow.NexusClient, request recordSyncRequest) workflow.Future {
-	fut := client.ExecuteOperation(ctx, "RecordSync", request, workflow.NexusOperationOptions{})
+func recordSync(ctx workflow.Context, request recordSyncRequest) workflow.Future {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "RecordSync", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func deactivate(ctx workflow.Context, client workflow.NexusClient, request deactivateRequest) workflow.Future {
-	fut := client.ExecuteOperation(ctx, "Deactivate", request, workflow.NexusOperationOptions{})
+func deactivate(ctx workflow.Context, request deactivateRequest) workflow.Future {
+	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
+	fut := c.ExecuteOperation(ctx, "Deactivate", request, workflow.NexusOperationOptions{})
 	return fut
-}
-
-// --- Service clients ---
-
-type TypeShowcaseClient struct {
-	client workflow.NexusClient
-}
-
-func NewTypeShowcaseClient(endpoint string) *TypeShowcaseClient {
-	return &TypeShowcaseClient{client: nexGenNewNexusClient(endpoint, "TypeShowcase")}
 }
 
 // --- Operations (public API) ---
@@ -225,8 +215,7 @@ func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.Future {
 	if opts.ConsistencyToken != "" {
 		consistencyToken = &opts.ConsistencyToken
 	}
-	client := nexGenNewNexusClient("type-showcase", "TypeShowcase")
-	return getUser(ctx, client, getUserRequest{
+	return getUser(ctx, getUserRequest{
 		UserId:           opts.UserId,
 		ConsistencyToken: consistencyToken,
 	})
@@ -240,8 +229,7 @@ type UpdateEmailOptions struct {
 }
 
 func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.Future {
-	client := nexGenNewNexusClient("type-showcase", "TypeShowcase")
-	return updateEmail(ctx, client, updateEmailRequest{
+	return updateEmail(ctx, updateEmailRequest{
 		UserId: opts.UserId,
 		Email:  opts.Email,
 	})
@@ -255,8 +243,7 @@ type RenameOptions struct {
 }
 
 func Rename(ctx workflow.Context, opts RenameOptions) workflow.Future {
-	client := nexGenNewNexusClient("type-showcase", "TypeShowcase")
-	return rename(ctx, client, renameRequest{
+	return rename(ctx, renameRequest{
 		UserId:      opts.UserId,
 		DisplayName: opts.DisplayName,
 	})
@@ -270,8 +257,7 @@ type SetProfileOptions struct {
 }
 
 func SetProfile(ctx workflow.Context, opts SetProfileOptions) workflow.Future {
-	client := nexGenNewNexusClient("type-showcase", "TypeShowcase")
-	return setProfile(ctx, client, setProfileRequest{
+	return setProfile(ctx, setProfileRequest{
 		UserId:  opts.UserId,
 		Profile: opts.Profile,
 	})
@@ -285,8 +271,7 @@ type RecordSyncOptions struct {
 }
 
 func RecordSync(ctx workflow.Context, opts RecordSyncOptions) workflow.Future {
-	client := nexGenNewNexusClient("type-showcase", "TypeShowcase")
-	return recordSync(ctx, client, recordSyncRequest{
+	return recordSync(ctx, recordSyncRequest{
 		UserId: opts.UserId,
 		Report: opts.Report,
 	})
@@ -304,8 +289,7 @@ func Deactivate(ctx workflow.Context, opts DeactivateOptions) workflow.Future {
 	if opts.Reason != "" {
 		reason = &opts.Reason
 	}
-	client := nexGenNewNexusClient("type-showcase", "TypeShowcase")
-	return deactivate(ctx, client, deactivateRequest{
+	return deactivate(ctx, deactivateRequest{
 		UserId: opts.UserId,
 		Reason: reason,
 	})

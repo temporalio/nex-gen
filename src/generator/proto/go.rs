@@ -794,6 +794,7 @@ impl ModelBackend {
 /// the SDK call and deserializes the proto response afterwards.
 pub(in crate::generator) fn render_operation_function_proto(
     output: &mut String,
+    service: &crate::generator::go::RenderedService<'_>,
     operation: &crate::generator::go::RenderedOperation<'_>,
     binding: &OperationBinding,
     package: &GoPackageContext,
@@ -804,8 +805,6 @@ pub(in crate::generator) fn render_operation_function_proto(
     output.push_str(&operation.func_name);
     output.push_str("(ctx ");
     output.push_str(&package.workflow_context_type());
-    output.push_str(", client ");
-    output.push_str(&package.workflow_nexus_client_type());
     output.push_str(", request ");
     output.push_str(&operation.input_type);
     output.push_str(") ");
@@ -822,7 +821,18 @@ pub(in crate::generator) fn render_operation_function_proto(
     output.push_str("\t\tresultSettable.SetError(err)\n");
     output.push_str("\t\treturn result\n");
     output.push_str("\t}\n");
-    output.push_str("\tfut := client.ExecuteOperation(ctx, ");
+    let endpoint = service
+        .endpoint
+        .as_deref()
+        .expect("operations require endpoint");
+    output.push_str("\tc := ");
+    output.push_str(&package.new_nexus_client());
+    output.push('(');
+    output.push_str(&go_string_literal(endpoint));
+    output.push_str(", ");
+    output.push_str(&go_string_literal(service.wire_name));
+    output.push_str(")\n");
+    output.push_str("\tfut := c.ExecuteOperation(ctx, ");
     output.push_str(&operation_name);
     output.push_str(", requestProto");
     output.push_str(", ");
