@@ -6,7 +6,7 @@ import google.protobuf.duration_pb2
 import temporalio.api.common.v1.message_pb2 as common_pb2
 import temporalio.api.enums.v1.workflow_pb2 as workflow_enums_pb2
 import temporalio.api.taskqueue.v1.message_pb2 as taskqueue_pb2
-import temporalio.api.workflow.v1
+import temporalio.api.workflow.v1 as workflow_pb2
 import temporalio.converter as temporalio_converter
 import temporalio.common as temporalio_common
 import temporalio.nexus.system
@@ -213,12 +213,12 @@ def priority_to_proto(
 
 def versioning_override_to_proto(
     versioning_override: temporalio_common.VersioningOverride,
-) -> temporalio.api.workflow.v1.VersioningOverride:
+) -> workflow_pb2.VersioningOverride:
     return versioning_override._to_proto()
 
 
 def versioning_override_from_proto(
-    proto: temporalio.api.workflow.v1.VersioningOverride,
+    proto: workflow_pb2.VersioningOverride,
 ) -> temporalio_common.VersioningOverride:
     if proto.HasField("pinned") and proto.pinned.HasField("version"):
         version = proto.pinned.version
