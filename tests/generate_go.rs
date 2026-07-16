@@ -9,6 +9,35 @@ use nex_gen::{GenerateRequest, generate_to_file};
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+fn generate_to_string_with_inputs(
+    language: nex_gen::language::Language,
+    input_paths: &[PathBuf],
+    descriptor_paths: &[PathBuf],
+) -> Result<String, Box<dyn std::error::Error>> {
+    let temp_dir = unique_output_path("go-rendered");
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        language,
+        input_paths: input_paths.to_vec(),
+        support_paths: Vec::new(),
+        descriptor_paths: descriptor_paths.to_vec(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: true,
+    })?;
+    let rendered = if output_path.is_file() {
+        fs::read_to_string(&output_path)?
+    } else {
+        read_go_output_files(&output_path)
+            .into_iter()
+            .map(|(path, contents)| format!("### {}\n{contents}", path.display()))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+    fs::remove_dir_all(temp_dir)?;
+    Ok(rendered)
+}
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -54,30 +83,6 @@ fn go_output_path(root: &Path, example_id: &str) -> PathBuf {
     go_root(root).join(go_package_name(example_id))
 }
 
-fn go_json_output_path(root: &Path, mode: &str, example_id: &str) -> PathBuf {
-    go_root(root)
-        .join("json_schema")
-        .join(mode)
-        .join(go_package_name(example_id))
-}
-
-fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
-    let dir_path = root.join("examples/json-inputs").join(example_id);
-    if dir_path.is_dir() {
-        return dir_path;
-    }
-    for extension in ["yaml", "yml", "json"] {
-        let path = root
-            .join("examples/json-inputs")
-            .join(format!("{example_id}.{extension}"));
-        if path.is_file() {
-            return path;
-        }
-    }
-    root.join("examples/json-inputs")
-        .join(format!("{example_id}.yaml"))
-}
-
 fn go_example_ids(root: &Path) -> Vec<String> {
     let go_root = go_root(root);
     let mut ids = fs::read_dir(root.join("examples/inputs"))
@@ -101,15 +106,6 @@ fn go_example_ids(root: &Path) -> Vec<String> {
         .collect::<Vec<_>>();
     ids.sort();
     ids
-}
-
-fn user_service_input_with_endpoint(root: &Path) -> String {
-    fs::read_to_string(input_path(root, "user-service"))
-        .unwrap()
-        .replace(
-            "interface user-service {",
-            "/// @nexus.endpoint \"user-service\"\ninterface user-service {",
-        )
 }
 
 fn read_go_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
@@ -143,36 +139,6 @@ fn read_go_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
     files
 }
 
-fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
-    files
-        .into_iter()
-        .map(|(path, contents)| format!("### {}\n{contents}", path.display()))
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-fn generate_go_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBuf]) -> String {
-    let temp_dir = unique_output_path("go-rendered");
-    let output_path = temp_dir.join("output");
-    generate_to_file(&GenerateRequest {
-        language: nex_gen::language::Language::Go,
-        input_paths: input_paths.to_vec(),
-        support_paths: Vec::new(),
-        descriptor_paths: descriptor_paths.to_vec(),
-        output_path: output_path.clone(),
-        format: false,
-        generate_native_api: true,
-    })
-    .unwrap();
-    let rendered = if output_path.is_file() {
-        fs::read_to_string(&output_path).unwrap()
-    } else {
-        render_output_files(read_go_output_files(&output_path))
-    };
-    fs::remove_dir_all(temp_dir).unwrap();
-    rendered
-}
-
 fn generate_formatted_go_output(root: &Path, example_id: &str, output_path: &Path) {
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
@@ -199,35 +165,6 @@ fn generate_formatted_go_output(root: &Path, example_id: &str, output_path: &Pat
     assert!(format_status.success());
 }
 
-fn generate_formatted_go_json_output(
-    root: &Path,
-    example_id: &str,
-    output_path: &Path,
-    native_api: bool,
-) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_nex-gen"));
-    command.args([
-        "generate",
-        "--lang",
-        "go",
-        "--input",
-        json_input_path(root, example_id).to_str().unwrap(),
-        "--output",
-        output_path.to_str().unwrap(),
-    ]);
-    if !native_api {
-        command.arg("--no-native-api");
-    }
-    let status = command.status().unwrap();
-    assert!(status.success());
-
-    let format_status = Command::new("gofmt")
-        .args(["-w", output_path.to_str().unwrap()])
-        .status()
-        .unwrap();
-    assert!(format_status.success());
-}
-
 fn unique_output_path(label: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -242,8 +179,6 @@ fn cli_generates_go_support_file_from_parameter() {
     let root = project_root();
     let temp_dir = unique_output_path("go-support-file-input");
     fs::create_dir_all(&temp_dir).unwrap();
-    let temp_input_path = temp_dir.join("user-service.wit");
-    fs::write(&temp_input_path, user_service_input_with_endpoint(&root)).unwrap();
     let support_path = temp_dir.join("custom_support.go");
     let output_path = temp_dir.join("output");
     fs::write(
@@ -258,7 +193,7 @@ fn cli_generates_go_support_file_from_parameter() {
             "--lang",
             "go",
             "--input",
-            temp_input_path.to_str().unwrap(),
+            input_path(&root, "user-service").to_str().unwrap(),
             "--support-file",
             support_path.to_str().unwrap(),
             "--output",
@@ -290,10 +225,11 @@ fn cli_generates_go_with_package_self_imports_removed() {
     let output_path = temp_dir.join("output");
     fs::create_dir_all(&temp_dir).unwrap();
     let temp_input_path = temp_dir.join("user-service.wit");
-    let input = user_service_input_with_endpoint(&root)
+    let input = fs::read_to_string(input_path(&root, "user-service"))
+        .unwrap()
         .replace(
-            "/// @nexus.endpoint \"user-service\"\n",
-            "/// @nexus.endpoint \"user-service\"\n/// @nexus.namespace go=\"go.temporal.io/sdk/workflow\"\n",
+            "interface user-service {",
+            "/// @nexus.namespace go=\"go.temporal.io/sdk/workflow\"\ninterface user-service {",
         );
     fs::write(&temp_input_path, input).unwrap();
 
@@ -318,13 +254,15 @@ fn cli_generates_go_with_package_self_imports_removed() {
     let api = fs::read_to_string(output_path.join("userservice.go")).unwrap();
     assert!(api.contains("package workflow\n"));
     assert!(!api.contains("\"go.temporal.io/sdk/workflow\""));
-    assert!(api.contains(
-        "func getUser(ctx Context, client NexusClient, request getUserRequest) NexusOperationFuture"
-    ));
-    assert!(api.contains("client := nexGenNewNexusClient(\"user-service\", \"UserService\")"));
+    assert!(!api.contains("type OperationFuture interface {"));
+    assert!(
+        api.contains(
+            "func getUser(ctx Context, client NexusClient, request getUserRequest) Future"
+        )
+    );
     assert!(!api.contains("const ServiceName"));
     assert!(!api.contains("const Endpoint"));
-    assert!(!api.contains("GetUserOp"));
+    assert!(!api.contains("const GetUserOp"));
     assert!(api.contains("NexusOperationOptions{}"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
@@ -375,7 +313,12 @@ interface namespace-service {
     )
     .unwrap();
 
-    let rendered = generate_go_to_string(&[wit_path], &[descriptor_path(&root)]);
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &[wit_path],
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
 
     // The sourced map is bound to a field-unique local, evaluated once, and
     // copied into a properly typed proto map.
@@ -439,7 +382,12 @@ interface namespace-service {
     )
     .unwrap();
 
-    let rendered = generate_go_to_string(&[wit_path], &[descriptor_path(&root)]);
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &[wit_path],
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
 
     assert!(rendered.contains("namespace \"go.temporal.io/api/namespace/v1\""));
     assert!(rendered.contains("enums \"go.temporal.io/api/enums/v1\""));
@@ -481,22 +429,30 @@ interface sample-service {
     )
     .unwrap();
 
-    let rendered = generate_go_to_string(&[wit_path], &[]);
+    let rendered =
+        generate_to_string_with_inputs(nex_gen::language::Language::Go, &[wit_path], &[]).unwrap();
 
     assert!(rendered.contains("\"example.com/nexgen/handles\""));
     assert!(rendered.contains(
-        "func getHandle(ctx workflow.Context, client workflow.NexusClient, request transformRequest) workflow.NexusOperationFuture {"
+        "func getHandle(ctx workflow.Context, client workflow.NexusClient, request transformRequest) workflow.Future {"
     ));
-    assert!(rendered.contains("return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {"));
+    assert!(rendered.contains("result, resultSettable := workflow.NewFuture(ctx)"));
+    assert!(rendered.contains("workflow.Go(ctx, func(ctx workflow.Context) {"));
+    assert!(rendered.contains("resultSettable.Set(value, nil)"));
+    assert!(!rendered.contains("nexGenOperationFuture"));
     assert!(rendered.contains("\tvar result transformResponse\n"));
     assert!(rendered.contains("\t\tif err := fut.Get(ctx, &result); err != nil {\n"));
     assert!(
         rendered.contains("\t\tvalue, err := handles.NewValueHandle(request.Id, result.Value)\n")
     );
-    assert!(rendered.contains("\t\t*typedValue = value\n"));
-    assert!(rendered.contains(
-        "func GetHandle(ctx workflow.Context, id string) workflow.NexusOperationFuture {"
-    ));
+    assert!(rendered.contains("\t\tresultSettable.Set(value, nil)\n"));
+    assert!(
+        rendered.contains(
+            "func GetHandle(ctx workflow.Context, opts GetHandleOptions) workflow.Future {"
+        )
+    );
+    assert!(!rendered.contains("NexusOperationFuture"));
+    assert!(!rendered.contains("GetNexusOperationExecution"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
@@ -504,10 +460,14 @@ interface sample-service {
 fn go_examples_generation_matches_checked_in_output() {
     let root = project_root();
     for example_id in go_example_ids(&root) {
-        let temp_dir = unique_output_path(&format!("go-{example_id}"));
-        fs::create_dir_all(&temp_dir).unwrap();
-        fs::write(temp_dir.join("go.mod"), "module examples/go\n\ngo 1.24.0\n").unwrap();
-        let output_path = temp_dir.join(go_package_name(&example_id));
+        let temp_root = unique_output_path(&format!("go-{example_id}"));
+        fs::create_dir_all(&temp_root).unwrap();
+        fs::write(
+            temp_root.join("go.mod"),
+            "module examples/go\n\ngo 1.24.0\n",
+        )
+        .unwrap();
+        let output_path = temp_root.join(go_package_name(&example_id));
         generate_formatted_go_output(&root, &example_id, &output_path);
         let rendered = read_go_output_files(&output_path);
         let expected = read_go_output_files(&go_output_path(&root, &example_id));
@@ -595,10 +555,12 @@ fn go_json_generation_matches_checked_in_output() {
 #[test]
 fn go_function_fields_accept_strings_or_exact_function_pointers() {
     let root = project_root();
-    let rendered = generate_go_to_string(
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
         &example_input_paths(&root, "function-execution"),
         &[descriptor_path(&root)],
-    );
+    )
+    .unwrap();
 
     let service_rendered = rendered
         .split("### functionexecution.go")
@@ -613,15 +575,16 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(service_rendered.contains("\"reflect\""));
     assert!(service_rendered.contains("\"runtime\""));
     assert!(service_rendered.contains("\"strings\""));
-    assert!(service_rendered.contains("\"errors\""));
+    assert!(!service_rendered.contains("\"errors\""));
     assert!(!service_rendered.contains("func nexGenFunctionName[F any](value F) string"));
     assert!(service_rendered.contains("functionName = strings.TrimSuffix(shortName, \"-fm\")"));
+    assert!(service_rendered.contains("rv := reflect.ValueOf(function)"));
     assert!(service_rendered.contains("switch rv := reflect.ValueOf(function); rv.Kind()"));
     assert!(service_rendered.contains("functionName = strings.TrimSuffix(shortName, \"-fm\")"));
     assert!(!service_rendered.contains("func nexGenWorkflowDataConverter"));
     assert!(!service_rendered.contains("func getWorkflowDataConverter"));
-    assert!(service_rendered.contains("type nexGenNexusOperationFuture struct"));
-    assert!(service_rendered.contains("func nexGenFailedNexusOperationFuture"));
+    assert!(!service_rendered.contains("type nexGenOperationFuture struct"));
+    assert!(!service_rendered.contains("type OperationFuture interface"));
     assert!(support_rendered.contains("\"reflect\""));
     assert!(!support_rendered.contains("\"runtime\""));
     assert!(!support_rendered.contains("\"strings\""));
@@ -629,30 +592,32 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!support_rendered.contains("func nexGenFunctionName[F any](value F) string"));
     assert!(!support_rendered.contains("func nexGenWorkflowDataConverter"));
     assert!(support_rendered.contains("func getWorkflowDataConverter"));
-    assert!(!support_rendered.contains("type nexGenNexusOperationFuture struct"));
-    assert!(!support_rendered.contains("func nexGenFailedNexusOperationFuture"));
+    assert!(!support_rendered.contains("type nexGenOperationFuture struct"));
 
-    // Internal request structs remain wire-shaped.
-    assert!(
-        rendered
-            .contains("type executeFunctionRequest struct {\n\t// Required.\n\tFunction string")
-    );
-    assert!(
-        rendered.contains(
-            "type executeNamedFunctionRequest struct {\n\t// Required.\n\tFunction string"
-        )
-    );
+    // Internal request structs remain wire-shaped without public API docs.
+    assert!(rendered.contains("type executeFunctionRequest struct {\n\tFunction string"));
+    assert!(rendered.contains("type executeNamedFunctionRequest struct {\n\tFunction string"));
+    assert!(!rendered.contains("type executeFunctionRequest struct {\n\t// Required."));
 
-    // Required public function fields accept either a string name or the exact
-    // WIT-derived Go function signature.
+    // Required public function fields accept string names only when the WIT
+    // directive declares an alternate type.
     assert!(rendered.contains(
-        "func ExecuteFunction[FunctionF interface{ ~string | func(string, bool) string }]("
+        "func ExecuteFunction(\n\tctx workflow.Context,\n\topts ExecuteFunctionOptions,\n\tfunction func(string, bool) string,\n"
     ));
     assert!(rendered.contains(
-        "func ExecuteCountedFunction[FunctionF interface{ ~string | func(string, int32) string }]("
+        "functionName := \"\"\n\t{\n\t\trv := reflect.ValueOf(function)\n\t\tfullName := runtime.FuncForPC(rv.Pointer()).Name()"
     ));
     assert!(rendered.contains(
-        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }]"
+        "func ExecuteCountedFunction(\n\tctx workflow.Context,\n\topts ExecuteCountedFunctionOptions,\n\tfunction func(string, int32) string,\n"
+    ));
+    assert!(rendered.contains(
+        "func ExecuteNamedFunction[FunctionF interface{ ~string | func(string, bool) string }]("
+    ));
+    assert!(rendered.contains(
+        "func ExecuteVarargsFunction(\n\tctx workflow.Context,\n\topts ExecuteVarargsFunctionOptions,\n\tfunction func(...string) string,\n"
+    ));
+    assert!(rendered.contains(
+        "func ExecuteNamedVarargsFunction[FunctionF interface{ ~string | func(...string) string }]("
     ));
     assert!(rendered.contains("\tfunction FunctionF,\n"));
     assert!(rendered.contains("\t\tFunction: functionName,\n"));
@@ -660,81 +625,150 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!rendered.contains("func ExecuteCountedFunctionWithArgs"));
     assert!(!rendered.contains("func ExecuteNamedFunctionWithArgs"));
 
-    // Optional function-adjacent args stay in the options struct with their
-    // normal wire-compatible type.
-    assert!(rendered.contains("type ExecuteVarargsFunctionOptions struct {\n\t// Arguments for the function.\n\tArgs []string\n}"));
+    // Function-adjacent args stay positional and do not enter the options struct.
+    assert!(rendered.contains("type ExecuteVarargsFunctionOptions struct {\n}"));
     assert!(rendered.contains(
-        "func ExecuteVarargsFunction[FunctionF interface{ ~string | func(...string) string }](ctx workflow.Context, function FunctionF, opts ExecuteVarargsFunctionOptions) workflow.NexusOperationFuture {"
+        "func ExecuteVarargsFunction(\n\tctx workflow.Context,\n\topts ExecuteVarargsFunctionOptions,\n\tfunction func(...string) string,\n"
     ));
-    assert!(rendered.contains("\t\tArgs: opts.Args,\n"));
-
-    // Primary varargs function fields also get a trailing-args convenience
-    // wrapper that matches Python's positional/list-form conflict behavior.
-    assert!(rendered.contains(
-        "func ExecuteVarargsFunctionWithArgs[FunctionF interface{ ~string | func(...string) string }]("
-    ));
-    assert!(rendered.contains(
-        "func ExecuteNamedVarargsFunctionWithArgs[FunctionF interface{ ~string | func(...string) string }]("
-    ));
+    assert!(rendered.contains("\topts ExecuteVarargsFunctionOptions,\n"));
+    assert!(rendered.contains("\tfunction func(...string) string,\n"));
     assert!(rendered.contains("\targs ...string,\n"));
-    assert!(rendered.contains(
-        "\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nexGenFailedNexusOperationFuture(ctx, errors.New(\"cannot specify both positional arguments and args\"))\n\t}\n"
-    ));
-    assert!(rendered.contains("\tif len(args) == 0 {\n\t\targs = opts.Args\n\t}\n"));
+    assert!(rendered.contains("\t\tArgs: args,\n"));
+
+    // Primary base varargs collapse into the default wrapper; args are
+    // positional only, never options fields.
+    assert!(!rendered.contains("func ExecuteVarargsFunctionWithArgs"));
+    assert!(!rendered.contains("func ExecuteNamedVarargsFunctionWithArgs"));
+    assert!(!rendered.contains("cannot specify both positional arguments and args"));
+    assert!(!rendered.contains("opts.Args"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
     assert!(rendered.contains(
         "// Input name: The name argument for the function.\n// Input enabled: The enabled argument for the function.\nfunc ExecuteFunction"
     ));
-    assert!(rendered.contains(
-        "// Input args: Arguments for the function.\nfunc ExecuteVarargsFunctionWithArgs"
-    ));
+    assert!(
+        rendered
+            .contains("// Input args: Arguments for the function.\nfunc ExecuteVarargsFunction")
+    );
 
-    let temp_dir = unique_output_path("go-user-service-function-helper");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let user_service_path = temp_dir.join("user-service.wit");
-    fs::write(&user_service_path, user_service_input_with_endpoint(&root)).unwrap();
-    let user_rendered = generate_go_to_string(&[user_service_path], &[]);
+    let user_rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &[input_path(&root, "user-service")],
+        &[],
+    )
+    .unwrap();
     assert!(!user_rendered.contains("nexGenFunctionName"));
     assert!(!user_rendered.contains("getWorkflowDataConverter"));
     assert!(!user_rendered.contains("\"reflect\""));
     assert!(!user_rendered.contains("\"runtime\""));
     assert!(!user_rendered.contains("\"strings\""));
     assert!(!user_rendered.contains("\"errors\""));
+}
+
+#[test]
+fn go_function_name_locals_do_not_collide_with_authored_parameters() {
+    let temp_dir = unique_output_path("go-function-local-collisions");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("collision-service.wit");
+    fs::write(
+        &wit_path,
+        r#"
+package test:function-local-collisions@1.0.0;
+
+world test-world {
+  export collision-service;
+}
+
+interface functions {
+  type placeholder = string;
+  function-call: func(name: string, enabled: bool) -> string;
+
+  /// @nexus.function
+  ///   signature="function-call"
+  type executable-function = placeholder;
+}
+
+/// @nexus.endpoint "collision-endpoint"
+interface collision-service {
+  use functions.{executable-function};
+
+  record execute-request {
+    function: executable-function,
+    function-name: string,
+    rv: string,
+    full-name: string,
+    elements: string,
+    short-name: string,
+  }
+
+  execute: func(request: execute-request);
+}
+"#,
+    )
+    .unwrap();
+
+    let rendered =
+        generate_to_string_with_inputs(nex_gen::language::Language::Go, &[wit_path], &[]).unwrap();
+
+    // The result local is allocated around the authored `functionName`
+    // parameter. Extraction-only locals can keep simple names because their
+    // block scope safely shadows the authored parameters.
+    assert!(rendered.contains("\tfunctionName2 := \"\"\n\t{"));
+    assert!(rendered.contains("\t\trv := reflect.ValueOf(function)"));
+    assert!(rendered.contains("\t\tfullName := runtime.FuncForPC(rv.Pointer()).Name()"));
+    assert!(rendered.contains("\t\telements := strings.Split(fullName, \".\")"));
+    assert!(rendered.contains("\t\tshortName := elements[len(elements)-1]"));
+    assert!(rendered.contains("\t\tfunctionName2 = strings.TrimSuffix(shortName, \"-fm\")"));
+    assert!(rendered.contains("\t\tFunction: functionName2,"));
+
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
 #[test]
 fn go_temporal_function_constraints_use_workflow_context_prefix() {
     let root = project_root();
-    let rendered = generate_go_to_string(
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
         &example_input_paths(&root, "workflow-service"),
         &[descriptor_path(&root)],
-    );
+    )
+    .unwrap();
 
-    assert!(rendered.contains(
-        "func SignalWithStartWorkflow[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }, SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
-    ));
-    assert!(rendered.contains(
-        "func SignalWithStartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }, SignalF interface{ ~string | func(workflow.Context, ...any) any }]("
-    ));
-    assert!(rendered.contains("\tworkflow WorkflowF,\n"));
-    assert!(rendered.contains("\tsignal SignalF,\n"));
+    assert!(rendered.contains("func SignalWithStartWorkflow("));
+    assert!(
+        rendered
+            .contains("func SignalWithStartWorkflowTyped[WorkflowArg any, WorkflowResult any](")
+    );
+    assert!(rendered.contains("\tworkflow func(workflow.Context, WorkflowArg) WorkflowResult,"));
+    assert!(!rendered.contains("func SignalWithStartWorkflowWithArgs("));
+    assert!(!rendered.contains("SignalF interface"));
+    assert!(rendered.contains("\topts SignalWithStartWorkflowOptions,\n"));
+    assert!(
+        rendered.contains("\tsignal string,\n\tsignalArg any,\n\tworkflow any,\n\targs ...any,\n")
+    );
     assert!(rendered.contains("\targs ...any,\n"));
     assert!(rendered.contains("switch rv := reflect.ValueOf(workflow); rv.Kind()"));
-    assert!(rendered.contains("switch rv := reflect.ValueOf(signal); rv.Kind()"));
+    assert_eq!(
+        rendered
+            .matches("switch rv := reflect.ValueOf(workflow); rv.Kind()")
+            .count(),
+        1
+    );
+    assert!(!rendered.contains("switch rv := reflect.ValueOf(signal); rv.Kind()"));
     assert!(rendered.contains("\t\tWorkflow: workflowName,\n"));
-    assert!(rendered.contains("\t\tSignal: signalName,\n"));
+    assert!(rendered.contains("\t\tSignal: signal,\n"));
     assert!(rendered.contains("\t\tArgs: args,\n"));
-    assert!(rendered.contains("\t\tSignalArgs: opts.SignalArgs,\n"));
+    assert!(rendered.contains("\t\tSignalArgs: []any{signalArg},\n"));
 }
 
 #[test]
 fn go_type_showcase_generates_expected_types() {
     let root = project_root();
-    let rendered = generate_go_to_string(
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
         &example_input_paths(&root, "type-showcase"),
         &[descriptor_path(&root)],
-    );
+    )
+    .unwrap();
 
     // Service and operation names are inlined at call sites, not exported as constants.
     assert!(!rendered.contains("const ServiceName"));
@@ -783,21 +817,15 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("\t// Required.\n\tStreet string"));
     assert!(rendered.contains("\t// Required.\n\tCity string"));
     assert!(rendered.contains("\t// Required.\n\tCountry string"));
-    // Tuple field generates a named struct with ordinal fields
-    assert!(rendered.contains("Coordinates *Coordinates"));
-    assert!(rendered.contains("type Coordinates struct"));
-    assert!(rendered.contains("\t// Required.\n\tFirst float64"));
-    assert!(rendered.contains("\t// Required.\n\tSecond float64"));
+    assert!(rendered.contains("Coordinates *Tuple2[float64, float64]"));
+    assert!(!rendered.contains("type Coordinates struct"));
 
     assert!(rendered.contains("type UserProfile struct"));
     assert!(rendered.contains("\t// Required.\n\tTags []string"));
     assert!(rendered.contains("\t// Required.\n\tMetadata map[string]string"));
     assert!(rendered.contains("\t// Required.\n\tCapabilities UserCapability"));
-    // Result field generates a named struct
-    assert!(rendered.contains("\t// Required.\n\tSyncState SyncState"));
-    assert!(rendered.contains("type SyncState struct"));
-    assert!(rendered.contains("\t// Required.\n\tResult string"));
-    assert!(rendered.contains("\t// Required.\n\tError string"));
+    assert!(rendered.contains("\t// Required.\n\tSyncState Result[string, string]"));
+    assert!(!rendered.contains("type SyncState struct"));
     // Variant interface field
     assert!(rendered.contains("\t// Required.\n\tNotificationTarget NotificationTarget"));
     // Optional struct field keeps pointer and is not marked required.
@@ -817,8 +845,8 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("\t// Required.\n\tAttempts []Result[string, string]"));
     assert!(rendered.contains("\t// Required.\n\tRegionStatus map[string]Result[string, string]"));
     assert!(rendered.contains("type Tuple2[T1, T2 any] struct {"));
-    assert!(rendered.contains("First T1"));
-    assert!(rendered.contains("Second T2"));
+    assert!(rendered.contains("\t// Required.\n\tFirst T1"));
+    assert!(rendered.contains("\t// Required.\n\tSecond T2"));
     assert!(rendered.contains("type Result[T, E any] struct {"));
     assert!(rendered.contains("Result T"));
     assert!(rendered.contains("Error E"));
@@ -828,70 +856,84 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("\t// Required.\n\tDisplayName string"));
     assert!(rendered.contains("\t// Required.\n\tStatus UserStatus"));
     assert!(rendered.contains("\t// Required.\n\tProfile UserProfile"));
+    assert!(rendered.contains("func NewUser("));
 
     // Resource methods
-    assert!(
-        rendered.contains(
-            "func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.NexusOperationFuture"
-        )
-    );
+    assert!(rendered.contains(
+        "func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.Future"
+    ));
     assert!(rendered.contains("updateEmailRequest{UserId: u.UserId, Email: email}"));
     assert!(rendered.contains(
-        "func (u *User) Rename(ctx workflow.Context, displayName string) workflow.NexusOperationFuture"
+        "func (u *User) Rename(ctx workflow.Context, displayName string) workflow.Future"
     ));
     assert!(rendered.contains("renameRequest{UserId: u.UserId, DisplayName: displayName}"));
-    // Void resource method -- optional param is a pointer.
-    assert!(
-        rendered.contains("func (u *User) Deactivate(ctx workflow.Context, reason *string) workflow.NexusOperationFuture")
-    );
-    assert!(rendered.contains("deactivateRequest{UserId: u.UserId, Reason: reason}"));
+    // Void resource method -- optional primitive param is value-shaped publicly
+    // and converted to a pointer for the internal request.
+    assert!(rendered.contains(
+        "func (u *User) Deactivate(ctx workflow.Context, reason string) workflow.Future"
+    ));
+    assert!(rendered.contains("var reasonPtr *string"));
+    assert!(rendered.contains("deactivateRequest{UserId: u.UserId, Reason: reasonPtr}"));
 
     // Unexported operation wrapper functions
+    assert!(
+        rendered
+            .contains("func getUser(ctx workflow.Context, client workflow.NexusClient, request getUserRequest) workflow.Future")
+    );
     assert!(rendered.contains(
-        "func getUser(ctx workflow.Context, client workflow.NexusClient, request getUserRequest) workflow.NexusOperationFuture"
-    ));
-    assert!(rendered.contains(
-        "func updateEmail(ctx workflow.Context, client workflow.NexusClient, request updateEmailRequest) workflow.NexusOperationFuture"
+        "func updateEmail(ctx workflow.Context, client workflow.NexusClient, request updateEmailRequest) workflow.Future"
     ));
     assert!(rendered.contains("nexGenNewNexusClient(\"type-showcase\", \"TypeShowcase\")"));
     assert!(rendered.contains(
         "client.ExecuteOperation(ctx, \"GetUser\", request, workflow.NexusOperationOptions{})"
     ));
     // Void operation
-    assert!(
-        rendered.contains("func deactivate(ctx workflow.Context, client workflow.NexusClient, request deactivateRequest) workflow.NexusOperationFuture")
-    );
+    assert!(rendered.contains(
+        "func deactivate(ctx workflow.Context, client workflow.NexusClient, request deactivateRequest) workflow.Future"
+    ));
     assert!(rendered.contains("\treturn fut\n"));
 
-    // Exported convenience wrappers -- all required fields become positional args
+    // Exported convenience wrappers -- required non-function fields live in options.
     assert!(rendered.contains(
-        "func UpdateEmail(ctx workflow.Context, userId string, email string) workflow.NexusOperationFuture"
+        "func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.Future"
     ));
     // The request struct is always constructed across multiple lines.
-    assert!(rendered.contains("updateEmailRequest{\n\t\tUserId: userId,\n\t\tEmail: email,\n\t}"));
-    // Optional fields produce an options struct (pointer-typed)
+    assert!(
+        rendered
+            .contains("updateEmailRequest{\n\t\tUserId: opts.UserId,\n\t\tEmail: opts.Email,\n\t}")
+    );
+    // Required and optional public fields share the options struct; optional
+    // primitive fields default-pun to nil internally.
     assert!(rendered.contains("type GetUserOptions struct"));
-    assert!(rendered.contains("ConsistencyToken *string"));
+    assert!(rendered.contains("UserId string"));
+    assert!(rendered.contains("ConsistencyToken string"));
+    assert!(
+        rendered
+            .contains("func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.Future")
+    );
+    assert!(rendered.contains("var consistencyToken *string"));
     assert!(rendered.contains(
-        "func GetUser(ctx workflow.Context, userId string, opts GetUserOptions) workflow.NexusOperationFuture"
-    ));
-    assert!(rendered.contains(
-        "getUserRequest{\n\t\tUserId: userId,\n\t\tConsistencyToken: opts.ConsistencyToken,\n\t}"
+        "getUserRequest{\n\t\tUserId: opts.UserId,\n\t\tConsistencyToken: consistencyToken,\n\t}"
     ));
     // Void convenience wrapper with options
     assert!(rendered.contains("type DeactivateOptions struct"));
-    assert!(rendered.contains(
-        "func Deactivate(ctx workflow.Context, userId string, opts DeactivateOptions) workflow.NexusOperationFuture"
-    ));
+    assert!(rendered.contains("Reason string"));
+    assert!(
+        rendered.contains(
+            "func Deactivate(ctx workflow.Context, opts DeactivateOptions) workflow.Future"
+        )
+    );
 }
 
 #[test]
 fn go_type_roundtrip_generates_proto_conversions() {
     let root = project_root();
-    let rendered = generate_go_to_string(
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
         &example_input_paths(&root, "type-roundtrip"),
         &[descriptor_path(&root)],
-    );
+    )
+    .unwrap();
 
     // Aliased proto imports derived from the descriptors' `go_package` option.
     assert!(rendered.contains("activity \"go.temporal.io/api/activity/v1\""));
@@ -910,6 +952,11 @@ fn go_type_roundtrip_generates_proto_conversions() {
     assert!(rendered
         .contains("func (m ActivityOptions) toProto(ctx workflow.Context) (*activity.ActivityOptions, error) {"));
     assert!(rendered.contains("message := &activity.ActivityOptions{}"));
+    assert!(
+        rendered.contains("type ActivityOptions struct {\n\t// Optional.\n\tTaskQueue *string")
+    );
+    assert!(rendered.contains("\t// Optional.\n\tScheduleToCloseTimeout *time.Duration"));
+    assert!(rendered.contains("\t// Optional.\n\tPriority *temporal.Priority"));
     // Optional override fields pass the pointer straight to the nil-safe
     // converter; the required field passes its address.
     assert!(rendered.contains("converted, err := retryPolicyToProto(ctx, &m.RetryPolicy)"));
@@ -929,8 +976,10 @@ fn go_type_roundtrip_generates_proto_conversions() {
         rendered.contains("converted, err := retryPolicyFromProto(ctx, proto.GetRetryPolicy())")
     );
     assert!(rendered.contains("value.RetryPolicy = *converted"));
-    assert!(rendered.contains("\t\t*typedValue = value\n"));
-
+    assert!(rendered.contains("\t\tresultSettable.Set(*value, nil)\n"));
+    assert!(rendered.contains(
+        "resultSettable.SetError(fmt.Errorf(\"nex-gen decoded required operation result was nil\"))"
+    ));
     // Operation functions convert the request to proto before the SDK call and
     // decode the proto response afterwards.
     assert!(rendered.contains("requestProto, err := request.toProto(ctx)"));
@@ -955,37 +1004,52 @@ fn go_type_roundtrip_generates_proto_conversions() {
 #[test]
 fn go_proto_resource_return_converts_request_and_constructs_resource() {
     let root = project_root();
-    let rendered = generate_go_to_string(
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
         &example_input_paths(&root, "start-workflow"),
         &[descriptor_path(&root)],
-    );
+    )
+    .unwrap();
 
     assert!(rendered.contains("\trequestProto, err := request.toProto(ctx)\n"));
     assert!(rendered.contains(
-        "\tif err != nil {\n\t\treturn nexGenFailedNexusOperationFuture(ctx, err)\n\t}\n"
+        "\tif err != nil {\n\t\tresult, resultSettable := workflow.NewFuture(ctx)\n\t\tresultSettable.SetError(err)\n\t\treturn result\n\t}\n"
     ));
     assert!(rendered.contains(
         "fut := client.ExecuteOperation(ctx, \"StartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
     assert!(rendered.contains("\tvar result workflowservice.StartWorkflowExecutionResponse\n"));
-    assert!(rendered.contains("\tnamespace := requestProto.GetNamespace()\n"));
-    assert!(rendered.contains("\trunIdValue := result.GetRunId()\n"));
-    assert!(rendered.contains("\tvar runId *string\n"));
-    assert!(rendered.contains("\t\tNamespace: namespace,\n"));
-    assert!(rendered.contains("\t\tWorkflowId: request.WorkflowId,\n"));
-    assert!(rendered.contains("\t\tRunId: runId,\n"));
+    assert!(rendered.contains(
+        "value := NewStartedWorkflow(requestProto.GetNamespace(), request.WorkflowId, result.GetRunId())"
+    ));
+    assert!(rendered.contains(
+        "type StartedWorkflow struct {\n\t// Required.\n\tNamespace string\n\t// Required.\n\tWorkflowId string\n\t// Optional.\n\tRunId *string\n}"
+    ));
+    assert!(rendered.contains(
+        "func NewStartedWorkflow(namespace string, workflowId string, runId string) StartedWorkflow"
+    ));
     assert!(rendered.contains(
         "fut := client.ExecuteOperation(ctx, \"RestartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
+    assert!(rendered.contains("func StartWorkflow("));
     assert!(rendered.contains(
-        "func StartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }]("
+        "type StartWorkflowOptions struct {\n\t// Required.\n\tWorkflowId string\n\t// Required.\n\tTaskQueue string\n\t// Optional.\n\tWorkflowStartDelay time.Duration\n}"
     ));
     assert!(rendered.contains(
-        "func RestartWorkflowWithArgs[WorkflowF interface{ ~string | func(workflow.Context, ...any) any }]("
+        "func StartWorkflow(\n\tctx workflow.Context,\n\topts StartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
     ));
-    assert!(rendered.contains("\tif len(args) > 0 && opts.Args != nil {\n\t\treturn nexGenFailedNexusOperationFuture(ctx, errors.New(\"cannot specify both positional arguments and args\"))\n\t}\n"));
-    assert!(rendered.contains("\tif len(args) == 0 {\n\t\targs = opts.Args\n\t}\n"));
+    assert!(rendered.contains("func RestartWorkflow("));
+    assert!(rendered.contains(
+        "func RestartWorkflow(\n\tctx workflow.Context,\n\topts RestartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
+    ));
+    assert!(rendered.contains(
+        "func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) workflow.Future"
+    ));
+    assert!(rendered.contains(
+        "return restartWorkflow(ctx, nexGenNewNexusClient(\"temporal-system\", \"StartWorkflowService\"), startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})"
+    ));
     assert!(rendered.contains("\t\tArgs: args,\n"));
+    assert!(!rendered.contains("opts.Args"));
 }
 
 #[test]
@@ -1037,30 +1101,41 @@ interface workflow-service {
     )
     .unwrap();
 
-    let rendered = generate_go_to_string(&[wit_path], &[descriptor_path(&root)]);
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
+        &[wit_path],
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
 
-    assert!(rendered.contains("\tnamespace := requestProto.GetNamespace()\n"));
-    assert!(rendered.contains("\tstartedValue := result.GetStarted()\n"));
-    assert!(rendered.contains("\tvar started *bool\n"));
-    assert!(rendered.contains("\tif startedValue != false {\n"));
-    assert!(rendered.contains("\t\tStarted: started,\n"));
+    assert!(
+        rendered
+            .contains("value := NewSignalResult(requestProto.GetNamespace(), result.GetStarted())")
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
 #[test]
 fn go_flatten_in_api_embeds_options_value() {
     let root = project_root();
-    let rendered = generate_go_to_string(
+    let rendered = generate_to_string_with_inputs(
+        nex_gen::language::Language::Go,
         &example_input_paths(&root, "workflow-service"),
         &[descriptor_path(&root)],
-    );
+    )
+    .unwrap();
 
     assert!(rendered.contains("type SignalWithStartWorkflowOptions struct {"));
     assert!(rendered.contains("\tUserMetadata\n}\n\n// Signal a workflow"));
     assert!(!rendered.contains("\tUserMetadata *UserMetadata\n}\n\n// Signal a workflow"));
     assert!(rendered.contains("\t\tUserMetadata: &opts.UserMetadata,\n"));
-    assert!(rendered.contains("\tStaticSummary any"));
-    assert!(rendered.contains("\tStaticDetails any"));
+    assert!(rendered.contains("\tStaticSummary string"));
+    assert!(rendered.contains("\tStaticDetails string"));
+    assert!(rendered.contains("// Input signal: Signal name to send with the start request."));
+    assert!(
+        rendered
+            .contains("// Input workflow: Workflow function identifying the workflow to start.")
+    );
 }
 
 #[test]
@@ -1102,20 +1177,21 @@ interface doc-service {
     )
     .unwrap();
 
-    let rendered = generate_go_to_string(&[wit_path], &[]);
+    let rendered =
+        generate_to_string_with_inputs(nex_gen::language::Language::Go, &[wit_path], &[]).unwrap();
 
-    // Field docs become godoc comments above the request struct fields.
-    // Required fields fold a `Required.` prefix into the doc comment.
-    // (Assertions use the un-gofmt'd output, so fields are single-space
-    // separated.)
+    // Internal wire structs have no field docs; exported request types retain
+    // their public API docs.
+    assert!(rendered.contains("type greetRequest struct {\n\tName string"));
+    assert!(!rendered.contains("type greetRequest struct {\n\t// Required."));
     assert!(rendered.contains("\t// Required. Name of the person to greet.\n\tName string"));
 
     // Required fields without any doc text get a bare `// Required.` comment.
     assert!(rendered.contains("\t// Required.\n\tMessage string"));
 
-    // The `go=` override wins over the default text, on both the request
-    // struct and the options struct; the default-only doc falls through.
-    assert!(rendered.contains("\t// Go-specific greeting doc.\n\tGreeting *string"));
+    // The `go=` override wins over the default text on the public options
+    // type; the default-only doc falls through.
+    assert!(rendered.contains("\t// Optional.\n\t// Go-specific greeting doc.\n\tGreeting string"));
     assert!(!rendered.contains("Default greeting doc."));
 
     // Per-language docs without a default or `go=` key are omitted from Go.
@@ -1123,14 +1199,143 @@ interface doc-service {
 
     // Long docs wrap across comment lines.
     assert!(rendered.contains(
-        "\t// A very long field doc that has to be wrapped because it exceeds the generated\n\t// comment line width by a comfortable margin for testing.\n\tSalutation *string"
+        "\t// Optional.\n\t// A very long field doc that has to be wrapped because it exceeds the generated\n\t// comment line width by a comfortable margin for testing.\n\tSalutation string"
     ));
 
     // Operation docs render on the exported convenience wrapper, with the
     // `returns=` text in a separate paragraph.
     assert!(rendered.contains(
-        "// Greets the given person.\n//\n// Input name: Name of the person to greet.\n//\n// Returns: The rendered greeting.\nfunc Greet("
+        "// Greets the given person.\n//\n// Returns: The rendered greeting.\nfunc Greet("
     ));
 
     fs::remove_dir_all(temp_dir).unwrap();
+}
+
+fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
+    let dir_path = root.join("examples/json-inputs").join(example_id);
+    if dir_path.is_dir() {
+        return dir_path;
+    }
+    for extension in ["yaml", "yml", "json"] {
+        let path = root
+            .join("examples/json-inputs")
+            .join(format!("{example_id}.{extension}"));
+        if path.is_file() {
+            return path;
+        }
+    }
+    root.join("examples/json-inputs")
+        .join(format!("{example_id}.yaml"))
+}
+
+fn go_json_output_path(root: &Path, mode: &str, example_id: &str) -> PathBuf {
+    go_root(root)
+        .join("json_schema")
+        .join(mode)
+        .join(go_package_name(example_id))
+}
+
+fn generate_formatted_go_json_output(
+    root: &Path,
+    example_id: &str,
+    output_path: &Path,
+    native_api: bool,
+) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nex-gen"));
+    command.args([
+        "generate",
+        "--lang",
+        "go",
+        "--input",
+        json_input_path(root, example_id).to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
+    if !native_api {
+        command.arg("--no-native-api");
+    }
+    let status = command.status().unwrap();
+    assert!(status.success());
+
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+}
+
+#[test]
+fn go_json_generation_matches_checked_in_output() {
+    let root = project_root();
+    for example_id in ["chat", "kb"] {
+        for (mode, native_api) in [("definitions", false), ("api", true)] {
+            let temp_dir = unique_output_path(&format!("go-json-{example_id}-{mode}"));
+            fs::create_dir_all(&temp_dir).unwrap();
+            fs::write(temp_dir.join("go.mod"), "module examples/go\n\ngo 1.24.0\n").unwrap();
+            let output_path = temp_dir
+                .join("json_schema")
+                .join(mode)
+                .join(go_package_name(example_id));
+            generate_formatted_go_json_output(&root, example_id, &output_path, native_api);
+
+            let expected = read_go_output_files(&go_json_output_path(&root, mode, example_id));
+            let actual = read_go_output_files(&output_path);
+            assert_eq!(
+                actual, expected,
+                "go JSON {example_id} {mode} output changed"
+            );
+
+            let generated_file = if example_id == "kb" {
+                PathBuf::from("kb/kb.go")
+            } else {
+                PathBuf::from(format!("{example_id}.go"))
+            };
+            let generated = actual
+                .get(&generated_file)
+                .unwrap_or_else(|| panic!("{} should be generated", generated_file.display()));
+            if native_api {
+                match example_id {
+                    "chat" => {
+                        assert!(generated.contains("var ChatService = struct"));
+                        assert!(generated.contains("type ChatServiceClient struct"));
+                        assert!(generated.contains("func NewChatServiceClient(endpoint string)"));
+                        assert!(generated.contains(
+                            "nexus.OperationReference[SendMessageInput, SendMessageOutput]"
+                        ));
+                        assert!(generated.contains(
+                            "func (c *ChatServiceClient) Ping(ctx workflow.Context) workflow.Future"
+                        ));
+                    }
+                    "kb" => {
+                        assert!(generated.contains("var KnowledgeBaseService = struct"));
+                        assert!(generated.contains("type KnowledgeBaseServiceClient struct"));
+                        assert!(
+                            generated
+                                .contains("func NewKnowledgeBaseServiceClient(endpoint string)")
+                        );
+                        assert!(
+                            generated
+                                .contains("nexus.OperationReference[GetPageInput, content.Page]")
+                        );
+                        assert!(
+                            generated.contains(
+                                "nexus.OperationReference[content.Block, PutBlockOutput]"
+                            )
+                        );
+                        assert!(generated.contains(
+                            "func (c *KnowledgeBaseServiceClient) GetPage(ctx workflow.Context, request GetPageInput) workflow.Future"
+                        ));
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                assert!(!generated.contains("Service = struct"));
+                assert!(!generated.contains("ServiceClient"));
+                assert!(!generated.contains("github.com/nexus-rpc/sdk-go/nexus"));
+                assert!(!generated.contains("go.temporal.io/sdk/workflow"));
+            }
+
+            fs::remove_dir_all(temp_dir).unwrap();
+        }
+    }
 }

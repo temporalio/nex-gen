@@ -81,6 +81,6 @@ func TestJSONSchemaKBRuntime(t *testing.T) {
 	require.NotNil(t, apikb.NewKnowledgeBaseServiceClient("kb-endpoint"))
 }
 
-var _ func(*apikb.KnowledgeBaseServiceClient, workflow.Context, apikb.GetPageInput) workflow.NexusOperationFuture = (*apikb.KnowledgeBaseServiceClient).GetPage
-var _ func(*apikb.KnowledgeBaseServiceClient, workflow.Context, apicontent.Block) workflow.NexusOperationFuture = (*apikb.KnowledgeBaseServiceClient).PutBlock
-var _ func(*apikb.KnowledgeBaseServiceClient, workflow.Context, apikb.GetCategoryTreeInput) workflow.NexusOperationFuture = (*apikb.KnowledgeBaseServiceClient).GetCategoryTree
+var _ func(*apikb.KnowledgeBaseServiceClient, workflow.Context, apikb.GetPageInput) workflow.Future = (*apikb.KnowledgeBaseServiceClient).GetPage
+var _ func(*apikb.KnowledgeBaseServiceClient, workflow.Context, apicontent.Block) workflow.Future = (*apikb.KnowledgeBaseServiceClient).PutBlock
+var _ func(*apikb.KnowledgeBaseServiceClient, workflow.Context, apikb.GetCategoryTreeInput) workflow.Future = (*apikb.KnowledgeBaseServiceClient).GetCategoryTree

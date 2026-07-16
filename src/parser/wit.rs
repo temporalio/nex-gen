@@ -1300,16 +1300,6 @@ fn build_fields_from_record(
                 .unwrap_or_else(|| field.name.to_snake_case());
         let function_directive = directive(&directives, "function", path, &field_context)?;
         let default_directive = directive(&directives, "default", path, &field_context)?;
-        if default_directive.is_some()
-            && directive(&directives, "source", path, &field_context)?.is_some()
-        {
-            return Err(Error::InvalidWitDirective {
-                path: path.to_path_buf(),
-                context: field_context,
-                directive: "@nexus.default".to_string(),
-                reason: "cannot be combined with `@nexus.source`".to_string(),
-            });
-        }
         let flattened_function_type = if omit_directive.is_none() && function_directive.is_none() {
             find_flattened_function_type_spec(resolve, &field.ty, path, language)?
         } else {
@@ -1929,12 +1919,7 @@ fn build_source_call(
     let Some(helper_name) =
         directive_language_value(directive, language).or_else(|| directive.value("value"))
     else {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.source".to_string(),
-            reason: "missing required support helper name".to_string(),
-        });
+        return Ok(None);
     };
 
     Ok(Some(helper_name.to_string()))
@@ -3670,7 +3655,7 @@ interface workflow-service {
     }
 
     #[test]
-    fn rejects_enum_field_default_with_source() {
+    fn ignores_language_specific_source_for_other_languages() {
         let wit = r#"
 package temporal:nexus@1.0.0;
 
@@ -3685,23 +3670,49 @@ interface workflow-service {
   record request {
     /// @nexus.proto-field "workflow_id_reuse_policy"
     /// @nexus.default "allow-duplicate"
-    /// @nexus.source "workflow_id_reuse_policy"
+    /// @nexus.source go="workflowIDReusePolicy(ctx)"
     id-reuse-policy: workflow-id-reuse-policy,
   }
 }
 "#;
 
-        let error = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
+        let go = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
+            Language::Go,
+            wit,
+            PathBuf::from("inline.wit"),
+            &[linked_inputs_path()],
+        )
+        .unwrap();
+        let go_record = go
+            .records()
+            .find(|(_, record)| record.name == "Request")
+            .unwrap()
+            .1;
+        assert!(matches!(
+            go_record.fields["workflow_id_reuse_policy"].visibility,
+            crate::spec::RecordFieldVisibility::Sourced { ref source_expr } if source_expr == "workflowIDReusePolicy(ctx)"
+        ));
+
+        let python = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
             Language::Python,
             wit,
             PathBuf::from("inline.wit"),
             &[linked_inputs_path()],
         )
-        .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("cannot be combined with `@nexus.source`")
+        .unwrap();
+        let python_record = python
+            .records()
+            .find(|(_, record)| record.name == "Request")
+            .unwrap()
+            .1;
+        let field = &python_record.fields["workflow_id_reuse_policy"];
+        assert!(matches!(
+            field.visibility,
+            crate::spec::RecordFieldVisibility::Public
+        ));
+        assert_eq!(
+            field.default_value.as_ref().unwrap().enum_case,
+            "allow-duplicate"
         );
     }
 

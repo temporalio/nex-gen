@@ -56,6 +56,6 @@ func TestJSONSchemaChatRuntime(t *testing.T) {
 	require.NotNil(t, apichat.NewChatServiceClient("chat-endpoint"))
 }
 
-var _ func(*apichat.ChatServiceClient, workflow.Context, apichat.SendMessageInput) workflow.NexusOperationFuture = (*apichat.ChatServiceClient).SendMessage
-var _ func(*apichat.ChatServiceClient, workflow.Context, apichat.GetRoomInput) workflow.NexusOperationFuture = (*apichat.ChatServiceClient).GetRoom
-var _ func(*apichat.ChatServiceClient, workflow.Context) workflow.NexusOperationFuture = (*apichat.ChatServiceClient).Ping
+var _ func(*apichat.ChatServiceClient, workflow.Context, apichat.SendMessageInput) workflow.Future = (*apichat.ChatServiceClient).SendMessage
+var _ func(*apichat.ChatServiceClient, workflow.Context, apichat.GetRoomInput) workflow.Future = (*apichat.ChatServiceClient).GetRoom
+var _ func(*apichat.ChatServiceClient, workflow.Context) workflow.Future = (*apichat.ChatServiceClient).Ping

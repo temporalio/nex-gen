@@ -105,6 +105,8 @@ pub(in crate::generator) struct PlannedField {
     pub(in crate::generator) proto_name: String,
     pub(in crate::generator) authored_name: String,
     pub(in crate::generator) doc: Option<LanguageStringSpec>,
+    annotation_override: Option<LanguageStringSpec>,
+    pub(in crate::generator) flattened_annotation_override: Option<LanguageStringSpec>,
     pub(in crate::generator) required: bool,
     role: PlannedFieldRole,
     pub(in crate::generator) kind: PlannedFieldKind,
@@ -337,6 +339,8 @@ pub(in crate::generator) fn planned_field(
         proto_name: field_name.to_string(),
         authored_name: field.name.clone(),
         doc: field.doc.clone(),
+        annotation_override: field.annotation.clone(),
+        flattened_annotation_override: field.flattened_annotation.clone(),
         required: field.required,
         role,
         kind: planned_field_kind(&field.field_type, spec),
@@ -589,15 +593,12 @@ impl GoPackageContext {
         self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Future")
     }
 
-    fn workflow_nexus_operation_future_type(&self) -> String {
-        self.qualified_expr(
-            "go.temporal.io/sdk/workflow",
-            "workflow.NexusOperationFuture",
-        )
+    pub(in crate::generator) fn new_future(&self) -> String {
+        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.NewFuture")
     }
 
-    fn new_future(&self) -> String {
-        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.NewFuture")
+    fn workflow_go(&self) -> String {
+        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Go")
     }
 
     pub(in crate::generator) fn new_nexus_client(&self) -> String {
@@ -1148,7 +1149,10 @@ impl<'a> ApiPlanner<'a> {
 
                 services.push(RenderedService {
                     wire_name: &service.wire_name,
-                    endpoint: service.endpoint.clone(),
+                    endpoint: service
+                        .endpoint
+                        .clone()
+                        .or_else(|| Some(service.name.clone())),
                     operations,
                     resources: service
                         .resources
@@ -1187,7 +1191,6 @@ impl<'a> ApiPlanner<'a> {
         self.populate_model_wire_conversions()?;
         self.populate_operation_bindings(&mut services)?;
 
-        let needs_future_helpers = services.iter().any(service_uses_generated_future_helpers);
         let needs_function_name_inlining = services.iter().any(service_uses_function_name_inlining);
 
         // Operation wrapper functions require the workflow package.
@@ -1196,8 +1199,26 @@ impl<'a> ApiPlanner<'a> {
             self.imports
                 .insert("go.temporal.io/sdk/workflow".to_string());
         }
-        if needs_future_helpers || services.iter().any(service_uses_primary_varargs_wrappers) {
-            self.imports.insert("errors".to_string());
+        if services
+            .iter()
+            .flat_map(|service| &service.operations)
+            .any(|operation| {
+                operation
+                    .wire_binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.requires_fmt())
+            })
+            || self.api_plan.records().any(|(_, record)| {
+                record.fields.values().any(|field| {
+                    field
+                        .flattened_annotation
+                        .as_ref()
+                        .and_then(|annotation| annotation.for_language(Language::Go))
+                        .is_some()
+                })
+            })
+        {
+            self.imports.insert("fmt".to_string());
         }
         if needs_function_name_inlining {
             self.imports.insert("reflect".to_string());
@@ -1245,7 +1266,6 @@ impl<'a> ApiPlanner<'a> {
             &self.external_models,
             self.api_plan,
             &visibility,
-            needs_future_helpers,
         );
 
         let mut files = BTreeMap::new();
@@ -1362,21 +1382,38 @@ impl<'a> ApiPlanner<'a> {
                             PlannedFieldRole::FunctionArgs(function) => Some(function.clone()),
                             _ => None,
                         });
+                    let embed_in_options = planned_field.is_some_and(|planned_field| {
+                        !planned_field.required
+                            && field_kind_is_flattened_message(&planned_field.kind, self.api_plan)
+                    });
+                    let default_punning_zero = planned_field
+                        .filter(|planned_field| !planned_field.required && !embed_in_options)
+                        .and_then(|planned_field| {
+                            public_default_punning_zero_for_field(
+                                &planned_field.kind,
+                                &field.go_type,
+                            )
+                        });
+                    let public_go_type = if default_punning_zero.is_some() {
+                        field
+                            .go_type
+                            .strip_prefix('*')
+                            .unwrap_or(&field.go_type)
+                            .to_string()
+                    } else {
+                        field.go_type.clone()
+                    };
                     RenderedUnpackedParam {
                         field_name: field.name.clone(),
                         doc: field.doc.clone(),
                         param_name: go_unexported_name(&field.name),
                         go_type: field.go_type.clone(),
+                        public_go_type,
+                        default_punning_zero,
                         function,
                         function_args,
                         required: field.required,
-                        embed_in_options: planned_field.is_some_and(|planned_field| {
-                            !planned_field.required
-                                && field_kind_is_flattened_message(
-                                    &planned_field.kind,
-                                    self.api_plan,
-                                )
-                        }),
+                        embed_in_options,
                     }
                 })
                 .collect()
@@ -1684,39 +1721,35 @@ impl<'a> ApiPlanner<'a> {
     fn build_field(&mut self, field: &PlannedField) -> Result<RenderedField> {
         let field_name = go_field_name(&field.authored_name);
 
-        let go_type = match &field.kind {
-            PlannedFieldKind::Map { key, value } => {
-                let key_type = self.resolve_planned_value_type(key)?;
-                let value_type = self.resolve_planned_value_type(value)?;
-                format!("map[{}]{}", key_type.type_expr, value_type.type_expr)
-            }
-            PlannedFieldKind::Repeated(value) => {
-                let element_type = self.resolve_planned_value_type(value)?;
-                format!("[]{}", element_type.type_expr)
-            }
-            PlannedFieldKind::Singular(PlannedValueType::Tuple(items)) => {
-                let struct_name = self.build_tuple_struct(&field_name, items)?;
-                if !field.required {
-                    format!("*{struct_name}")
-                } else {
-                    struct_name
+        let annotated_go_type = field
+            .flattened_annotation_override
+            .as_ref()
+            .or(field.annotation_override.as_ref())
+            .and_then(|annotation| annotation.for_language(Language::Go))
+            .map(|annotation| self.package.go_type_expr(annotation));
+
+        let go_type = if let Some(annotated) = annotated_go_type {
+            annotated
+        } else {
+            match &field.kind {
+                PlannedFieldKind::Map { key, value } => {
+                    let key_type = self.resolve_planned_value_type(key)?;
+                    let value_type = self.resolve_planned_value_type(value)?;
+                    format!("map[{}]{}", key_type.type_expr, value_type.type_expr)
                 }
-            }
-            PlannedFieldKind::Singular(PlannedValueType::Result { ok, err }) => {
-                let struct_name =
-                    self.build_result_struct(&field_name, ok.as_deref(), err.as_deref())?;
-                if !field.required {
-                    format!("*{struct_name}")
-                } else {
-                    struct_name
+                PlannedFieldKind::Repeated(value) => {
+                    let element_type = self.resolve_planned_value_type(value)?;
+                    format!("[]{}", element_type.type_expr)
                 }
-            }
-            PlannedFieldKind::Singular(value) => {
-                let resolved = self.resolve_planned_value_type(value)?;
-                if !field.required && type_needs_pointer_when_optional(value, &resolved.type_expr) {
-                    format!("*{}", resolved.type_expr)
-                } else {
-                    resolved.type_expr
+                PlannedFieldKind::Singular(value) => {
+                    let resolved = self.resolve_planned_value_type(value)?;
+                    if !field.required
+                        && type_needs_pointer_when_optional(value, &resolved.type_expr)
+                    {
+                        format!("*{}", resolved.type_expr)
+                    } else {
+                        resolved.type_expr
+                    }
                 }
             }
         };
@@ -1741,120 +1774,6 @@ impl<'a> ApiPlanner<'a> {
         ensure_generic_result(&mut self.models);
     }
 
-    fn build_tuple_struct(
-        &mut self,
-        field_name: &str,
-        items: &[PlannedValueType],
-    ) -> Result<String> {
-        if items.len() > TUPLE_FIELD_NAMES.len() {
-            return Err(Error::UnsupportedGoType {
-                context: format!("tuple with {} elements", items.len()),
-                reason: format!(
-                    "Go code generation supports tuples with at most {} elements",
-                    TUPLE_FIELD_NAMES.len()
-                ),
-            });
-        }
-
-        let struct_name = field_name.to_string();
-
-        let fields = items
-            .iter()
-            .zip(TUPLE_FIELD_NAMES.iter())
-            .map(|(item, &ordinal_name)| {
-                let resolved = self.resolve_planned_value_type(item)?;
-                Ok(RenderedField {
-                    name: ordinal_name.to_string(),
-                    doc: None,
-                    go_type: resolved.type_expr,
-                    required: true,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        // Check for conflicts: same name but different field types.
-        if let Some(existing) = self.models.get(&struct_name) {
-            let existing_types: Vec<&str> =
-                existing.fields.iter().map(|f| f.go_type.as_str()).collect();
-            let new_types: Vec<&str> = fields.iter().map(|f| f.go_type.as_str()).collect();
-            if existing_types != new_types {
-                return Err(Error::UnsupportedGoType {
-                    context: format!("tuple struct `{struct_name}`"),
-                    reason: format!(
-                        "a tuple struct named `{struct_name}` already exists with different element types"
-                    ),
-                });
-            }
-        } else {
-            self.models.insert(
-                struct_name.clone(),
-                RenderedModel {
-                    name: struct_name.clone(),
-                    fields,
-                },
-            );
-        }
-
-        Ok(struct_name)
-    }
-
-    fn build_result_struct(
-        &mut self,
-        field_name: &str,
-        ok: Option<&PlannedValueType>,
-        err: Option<&PlannedValueType>,
-    ) -> Result<String> {
-        let struct_name = field_name.to_string();
-
-        let mut fields = Vec::new();
-
-        if let Some(ok_type) = ok {
-            let resolved = self.resolve_planned_value_type(ok_type)?;
-            fields.push(RenderedField {
-                name: "Result".to_string(),
-                doc: None,
-                go_type: resolved.type_expr,
-                required: true,
-            });
-        }
-
-        let error_type = if let Some(err_type) = err {
-            self.resolve_planned_value_type(err_type)?.type_expr
-        } else {
-            "error".to_string()
-        };
-        fields.push(RenderedField {
-            name: "Error".to_string(),
-            doc: None,
-            go_type: error_type,
-            required: true,
-        });
-
-        if let Some(existing) = self.models.get(&struct_name) {
-            let existing_types: Vec<&str> =
-                existing.fields.iter().map(|f| f.go_type.as_str()).collect();
-            let new_types: Vec<&str> = fields.iter().map(|f| f.go_type.as_str()).collect();
-            if existing_types != new_types {
-                return Err(Error::UnsupportedGoType {
-                    context: format!("result struct `{struct_name}`"),
-                    reason: format!(
-                        "a result struct named `{struct_name}` already exists with different field types"
-                    ),
-                });
-            }
-        } else {
-            self.models.insert(
-                struct_name.clone(),
-                RenderedModel {
-                    name: struct_name.clone(),
-                    fields,
-                },
-            );
-        }
-
-        Ok(struct_name)
-    }
-
     fn populate_model_wire_conversions(&mut self) -> Result<()> {
         self.external_models
             .populate_model_wire_conversions(self.api_plan, &self.models)
@@ -1866,21 +1785,6 @@ impl<'a> ApiPlanner<'a> {
     }
 }
 
-fn service_uses_primary_varargs_wrappers(service: &RenderedService<'_>) -> bool {
-    service
-        .operations
-        .iter()
-        .any(operation_uses_primary_varargs_wrapper)
-}
-
-fn service_uses_generated_future_helpers(service: &RenderedService<'_>) -> bool {
-    service.operations.iter().any(|operation| {
-        operation.wire_binding.is_some()
-            || operation_uses_primary_varargs_wrapper(operation)
-            || operation_uses_native_future_adapter(operation)
-    })
-}
-
 fn service_uses_function_name_inlining(service: &RenderedService<'_>) -> bool {
     service.operations.iter().any(|operation| {
         operation.unpacked_input.as_ref().is_some_and(|params| {
@@ -1889,24 +1793,6 @@ fn service_uses_function_name_inlining(service: &RenderedService<'_>) -> bool {
                 .any(|param| param.required && param.function.is_some())
         })
     })
-}
-
-fn operation_uses_primary_varargs_wrapper(operation: &RenderedOperation<'_>) -> bool {
-    operation
-        .unpacked_input
-        .as_deref()
-        .and_then(primary_varargs_args_param)
-        .is_some()
-}
-
-fn operation_uses_native_future_adapter(operation: &RenderedOperation<'_>) -> bool {
-    if operation.output_transform_expr.is_some() {
-        return true;
-    }
-    operation
-        .wire_binding
-        .as_ref()
-        .is_some_and(|binding| binding.uses_native_future_adapter())
 }
 
 /// Derives the primary Go output filename from the first service name
@@ -2137,8 +2023,12 @@ struct RenderedUnpackedParam {
     /// Unexported Go parameter name used in the function signature
     /// (e.g. `"userId"`).
     param_name: String,
-    /// Go type expression (e.g. `"string"`, `"UserProfile"`).
+    /// Internal request Go type expression (e.g. `"string"`, `"*string"`).
     go_type: String,
+    /// Public options/parameter Go type expression.
+    public_go_type: String,
+    /// Public zero value that represents absence, when default-punning applies.
+    default_punning_zero: Option<String>,
     /// Function field metadata for required `@nexus.function` fields. Optional
     /// function fields remain string-shaped in generated options structs.
     function: Option<FunctionFieldSpec>,
@@ -2660,6 +2550,57 @@ fn field_kind_is_flattened_message(kind: &PlannedFieldKind, api_plan: &PlannedSp
     record_for_message(api_plan, message).is_some_and(|model| model.flatten_in_api)
 }
 
+pub(in crate::generator) fn public_default_punning_zero_for_field(
+    kind: &PlannedFieldKind,
+    internal_go_type: &str,
+) -> Option<String> {
+    let public_go_type = internal_go_type.strip_prefix('*')?;
+    if let Some(zero) = public_default_punning_zero_for_go_type(public_go_type) {
+        return Some(zero.to_string());
+    }
+    match kind {
+        PlannedFieldKind::Singular(value) => {
+            public_default_punning_zero_for_value(value, public_go_type)
+        }
+        PlannedFieldKind::Repeated(_) | PlannedFieldKind::Map { .. } => None,
+    }
+}
+
+fn public_default_punning_zero_for_value(
+    value: &PlannedValueType,
+    public_go_type: &str,
+) -> Option<String> {
+    match value {
+        PlannedValueType::Scalar(scalar) => match scalar {
+            PlannedScalarType::Bool => Some("false".to_string()),
+            PlannedScalarType::String => Some("\"\"".to_string()),
+            PlannedScalarType::Int32 | PlannedScalarType::Int64 | PlannedScalarType::Float => {
+                Some("0".to_string())
+            }
+            PlannedScalarType::Bytes => None,
+        },
+        PlannedValueType::Enum(_) | PlannedValueType::Flags(_) => Some("0".to_string()),
+        PlannedValueType::External { .. } => {
+            public_default_punning_zero_for_go_type(public_go_type).map(str::to_string)
+        }
+        PlannedValueType::Variant(_)
+        | PlannedValueType::Message(_)
+        | PlannedValueType::Tuple(_)
+        | PlannedValueType::Result { .. }
+        | PlannedValueType::Unknown => None,
+    }
+}
+
+fn public_default_punning_zero_for_go_type(public_go_type: &str) -> Option<&'static str> {
+    match public_go_type {
+        "string" => Some("\"\""),
+        "bool" => Some("false"),
+        "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16" | "uint32"
+        | "uint64" | "float32" | "float64" | "time.Duration" => Some("0"),
+        _ => None,
+    }
+}
+
 fn resolve_message_go_type(
     message: &PlannedMessageType,
     external_models: &GoExternalModels,
@@ -2784,7 +2725,7 @@ fn ensure_generic_tuple(
                 name: TUPLE_FIELD_NAMES[index].to_string(),
                 doc: None,
                 go_type: format!("T{}", index + 1),
-                required: false,
+                required: true,
             })
             .collect();
         models.insert(
@@ -3154,7 +3095,6 @@ fn render_file(
     external_models: &GoExternalModels,
     api_plan: &PlannedSpec,
     visibility: &GoVisibility,
-    needs_future_helpers: bool,
 ) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
@@ -3234,16 +3174,12 @@ fn render_file(
     }
 
     let has_operations = services.iter().any(|s| !s.operations.is_empty());
-    if needs_future_helpers || has_operations {
+    if has_operations {
         output.push_str("\n// --- Helpers ---\n");
     }
     if has_operations {
         output.push('\n');
         render_nexus_client_helper(&mut output, package);
-    }
-    if needs_future_helpers {
-        output.push('\n');
-        render_generated_future_helpers(&mut output, package);
     }
 
     // --- Datatypes ---
@@ -3288,7 +3224,7 @@ fn render_file(
         }
         for (key, model) in private_models {
             output.push('\n');
-            render_model(&mut output, key, model, external_models);
+            render_model(&mut output, key, model, external_models, false);
         }
     }
 
@@ -3299,7 +3235,21 @@ fn render_file(
         for service in services {
             for resource in &service.resources {
                 output.push('\n');
-                render_resource(&mut output, resource, api_plan, package, visibility);
+                let constructor_returns_value = service.operations.iter().any(|operation| {
+                    operation
+                        .wire_binding
+                        .as_ref()
+                        .and_then(|binding| binding.returned_resource_type_name())
+                        .is_some_and(|returned| returned == resource.type_name)
+                });
+                render_resource(
+                    &mut output,
+                    resource,
+                    api_plan,
+                    package,
+                    visibility,
+                    constructor_returns_value,
+                );
                 render_resource_methods(
                     &mut output,
                     service,
@@ -3378,7 +3328,7 @@ fn render_file(
         }
         for (key, model) in public_models {
             output.push('\n');
-            render_model(&mut output, key, model, external_models);
+            render_model(&mut output, key, model, external_models, true);
         }
         for service in services {
             if service.endpoint.is_none() {
@@ -3386,11 +3336,8 @@ fn render_file(
             }
             for operation in &service.operations {
                 if let Some(params) = &operation.unpacked_input {
-                    let has_optional = params.iter().any(|p| !p.required);
-                    if has_optional {
-                        output.push('\n');
-                        render_options_struct(&mut output, operation, params);
-                    }
+                    output.push('\n');
+                    render_options_struct(&mut output, operation, params);
                     output.push('\n');
                     render_convenience_wrapper(
                         &mut output,
@@ -3400,9 +3347,9 @@ fn render_file(
                         package,
                         visibility,
                     );
-                    if primary_varargs_args_param(params).is_some() {
+                    if unary_primary_varargs_function_param(params).is_some() {
                         output.push('\n');
-                        render_with_args_convenience_wrapper(
+                        render_typed_convenience_wrapper(
                             &mut output,
                             service,
                             operation,
@@ -3413,6 +3360,8 @@ fn render_file(
                     }
                 } else {
                     // External input type — generate a simple forwarding wrapper
+                    output.push('\n');
+                    render_empty_options_struct(&mut output, operation);
                     output.push('\n');
                     render_forwarding_wrapper(&mut output, service, operation, package);
                 }
@@ -3656,6 +3605,7 @@ fn render_model(
     key: &str,
     model: &RenderedModel,
     external_models: &GoExternalModels,
+    public: bool,
 ) {
     output.push_str("type ");
     output.push_str(&model.name);
@@ -3665,7 +3615,16 @@ fn render_model(
         output.push_str("}\n");
     } else {
         for field in &model.fields {
-            render_field_doc_comment(output, "\t", field.doc.as_deref(), field.required);
+            if public {
+                if field.required {
+                    render_field_doc_comment(output, "\t", field.doc.as_deref(), true);
+                } else {
+                    render_go_doc_comment(output, "\t", "Optional.");
+                    if let Some(doc) = field.doc.as_deref() {
+                        render_go_doc_comment(output, "\t", doc);
+                    }
+                }
+            }
             output.push('\t');
             output.push_str(&field.name);
             output.push(' ');
@@ -3694,6 +3653,7 @@ fn render_resource(
     api_plan: &PlannedSpec,
     package: &GoPackageContext,
     visibility: &GoVisibility,
+    constructor_returns_value: bool,
 ) {
     output.push_str("type ");
     output.push_str(&resource.type_name);
@@ -3701,25 +3661,100 @@ fn render_resource(
 
     if resource.fields.is_empty() {
         output.push_str("}\n");
-        return;
+    } else {
+        for field in &resource.fields {
+            let field_name = go_field_name(&field.name);
+            let field_kind = planned_field_kind(&field.kind, api_plan);
+            let go_type = visibility.rewrite_go_expr(&resolve_resource_field_kind(
+                &field_kind,
+                field.optional,
+                package,
+            ));
+            if field.optional {
+                render_go_doc_comment(output, "\t", "Optional.");
+            } else {
+                render_field_doc_comment(output, "\t", None, true);
+            }
+            output.push('\t');
+            output.push_str(&field_name);
+            output.push(' ');
+            output.push_str(&go_type);
+            output.push('\n');
+        }
+        output.push_str("}\n");
     }
 
-    for field in &resource.fields {
-        let field_name = go_field_name(&field.name);
-        let field_kind = planned_field_kind(&field.kind, api_plan);
-        let go_type = visibility.rewrite_go_expr(&resolve_resource_field_kind(
-            &field_kind,
-            field.optional,
-            package,
-        ));
-        render_field_doc_comment(output, "\t", None, !field.optional);
-        output.push('\t');
-        output.push_str(&field_name);
+    output.push_str("\nfunc New");
+    output.push_str(&resource.type_name);
+    output.push('(');
+    for (index, field) in resource.fields.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
+        }
+        let name = go_unexported_name(&go_field_name(&field.name));
+        let kind = planned_field_kind(&field.kind, api_plan);
+        let internal = resolve_resource_field_kind(&kind, field.optional, package);
+        let public = if field.optional
+            && public_default_punning_zero_for_field(&kind, &internal).is_some()
+        {
+            internal.trim_start_matches('*').to_string()
+        } else {
+            internal
+        };
+        output.push_str(&name);
         output.push(' ');
-        output.push_str(&go_type);
-        output.push('\n');
+        output.push_str(&visibility.rewrite_go_expr(&public));
     }
-    output.push_str("}\n");
+    output.push_str(") ");
+    if !constructor_returns_value {
+        output.push('*');
+    }
+    output.push_str(&resource.type_name);
+    output.push_str(" {\n");
+    for field in resource.fields.iter().filter(|field| field.optional) {
+        let name = go_unexported_name(&go_field_name(&field.name));
+        let kind = planned_field_kind(&field.kind, api_plan);
+        let internal = resolve_resource_field_kind(&kind, true, package);
+        if let Some(zero) = public_default_punning_zero_for_field(&kind, &internal) {
+            output.push_str("\tvar ");
+            output.push_str(&name);
+            output.push_str("Ptr ");
+            output.push_str(&visibility.rewrite_go_expr(&internal));
+            output.push_str("\n\tif ");
+            output.push_str(&name);
+            output.push_str(" != ");
+            output.push_str(&zero);
+            output.push_str(" {\n\t\t");
+            output.push_str(&name);
+            output.push_str("Ptr = &");
+            output.push_str(&name);
+            output.push_str("\n\t}\n");
+        }
+    }
+    output.push_str("\treturn ");
+    if !constructor_returns_value {
+        output.push('&');
+    }
+    output.push_str(&resource.type_name);
+    output.push_str("{\n");
+    for field in &resource.fields {
+        let name = go_unexported_name(&go_field_name(&field.name));
+        let kind = planned_field_kind(&field.kind, api_plan);
+        let internal = resolve_resource_field_kind(&kind, field.optional, package);
+        let value = if field.optional
+            && public_default_punning_zero_for_field(&kind, &internal).is_some()
+        {
+            format!("{name}Ptr")
+        } else {
+            name
+        };
+        output.push_str("\t\t");
+        output.push_str(&go_field_name(&field.name));
+        output.push_str(": ");
+        output.push_str(&value);
+        output.push_str(",\n");
+    }
+    output.push_str("\t}\n}\n");
 }
 
 /// Resolves a resource field's [`PlannedFieldKind`] to a Go type expression,
@@ -3873,6 +3908,12 @@ fn render_resource_methods(
                     .iter()
                     .find(|op| op.name == operation_name)
                     .expect("bound resource operation should exist on the service");
+                let primary_varargs_function = method.params.iter().find(|param| {
+                    param.function.as_ref().is_some_and(|function| {
+                        function.primary
+                            && matches!(function.args, FunctionArgsSpec::Varargs { .. })
+                    })
+                });
 
                 // Method signature: func (u *Type) Method(ctx workflow.Context, params...) (return)
                 output.push_str("func (u *");
@@ -3882,21 +3923,100 @@ fn render_resource_methods(
                 output.push_str("(ctx ");
                 output.push_str(&package.workflow_context_type());
                 for param in &method.params {
+                    if primary_varargs_function.is_some_and(|primary| primary.name == param.name) {
+                        continue;
+                    }
                     output.push_str(", ");
                     output.push_str(&go_unexported_name(&go_field_name(&param.name)));
                     output.push(' ');
                     let param_kind = planned_field_kind(&param.kind, api_plan);
-                    let param_type =
+                    let internal_type =
                         resolve_resource_field_kind(&param_kind, param.optional, package);
+                    let param_type = if param.optional
+                        && public_default_punning_zero_for_field(&param_kind, &internal_type)
+                            .is_some()
+                    {
+                        internal_type.trim_start_matches('*').to_string()
+                    } else {
+                        internal_type
+                    };
                     output.push_str(&visibility.rewrite_go_expr(&param_type));
+                }
+                if let Some(primary) = primary_varargs_function {
+                    output.push_str(", ");
+                    output.push_str(&go_unexported_name(&go_field_name(&primary.name)));
+                    output.push_str(" any, args ...any");
                 }
                 output.push_str(") ");
 
                 render_operation_future_return_type(output, package);
                 output.push_str(" {\n");
 
+                let function_name_var = primary_varargs_function.map(|primary| {
+                    let param_name = go_unexported_name(&go_field_name(&primary.name));
+                    let name_var = format!("{param_name}Name");
+                    let synthetic = RenderedUnpackedParam {
+                        field_name: go_field_name(&primary.name),
+                        doc: None,
+                        param_name,
+                        go_type: "string".to_string(),
+                        public_go_type: "any".to_string(),
+                        default_punning_zero: None,
+                        function: primary.function.clone(),
+                        function_args: None,
+                        required: true,
+                        embed_in_options: false,
+                    };
+                    render_function_name_inline_assignment(output, &synthetic);
+                    name_var
+                });
+
+                for param in method.params.iter().filter(|param| param.optional) {
+                    let kind = planned_field_kind(&param.kind, api_plan);
+                    let internal = resolve_resource_field_kind(&kind, true, package);
+                    if let Some(zero) = public_default_punning_zero_for_field(&kind, &internal) {
+                        let name = go_unexported_name(&go_field_name(&param.name));
+                        output.push_str("\tvar ");
+                        output.push_str(&name);
+                        output.push_str("Ptr ");
+                        output.push_str(&visibility.rewrite_go_expr(&internal));
+                        output.push_str("\n\tif ");
+                        output.push_str(&name);
+                        output.push_str(" != ");
+                        output.push_str(&zero);
+                        output.push_str(" {\n\t\t");
+                        output.push_str(&name);
+                        output.push_str("Ptr = &");
+                        output.push_str(&name);
+                        output.push_str("\n\t}\n");
+                    }
+                }
+
                 // Body: construct request and delegate
-                let request_expr = render_request_plan(
+                let method_param_sources = method
+                    .params
+                    .iter()
+                    .map(|param| {
+                        let name = go_unexported_name(&go_field_name(&param.name));
+                        let value = if primary_varargs_function
+                            .is_some_and(|primary| primary.name == param.name)
+                        {
+                            function_name_var.clone().unwrap()
+                        } else if param.optional {
+                            let kind = planned_field_kind(&param.kind, api_plan);
+                            let internal = resolve_resource_field_kind(&kind, true, package);
+                            if public_default_punning_zero_for_field(&kind, &internal).is_some() {
+                                format!("{name}Ptr")
+                            } else {
+                                name
+                            }
+                        } else {
+                            name
+                        };
+                        (param.name.clone(), value)
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let mut request_expr = render_request_plan(
                     request_plan,
                     go_field_name,
                     |name, value| format!("{name}: {value}"),
@@ -3913,8 +4033,23 @@ fn render_resource_methods(
                         }
                     },
                     |name| format!("u.{}", go_field_name(name)),
-                    |name| go_unexported_name(&go_field_name(name)),
+                    |name| {
+                        method_param_sources
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| go_unexported_name(&go_field_name(name)))
+                    },
                 );
+                if let Some(primary) = primary_varargs_function
+                    && let Some(args_param) = operation.unpacked_input.as_ref().and_then(|params| {
+                        params
+                            .iter()
+                            .find(|param| param.function_args.as_ref() == primary.function.as_ref())
+                    })
+                    && let Some(prefix) = request_expr.strip_suffix('}')
+                {
+                    request_expr = format!("{prefix}, {}: args}}", args_param.field_name);
+                }
 
                 output.push_str("\treturn ");
                 output.push_str(&operation.func_name);
@@ -3956,120 +4091,50 @@ fn render_resource_methods(
     }
 }
 
-fn render_generated_future_helpers(output: &mut String, package: &GoPackageContext) {
-    let context_type = package.workflow_context_type();
-    output.push_str("type nexGenNexusOperationFuture struct {\n");
-    output.push_str("\toperation ");
-    output.push_str(&package.workflow_nexus_operation_future_type());
-    output.push('\n');
-    output.push_str("\tresult ");
-    output.push_str(&package.workflow_future_type());
-    output.push('\n');
-    output.push_str("\texecution ");
-    output.push_str(&package.workflow_future_type());
-    output.push('\n');
-    output.push_str("\tget func(");
-    output.push_str(&context_type);
-    output.push_str(", any) error\n");
-    output.push_str("}\n\n");
-
-    output.push_str("func (f *nexGenNexusOperationFuture) Get(ctx ");
-    output.push_str(&context_type);
-    output.push_str(", valuePtr any) error {\n");
-    output.push_str("\tif f.get != nil {\n");
-    output.push_str("\t\treturn f.get(ctx, valuePtr)\n");
-    output.push_str("\t}\n");
-    output.push_str("\treturn f.result.Get(ctx, valuePtr)\n");
-    output.push_str("}\n\n");
-
-    output.push_str("func (f *nexGenNexusOperationFuture) IsReady() bool {\n");
-    output.push_str("\tif f.operation != nil {\n");
-    output.push_str("\t\treturn f.operation.IsReady()\n");
-    output.push_str("\t}\n");
-    output.push_str("\treturn f.result.IsReady()\n");
-    output.push_str("}\n\n");
-
-    output.push_str("func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() ");
-    output.push_str(&package.workflow_future_type());
-    output.push_str(" {\n");
-    output.push_str("\tif f.operation != nil {\n");
-    output.push_str("\t\treturn f.operation.GetNexusOperationExecution()\n");
-    output.push_str("\t}\n");
-    output.push_str("\treturn f.execution\n");
-    output.push_str("}\n\n");
-
-    output.push_str("func nexGenFailedNexusOperationFuture(ctx ");
-    output.push_str(&context_type);
-    output.push_str(", err error) ");
-    output.push_str(&package.workflow_nexus_operation_future_type());
-    output.push_str(" {\n");
-    output.push_str("\tresult, resultSettable := ");
-    output.push_str(&package.new_future());
-    output.push_str("(ctx)\n");
-    output.push_str("\tresultSettable.SetError(err)\n");
-    output.push_str("\texecution, executionSettable := ");
-    output.push_str(&package.new_future());
-    output.push_str("(ctx)\n");
-    output.push_str("\texecutionSettable.SetError(err)\n");
-    output.push_str("\treturn &nexGenNexusOperationFuture{result: result, execution: execution}\n");
-    output.push_str("}\n\n");
-
-    output.push_str("func nexGenFutureResultTypeError() error {\n");
-    output.push_str("\treturn errors.New(\"nex-gen future result pointer has unexpected type\")\n");
-    output.push_str("}\n");
-}
-
 pub(in crate::generator) fn render_operation_future_return_type(
     output: &mut String,
     package: &GoPackageContext,
 ) {
-    output.push_str(&package.workflow_nexus_operation_future_type());
+    output.push_str(&package.workflow_future_type());
 }
 
-fn render_future_value_assignment(
-    output: &mut String,
-    result_type: &str,
-    value_expr: &str,
-    value_is_pointer: bool,
-) {
-    output.push_str("\t\ttypedValue, ok := valuePtr.(*");
-    output.push_str(result_type);
-    output.push_str(")\n");
-    output.push_str("\t\tif !ok {\n");
-    output.push_str("\t\t\treturn nexGenFutureResultTypeError()\n");
-    output.push_str("\t\t}\n");
+fn render_future_value_set(output: &mut String, value_expr: &str, value_is_pointer: bool) {
     if value_is_pointer {
         output.push_str("\t\tif ");
         output.push_str(value_expr);
-        output.push_str(" != nil {\n");
-        output.push_str("\t\t\t*typedValue = *");
-        output.push_str(value_expr);
-        output.push('\n');
+        output.push_str(" == nil {\n");
+        output.push_str("\t\t\tresultSettable.SetError(fmt.Errorf(\"nex-gen decoded required operation result was nil\"))\n");
+        output.push_str("\t\t\treturn\n");
         output.push_str("\t\t}\n");
-    } else {
-        output.push_str("\t\t*typedValue = ");
+        output.push_str("\t\tresultSettable.Set(*");
         output.push_str(value_expr);
-        output.push('\n');
+        output.push_str(", nil)\n");
+    } else {
+        output.push_str("\t\tresultSettable.Set(");
+        output.push_str(value_expr);
+        output.push_str(", nil)\n");
     }
 }
 
 pub(in crate::generator) fn render_operation_future_adapter(
     output: &mut String,
     package: &GoPackageContext,
-    result_type: &str,
+    _result_type: &str,
     value_is_pointer: bool,
     get_body: impl FnOnce(&mut String),
 ) {
-    output.push_str("\treturn &nexGenNexusOperationFuture{operation: fut, get: func(ctx ");
+    output.push_str("\tresult, resultSettable := ");
+    output.push_str(&package.new_future());
+    output.push_str("(ctx)\n");
+    output.push_str("\t");
+    output.push_str(&package.workflow_go());
+    output.push_str("(ctx, func(ctx ");
     output.push_str(&package.workflow_context_type());
-    output.push_str(", valuePtr any) error {\n");
-    output.push_str("\t\tif valuePtr == nil {\n");
-    output.push_str("\t\t\treturn fut.Get(ctx, nil)\n");
-    output.push_str("\t\t}\n");
+    output.push_str(") {\n");
     get_body(output);
-    render_future_value_assignment(output, result_type, "value", value_is_pointer);
-    output.push_str("\t\treturn nil\n");
-    output.push_str("\t}}\n");
+    render_future_value_set(output, "value", value_is_pointer);
+    output.push_str("\t})\n");
+    output.push_str("\treturn result\n");
 }
 
 fn render_nexus_client_helper(output: &mut String, package: &GoPackageContext) {
@@ -4096,7 +4161,7 @@ fn render_service_client(
     output: &mut String,
     service: &RenderedService<'_>,
     package: &GoPackageContext,
-    visibility: &GoVisibility,
+    _visibility: &GoVisibility,
 ) {
     let service_name = service_client_name(service);
     output.push_str("type ");
@@ -4117,19 +4182,8 @@ fn render_service_client(
 
     for operation in &service.operations {
         output.push('\n');
-        if let Some(params) = &operation.unpacked_input {
-            if !required_function_type_parameters(params, package, visibility).is_empty() {
-                continue;
-            }
-            render_client_convenience_method(
-                output, service, operation, params, package, visibility,
-            );
-            if primary_varargs_args_param(params).is_some() {
-                output.push('\n');
-                render_client_with_args_convenience_method(
-                    output, service, operation, params, package, visibility,
-                );
-            }
+        if operation.unpacked_input.is_some() {
+            continue;
         } else {
             render_client_forwarding_method(output, service, operation, package);
         }
@@ -4212,13 +4266,15 @@ fn render_operation_function(
             } else {
                 output.push_str("\t\tif err := fut.Get(ctx, nil); err != nil {\n");
             }
-            output.push_str("\t\t\treturn err\n");
+            output.push_str("\t\t\tresultSettable.SetError(err)\n");
+            output.push_str("\t\t\treturn\n");
             output.push_str("\t\t}\n");
             output.push_str("\t\tvalue, err := ");
             output.push_str(transform_expr);
             output.push('\n');
             output.push_str("\t\tif err != nil {\n");
-            output.push_str("\t\t\treturn err\n");
+            output.push_str("\t\t\tresultSettable.SetError(err)\n");
+            output.push_str("\t\t\treturn\n");
             output.push_str("\t\t}\n");
         });
     } else {
@@ -4227,7 +4283,7 @@ fn render_operation_function(
     output.push_str("}\n");
 }
 
-/// Renders an options struct for optional parameters of a convenience wrapper.
+/// Renders an options struct for non-function parameters of a convenience wrapper.
 ///
 /// ```go
 /// type GetUserOptions struct {
@@ -4242,21 +4298,40 @@ fn render_options_struct(
     output.push_str("type ");
     output.push_str(&go_field_name(operation.name));
     output.push_str("Options struct {\n");
-    for param in params.iter().filter(|p| !p.required) {
-        if let Some(doc) = &param.doc {
-            render_go_doc_comment(output, "\t", doc);
+    for param in params.iter().filter(|p| param_belongs_in_options(p)) {
+        if param.required {
+            render_field_doc_comment(output, "\t", param.doc.as_deref(), true);
+        } else {
+            render_go_doc_comment(output, "\t", "Optional.");
+            if let Some(doc) = &param.doc {
+                render_go_doc_comment(output, "\t", doc);
+            }
         }
         output.push('\t');
         if param.embed_in_options {
-            output.push_str(param.go_type.trim_start_matches('*'));
+            output.push_str(param.public_go_type.trim_start_matches('*'));
         } else {
             output.push_str(&param.field_name);
             output.push(' ');
-            output.push_str(&param.go_type);
+            output.push_str(&param.public_go_type);
         }
         output.push('\n');
     }
     output.push_str("}\n");
+}
+
+fn render_empty_options_struct(output: &mut String, operation: &RenderedOperation<'_>) {
+    output.push_str("type ");
+    output.push_str(&go_field_name(operation.name));
+    output.push_str("Options struct {\n}\n");
+}
+
+fn param_belongs_in_options(param: &RenderedUnpackedParam) -> bool {
+    param.function.is_none() && param.function_args.is_none()
+}
+
+fn param_is_positional(param: &RenderedUnpackedParam) -> bool {
+    !param_belongs_in_options(param)
 }
 
 fn function_type_parameter_name(param: &RenderedUnpackedParam) -> String {
@@ -4270,9 +4345,15 @@ fn required_function_type_parameters(
 ) -> Vec<(String, String)> {
     params
         .iter()
-        .filter(|param| param.required)
         .filter_map(|param| {
             let function = param.function.as_ref()?;
+            if is_go_signal_function(function)
+                || function.alternate_type.is_none()
+                || (function.primary
+                    && matches!(function.args, FunctionArgsSpec::Varargs { ref prefix, .. } if !prefix.is_empty()))
+            {
+                return None;
+            }
             Some((
                 function_type_parameter_name(param),
                 go_function_constraint(function, params, package, visibility),
@@ -4333,11 +4414,67 @@ fn go_function_constraint(
             .map(|result| visibility.rewrite_go_expr(&result))
             .unwrap_or_else(|| "any".to_string()),
     };
-    format!(
-        "interface{{ ~string | func({}) {} }}",
-        args.join(", "),
-        result_type
-    )
+    let function_type = format!("func({}) {}", args.join(", "), result_type);
+    if let Some(alternate_type) = &function.alternate_type {
+        let alternate_type = go_authored_function_type_expr(alternate_type, package, visibility);
+        format!("interface{{ ~{alternate_type} | {function_type} }}")
+    } else {
+        format!("interface{{ ~{function_type} }}")
+    }
+}
+
+fn go_function_type_expr(
+    function: &FunctionFieldSpec,
+    params: &[RenderedUnpackedParam],
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+) -> String {
+    let constraint = go_function_constraint(function, params, package, visibility);
+    constraint
+        .strip_prefix("interface{ ~")
+        .and_then(|value| value.strip_suffix(" }"))
+        .unwrap_or(&constraint)
+        .to_string()
+}
+
+fn is_go_signal_function(function: &FunctionFieldSpec) -> bool {
+    !function.primary
+        && function.args_field == "signal_input"
+        && matches!(function.alternate_type.as_ref(), Some(TypeSpec::String))
+}
+
+fn is_go_signal_param(param: &RenderedUnpackedParam) -> bool {
+    param.function.as_ref().is_some_and(is_go_signal_function)
+}
+
+fn is_go_signal_args_param(param: &RenderedUnpackedParam) -> bool {
+    param
+        .function_args
+        .as_ref()
+        .is_some_and(is_go_signal_function)
+}
+
+fn ordered_positional_params(params: &[RenderedUnpackedParam]) -> Vec<&RenderedUnpackedParam> {
+    let mut ordered = Vec::new();
+    for signal in params.iter().filter(|param| is_go_signal_param(param)) {
+        ordered.push(signal);
+        if let Some(function) = &signal.function
+            && let Some(args) = params
+                .iter()
+                .find(|param| param.function_args.as_ref() == Some(function))
+        {
+            ordered.push(args);
+        }
+    }
+    for param in params.iter().filter(|param| param_is_positional(param)) {
+        if !ordered
+            .iter()
+            .any(|item| item.field_name == param.field_name)
+        {
+            ordered.push(param);
+        }
+    }
+    ordered
 }
 
 fn go_variadic_element_type(go_type: &str) -> String {
@@ -4399,52 +4536,129 @@ fn primary_varargs_args_param(params: &[RenderedUnpackedParam]) -> Option<&Rende
     })
 }
 
+fn unary_primary_varargs_function_param(
+    params: &[RenderedUnpackedParam],
+) -> Option<&RenderedUnpackedParam> {
+    let function_param = params.iter().find(|param| {
+        param.function.as_ref().is_some_and(|function| {
+            function.primary && matches!(function.args, FunctionArgsSpec::Varargs { .. })
+        })
+    })?;
+    let function = function_param.function.as_ref()?;
+    let FunctionArgsSpec::Varargs { prefix, .. } = &function.args else {
+        return None;
+    };
+    if prefix.is_empty() {
+        return None;
+    }
+    let args = primary_varargs_args_param(params)?;
+    (go_variadic_element_type(&args.go_type) == "any").then_some(function_param)
+}
+
 fn render_operation_wrapper_return_type(output: &mut String, package: &GoPackageContext) {
     render_operation_future_return_type(output, package);
 }
 
-fn render_with_args_conflict_return(output: &mut String) {
-    output.push_str(
-        "\t\treturn nexGenFailedNexusOperationFuture(ctx, errors.New(\"cannot specify both positional arguments and args\"))\n",
-    );
-}
-
 fn render_function_name_inlining(output: &mut String, params: &[RenderedUnpackedParam]) {
     for param in params {
-        if param.required && param.function.is_some() {
-            render_function_name_inline_assignment(output, param);
+        if param
+            .function
+            .as_ref()
+            .is_some_and(|function| !is_go_signal_function(function))
+        {
+            let name = function_name_local_var_for_params(param, params);
+            render_function_name_inline_assignment_named(output, param, &name);
         }
     }
 }
 
 fn render_function_name_inline_assignment(output: &mut String, param: &RenderedUnpackedParam) {
     let name_var = function_name_local_var(param);
+    render_function_name_inline_assignment_named(output, param, &name_var);
+}
+
+fn render_function_name_inline_assignment_named(
+    output: &mut String,
+    param: &RenderedUnpackedParam,
+    name_var: &str,
+) {
+    let accepts_alternate = param
+        .function
+        .as_ref()
+        .is_some_and(|function| function.alternate_type.is_some());
     output.push('\t');
     output.push_str(&name_var);
     output.push_str(" := \"\"\n");
-    output.push_str("\tswitch rv := reflect.ValueOf(");
+    output.push_str("\t{\n");
+    if accepts_alternate {
+        output.push_str("\t\tswitch rv := reflect.ValueOf(");
+    } else {
+        output.push_str("\t\trv := reflect.ValueOf(");
+    }
     output.push_str(&param.param_name);
-    output.push_str("); rv.Kind() {\n");
-    output.push_str("\tcase reflect.String:\n");
-    output.push('\t');
-    output.push('\t');
-    output.push_str(&name_var);
-    output.push_str(" = rv.String()\n");
-    output.push_str("\tcase reflect.Func:\n");
+    if accepts_alternate {
+        output.push_str("); rv.Kind() {\n");
+        output.push_str("\t\tcase reflect.String:\n\t\t\t");
+        output.push_str(&name_var);
+        output.push_str(" = rv.String()\n\t\tcase reflect.Func:\n\t");
+    } else {
+        output.push_str(")\n");
+    }
     output.push_str("\t\tfullName := runtime.FuncForPC(rv.Pointer()).Name()\n");
     output.push_str("\t\telements := strings.Split(fullName, \".\")\n");
     output.push_str("\t\tshortName := elements[len(elements)-1]\n");
-    output.push('\t');
-    output.push('\t');
+    output.push_str("\t\t");
+    if accepts_alternate {
+        output.push('\t');
+    }
     output.push_str(&name_var);
     output.push_str(" = strings.TrimSuffix(shortName, \"-fm\")\n");
-    output.push_str("\tdefault:\n");
-    output.push_str("\t\tpanic(\"nex-gen function name requires string or function\")\n");
+    if accepts_alternate {
+        output.push_str("\t\tdefault:\n\t\t\tpanic(\"nex-gen function name requires string or function\")\n\t\t}\n");
+    }
     output.push_str("\t}\n");
 }
 
 fn function_name_local_var(param: &RenderedUnpackedParam) -> String {
     format!("{}Name", param.param_name)
+}
+
+fn function_name_local_var_for_params(
+    target: &RenderedUnpackedParam,
+    params: &[RenderedUnpackedParam],
+) -> String {
+    let base = function_name_local_var(target);
+    let occupied = params
+        .iter()
+        .map(|param| param.param_name.as_str())
+        .chain(["ctx", "opts", "arg", "args"])
+        .collect::<BTreeSet<_>>();
+    if !occupied.contains(base.as_str()) {
+        return base;
+    }
+    let mut suffix = 2;
+    loop {
+        let candidate = format!("{base}{suffix}");
+        if !occupied.contains(candidate.as_str()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn render_exact_function_name_assignment(output: &mut String, param: &RenderedUnpackedParam) {
+    let name_var = function_name_local_var(param);
+    output.push('\t');
+    output.push_str(&name_var);
+    output.push_str(" := \"\"\n\t{\n");
+    output.push_str("\t\trv := reflect.ValueOf(");
+    output.push_str(&param.param_name);
+    output.push_str(")\n");
+    output.push_str("\t\tfullName := runtime.FuncForPC(rv.Pointer()).Name()\n");
+    output.push_str("\t\telements := strings.Split(fullName, \".\")\n");
+    output.push_str("\t\tshortName := elements[len(elements)-1]\n\t\t");
+    output.push_str(&name_var);
+    output.push_str(" = strings.TrimSuffix(shortName, \"-fm\")\n\t}\n");
 }
 
 fn wrapper_input_docs<'a>(
@@ -4457,7 +4671,12 @@ fn wrapper_input_docs<'a>(
             if doc.is_empty() {
                 None
             } else {
-                Some((param.param_name.clone(), doc.to_string()))
+                let name = if is_go_signal_args_param(param) {
+                    signal_args_public_param_name(param)
+                } else {
+                    param.param_name.clone()
+                };
+                Some((name, doc.to_string()))
             }
         })
         .collect()
@@ -4506,29 +4725,42 @@ fn render_convenience_wrapper(
     visibility: &GoVisibility,
 ) {
     let exported_name = go_field_name(operation.name);
-    let has_optional = params.iter().any(|p| !p.required);
     let type_params = required_function_type_parameters(params, package, visibility);
 
-    let input_docs = wrapper_input_docs(params.iter().filter(|p| p.required));
+    let positional_params = ordered_positional_params(params);
+    let input_docs = wrapper_input_docs(positional_params.iter().copied());
     render_operation_doc_comment(output, operation, &input_docs);
 
-    // Build the list of signature parameters (after `ctx`): one per required
-    // field, plus a trailing `opts` parameter when optional fields exist.
-    let mut signature_params: Vec<(String, String)> = params
-        .iter()
-        .filter(|p| p.required)
-        .map(|p| {
-            let ty = if p.function.is_some() {
+    let mut signature_params: Vec<(String, String)> =
+        vec![("opts".to_string(), format!("{exported_name}Options"))];
+    signature_params.extend(positional_params.iter().copied().map(|p| {
+        let (name, ty) = if is_go_signal_param(p) {
+            (p.param_name.clone(), "string".to_string())
+        } else if is_go_signal_args_param(p) {
+            (signal_args_public_param_name(p), "any".to_string())
+        } else if let Some(function) = &p.function {
+            let ty = if unary_primary_varargs_function_param(params)
+                .is_some_and(|primary| primary.field_name == p.field_name)
+            {
+                "any".to_string()
+            } else if function.alternate_type.is_some() {
                 function_type_parameter_name(p)
             } else {
-                p.go_type.clone()
+                go_function_type_expr(function, params, package, visibility)
             };
             (p.param_name.clone(), ty)
-        })
-        .collect();
-    if has_optional {
-        signature_params.push(("opts".to_string(), format!("{exported_name}Options")));
-    }
+        } else if let Some(function) = &p.function_args {
+            let ty = if matches!(function.args, FunctionArgsSpec::Varargs { .. }) {
+                format!("...{}", go_variadic_element_type(&p.public_go_type))
+            } else {
+                p.public_go_type.clone()
+            };
+            (p.param_name.clone(), ty)
+        } else {
+            (p.param_name.clone(), p.public_go_type.clone())
+        };
+        (name, ty)
+    }));
 
     // The signature is multi-line when it has more than 3 parameters total
     // (counting `ctx` plus the parameters above).
@@ -4581,6 +4813,7 @@ fn render_convenience_wrapper(
     // Function body -- build the request as a multi-line struct literal,
     // sourcing required fields from positional args and optional fields from
     // opts.
+    render_public_default_punning_locals(output, params);
     render_function_name_inlining(output, params);
     let endpoint = service
         .endpoint
@@ -4598,12 +4831,20 @@ fn render_convenience_wrapper(
         output.push_str("\t\t");
         output.push_str(&param.field_name);
         output.push_str(": ");
-        if param.required {
-            if param.function.is_some() {
-                output.push_str(&function_name_local_var(param));
-            } else {
-                output.push_str(&param.param_name);
-            }
+        if is_go_signal_param(param) {
+            output.push_str(&param.param_name);
+        } else if is_go_signal_args_param(param) {
+            output.push_str(&format!(
+                "{}{{{}}}",
+                param.go_type,
+                signal_args_public_param_name(param)
+            ));
+        } else if param.function.is_some() {
+            output.push_str(&function_name_local_var_for_params(param, params));
+        } else if param.function_args.is_some() {
+            output.push_str(&param.param_name);
+        } else if param.default_punning_zero.is_some() {
+            output.push_str(&param.param_name);
         } else if param.embed_in_options {
             output.push('&');
             output.push_str("opts.");
@@ -4619,64 +4860,36 @@ fn render_convenience_wrapper(
     output.push_str("}\n");
 }
 
-fn render_client_convenience_method(
-    output: &mut String,
-    service: &RenderedService<'_>,
-    operation: &RenderedOperation<'_>,
-    params: &[RenderedUnpackedParam],
-    package: &GoPackageContext,
-    visibility: &GoVisibility,
-) {
-    let method_name = go_field_name(operation.name);
-    let has_optional = params.iter().any(|p| !p.required);
-    let type_params = required_function_type_parameters(params, package, visibility);
-    let input_docs = wrapper_input_docs(params.iter().filter(|p| p.required));
-    render_operation_doc_comment(output, operation, &input_docs);
+fn signal_args_public_param_name(param: &RenderedUnpackedParam) -> String {
+    param
+        .param_name
+        .strip_suffix("Args")
+        .map(|prefix| format!("{prefix}Arg"))
+        .unwrap_or_else(|| param.param_name.clone())
+}
 
-    let mut signature_params: Vec<(String, String)> = params
+fn render_public_default_punning_locals(output: &mut String, params: &[RenderedUnpackedParam]) {
+    for param in params
         .iter()
-        .filter(|p| p.required)
-        .map(|p| {
-            let ty = if p.function.is_some() {
-                function_type_parameter_name(p)
-            } else {
-                p.go_type.clone()
-            };
-            (p.param_name.clone(), ty)
-        })
-        .collect();
-    if has_optional {
-        signature_params.push(("opts".to_string(), format!("{method_name}Options")));
-    }
-
-    output.push_str("func (c *");
-    output.push_str(&service_client_name(service));
-    output.push_str(") ");
-    output.push_str(&method_name);
-    if !type_params.is_empty() {
-        output.push('[');
-        for (index, (name, constraint)) in type_params.iter().enumerate() {
-            if index > 0 {
-                output.push_str(", ");
-            }
-            output.push_str(name);
+        .filter(|param| param_belongs_in_options(param))
+    {
+        if let Some(zero) = &param.default_punning_zero {
+            output.push_str("\tvar ");
+            output.push_str(&param.param_name);
             output.push(' ');
-            output.push_str(constraint);
+            output.push_str(&param.go_type);
+            output.push('\n');
+            output.push_str("\tif opts.");
+            output.push_str(&param.field_name);
+            output.push_str(" != ");
+            output.push_str(zero);
+            output.push_str(" {\n\t\t");
+            output.push_str(&param.param_name);
+            output.push_str(" = &opts.");
+            output.push_str(&param.field_name);
+            output.push_str("\n\t}\n");
         }
-        output.push(']');
     }
-    render_operation_params(output, &signature_params, package);
-    output.push(' ');
-    render_operation_wrapper_return_type(output, package);
-    output.push_str(" {\n");
-
-    render_function_name_inlining(output, params);
-    output.push_str("\treturn ");
-    output.push_str(&operation.func_name);
-    output.push_str("(ctx, c.client, ");
-    render_request_struct_literal(output, operation, params);
-    output.push_str("\t})\n");
-    output.push_str("}\n");
 }
 
 fn render_operation_params(
@@ -4710,36 +4923,7 @@ fn render_operation_params(
     }
 }
 
-fn render_request_struct_literal(
-    output: &mut String,
-    operation: &RenderedOperation<'_>,
-    params: &[RenderedUnpackedParam],
-) {
-    output.push_str(&operation.input_type);
-    output.push_str("{\n");
-    for param in params {
-        output.push_str("\t\t");
-        output.push_str(&param.field_name);
-        output.push_str(": ");
-        if param.required {
-            if param.function.is_some() {
-                output.push_str(&function_name_local_var(param));
-            } else {
-                output.push_str(&param.param_name);
-            }
-        } else if param.embed_in_options {
-            output.push('&');
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
-        } else {
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
-        }
-        output.push_str(",\n");
-    }
-}
-
-fn render_with_args_convenience_wrapper(
+fn render_typed_convenience_wrapper(
     output: &mut String,
     service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
@@ -4747,99 +4931,65 @@ fn render_with_args_convenience_wrapper(
     package: &GoPackageContext,
     visibility: &GoVisibility,
 ) {
-    let exported_name = format!("{}WithArgs", go_field_name(operation.name));
-    let base_exported_name = go_field_name(operation.name);
-    let args_param = primary_varargs_args_param(params)
-        .expect("WithArgs wrapper requires a primary varargs args param");
-    let vararg_type = go_variadic_element_type(&args_param.go_type);
-    let type_params = required_function_type_parameters(params, package, visibility);
-
-    let input_docs = wrapper_input_docs(
-        params
-            .iter()
-            .filter(|p| p.required)
-            .chain(std::iter::once(args_param)),
-    );
-    render_operation_doc_comment(output, operation, &input_docs);
-
-    let mut signature_params: Vec<(String, String)> = params
-        .iter()
-        .filter(|p| p.required)
-        .map(|p| {
-            let ty = if p.function.is_some() {
-                function_type_parameter_name(p)
-            } else {
-                p.go_type.clone()
+    let primary = unary_primary_varargs_function_param(params)
+        .expect("typed wrapper requires a unary-capable primary function");
+    let function = primary.function.as_ref().unwrap();
+    let exported_name = format!("{}Typed", go_field_name(operation.name));
+    let options_name = format!("{}Options", go_field_name(operation.name));
+    let arg_type = format!("{}Arg", primary.field_name);
+    let result_type = function
+        .result_type_parameter
+        .clone()
+        .unwrap_or_else(|| format!("{}Result", primary.field_name));
+    let mut signature = vec![("opts".to_string(), options_name)];
+    for param in ordered_positional_params(params) {
+        if param.field_name == primary.field_name {
+            let mut args = match &function.args {
+                FunctionArgsSpec::Varargs { prefix, .. } => prefix
+                    .iter()
+                    .map(|arg| go_authored_function_type_expr(&arg.field_type, package, visibility))
+                    .collect::<Vec<_>>(),
+                FunctionArgsSpec::Fixed(_) => Vec::new(),
             };
-            (p.param_name.clone(), ty)
-        })
-        .collect();
-    signature_params.push(("opts".to_string(), format!("{base_exported_name}Options")));
-    signature_params.push(("args".to_string(), format!("...{vararg_type}")));
-
-    let multiline_signature = signature_params.len() + 1 > 3;
-
+            args.push(arg_type.clone());
+            signature.push((
+                param.param_name.clone(),
+                format!("func({}) {result_type}", args.join(", ")),
+            ));
+            signature.push(("arg".to_string(), arg_type.clone()));
+        } else if param.function_args.as_ref() == Some(function) {
+            continue;
+        } else if is_go_signal_param(param) {
+            signature.push((param.param_name.clone(), "string".to_string()));
+        } else if is_go_signal_args_param(param) {
+            signature.push((signal_args_public_param_name(param), "any".to_string()));
+        }
+    }
+    render_operation_doc_comment(
+        output,
+        operation,
+        &wrapper_input_docs(ordered_positional_params(params)),
+    );
     output.push_str("func ");
     output.push_str(&exported_name);
-    if !type_params.is_empty() {
-        output.push('[');
-        for (index, (name, constraint)) in type_params.iter().enumerate() {
-            if index > 0 {
-                output.push_str(", ");
-            }
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(constraint);
-        }
-        output.push(']');
-    }
-    if multiline_signature {
-        output.push_str("(\n\tctx ");
-        output.push_str(&package.workflow_context_type());
-        output.push_str(",\n");
-        for (name, ty) in &signature_params {
-            output.push('\t');
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(ty);
-            output.push_str(",\n");
-        }
-        output.push(')');
-    } else {
-        output.push_str("(ctx ");
-        output.push_str(&package.workflow_context_type());
-        for (name, ty) in &signature_params {
-            output.push_str(", ");
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(ty);
-        }
-        output.push(')');
-    }
+    output.push('[');
+    output.push_str(&arg_type);
+    output.push_str(" any, ");
+    output.push_str(&result_type);
+    output.push_str(" any]");
+    render_operation_params(output, &signature, package);
     output.push(' ');
     render_operation_wrapper_return_type(output, package);
     output.push_str(" {\n");
-
-    output.push_str("\tif len(args) > 0 && opts.");
-    output.push_str(&args_param.field_name);
-    output.push_str(" != nil {\n");
-    render_with_args_conflict_return(output);
-    output.push_str("\t}\n");
-    output.push_str("\tif len(args) == 0 {\n");
-    output.push_str("\t\targs = opts.");
-    output.push_str(&args_param.field_name);
-    output.push('\n');
-    output.push_str("\t}\n");
-
-    render_function_name_inlining(output, params);
+    render_public_default_punning_locals(output, params);
+    render_exact_function_name_assignment(output, primary);
     let endpoint = service
         .endpoint
         .as_deref()
-        .expect("public package wrappers require an authored endpoint");
+        .expect("public wrappers require endpoint");
     output.push_str("\tclient := ");
     output.push_str(&new_nexus_client_expr(endpoint, service.wire_name, package));
-    output.push('\n');
-    output.push_str("\treturn ");
+    output.push_str("\n\treturn ");
     output.push_str(&operation.func_name);
     output.push_str("(ctx, client, ");
     output.push_str(&operation.input_type);
@@ -4848,17 +4998,22 @@ fn render_with_args_convenience_wrapper(
         output.push_str("\t\t");
         output.push_str(&param.field_name);
         output.push_str(": ");
-        if param.field_name == args_param.field_name {
-            output.push_str("args");
-        } else if param.required {
-            if param.function.is_some() {
-                output.push_str(&function_name_local_var(param));
-            } else {
-                output.push_str(&param.param_name);
-            }
+        if param.field_name == primary.field_name {
+            output.push_str(&function_name_local_var(param));
+        } else if param.function_args.as_ref() == Some(function) {
+            output.push_str(&format!("{}{{arg}}", param.go_type));
+        } else if is_go_signal_param(param) {
+            output.push_str(&param.param_name);
+        } else if is_go_signal_args_param(param) {
+            output.push_str(&format!(
+                "{}{{{}}}",
+                param.go_type,
+                signal_args_public_param_name(param)
+            ));
+        } else if param.default_punning_zero.is_some() {
+            output.push_str(&param.param_name);
         } else if param.embed_in_options {
-            output.push('&');
-            output.push_str("opts.");
+            output.push_str("&opts.");
             output.push_str(&param.field_name);
         } else {
             output.push_str("opts.");
@@ -4866,111 +5021,7 @@ fn render_with_args_convenience_wrapper(
         }
         output.push_str(",\n");
     }
-    output.push_str("\t})\n");
-
-    output.push_str("}\n");
-}
-
-fn render_client_with_args_convenience_method(
-    output: &mut String,
-    service: &RenderedService<'_>,
-    operation: &RenderedOperation<'_>,
-    params: &[RenderedUnpackedParam],
-    package: &GoPackageContext,
-    visibility: &GoVisibility,
-) {
-    let method_name = format!("{}WithArgs", go_field_name(operation.name));
-    let base_method_name = go_field_name(operation.name);
-    let args_param = primary_varargs_args_param(params)
-        .expect("WithArgs wrapper requires a primary varargs args param");
-    let vararg_type = go_variadic_element_type(&args_param.go_type);
-    let type_params = required_function_type_parameters(params, package, visibility);
-
-    let input_docs = wrapper_input_docs(
-        params
-            .iter()
-            .filter(|p| p.required)
-            .chain(std::iter::once(args_param)),
-    );
-    render_operation_doc_comment(output, operation, &input_docs);
-
-    let mut signature_params: Vec<(String, String)> = params
-        .iter()
-        .filter(|p| p.required)
-        .map(|p| {
-            let ty = if p.function.is_some() {
-                function_type_parameter_name(p)
-            } else {
-                p.go_type.clone()
-            };
-            (p.param_name.clone(), ty)
-        })
-        .collect();
-    signature_params.push(("opts".to_string(), format!("{base_method_name}Options")));
-    signature_params.push(("args".to_string(), format!("...{vararg_type}")));
-
-    output.push_str("func (c *");
-    output.push_str(&service_client_name(service));
-    output.push_str(") ");
-    output.push_str(&method_name);
-    if !type_params.is_empty() {
-        output.push('[');
-        for (index, (name, constraint)) in type_params.iter().enumerate() {
-            if index > 0 {
-                output.push_str(", ");
-            }
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(constraint);
-        }
-        output.push(']');
-    }
-    render_operation_params(output, &signature_params, package);
-    output.push(' ');
-    render_operation_wrapper_return_type(output, package);
-    output.push_str(" {\n");
-
-    output.push_str("\tif len(args) > 0 && opts.");
-    output.push_str(&args_param.field_name);
-    output.push_str(" != nil {\n");
-    render_with_args_conflict_return(output);
-    output.push_str("\t}\n");
-    output.push_str("\tif len(args) == 0 {\n");
-    output.push_str("\t\targs = opts.");
-    output.push_str(&args_param.field_name);
-    output.push('\n');
-    output.push_str("\t}\n");
-
-    render_function_name_inlining(output, params);
-    output.push_str("\treturn ");
-    output.push_str(&operation.func_name);
-    output.push_str("(ctx, c.client, ");
-    output.push_str(&operation.input_type);
-    output.push_str("{\n");
-    for param in params {
-        output.push_str("\t\t");
-        output.push_str(&param.field_name);
-        output.push_str(": ");
-        if param.field_name == args_param.field_name {
-            output.push_str("args");
-        } else if param.required {
-            if param.function.is_some() {
-                output.push_str(&function_name_local_var(param));
-            } else {
-                output.push_str(&param.param_name);
-            }
-        } else if param.embed_in_options {
-            output.push('&');
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
-        } else {
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
-        }
-        output.push_str(",\n");
-    }
-    output.push_str("\t})\n");
-    output.push_str("}\n");
+    output.push_str("\t})\n}\n");
 }
 
 /// Renders an exported forwarding wrapper for operations whose input type is
@@ -4995,13 +5046,16 @@ fn render_forwarding_wrapper(
     output.push_str(&exported_name);
     output.push_str("(ctx ");
     output.push_str(&package.workflow_context_type());
-    output.push_str(", request ");
+    output.push_str(", opts ");
+    output.push_str(&exported_name);
+    output.push_str("Options, request ");
     output.push_str(&operation.input_type);
     output.push_str(") ");
 
     render_operation_wrapper_return_type(output, package);
 
     output.push_str(" {\n");
+    output.push_str("\t_ = opts\n");
     let endpoint = service
         .endpoint
         .as_deref()
@@ -5030,11 +5084,14 @@ fn render_client_forwarding_method(
     output.push_str(&method_name);
     output.push_str("(ctx ");
     output.push_str(&package.workflow_context_type());
-    output.push_str(", request ");
+    output.push_str(", opts ");
+    output.push_str(&method_name);
+    output.push_str("Options, request ");
     output.push_str(&operation.input_type);
     output.push_str(") ");
     render_operation_wrapper_return_type(output, package);
     output.push_str(" {\n");
+    output.push_str("\t_ = opts\n");
     output.push_str("\treturn ");
     output.push_str(&operation.func_name);
     output.push_str("(ctx, c.client, request)\n");

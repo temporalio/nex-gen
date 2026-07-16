@@ -37,17 +37,17 @@ func NewKnowledgeBaseServiceClient(endpoint string) *KnowledgeBaseServiceClient 
 }
 
 // Fetch a page by id.
-func (c *KnowledgeBaseServiceClient) GetPage(ctx workflow.Context, request GetPageInput) workflow.NexusOperationFuture {
+func (c *KnowledgeBaseServiceClient) GetPage(ctx workflow.Context, request GetPageInput) workflow.Future {
 	return c.client.ExecuteOperation(ctx, KnowledgeBaseService.GetPage, request, workflow.NexusOperationOptions{})
 }
 
 // Create or update a content block.
-func (c *KnowledgeBaseServiceClient) PutBlock(ctx workflow.Context, request content.Block) workflow.NexusOperationFuture {
+func (c *KnowledgeBaseServiceClient) PutBlock(ctx workflow.Context, request content.Block) workflow.Future {
 	return c.client.ExecuteOperation(ctx, KnowledgeBaseService.PutBlock, request, workflow.NexusOperationOptions{})
 }
 
 // Fetch the category tree rooted at a category.
-func (c *KnowledgeBaseServiceClient) GetCategoryTree(ctx workflow.Context, request GetCategoryTreeInput) workflow.NexusOperationFuture {
+func (c *KnowledgeBaseServiceClient) GetCategoryTree(ctx workflow.Context, request GetCategoryTreeInput) workflow.Future {
 	return c.client.ExecuteOperation(ctx, KnowledgeBaseService.GetCategoryTree, request, workflow.NexusOperationOptions{})
 }
 

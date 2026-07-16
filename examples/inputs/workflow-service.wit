@@ -35,17 +35,20 @@ interface workflow-service {
     ///   python="Workflow type name or callable identifying the workflow to start."
     ///   typescript="Workflow type name or workflow function identifying the workflow to start."
     ///   dotnet="Workflow type name or workflow expression identifying the workflow to start."
+    ///   go="Workflow function identifying the workflow to start."
     /// @nexus.proto-field "workflow_type"
     workflow: workflow-function,
     /// @nexus.doc "Unique identifier for the workflow execution."
     /// @nexus.proto-field "workflow_id"
     id: string,
     /// @nexus.doc "Task queue to run the workflow on."
+    /// @nexus.source go="workflow.GetInfo(ctx).TaskQueueName"
     task-queue: task-queue,
     /// @nexus.doc
     ///   python="Signal name or callable to send with the start request."
     ///   typescript="Signal name or signal definition to send with the start request."
     ///   dotnet="Signal name or signal expression to send with the start request."
+    ///   go="Signal name to send with the start request."
     /// @nexus.proto-field "signal_name"
     signal: signal-function,
     /// @nexus.doc "Total workflow execution timeout, including retries and continue-as-new."
@@ -84,7 +87,7 @@ interface workflow-service {
     /// @nexus.proto-field "workflow_start_delay"
     start-delay: option<duration>,
     user-metadata: option<user-metadata>,
-    /// @nexus.source python="workflow_namespace()" typescript="workflowNamespace()" go="workflowNamespace(ctx)" dotnet="TemporalWorkflowContext.WorkflowNamespace()"
+    /// @nexus.source python="workflow_namespace()" typescript="workflowNamespace()" go="workflow.GetInfo(ctx).Namespace" dotnet="TemporalWorkflowContext.WorkflowNamespace()"
     namespace: string,
     /// @nexus.omit
     control: placeholder,
@@ -107,6 +110,7 @@ interface workflow-service {
 
   /// @nexus.doc
   ///   "Signal a workflow, starting it first if needed."
+  ///   go="Signal a workflow, starting it first if needed."
   ///   returns="A workflow handle to the started workflow."
   /// @nexus.output-transform
   ///   python-type="temporalio.workflow.ExternalWorkflowHandle[WorkflowResult]"

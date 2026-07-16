@@ -2,7 +2,7 @@
 package workflowservice
 
 import (
-	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
@@ -22,92 +22,28 @@ func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient 
 	return workflow.NewNexusClient(endpoint, service)
 }
 
-type nexGenNexusOperationFuture struct {
-	operation workflow.NexusOperationFuture
-	result    workflow.Future
-	execution workflow.Future
-	get       func(workflow.Context, any) error
-}
-
-func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
-	if f.get != nil {
-		return f.get(ctx, valuePtr)
-	}
-	return f.result.Get(ctx, valuePtr)
-}
-
-func (f *nexGenNexusOperationFuture) IsReady() bool {
-	if f.operation != nil {
-		return f.operation.IsReady()
-	}
-	return f.result.IsReady()
-}
-
-func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
-	if f.operation != nil {
-		return f.operation.GetNexusOperationExecution()
-	}
-	return f.execution
-}
-
-func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
-	result, resultSettable := workflow.NewFuture(ctx)
-	resultSettable.SetError(err)
-	execution, executionSettable := workflow.NewFuture(ctx)
-	executionSettable.SetError(err)
-	return &nexGenNexusOperationFuture{result: result, execution: execution}
-}
-
-func nexGenFutureResultTypeError() error {
-	return errors.New("nex-gen future result pointer has unexpected type")
-}
-
 // --- Datatypes ---
 
 type signalWithStartWorkflowRequest struct {
-	// Required.
-	Workflow string
-	// Arguments for the workflow.
-	Args []any
-	// Required. Unique identifier for the workflow execution.
-	Id string
-	// Required. Task queue to run the workflow on.
-	TaskQueue string
-	// Required.
-	Signal string
-	// Arguments for the signal.
-	SignalArgs []any
-	// Total workflow execution timeout, including retries and continue-as-new.
-	ExecutionTimeout *time.Duration
-	// Timeout of a single workflow run.
-	RunTimeout *time.Duration
-	// Timeout of a single workflow task.
-	TaskTimeout *time.Duration
-	// Request ID used to deduplicate workflow start requests.
-	RequestId *string
-	// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
-	IdReusePolicy *enums.WorkflowIdReusePolicy
-	// Behavior when a workflow is currently running with the same ID. Set to use-existing
-	// for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is
-	// terminate-if-running.
-	IdConflictPolicy *enums.WorkflowIdConflictPolicy
-	// Retry policy for the workflow.
-	RetryPolicy *temporal.RetryPolicy
-	// Cron schedule for recurring workflow executions. See
-	// https://docs.temporal.io/cron-job.
-	CronSchedule *string
-	// Memo for the workflow.
-	Memo map[string]any
-	// Typed search attributes for the workflow.
-	SearchAttributes temporal.SearchAttributes
-	// Priority of the workflow execution.
-	Priority *temporal.Priority
-	// Override for workflow versioning behavior.
+	Workflow           string
+	Args               []any
+	Id                 string
+	Signal             string
+	SignalArgs         []any
+	ExecutionTimeout   *time.Duration
+	RunTimeout         *time.Duration
+	TaskTimeout        *time.Duration
+	RequestId          *string
+	IdReusePolicy      *enums.WorkflowIdReusePolicy
+	IdConflictPolicy   *enums.WorkflowIdConflictPolicy
+	RetryPolicy        *temporal.RetryPolicy
+	CronSchedule       *string
+	Memo               map[string]any
+	SearchAttributes   temporal.SearchAttributes
+	Priority           *temporal.Priority
 	VersioningOverride client.VersioningOverride
-	// Amount of time to wait before starting the workflow. This does not work with
-	// cron-schedule.
-	StartDelay   *time.Duration
-	UserMetadata *UserMetadata
+	StartDelay         *time.Duration
+	UserMetadata       *UserMetadata
 }
 
 func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.SignalWithStartWorkflowExecutionRequest, error) {
@@ -127,13 +63,6 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 		message.Input = converted
 	}
 	message.WorkflowId = m.Id
-	{
-		converted, err := taskQueueToProto(ctx, &m.TaskQueue)
-		if err != nil {
-			return nil, err
-		}
-		message.TaskQueue = converted
-	}
 	message.SignalName = m.Signal
 	{
 		converted, err := payloadsToProto(ctx, m.SignalArgs)
@@ -224,37 +153,41 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 		}
 		message.UserMetadata = converted
 	}
-	message.Namespace = workflowNamespace(ctx)
+	sourced := workflow.GetInfo(ctx).TaskQueueName
+	converted, err := taskQueueToProto(ctx, &sourced)
+	if err != nil {
+		return nil, err
+	}
+	message.TaskQueue = converted
+	message.Namespace = workflow.GetInfo(ctx).Namespace
 	return message, nil
 }
 
 // --- Operations (internal) ---
 
-func signalWithStartWorkflow(ctx workflow.Context, client workflow.NexusClient, request signalWithStartWorkflowRequest) workflow.NexusOperationFuture {
+func signalWithStartWorkflow(ctx workflow.Context, client workflow.NexusClient, request signalWithStartWorkflowRequest) workflow.Future {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		result, resultSettable := workflow.NewFuture(ctx)
+		resultSettable.SetError(err)
+		return result
 	}
 	fut := client.ExecuteOperation(ctx, "SignalWithStartWorkflowExecution", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
-		if valuePtr == nil {
-			return fut.Get(ctx, nil)
-		}
+	result, resultSettable := workflow.NewFuture(ctx)
+	workflow.Go(ctx, func(ctx workflow.Context) {
 		var result workflowservice.SignalWithStartWorkflowExecutionResponse
 		if err := fut.Get(ctx, &result); err != nil {
-			return err
+			resultSettable.SetError(err)
+			return
 		}
 		value, err := signalWithStartWorkflowResponseFromProto(ctx, &result)
 		if err != nil {
-			return err
+			resultSettable.SetError(err)
+			return
 		}
-		typedValue, ok := valuePtr.(*SignalWithStartWorkflowResponse)
-		if !ok {
-			return nexGenFutureResultTypeError()
-		}
-		*typedValue = value
-		return nil
-	}}
+		resultSettable.Set(value, nil)
+	})
+	return result
 }
 
 // --- Service clients ---
@@ -270,13 +203,15 @@ func NewWorkflowServiceClient(endpoint string) *WorkflowServiceClient {
 // --- Operations (public API) ---
 
 type UserMetadata struct {
+	// Optional.
 	// Single-line fixed summary for the workflow execution that may appear in UI and CLI.
 	// This can be in single-line Temporal Markdown format.
-	StaticSummary any
+	StaticSummary string
+	// Optional.
 	// General fixed details for the workflow execution that may appear in UI and CLI. This
 	// can be in Temporal Markdown format and can span multiple lines. This value is fixed
 	// on the workflow execution and cannot be updated.
-	StaticDetails any
+	StaticDetails string
 }
 
 func (m UserMetadata) toProto(ctx workflow.Context) (*sdk.UserMetadata, error) {
@@ -300,25 +235,35 @@ func (m UserMetadata) toProto(ctx workflow.Context) (*sdk.UserMetadata, error) {
 
 func userMetadataFromProto(ctx workflow.Context, proto *sdk.UserMetadata) (UserMetadata, error) {
 	value := UserMetadata{}
-	{
+	if proto.GetSummary() != nil {
 		converted, err := payloadFromProto(ctx, proto.GetSummary())
 		if err != nil {
 			return value, err
 		}
-		value.StaticSummary = converted
+		typed, ok := converted.(string)
+		if !ok {
+			return value, fmt.Errorf("nex-gen decoded field StaticSummary has unexpected type %T", converted)
+		}
+		value.StaticSummary = typed
 	}
-	{
+	if proto.GetDetails() != nil {
 		converted, err := payloadFromProto(ctx, proto.GetDetails())
 		if err != nil {
 			return value, err
 		}
-		value.StaticDetails = converted
+		typed, ok := converted.(string)
+		if !ok {
+			return value, fmt.Errorf("nex-gen decoded field StaticDetails has unexpected type %T", converted)
+		}
+		value.StaticDetails = typed
 	}
 	return value, nil
 }
 
 type SignalWithStartWorkflowResponse struct {
-	RunId   *string
+	// Optional.
+	RunId *string
+	// Optional.
 	Started *bool
 }
 
@@ -347,181 +292,217 @@ func signalWithStartWorkflowResponseFromProto(ctx workflow.Context, proto *workf
 }
 
 type SignalWithStartWorkflowOptions struct {
-	// Arguments for the workflow.
-	Args []any
-	// Arguments for the signal.
-	SignalArgs []any
+	// Required. Unique identifier for the workflow execution.
+	Id string
+	// Optional.
 	// Total workflow execution timeout, including retries and continue-as-new.
-	ExecutionTimeout *time.Duration
+	ExecutionTimeout time.Duration
+	// Optional.
 	// Timeout of a single workflow run.
-	RunTimeout *time.Duration
+	RunTimeout time.Duration
+	// Optional.
 	// Timeout of a single workflow task.
-	TaskTimeout *time.Duration
+	TaskTimeout time.Duration
+	// Optional.
 	// Request ID used to deduplicate workflow start requests.
-	RequestId *string
+	RequestId string
+	// Optional.
 	// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
-	IdReusePolicy *enums.WorkflowIdReusePolicy
+	IdReusePolicy enums.WorkflowIdReusePolicy
+	// Optional.
 	// Behavior when a workflow is currently running with the same ID. Set to use-existing
 	// for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is
 	// terminate-if-running.
-	IdConflictPolicy *enums.WorkflowIdConflictPolicy
+	IdConflictPolicy enums.WorkflowIdConflictPolicy
+	// Optional.
 	// Retry policy for the workflow.
 	RetryPolicy *temporal.RetryPolicy
+	// Optional.
 	// Cron schedule for recurring workflow executions. See
 	// https://docs.temporal.io/cron-job.
-	CronSchedule *string
+	CronSchedule string
+	// Optional.
 	// Memo for the workflow.
 	Memo map[string]any
+	// Optional.
 	// Typed search attributes for the workflow.
 	SearchAttributes temporal.SearchAttributes
+	// Optional.
 	// Priority of the workflow execution.
 	Priority *temporal.Priority
+	// Optional.
 	// Override for workflow versioning behavior.
 	VersioningOverride client.VersioningOverride
+	// Optional.
 	// Amount of time to wait before starting the workflow. This does not work with
 	// cron-schedule.
-	StartDelay *time.Duration
+	StartDelay time.Duration
+	// Optional.
 	UserMetadata
 }
 
 // Signal a workflow, starting it first if needed.
 //
-// Input id: Unique identifier for the workflow execution.
-// Input taskQueue: Task queue to run the workflow on.
+// Input signal: Signal name to send with the start request.
+// Input signalArg: Arguments for the signal.
+// Input workflow: Workflow function identifying the workflow to start.
+// Input args: Arguments for the workflow.
 //
 // Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflow[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
-}, SignalF interface {
-	~string | func(workflow.Context, ...any) any
-}](
+func SignalWithStartWorkflow(
 	ctx workflow.Context,
-	workflow WorkflowF,
-	id string,
-	taskQueue string,
-	signal SignalF,
 	opts SignalWithStartWorkflowOptions,
-) workflow.NexusOperationFuture {
-	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	signal string,
+	signalArg any,
+	workflow any,
+	args ...any,
+) workflow.Future {
+	var executionTimeout *time.Duration
+	if opts.ExecutionTimeout != 0 {
+		executionTimeout = &opts.ExecutionTimeout
 	}
-	signalName := ""
-	switch rv := reflect.ValueOf(signal); rv.Kind() {
-	case reflect.String:
-		signalName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		signalName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	var runTimeout *time.Duration
+	if opts.RunTimeout != 0 {
+		runTimeout = &opts.RunTimeout
+	}
+	var taskTimeout *time.Duration
+	if opts.TaskTimeout != 0 {
+		taskTimeout = &opts.TaskTimeout
+	}
+	var requestId *string
+	if opts.RequestId != "" {
+		requestId = &opts.RequestId
+	}
+	var idReusePolicy *enums.WorkflowIdReusePolicy
+	if opts.IdReusePolicy != 0 {
+		idReusePolicy = &opts.IdReusePolicy
+	}
+	var idConflictPolicy *enums.WorkflowIdConflictPolicy
+	if opts.IdConflictPolicy != 0 {
+		idConflictPolicy = &opts.IdConflictPolicy
+	}
+	var cronSchedule *string
+	if opts.CronSchedule != "" {
+		cronSchedule = &opts.CronSchedule
+	}
+	var startDelay *time.Duration
+	if opts.StartDelay != 0 {
+		startDelay = &opts.StartDelay
+	}
+	workflowName := ""
+	{
+		switch rv := reflect.ValueOf(workflow); rv.Kind() {
+		case reflect.String:
+			workflowName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			workflowName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
 	}
 	client := nexGenNewNexusClient("temporal-system", "temporal.api.workflowservice.v1.WorkflowService")
 	return signalWithStartWorkflow(ctx, client, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
-		Args:               opts.Args,
-		Id:                 id,
-		TaskQueue:          taskQueue,
-		Signal:             signalName,
-		SignalArgs:         opts.SignalArgs,
-		ExecutionTimeout:   opts.ExecutionTimeout,
-		RunTimeout:         opts.RunTimeout,
-		TaskTimeout:        opts.TaskTimeout,
-		RequestId:          opts.RequestId,
-		IdReusePolicy:      opts.IdReusePolicy,
-		IdConflictPolicy:   opts.IdConflictPolicy,
+		Args:               args,
+		Id:                 opts.Id,
+		Signal:             signal,
+		SignalArgs:         []any{signalArg},
+		ExecutionTimeout:   executionTimeout,
+		RunTimeout:         runTimeout,
+		TaskTimeout:        taskTimeout,
+		RequestId:          requestId,
+		IdReusePolicy:      idReusePolicy,
+		IdConflictPolicy:   idConflictPolicy,
 		RetryPolicy:        opts.RetryPolicy,
-		CronSchedule:       opts.CronSchedule,
+		CronSchedule:       cronSchedule,
 		Memo:               opts.Memo,
 		SearchAttributes:   opts.SearchAttributes,
 		Priority:           opts.Priority,
 		VersioningOverride: opts.VersioningOverride,
-		StartDelay:         opts.StartDelay,
+		StartDelay:         startDelay,
 		UserMetadata:       &opts.UserMetadata,
 	})
 }
 
 // Signal a workflow, starting it first if needed.
 //
-// Input id: Unique identifier for the workflow execution.
-// Input taskQueue: Task queue to run the workflow on.
+// Input signal: Signal name to send with the start request.
+// Input signalArg: Arguments for the signal.
+// Input workflow: Workflow function identifying the workflow to start.
 // Input args: Arguments for the workflow.
 //
 // Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflowWithArgs[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
-}, SignalF interface {
-	~string | func(workflow.Context, ...any) any
-}](
+func SignalWithStartWorkflowTyped[WorkflowArg any, WorkflowResult any](
 	ctx workflow.Context,
-	workflow WorkflowF,
-	id string,
-	taskQueue string,
-	signal SignalF,
 	opts SignalWithStartWorkflowOptions,
-	args ...any,
-) workflow.NexusOperationFuture {
-	if len(args) > 0 && opts.Args != nil {
-		return nexGenFailedNexusOperationFuture(ctx, errors.New("cannot specify both positional arguments and args"))
+	signal string,
+	signalArg any,
+	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
+	arg WorkflowArg,
+) workflow.Future {
+	var executionTimeout *time.Duration
+	if opts.ExecutionTimeout != 0 {
+		executionTimeout = &opts.ExecutionTimeout
 	}
-	if len(args) == 0 {
-		args = opts.Args
+	var runTimeout *time.Duration
+	if opts.RunTimeout != 0 {
+		runTimeout = &opts.RunTimeout
+	}
+	var taskTimeout *time.Duration
+	if opts.TaskTimeout != 0 {
+		taskTimeout = &opts.TaskTimeout
+	}
+	var requestId *string
+	if opts.RequestId != "" {
+		requestId = &opts.RequestId
+	}
+	var idReusePolicy *enums.WorkflowIdReusePolicy
+	if opts.IdReusePolicy != 0 {
+		idReusePolicy = &opts.IdReusePolicy
+	}
+	var idConflictPolicy *enums.WorkflowIdConflictPolicy
+	if opts.IdConflictPolicy != 0 {
+		idConflictPolicy = &opts.IdConflictPolicy
+	}
+	var cronSchedule *string
+	if opts.CronSchedule != "" {
+		cronSchedule = &opts.CronSchedule
+	}
+	var startDelay *time.Duration
+	if opts.StartDelay != 0 {
+		startDelay = &opts.StartDelay
 	}
 	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
+	{
+		rv := reflect.ValueOf(workflow)
 		fullName := runtime.FuncForPC(rv.Pointer()).Name()
 		elements := strings.Split(fullName, ".")
 		shortName := elements[len(elements)-1]
 		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
-	}
-	signalName := ""
-	switch rv := reflect.ValueOf(signal); rv.Kind() {
-	case reflect.String:
-		signalName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		signalName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
 	}
 	client := nexGenNewNexusClient("temporal-system", "temporal.api.workflowservice.v1.WorkflowService")
 	return signalWithStartWorkflow(ctx, client, signalWithStartWorkflowRequest{
 		Workflow:           workflowName,
-		Args:               args,
-		Id:                 id,
-		TaskQueue:          taskQueue,
-		Signal:             signalName,
-		SignalArgs:         opts.SignalArgs,
-		ExecutionTimeout:   opts.ExecutionTimeout,
-		RunTimeout:         opts.RunTimeout,
-		TaskTimeout:        opts.TaskTimeout,
-		RequestId:          opts.RequestId,
-		IdReusePolicy:      opts.IdReusePolicy,
-		IdConflictPolicy:   opts.IdConflictPolicy,
+		Args:               []any{arg},
+		Id:                 opts.Id,
+		Signal:             signal,
+		SignalArgs:         []any{signalArg},
+		ExecutionTimeout:   executionTimeout,
+		RunTimeout:         runTimeout,
+		TaskTimeout:        taskTimeout,
+		RequestId:          requestId,
+		IdReusePolicy:      idReusePolicy,
+		IdConflictPolicy:   idConflictPolicy,
 		RetryPolicy:        opts.RetryPolicy,
-		CronSchedule:       opts.CronSchedule,
+		CronSchedule:       cronSchedule,
 		Memo:               opts.Memo,
 		SearchAttributes:   opts.SearchAttributes,
 		Priority:           opts.Priority,
 		VersioningOverride: opts.VersioningOverride,
-		StartDelay:         opts.StartDelay,
+		StartDelay:         startDelay,
 		UserMetadata:       &opts.UserMetadata,
 	})
 }

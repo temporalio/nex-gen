@@ -2,7 +2,6 @@
 package typeroundtrip
 
 import (
-	"errors"
 	"time"
 
 	activity "go.temporal.io/api/activity/v1"
@@ -16,73 +15,31 @@ func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient 
 	return workflow.NewNexusClient(endpoint, service)
 }
 
-type nexGenNexusOperationFuture struct {
-	operation workflow.NexusOperationFuture
-	result    workflow.Future
-	execution workflow.Future
-	get       func(workflow.Context, any) error
-}
-
-func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
-	if f.get != nil {
-		return f.get(ctx, valuePtr)
-	}
-	return f.result.Get(ctx, valuePtr)
-}
-
-func (f *nexGenNexusOperationFuture) IsReady() bool {
-	if f.operation != nil {
-		return f.operation.IsReady()
-	}
-	return f.result.IsReady()
-}
-
-func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
-	if f.operation != nil {
-		return f.operation.GetNexusOperationExecution()
-	}
-	return f.execution
-}
-
-func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
-	result, resultSettable := workflow.NewFuture(ctx)
-	resultSettable.SetError(err)
-	execution, executionSettable := workflow.NewFuture(ctx)
-	executionSettable.SetError(err)
-	return &nexGenNexusOperationFuture{result: result, execution: execution}
-}
-
-func nexGenFutureResultTypeError() error {
-	return errors.New("nex-gen future result pointer has unexpected type")
-}
-
 // --- Operations (internal) ---
 
-func activityOptionsOperation(ctx workflow.Context, client workflow.NexusClient, request ActivityOptions) workflow.NexusOperationFuture {
+func activityOptionsOperation(ctx workflow.Context, client workflow.NexusClient, request ActivityOptions) workflow.Future {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		result, resultSettable := workflow.NewFuture(ctx)
+		resultSettable.SetError(err)
+		return result
 	}
 	fut := client.ExecuteOperation(ctx, "ActivityOptionsOperation", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
-		if valuePtr == nil {
-			return fut.Get(ctx, nil)
-		}
+	result, resultSettable := workflow.NewFuture(ctx)
+	workflow.Go(ctx, func(ctx workflow.Context) {
 		var result activity.ActivityOptions
 		if err := fut.Get(ctx, &result); err != nil {
-			return err
+			resultSettable.SetError(err)
+			return
 		}
 		value, err := activityOptionsFromProto(ctx, &result)
 		if err != nil {
-			return err
+			resultSettable.SetError(err)
+			return
 		}
-		typedValue, ok := valuePtr.(*ActivityOptions)
-		if !ok {
-			return nexGenFutureResultTypeError()
-		}
-		*typedValue = value
-		return nil
-	}}
+		resultSettable.Set(value, nil)
+	})
+	return result
 }
 
 // --- Service clients ---
@@ -95,23 +52,17 @@ func NewTypeRoundtripServiceClient(endpoint string) *TypeRoundtripServiceClient 
 	return &TypeRoundtripServiceClient{client: nexGenNewNexusClient(endpoint, "TypeRoundtripService")}
 }
 
-func (c *TypeRoundtripServiceClient) ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ActivityOptionsOperationOptions) workflow.NexusOperationFuture {
-	return activityOptionsOperation(ctx, c.client, ActivityOptions{
-		TaskQueue:              opts.TaskQueue,
-		RetryPolicy:            retryPolicy,
-		ScheduleToCloseTimeout: opts.ScheduleToCloseTimeout,
-		Priority:               opts.Priority,
-	})
-}
-
 // --- Operations (public API) ---
 
 type ActivityOptions struct {
+	// Optional.
 	TaskQueue *string
 	// Required.
-	RetryPolicy            temporal.RetryPolicy
+	RetryPolicy temporal.RetryPolicy
+	// Optional.
 	ScheduleToCloseTimeout *time.Duration
-	Priority               *temporal.Priority
+	// Optional.
+	Priority *temporal.Priority
 }
 
 func (m ActivityOptions) toProto(ctx workflow.Context) (*activity.ActivityOptions, error) {
@@ -183,17 +134,30 @@ func activityOptionsFromProto(ctx workflow.Context, proto *activity.ActivityOpti
 }
 
 type ActivityOptionsOperationOptions struct {
-	TaskQueue              *string
-	ScheduleToCloseTimeout *time.Duration
-	Priority               *temporal.Priority
+	// Optional.
+	TaskQueue string
+	// Required.
+	RetryPolicy temporal.RetryPolicy
+	// Optional.
+	ScheduleToCloseTimeout time.Duration
+	// Optional.
+	Priority *temporal.Priority
 }
 
-func ActivityOptionsOperation(ctx workflow.Context, retryPolicy temporal.RetryPolicy, opts ActivityOptionsOperationOptions) workflow.NexusOperationFuture {
+func ActivityOptionsOperation(ctx workflow.Context, opts ActivityOptionsOperationOptions) workflow.Future {
+	var taskQueue *string
+	if opts.TaskQueue != "" {
+		taskQueue = &opts.TaskQueue
+	}
+	var scheduleToCloseTimeout *time.Duration
+	if opts.ScheduleToCloseTimeout != 0 {
+		scheduleToCloseTimeout = &opts.ScheduleToCloseTimeout
+	}
 	client := nexGenNewNexusClient("temporal-system", "TypeRoundtripService")
 	return activityOptionsOperation(ctx, client, ActivityOptions{
-		TaskQueue:              opts.TaskQueue,
-		RetryPolicy:            retryPolicy,
-		ScheduleToCloseTimeout: opts.ScheduleToCloseTimeout,
+		TaskQueue:              taskQueue,
+		RetryPolicy:            opts.RetryPolicy,
+		ScheduleToCloseTimeout: scheduleToCloseTimeout,
 		Priority:               opts.Priority,
 	})
 }

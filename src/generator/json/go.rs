@@ -343,9 +343,7 @@ fn render_service_client(
         } else {
             "nil"
         };
-        output.push_str(
-            ") workflow.NexusOperationFuture {\n\treturn c.client.ExecuteOperation(ctx, ",
-        );
+        output.push_str(") workflow.Future {\n\treturn c.client.ExecuteOperation(ctx, ");
         output.push_str(&service_var);
         output.push('.');
         output.push_str(&go_field_name(&operation.name));

@@ -39,17 +39,17 @@ func NewChatServiceClient(endpoint string) *ChatServiceClient {
 }
 
 // Post a message to a room.
-func (c *ChatServiceClient) SendMessage(ctx workflow.Context, request SendMessageInput) workflow.NexusOperationFuture {
+func (c *ChatServiceClient) SendMessage(ctx workflow.Context, request SendMessageInput) workflow.Future {
 	return c.client.ExecuteOperation(ctx, ChatService.SendMessage, request, workflow.NexusOperationOptions{})
 }
 
 // Look up a room by id.
-func (c *ChatServiceClient) GetRoom(ctx workflow.Context, request GetRoomInput) workflow.NexusOperationFuture {
+func (c *ChatServiceClient) GetRoom(ctx workflow.Context, request GetRoomInput) workflow.Future {
 	return c.client.ExecuteOperation(ctx, ChatService.GetRoom, request, workflow.NexusOperationOptions{})
 }
 
 // Liveness probe.
-func (c *ChatServiceClient) Ping(ctx workflow.Context) workflow.NexusOperationFuture {
+func (c *ChatServiceClient) Ping(ctx workflow.Context) workflow.Future {
 	return c.client.ExecuteOperation(ctx, ChatService.Ping, nil, workflow.NexusOperationOptions{})
 }
 

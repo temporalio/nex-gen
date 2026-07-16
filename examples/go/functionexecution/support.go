@@ -1,20 +1,3 @@
-// Hand-written proto converter functions for Temporal semantic types.
-//
-// The generated service file references these converters by name when a WIT type is
-// replaced with a native Temporal Go SDK type (via `@nexus.type go=...`). Each
-// function translates between the native value and the protobuf message that
-// the Temporal SDK serializes onto the wire, keeping the Go bindings
-// wire-compatible with the Python and TypeScript bindings.
-//
-// Converters are pure structural translations: a `nil` input always produces a
-// `nil` output. They never invent zero values for absent data. The generated
-// service file owns all presence/optionality logic -- it passes a pointer for
-// required values and dereferences results with a zero fallback, and it stores
-// optional values directly as pointers so that "unset" and "set to zero" remain
-// distinguishable.
-//
-// The `package` declaration below is replaced with the generated package name
-// when this file is emitted alongside the generated service file.
 package functionexecution
 
 import (
@@ -164,14 +147,7 @@ func payloadFromProto(ctx workflow.Context, payload *common.Payload) (any, error
 }
 
 func payloadsToProto(ctx workflow.Context, values []any) (*common.Payloads, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-	payloads, err := getWorkflowDataConverter(ctx).ToPayloads(values...)
-	if err != nil {
-		return nil, err
-	}
-	return payloads, nil
+	return getWorkflowDataConverter(ctx).ToPayloads(values...)
 }
 
 func payloadsFromProto(ctx workflow.Context, payloads *common.Payloads) ([]any, error) {
@@ -246,7 +222,7 @@ func memoFromProto(ctx workflow.Context, memo *common.Memo) (map[string]any, err
 // --- SearchAttributes (temporal.api.common.v1.SearchAttributes) ---
 
 func searchAttributesToProto(_ workflow.Context, searchAttributes *temporal.SearchAttributes) (*common.SearchAttributes, error) {
-	if searchAttributes == nil || searchAttributes.Size() == 0 {
+	if searchAttributes == nil {
 		return nil, nil
 	}
 
@@ -303,22 +279,4 @@ func versioningOverrideToProto(_ workflow.Context, versioningOverride *client.Ve
 	default:
 		return nil, nil
 	}
-}
-
-// --- Workflow namespace (sourced field) ---
-
-func workflowNamespace(ctx workflow.Context) string {
-	if options := ctx.Value("wfEnvOptions"); options != nil {
-		optionsValue := reflect.ValueOf(options)
-		if optionsValue.Kind() == reflect.Pointer && !optionsValue.IsNil() {
-			optionsValue = optionsValue.Elem()
-		}
-		if optionsValue.Kind() == reflect.Struct {
-			field := optionsValue.FieldByName("Namespace")
-			if field.IsValid() && field.Kind() == reflect.String {
-				return field.String()
-			}
-		}
-	}
-	return ""
 }

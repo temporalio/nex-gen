@@ -2,7 +2,6 @@
 package startworkflow
 
 import (
-	"errors"
 	"reflect"
 	"runtime"
 	"strings"
@@ -19,56 +18,12 @@ func nexGenNewNexusClient(endpoint string, service string) workflow.NexusClient 
 	return workflow.NewNexusClient(endpoint, service)
 }
 
-type nexGenNexusOperationFuture struct {
-	operation workflow.NexusOperationFuture
-	result    workflow.Future
-	execution workflow.Future
-	get       func(workflow.Context, any) error
-}
-
-func (f *nexGenNexusOperationFuture) Get(ctx workflow.Context, valuePtr any) error {
-	if f.get != nil {
-		return f.get(ctx, valuePtr)
-	}
-	return f.result.Get(ctx, valuePtr)
-}
-
-func (f *nexGenNexusOperationFuture) IsReady() bool {
-	if f.operation != nil {
-		return f.operation.IsReady()
-	}
-	return f.result.IsReady()
-}
-
-func (f *nexGenNexusOperationFuture) GetNexusOperationExecution() workflow.Future {
-	if f.operation != nil {
-		return f.operation.GetNexusOperationExecution()
-	}
-	return f.execution
-}
-
-func nexGenFailedNexusOperationFuture(ctx workflow.Context, err error) workflow.NexusOperationFuture {
-	result, resultSettable := workflow.NewFuture(ctx)
-	resultSettable.SetError(err)
-	execution, executionSettable := workflow.NewFuture(ctx)
-	executionSettable.SetError(err)
-	return &nexGenNexusOperationFuture{result: result, execution: execution}
-}
-
-func nexGenFutureResultTypeError() error {
-	return errors.New("nex-gen future result pointer has unexpected type")
-}
-
 // --- Datatypes ---
 
 type startWorkflowRequest struct {
-	// Required.
-	Workflow string
-	// Arguments for the workflow.
-	Args []any
-	// Required.
-	WorkflowId string
-	// Required.
+	Workflow           string
+	Args               []any
+	WorkflowId         string
 	TaskQueue          string
 	WorkflowStartDelay *time.Duration
 }
@@ -104,12 +59,11 @@ func (m startWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.St
 		}
 		message.WorkflowStartDelay = converted
 	}
-	message.Namespace = workflowNamespace(ctx)
+	message.Namespace = workflow.GetInfo(ctx).Namespace
 	return message, nil
 }
 
 type cancelWorkflowRequest struct {
-	// Required.
 	WorkflowExecution WorkflowExecution
 	Reason            *string
 }
@@ -126,7 +80,7 @@ func (m cancelWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.R
 	if m.Reason != nil {
 		message.Reason = (*m.Reason)
 	}
-	message.Namespace = workflowNamespace(ctx)
+	message.Namespace = workflow.GetInfo(ctx).Namespace
 	return message, nil
 }
 
@@ -137,116 +91,119 @@ type StartedWorkflow struct {
 	Namespace string
 	// Required.
 	WorkflowId string
-	RunId      *string
+	// Optional.
+	RunId *string
 }
 
-func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason *string) workflow.NexusOperationFuture {
-	return cancelWorkflow(ctx, nexGenNewNexusClient("temporal-system", "StartWorkflowService"), cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reason})
+func NewStartedWorkflow(namespace string, workflowId string, runId string) StartedWorkflow {
+	var runIdPtr *string
+	if runId != "" {
+		runIdPtr = &runId
+	}
+	return StartedWorkflow{
+		Namespace:  namespace,
+		WorkflowId: workflowId,
+		RunId:      runIdPtr,
+	}
 }
 
-func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string, taskQueue string) workflow.NexusOperationFuture {
-	return restartWorkflow(ctx, nexGenNewNexusClient("temporal-system", "StartWorkflowService"), startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflow, TaskQueue: taskQueue})
+func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) workflow.Future {
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+	return cancelWorkflow(ctx, nexGenNewNexusClient("temporal-system", "StartWorkflowService"), cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reasonPtr})
 }
 
-func (u *StartedWorkflow) GetResult(ctx workflow.Context) workflow.NexusOperationFuture {
+func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) workflow.Future {
+	workflowName := ""
+	{
+		switch rv := reflect.ValueOf(workflow); rv.Kind() {
+		case reflect.String:
+			workflowName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			workflowName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
+	}
+	return restartWorkflow(ctx, nexGenNewNexusClient("temporal-system", "StartWorkflowService"), startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})
+}
+
+func (u *StartedWorkflow) GetResult(ctx workflow.Context) workflow.Future {
 	panic("StartedWorkflow.GetResult is not yet implemented")
 }
 
 // --- Operations (internal) ---
 
-func startWorkflow(ctx workflow.Context, client workflow.NexusClient, request startWorkflowRequest) workflow.NexusOperationFuture {
+func startWorkflow(ctx workflow.Context, client workflow.NexusClient, request startWorkflowRequest) workflow.Future {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		result, resultSettable := workflow.NewFuture(ctx)
+		resultSettable.SetError(err)
+		return result
 	}
 	fut := client.ExecuteOperation(ctx, "StartWorkflow", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
-		if valuePtr == nil {
-			return fut.Get(ctx, nil)
-		}
+	result, resultSettable := workflow.NewFuture(ctx)
+	workflow.Go(ctx, func(ctx workflow.Context) {
 		var result workflowservice.StartWorkflowExecutionResponse
 		if err := fut.Get(ctx, &result); err != nil {
-			return err
+			resultSettable.SetError(err)
+			return
 		}
-		namespace := requestProto.GetNamespace()
-		runIdValue := result.GetRunId()
-		var runId *string
-		if runIdValue != "" {
-			runId = &runIdValue
-		}
-		value := StartedWorkflow{
-			Namespace:  namespace,
-			WorkflowId: request.WorkflowId,
-			RunId:      runId,
-		}
-		typedValue, ok := valuePtr.(*StartedWorkflow)
-		if !ok {
-			return nexGenFutureResultTypeError()
-		}
-		*typedValue = value
-		return nil
-	}}
+		value := NewStartedWorkflow(requestProto.GetNamespace(), request.WorkflowId, result.GetRunId())
+		resultSettable.Set(value, nil)
+	})
+	return result
 }
 
-func restartWorkflow(ctx workflow.Context, client workflow.NexusClient, request startWorkflowRequest) workflow.NexusOperationFuture {
+func restartWorkflow(ctx workflow.Context, client workflow.NexusClient, request startWorkflowRequest) workflow.Future {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		result, resultSettable := workflow.NewFuture(ctx)
+		resultSettable.SetError(err)
+		return result
 	}
 	fut := client.ExecuteOperation(ctx, "RestartWorkflow", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
-		if valuePtr == nil {
-			return fut.Get(ctx, nil)
-		}
+	result, resultSettable := workflow.NewFuture(ctx)
+	workflow.Go(ctx, func(ctx workflow.Context) {
 		var result workflowservice.StartWorkflowExecutionResponse
 		if err := fut.Get(ctx, &result); err != nil {
-			return err
+			resultSettable.SetError(err)
+			return
 		}
-		namespace := requestProto.GetNamespace()
-		runIdValue := result.GetRunId()
-		var runId *string
-		if runIdValue != "" {
-			runId = &runIdValue
-		}
-		value := StartedWorkflow{
-			Namespace:  namespace,
-			WorkflowId: request.WorkflowId,
-			RunId:      runId,
-		}
-		typedValue, ok := valuePtr.(*StartedWorkflow)
-		if !ok {
-			return nexGenFutureResultTypeError()
-		}
-		*typedValue = value
-		return nil
-	}}
+		value := NewStartedWorkflow(requestProto.GetNamespace(), request.WorkflowId, result.GetRunId())
+		resultSettable.Set(value, nil)
+	})
+	return result
 }
 
-func cancelWorkflow(ctx workflow.Context, client workflow.NexusClient, request cancelWorkflowRequest) workflow.NexusOperationFuture {
+func cancelWorkflow(ctx workflow.Context, client workflow.NexusClient, request cancelWorkflowRequest) workflow.Future {
 	requestProto, err := request.toProto(ctx)
 	if err != nil {
-		return nexGenFailedNexusOperationFuture(ctx, err)
+		result, resultSettable := workflow.NewFuture(ctx)
+		resultSettable.SetError(err)
+		return result
 	}
 	fut := client.ExecuteOperation(ctx, "CancelWorkflow", requestProto, workflow.NexusOperationOptions{})
-	return &nexGenNexusOperationFuture{operation: fut, get: func(ctx workflow.Context, valuePtr any) error {
-		if valuePtr == nil {
-			return fut.Get(ctx, nil)
-		}
+	result, resultSettable := workflow.NewFuture(ctx)
+	workflow.Go(ctx, func(ctx workflow.Context) {
 		var result workflowservice.RequestCancelWorkflowExecutionResponse
 		if err := fut.Get(ctx, &result); err != nil {
-			return err
+			resultSettable.SetError(err)
+			return
 		}
 		value, err := cancelWorkflowResponseFromProto(ctx, &result)
 		if err != nil {
-			return err
+			resultSettable.SetError(err)
+			return
 		}
-		typedValue, ok := valuePtr.(*CancelWorkflowResponse)
-		if !ok {
-			return nexGenFutureResultTypeError()
-		}
-		*typedValue = value
-		return nil
-	}}
+		resultSettable.Set(value, nil)
+	})
+	return result
 }
 
 // --- Service clients ---
@@ -259,19 +216,13 @@ func NewStartWorkflowServiceClient(endpoint string) *StartWorkflowServiceClient 
 	return &StartWorkflowServiceClient{client: nexGenNewNexusClient(endpoint, "StartWorkflowService")}
 }
 
-func (c *StartWorkflowServiceClient) CancelWorkflow(ctx workflow.Context, workflowExecution WorkflowExecution, opts CancelWorkflowOptions) workflow.NexusOperationFuture {
-	return cancelWorkflow(ctx, c.client, cancelWorkflowRequest{
-		WorkflowExecution: workflowExecution,
-		Reason:            opts.Reason,
-	})
-}
-
 // --- Operations (public API) ---
 
 type WorkflowExecution struct {
 	// Required.
 	WorkflowId string
-	RunId      *string
+	// Optional.
+	RunId *string
 }
 
 func (m WorkflowExecution) toProto(ctx workflow.Context) (*common.WorkflowExecution, error) {
@@ -307,165 +258,166 @@ func cancelWorkflowResponseFromProto(ctx workflow.Context, proto *workflowservic
 }
 
 type StartWorkflowOptions struct {
-	// Arguments for the workflow.
-	Args               []any
-	WorkflowStartDelay *time.Duration
-}
-
-func StartWorkflow[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
-}](
-	ctx workflow.Context,
-	workflow WorkflowF,
-	workflowId string,
-	taskQueue string,
-	opts StartWorkflowOptions,
-) workflow.NexusOperationFuture {
-	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
-	}
-	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
-	return startWorkflow(ctx, client, startWorkflowRequest{
-		Workflow:           workflowName,
-		Args:               opts.Args,
-		WorkflowId:         workflowId,
-		TaskQueue:          taskQueue,
-		WorkflowStartDelay: opts.WorkflowStartDelay,
-	})
+	// Required.
+	WorkflowId string
+	// Required.
+	TaskQueue string
+	// Optional.
+	WorkflowStartDelay time.Duration
 }
 
 // Input args: Arguments for the workflow.
-func StartWorkflowWithArgs[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
-}](
+func StartWorkflow(
 	ctx workflow.Context,
-	workflow WorkflowF,
-	workflowId string,
-	taskQueue string,
 	opts StartWorkflowOptions,
+	workflow any,
 	args ...any,
-) workflow.NexusOperationFuture {
-	if len(args) > 0 && opts.Args != nil {
-		return nexGenFailedNexusOperationFuture(ctx, errors.New("cannot specify both positional arguments and args"))
-	}
-	if len(args) == 0 {
-		args = opts.Args
+) workflow.Future {
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
 	}
 	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	{
+		switch rv := reflect.ValueOf(workflow); rv.Kind() {
+		case reflect.String:
+			workflowName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			workflowName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
 	}
 	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
 	return startWorkflow(ctx, client, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
-		WorkflowId:         workflowId,
-		TaskQueue:          taskQueue,
-		WorkflowStartDelay: opts.WorkflowStartDelay,
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
+	})
+}
+
+// Input args: Arguments for the workflow.
+func StartWorkflowTyped[WorkflowArg any, WorkflowResult any](
+	ctx workflow.Context,
+	opts StartWorkflowOptions,
+	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
+	arg WorkflowArg,
+) workflow.Future {
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
+	}
+	workflowName := ""
+	{
+		rv := reflect.ValueOf(workflow)
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
+	}
+	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
+	return startWorkflow(ctx, client, startWorkflowRequest{
+		Workflow:           workflowName,
+		Args:               []any{arg},
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
 	})
 }
 
 type RestartWorkflowOptions struct {
-	// Arguments for the workflow.
-	Args               []any
-	WorkflowStartDelay *time.Duration
-}
-
-func RestartWorkflow[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
-}](
-	ctx workflow.Context,
-	workflow WorkflowF,
-	workflowId string,
-	taskQueue string,
-	opts RestartWorkflowOptions,
-) workflow.NexusOperationFuture {
-	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
-	}
-	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
-	return restartWorkflow(ctx, client, startWorkflowRequest{
-		Workflow:           workflowName,
-		Args:               opts.Args,
-		WorkflowId:         workflowId,
-		TaskQueue:          taskQueue,
-		WorkflowStartDelay: opts.WorkflowStartDelay,
-	})
+	// Required.
+	WorkflowId string
+	// Required.
+	TaskQueue string
+	// Optional.
+	WorkflowStartDelay time.Duration
 }
 
 // Input args: Arguments for the workflow.
-func RestartWorkflowWithArgs[WorkflowF interface {
-	~string | func(workflow.Context, ...any) any
-}](
+func RestartWorkflow(
 	ctx workflow.Context,
-	workflow WorkflowF,
-	workflowId string,
-	taskQueue string,
 	opts RestartWorkflowOptions,
+	workflow any,
 	args ...any,
-) workflow.NexusOperationFuture {
-	if len(args) > 0 && opts.Args != nil {
-		return nexGenFailedNexusOperationFuture(ctx, errors.New("cannot specify both positional arguments and args"))
-	}
-	if len(args) == 0 {
-		args = opts.Args
+) workflow.Future {
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
 	}
 	workflowName := ""
-	switch rv := reflect.ValueOf(workflow); rv.Kind() {
-	case reflect.String:
-		workflowName = rv.String()
-	case reflect.Func:
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	default:
-		panic("nex-gen function name requires string or function")
+	{
+		switch rv := reflect.ValueOf(workflow); rv.Kind() {
+		case reflect.String:
+			workflowName = rv.String()
+		case reflect.Func:
+			fullName := runtime.FuncForPC(rv.Pointer()).Name()
+			elements := strings.Split(fullName, ".")
+			shortName := elements[len(elements)-1]
+			workflowName = strings.TrimSuffix(shortName, "-fm")
+		default:
+			panic("nex-gen function name requires string or function")
+		}
 	}
 	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
 	return restartWorkflow(ctx, client, startWorkflowRequest{
 		Workflow:           workflowName,
 		Args:               args,
-		WorkflowId:         workflowId,
-		TaskQueue:          taskQueue,
-		WorkflowStartDelay: opts.WorkflowStartDelay,
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
+	})
+}
+
+// Input args: Arguments for the workflow.
+func RestartWorkflowTyped[WorkflowArg any, WorkflowResult any](
+	ctx workflow.Context,
+	opts RestartWorkflowOptions,
+	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
+	arg WorkflowArg,
+) workflow.Future {
+	var workflowStartDelay *time.Duration
+	if opts.WorkflowStartDelay != 0 {
+		workflowStartDelay = &opts.WorkflowStartDelay
+	}
+	workflowName := ""
+	{
+		rv := reflect.ValueOf(workflow)
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		workflowName = strings.TrimSuffix(shortName, "-fm")
+	}
+	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
+	return restartWorkflow(ctx, client, startWorkflowRequest{
+		Workflow:           workflowName,
+		Args:               []any{arg},
+		WorkflowId:         opts.WorkflowId,
+		TaskQueue:          opts.TaskQueue,
+		WorkflowStartDelay: workflowStartDelay,
 	})
 }
 
 type CancelWorkflowOptions struct {
-	Reason *string
+	// Required.
+	WorkflowExecution WorkflowExecution
+	// Optional.
+	Reason string
 }
 
-func CancelWorkflow(ctx workflow.Context, workflowExecution WorkflowExecution, opts CancelWorkflowOptions) workflow.NexusOperationFuture {
+func CancelWorkflow(ctx workflow.Context, opts CancelWorkflowOptions) workflow.Future {
+	var reason *string
+	if opts.Reason != "" {
+		reason = &opts.Reason
+	}
 	client := nexGenNewNexusClient("temporal-system", "StartWorkflowService")
 	return cancelWorkflow(ctx, client, cancelWorkflowRequest{
-		WorkflowExecution: workflowExecution,
-		Reason:            opts.Reason,
+		WorkflowExecution: opts.WorkflowExecution,
+		Reason:            reason,
 	})
 }
