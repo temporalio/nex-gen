@@ -1653,11 +1653,16 @@ fn singular_from_proto_lines(
                         "}".to_string(),
                     ]
                 } else {
-                    vec![if field_is_pointer {
-                        format!("converted := {converted}\nvalue.{go_field} = &converted")
+                    if field_is_pointer {
+                        vec![
+                            "{".to_string(),
+                            format!("\tconverted := {converted}"),
+                            format!("\tvalue.{go_field} = &converted"),
+                            "}".to_string(),
+                        ]
                     } else {
-                        format!("value.{go_field} = {converted}")
-                    }]
+                        vec![format!("value.{go_field} = {converted}")]
+                    }
                 }
             } else if field_is_pointer {
                 if conversion.fallible {
@@ -1732,8 +1737,10 @@ fn singular_from_proto_lines(
             let converted = (conversion.from_proto)(&getter);
             if field_is_pointer {
                 vec![
-                    format!("converted := {converted}"),
-                    format!("value.{go_field} = &converted"),
+                    "{".to_string(),
+                    format!("\tconverted := {converted}"),
+                    format!("\tvalue.{go_field} = &converted"),
+                    "}".to_string(),
                 ]
             } else {
                 vec![format!("value.{go_field} = {converted}")]

@@ -335,10 +335,14 @@ func (m SignalWithStartWorkflowResponse) toProto(ctx workflow.Context) (*workflo
 
 func signalWithStartWorkflowResponseFromProto(ctx workflow.Context, proto *workflowservice.SignalWithStartWorkflowExecutionResponse) (SignalWithStartWorkflowResponse, error) {
 	value := SignalWithStartWorkflowResponse{}
-	converted := proto.GetRunId()
-	value.RunId = &converted
-	converted := proto.GetStarted()
-	value.Started = &converted
+	{
+		converted := proto.GetRunId()
+		value.RunId = &converted
+	}
+	{
+		converted := proto.GetStarted()
+		value.Started = &converted
+	}
 	return value, nil
 }
 

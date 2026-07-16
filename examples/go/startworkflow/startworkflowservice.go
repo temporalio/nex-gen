@@ -286,8 +286,10 @@ func (m WorkflowExecution) toProto(ctx workflow.Context) (*common.WorkflowExecut
 func workflowExecutionFromProto(ctx workflow.Context, proto *common.WorkflowExecution) (WorkflowExecution, error) {
 	value := WorkflowExecution{}
 	value.WorkflowId = proto.GetWorkflowId()
-	converted := proto.GetRunId()
-	value.RunId = &converted
+	{
+		converted := proto.GetRunId()
+		value.RunId = &converted
+	}
 	return value, nil
 }
 
