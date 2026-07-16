@@ -286,10 +286,10 @@ func StartWorkflow(
 }
 
 // Input args: Arguments for the workflow.
-func StartWorkflowTyped[WorkflowArg any](
+func StartWorkflowTyped[WorkflowArg any, WorkflowResult any](
 	ctx workflow.Context,
 	opts StartWorkflowOptions,
-	workflow func(workflow.Context, WorkflowArg) any,
+	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
 	arg WorkflowArg,
 ) workflow.Future {
 	var workflowStartDelay *time.Duration
@@ -357,10 +357,10 @@ func RestartWorkflow(
 }
 
 // Input args: Arguments for the workflow.
-func RestartWorkflowTyped[WorkflowArg any](
+func RestartWorkflowTyped[WorkflowArg any, WorkflowResult any](
 	ctx workflow.Context,
 	opts RestartWorkflowOptions,
-	workflow func(workflow.Context, WorkflowArg) any,
+	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
 	arg WorkflowArg,
 ) workflow.Future {
 	var workflowStartDelay *time.Duration

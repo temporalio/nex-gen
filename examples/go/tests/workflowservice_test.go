@@ -25,10 +25,6 @@ func signalWithStartWorkflow(ctx workflow.Context, input string) string {
 	return input
 }
 
-func signalWithStartWorkflowAny(ctx workflow.Context, input string) any {
-	return signalWithStartWorkflow(ctx, input)
-}
-
 type emptyPayloadsDataConverter struct {
 	converter.DataConverter
 }
@@ -91,7 +87,7 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms()
 			opts,
 			"wake-up",
 			"signal-value",
-			signalWithStartWorkflowAny,
+			signalWithStartWorkflow,
 			"workflow-input",
 		)
 		selector := workflow.NewSelector(ctx)

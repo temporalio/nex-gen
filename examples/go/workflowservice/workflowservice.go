@@ -399,12 +399,12 @@ func SignalWithStartWorkflow(
 // Input args: Arguments for the workflow.
 //
 // Returns: A workflow handle to the started workflow.
-func SignalWithStartWorkflowTyped[WorkflowArg any](
+func SignalWithStartWorkflowTyped[WorkflowArg any, WorkflowResult any](
 	ctx workflow.Context,
 	opts SignalWithStartWorkflowOptions,
 	signal string,
 	signalArg any,
-	workflow func(workflow.Context, WorkflowArg) any,
+	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
 	arg WorkflowArg,
 ) workflow.Future {
 	var executionTimeout *time.Duration

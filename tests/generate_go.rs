@@ -615,8 +615,11 @@ fn go_temporal_function_constraints_use_workflow_context_prefix() {
     .unwrap();
 
     assert!(rendered.contains("func SignalWithStartWorkflow("));
-    assert!(rendered.contains("func SignalWithStartWorkflowTyped[WorkflowArg any]("));
-    assert!(!rendered.contains("WorkflowResult"));
+    assert!(
+        rendered
+            .contains("func SignalWithStartWorkflowTyped[WorkflowArg any, WorkflowResult any](")
+    );
+    assert!(rendered.contains("\tworkflow func(workflow.Context, WorkflowArg) WorkflowResult,"));
     assert!(!rendered.contains("func SignalWithStartWorkflowWithArgs("));
     assert!(!rendered.contains("SignalF interface"));
     assert!(rendered.contains("\topts SignalWithStartWorkflowOptions,\n"));

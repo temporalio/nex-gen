@@ -5547,6 +5547,7 @@ fn function_type_parameters(
         }
         if unary_primary.is_some_and(|primary| primary.field_name == param.field_name) {
             type_params.push((primary_arg_type_parameter_name(param), "any".to_string()));
+            type_params.push((primary_result_type_parameter_name(param), "any".to_string()));
         } else if function.alternate_type.is_some() {
             type_params.push((
                 function_type_parameter_name(param),
@@ -5650,11 +5651,16 @@ fn go_unary_function_type_expr(
             .collect::<Vec<_>>(),
     };
     args.push(primary_arg_type_parameter_name(param));
-    format!("func({}) any", args.join(", "))
+    let result_type = primary_result_type_parameter_name(param);
+    format!("func({}) {}", args.join(", "), result_type)
 }
 
 fn primary_arg_type_parameter_name(param: &RenderedUnpackedParam) -> String {
     format!("{}Arg", param.field_name)
+}
+
+fn primary_result_type_parameter_name(param: &RenderedUnpackedParam) -> String {
+    format!("{}Result", param.field_name)
 }
 
 fn is_go_signal_function(function: &FunctionFieldSpec) -> bool {
