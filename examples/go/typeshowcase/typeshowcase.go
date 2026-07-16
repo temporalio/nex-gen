@@ -5,14 +5,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// --- Futures ---
-
-// OperationFuture represents the result of a generated operation.
-type OperationFuture interface {
-	Get(ctx workflow.Context, valuePtr any) error
-	IsReady() bool
-}
-
 // --- Datatypes ---
 
 type getUserRequest struct {
@@ -70,15 +62,15 @@ func NewUser(userId string, email string, displayName string, status UserStatus,
 	}
 }
 
-func (u *User) UpdateEmail(ctx workflow.Context, email string) OperationFuture {
+func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.Future {
 	return updateEmail(ctx, updateEmailRequest{UserId: u.UserId, Email: email})
 }
 
-func (u *User) Rename(ctx workflow.Context, displayName string) OperationFuture {
+func (u *User) Rename(ctx workflow.Context, displayName string) workflow.Future {
 	return rename(ctx, renameRequest{UserId: u.UserId, DisplayName: displayName})
 }
 
-func (u *User) Deactivate(ctx workflow.Context, reason string) OperationFuture {
+func (u *User) Deactivate(ctx workflow.Context, reason string) workflow.Future {
 	var reasonPtr *string
 	if reason != "" {
 		reasonPtr = &reason
@@ -88,37 +80,37 @@ func (u *User) Deactivate(ctx workflow.Context, reason string) OperationFuture {
 
 // --- Operations (internal) ---
 
-func getUser(ctx workflow.Context, request getUserRequest) OperationFuture {
+func getUser(ctx workflow.Context, request getUserRequest) workflow.Future {
 	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
 	fut := c.ExecuteOperation(ctx, "GetUser", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func updateEmail(ctx workflow.Context, request updateEmailRequest) OperationFuture {
+func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Future {
 	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
 	fut := c.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func rename(ctx workflow.Context, request renameRequest) OperationFuture {
+func rename(ctx workflow.Context, request renameRequest) workflow.Future {
 	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
 	fut := c.ExecuteOperation(ctx, "Rename", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func setProfile(ctx workflow.Context, request setProfileRequest) OperationFuture {
+func setProfile(ctx workflow.Context, request setProfileRequest) workflow.Future {
 	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
 	fut := c.ExecuteOperation(ctx, "SetProfile", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func recordSync(ctx workflow.Context, request recordSyncRequest) OperationFuture {
+func recordSync(ctx workflow.Context, request recordSyncRequest) workflow.Future {
 	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
 	fut := c.ExecuteOperation(ctx, "RecordSync", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func deactivate(ctx workflow.Context, request deactivateRequest) OperationFuture {
+func deactivate(ctx workflow.Context, request deactivateRequest) workflow.Future {
 	c := workflow.NewNexusClient("type-showcase", "TypeShowcase")
 	fut := c.ExecuteOperation(ctx, "Deactivate", request, workflow.NexusOperationOptions{})
 	return fut
@@ -218,7 +210,7 @@ type GetUserOptions struct {
 	ConsistencyToken string
 }
 
-func GetUser(ctx workflow.Context, opts GetUserOptions) OperationFuture {
+func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.Future {
 	var consistencyToken *string
 	if opts.ConsistencyToken != "" {
 		consistencyToken = &opts.ConsistencyToken
@@ -236,7 +228,7 @@ type UpdateEmailOptions struct {
 	Email string
 }
 
-func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) OperationFuture {
+func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.Future {
 	return updateEmail(ctx, updateEmailRequest{
 		UserId: opts.UserId,
 		Email:  opts.Email,
@@ -250,7 +242,7 @@ type RenameOptions struct {
 	DisplayName string
 }
 
-func Rename(ctx workflow.Context, opts RenameOptions) OperationFuture {
+func Rename(ctx workflow.Context, opts RenameOptions) workflow.Future {
 	return rename(ctx, renameRequest{
 		UserId:      opts.UserId,
 		DisplayName: opts.DisplayName,
@@ -264,7 +256,7 @@ type SetProfileOptions struct {
 	Profile UserProfile
 }
 
-func SetProfile(ctx workflow.Context, opts SetProfileOptions) OperationFuture {
+func SetProfile(ctx workflow.Context, opts SetProfileOptions) workflow.Future {
 	return setProfile(ctx, setProfileRequest{
 		UserId:  opts.UserId,
 		Profile: opts.Profile,
@@ -278,7 +270,7 @@ type RecordSyncOptions struct {
 	Report SyncReport
 }
 
-func RecordSync(ctx workflow.Context, opts RecordSyncOptions) OperationFuture {
+func RecordSync(ctx workflow.Context, opts RecordSyncOptions) workflow.Future {
 	return recordSync(ctx, recordSyncRequest{
 		UserId: opts.UserId,
 		Report: opts.Report,
@@ -292,7 +284,7 @@ type DeactivateOptions struct {
 	Reason string
 }
 
-func Deactivate(ctx workflow.Context, opts DeactivateOptions) OperationFuture {
+func Deactivate(ctx workflow.Context, opts DeactivateOptions) workflow.Future {
 	var reason *string
 	if opts.Reason != "" {
 		reason = &opts.Reason

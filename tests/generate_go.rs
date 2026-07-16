@@ -221,8 +221,8 @@ fn cli_generates_go_with_package_self_imports_removed() {
     let api = fs::read_to_string(output_path.join("userservice.go")).unwrap();
     assert!(api.contains("package workflow\n"));
     assert!(!api.contains("\"go.temporal.io/sdk/workflow\""));
-    assert!(api.contains("type OperationFuture interface {"));
-    assert!(api.contains("func getUser(ctx Context, request getUserRequest) OperationFuture"));
+    assert!(!api.contains("type OperationFuture interface {"));
+    assert!(api.contains("func getUser(ctx Context, request getUserRequest) Future"));
     assert!(api.contains("c := NewNexusClient(\"user-service\", \"UserService\")"));
     assert!(!api.contains("const ServiceName"));
     assert!(!api.contains("const Endpoint"));
@@ -398,21 +398,21 @@ interface sample-service {
 
     assert!(rendered.contains("\"example.com/nexgen/handles\""));
     assert!(rendered.contains(
-        "func getHandle(ctx workflow.Context, request transformRequest) OperationFuture {"
+        "func getHandle(ctx workflow.Context, request transformRequest) workflow.Future {"
     ));
-    assert!(rendered.contains(
-        "return &nexGenOperationFuture{get: func(ctx workflow.Context, valuePtr any) error {"
-    ));
-    assert!(rendered.contains("}, isReady: fut.IsReady}"));
+    assert!(rendered.contains("result, resultSettable := workflow.NewFuture(ctx)"));
+    assert!(rendered.contains("workflow.Go(ctx, func(ctx workflow.Context) {"));
+    assert!(rendered.contains("resultSettable.Set(value, nil)"));
+    assert!(!rendered.contains("nexGenOperationFuture"));
     assert!(rendered.contains("\tvar result transformResponse\n"));
     assert!(rendered.contains("\t\tif err := fut.Get(ctx, &result); err != nil {\n"));
     assert!(
         rendered.contains("\t\tvalue, err := handles.NewValueHandle(request.Id, result.Value)\n")
     );
-    assert!(rendered.contains("\t\t*typedValue = value\n"));
+    assert!(rendered.contains("\t\tresultSettable.Set(value, nil)\n"));
     assert!(
         rendered.contains(
-            "func GetHandle(ctx workflow.Context, opts GetHandleOptions) OperationFuture {"
+            "func GetHandle(ctx workflow.Context, opts GetHandleOptions) workflow.Future {"
         )
     );
     assert!(!rendered.contains("NexusOperationFuture"));
@@ -465,8 +465,7 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!service_rendered.contains("func nexGenWorkflowDataConverter"));
     assert!(!service_rendered.contains("func getWorkflowDataConverter"));
     assert!(!service_rendered.contains("type nexGenOperationFuture struct"));
-    assert!(!service_rendered.contains("func nexGenFailedOperationFuture"));
-    assert!(service_rendered.contains("type OperationFuture interface"));
+    assert!(!service_rendered.contains("type OperationFuture interface"));
     assert!(support_rendered.contains("\"reflect\""));
     assert!(!support_rendered.contains("\"runtime\""));
     assert!(!support_rendered.contains("\"strings\""));
@@ -475,7 +474,6 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!support_rendered.contains("func nexGenWorkflowDataConverter"));
     assert!(support_rendered.contains("func getWorkflowDataConverter"));
     assert!(!support_rendered.contains("type nexGenOperationFuture struct"));
-    assert!(!support_rendered.contains("func nexGenFailedOperationFuture"));
 
     // Internal request structs remain wire-shaped without public API docs.
     assert!(rendered.contains("type executeFunctionRequest struct {\n\tFunction string"));
@@ -748,17 +746,17 @@ fn go_type_showcase_generates_expected_types() {
 
     // Resource methods
     assert!(rendered.contains(
-        "func (u *User) UpdateEmail(ctx workflow.Context, email string) OperationFuture"
+        "func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.Future"
     ));
     assert!(rendered.contains("updateEmailRequest{UserId: u.UserId, Email: email}"));
     assert!(rendered.contains(
-        "func (u *User) Rename(ctx workflow.Context, displayName string) OperationFuture"
+        "func (u *User) Rename(ctx workflow.Context, displayName string) workflow.Future"
     ));
     assert!(rendered.contains("renameRequest{UserId: u.UserId, DisplayName: displayName}"));
     // Void resource method -- optional primitive param is value-shaped publicly
     // and converted to a pointer for the internal request.
     assert!(rendered.contains(
-        "func (u *User) Deactivate(ctx workflow.Context, reason string) OperationFuture"
+        "func (u *User) Deactivate(ctx workflow.Context, reason string) workflow.Future"
     ));
     assert!(rendered.contains("var reasonPtr *string"));
     assert!(rendered.contains("deactivateRequest{UserId: u.UserId, Reason: reasonPtr}"));
@@ -766,10 +764,10 @@ fn go_type_showcase_generates_expected_types() {
     // Unexported operation wrapper functions
     assert!(
         rendered
-            .contains("func getUser(ctx workflow.Context, request getUserRequest) OperationFuture")
+            .contains("func getUser(ctx workflow.Context, request getUserRequest) workflow.Future")
     );
     assert!(rendered.contains(
-        "func updateEmail(ctx workflow.Context, request updateEmailRequest) OperationFuture"
+        "func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Future"
     ));
     assert!(rendered.contains("workflow.NewNexusClient(\"type-showcase\", \"TypeShowcase\")"));
     assert!(rendered.contains(
@@ -777,13 +775,13 @@ fn go_type_showcase_generates_expected_types() {
     ));
     // Void operation
     assert!(rendered.contains(
-        "func deactivate(ctx workflow.Context, request deactivateRequest) OperationFuture"
+        "func deactivate(ctx workflow.Context, request deactivateRequest) workflow.Future"
     ));
     assert!(rendered.contains("\treturn fut\n"));
 
     // Exported convenience wrappers -- required non-function fields live in options.
     assert!(rendered.contains(
-        "func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) OperationFuture"
+        "func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.Future"
     ));
     // The request struct is always constructed across multiple lines.
     assert!(
@@ -797,7 +795,7 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("ConsistencyToken string"));
     assert!(
         rendered
-            .contains("func GetUser(ctx workflow.Context, opts GetUserOptions) OperationFuture")
+            .contains("func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.Future")
     );
     assert!(rendered.contains("var consistencyToken *string"));
     assert!(rendered.contains(
@@ -808,7 +806,7 @@ fn go_type_showcase_generates_expected_types() {
     assert!(rendered.contains("Reason string"));
     assert!(
         rendered.contains(
-            "func Deactivate(ctx workflow.Context, opts DeactivateOptions) OperationFuture"
+            "func Deactivate(ctx workflow.Context, opts DeactivateOptions) workflow.Future"
         )
     );
 }
@@ -864,7 +862,10 @@ fn go_type_roundtrip_generates_proto_conversions() {
         rendered.contains("converted, err := retryPolicyFromProto(ctx, proto.GetRetryPolicy())")
     );
     assert!(rendered.contains("value.RetryPolicy = *converted"));
-    assert!(rendered.contains("\t\t*typedValue = *value\n"));
+    assert!(rendered.contains("\t\tresultSettable.Set(*value, nil)\n"));
+    assert!(rendered.contains(
+        "resultSettable.SetError(fmt.Errorf(\"nex-gen decoded required operation result was nil\"))"
+    ));
 
     // Operation functions convert the request to proto before the SDK call and
     // decode the proto response afterwards.
@@ -909,10 +910,9 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     .unwrap();
 
     assert!(rendered.contains("\trequestProto, err := request.toProto(ctx)\n"));
-    assert!(
-        rendered
-            .contains("\tif err != nil {\n\t\treturn nexGenFailedOperationFuture(ctx, err)\n\t}\n")
-    );
+    assert!(rendered.contains(
+        "\tif err != nil {\n\t\tresult, resultSettable := workflow.NewFuture(ctx)\n\t\tresultSettable.SetError(err)\n\t\treturn result\n\t}\n"
+    ));
     assert!(rendered.contains(
         "fut := c.ExecuteOperation(ctx, \"StartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
     ));
@@ -924,7 +924,7 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
         "type StartedWorkflow struct {\n\t// Required.\n\tNamespace string\n\t// Required.\n\tWorkflowId string\n\t// Optional.\n\tRunId *string\n}"
     ));
     assert!(rendered.contains(
-        "func NewStartedWorkflow(namespace string, workflowId string, runId string) *StartedWorkflow"
+        "func NewStartedWorkflow(namespace string, workflowId string, runId string) StartedWorkflow"
     ));
     assert!(rendered.contains(
         "fut := c.ExecuteOperation(ctx, \"RestartWorkflow\", requestProto, workflow.NexusOperationOptions{})"
@@ -942,7 +942,7 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
         "func RestartWorkflowWithArgs(\n\tctx workflow.Context,\n\topts RestartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
     ));
     assert!(rendered.contains(
-        "func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) OperationFuture"
+        "func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) workflow.Future"
     ));
     assert!(rendered.contains(
         "return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})"

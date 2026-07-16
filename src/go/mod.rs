@@ -100,6 +100,14 @@ impl GoPackageContext {
         self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.NewFuture")
     }
 
+    fn workflow_go(&self) -> String {
+        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Go")
+    }
+
+    fn workflow_future_type(&self) -> String {
+        self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.Future")
+    }
+
     fn new_nexus_client(&self) -> String {
         self.qualified_expr("go.temporal.io/sdk/workflow", "workflow.NewNexusClient")
     }
@@ -200,6 +208,29 @@ pub(crate) fn generate(
     let mut proto_imports = GoImportCollector::default();
     populate_proto_conversions(api_plan, &mut models, &mut proto_imports, &package)?;
     populate_operation_bindings(api_plan, &mut services, &mut proto_imports, &package)?;
+    let needs_fmt = models
+        .values()
+        .flat_map(|model| &model.fields)
+        .any(|field| {
+            field.conversion.as_ref().is_some_and(|conversion| {
+                conversion
+                    .from_proto_lines
+                    .iter()
+                    .any(|line| line.contains("fmt."))
+            })
+        })
+        || services
+            .iter()
+            .flat_map(|service| &service.operations)
+            .any(|operation| {
+                operation
+                    .proto_binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.output_returns_pointer)
+            });
+    if needs_fmt {
+        imports.insert("fmt".to_string());
+    }
 
     let visibility = compute_go_visibility(api_plan, &enums, &flags, &variants, &models);
     apply_go_visibility(
@@ -211,16 +242,12 @@ pub(crate) fn generate(
         &mut services,
     );
 
-    let needs_future_helpers = services.iter().any(service_uses_generated_future_helpers);
     let needs_function_name_inlining = services.iter().any(service_uses_function_name_inlining);
 
     // Operation wrapper functions require the workflow package.
     let has_operations = services.iter().any(|s| !s.operations.is_empty());
     if has_operations && !package.is_self_import("go.temporal.io/sdk/workflow") {
         imports.insert("go.temporal.io/sdk/workflow".to_string());
-    }
-    if needs_future_helpers {
-        imports.insert("fmt".to_string());
     }
     if needs_function_name_inlining {
         imports.insert("reflect".to_string());
@@ -238,7 +265,6 @@ pub(crate) fn generate(
         &services,
         api_plan,
         &visibility,
-        needs_future_helpers,
     );
 
     let mut files = BTreeMap::new();
@@ -257,12 +283,6 @@ pub(crate) fn generate(
     Ok(GeneratedFiles::directory(files))
 }
 
-fn service_uses_generated_future_helpers(service: &RenderedService<'_>) -> bool {
-    service.operations.iter().any(|operation| {
-        operation.proto_binding.is_some() || operation_uses_native_future_adapter(operation)
-    })
-}
-
 fn service_uses_function_name_inlining(service: &RenderedService<'_>) -> bool {
     service.operations.iter().any(|operation| {
         operation.unpacked_input.as_ref().is_some_and(|params| {
@@ -274,15 +294,6 @@ fn service_uses_function_name_inlining(service: &RenderedService<'_>) -> bool {
                         .is_some_and(|function| !is_go_signal_function(function))
             })
         })
-    })
-}
-
-fn operation_uses_native_future_adapter(operation: &RenderedOperation<'_>) -> bool {
-    if operation.output_transform_expr.is_some() {
-        return true;
-    }
-    operation.proto_binding.as_ref().is_some_and(|binding| {
-        binding.output_from_proto.is_some() || binding.resource_return.is_some()
     })
 }
 
@@ -4076,7 +4087,6 @@ fn render_file(
     services: &[RenderedService<'_>],
     api_plan: &ApiPlan,
     visibility: &GoVisibility,
-    needs_future_helpers: bool,
 ) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
@@ -4129,20 +4139,6 @@ fn render_file(
             output.push('\n');
         }
         output.push_str(")\n");
-    }
-
-    if services
-        .iter()
-        .any(|service| !service.operations.is_empty())
-    {
-        output.push_str("\n// --- Futures ---\n\n");
-        render_operation_future_interface(&mut output, package);
-    }
-
-    if needs_future_helpers {
-        output.push_str("\n// --- Helpers ---\n");
-        output.push('\n');
-        render_generated_future_helpers(&mut output, package);
     }
 
     // --- Datatypes ---
@@ -4198,7 +4194,20 @@ fn render_file(
         for service in services {
             for resource in &service.resources {
                 output.push('\n');
-                render_resource(&mut output, resource, package, visibility);
+                let constructor_returns_value = service.operations.iter().any(|operation| {
+                    operation
+                        .proto_binding
+                        .as_ref()
+                        .and_then(|binding| binding.resource_return.as_ref())
+                        .is_some_and(|returned| returned.resource_type_name == resource.type_name)
+                });
+                render_resource(
+                    &mut output,
+                    resource,
+                    package,
+                    visibility,
+                    constructor_returns_value,
+                );
                 render_resource_methods(
                     &mut output,
                     resource,
@@ -4669,6 +4678,7 @@ fn render_resource(
     resource: &PlannedResource,
     package: &GoPackageContext,
     visibility: &GoVisibility,
+    constructor_returns_value: bool,
 ) {
     output.push_str("type ");
     output.push_str(&resource.type_name);
@@ -4718,7 +4728,10 @@ fn render_resource(
         output.push(' ');
         output.push_str(&visibility.rewrite_go_expr(&public_type));
     }
-    output.push_str(") *");
+    output.push_str(") ");
+    if !constructor_returns_value {
+        output.push('*');
+    }
     output.push_str(&resource.type_name);
     output.push_str(" {\n");
     for field in &resource.fields {
@@ -4743,7 +4756,10 @@ fn render_resource(
             output.push_str("\n\t}\n");
         }
     }
-    output.push_str("\treturn &");
+    output.push_str("\treturn ");
+    if !constructor_returns_value {
+        output.push('&');
+    }
     output.push_str(&resource.type_name);
     output.push_str("{\n");
     for field in &resource.fields {
@@ -5124,100 +5140,47 @@ fn render_resource_methods(
     }
 }
 
-fn render_operation_future_interface(output: &mut String, package: &GoPackageContext) {
-    output.push_str("// OperationFuture represents the result of a generated operation.\n");
-    output.push_str("type OperationFuture interface {\n");
-    output.push_str("\tGet(ctx ");
-    output.push_str(&package.workflow_context_type());
-    output.push_str(", valuePtr any) error\n");
-    output.push_str("\tIsReady() bool\n");
-    output.push_str("}\n");
+fn render_operation_future_return_type(output: &mut String, package: &GoPackageContext) {
+    output.push_str(&package.workflow_future_type());
 }
 
-fn render_generated_future_helpers(output: &mut String, package: &GoPackageContext) {
-    let context_type = package.workflow_context_type();
-    output.push_str("type nexGenOperationFuture struct {\n");
-    output.push_str("\tget func(");
-    output.push_str(&context_type);
-    output.push_str(", any) error\n");
-    output.push_str("\tisReady func() bool\n");
-    output.push_str("}\n\n");
-
-    output.push_str("func (f *nexGenOperationFuture) Get(ctx ");
-    output.push_str(&context_type);
-    output.push_str(", valuePtr any) error {\n");
-    output.push_str("\treturn f.get(ctx, valuePtr)\n");
-    output.push_str("}\n\n");
-
-    output.push_str("func (f *nexGenOperationFuture) IsReady() bool {\n");
-    output.push_str("\treturn f.isReady()\n");
-    output.push_str("}\n\n");
-
-    output.push_str("func nexGenFailedOperationFuture(ctx ");
-    output.push_str(&context_type);
-    output.push_str(", err error) OperationFuture {\n");
-    output.push_str("\tresult, resultSettable := ");
-    output.push_str(&package.new_future());
-    output.push_str("(ctx)\n");
-    output.push_str("\tresultSettable.SetError(err)\n");
-    output.push_str("\treturn &nexGenOperationFuture{get: result.Get, isReady: result.IsReady}\n");
-    output.push_str("}\n\n");
-
-    output.push_str("func nexGenFutureResultTypeError(expected string) error {\n");
-    output.push_str("\treturn fmt.Errorf(\"nex-gen future result pointer has unexpected type: expected %s\", expected)\n");
-    output.push_str("}\n");
-}
-
-fn render_operation_future_return_type(output: &mut String, _package: &GoPackageContext) {
-    output.push_str("OperationFuture");
-}
-
-fn render_future_value_assignment(
-    output: &mut String,
-    result_type: &str,
-    value_expr: &str,
-    value_is_pointer: bool,
-) {
-    output.push_str("\t\ttypedValue, ok := valuePtr.(*");
-    output.push_str(result_type);
-    output.push_str(")\n");
-    output.push_str("\t\tif !ok {\n");
-    output.push_str("\t\t\treturn nexGenFutureResultTypeError(\"*");
-    output.push_str(result_type);
-    output.push_str("\")\n");
-    output.push_str("\t\t}\n");
+fn render_future_value_set(output: &mut String, value_expr: &str, value_is_pointer: bool) {
     if value_is_pointer {
         output.push_str("\t\tif ");
         output.push_str(value_expr);
-        output.push_str(" != nil {\n");
-        output.push_str("\t\t\t*typedValue = *");
-        output.push_str(value_expr);
-        output.push('\n');
+        output.push_str(" == nil {\n");
+        output.push_str("\t\t\tresultSettable.SetError(fmt.Errorf(\"nex-gen decoded required operation result was nil\"))\n");
+        output.push_str("\t\t\treturn\n");
         output.push_str("\t\t}\n");
-    } else {
-        output.push_str("\t\t*typedValue = ");
+        output.push_str("\t\tresultSettable.Set(*");
         output.push_str(value_expr);
-        output.push('\n');
+        output.push_str(", nil)\n");
+    } else {
+        output.push_str("\t\tresultSettable.Set(");
+        output.push_str(value_expr);
+        output.push_str(", nil)\n");
     }
 }
 
 fn render_operation_future_adapter(
     output: &mut String,
     package: &GoPackageContext,
-    result_type: &str,
+    _result_type: &str,
     value_is_pointer: bool,
     get_body: impl FnOnce(&mut String),
 ) {
-    output.push_str("\treturn &nexGenOperationFuture{get: func(ctx ");
+    output.push_str("\tresult, resultSettable := ");
+    output.push_str(&package.new_future());
+    output.push_str("(ctx)\n");
+    output.push_str("\t");
+    output.push_str(&package.workflow_go());
+    output.push_str("(ctx, func(ctx ");
     output.push_str(&package.workflow_context_type());
-    output.push_str(", valuePtr any) error {\n");
-    output.push_str("\t\tif valuePtr == nil {\n");
-    output.push_str("\t\t\treturn fut.Get(ctx, nil)\n");
-    output.push_str("\t\t}\n");
+    output.push_str(") {\n");
     get_body(output);
-    render_future_value_assignment(output, result_type, "value", value_is_pointer);
-    output.push_str("\t\treturn nil\n");
-    output.push_str("\t}, isReady: fut.IsReady}\n");
+    render_future_value_set(output, "value", value_is_pointer);
+    output.push_str("\t})\n");
+    output.push_str("\treturn result\n");
 }
 
 /// Renders an unexported operation wrapper function that creates a Nexus
@@ -5293,13 +5256,15 @@ fn render_operation_function(
             } else {
                 output.push_str("\t\tif err := fut.Get(ctx, nil); err != nil {\n");
             }
-            output.push_str("\t\t\treturn err\n");
+            output.push_str("\t\t\tresultSettable.SetError(err)\n");
+            output.push_str("\t\t\treturn\n");
             output.push_str("\t\t}\n");
             output.push_str("\t\tvalue, err := ");
             output.push_str(transform_expr);
             output.push('\n');
             output.push_str("\t\tif err != nil {\n");
-            output.push_str("\t\t\treturn err\n");
+            output.push_str("\t\t\tresultSettable.SetError(err)\n");
+            output.push_str("\t\t\treturn\n");
             output.push_str("\t\t}\n");
         });
     } else {
@@ -5350,7 +5315,11 @@ fn render_operation_function_proto(
     output.push_str(&binding.input_to_proto);
     output.push('\n');
     output.push_str("\tif err != nil {\n");
-    output.push_str("\t\treturn nexGenFailedOperationFuture(ctx, err)\n");
+    output.push_str("\t\tresult, resultSettable := ");
+    output.push_str(&package.new_future());
+    output.push_str("(ctx)\n");
+    output.push_str("\t\tresultSettable.SetError(err)\n");
+    output.push_str("\t\treturn result\n");
     output.push_str("\t}\n");
     output.push_str("\tc := ");
     output.push_str(&package.new_nexus_client());
@@ -5388,13 +5357,15 @@ fn render_operation_function_proto(
             } else {
                 output.push_str("\t\tif err := fut.Get(ctx, nil); err != nil {\n");
             }
-            output.push_str("\t\t\treturn err\n");
+            output.push_str("\t\t\tresultSettable.SetError(err)\n");
+            output.push_str("\t\t\treturn\n");
             output.push_str("\t\t}\n");
             output.push_str("\t\tvalue, err := ");
             output.push_str(transform_expr);
             output.push('\n');
             output.push_str("\t\tif err != nil {\n");
-            output.push_str("\t\t\treturn err\n");
+            output.push_str("\t\t\tresultSettable.SetError(err)\n");
+            output.push_str("\t\t\treturn\n");
             output.push_str("\t\t}\n");
         });
     } else if let (Some(output_type), Some(proto_value_type), Some(from_proto)) = (
@@ -5415,13 +5386,15 @@ fn render_operation_function_proto(
                 output.push_str(proto_value_type);
                 output.push('\n');
                 output.push_str("\t\tif err := fut.Get(ctx, &result); err != nil {\n");
-                output.push_str("\t\t\treturn err\n");
+                output.push_str("\t\t\tresultSettable.SetError(err)\n");
+                output.push_str("\t\t\treturn\n");
                 output.push_str("\t\t}\n");
                 output.push_str("\t\tvalue, err := ");
                 output.push_str(from_proto);
                 output.push('\n');
                 output.push_str("\t\tif err != nil {\n");
-                output.push_str("\t\t\treturn err\n");
+                output.push_str("\t\t\tresultSettable.SetError(err)\n");
+                output.push_str("\t\t\treturn\n");
                 output.push_str("\t\t}\n");
             },
         );
@@ -5436,13 +5409,14 @@ fn render_operation_function_proto(
             output,
             package,
             &resource_return.resource_type_name,
-            true,
+            false,
             |output| {
                 output.push_str("\t\tvar result ");
                 output.push_str(proto_value_type);
                 output.push('\n');
                 output.push_str("\t\tif err := fut.Get(ctx, &result); err != nil {\n");
-                output.push_str("\t\t\treturn err\n");
+                output.push_str("\t\t\tresultSettable.SetError(err)\n");
+                output.push_str("\t\t\treturn\n");
                 output.push_str("\t\t}\n");
                 for line in &resource_return.local_lines {
                     output.push_str("\t\t");

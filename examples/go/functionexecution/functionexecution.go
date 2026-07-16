@@ -9,14 +9,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// --- Futures ---
-
-// OperationFuture represents the result of a generated operation.
-type OperationFuture interface {
-	Get(ctx workflow.Context, valuePtr any) error
-	IsReady() bool
-}
-
 // --- Datatypes ---
 
 type executeFunctionRequest struct {
@@ -49,31 +41,31 @@ type executeNamedVarargsFunctionRequest struct {
 
 // --- Operations (internal) ---
 
-func executeFunction(ctx workflow.Context, request executeFunctionRequest) OperationFuture {
+func executeFunction(ctx workflow.Context, request executeFunctionRequest) workflow.Future {
 	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
 	fut := c.ExecuteOperation(ctx, "ExecuteFunction", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func executeCountedFunction(ctx workflow.Context, request executeCountedFunctionRequest) OperationFuture {
+func executeCountedFunction(ctx workflow.Context, request executeCountedFunctionRequest) workflow.Future {
 	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
 	fut := c.ExecuteOperation(ctx, "ExecuteCountedFunction", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func executeNamedFunction(ctx workflow.Context, request executeNamedFunctionRequest) OperationFuture {
+func executeNamedFunction(ctx workflow.Context, request executeNamedFunctionRequest) workflow.Future {
 	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
 	fut := c.ExecuteOperation(ctx, "ExecuteNamedFunction", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func executeVarargsFunction(ctx workflow.Context, request executeVarargsFunctionRequest) OperationFuture {
+func executeVarargsFunction(ctx workflow.Context, request executeVarargsFunctionRequest) workflow.Future {
 	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
 	fut := c.ExecuteOperation(ctx, "ExecuteVarargsFunction", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
-func executeNamedVarargsFunction(ctx workflow.Context, request executeNamedVarargsFunctionRequest) OperationFuture {
+func executeNamedVarargsFunction(ctx workflow.Context, request executeNamedVarargsFunctionRequest) workflow.Future {
 	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
 	fut := c.ExecuteOperation(ctx, "ExecuteNamedVarargsFunction", request, workflow.NexusOperationOptions{})
 	return fut
@@ -117,7 +109,7 @@ func ExecuteFunction(
 	function func(string, bool) string,
 	name string,
 	enabled bool,
-) OperationFuture {
+) workflow.Future {
 	functionName := ""
 	{
 		rv := reflect.ValueOf(function)
@@ -144,7 +136,7 @@ func ExecuteCountedFunction(
 	function func(string, int32) string,
 	name string,
 	count int32,
-) OperationFuture {
+) workflow.Future {
 	functionName := ""
 	{
 		rv := reflect.ValueOf(function)
@@ -173,7 +165,7 @@ func ExecuteNamedFunction[FunctionF interface {
 	function FunctionF,
 	name string,
 	enabled bool,
-) OperationFuture {
+) workflow.Future {
 	functionName := ""
 	{
 		switch rv := reflect.ValueOf(function); rv.Kind() {
@@ -204,7 +196,7 @@ func ExecuteVarargsFunction(
 	opts ExecuteVarargsFunctionOptions,
 	function func(...string) string,
 	args ...string,
-) OperationFuture {
+) workflow.Future {
 	functionName := ""
 	{
 		rv := reflect.ValueOf(function)
@@ -230,7 +222,7 @@ func ExecuteNamedVarargsFunction[FunctionF interface {
 	opts ExecuteNamedVarargsFunctionOptions,
 	function FunctionF,
 	args ...string,
-) OperationFuture {
+) workflow.Future {
 	functionName := ""
 	{
 		switch rv := reflect.ValueOf(function); rv.Kind() {
