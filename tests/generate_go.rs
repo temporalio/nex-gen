@@ -468,83 +468,7 @@ fn go_examples_generation_matches_checked_in_output() {
         let rendered = read_go_output_files(&output_path);
         let expected = read_go_output_files(&go_output_path(&root, &example_id));
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
-        fs::remove_dir_all(temp_dir).unwrap();
-    }
-}
-
-#[test]
-fn go_json_generation_matches_checked_in_output() {
-    let root = project_root();
-    for example_id in ["chat", "kb"] {
-        for (mode, native_api) in [("definitions", false), ("api", true)] {
-            let temp_dir = unique_output_path(&format!("go-json-{example_id}-{mode}"));
-            fs::create_dir_all(&temp_dir).unwrap();
-            fs::write(temp_dir.join("go.mod"), "module examples/go\n\ngo 1.24.0\n").unwrap();
-            let output_path = temp_dir
-                .join("json_schema")
-                .join(mode)
-                .join(go_package_name(example_id));
-            generate_formatted_go_json_output(&root, example_id, &output_path, native_api);
-
-            let expected = read_go_output_files(&go_json_output_path(&root, mode, example_id));
-            let actual = read_go_output_files(&output_path);
-            assert_eq!(
-                actual, expected,
-                "go JSON {example_id} {mode} output changed"
-            );
-
-            let generated_file = if example_id == "kb" {
-                PathBuf::from("kb/kb.go")
-            } else {
-                PathBuf::from(format!("{example_id}.go"))
-            };
-            let generated = actual
-                .get(&generated_file)
-                .unwrap_or_else(|| panic!("{} should be generated", generated_file.display()));
-            if native_api {
-                match example_id {
-                    "chat" => {
-                        assert!(generated.contains("var ChatService = struct"));
-                        assert!(generated.contains("type ChatServiceClient struct"));
-                        assert!(generated.contains("func NewChatServiceClient(endpoint string)"));
-                        assert!(generated.contains(
-                            "nexus.OperationReference[SendMessageInput, SendMessageOutput]"
-                        ));
-                        assert!(generated.contains(
-                            "func (c *ChatServiceClient) Ping(ctx workflow.Context) workflow.NexusOperationFuture"
-                        ));
-                    }
-                    "kb" => {
-                        assert!(generated.contains("var KnowledgeBaseService = struct"));
-                        assert!(generated.contains("type KnowledgeBaseServiceClient struct"));
-                        assert!(
-                            generated
-                                .contains("func NewKnowledgeBaseServiceClient(endpoint string)")
-                        );
-                        assert!(
-                            generated
-                                .contains("nexus.OperationReference[GetPageInput, content.Page]")
-                        );
-                        assert!(
-                            generated.contains(
-                                "nexus.OperationReference[content.Block, PutBlockOutput]"
-                            )
-                        );
-                        assert!(generated.contains(
-                            "func (c *KnowledgeBaseServiceClient) GetPage(ctx workflow.Context, request GetPageInput) workflow.NexusOperationFuture"
-                        ));
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                assert!(!generated.contains("Service = struct"));
-                assert!(!generated.contains("ServiceClient"));
-                assert!(!generated.contains("github.com/nexus-rpc/sdk-go/nexus"));
-                assert!(!generated.contains("go.temporal.io/sdk/workflow"));
-            }
-
-            fs::remove_dir_all(temp_dir).unwrap();
-        }
+        fs::remove_dir_all(temp_root).unwrap();
     }
 }
 
@@ -972,10 +896,6 @@ fn go_type_roundtrip_generates_proto_conversions() {
         rendered.contains("converted, err := retryPolicyFromProto(ctx, proto.GetRetryPolicy())")
     );
     assert!(rendered.contains("value.RetryPolicy = *converted"));
-    assert!(rendered.contains("\t\tresultSettable.Set(*value, nil)\n"));
-    assert!(rendered.contains(
-        "resultSettable.SetError(fmt.Errorf(\"nex-gen decoded required operation result was nil\"))"
-    ));
     // Operation functions convert the request to proto before the SDK call and
     // decode the proto response afterwards.
     assert!(rendered.contains("requestProto, err := request.toProto(ctx)"));

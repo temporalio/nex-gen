@@ -71,6 +71,7 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms()
 		priority := temporal.Priority{PriorityKey: 7}
 		opts := ws.SignalWithStartWorkflowOptions{
 			Id:               "workflow-id",
+			TaskQueue:        "my-task-queue",
 			ExecutionTimeout: 3 * time.Hour,
 			RunTimeout:       2 * time.Hour,
 			TaskTimeout:      time.Minute,
@@ -128,7 +129,7 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms()
 	s.Len(typedRequest.GetInput().GetPayloads(), 1)
 	s.Equal("default-test-namespace", typedRequest.GetNamespace())
 	s.Equal("workflow-id", typedRequest.GetWorkflowId())
-	s.Equal("default-test-taskqueue", typedRequest.GetTaskQueue().GetName())
+	s.Equal("my-task-queue", typedRequest.GetTaskQueue().GetName())
 	s.Equal(3*time.Hour, typedRequest.GetWorkflowExecutionTimeout().AsDuration())
 	s.Equal(2*time.Hour, typedRequest.GetWorkflowRunTimeout().AsDuration())
 	s.Equal(time.Minute, typedRequest.GetWorkflowTaskTimeout().AsDuration())
