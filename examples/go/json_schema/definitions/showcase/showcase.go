@@ -839,15 +839,15 @@ func (m Settings) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-var ShowcaseSkuPattern = regexp.MustCompile("^[A-Z]{2,4}$")
-var ShowcasePhrasePattern = regexp.MustCompile("^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+$")
-var ShowcaseRequestIdFormat = regexp.MustCompile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-var ShowcaseContactEmailFormat = regexp.MustCompile("^[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$")
-var ShowcaseHostFormat = regexp.MustCompile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
-var ShowcaseHomepageFormat = regexp.MustCompile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)$")
-var ShowcaseGatewayFormat = regexp.MustCompile("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$")
-var ShowcaseBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
-var ShowcaseUrlBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$")
+var showcaseSkuPattern = regexp.MustCompile("^[A-Z]{2,4}$")
+var showcasePhrasePattern = regexp.MustCompile("^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+$")
+var showcaseRequestIdFormat = regexp.MustCompile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+var showcaseContactEmailFormat = regexp.MustCompile("^[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$")
+var showcaseHostFormat = regexp.MustCompile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
+var showcaseHomepageFormat = regexp.MustCompile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)$")
+var showcaseGatewayFormat = regexp.MustCompile("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$")
+var showcaseBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
+var showcaseUrlBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$")
 
 // Showcase
 // Root object exercising the supported JSON-Schema feature subset: required and optional fields of every scalar type, optional+nullable and required+nullable members, arrays, a nested object via $ref, a typed-map, a closed object, an open (catch-all) object, a string const, a scalar default, and member docs.
@@ -1008,37 +1008,37 @@ func (m Showcase) Validate() error {
 		}
 	}
 	if m.Sku != nil {
-		if !ShowcaseSkuPattern.MatchString(*m.Sku) {
+		if !showcaseSkuPattern.MatchString(*m.Sku) {
 			errs = append(errs, Violation{"sku", fmt.Sprintf("must match pattern %q, got %q", "^[A-Z]{2,4}$", *m.Sku)})
 		}
 	}
 	if m.Phrase != nil {
-		if !ShowcasePhrasePattern.MatchString(*m.Phrase) {
+		if !showcasePhrasePattern.MatchString(*m.Phrase) {
 			errs = append(errs, Violation{"phrase", fmt.Sprintf("must match pattern %q, got %q", "^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+$", *m.Phrase)})
 		}
 	}
 	if m.RequestId != nil {
-		if !ShowcaseRequestIdFormat.MatchString(*m.RequestId) {
+		if !showcaseRequestIdFormat.MatchString(*m.RequestId) {
 			errs = append(errs, Violation{"requestId", fmt.Sprintf("must be a valid uuid, got %q", *m.RequestId)})
 		}
 	}
 	if m.ContactEmail != nil {
-		if utf8.RuneCountInString(*m.ContactEmail) > 254 || !ShowcaseContactEmailFormat.MatchString(*m.ContactEmail) {
+		if utf8.RuneCountInString(*m.ContactEmail) > 254 || !showcaseContactEmailFormat.MatchString(*m.ContactEmail) {
 			errs = append(errs, Violation{"contactEmail", fmt.Sprintf("must be a valid email, got %q", *m.ContactEmail)})
 		}
 	}
 	if m.Host != nil {
-		if utf8.RuneCountInString(*m.Host) > 253 || !ShowcaseHostFormat.MatchString(*m.Host) {
+		if utf8.RuneCountInString(*m.Host) > 253 || !showcaseHostFormat.MatchString(*m.Host) {
 			errs = append(errs, Violation{"host", fmt.Sprintf("must be a valid hostname, got %q", *m.Host)})
 		}
 	}
 	if m.Homepage != nil {
-		if !ShowcaseHomepageFormat.MatchString(*m.Homepage) {
+		if !showcaseHomepageFormat.MatchString(*m.Homepage) {
 			errs = append(errs, Violation{"homepage", fmt.Sprintf("must be a valid uri, got %q", *m.Homepage)})
 		}
 	}
 	if m.Gateway != nil {
-		if !ShowcaseGatewayFormat.MatchString(*m.Gateway) {
+		if !showcaseGatewayFormat.MatchString(*m.Gateway) {
 			errs = append(errs, Violation{"gateway", fmt.Sprintf("must be a valid ipv4, got %q", *m.Gateway)})
 		}
 	}
@@ -1246,53 +1246,53 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	}
 	if v, ok := parseStringField(get("sku"), "sku", false, false, &errs); ok {
 		m.Sku = &v
-		if !ShowcaseSkuPattern.MatchString(v) {
+		if !showcaseSkuPattern.MatchString(v) {
 			errs = append(errs, Violation{"sku", fmt.Sprintf("must match pattern %q, got %q", "^[A-Z]{2,4}$", v)})
 		}
 	}
 	if v, ok := parseStringField(get("phrase"), "phrase", false, false, &errs); ok {
 		m.Phrase = &v
-		if !ShowcasePhrasePattern.MatchString(v) {
+		if !showcasePhrasePattern.MatchString(v) {
 			errs = append(errs, Violation{"phrase", fmt.Sprintf("must match pattern %q, got %q", "^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+$", v)})
 		}
 	}
 	if v, ok := parseStringField(get("requestId"), "requestId", false, false, &errs); ok {
 		m.RequestId = &v
-		if !ShowcaseRequestIdFormat.MatchString(v) {
+		if !showcaseRequestIdFormat.MatchString(v) {
 			errs = append(errs, Violation{"requestId", fmt.Sprintf("must be a valid uuid, got %q", v)})
 		}
 	}
 	if v, ok := parseStringField(get("contactEmail"), "contactEmail", false, false, &errs); ok {
 		m.ContactEmail = &v
-		if utf8.RuneCountInString(v) > 254 || !ShowcaseContactEmailFormat.MatchString(v) {
+		if utf8.RuneCountInString(v) > 254 || !showcaseContactEmailFormat.MatchString(v) {
 			errs = append(errs, Violation{"contactEmail", fmt.Sprintf("must be a valid email, got %q", v)})
 		}
 	}
 	if v, ok := parseStringField(get("host"), "host", false, false, &errs); ok {
 		m.Host = &v
-		if utf8.RuneCountInString(v) > 253 || !ShowcaseHostFormat.MatchString(v) {
+		if utf8.RuneCountInString(v) > 253 || !showcaseHostFormat.MatchString(v) {
 			errs = append(errs, Violation{"host", fmt.Sprintf("must be a valid hostname, got %q", v)})
 		}
 	}
 	if v, ok := parseStringField(get("homepage"), "homepage", false, false, &errs); ok {
 		m.Homepage = &v
-		if !ShowcaseHomepageFormat.MatchString(v) {
+		if !showcaseHomepageFormat.MatchString(v) {
 			errs = append(errs, Violation{"homepage", fmt.Sprintf("must be a valid uri, got %q", v)})
 		}
 	}
 	if v, ok := parseStringField(get("gateway"), "gateway", false, false, &errs); ok {
 		m.Gateway = &v
-		if !ShowcaseGatewayFormat.MatchString(v) {
+		if !showcaseGatewayFormat.MatchString(v) {
 			errs = append(errs, Violation{"gateway", fmt.Sprintf("must be a valid ipv4, got %q", v)})
 		}
 	}
 	if s, ok := parseStringField(get("blob"), "blob", false, false, &errs); ok {
-		if v, ok := decodeBase64("blob", s, ShowcaseBlobContentEncoding, &errs); ok {
+		if v, ok := decodeBase64("blob", s, showcaseBlobContentEncoding, &errs); ok {
 			m.Blob = v
 		}
 	}
 	if s, ok := parseStringField(get("urlBlob"), "urlBlob", false, false, &errs); ok {
-		if v, ok := decodeBase64URL("urlBlob", s, ShowcaseUrlBlobContentEncoding, &errs); ok {
+		if v, ok := decodeBase64URL("urlBlob", s, showcaseUrlBlobContentEncoding, &errs); ok {
 			m.UrlBlob = v
 		}
 	}

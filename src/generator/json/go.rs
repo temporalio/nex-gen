@@ -232,12 +232,22 @@ fn render_go_string_checks(
     }
 }
 
+/// Lowercases the first byte of an exported Go identifier so the generated
+/// package-level regex vars stay unexported implementation detail.
+fn go_unexported(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// The package-level compiled-regex var name for a `pattern` on `json_name` of
 /// `model_name` — unique per (model, field) so the pattern compiles once at
 /// package init (the load-time gate already proved it compiles). See
 /// `json-schema/features/pattern.md`.
 fn go_pattern_var_name(model_name: &str, json_name: &str) -> String {
-    format!("{model_name}{}Pattern", go_field_name(json_name))
+    go_unexported(&format!("{model_name}{}Pattern", go_field_name(json_name)))
 }
 
 /// Emits the package-level `var <Model><Field>Pattern = regexp.MustCompile(...)`
@@ -283,13 +293,16 @@ fn render_go_pattern_vars(output: &mut String, model: &PlannedJsonType, schema: 
 /// The package-level compiled-regex var name for a `contentEncoding` on
 /// `json_name` of `model_name`. See `json-schema/features/contentEncoding.md`.
 fn go_content_encoding_var_name(model_name: &str, json_name: &str) -> String {
-    format!("{model_name}{}ContentEncoding", go_field_name(json_name))
+    go_unexported(&format!(
+        "{model_name}{}ContentEncoding",
+        go_field_name(json_name)
+    ))
 }
 
 /// The package-level compiled-regex var name for a `format` on `json_name` of
 /// `model_name`. See `json-schema/features/format.md`.
 fn go_format_var_name(model_name: &str, json_name: &str) -> String {
-    format!("{model_name}{}Format", go_field_name(json_name))
+    go_unexported(&format!("{model_name}{}Format", go_field_name(json_name)))
 }
 
 /// Emits the `format` predicate over `value_expr` (a `string` in scope): the
