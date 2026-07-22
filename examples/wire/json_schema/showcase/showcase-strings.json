@@ -1,0 +1,14 @@
+{
+  "kind": "showcase",
+  "revision": 1,
+  "enabled": true,
+  "status": "inactive",
+  "tier": 2,
+  "scale": 2.5,
+  "name": "Widget",
+  "count": 3,
+  "active": true,
+  "category": "tools",
+  "nickname": "buddy",
+  "code": "a\ud83d\ude00b"
+}

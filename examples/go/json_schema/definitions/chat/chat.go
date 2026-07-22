@@ -148,6 +148,34 @@ func parseIntegerField(raw *json.RawMessage, path string, required, nullable boo
 	return v, true
 }
 
+func parseNumberField(raw *json.RawMessage, path string, required, nullable bool, errs *[]Violation) (float64, bool) {
+	if raw == nil {
+		if required {
+			*errs = append(*errs, Violation{path, "required"})
+		}
+		return 0, false
+	}
+	if isNull(*raw) {
+		if !nullable {
+			*errs = append(*errs, Violation{path, "explicit null not allowed"})
+		}
+		return 0, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(*raw))
+	dec.UseNumber()
+	var n json.Number
+	if err := dec.Decode(&n); err != nil {
+		*errs = append(*errs, Violation{path, "expected number"})
+		return 0, false
+	}
+	f, err := n.Float64()
+	if err != nil {
+		*errs = append(*errs, Violation{path, "expected number"})
+		return 0, false
+	}
+	return f, true
+}
+
 func parseBoolField(raw *json.RawMessage, path string, required, nullable bool, errs *[]Violation) (bool, bool) {
 	if raw == nil {
 		if required {
@@ -178,9 +206,9 @@ func marshalField(out map[string]json.RawMessage, key string, v any, errs *[]Vio
 	out[key] = b
 }
 
-type MessageKind = string
+type MessageKind string
 
-const MessageKindText = MessageKind("text")
+const MessageKindText MessageKind = "text"
 
 type GetRoomInput struct {
 	RoomId string `json:"roomId"`
@@ -241,8 +269,8 @@ type Labels struct {
 
 func (m Labels) Validate() error {
 	var errs []Violation
-	if len(m.AdditionalProperties) > 50 {
-		errs = append(errs, Violation{"", fmt.Sprintf("maxProperties: at most 50 (got %d)", len(m.AdditionalProperties))})
+	if n := len(m.AdditionalProperties); n > 50 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 50 properties, got %d", n)})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -269,8 +297,8 @@ func (m *Labels) UnmarshalJSON(data []byte) error {
 		}
 		m.AdditionalProperties[k] = s
 	}
-	if len(m.AdditionalProperties) > 50 {
-		errs = append(errs, Violation{"", fmt.Sprintf("maxProperties: at most 50 (got %d)", len(m.AdditionalProperties))})
+	if n := len(raw); n > 50 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 50 properties, got %d", n)})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -311,7 +339,7 @@ func (m Message) PriorityOrDefault() int64 {
 func (m Message) Validate() error {
 	var errs []Violation
 	if m.Kind != MessageKindText {
-		errs = append(errs, Violation{"kind", `const: must equal \"text\"`})
+		errs = append(errs, Violation{"kind", "must equal \"text\""})
 	}
 	if m.Priority != nil && (*m.Priority < -IntegerCap || *m.Priority > IntegerCap) {
 		errs = append(errs, Violation{"priority", "exceeds ±(2^53-1) integer cap"})
@@ -343,9 +371,11 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	}
 	_ = get
 	if v, ok := parseStringField(get("kind"), "kind", true, false, &errs); ok {
-		m.Kind = v
-		if v != MessageKindText {
-			errs = append(errs, Violation{"kind", `const: must equal \"text\"`})
+		typed := MessageKind(v)
+		if typed != MessageKindText {
+			errs = append(errs, Violation{"kind", "must equal \"text\""})
+		} else {
+			m.Kind = typed
 		}
 	}
 	if v, ok := parseStringField(get("body"), "body", true, false, &errs); ok {

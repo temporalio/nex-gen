@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
-from .._models import (
+from .._recursive import (
     Block,
     Page,
 )

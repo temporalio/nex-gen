@@ -24,7 +24,9 @@ struct Schema {
     reference: Option<String>,
     #[serde(rename = "type")]
     ty: Option<Value>,
+    title: Option<String>,
     description: Option<String>,
+    deprecated: Option<bool>,
     properties: Option<IndexMap<String, Schema>>,
     required: Option<Vec<String>>,
     #[serde(rename = "additionalProperties")]
@@ -37,6 +39,109 @@ struct Schema {
     const_value: Option<Value>,
     #[serde(rename = "maxProperties")]
     max_properties: Option<usize>,
+    #[serde(rename = "minProperties")]
+    min_properties: Option<usize>,
+    #[serde(rename = "propertyNames")]
+    property_names: Option<Box<Schema>>,
+    #[serde(rename = "dependentRequired")]
+    dependent_required: Option<IndexMap<String, Vec<String>>>,
+    minimum: Option<serde_json::Number>,
+    maximum: Option<serde_json::Number>,
+    #[serde(rename = "exclusiveMinimum")]
+    exclusive_minimum: Option<serde_json::Number>,
+    #[serde(rename = "exclusiveMaximum")]
+    exclusive_maximum: Option<serde_json::Number>,
+    #[serde(rename = "multipleOf")]
+    multiple_of: Option<serde_json::Number>,
+    #[serde(rename = "minLength")]
+    min_length: Option<u64>,
+    #[serde(rename = "maxLength")]
+    max_length: Option<u64>,
+    pattern: Option<String>,
+    format: Option<String>,
+    #[serde(rename = "contentEncoding")]
+    content_encoding: Option<String>,
+    #[serde(rename = "minItems")]
+    min_items: Option<u64>,
+    #[serde(rename = "maxItems")]
+    max_items: Option<u64>,
+    #[serde(rename = "uniqueItems")]
+    unique_items: Option<bool>,
+    contains: Option<Box<Schema>>,
+    #[serde(rename = "minContains")]
+    min_contains: Option<u64>,
+    #[serde(rename = "maxContains")]
+    max_contains: Option<u64>,
+    #[serde(rename = "enum")]
+    enum_values: Option<Vec<Value>>,
+    #[serde(rename = "x-py-name")]
+    x_py_name: Option<String>,
+}
+
+impl Schema {
+    /// The emitted Python attribute identifier for a property: the `x-py-name`
+    /// override if present (used verbatim), otherwise the snake-cased JSON name.
+    /// The wire name (`json_name`) is unaffected — the `Field(alias=...)` pin
+    /// keeps the contract stable. See json-schema/features/properties.md.
+    fn py_member_name(&self, json_name: &str) -> String {
+        self.x_py_name
+            .clone()
+            .unwrap_or_else(|| python_field_name(json_name))
+    }
+}
+
+impl Schema {
+    fn is_integer_field(&self) -> bool {
+        self.ty.as_ref().and_then(Value::as_str) == Some("integer")
+    }
+
+    fn is_array_field(&self) -> bool {
+        self.ty.as_ref().and_then(Value::as_str) == Some("array")
+    }
+
+    /// True when the array field needs a custom after-validator: `uniqueItems`
+    /// and `contains` (with `minContains`/`maxContains`) have no native Pydantic
+    /// equivalent. `minItems`/`maxItems` map to native `min_length`/`max_length`
+    /// and are handled in the field expression instead.
+    fn needs_array_validator(&self) -> bool {
+        self.is_array_field() && (self.unique_items == Some(true) || self.contains.is_some())
+    }
+
+    fn is_number_field(&self) -> bool {
+        self.ty.as_ref().and_then(Value::as_str) == Some("number")
+    }
+
+    fn is_string_field(&self) -> bool {
+        self.ty.as_ref().and_then(Value::as_str) == Some("string")
+    }
+
+    /// Number-field `multipleOf` uses an explicit `math.fmod` AfterValidator
+    /// (not Pydantic's tolerant native `multiple_of`) for bit-identical
+    /// divisibility across the four targets — see `multipleOf.md`.
+    fn number_multiple_of(&self) -> Option<&serde_json::Number> {
+        if self.is_number_field() {
+            self.multiple_of.as_ref()
+        } else {
+            None
+        }
+    }
+
+    /// True when the declared-property object carries a member-count or
+    /// cross-field object constraint that lowers to a custom model validator.
+    fn has_object_count_or_dependency(&self) -> bool {
+        self.min_properties.is_some()
+            || self.max_properties.is_some()
+            || self.dependent_required.is_some()
+    }
+}
+
+fn py_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
+    if is_integer
+        && let Some(value) = number.as_f64()
+    {
+        return (value.trunc() as i64).to_string();
+    }
+    number.to_string()
 }
 
 pub(in crate::generator) fn model_type_ref(json_type: &PlannedJsonType) -> String {
@@ -60,7 +165,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         self.runtime_import_module = if self.tree_leaf {
             root_python_runtime_module(&api_plan.module_path)
         } else {
-            "._json".to_string()
+            ".definitions".to_string()
         };
         let mut json_models = api_plan
             .external_types()
@@ -86,7 +191,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         }
 
         Ok(BTreeMap::from([(
-            PathBuf::from("_json.py"),
+            PathBuf::from("definitions.py"),
             render_support_file(),
         )]))
     }
@@ -230,7 +335,7 @@ pub(in crate::generator) fn tree_model_hoists(
         hoists.add_module_hoists(module_path.clone(), names.clone());
     }
     hoists.add_file(
-        PathBuf::from("_models.py"),
+        PathBuf::from("_recursive.py"),
         render_hoisted_models_module(&plan)?,
     );
     hoists.add_exported_names(
@@ -244,7 +349,7 @@ pub(in crate::generator) fn tree_model_hoists(
 
 fn render_hoisted_models_module(hoists: &JsonModelHoistPlan) -> Result<String> {
     let models = hoists.hoisted_models.iter().collect::<Vec<_>>();
-    let model_fragments = render_external_models(models.as_slice(), "._json")?;
+    let model_fragments = render_external_models(models.as_slice(), ".definitions")?;
     let mut body = model_fragments.body.clone();
     if !model_fragments.post_model_statements.is_empty() {
         if !body.is_empty() {
@@ -401,7 +506,7 @@ pub(in crate::generator) fn render_support_file() -> String {
 }
 
 fn root_python_runtime_module(module_path: &ModulePath) -> String {
-    format!("{}{}", ".".repeat(module_path.0.len() + 1), "_json")
+    format!("{}{}", ".".repeat(module_path.0.len() + 1), "definitions")
 }
 
 pub(in crate::generator) fn render_external_models(
@@ -412,12 +517,29 @@ pub(in crate::generator) fn render_external_models(
         return Ok(RenderedModelFragments::default());
     }
 
+    // Partition class models from `oneOf` sum-type union defs. Union defs are
+    // emitted as `typing.Union[...]` TypeAliases *after* all classes so their
+    // eager `Union[...]` expression sees every member class defined.
+    let class_models: Vec<&PlannedJsonType> = json_models
+        .iter()
+        .copied()
+        .filter(|model| !is_python_union_model(model))
+        .collect();
+    let union_models: Vec<&PlannedJsonType> = json_models
+        .iter()
+        .copied()
+        .filter(|model| is_python_union_model(model))
+        .collect();
+
     let mut models_body = String::new();
     let mut needs_optional_non_nullable_helper = false;
     let mut needs_set_fields_helper = false;
     let mut needs_pydantic_core = false;
     let mut needs_spec_int_helper = false;
-    for (index, model) in json_models.iter().enumerate() {
+    let mut needs_multiple_of_helper = false;
+    let mut needs_pattern_helper = false;
+    let mut needs_format_helper = false;
+    for (index, model) in class_models.iter().enumerate() {
         render_model(
             &mut models_body,
             model,
@@ -425,16 +547,37 @@ pub(in crate::generator) fn render_external_models(
             &mut needs_set_fields_helper,
             &mut needs_pydantic_core,
             &mut needs_spec_int_helper,
+            &mut needs_multiple_of_helper,
+            &mut needs_pattern_helper,
+            &mut needs_format_helper,
         )?;
-        if index + 1 != json_models.len() {
+        if index + 1 != class_models.len() {
             models_body.push_str("\n\n");
         }
+    }
+    for model in &union_models {
+        let schema = decode_schema(model)?;
+        needs_spec_int_helper |= schema_uses_integer(&schema);
+        models_body.push_str("\n\n\n");
+        render_python_docstring(
+            &mut models_body,
+            "",
+            schema.description.as_deref(),
+            &[],
+            None,
+            false,
+        );
+        models_body.push_str(&model.model_name);
+        models_body.push_str(": typing.TypeAlias = ");
+        models_body.push_str(&annotation(&schema)?);
+        models_body.push('\n');
     }
     let mut body = String::new();
     body.push_str(&models_body);
 
     let mut post_model_statements = String::new();
     render_cyclic_model_rebuilds(&mut post_model_statements, json_models);
+    render_union_ref_rebuilds(&mut post_model_statements, &class_models, &union_models);
     let mut module_imports = BTreeSet::from(["pydantic".to_string()]);
     if needs_pydantic_core {
         module_imports.insert("pydantic_core".to_string());
@@ -443,6 +586,29 @@ pub(in crate::generator) fn render_external_models(
     let mut runtime_imports = BTreeSet::new();
     if needs_spec_int_helper {
         runtime_imports.insert("SpecInt".to_string());
+    }
+    if needs_multiple_of_helper {
+        runtime_imports.insert("check_multiple_of".to_string());
+    }
+    if needs_pattern_helper {
+        runtime_imports.insert("check_pattern".to_string());
+    }
+    if needs_format_helper {
+        runtime_imports.insert("check_format".to_string());
+    }
+    // Import the materialized-temporal field aliases actually referenced by the
+    // rendered models (defined once in the runtime module).
+    for alias in [
+        "DateTimeField",
+        "DateField",
+        "TimeField",
+        "DurationField",
+        "Base64Field",
+        "Base64UrlField",
+    ] {
+        if models_body.contains(alias) {
+            runtime_imports.insert(alias.to_string());
+        }
     }
     if needs_optional_non_nullable_helper {
         runtime_imports.insert("reject_explicit_null".to_string());
@@ -465,6 +631,81 @@ pub(in crate::generator) fn render_external_models(
             .collect(),
         allows_private_wire_access: false,
     })
+}
+
+/// True when a model's schema is a `oneOf` sum type (two or more non-null
+/// branches) — emitted as a `typing.Union` TypeAlias, not a Pydantic class.
+fn is_python_union_model(model: &PlannedJsonType) -> bool {
+    decode_schema(model).is_ok_and(|schema| {
+        schema.one_of.as_ref().is_some_and(|branches| {
+            branches
+                .iter()
+                .filter(|branch| branch.ty.as_ref().and_then(Value::as_str) != Some("null"))
+                .count()
+                >= 2
+        })
+    })
+}
+
+fn schema_references_union(schema: &Schema, union_names: &BTreeSet<String>) -> bool {
+    if let Some(reference) = &schema.reference
+        && union_names.contains(&reference_model_name(reference))
+    {
+        return true;
+    }
+    if let Some(properties) = &schema.properties
+        && properties
+            .values()
+            .any(|property| schema_references_union(property, union_names))
+    {
+        return true;
+    }
+    if let Some(items) = &schema.items
+        && schema_references_union(items, union_names)
+    {
+        return true;
+    }
+    if let Some(one_of) = &schema.one_of
+        && one_of
+            .iter()
+            .any(|branch| schema_references_union(branch, union_names))
+    {
+        return true;
+    }
+    if let Some(additional) = &schema.additional_properties
+        && let Ok(additional_schema) = serde_json::from_value::<Schema>(additional.clone())
+        && schema_references_union(&additional_schema, union_names)
+    {
+        return true;
+    }
+    false
+}
+
+/// A class model referencing a named union def carries a deferred (`from
+/// __future__ import annotations`) `field: Union` annotation the alias only
+/// satisfies once defined (after all classes), so rebuild it here.
+fn render_union_ref_rebuilds(
+    output: &mut String,
+    class_models: &[&PlannedJsonType],
+    union_models: &[&PlannedJsonType],
+) {
+    if union_models.is_empty() {
+        return;
+    }
+    let union_names: BTreeSet<String> = union_models
+        .iter()
+        .map(|model| model.model_name.clone())
+        .collect();
+    for model in class_models {
+        let Ok(schema) = decode_schema(model) else {
+            continue;
+        };
+        if schema_references_union(&schema, &union_names) {
+            output.push_str("_ = ");
+            output.push_str(&model.model_name);
+            output.push_str(".model_rebuild()\n");
+        }
+    }
 }
 
 fn render_cyclic_model_rebuilds(output: &mut String, models: &[&PlannedJsonType]) {
@@ -504,17 +745,330 @@ fn render_json_runtime_module() -> String {
     let mut output = String::new();
     output.push_str("# Generated by nex-gen. DO NOT EDIT!\n\n");
     output.push_str("from __future__ import annotations\n\n");
+    output.push_str("import base64\n");
     output.push_str("import collections.abc\n");
+    output.push_str("import datetime\n");
+    output.push_str("import math\n");
+    output.push_str("import re\n");
     output.push_str("import typing\n\n");
     output.push_str("import pydantic\n");
     output.push_str("import pydantic.functional_validators\n");
     output.push_str("import pydantic_core\n\n\n");
     render_spec_int_helper(&mut output);
     output.push_str("\n\n");
+    render_multiple_of_helper(&mut output);
+    output.push_str("\n\n");
+    render_pattern_helper(&mut output);
+    output.push_str("\n\n");
+    render_format_helper(&mut output);
+    output.push_str("\n\n");
+    render_temporal_helpers(&mut output);
+    output.push_str("\n\n");
+    render_content_encoding_helpers(&mut output);
+    output.push_str("\n\n");
     render_optional_non_nullable_helper(&mut output);
     output.push_str("\n\n");
     render_set_fields_helper(&mut output);
     output
+}
+
+/// Emits the materialized-temporal runtime: the pinned narrowed regexes, the
+/// Gregorian calendar predicate, the parse (`BeforeValidator`) + generator-owned
+/// serialize (`PlainSerializer`) adapters, and the four `Annotated` field
+/// aliases (`DateTimeField` / `DateField` / `TimeField` / `DurationField`). See
+/// `json-schema/features/format.md`. We do NOT use Pydantic's native `datetime`
+/// coercion (it accepts a missing offset and normalizes differently).
+fn render_temporal_helpers(output: &mut String) {
+    use crate::format::TemporalKind;
+    output.push_str(&format!(
+        "_TEMPORAL_DATE_TIME_RE = re.compile(r\"{}\")\n",
+        TemporalKind::DateTime.pattern()
+    ));
+    output.push_str(&format!(
+        "_TEMPORAL_DATE_RE = re.compile(r\"{}\")\n",
+        TemporalKind::Date.pattern()
+    ));
+    output.push_str(&format!(
+        "_TEMPORAL_TIME_RE = re.compile(r\"{}\")\n",
+        TemporalKind::Time.pattern()
+    ));
+    output.push_str(&format!(
+        "_TEMPORAL_DURATION_RE = re.compile(r\"{}\")\n",
+        TemporalKind::Duration.pattern()
+    ));
+    output.push_str(TEMPORAL_HELPER_BODY);
+}
+
+const TEMPORAL_HELPER_BODY: &str = r#"_TEMPORAL_MAX_DURATION_SECONDS = ((1 << 63) - 1) // 1_000_000_000
+
+
+def _days_in_month(year: int, month: int) -> int:
+    if month in (1, 3, 5, 7, 8, 10, 12):
+        return 31
+    if month in (4, 6, 9, 11):
+        return 30
+    if month == 2:
+        return 29 if (year % 4 == 0 and year % 100 != 0) or year % 400 == 0 else 28
+    return 0
+
+
+def _valid_temporal_calendar(value: str) -> bool:
+    if len(value) < 10:
+        return False
+    try:
+        year, month, day = int(value[0:4]), int(value[5:7]), int(value[8:10])
+    except ValueError:
+        return False
+    maximum = _days_in_month(year, month)
+    return maximum > 0 and 1 <= day <= maximum
+
+
+def _parse_date_time(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if _TEMPORAL_DATE_TIME_RE.match(value) is None or not _valid_temporal_calendar(value):
+        raise ValueError(f"must be a valid date-time, got {value!r}")
+    return datetime.datetime.fromisoformat(value.upper())
+
+
+def _parse_date(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if _TEMPORAL_DATE_RE.match(value) is None or not _valid_temporal_calendar(value):
+        raise ValueError(f"must be a valid date, got {value!r}")
+    return datetime.date.fromisoformat(value)
+
+
+def _parse_time(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if _TEMPORAL_TIME_RE.match(value) is None:
+        raise ValueError(f"must be a valid time, got {value!r}")
+    return datetime.time.fromisoformat(value.upper())
+
+
+def _parse_duration(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if _TEMPORAL_DURATION_RE.match(value) is None:
+        raise ValueError(f"must be a valid duration, got {value!r}")
+    total = 0
+    number = ""
+    for char in value[2:]:
+        if char.isdigit():
+            number += char
+            continue
+        total += int(number) * {"H": 3600, "M": 60, "S": 1}[char]
+        number = ""
+        if total > _TEMPORAL_MAX_DURATION_SECONDS:
+            raise ValueError(f"must be a valid duration, got {value!r}")
+    return datetime.timedelta(seconds=total)
+
+
+def _temporal_frac(microsecond: int) -> str:
+    if microsecond == 0:
+        return ""
+    return "." + f"{microsecond:06d}".rstrip("0")
+
+
+def _temporal_offset(value: datetime.datetime | datetime.time) -> str:
+    offset = value.utcoffset()
+    if offset is None:
+        return ""
+    total = int(offset.total_seconds())
+    if total == 0:
+        return "Z"
+    sign = "+" if total > 0 else "-"
+    total = abs(total)
+    return f"{sign}{total // 3600:02d}:{(total % 3600) // 60:02d}"
+
+
+def _format_date_time(value: datetime.datetime) -> str:
+    return (
+        f"{value.year:04d}-{value.month:02d}-{value.day:02d}"
+        f"T{value.hour:02d}:{value.minute:02d}:{value.second:02d}"
+        f"{_temporal_frac(value.microsecond)}{_temporal_offset(value)}"
+    )
+
+
+def _format_date(value: datetime.date) -> str:
+    return f"{value.year:04d}-{value.month:02d}-{value.day:02d}"
+
+
+def _format_time(value: datetime.time) -> str:
+    return (
+        f"{value.hour:02d}:{value.minute:02d}:{value.second:02d}"
+        f"{_temporal_frac(value.microsecond)}{_temporal_offset(value)}"
+    )
+
+
+def _format_duration(value: datetime.timedelta) -> str:
+    total = int(value.total_seconds())
+    if total == 0:
+        return "PT0S"
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    out = "PT"
+    if hours:
+        out += f"{hours}H"
+    if minutes:
+        out += f"{minutes}M"
+    if seconds:
+        out += f"{seconds}S"
+    return out
+
+
+DateTimeField: typing.TypeAlias = typing.Annotated[
+    datetime.datetime,
+    pydantic.BeforeValidator(_parse_date_time),
+    pydantic.PlainSerializer(_format_date_time, return_type=str),
+]
+DateField: typing.TypeAlias = typing.Annotated[
+    datetime.date,
+    pydantic.BeforeValidator(_parse_date),
+    pydantic.PlainSerializer(_format_date, return_type=str),
+]
+TimeField: typing.TypeAlias = typing.Annotated[
+    datetime.time,
+    pydantic.BeforeValidator(_parse_time),
+    pydantic.PlainSerializer(_format_time, return_type=str),
+]
+DurationField: typing.TypeAlias = typing.Annotated[
+    datetime.timedelta,
+    pydantic.BeforeValidator(_parse_duration),
+    pydantic.PlainSerializer(_format_duration, return_type=str),
+]
+"#;
+
+/// Emits the materialized-`contentEncoding` runtime: the pinned canonical
+/// base64 / base64url regexes (the validity oracle), the parse
+/// (`BeforeValidator`) + generator-owned canonical serialize (`PlainSerializer`)
+/// adapters, and the two `Annotated` bytes field aliases. We own the codec via
+/// the model hooks rather than lean on Pydantic's `Base64Bytes`, for full control
+/// of the accept/reject line and the canonical output. See
+/// `json-schema/features/contentEncoding.md`.
+fn render_content_encoding_helpers(output: &mut String) {
+    use crate::content_encoding::Encoding;
+    output.push_str(&format!(
+        "_BASE64_RE = re.compile({}, re.ASCII)\n",
+        python_string_literal(&crate::pattern::rewrite_end_anchor(
+            Encoding::Base64.pattern(),
+            r"\Z"
+        ))
+    ));
+    output.push_str(&format!(
+        "_BASE64URL_RE = re.compile({}, re.ASCII)\n",
+        python_string_literal(&crate::pattern::rewrite_end_anchor(
+            Encoding::Base64Url.pattern(),
+            r"\Z"
+        ))
+    ));
+    output.push_str(CONTENT_ENCODING_HELPER_BODY);
+}
+
+const CONTENT_ENCODING_HELPER_BODY: &str = r#"
+
+def _parse_base64(value: typing.Any) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if not isinstance(value, str) or _BASE64_RE.match(value) is None:
+        raise ValueError(f"must be base64-encoded, got {value!r}")
+    return base64.b64decode(value, validate=True)
+
+
+def _format_base64(value: bytes) -> str:
+    return base64.b64encode(value).decode("ascii")
+
+
+def _parse_base64url(value: typing.Any) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if not isinstance(value, str) or _BASE64URL_RE.match(value) is None:
+        raise ValueError(f"must be base64url-encoded, got {value!r}")
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def _format_base64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+Base64Field: typing.TypeAlias = typing.Annotated[
+    bytes,
+    pydantic.BeforeValidator(_parse_base64),
+    pydantic.PlainSerializer(_format_base64, return_type=str),
+]
+Base64UrlField: typing.TypeAlias = typing.Annotated[
+    bytes,
+    pydantic.BeforeValidator(_parse_base64url),
+    pydantic.PlainSerializer(_format_base64url, return_type=str),
+]
+"#;
+
+fn render_multiple_of_helper(output: &mut String) {
+    output.push_str("def check_multiple_of(\n");
+    output.push_str("    divisor: float,\n");
+    output.push_str(") -> typing.Callable[[float], float]:\n");
+    output.push_str(
+        "    \"\"\"Builds an AfterValidator asserting `math.fmod`-exact divisibility for number fields.\"\"\"\n",
+    );
+    output.push_str("\n");
+    output.push_str("    def validate(value: float) -> float:\n");
+    output.push_str("        if math.fmod(value, divisor) != 0:\n");
+    output.push_str(
+        "            raise ValueError(f\"must be a multiple of {divisor}, got {value}\")\n",
+    );
+    output.push_str("        return value\n");
+    output.push_str("\n");
+    output.push_str("    return validate\n");
+}
+
+fn render_pattern_helper(output: &mut String) {
+    output.push_str("def check_pattern(\n");
+    output.push_str("    pattern: str,\n");
+    output.push_str(") -> typing.Callable[[str], str]:\n");
+    output.push_str(
+        "    \"\"\"Builds an AfterValidator asserting an unanchored, ASCII-class regex match for string fields.\"\"\"\n",
+    );
+    output.push_str("\n");
+    output.push_str("    compiled = re.compile(pattern, re.ASCII)\n");
+    output.push_str("\n");
+    output.push_str("    def validate(value: str) -> str:\n");
+    output.push_str("        if compiled.search(value) is None:\n");
+    output.push_str(
+        "            raise ValueError(f\"must match pattern {pattern}, got {value!r}\")\n",
+    );
+    output.push_str("        return value\n");
+    output.push_str("\n");
+    output.push_str("    return validate\n");
+}
+
+/// Emits the `check_format` runtime helper: an AfterValidator that asserts a
+/// string matches a pinned `format` regex, with an optional total-length guard
+/// run **first** (short-circuit — the email order neutralizes a matcher-recursion
+/// hazard). `len(value)` is the Unicode code-point count. See
+/// `json-schema/features/format.md`.
+fn render_format_helper(output: &mut String) {
+    output.push_str("def check_format(\n");
+    output.push_str("    format_name: str,\n");
+    output.push_str("    pattern: str,\n");
+    output.push_str("    max_code_points: int | None = None,\n");
+    output.push_str(") -> typing.Callable[[str], str]:\n");
+    output.push_str(
+        "    \"\"\"Builds an AfterValidator asserting a value matches a pinned `format` regex (+ optional length guard).\"\"\"\n",
+    );
+    output.push_str("\n");
+    output.push_str("    compiled = re.compile(pattern, re.ASCII)\n");
+    output.push_str("\n");
+    output.push_str("    def validate(value: str) -> str:\n");
+    output.push_str(
+        "        if (max_code_points is not None and len(value) > max_code_points) or compiled.search(value) is None:\n",
+    );
+    output.push_str(
+        "            raise ValueError(f\"must be a valid {format_name}, got {value!r}\")\n",
+    );
+    output.push_str("        return value\n");
+    output.push_str("\n");
+    output.push_str("    return validate\n");
 }
 
 fn render_model(
@@ -524,20 +1078,34 @@ fn render_model(
     needs_set_fields_helper: &mut bool,
     needs_pydantic_core: &mut bool,
     needs_spec_int_helper: &mut bool,
+    needs_multiple_of_helper: &mut bool,
+    needs_pattern_helper: &mut bool,
+    needs_format_helper: &mut bool,
 ) -> Result<()> {
     let schema = decode_schema(model)?;
+    // A `oneOf` sum-type union def is emitted as a TypeAlias by the caller.
+    if is_python_union_model(model) {
+        return Ok(());
+    }
     *needs_spec_int_helper |= schema_uses_integer(&schema);
     let extra = match schema.additional_properties.as_ref() {
         Some(Value::Bool(false)) => "forbid",
         _ => "allow",
     };
+    // Native deprecation marker (PEP 702) on the type; `category=None` is the
+    // no-runtime-warning form. See json-schema/features/deprecated.md.
+    if schema.deprecated == Some(true) {
+        output.push_str(
+            "@typing_extensions.deprecated(\"This type is deprecated.\", category=None)\n",
+        );
+    }
     output.push_str("class ");
     output.push_str(&model.model_name);
     output.push_str("(pydantic.BaseModel):\n");
     render_python_docstring(
         output,
         "    ",
-        schema.description.as_deref(),
+        compose_python_doc(schema.title.as_deref(), schema.description.as_deref()).as_deref(),
         &[],
         None,
         false,
@@ -569,10 +1137,63 @@ fn render_model(
         .collect::<BTreeSet<_>>();
     let mut optional_non_nullable_fields = BTreeSet::new();
     let mut const_fields = Vec::new();
+    let mut enum_fields: Vec<(String, String, Vec<Value>)> = Vec::new();
+    let mut array_validator_fields: Vec<(String, String, &Schema)> = Vec::new();
     for (json_name, property) in properties {
         output.push('\n');
-        let field_name = python_field_name(json_name);
-        let annotation = annotation(property)?;
+        let field_name = property.py_member_name(json_name);
+        let mut annotation = annotation(property)?;
+        if let Some(divisor) = property.number_multiple_of() {
+            *needs_multiple_of_helper = true;
+            annotation = format!(
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(check_multiple_of({}))]",
+                py_bound_literal(divisor, false)
+            );
+        }
+        if let Some(pattern) = &property.pattern
+            && property.ty.as_ref().and_then(Value::as_str) == Some("string")
+        {
+            *needs_pattern_helper = true;
+            // Per-target `$`→`\Z` rewrite: `re`'s `\Z` is the strict
+            // end-of-string anchor (no trailing-`\n` exception). See
+            // `json-schema/features/pattern.md`.
+            let rewritten = crate::pattern::rewrite_end_anchor(pattern, r"\Z");
+            annotation = format!(
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(check_pattern({}))]",
+                python_string_literal(&rewritten)
+            );
+        }
+        if let Some(format) = &property.format
+            && property.ty.as_ref().and_then(Value::as_str) == Some("string")
+            && let Some(check) = crate::format::check_for(format)
+        {
+            *needs_format_helper = true;
+            // Per-target `$`→`\Z` rewrite (strict end-of-string, no trailing-`\n`
+            // exception), matching `check_pattern`.
+            let rewritten = crate::pattern::rewrite_end_anchor(&check.pattern, r"\Z");
+            let max_arg = match check.max_code_points {
+                Some(max) => format!(", {max}"),
+                None => String::new(),
+            };
+            annotation = format!(
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(check_format({}, {}{max_arg}))]",
+                python_string_literal(check.name),
+                python_string_literal(&rewritten)
+            );
+        }
+        // Native deprecation marker (PEP 702) on the field; `category=None` is
+        // the no-runtime-warning form. See json-schema/features/deprecated.md.
+        if property.deprecated == Some(true) {
+            annotation = format!(
+                "typing.Annotated[{annotation}, typing_extensions.deprecated(\"This field is deprecated.\", category=None)]"
+            );
+        }
+        if property.needs_array_validator() {
+            array_validator_fields.push((json_name.clone(), field_name.clone(), property));
+        }
+        if let Some(values) = &property.enum_values {
+            enum_fields.push((json_name.clone(), field_name.clone(), values.clone()));
+        }
         let required_field = required.contains(json_name);
         output.push_str("    ");
         output.push_str(&field_name);
@@ -582,16 +1203,16 @@ fn render_model(
             output.push_str(&annotation);
             output.push_str(" = ");
             let default = python_value_literal(const_value)?;
-            render_field_expr(output, json_name, &field_name, Some(&default));
+            render_field_expr(output, json_name, &field_name, Some(&default), property);
         } else if required_field {
             output.push_str(&annotation);
             output.push_str(" = ");
-            render_field_expr(output, json_name, &field_name, None);
+            render_field_expr(output, json_name, &field_name, None, property);
         } else if let Some(default) = &property.default {
             output.push_str(&annotation);
             output.push_str(" = ");
             let default = python_value_literal(default)?;
-            render_field_expr(output, json_name, &field_name, Some(&default));
+            render_field_expr(output, json_name, &field_name, Some(&default), property);
         } else {
             if !allows_null(property) {
                 optional_non_nullable_fields.insert(json_name.clone());
@@ -601,22 +1222,30 @@ fn render_model(
             }
             output.push_str(&optional_annotation(&annotation));
             output.push_str(" = ");
-            render_field_expr(output, json_name, &field_name, Some("None"));
+            render_field_expr(output, json_name, &field_name, Some("None"), property);
         }
         output.push('\n');
         render_python_docstring(
             output,
             "    ",
-            property.description.as_deref(),
+            compose_python_doc(property.title.as_deref(), property.description.as_deref())
+                .as_deref(),
             &[],
             None,
             false,
         );
     }
     render_const_validators(output, &const_fields)?;
+    render_enum_validators(output, &enum_fields)?;
+    render_array_validators(output, &array_validator_fields)?;
+    render_object_constraints_validator(output, &schema);
     render_optional_non_nullable_validator(output, &optional_non_nullable_fields);
     *needs_optional_non_nullable_helper |= !optional_non_nullable_fields.is_empty();
-    *needs_pydantic_core |= !optional_non_nullable_fields.is_empty() || !const_fields.is_empty();
+    *needs_pydantic_core |= !optional_non_nullable_fields.is_empty()
+        || !const_fields.is_empty()
+        || !enum_fields.is_empty()
+        || !array_validator_fields.is_empty()
+        || schema.has_object_count_or_dependency();
     render_set_fields_serializer(output);
     *needs_set_fields_helper = true;
     Ok(())
@@ -672,30 +1301,35 @@ fn typed_map_value_schema(schema: &Schema) -> Result<Option<Schema>> {
 }
 
 fn render_typed_map_model_methods(output: &mut String, schema: &Schema, value_schema: &Schema) {
-    if let Some(max_properties) = schema.max_properties {
-        output.push_str("\n    _MAX_PROPERTIES: typing.ClassVar[int] = ");
-        output.push_str(&max_properties.to_string());
-        output.push('\n');
-    }
-
     output.push_str("\n    @pydantic.model_validator(mode=\"after\")\n");
     output.push_str("    def _validate_extras(self) -> typing.Any:\n");
     output.push_str("        extra = typing.cast(dict[str, object], self.model_extra or {})\n");
     output.push_str("        errors: list[pydantic_core.InitErrorDetails] = []\n");
     render_typed_map_value_validator(output, value_schema);
-    if schema.max_properties.is_some() {
-        output.push_str("        if len(extra) > self._MAX_PROPERTIES:\n");
-        output.push_str("            errors.append(\n");
-        output.push_str("                pydantic_core.InitErrorDetails(\n");
-        output.push_str("                    type=pydantic_core.PydanticCustomError(\n");
-        output.push_str(
-            "                        \"too_many_properties\", typing.cast(typing.Any, f\"at most {self._MAX_PROPERTIES} properties allowed\")\n",
+    // `len(extra)` is the distinct wire-key count for a map (no declared
+    // fields), counted as one number (never a declared + extras sum).
+    if let Some(min) = schema.min_properties {
+        output.push_str(&format!("        if len(extra) < {min}:\n"));
+        render_py_count_violation(
+            output,
+            "too_few_properties",
+            &format!("must have at least {min} properties, got {{len(extra)}}"),
+            "len(extra)",
+            "                ",
         );
-        output.push_str("                    ),\n");
-        output.push_str("                    loc=(),\n");
-        output.push_str("                    input=len(extra),\n");
-        output.push_str("                )\n");
-        output.push_str("            )\n");
+    }
+    if let Some(max) = schema.max_properties {
+        output.push_str(&format!("        if len(extra) > {max}:\n"));
+        render_py_count_violation(
+            output,
+            "too_many_properties",
+            &format!("must have at most {max} properties, got {{len(extra)}}"),
+            "len(extra)",
+            "                ",
+        );
+    }
+    if let Some(subschema) = &schema.property_names {
+        render_py_property_name_validator(output, subschema);
     }
     output.push_str("        if errors:\n");
     output.push_str("            raise pydantic.ValidationError.from_exception_data(\n");
@@ -725,6 +1359,158 @@ fn render_typed_map_value_validator(output: &mut String, value_schema: &Schema) 
         output.push_str("                    )\n");
         output.push_str("                )\n");
     }
+}
+
+/// Emits an `errors.append(...)` for an object member-count violation (`{indent}`
+/// is the body indent of the enclosing `if`). `message` is a Python f-string
+/// body (may reference the runtime count) and `count_expr` is the reported
+/// input value.
+fn render_py_count_violation(
+    output: &mut String,
+    error_type: &str,
+    message: &str,
+    count_expr: &str,
+    indent: &str,
+) {
+    output.push_str(indent);
+    output.push_str("errors.append(\n");
+    output.push_str(indent);
+    output.push_str("    pydantic_core.InitErrorDetails(\n");
+    output.push_str(indent);
+    output.push_str("        type=pydantic_core.PydanticCustomError(\n");
+    output.push_str(indent);
+    output.push_str(&format!(
+        "            {}, typing.cast(typing.Any, f{})\n",
+        python_string_literal(error_type),
+        python_string_literal(message)
+    ));
+    output.push_str(indent);
+    output.push_str("        ),\n");
+    output.push_str(indent);
+    output.push_str("        loc=(),\n");
+    output.push_str(indent);
+    output.push_str(&format!("        input={count_expr},\n"));
+    output.push_str(indent);
+    output.push_str("    )\n");
+    output.push_str(indent);
+    output.push_str(")\n");
+}
+
+/// Emits the `propertyNames` key-shape loop for a typed map (over `extra`),
+/// pushing an `InitErrorDetails` per key whose string length is out of bounds.
+/// `len(key)` counts Unicode code points in Python — spec-correct.
+fn render_py_property_name_validator(output: &mut String, subschema: &Schema) {
+    if subschema.min_length.is_none() && subschema.max_length.is_none() {
+        return;
+    }
+    output.push_str("        for key in extra:\n");
+    let mut emit = |condition: &str, reason: &str| {
+        output.push_str(&format!("            if {condition}:\n"));
+        output.push_str("                errors.append(\n");
+        output.push_str("                    pydantic_core.InitErrorDetails(\n");
+        output.push_str("                        type=pydantic_core.PydanticCustomError(\n");
+        output.push_str(&format!(
+            "                            \"invalid_property_name\", typing.cast(typing.Any, f{})\n",
+            python_string_literal(&format!("invalid property name \"{{key}}\": {reason}"))
+        ));
+        output.push_str("                        ),\n");
+        output.push_str("                        loc=(key,),\n");
+        output.push_str("                        input=key,\n");
+        output.push_str("                    )\n");
+        output.push_str("                )\n");
+    };
+    if let Some(min) = subschema.min_length {
+        emit(
+            &format!("len(key) < {min}"),
+            &format!("must have length >= {min}, got {{len(key)}}"),
+        );
+    }
+    if let Some(max) = subschema.max_length {
+        emit(
+            &format!("len(key) > {max}"),
+            &format!("must have length <= {max}, got {{len(key)}}"),
+        );
+    }
+}
+
+/// Emits a `_validate_object` after-validator for a declared-property object
+/// covering `minProperties`/`maxProperties` (over the distinct wire-key count,
+/// `len(model_fields_set)`, which includes extras and excludes default-filled
+/// fields) and `dependentRequired` (cross-field presence over the same set).
+fn render_object_constraints_validator(output: &mut String, schema: &Schema) {
+    if !schema.has_object_count_or_dependency() {
+        return;
+    }
+    output.push_str("\n    @pydantic.model_validator(mode=\"after\")\n");
+    output.push_str("    def _validate_object(self) -> typing.Any:\n");
+    output.push_str("        errors: list[pydantic_core.InitErrorDetails] = []\n");
+    output.push_str("        present = self.model_fields_set\n");
+    let count = "len(present)";
+    if let Some(min) = schema.min_properties {
+        output.push_str(&format!("        if {count} < {min}:\n"));
+        render_py_count_violation(
+            output,
+            "too_few_properties",
+            &format!("must have at least {min} properties, got {{{count}}}"),
+            count,
+            "            ",
+        );
+    }
+    if let Some(max) = schema.max_properties {
+        output.push_str(&format!("        if {count} > {max}:\n"));
+        render_py_count_violation(
+            output,
+            "too_many_properties",
+            &format!("must have at most {max} properties, got {{{count}}}"),
+            count,
+            "            ",
+        );
+    }
+    if let Some(dependent_required) = &schema.dependent_required {
+        let member = |name: &str| -> String {
+            schema
+                .properties
+                .as_ref()
+                .and_then(|properties| properties.get(name))
+                .map(|property| property.py_member_name(name))
+                .unwrap_or_else(|| python_field_name(name))
+        };
+        for (trigger, deps) in dependent_required {
+            let trigger_field = member(trigger);
+            output.push_str(&format!(
+                "        if {} in present:\n",
+                python_string_literal(&trigger_field)
+            ));
+            for dep in deps {
+                let dep_field = member(dep);
+                output.push_str(&format!(
+                    "            if {} not in present:\n",
+                    python_string_literal(&dep_field)
+                ));
+                output.push_str("                errors.append(\n");
+                output.push_str("                    pydantic_core.InitErrorDetails(\n");
+                output.push_str("                        type=pydantic_core.PydanticCustomError(\n");
+                let reason = format!("property \"{dep}\" is required when \"{trigger}\" is present");
+                output.push_str(&format!(
+                    "                            \"dependent_required\", {}\n",
+                    python_string_literal(&reason)
+                ));
+                output.push_str("                        ),\n");
+                output.push_str(&format!(
+                    "                        loc=({},),\n",
+                    python_string_literal(dep)
+                ));
+                output.push_str("                        input=None,\n");
+                output.push_str("                    )\n");
+                output.push_str("                )\n");
+            }
+        }
+    }
+    output.push_str("        if errors:\n");
+    output.push_str("            raise pydantic.ValidationError.from_exception_data(\n");
+    output.push_str("                title=type(self).__name__, line_errors=errors\n");
+    output.push_str("            )\n");
+    output.push_str("        return self\n");
 }
 
 fn render_optional_non_nullable_helper(output: &mut String) {
@@ -802,6 +1588,141 @@ fn render_set_fields_helper(output: &mut String) {
     output.push_str("    return out\n");
 }
 
+/// Builds the boolean Python sub-conditions that define "match" for a scalar
+/// `contains` matcher over `elem`. A type-only matcher matches every element, so
+/// an empty condition set renders as the literal `True`.
+fn py_matcher_condition(matcher: &Schema, elem: &str) -> Result<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(value) = &matcher.const_value {
+        parts.push(format!("{elem} == {}", python_value_literal(value)?));
+    }
+    if let Some(values) = &matcher.enum_values {
+        let alternatives = values
+            .iter()
+            .map(python_value_literal)
+            .collect::<Result<Vec<_>>>()?
+            .join(", ");
+        if !alternatives.is_empty() {
+            parts.push(format!("{elem} in ({alternatives},)"));
+        }
+    }
+    let is_integer = matcher.ty.as_ref().and_then(Value::as_str) == Some("integer");
+    if let Some(min) = &matcher.minimum {
+        parts.push(format!("{elem} >= {}", py_bound_literal(min, is_integer)));
+    }
+    if let Some(max) = &matcher.maximum {
+        parts.push(format!("{elem} <= {}", py_bound_literal(max, is_integer)));
+    }
+    if let Some(min) = &matcher.exclusive_minimum {
+        parts.push(format!("{elem} > {}", py_bound_literal(min, is_integer)));
+    }
+    if let Some(max) = &matcher.exclusive_maximum {
+        parts.push(format!("{elem} < {}", py_bound_literal(max, is_integer)));
+    }
+    if let Some(divisor) = &matcher.multiple_of {
+        parts.push(format!("{elem} % {} == 0", py_bound_literal(divisor, is_integer)));
+    }
+    if let Some(min) = matcher.min_length {
+        parts.push(format!("len({elem}) >= {min}"));
+    }
+    if let Some(max) = matcher.max_length {
+        parts.push(format!("len({elem}) <= {max}"));
+    }
+    if parts.is_empty() {
+        Ok("True".to_string())
+    } else {
+        Ok(parts.join(" and "))
+    }
+}
+
+/// Emits one `_validate_arrays` after-validator covering every array field that
+/// needs `uniqueItems` / `contains` enforcement (both lack a native Pydantic
+/// equivalent). Violations aggregate into a single `pydantic.ValidationError`.
+fn render_array_validators(output: &mut String, fields: &[(String, String, &Schema)]) -> Result<()> {
+    if fields.is_empty() {
+        return Ok(());
+    }
+
+    output.push_str("\n    @pydantic.model_validator(mode=\"after\")\n");
+    output.push_str("    def _validate_arrays(self) -> typing.Any:\n");
+    output.push_str("        errors: list[pydantic_core.InitErrorDetails] = []\n");
+    for (json_name, field_name, schema) in fields {
+        let loc = python_string_literal(json_name);
+        output.push_str("        value = self.");
+        output.push_str(field_name);
+        output.push('\n');
+        output.push_str("        if value is not None:\n");
+        if schema.unique_items == Some(true) {
+            output.push_str("            seen: dict[object, int] = {}\n");
+            output.push_str("            for index, element in enumerate(value):\n");
+            output.push_str("                if element in seen:\n");
+            output.push_str("                    errors.append(\n");
+            output.push_str("                        pydantic_core.InitErrorDetails(\n");
+            output.push_str("                            type=pydantic_core.PydanticCustomError(\n");
+            output.push_str(
+                "                                \"unique_items\", typing.cast(typing.Any, f\"duplicate items: element at index {index} equals index {seen[element]}\")\n",
+            );
+            output.push_str("                            ),\n");
+            output.push_str(&format!("                            loc=({loc},),\n"));
+            output.push_str("                            input=element,\n");
+            output.push_str("                        )\n");
+            output.push_str("                    )\n");
+            output.push_str("                else:\n");
+            output.push_str("                    seen[element] = index\n");
+        }
+        if let Some(matcher) = &schema.contains {
+            let condition = py_matcher_condition(matcher, "element")?;
+            let effective_min = schema.min_contains.unwrap_or(1);
+            output.push_str(&format!(
+                "            match_count = sum(1 for element in value if {condition})\n"
+            ));
+            if effective_min > 0 {
+                output.push_str(&format!("            if match_count < {effective_min}:\n"));
+                let message = if schema.min_contains.is_some() {
+                    format!(
+                        "typing.cast(typing.Any, f\"too few matching items: at least {effective_min}, got {{match_count}}\")"
+                    )
+                } else {
+                    "\"no element matches the required schema\"".to_string()
+                };
+                let error_type = if schema.min_contains.is_some() {
+                    "too_few_matching_items"
+                } else {
+                    "contains"
+                };
+                output.push_str("                errors.append(\n");
+                output.push_str("                    pydantic_core.InitErrorDetails(\n");
+                output.push_str(&format!(
+                    "                        type=pydantic_core.PydanticCustomError(\n                            {}, {message}\n                        ),\n",
+                    python_string_literal(error_type)
+                ));
+                output.push_str(&format!("                        loc=({loc},),\n"));
+                output.push_str("                        input=value,\n");
+                output.push_str("                    )\n");
+                output.push_str("                )\n");
+            }
+            if let Some(max) = schema.max_contains {
+                output.push_str(&format!("            if match_count > {max}:\n"));
+                output.push_str("                errors.append(\n");
+                output.push_str("                    pydantic_core.InitErrorDetails(\n");
+                output.push_str(&format!(
+                    "                        type=pydantic_core.PydanticCustomError(\n                            \"too_many_matching_items\", typing.cast(typing.Any, f\"too many matching items: at most {max}, got {{match_count}}\")\n                        ),\n"
+                ));
+                output.push_str(&format!("                        loc=({loc},),\n"));
+                output.push_str("                        input=value,\n");
+                output.push_str("                    )\n");
+                output.push_str("                )\n");
+            }
+        }
+    }
+    output.push_str("        if errors:\n");
+    output.push_str("            raise pydantic.ValidationError.from_exception_data(\n");
+    output.push_str("                title=type(self).__name__, line_errors=errors\n");
+    output.push_str("            )\n");
+    output.push_str("        return self\n");
+    Ok(())
+}
+
 fn render_const_validators(output: &mut String, fields: &[(String, String, Value)]) -> Result<()> {
     if fields.is_empty() {
         return Ok(());
@@ -852,6 +1773,71 @@ fn render_const_validators(output: &mut String, fields: &[(String, String, Value
     Ok(())
 }
 
+/// Emits, per `enum` field, a `model_validator(mode="before")` membership check.
+/// Unlike `const` there is no injection (no single value to fill on absence —
+/// presence is owned by `required`); a present out-of-set value raises an
+/// aggregated `enum` error naming the set and the offending value. String/int/
+/// bool enums are additionally closed by their `Literal` annotation; float enums
+/// (plain `float`) rest on this check alone. See `json-schema/features/enum.md`.
+fn render_enum_validators(
+    output: &mut String,
+    fields: &[(String, String, Vec<Value>)],
+) -> Result<()> {
+    if fields.is_empty() {
+        return Ok(());
+    }
+
+    for (json_name, field_name, values) in fields {
+        let literals = values
+            .iter()
+            .map(python_value_literal)
+            .collect::<Result<Vec<_>>>()?;
+        let set_literal = format!("[{}]", literals.join(", "));
+        let message = format!(
+            "{json_name} must be one of [{}], got {{got}}",
+            literals.join(", ")
+        );
+        output.push_str("\n    @pydantic.model_validator(mode=\"before\")\n");
+        output.push_str("    @classmethod\n");
+        output.push_str("    def _check_enum_");
+        output.push_str(field_name);
+        output.push_str("(\n");
+        output.push_str("        cls,\n");
+        output.push_str("        data: object,\n");
+        output.push_str("    ) -> object:\n");
+        output.push_str("        if isinstance(data, dict):\n");
+        output.push_str("            values = typing.cast(dict[str, object], data)\n");
+        output.push_str("            if ");
+        output.push_str(&python_string_literal(json_name));
+        output.push_str(" in values");
+        if field_name != json_name {
+            output.push_str(" or ");
+            output.push_str(&python_string_literal(field_name));
+            output.push_str(" in values");
+        }
+        output.push_str(":\n");
+        output.push_str("                got = values.get(");
+        output.push_str(&python_string_literal(json_name));
+        if field_name != json_name {
+            output.push_str(", values.get(");
+            output.push_str(&python_string_literal(field_name));
+            output.push_str(")");
+        }
+        output.push_str(")\n");
+        output.push_str("                if got not in ");
+        output.push_str(&set_literal);
+        output.push_str(":\n");
+        output.push_str("                    raise pydantic_core.PydanticCustomError(\n");
+        output.push_str("                        \"enum\", ");
+        output.push_str(&python_string_literal(&message));
+        output.push_str(", {\"got\": got}\n");
+        output.push_str("                    )\n");
+        output.push_str("        return typing.cast(object, data)\n");
+    }
+
+    Ok(())
+}
+
 fn render_optional_non_nullable_validator(output: &mut String, fields: &BTreeSet<String>) {
     if fields.is_empty() {
         return;
@@ -891,6 +1877,7 @@ fn render_field_expr(
     json_name: &str,
     field_name: &str,
     default: Option<&str>,
+    property: &Schema,
 ) {
     output.push_str("pydantic.Field(");
     let mut arguments = Vec::new();
@@ -900,8 +1887,73 @@ fn render_field_expr(
     if json_name != field_name {
         arguments.push(format!("alias={}", python_string_literal(json_name)));
     }
+    // Numeric bounds map to native Pydantic constraints (annotated_types
+    // Ge/Le/Gt/Lt). Integer-field `multipleOf` uses Pydantic's native
+    // `multiple_of` (exact for ints); number-field `multipleOf` is handled by
+    // an explicit `fmod` AfterValidator in the annotation instead.
+    let is_integer = property.is_integer_field();
+    if is_integer || property.is_number_field() {
+        if let Some(min) = &property.minimum {
+            arguments.push(format!("ge={}", py_bound_literal(min, is_integer)));
+        }
+        if let Some(max) = &property.maximum {
+            arguments.push(format!("le={}", py_bound_literal(max, is_integer)));
+        }
+        if let Some(min) = &property.exclusive_minimum {
+            arguments.push(format!("gt={}", py_bound_literal(min, is_integer)));
+        }
+        if let Some(max) = &property.exclusive_maximum {
+            arguments.push(format!("lt={}", py_bound_literal(max, is_integer)));
+        }
+        if is_integer
+            && let Some(divisor) = &property.multiple_of
+        {
+            arguments.push(format!("multiple_of={}", py_bound_literal(divisor, true)));
+        }
+    }
+    // String-length bounds map to Pydantic's native `min_length`/`max_length`,
+    // which count Unicode code points (verified in `maxLength.md`) — spec-correct
+    // without a custom validator.
+    if property.is_string_field() {
+        if let Some(min) = property.min_length {
+            arguments.push(format!("min_length={min}"));
+        }
+        if let Some(max) = property.max_length {
+            arguments.push(format!("max_length={max}"));
+        }
+    }
+    // Array `minItems`/`maxItems` map to Pydantic's native `min_length`/
+    // `max_length`, which bound the element count for sequences — spec-correct
+    // without a custom validator (see minItems.md / maxItems.md).
+    if property.is_array_field() {
+        if let Some(min) = property.min_items {
+            arguments.push(format!("min_length={min}"));
+        }
+        if let Some(max) = property.max_items {
+            arguments.push(format!("max_length={max}"));
+        }
+    }
     output.push_str(&arguments.join(", "));
     output.push(')');
+}
+
+/// Composes a docstring from a `title` (summary line) and `description` (body);
+/// returns `None` when both are empty. See json-schema/features/{title,description}.md.
+fn compose_python_doc(title: Option<&str>, description: Option<&str>) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(title) = title.map(str::trim).filter(|t| !t.is_empty()) {
+        lines.push(title.to_string());
+    }
+    if let Some(description) = description.map(str::trim).filter(|d| !d.is_empty()) {
+        for line in description.lines() {
+            lines.push(line.trim().to_string());
+        }
+    }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
 }
 
 fn python_value_literal(value: &Value) -> Result<String> {
@@ -943,11 +1995,67 @@ fn decode_schema(model: &PlannedJsonType) -> Result<Schema> {
     })
 }
 
+/// The materialized `TemporalKind` of a schema that is directly a temporal
+/// string (not looking through `oneOf`, which `annotation` handles by recursion).
+fn temporal_kind_direct(schema: &Schema) -> Option<crate::format::TemporalKind> {
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
+        return None;
+    }
+    schema
+        .format
+        .as_deref()
+        .and_then(crate::format::TemporalKind::from_name)
+}
+
+/// The runtime-module `Annotated` alias name for a materialized `contentEncoding`.
+fn content_encoding_field_alias(encoding: crate::content_encoding::Encoding) -> &'static str {
+    match encoding {
+        crate::content_encoding::Encoding::Base64 => "Base64Field",
+        crate::content_encoding::Encoding::Base64Url => "Base64UrlField",
+    }
+}
+
+/// The materialized `contentEncoding` of a schema that is directly a bytes string
+/// (the `oneOf[…, null]` wrapper is handled by `annotation` recursion).
+fn content_encoding_direct(schema: &Schema) -> Option<crate::content_encoding::Encoding> {
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
+        return None;
+    }
+    schema
+        .content_encoding
+        .as_deref()
+        .and_then(crate::content_encoding::Encoding::from_name)
+}
+
+/// The runtime-module `Annotated` alias name for a materialized temporal kind.
+fn temporal_field_alias(kind: crate::format::TemporalKind) -> &'static str {
+    match kind {
+        crate::format::TemporalKind::DateTime => "DateTimeField",
+        crate::format::TemporalKind::Date => "DateField",
+        crate::format::TemporalKind::Time => "TimeField",
+        crate::format::TemporalKind::Duration => "DurationField",
+    }
+}
+
 fn annotation(schema: &Schema) -> Result<String> {
     if let Some(const_value) = &schema.const_value
         && let Some(annotation) = python_literal_annotation(const_value)
     {
         return Ok(annotation);
+    }
+    // A scalar `enum` is a closed `Literal` union. Number(float) members are the
+    // exception (PEP 586 forbids float literals): they fall through to the plain
+    // `float` type and rest on the membership validator (see enum.md).
+    if let Some(values) = &schema.enum_values
+        && !values.is_empty()
+    {
+        let tokens = values
+            .iter()
+            .filter_map(python_literal_token)
+            .collect::<Vec<_>>();
+        if tokens.len() == values.len() {
+            return Ok(format!("typing.Literal[{}]", tokens.join(", ")));
+        }
     }
     if let Some(reference) = &schema.reference {
         return Ok(reference_model_name(reference));
@@ -957,10 +2065,40 @@ fn annotation(schema: &Schema) -> Result<String> {
             .iter()
             .filter(|branch| branch.ty.as_ref().and_then(Value::as_str) != Some("null"))
             .collect::<Vec<_>>();
+        let nullable = one_of
+            .iter()
+            .any(|branch| branch.ty.as_ref().and_then(Value::as_str) == Some("null"));
+        // Two or more non-null branches form a closed sum type — a
+        // `typing.Union[...]` (Pydantic v2 smart mode selects the branch by
+        // token / `Literal` discriminant). One non-null branch is the
+        // degenerate nullability pattern.
+        if non_null.len() >= 2 {
+            let mut members = non_null
+                .iter()
+                .map(|branch| annotation(branch))
+                .collect::<Result<Vec<_>>>()?;
+            if nullable {
+                members.push("None".to_string());
+            }
+            return Ok(members.join(" | "));
+        }
         let Some(branch) = non_null.first() else {
             return Ok("None".to_string());
         };
         return Ok(optional_annotation(&annotation(branch)?));
+    }
+    // A materialized temporal `format` replaces `str` with a native typed field,
+    // carried by a runtime-module `Annotated` alias (BeforeValidator parse +
+    // PlainSerializer generator-owned serialize). The `oneOf[…, null]` nullable
+    // wrapper is handled above by recursing into the non-null branch.
+    if let Some(kind) = temporal_kind_direct(schema) {
+        return Ok(temporal_field_alias(kind).to_string());
+    }
+    // A materialized `contentEncoding` replaces `str` with `bytes`, carried by a
+    // runtime-module `Annotated` alias (BeforeValidator parse + PlainSerializer
+    // generator-owned canonical serialize).
+    if let Some(encoding) = content_encoding_direct(schema) {
+        return Ok(content_encoding_field_alias(encoding).to_string());
     }
     match schema.ty.as_ref().and_then(Value::as_str) {
         Some("string") => Ok("str".to_string()),
@@ -983,16 +2121,17 @@ fn annotation(schema: &Schema) -> Result<String> {
 }
 
 fn python_literal_annotation(value: &Value) -> Option<String> {
+    python_literal_token(value).map(|token| format!("typing.Literal[{token}]"))
+}
+
+/// The inner `Literal[...]` member token for a scalar value, or `None` when the
+/// value cannot be a `Literal` member (a float — PEP 586 — or a composite).
+fn python_literal_token(value: &Value) -> Option<String> {
     match value {
-        Value::Null => Some("typing.Literal[None]".to_string()),
-        Value::Bool(value) => Some(format!(
-            "typing.Literal[{}]",
-            if *value { "True" } else { "False" }
-        )),
-        Value::Number(value) if value.is_i64() || value.is_u64() => {
-            Some(format!("typing.Literal[{value}]"))
-        }
-        Value::String(value) => Some(format!("typing.Literal[{}]", python_string_literal(value))),
+        Value::Null => Some("None".to_string()),
+        Value::Bool(value) => Some(if *value { "True" } else { "False" }.to_string()),
+        Value::Number(value) if value.is_i64() || value.is_u64() => Some(value.to_string()),
+        Value::String(value) => Some(python_string_literal(value)),
         _ => None,
     }
 }

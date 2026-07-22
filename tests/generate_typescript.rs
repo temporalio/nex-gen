@@ -155,6 +155,7 @@ fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[Pa
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
+        js_temporal_repr: Default::default(),
     })
     .unwrap();
     let rendered = if output_path.is_file() {
@@ -209,9 +210,28 @@ fn generate_formatted_json_typescript_output(
     output_path: &Path,
     generate_native_api: bool,
 ) {
+    generate_formatted_json_typescript_output_repr(
+        root,
+        example_id,
+        output_path,
+        generate_native_api,
+        None,
+    );
+}
+
+/// Like `generate_formatted_json_typescript_output`, but reads the input from
+/// `input_id` (so the repr variants reuse `temporal.yaml`) and threads an
+/// optional `--js-temporal-repr`.
+fn generate_formatted_json_typescript_output_repr(
+    root: &Path,
+    input_id: &str,
+    output_path: &Path,
+    generate_native_api: bool,
+    repr: Option<&str>,
+) {
     ensure_typescript_dependencies(root);
 
-    let input_path = json_input_path(root, example_id);
+    let input_path = json_input_path(root, input_id);
     let mut args = vec![
         "generate",
         "--lang",
@@ -221,6 +241,10 @@ fn generate_formatted_json_typescript_output(
         "--output",
         output_path.to_str().unwrap(),
     ];
+    if let Some(repr) = repr {
+        args.push("--js-temporal-repr");
+        args.push(repr);
+    }
     if !generate_native_api {
         args.push("--no-native-api");
     }
@@ -272,7 +296,7 @@ fn typescript_examples_generation_matches_checked_in_output() {
 #[test]
 fn typescript_json_example_generation_matches_checked_in_output() {
     let root = project_root();
-    for example_id in ["chat", "kb"] {
+    for example_id in ["chat", "kb", "showcase", "temporal"] {
         let output_path = unique_output_path(&format!("typescript-json-{example_id}"));
         generate_formatted_json_typescript_output(&root, example_id, &output_path, false);
         let rendered = read_typescript_output_files(&output_path);
@@ -280,6 +304,36 @@ fn typescript_json_example_generation_matches_checked_in_output() {
             &root, example_id,
         ));
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        if example_id == "showcase" {
+            let all = rendered.values().cloned().collect::<Vec<_>>().join("\n");
+            // Scalar defaults → emitted DEFAULT_<FIELD> module constants.
+            assert!(all.contains("export const DEFAULT_GREETING = \"hello\";"));
+            assert!(all.contains("export const DEFAULT_DEBUG = false;"));
+            // `deprecated` → JSDoc @deprecated tag; `title` → JSDoc summary line.
+            assert!(all.contains("@deprecated"));
+            assert!(all.contains("Retry budget"));
+            // `x-ts-name` override (Stage 4): the interface member + (de)serialize
+            // use the override while the wire key stays `legacyId`.
+            assert!(all.contains("legacyID?: string;"));
+            assert!(all.contains("legacyID = raw.legacyId;"));
+            assert!(all.contains("out.legacyId = value.legacyID;"));
+        }
+        fs::remove_dir_all(output_path).unwrap();
+    }
+    // The `--js-temporal-repr` date/temporal variants of the temporal example.
+    for (output_id, repr) in [("temporal-date", "date"), ("temporal-temporal", "temporal")] {
+        let output_path = unique_output_path(&format!("typescript-json-{output_id}"));
+        generate_formatted_json_typescript_output_repr(
+            &root,
+            "temporal",
+            &output_path,
+            false,
+            Some(repr),
+        );
+        let rendered = read_typescript_output_files(&output_path);
+        let expected =
+            read_typescript_output_files(&typescript_json_definitions_output_path(&root, output_id));
+        assert_eq!(rendered, expected, "snapshot mismatch for {output_id}");
         fs::remove_dir_all(output_path).unwrap();
     }
 }
@@ -287,13 +341,28 @@ fn typescript_json_example_generation_matches_checked_in_output() {
 #[test]
 fn typescript_json_api_example_generation_matches_checked_in_output() {
     let root = project_root();
-    for example_id in ["chat", "kb"] {
+    for example_id in ["chat", "kb", "showcase", "temporal"] {
         let output_path = unique_output_path(&format!("typescript-json-api-{example_id}"));
         generate_formatted_json_typescript_output(&root, example_id, &output_path, true);
         let rendered = read_typescript_output_files(&output_path);
         let expected =
             read_typescript_output_files(&typescript_json_api_output_path(&root, example_id));
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        fs::remove_dir_all(output_path).unwrap();
+    }
+    for (output_id, repr) in [("temporal-date", "date"), ("temporal-temporal", "temporal")] {
+        let output_path = unique_output_path(&format!("typescript-json-api-{output_id}"));
+        generate_formatted_json_typescript_output_repr(
+            &root,
+            "temporal",
+            &output_path,
+            true,
+            Some(repr),
+        );
+        let rendered = read_typescript_output_files(&output_path);
+        let expected =
+            read_typescript_output_files(&typescript_json_api_output_path(&root, output_id));
+        assert_eq!(rendered, expected, "snapshot mismatch for {output_id}");
         fs::remove_dir_all(output_path).unwrap();
     }
 }

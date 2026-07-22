@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use nex_gen::language::Language;
 use nex_gen::parser::write_prepared_wit_directory;
+use nex_gen::generator::JsTemporalRepr;
 use nex_gen::{
     AddRpcRequest, BuildExamplesRequest, GenerateRequest, add_rpc_to_file, build_examples,
     build_json_examples, generate_to_file,
@@ -48,6 +49,27 @@ struct GenerateArgs {
     format: bool,
     #[arg(long = "no-native-api", action = ArgAction::SetFalse, default_value_t = true)]
     generate_native_api: bool,
+    /// TypeScript-only: the in-memory representation for materialized temporal
+    /// `format` fields (date-time/date/time/duration). Ignored for other targets.
+    #[arg(long = "js-temporal-repr", value_enum, default_value_t = CliJsTemporalRepr::String)]
+    js_temporal_repr: CliJsTemporalRepr,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum CliJsTemporalRepr {
+    String,
+    Date,
+    Temporal,
+}
+
+impl From<CliJsTemporalRepr> for JsTemporalRepr {
+    fn from(value: CliJsTemporalRepr) -> Self {
+        match value {
+            CliJsTemporalRepr::String => JsTemporalRepr::String,
+            CliJsTemporalRepr::Date => JsTemporalRepr::Date,
+            CliJsTemporalRepr::Temporal => JsTemporalRepr::Temporal,
+        }
+    }
 }
 
 #[derive(Args)]
@@ -82,6 +104,7 @@ struct DebugWitDirArgs {
 enum CliLanguage {
     Dotnet,
     Go,
+    Java,
     Python,
     Typescript,
 }
@@ -90,6 +113,7 @@ enum CliLanguage {
 enum ExampleCliLanguage {
     Dotnet,
     Go,
+    Java,
     Python,
     Typescript,
 }
@@ -99,6 +123,7 @@ impl From<CliLanguage> for Language {
         match value {
             CliLanguage::Dotnet => Language::Dotnet,
             CliLanguage::Go => Language::Go,
+            CliLanguage::Java => Language::Java,
             CliLanguage::Python => Language::Python,
             CliLanguage::Typescript => Language::TypeScript,
         }
@@ -110,6 +135,7 @@ impl From<ExampleCliLanguage> for Language {
         match value {
             ExampleCliLanguage::Dotnet => Language::Dotnet,
             ExampleCliLanguage::Go => Language::Go,
+            ExampleCliLanguage::Java => Language::Java,
             ExampleCliLanguage::Python => Language::Python,
             ExampleCliLanguage::Typescript => Language::TypeScript,
         }
@@ -128,6 +154,7 @@ fn main() -> ExitCode {
             output_path: args.output,
             format: args.format,
             generate_native_api: args.generate_native_api,
+            js_temporal_repr: args.js_temporal_repr.into(),
         }),
         Commands::BuildExamples(args) => build_examples(&BuildExamplesRequest {
             languages: args.langs.into_iter().map(Language::from).collect(),

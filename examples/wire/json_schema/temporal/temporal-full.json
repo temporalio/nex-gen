@@ -1,0 +1,12 @@
+{
+  "createdAt": "2021-06-15T12:30:45.123456+02:00",
+  "birthday": "2021-06-15",
+  "alarm": "12:30:45+02:00",
+  "timeout": "PT1H30M",
+  "updatedAt": "2021-01-01T00:00:00Z",
+  "expiresOn": "2030-12-31",
+  "reminder": "23:59:59",
+  "retryDelay": "PT15S",
+  "deletedAt": "2020-02-29T08:00:00-05:00",
+  "archivedOn": "2019-07-04"
+}

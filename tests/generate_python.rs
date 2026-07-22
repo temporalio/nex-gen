@@ -151,6 +151,7 @@ fn generate_python_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
+        js_temporal_repr: Default::default(),
     })
     .unwrap();
     let rendered = if output_path.is_file() {
@@ -294,7 +295,7 @@ fn python_examples_generation_matches_checked_in_output() {
 #[test]
 fn python_json_example_generation_matches_checked_in_output() {
     let root = project_root();
-    for example_id in ["chat", "kb"] {
+    for example_id in ["chat", "kb", "showcase", "temporal"] {
         let output_path = unique_output_path(&format!("python-json-{example_id}"));
         generate_formatted_json_python_output(&root, example_id, &output_path, false);
         assert_python_310_syntax_compatible(&output_path);
@@ -302,6 +303,21 @@ fn python_json_example_generation_matches_checked_in_output() {
         let expected =
             read_python_package_files(&python_json_definitions_output_path(&root, example_id));
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        if example_id == "showcase" {
+            let all = rendered.values().cloned().collect::<Vec<_>>().join("\n");
+            // Scalar defaults surface natively via the Pydantic field default.
+            assert!(all.contains("greeting: str = pydantic.Field(default=\"hello\")"));
+            assert!(all.contains("debug: bool = pydantic.Field(default=False)"));
+            // `deprecated` → PEP 702 marker (no runtime warning); `title` → docstring.
+            assert!(all.contains(
+                "typing_extensions.deprecated(\"This field is deprecated.\", category=None)"
+            ));
+            assert!(all.contains("Retry budget"));
+            // `x-py-name` override (Stage 4): the attribute uses the override
+            // while the wire name is pinned by `Field(alias="legacyId")`.
+            assert!(all.contains("legacy_ident:"));
+            assert!(all.contains("alias=\"legacyId\""));
+        }
         fs::remove_dir_all(output_path).unwrap();
     }
 }
@@ -309,7 +325,7 @@ fn python_json_example_generation_matches_checked_in_output() {
 #[test]
 fn python_json_api_example_generation_matches_checked_in_output() {
     let root = project_root();
-    for example_id in ["chat", "kb"] {
+    for example_id in ["chat", "kb", "showcase", "temporal"] {
         let output_path = unique_output_path(&format!("python-json-api-{example_id}"));
         generate_formatted_json_python_output(&root, example_id, &output_path, true);
         assert_python_310_syntax_compatible(&output_path);

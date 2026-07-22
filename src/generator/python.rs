@@ -181,7 +181,7 @@ fn insert_branch_index_file(
         }
         render_named_python_import(
             &mut contents,
-            "._models",
+            "._recursive",
             &model_hoists
                 .exported_names()
                 .iter()
@@ -2544,7 +2544,7 @@ pub(crate) fn render_tree_support_files(
     }
 
     BTreeMap::from([(
-        PathBuf::from("_json.py"),
+        PathBuf::from("definitions.py"),
         python_json::render_support_file(),
     )])
 }
@@ -3653,7 +3653,7 @@ fn render_service_module(
                     let type_ref = operation_input_type_ref(operation);
                     if !type_ref.contains('.') {
                         model_type_imports.insert(type_ref.to_string());
-                    } else if let Some(type_name) = type_ref.strip_prefix("_models.") {
+                    } else if let Some(type_name) = type_ref.strip_prefix("_recursive.") {
                         model_type_imports.insert(type_name.to_string());
                     }
                 } else {
@@ -3675,7 +3675,9 @@ fn render_service_module(
                 {
                     if !operation.output_ref.contains('.') {
                         model_type_imports.insert(operation.output_ref.clone());
-                    } else if let Some(type_name) = operation.output_ref.strip_prefix("_models.") {
+                    } else if let Some(type_name) =
+                        operation.output_ref.strip_prefix("_recursive.")
+                    {
                         model_type_imports.insert(type_name.to_string());
                     }
                 } else {
@@ -4115,7 +4117,7 @@ fn render_python_module_model_runtime_imports(
 }
 
 fn root_python_model_hoist_module(module_path: &ModulePath) -> String {
-    format!("{}{}", ".".repeat(module_path.0.len() + 1), "_models")
+    format!("{}{}", ".".repeat(module_path.0.len() + 1), "_recursive")
 }
 
 fn python_relative_models_module(from: &ModulePath, to: &ModulePath) -> String {
@@ -4551,7 +4553,7 @@ fn service_type_ref(type_ref: &str) -> String {
 fn local_python_model_type_expr(type_ref: &str) -> String {
     type_ref
         .strip_prefix("models.")
-        .or_else(|| type_ref.strip_prefix("_models."))
+        .or_else(|| type_ref.strip_prefix("_recursive."))
         .unwrap_or(type_ref)
         .to_string()
 }
@@ -4559,7 +4561,7 @@ fn local_python_model_type_expr(type_ref: &str) -> String {
 fn model_type_name(type_ref: &str) -> Option<String> {
     let type_name = type_ref
         .strip_prefix("models.")
-        .or_else(|| type_ref.strip_prefix("_models."))
+        .or_else(|| type_ref.strip_prefix("_recursive."))
         .unwrap_or(type_ref);
     (type_name != "None" && !type_name.contains('.')).then(|| type_name.to_string())
 }

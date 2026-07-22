@@ -11,7 +11,7 @@ use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::proto::typescript::{
     model_typescript_interface_ref, model_typescript_type_id, typescript_replacement_type_name,
 };
-use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
+use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode, JsTemporalRepr};
 use crate::language::Language;
 use crate::planning::{
     PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedProtoType,
@@ -74,7 +74,7 @@ pub(crate) fn render_tree_support_files(
     }
 
     BTreeMap::from([(
-        PathBuf::from("json.ts"),
+        PathBuf::from("definitions.ts"),
         typescript_json::render_support_file(),
     )])
 }
@@ -83,13 +83,14 @@ fn generate_tree(
     branch: &ApiSpecBranch<PlannedTypeFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
+    js_temporal_repr: JsTemporalRepr,
 ) -> Result<GeneratedFiles> {
     let mut files = BTreeMap::new();
     let mut warnings = Vec::new();
     insert_branch_index_file(&mut files, branch)?;
     insert_files(&mut files, render_tree_support_files(branch))?;
     for node in branch.children.values() {
-        generate_tree_node(node, support, mode, &mut files, &mut warnings)?;
+        generate_tree_node(node, support, mode, js_temporal_repr, &mut files, &mut warnings)?;
     }
     Ok(GeneratedFiles {
         layout: crate::generator::GeneratedOutputLayout::Directory,
@@ -102,13 +103,15 @@ fn generate_tree_node(
     node: &ApiSpecNode<PlannedTypeFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
+    js_temporal_repr: JsTemporalRepr,
     files: &mut BTreeMap<PathBuf, String>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            let generated = generate_leaf(&leaf.spec, &support_fragments, mode)?;
+            let generated =
+                generate_leaf(&leaf.spec, &support_fragments, mode, js_temporal_repr)?;
             warnings.extend(generated.warnings);
             let prefix = leaf.module_path.to_path_buf();
             for (path, mut contents) in generated.files {
@@ -124,7 +127,7 @@ fn generate_tree_node(
         ApiSpecNode::Branch(branch) => {
             insert_branch_index_file(files, branch)?;
             for node in branch.children.values() {
-                generate_tree_node(node, support, mode, files, warnings)?;
+                generate_tree_node(node, support, mode, js_temporal_repr, files, warnings)?;
             }
             Ok(())
         }
@@ -205,8 +208,9 @@ struct TypeScriptExternalModels {
 }
 
 impl TypeScriptExternalModels {
-    fn new(api_plan: &PlannedSpec) -> Result<Self> {
+    fn new(api_plan: &PlannedSpec, js_temporal_repr: JsTemporalRepr) -> Result<Self> {
         let mut this = Self::default();
+        this.json.js_temporal_repr = js_temporal_repr;
         this.prepare(api_plan)?;
         Ok(this)
     }
@@ -296,10 +300,10 @@ struct ApiPlanner<'a> {
 }
 
 impl<'a> ApiPlanner<'a> {
-    fn new(api_plan: &'a PlannedSpec) -> Result<Self> {
+    fn new(api_plan: &'a PlannedSpec, js_temporal_repr: JsTemporalRepr) -> Result<Self> {
         Ok(Self {
             api_plan,
-            external_models: TypeScriptExternalModels::new(api_plan)?,
+            external_models: TypeScriptExternalModels::new(api_plan, js_temporal_repr)?,
             enums: IndexMap::new(),
             flags: IndexMap::new(),
             variants: IndexMap::new(),
@@ -1681,13 +1685,14 @@ pub(crate) fn generate(
     tree: &crate::workspace::ApiSpecTree<PlannedTypeFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
+    js_temporal_repr: JsTemporalRepr,
 ) -> Result<GeneratedFiles> {
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            generate_leaf(&leaf.spec, &support_fragments, mode)
+            generate_leaf(&leaf.spec, &support_fragments, mode, js_temporal_repr)
         }
-        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode),
+        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode, js_temporal_repr),
     }
 }
 
@@ -1695,10 +1700,11 @@ fn generate_leaf(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
     mode: GenerationMode,
+    js_temporal_repr: JsTemporalRepr,
 ) -> Result<GeneratedFiles> {
     reject_support_namespaces(Language::TypeScript, support_fragments)?;
     let language_imports = collect_typescript_language_imports(api_plan);
-    let mut planner = ApiPlanner::new(api_plan)?;
+    let mut planner = ApiPlanner::new(api_plan, js_temporal_repr)?;
     let services = api_plan
         .services
         .iter()

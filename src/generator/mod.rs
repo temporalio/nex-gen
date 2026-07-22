@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 pub(crate) mod dotnet;
 pub(crate) mod go;
+pub(crate) mod java;
 pub(crate) mod json;
 pub(crate) mod proto;
 pub(crate) mod python;
@@ -13,8 +14,8 @@ use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::planning::{
-    PlannedSpec, PlannedType, PlannedTypeFamily, PlanningMode, build_api_plan_with_mode,
-    build_api_plans_for_tree_with_mode,
+    PlannedSpec, PlannedType, PlannedTypeFamily, PlanningMode,
+    build_api_plans_for_tree_with_mode, build_leaf_api_plan_with_mode,
 };
 use crate::resources::ensure_unique_resource_names;
 use crate::spec::{ApiSpec, RecordSpec};
@@ -123,6 +124,24 @@ pub enum GenerationMode {
     DefinitionsOnly,
 }
 
+/// The TypeScript in-memory representation of a materialized temporal `format`
+/// field, selected by the `--js-temporal-repr` generator flag (P16 API parity).
+/// Affects **only** the TypeScript output; Go / Java / Python are unchanged. See
+/// `json-schema/features/format.md` (JS temporal representation).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum JsTemporalRepr {
+    /// Every temporal is a `string` holding the generator-serialized form
+    /// (lossless, still materialized — the narrowed grammar rejects `:60`).
+    #[default]
+    String,
+    /// `date-time` → `Date` (UTC instant, ms, offset folded); the others stay
+    /// `string`.
+    Date,
+    /// `date-time` → `Temporal.ZonedDateTime`, `date` → `Temporal.PlainDate`,
+    /// `duration` → `Temporal.Duration`; `time` stays `string`.
+    Temporal,
+}
+
 pub fn generate_files(
     language: Language,
     spec: ApiSpec,
@@ -174,6 +193,10 @@ pub fn generate_files_for_tree_with_mode(
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct GenerateFilesOptions {
     pub(crate) go_import_root: Option<String>,
+    pub(crate) java_package_root: Option<String>,
+    /// The TypeScript temporal representation (`--js-temporal-repr`); ignored by
+    /// the non-TypeScript backends.
+    pub(crate) js_temporal_repr: JsTemporalRepr,
 }
 
 pub(crate) fn generate_files_for_tree_with_mode_and_options(
@@ -188,7 +211,7 @@ pub(crate) fn generate_files_for_tree_with_mode_and_options(
     let planned_tree = match tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let planned =
-                build_api_plan_with_mode(leaf.spec, descriptors, planning_mode(mode), language)?;
+                build_leaf_api_plan_with_mode(leaf.spec, descriptors, planning_mode(mode), language)?;
             ApiSpecTree {
                 root: ApiSpecNode::Leaf(crate::workspace::ApiSpecLeaf {
                     module_path: leaf.module_path,
@@ -234,8 +257,11 @@ fn generate_files_from_planned_tree(
     let mut generated = match language {
         Language::Dotnet => dotnet::generate(tree, support, mode),
         Language::Go => generate_go_tree(tree, support, mode, options),
+        Language::Java => java::generate(tree, support, mode, options.java_package_root.as_deref()),
         Language::Python => python::generate(tree, support, mode),
-        Language::TypeScript => typescript::generate(tree, support, mode),
+        Language::TypeScript => {
+            typescript::generate(tree, support, mode, options.js_temporal_repr)
+        }
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = if mode == GenerationMode::NativeApi {

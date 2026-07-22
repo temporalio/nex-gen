@@ -254,15 +254,24 @@ pub(crate) enum PlanningMode {
     DefinitionsOnly,
 }
 
-pub(crate) fn build_api_plan_with_mode(
+/// Plans a single-file (leaf) spec, treating its JSON-schema models as an
+/// exported module surface so a standalone pure-JSON-schema file (root type +
+/// `$defs`, no services) still emits every model even though none are reached
+/// from a service. WIT leaf specs are unaffected: `module_export_names` returns
+/// only JSON models, so WIT keeps its reachability-based tree-shaking.
+pub(crate) fn build_leaf_api_plan_with_mode(
     spec: ApiSpec,
     descriptors: &DescriptorIndex,
     mode: PlanningMode,
     language: Language,
 ) -> Result<PlannedSpec> {
+    let module_exports = module_export_names(&spec);
     ApiPlanner::new(
         spec,
-        PlannedSpecData::default(),
+        PlannedSpecData {
+            module_exports,
+            ..PlannedSpecData::default()
+        },
         descriptors,
         mode,
         language,
@@ -337,16 +346,17 @@ fn module_export_names(spec: &ApiSpec) -> BTreeSet<String> {
     spec.types
         .iter()
         .filter_map(|(name, decl)| {
-            let module_path = match decl {
-                TypeDeclSpec::External(binding) => {
-                    external_type_module_path(&binding.external_type)
-                }
-                TypeDeclSpec::Record(_)
-                | TypeDeclSpec::Enum(_)
-                | TypeDeclSpec::Flags(_)
-                | TypeDeclSpec::Variant(_) => None,
+            // Only JSON-schema models are treated as an always-exported module
+            // surface (root type + every `$def`, including unreferenced ones).
+            // WIT-sourced records/enums/protos keep their reachability-based
+            // tree-shaking, so they are never force-exported here.
+            let TypeDeclSpec::External(binding) = decl else {
+                return None;
             };
-            module_path
+            if !matches!(binding.external_type, ExternalTypeSpec::Json(_)) {
+                return None;
+            }
+            external_type_module_path(&binding.external_type)
                 .is_none_or(|module_path| module_path == &spec.module_path)
                 .then(|| name.clone())
         })
@@ -1855,7 +1865,7 @@ mod tests {
         )
         .unwrap();
 
-        let plan = build_api_plan_with_mode(
+        let plan = build_leaf_api_plan_with_mode(
             spec,
             &descriptors,
             PlanningMode::DefinitionsOnly,

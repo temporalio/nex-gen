@@ -1,55 +1,57 @@
 package tests
 
 import (
-	"encoding/json"
 	"testing"
 
 	apichat "examples/go/json_schema/api/chat"
 
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/workflow"
 )
 
+// TestJSONSchemaChatRuntime round-trips every chat wire fixture through the
+// Temporal default data converter and asserts JSON-equality against the
+// canonical fixtures, mirroring the Python and Java suites.
+//
+// Exception (see json-schema/nullability.md): optional+nullable fields collapse
+// in Go. message-full.json carries replyToId: null (optional+nullable), which
+// Go collapses on serialize, so it is verified by deserialization + field checks
+// rather than exact JSON-equality, matching the Java test. (room-open.json's
+// topic is required-nullable, so its explicit null survives the round-trip and
+// is checked via JSON-equality.)
 func TestJSONSchemaChatRuntime(t *testing.T) {
-	topic := "general"
-	room := apichat.Room{
-		RoomId:      "room-1",
-		DisplayName: "General",
-		Topic:       &topic,
-		Members:     []string{"user-1"},
-		Labels: &apichat.Labels{
-			AdditionalProperties: map[string]string{"team": "sdk"},
-		},
-		AdditionalProperties: map[string]json.RawMessage{
-			"extra": json.RawMessage(`{"kept":true}`),
-		},
-	}
+	dc := converter.GetDefaultDataConverter()
 
-	encoded, err := json.Marshal(room)
-	require.NoError(t, err)
-	require.Contains(t, string(encoded), `"extra":{"kept":true}`)
+	minimal := roundTripJSONEq[apichat.Message](t, dc, "chat", "message-minimal.json")
+	require.Equal(t, apichat.MessageKindText, minimal.Kind)
+	require.Equal(t, "hi", minimal.Body)
+	require.Nil(t, minimal.ReplyToId)
+	require.Nil(t, minimal.Priority)
+	require.Equal(t, int64(0), minimal.PriorityOrDefault())
 
-	var decoded apichat.Room
-	require.NoError(t, json.Unmarshal(encoded, &decoded))
-	require.Equal(t, "room-1", decoded.RoomId)
-	require.NotNil(t, decoded.Topic)
-	require.Equal(t, "general", *decoded.Topic)
-	require.Equal(t, json.RawMessage(`{"kept":true}`), decoded.AdditionalProperties["extra"])
+	// message-full carries replyToId: null (optional+nullable) — deserialization only.
+	full := decodeFixture[apichat.Message](t, dc, "chat", "message-full.json")
+	require.Nil(t, full.ReplyToId)
+	require.NotNil(t, full.Priority)
+	require.Equal(t, int64(7), *full.Priority)
 
-	decoded.Topic = nil
-	encoded, err = json.Marshal(decoded)
-	require.NoError(t, err)
-	require.Contains(t, string(encoded), `"topic":null`)
+	room := roundTripJSONEq[apichat.Room](t, dc, "chat", "room-open.json")
+	require.Equal(t, "r1", room.RoomId)
+	require.Nil(t, room.Topic)
+	require.Equal(t, []string{"a"}, room.Members)
+	require.Contains(t, room.AdditionalProperties, "x-extra")
 
-	messageBytes := []byte(`{"kind":"text","body":"hello","priority":2}`)
-	var message apichat.Message
-	require.NoError(t, json.Unmarshal(messageBytes, &message))
-	require.Equal(t, int64(2), message.PriorityOrDefault())
+	labels := roundTripJSONEq[apichat.Labels](t, dc, "chat", "labels.json")
+	require.Equal(t, "prod", labels.AdditionalProperties["env"])
+	require.Equal(t, "core", labels.AdditionalProperties["team"])
 
-	err = json.Unmarshal([]byte(`{"kind":"image","body":"nope"}`), &message)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "kind")
-	require.Contains(t, err.Error(), "const: must equal")
+	input := roundTripJSONEq[apichat.SendMessageInput](t, dc, "chat", "send-message-input.json")
+	require.Equal(t, "r1", input.RoomId)
+	require.Equal(t, "hi", input.Message.Body)
+
+	output := roundTripJSONEq[apichat.SendMessageOutput](t, dc, "chat", "send-message-output.json")
+	require.Equal(t, "m1", output.MessageId)
 
 	require.Equal(t, "example.chat.v1.ChatService", apichat.ChatService.ServiceName)
 	require.Equal(t, "SendMessage", apichat.ChatService.SendMessage.Name())

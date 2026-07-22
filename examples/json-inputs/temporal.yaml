@@ -1,0 +1,71 @@
+# A pure JSON Schema input exercising the four MATERIALIZED temporal `format`s
+# (date-time / date / time / duration) across required, optional, and nullable
+# members. Each format becomes an idiomatic language-native typed field (Go
+# time.Time / time.Duration, Java OffsetDateTime / LocalDate / OffsetTime /
+# Duration, Python datetime / date / time / timedelta, and — per
+# `--js-temporal-repr` — a TS string / Date / Temporal type). The wire is
+# produced by the generator-owned serializer (RFC 3339, original offset
+# preserved, `+00:00`/`-00:00` → `Z`, trailing fractional zeros trimmed;
+# duration canonicalized to time-only `PT…H…M…S`). See
+# json-schema/features/format.md (Materialization).
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Temporal
+description: >-
+  Root object materializing the four RFC 3339 temporal formats as native typed
+  fields: date-time (offset & sub-second precision preserved), date, time
+  (offset preserved when present), and duration (time-only, canonicalized).
+  Covers required, optional, and nullable members of each.
+type: object
+additionalProperties: false
+required: [createdAt, birthday, alarm, timeout]
+properties:
+  createdAt:
+    description: >-
+      Required event timestamp; materialized date-time (offset required,
+      sub-second precision & offset preserved on round-trip).
+    type: string
+    format: date-time
+  birthday:
+    description: Required calendar date; materialized date (YYYY-MM-DD, lossless).
+    type: string
+    format: date
+  alarm:
+    description: >-
+      Required wall-clock time; materialized time (offset preserved when
+      present, otherwise offset-less).
+    type: string
+    format: time
+  timeout:
+    description: >-
+      Required time-only duration; materialized duration, canonicalized to
+      PT…H…M…S (e.g. PT90M → PT1H30M).
+    type: string
+    format: duration
+  updatedAt:
+    description: Optional date-time.
+    type: string
+    format: date-time
+  expiresOn:
+    description: Optional date.
+    type: string
+    format: date
+  reminder:
+    description: Optional time.
+    type: string
+    format: time
+  retryDelay:
+    description: Optional duration.
+    type: string
+    format: duration
+  deletedAt:
+    description: Optional and nullable date-time (may be absent or explicitly null).
+    oneOf:
+      - type: string
+        format: date-time
+      - type: "null"
+  archivedOn:
+    description: Optional and nullable date.
+    oneOf:
+      - type: string
+        format: date
+      - type: "null"

@@ -6,7 +6,7 @@ import typing
 import pydantic
 import pydantic_core
 
-from ._json import (
+from .definitions import (
     SpecInt,
     emit_set_fields,
     reject_explicit_null,
@@ -35,8 +35,6 @@ class Labels(pydantic.BaseModel):
         strict=True, populate_by_name=True, extra="allow"
     )
 
-    _MAX_PROPERTIES: typing.ClassVar[int] = 50
-
     @pydantic.model_validator(mode="after")
     def _validate_extras(self) -> typing.Any:
         extra = typing.cast(dict[str, object], self.model_extra or {})
@@ -52,14 +50,14 @@ class Labels(pydantic.BaseModel):
                         input=value,
                     )
                 )
-        if len(extra) > self._MAX_PROPERTIES:
+        if len(extra) > 50:
             errors.append(
                 pydantic_core.InitErrorDetails(
                     type=pydantic_core.PydanticCustomError(
                         "too_many_properties",
                         typing.cast(
                             typing.Any,
-                            f"at most {self._MAX_PROPERTIES} properties allowed",
+                            f"must have at most 50 properties, got {len(extra)}",
                         ),
                     ),
                     loc=(),

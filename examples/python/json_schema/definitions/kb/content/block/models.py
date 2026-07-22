@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 import pydantic
 
-from ..._json import (
+from ...definitions import (
     SpecInt,
     emit_set_fields,
     reject_explicit_null,
@@ -21,7 +21,7 @@ class BlockStyle(pydantic.BaseModel):
 
     bold: bool | None = pydantic.Field(default=None)
 
-    indent: SpecInt | None = pydantic.Field(default=None)
+    indent: SpecInt | None = pydantic.Field(default=None, ge=0)
 
     _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
         {"bold", "indent"}

@@ -15,7 +15,8 @@
     "@temporalio/worker": "^1.16.2",
     "@temporalio/workflow": "^1.16.2",
     "long": "5.2.3",
-    "nexus-rpc": "^0.0.2"
+    "nexus-rpc": "^0.0.2",
+    "@js-temporal/polyfill": "^0.5.1"
   },
   "devDependencies": {
     "prettier": "^3.8.3",

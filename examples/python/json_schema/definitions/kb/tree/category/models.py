@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 import pydantic
 
-from ..._json import (
+from ...definitions import (
     emit_set_fields,
     reject_explicit_null,
 )

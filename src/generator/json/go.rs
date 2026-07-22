@@ -15,13 +15,15 @@ use crate::generator::go::{
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, OperationSpec, RecordSpec, TypeSpec};
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 struct Schema {
     #[serde(rename = "$ref")]
     reference: Option<String>,
     #[serde(rename = "type")]
     ty: Option<Value>,
+    title: Option<String>,
     description: Option<String>,
+    deprecated: Option<bool>,
     properties: Option<IndexMap<String, Schema>>,
     required: Option<Vec<String>>,
     #[serde(rename = "additionalProperties")]
@@ -34,6 +36,629 @@ struct Schema {
     const_value: Option<Value>,
     #[serde(rename = "maxProperties")]
     max_properties: Option<usize>,
+    #[serde(rename = "minProperties")]
+    min_properties: Option<usize>,
+    #[serde(rename = "propertyNames")]
+    property_names: Option<Box<Schema>>,
+    #[serde(rename = "dependentRequired")]
+    dependent_required: Option<IndexMap<String, Vec<String>>>,
+    minimum: Option<serde_json::Number>,
+    maximum: Option<serde_json::Number>,
+    #[serde(rename = "exclusiveMinimum")]
+    exclusive_minimum: Option<serde_json::Number>,
+    #[serde(rename = "exclusiveMaximum")]
+    exclusive_maximum: Option<serde_json::Number>,
+    #[serde(rename = "multipleOf")]
+    multiple_of: Option<serde_json::Number>,
+    #[serde(rename = "minLength")]
+    min_length: Option<u64>,
+    #[serde(rename = "maxLength")]
+    max_length: Option<u64>,
+    pattern: Option<String>,
+    format: Option<String>,
+    #[serde(rename = "contentEncoding")]
+    content_encoding: Option<String>,
+    #[serde(rename = "minItems")]
+    min_items: Option<u64>,
+    #[serde(rename = "maxItems")]
+    max_items: Option<u64>,
+    #[serde(rename = "uniqueItems")]
+    unique_items: Option<bool>,
+    contains: Option<Box<Schema>>,
+    #[serde(rename = "minContains")]
+    min_contains: Option<u64>,
+    #[serde(rename = "maxContains")]
+    max_contains: Option<u64>,
+    #[serde(rename = "enum")]
+    enum_values: Option<Vec<Value>>,
+    #[serde(rename = "x-go-name")]
+    x_go_name: Option<String>,
+}
+
+impl Schema {
+    /// The emitted Go field identifier for a property: the `x-go-name` override
+    /// if present (used verbatim), otherwise the PascalCased JSON name. The wire
+    /// name is unaffected (the `json:"<name>"` tag pins it). See
+    /// json-schema/features/properties.md.
+    fn go_member_name(&self, json_name: &str) -> String {
+        self.x_go_name
+            .clone()
+            .unwrap_or_else(|| go_field_name(json_name))
+    }
+
+    fn has_numeric_constraints(&self) -> bool {
+        self.minimum.is_some()
+            || self.maximum.is_some()
+            || self.exclusive_minimum.is_some()
+            || self.exclusive_maximum.is_some()
+            || self.multiple_of.is_some()
+    }
+
+    fn has_string_constraints(&self) -> bool {
+        self.min_length.is_some()
+            || self.max_length.is_some()
+            || self.pattern.is_some()
+            || self.format.is_some()
+    }
+
+    fn has_array_constraints(&self) -> bool {
+        self.min_items.is_some()
+            || self.max_items.is_some()
+            || self.unique_items == Some(true)
+            || self.contains.is_some()
+    }
+}
+
+/// Formats a numeric-bound literal for the given field kind. Integer-field
+/// bounds are integer-valued (loader-enforced), so they render without a
+/// fractional suffix; number-field bounds render as-is.
+fn go_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
+    if is_integer {
+        if let Some(value) = number.as_f64() {
+            return (value.trunc() as i64).to_string();
+        }
+    }
+    number.to_string()
+}
+
+/// Emits the numeric-constraint predicates (`minimum`/`maximum`/`exclusive*`/
+/// `multipleOf`) over `value_expr` (an `int64` or `float64` already in scope),
+/// appending Violations to `errs`. Shared by the parse (`UnmarshalJSON`) and
+/// serialize (`Validate`) paths per P12.
+fn render_go_numeric_checks(
+    output: &mut String,
+    value_expr: &str,
+    json_name: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    let is_integer = schema.ty.as_ref().and_then(Value::as_str) == Some("integer");
+    let path = go_string_literal(json_name);
+    let mut emit = |condition: String, reason: String| {
+        output.push_str(indent);
+        output.push_str("if ");
+        output.push_str(&condition);
+        output.push_str(" {\n");
+        output.push_str(indent);
+        output.push_str("\terrs = append(errs, Violation{");
+        output.push_str(&path);
+        output.push_str(", fmt.Sprintf(");
+        output.push_str(&go_string_literal(&reason));
+        output.push_str(", ");
+        output.push_str(value_expr);
+        output.push_str(")})\n");
+        output.push_str(indent);
+        output.push_str("}\n");
+    };
+    if let Some(min) = &schema.minimum {
+        let bound = go_bound_literal(min, is_integer);
+        emit(
+            format!("{value_expr} < {bound}"),
+            format!("must be >= {bound}, got %v"),
+        );
+    }
+    if let Some(max) = &schema.maximum {
+        let bound = go_bound_literal(max, is_integer);
+        emit(
+            format!("{value_expr} > {bound}"),
+            format!("must be <= {bound}, got %v"),
+        );
+    }
+    if let Some(min) = &schema.exclusive_minimum {
+        let bound = go_bound_literal(min, is_integer);
+        emit(
+            format!("{value_expr} <= {bound}"),
+            format!("must be > {bound}, got %v"),
+        );
+    }
+    if let Some(max) = &schema.exclusive_maximum {
+        let bound = go_bound_literal(max, is_integer);
+        emit(
+            format!("{value_expr} >= {bound}"),
+            format!("must be < {bound}, got %v"),
+        );
+    }
+    if let Some(divisor) = &schema.multiple_of {
+        let bound = go_bound_literal(divisor, is_integer);
+        let condition = if is_integer {
+            format!("{value_expr}%{bound} != 0")
+        } else {
+            format!("math.Mod({value_expr}, {bound}) != 0")
+        };
+        emit(condition, format!("must be a multiple of {bound}, got %v"));
+    }
+}
+
+/// Emits the string-length predicates (`minLength`/`maxLength`) over
+/// `value_expr` (a `string` already in scope), appending Violations to `errs`.
+/// Length is the Unicode code-point count via `utf8.RuneCountInString` (never
+/// `len`, which is the UTF-8 byte count) — see `json-schema/features/maxLength.md`.
+/// Shared by the parse (`UnmarshalJSON`) and serialize (`Validate`) paths per P12.
+fn render_go_string_checks(
+    output: &mut String,
+    value_expr: &str,
+    json_name: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    let path = go_string_literal(json_name);
+    let mut emit = |condition: &str, reason: String| {
+        output.push_str(indent);
+        output.push_str("if n := utf8.RuneCountInString(");
+        output.push_str(value_expr);
+        output.push_str("); ");
+        output.push_str(condition);
+        output.push_str(" {\n");
+        output.push_str(indent);
+        output.push_str("\terrs = append(errs, Violation{");
+        output.push_str(&path);
+        output.push_str(", fmt.Sprintf(");
+        output.push_str(&go_string_literal(&reason));
+        output.push_str(", n)})\n");
+        output.push_str(indent);
+        output.push_str("}\n");
+    };
+    if let Some(min) = schema.min_length {
+        emit(
+            &format!("n < {min}"),
+            format!("must have length >= {min}, got %d"),
+        );
+    }
+    if let Some(max) = schema.max_length {
+        emit(
+            &format!("n > {max}"),
+            format!("must have length <= {max}, got %d"),
+        );
+    }
+}
+
+/// The package-level compiled-regex var name for a `pattern` on `json_name` of
+/// `model_name` — unique per (model, field) so the pattern compiles once at
+/// package init (the load-time gate already proved it compiles). See
+/// `json-schema/features/pattern.md`.
+fn go_pattern_var_name(model_name: &str, json_name: &str) -> String {
+    format!("{model_name}{}Pattern", go_field_name(json_name))
+}
+
+/// Emits the package-level `var <Model><Field>Pattern = regexp.MustCompile(...)`
+/// declarations for every string field of `schema` carrying a `pattern`. The
+/// pattern is the loader-normalized form (`\s`/`\S` already the explicit ASCII
+/// class); Go keeps `$` (RE2 end-anchor is already exception-free).
+fn render_go_pattern_vars(output: &mut String, model: &PlannedJsonType, schema: &Schema) {
+    let Some(properties) = &schema.properties else {
+        return;
+    };
+    for (json_name, property) in properties {
+        if property.ty.as_ref().and_then(Value::as_str) != Some("string") {
+            continue;
+        }
+        if let Some(pattern) = &property.pattern {
+            output.push_str("var ");
+            output.push_str(&go_pattern_var_name(&model.model_name, json_name));
+            output.push_str(" = regexp.MustCompile(");
+            output.push_str(&go_string_literal(pattern));
+            output.push_str(")\n");
+        }
+        if let Some(format) = &property.format
+            && let Some(check) = crate::format::check_for(format)
+        {
+            // Go keeps the `$` end-anchor (RE2 is exception-free); the pinned
+            // regex compiles once at package init.
+            output.push_str("var ");
+            output.push_str(&go_format_var_name(&model.model_name, json_name));
+            output.push_str(" = regexp.MustCompile(");
+            output.push_str(&go_string_literal(&check.pattern));
+            output.push_str(")\n");
+        }
+        if let Some(encoding) = content_encoding_kind(property) {
+            output.push_str("var ");
+            output.push_str(&go_content_encoding_var_name(&model.model_name, json_name));
+            output.push_str(" = regexp.MustCompile(");
+            output.push_str(&go_string_literal(encoding.pattern()));
+            output.push_str(")\n");
+        }
+    }
+}
+
+/// The package-level compiled-regex var name for a `contentEncoding` on
+/// `json_name` of `model_name`. See `json-schema/features/contentEncoding.md`.
+fn go_content_encoding_var_name(model_name: &str, json_name: &str) -> String {
+    format!("{model_name}{}ContentEncoding", go_field_name(json_name))
+}
+
+/// The package-level compiled-regex var name for a `format` on `json_name` of
+/// `model_name`. See `json-schema/features/format.md`.
+fn go_format_var_name(model_name: &str, json_name: &str) -> String {
+    format!("{model_name}{}Format", go_field_name(json_name))
+}
+
+/// Emits the `format` predicate over `value_expr` (a `string` in scope): the
+/// length guard (if any) short-circuits **before** the pinned regex, so a single
+/// combined condition pushes one Violation naming the format + value. Shared by
+/// the parse (`UnmarshalJSON`) and serialize (`Validate`) paths per P12. See
+/// `json-schema/features/format.md`.
+fn render_go_format_check(
+    output: &mut String,
+    value_expr: &str,
+    json_name: &str,
+    var_name: &str,
+    format: &str,
+    indent: &str,
+) {
+    let Some(check) = crate::format::check_for(format) else {
+        return;
+    };
+    output.push_str(indent);
+    output.push_str("if ");
+    if let Some(max) = check.max_code_points {
+        output.push_str(&format!(
+            "utf8.RuneCountInString({value_expr}) > {max} || "
+        ));
+    }
+    output.push_str("!");
+    output.push_str(var_name);
+    output.push_str(".MatchString(");
+    output.push_str(value_expr);
+    output.push_str(") {\n");
+    output.push_str(indent);
+    output.push_str("\terrs = append(errs, Violation{");
+    output.push_str(&go_string_literal(json_name));
+    output.push_str(", fmt.Sprintf(");
+    output.push_str(&go_string_literal(&format!(
+        "must be a valid {}, got %q",
+        check.name
+    )));
+    output.push_str(", ");
+    output.push_str(value_expr);
+    output.push_str(")})\n");
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
+/// Emits the `pattern` predicate over `value_expr` (a `string` in scope):
+/// `if !<var>.MatchString(v) { push Violation }`. `MatchString` is unanchored
+/// (RE2), ASCII-class, code-point `.`. Shared by the parse (`UnmarshalJSON`) and
+/// serialize (`Validate`) paths per P12. See `json-schema/features/pattern.md`.
+fn render_go_pattern_check(
+    output: &mut String,
+    value_expr: &str,
+    json_name: &str,
+    var_name: &str,
+    pattern: &str,
+    indent: &str,
+) {
+    output.push_str(indent);
+    output.push_str("if !");
+    output.push_str(var_name);
+    output.push_str(".MatchString(");
+    output.push_str(value_expr);
+    output.push_str(") {\n");
+    output.push_str(indent);
+    output.push_str("\terrs = append(errs, Violation{");
+    output.push_str(&go_string_literal(json_name));
+    output.push_str(", fmt.Sprintf(");
+    output.push_str(&go_string_literal("must match pattern %q, got %q"));
+    output.push_str(", ");
+    output.push_str(&go_string_literal(pattern));
+    output.push_str(", ");
+    output.push_str(value_expr);
+    output.push_str(")})\n");
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
+/// Renders a Go literal for a scalar matcher value in the element's static type
+/// (`int64`/`float64`/`string`/`bool`).
+fn go_scalar_literal(value: &Value, element_ty: Option<&str>) -> String {
+    match value {
+        Value::String(text) => go_string_literal(text),
+        Value::Bool(boolean) => boolean.to_string(),
+        Value::Number(number) => match element_ty {
+            Some("integer") => go_bound_literal(number, true),
+            _ => number.to_string(),
+        },
+        _ => "nil".to_string(),
+    }
+}
+
+/// Builds the boolean Go sub-conditions that define "match" for a scalar
+/// `contains` matcher over `elem` (an element of the array, already of the
+/// element's static type). A type-only matcher matches every element, so an
+/// empty condition set renders as the literal `true`.
+fn go_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) -> String {
+    let is_integer = element_ty == Some("integer");
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(value) = &matcher.const_value {
+        parts.push(format!("{elem} == {}", go_scalar_literal(value, element_ty)));
+    }
+    if let Some(values) = &matcher.enum_values {
+        let alternatives = values
+            .iter()
+            .map(|value| format!("{elem} == {}", go_scalar_literal(value, element_ty)))
+            .collect::<Vec<_>>()
+            .join(" || ");
+        if !alternatives.is_empty() {
+            parts.push(format!("({alternatives})"));
+        }
+    }
+    if let Some(min) = &matcher.minimum {
+        parts.push(format!("{elem} >= {}", go_bound_literal(min, is_integer)));
+    }
+    if let Some(max) = &matcher.maximum {
+        parts.push(format!("{elem} <= {}", go_bound_literal(max, is_integer)));
+    }
+    if let Some(min) = &matcher.exclusive_minimum {
+        parts.push(format!("{elem} > {}", go_bound_literal(min, is_integer)));
+    }
+    if let Some(max) = &matcher.exclusive_maximum {
+        parts.push(format!("{elem} < {}", go_bound_literal(max, is_integer)));
+    }
+    if let Some(divisor) = &matcher.multiple_of {
+        let bound = go_bound_literal(divisor, is_integer);
+        if is_integer {
+            parts.push(format!("{elem}%{bound} == 0"));
+        } else {
+            parts.push(format!("math.Mod({elem}, {bound}) == 0"));
+        }
+    }
+    if let Some(min) = matcher.min_length {
+        parts.push(format!("utf8.RuneCountInString({elem}) >= {min}"));
+    }
+    if let Some(max) = matcher.max_length {
+        parts.push(format!("utf8.RuneCountInString({elem}) <= {max}"));
+    }
+    if parts.is_empty() {
+        "true".to_string()
+    } else {
+        parts.join(" && ")
+    }
+}
+
+/// Emits the array-constraint predicates (`minItems`/`maxItems`/`uniqueItems`/
+/// `contains`/`minContains`/`maxContains`) over `slice_expr` (a `[]T` already in
+/// scope), appending Violations to `errs`. Shared by the parse (`UnmarshalJSON`)
+/// and serialize (`Validate`) paths per P12.
+fn render_go_array_checks(
+    output: &mut String,
+    slice_expr: &str,
+    json_name: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    let path = go_string_literal(json_name);
+    let element_ty = schema
+        .items
+        .as_ref()
+        .and_then(|item| item.ty.as_ref())
+        .and_then(Value::as_str);
+    if let Some(min) = schema.min_items {
+        output.push_str(indent);
+        output.push_str(&format!("if n := len({slice_expr}); n < {min} {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "\terrs = append(errs, Violation{{{path}, fmt.Sprintf(\"must have at least {min} items, got %d\", n)}})\n"
+        ));
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+    if let Some(max) = schema.max_items {
+        output.push_str(indent);
+        output.push_str(&format!("if n := len({slice_expr}); n > {max} {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "\terrs = append(errs, Violation{{{path}, fmt.Sprintf(\"must have at most {max} items, got %d\", n)}})\n"
+        ));
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+    if schema.unique_items == Some(true) {
+        let key_ty = match element_ty {
+            Some("integer") => "int64",
+            Some("number") => "float64",
+            Some("boolean") => "bool",
+            _ => "string",
+        };
+        output.push_str(indent);
+        output.push_str(&format!(
+            "{{\n{indent}\tseen := make(map[{key_ty}]int, len({slice_expr}))\n"
+        ));
+        output.push_str(indent);
+        output.push_str(&format!("\tfor i, e := range {slice_expr} {{\n"));
+        output.push_str(indent);
+        output.push_str("\t\tif j, ok := seen[e]; ok {\n");
+        output.push_str(indent);
+        output.push_str(&format!(
+            "\t\t\terrs = append(errs, Violation{{{path}, fmt.Sprintf(\"duplicate items: element at index %d equals index %d\", i, j)}})\n"
+        ));
+        output.push_str(indent);
+        output.push_str("\t\t} else {\n");
+        output.push_str(indent);
+        output.push_str("\t\t\tseen[e] = i\n");
+        output.push_str(indent);
+        output.push_str("\t\t}\n");
+        output.push_str(indent);
+        output.push_str("\t}\n");
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+    if let Some(matcher) = &schema.contains {
+        let condition = go_matcher_condition(matcher, "e", element_ty);
+        let effective_min = schema.min_contains.unwrap_or(1);
+        output.push_str(indent);
+        output.push_str("{\n");
+        output.push_str(indent);
+        output.push_str("\tmatchCount := 0\n");
+        output.push_str(indent);
+        output.push_str(&format!("\tfor _, e := range {slice_expr} {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!("\t\tif {condition} {{\n"));
+        output.push_str(indent);
+        output.push_str("\t\t\tmatchCount++\n");
+        output.push_str(indent);
+        output.push_str("\t\t}\n");
+        output.push_str(indent);
+        output.push_str("\t}\n");
+        if effective_min > 0 {
+            output.push_str(indent);
+            output.push_str(&format!("\tif matchCount < {effective_min} {{\n"));
+            output.push_str(indent);
+            if schema.min_contains.is_some() {
+                output.push_str(&format!(
+                    "\t\terrs = append(errs, Violation{{{path}, fmt.Sprintf(\"too few matching items: at least {effective_min}, got %d\", matchCount)}})\n"
+                ));
+            } else {
+                output.push_str(&format!(
+                    "\t\terrs = append(errs, Violation{{{path}, \"no element matches the required schema\"}})\n"
+                ));
+            }
+            output.push_str(indent);
+            output.push_str("\t}\n");
+        }
+        if let Some(max) = schema.max_contains {
+            output.push_str(indent);
+            output.push_str(&format!("\tif matchCount > {max} {{\n"));
+            output.push_str(indent);
+            output.push_str(&format!(
+                "\t\terrs = append(errs, Violation{{{path}, fmt.Sprintf(\"too many matching items: at most {max}, got %d\", matchCount)}})\n"
+            ));
+            output.push_str(indent);
+            output.push_str("\t}\n");
+        }
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+}
+
+/// Emits the object member-count predicates (`minProperties`/`maxProperties`)
+/// over `count_expr` (an `int` giving the number of distinct wire member keys —
+/// one number over the whole object, never a per-bucket sum), appending
+/// Violations to `errs`. Shared by the deserialize (`UnmarshalJSON`, counting
+/// wire keys) and serialize (`MarshalJSON`, counting to-be-emitted keys) paths
+/// per P12. See `json-schema/features/minProperties.md`.
+fn render_go_property_count_checks(
+    output: &mut String,
+    count_expr: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    if let Some(min) = schema.min_properties {
+        output.push_str(indent);
+        output.push_str(&format!("if n := {count_expr}; n < {min} {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "\terrs = append(errs, Violation{{\"\", fmt.Sprintf(\"must have at least {min} properties, got %d\", n)}})\n"
+        ));
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+    if let Some(max) = schema.max_properties {
+        output.push_str(indent);
+        output.push_str(&format!("if n := {count_expr}; n > {max} {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "\terrs = append(errs, Violation{{\"\", fmt.Sprintf(\"must have at most {max} properties, got %d\", n)}})\n"
+        ));
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+}
+
+/// Emits the `propertyNames` key-shape predicate over the keys of `map_expr`,
+/// applying the (string-length) key subschema to each key `k` and pushing a
+/// `Violation{k, "invalid property name \"k\": <why>"}` per bad key. Reuses the
+/// string-length assertions applied to keys instead of values. See
+/// `json-schema/features/propertyNames.md`.
+fn render_go_property_name_checks(
+    output: &mut String,
+    map_expr: &str,
+    subschema: &Schema,
+    indent: &str,
+) {
+    if subschema.min_length.is_none() && subschema.max_length.is_none() {
+        return;
+    }
+    output.push_str(indent);
+    output.push_str(&format!("for k := range {map_expr} {{\n"));
+    let inner = format!("{indent}\t");
+    let mut emit = |condition: &str, reason: &str| {
+        output.push_str(&inner);
+        output.push_str(&format!("if n := utf8.RuneCountInString(k); {condition} {{\n"));
+        output.push_str(&inner);
+        output.push_str(&format!(
+            "\terrs = append(errs, Violation{{k, fmt.Sprintf({}, k, n)}})\n",
+            go_string_literal(&format!("invalid property name %q: {reason}"))
+        ));
+        output.push_str(&inner);
+        output.push_str("}\n");
+    };
+    if let Some(min) = subschema.min_length {
+        emit(&format!("n < {min}"), &format!("must have length >= {min}, got %d"));
+    }
+    if let Some(max) = subschema.max_length {
+        emit(&format!("n > {max}"), &format!("must have length <= {max}, got %d"));
+    }
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
+/// Emits the `dependentRequired` cross-field presence predicate over the
+/// presence set `map_expr` (`all` on the wire deserialize path, `out` on the
+/// serialize path): for each present trigger key, each dependent key must also
+/// be present. See `json-schema/features/dependentRequired.md`.
+fn render_go_dependent_required(
+    output: &mut String,
+    map_expr: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    let Some(dependent_required) = &schema.dependent_required else {
+        return;
+    };
+    for (trigger, deps) in dependent_required {
+        output.push_str(indent);
+        output.push_str(&format!(
+            "if _, ok := {map_expr}[{}]; ok {{\n",
+            go_string_literal(trigger)
+        ));
+        for dep in deps {
+            output.push_str(indent);
+            output.push_str(&format!(
+                "\tif _, ok := {map_expr}[{}]; !ok {{\n",
+                go_string_literal(dep)
+            ));
+            output.push_str(indent);
+            let reason = format!("property {dep:?} is required when {trigger:?} is present");
+            output.push_str(&format!(
+                "\t\terrs = append(errs, Violation{{{}, {}}})\n",
+                go_string_literal(dep),
+                go_string_literal(&reason)
+            ));
+            output.push_str(indent);
+            output.push_str("\t}\n");
+        }
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
 }
 
 #[derive(Debug, Default)]
@@ -59,7 +684,7 @@ impl ModelBackend {
         include_service_imports: bool,
     ) -> Self {
         Self {
-            shared_runtime: package.shared_json_import_path().is_some(),
+            shared_runtime: package.has_shared_runtime(),
             package,
             include_service_imports,
             json_models: Vec::new(),
@@ -123,12 +748,6 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
                     );
                 }
             }
-        }
-        if self.shared_runtime
-            && !self.local_json_models.is_empty()
-            && let Some(import_path) = self.package.shared_json_import_path()
-        {
-            self.imports.insert(import_path, "nexgenjson".to_string());
         }
         Ok(())
     }
@@ -427,15 +1046,46 @@ fn render_external_models(
         render_validator_core(&mut output);
     }
     render_const_discriminators(&mut output, models)?;
+    let unions = collect_go_unions(models, model_names)?;
+    if !unions.is_empty() {
+        output.push('\n');
+        render_go_unions(&mut output, &unions);
+    }
+    if models.iter().any(|model| model_uses_temporal(model)) {
+        output.push('\n');
+        render_go_temporal_helpers(&mut output);
+    }
+    if models.iter().any(|model| model_uses_content_encoding(model)) {
+        output.push('\n');
+        render_go_content_encoding_helpers(&mut output);
+    }
     for model in models {
         output.push('\n');
-        render_model(&mut output, model, models, model_names)?;
-    }
-    if shared_runtime {
-        qualify_shared_runtime_references(&mut output);
+        render_model(&mut output, model, models, model_names, &unions)?;
     }
     if output.contains("fmt.") {
         imports.insert("fmt".to_string());
+    }
+    if output.contains("math.") {
+        imports.insert("math".to_string());
+    }
+    if output.contains("utf8.") {
+        imports.insert("unicode/utf8".to_string());
+    }
+    if output.contains("regexp.") {
+        imports.insert("regexp".to_string());
+    }
+    if output.contains("base64.") {
+        imports.insert("encoding/base64".to_string());
+    }
+    if output.contains("time.") {
+        imports.insert("time".to_string());
+    }
+    if output.contains("strconv.") {
+        imports.insert("strconv".to_string());
+    }
+    if output.contains("strings.") {
+        imports.insert("strings".to_string());
     }
     if output.contains("nexus.") {
         imports.insert("github.com/nexus-rpc/sdk-go/nexus".to_string());
@@ -446,10 +1096,17 @@ fn render_external_models(
     })
 }
 
-pub(in crate::generator) fn render_support_file() -> String {
+/// Renders the shared `definitions.go` file: the schema-independent runtime
+/// (`Violation`/`ValidationError`, `parseSpecInteger`, the (de)serialize
+/// helpers) defined once in the models' own package. The identifiers stay
+/// unexported because the generated model files reference them within the same
+/// package.
+pub(in crate::generator) fn render_definitions_file(package_name: &str) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_JSON_HEADER);
-    output.push_str("package nexgenjson\n\n");
+    output.push_str("package ");
+    output.push_str(package_name);
+    output.push_str("\n\n");
     output.push_str("import (\n");
     output.push_str("\t\"bytes\"\n");
     output.push_str("\t\"encoding/json\"\n");
@@ -459,50 +1116,10 @@ pub(in crate::generator) fn render_support_file() -> String {
     output.push_str("\t\"strings\"\n");
     output.push_str(")\n\n");
     render_validator_core(&mut output);
-    export_validator_core(&mut output);
     output
 }
 
 const GENERATED_JSON_HEADER: &str = "// Code generated by nex-gen. DO NOT EDIT.\n";
-
-fn export_validator_core(output: &mut String) {
-    for (from, to) in [
-        ("func addViolations", "func AddViolations"),
-        ("func mergeNested", "func MergeNested"),
-        ("func parseStringField", "func ParseStringField"),
-        ("func parseIntegerField", "func ParseIntegerField"),
-        ("func parseBoolField", "func ParseBoolField"),
-        ("func isNull", "func IsNull"),
-        ("func marshalField", "func MarshalField"),
-        ("addViolations(", "AddViolations("),
-        ("mergeNested(", "MergeNested("),
-        ("parseStringField(", "ParseStringField("),
-        ("parseIntegerField(", "ParseIntegerField("),
-        ("parseBoolField(", "ParseBoolField("),
-        ("isNull(", "IsNull("),
-        ("marshalField(", "MarshalField("),
-    ] {
-        *output = output.replace(from, to);
-    }
-}
-
-fn qualify_shared_runtime_references(output: &mut String) {
-    for (from, to) in [
-        ("[]Violation", "[]nexgenjson.Violation"),
-        ("Violation{", "nexgenjson.Violation{"),
-        ("&ValidationError{", "&nexgenjson.ValidationError{"),
-        ("IntegerCap", "nexgenjson.IntegerCap"),
-        ("addViolations(", "nexgenjson.AddViolations("),
-        ("mergeNested(", "nexgenjson.MergeNested("),
-        ("parseStringField(", "nexgenjson.ParseStringField("),
-        ("parseIntegerField(", "nexgenjson.ParseIntegerField("),
-        ("parseBoolField(", "nexgenjson.ParseBoolField("),
-        ("isNull(", "nexgenjson.IsNull("),
-        ("marshalField(", "nexgenjson.MarshalField("),
-    ] {
-        *output = output.replace(from, to);
-    }
-}
 
 fn render_validator_core(output: &mut String) {
     output.push_str("// Violation is a single constraint failure. Path is the JSON member path\n");
@@ -556,6 +1173,14 @@ fn render_validator_core(output: &mut String) {
     );
     output.push_str("\tif err := dec.Decode(&n); err != nil {\n\t\t*errs = append(*errs, Violation{path, \"expected integer\"})\n\t\treturn 0, false\n\t}\n");
     output.push_str("\tv, err := parseSpecInteger(n)\n\tif err != nil {\n\t\t*errs = append(*errs, Violation{path, err.Error()})\n\t\treturn 0, false\n\t}\n\treturn v, true\n}\n\n");
+    output.push_str("func parseNumberField(raw *json.RawMessage, path string, required, nullable bool, errs *[]Violation) (float64, bool) {\n");
+    output.push_str("\tif raw == nil {\n\t\tif required {\n\t\t\t*errs = append(*errs, Violation{path, \"required\"})\n\t\t}\n\t\treturn 0, false\n\t}\n");
+    output.push_str("\tif isNull(*raw) {\n\t\tif !nullable {\n\t\t\t*errs = append(*errs, Violation{path, \"explicit null not allowed\"})\n\t\t}\n\t\treturn 0, false\n\t}\n");
+    output.push_str(
+        "\tdec := json.NewDecoder(bytes.NewReader(*raw))\n\tdec.UseNumber()\n\tvar n json.Number\n",
+    );
+    output.push_str("\tif err := dec.Decode(&n); err != nil {\n\t\t*errs = append(*errs, Violation{path, \"expected number\"})\n\t\treturn 0, false\n\t}\n");
+    output.push_str("\tf, err := n.Float64()\n\tif err != nil {\n\t\t*errs = append(*errs, Violation{path, \"expected number\"})\n\t\treturn 0, false\n\t}\n\treturn f, true\n}\n\n");
     output.push_str("func parseBoolField(raw *json.RawMessage, path string, required, nullable bool, errs *[]Violation) (bool, bool) {\n");
     output.push_str("\tif raw == nil {\n\t\tif required {\n\t\t\t*errs = append(*errs, Violation{path, \"required\"})\n\t\t}\n\t\treturn false, false\n\t}\n");
     output.push_str("\tif isNull(*raw) {\n\t\tif !nullable {\n\t\t\t*errs = append(*errs, Violation{path, \"explicit null not allowed\"})\n\t\t}\n\t\treturn false, false\n\t}\n");
@@ -564,40 +1189,580 @@ fn render_validator_core(output: &mut String) {
     output.push_str("\tb, err := json.Marshal(v)\n\tif err != nil {\n\t\tmergeNested(errs, key, err)\n\t\treturn\n\t}\n\tout[key] = b\n}\n\n");
 }
 
+/// Renders the closed-value (`const`/`enum`) defined types and their typed value
+/// constants. Each scalar `const`/`enum` field synthesizes a defined type over
+/// the primitive (`type ShowcaseStatus string`) plus one typed constant per
+/// member (`const ShowcaseStatusActive ShowcaseStatus = "active"`). See
+/// `json-schema/features/{const,enum}.md`.
 fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType]) -> Result<()> {
-    let mut constants = Vec::new();
+    struct Declared {
+        type_name: String,
+        underlying: &'static str,
+        consts: Vec<(String, String)>,
+    }
+    let mut declared = Vec::new();
     for model in models {
         let schema = decode_schema(model)?;
         let Some(properties) = &schema.properties else {
             continue;
         };
         for (field_name, property) in properties {
-            let Some(Value::String(value)) = &property.const_value else {
+            if !is_closed_value_schema(property) {
                 continue;
-            };
-            constants.push((
-                const_type_name(&model.model_name, field_name),
-                const_value_name(&model.model_name, field_name, value),
-                value.clone(),
-            ));
+            }
+            let type_name = const_type_name(&model.model_name, field_name);
+            let underlying = go_closed_underlying(property);
+            let consts = closed_values(property)
+                .iter()
+                .map(|value| {
+                    (
+                        go_closed_value_name(&model.model_name, field_name, value),
+                        go_closed_value_literal(value),
+                    )
+                })
+                .collect::<Vec<_>>();
+            declared.push(Declared {
+                type_name,
+                underlying,
+                consts,
+            });
         }
     }
-    if constants.is_empty() {
+    if declared.is_empty() {
         return Ok(());
     }
-    for (type_name, const_name, value) in constants {
+    for decl in declared {
         output.push_str("type ");
-        output.push_str(&type_name);
-        output.push_str(" = string\n\n");
-        output.push_str("const ");
-        output.push_str(&const_name);
-        output.push_str(" = ");
-        output.push_str(&type_name);
-        output.push('(');
-        output.push_str(&go_string_literal(&value));
-        output.push_str(")\n\n");
+        output.push_str(&decl.type_name);
+        output.push(' ');
+        output.push_str(decl.underlying);
+        output.push_str("\n\n");
+        if decl.consts.len() == 1 {
+            let (name, literal) = &decl.consts[0];
+            output.push_str("const ");
+            output.push_str(name);
+            output.push(' ');
+            output.push_str(&decl.type_name);
+            output.push_str(" = ");
+            output.push_str(literal);
+            output.push_str("\n\n");
+        } else {
+            output.push_str("const (\n");
+            for (name, literal) in &decl.consts {
+                output.push('\t');
+                output.push_str(name);
+                output.push(' ');
+                output.push_str(&decl.type_name);
+                output.push_str(" = ");
+                output.push_str(literal);
+                output.push('\n');
+            }
+            output.push_str(")\n\n");
+        }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// `oneOf` closed sum types (json-schema/features/oneOf.md)
+// ---------------------------------------------------------------------------
+
+/// A single member of a Go union (sealed interface).
+#[derive(Debug, Clone)]
+struct GoUnionVariant {
+    /// The concrete Go type used as the interface member (`Circle`,
+    /// `ShowcaseIdOrNameString`, …).
+    go_type: String,
+    /// A synthesized wrapper type this union owns and must declare (a scalar or
+    /// array branch), with its underlying Go type. `None` for a `$ref` object
+    /// branch, whose named type already exists and just gains a marker method.
+    synthesized: Option<String>,
+    /// The leading wire-token bytes that select this branch (`"{"`, `"\""`,
+    /// digits, …).
+    tokens: Vec<char>,
+    /// A human label for the "expected …" reason (`string`, `Circle`, …).
+    label: String,
+    /// For an object branch of a tagged union: its discriminant `const` value.
+    discriminant_value: Option<Value>,
+    /// The branch schema (resolved for a `$ref`), for wrapper `Validate`.
+    schema: Schema,
+    /// True when the concrete type has its own `Validate`/`UnmarshalJSON` (an
+    /// object branch); false for a synthesized scalar/array wrapper.
+    is_object: bool,
+}
+
+/// A Go closed sum type emitted as a sealed interface.
+#[derive(Debug, Clone)]
+struct GoUnion {
+    name: String,
+    nullable: bool,
+    discriminant: Option<String>,
+    variants: Vec<GoUnionVariant>,
+}
+
+impl GoUnion {
+    fn marker_method(&self) -> String {
+        format!("is{}", self.name)
+    }
+
+    fn admissible(&self) -> String {
+        self.variants
+            .iter()
+            .map(|variant| variant.label.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// The scalar discriminator `const` of a property (bare `const`, or a
+/// single-member `enum`).
+fn go_discriminator_const(property: &Schema) -> Option<Value> {
+    if let Some(value) = &property.const_value {
+        return Some(value.clone());
+    }
+    if let Some(values) = &property.enum_values
+        && values.len() == 1
+    {
+        return Some(values[0].clone());
+    }
+    None
+}
+
+/// The `{name: const}` discriminator tags an object branch carries (required +
+/// `const`).
+fn go_branch_discriminator_tags(object: &Schema) -> BTreeMap<String, Value> {
+    let required: BTreeSet<String> = object.required.iter().flatten().cloned().collect();
+    let mut tags = BTreeMap::new();
+    if let Some(properties) = &object.properties {
+        for (name, property) in properties {
+            if required.contains(name)
+                && let Some(value) = go_discriminator_const(property)
+            {
+                tags.insert(name.clone(), value);
+            }
+        }
+    }
+    tags
+}
+
+/// Finds the planned model a resolved `$ref` points at (matched by its Go type
+/// name).
+fn find_ref_model<'a>(
+    reference: &str,
+    models: &'a [&PlannedJsonType],
+    model_names: &BTreeMap<String, String>,
+) -> Option<&'a PlannedJsonType> {
+    let target = reference_model_name(reference, model_names);
+    models
+        .iter()
+        .copied()
+        .find(|model| model.model_name == target || model.full_name == target)
+}
+
+/// Classifies a `oneOf` schema into a Go union, or `None` when it is the
+/// degenerate nullability pattern (fewer than two non-null branches) rather than
+/// a sum type. The loader has already proven the sum-type invariants.
+fn classify_go_union(
+    union_name: &str,
+    schema: &Schema,
+    models: &[&PlannedJsonType],
+    model_names: &BTreeMap<String, String>,
+) -> Option<GoUnion> {
+    let branches = schema.one_of.as_ref()?;
+    let mut nullable = false;
+    let mut variants: Vec<GoUnionVariant> = Vec::new();
+    for branch in branches {
+        let resolved = if let Some(reference) = &branch.reference {
+            find_ref_model(reference, models, model_names)
+                .and_then(|model| decode_schema(model).ok())
+                .unwrap_or_else(|| branch.clone())
+        } else {
+            branch.clone()
+        };
+        let ty = resolved.ty.as_ref().and_then(Value::as_str);
+        match ty {
+            Some("null") => {
+                nullable = true;
+            }
+            Some("object") => {
+                let go_type = branch
+                    .reference
+                    .as_ref()
+                    .map(|reference| reference_model_name(reference, model_names))
+                    .unwrap_or_else(|| format!("{union_name}Object"));
+                variants.push(GoUnionVariant {
+                    go_type: go_type.clone(),
+                    synthesized: None,
+                    tokens: vec!['{'],
+                    label: go_type,
+                    discriminant_value: None,
+                    schema: resolved,
+                    is_object: true,
+                });
+            }
+            Some("string") => variants.push(GoUnionVariant {
+                go_type: format!("{union_name}String"),
+                synthesized: Some("string".to_string()),
+                tokens: vec!['"'],
+                label: "string".to_string(),
+                discriminant_value: None,
+                schema: resolved,
+                is_object: false,
+            }),
+            Some("integer") => variants.push(GoUnionVariant {
+                go_type: format!("{union_name}Integer"),
+                synthesized: Some("int64".to_string()),
+                tokens: "-0123456789".chars().collect(),
+                label: "integer".to_string(),
+                discriminant_value: None,
+                schema: resolved,
+                is_object: false,
+            }),
+            Some("number") => variants.push(GoUnionVariant {
+                go_type: format!("{union_name}Number"),
+                synthesized: Some("float64".to_string()),
+                tokens: "-0123456789".chars().collect(),
+                label: "number".to_string(),
+                discriminant_value: None,
+                schema: resolved,
+                is_object: false,
+            }),
+            Some("boolean") => variants.push(GoUnionVariant {
+                go_type: format!("{union_name}Boolean"),
+                synthesized: Some("bool".to_string()),
+                tokens: vec!['t', 'f'],
+                label: "boolean".to_string(),
+                discriminant_value: None,
+                schema: resolved,
+                is_object: false,
+            }),
+            Some("array") => {
+                let item = resolved
+                    .items
+                    .as_ref()
+                    .map(|item| go_type_annotation(item, "", model_names))
+                    .transpose()
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "any".to_string());
+                variants.push(GoUnionVariant {
+                    go_type: format!("{union_name}Array"),
+                    synthesized: Some(format!("[]{item}")),
+                    tokens: vec!['['],
+                    label: format!("[]{item}"),
+                    discriminant_value: None,
+                    schema: resolved,
+                    is_object: false,
+                });
+            }
+            _ => {}
+        }
+    }
+    if variants.len() < 2 {
+        return None;
+    }
+    // Tagged object union: locate the shared required-`const` discriminator and
+    // record each object variant's tag value.
+    let object_count = variants.iter().filter(|variant| variant.is_object).count();
+    let mut discriminant = None;
+    if object_count >= 2 {
+        let object_schemas: Vec<&Schema> = variants
+            .iter()
+            .filter(|variant| variant.is_object)
+            .map(|variant| &variant.schema)
+            .collect();
+        let mut shared: Option<BTreeMap<String, Value>> = None;
+        for object in &object_schemas {
+            let tags = go_branch_discriminator_tags(object);
+            shared = Some(match shared {
+                None => tags,
+                Some(existing) => existing
+                    .into_iter()
+                    .filter(|(name, _)| tags.contains_key(name))
+                    .collect(),
+            });
+        }
+        let shared = shared.unwrap_or_default();
+        let name = shared
+            .keys()
+            .find(|name| {
+                let values: Vec<Value> = object_schemas
+                    .iter()
+                    .filter_map(|object| go_branch_discriminator_tags(object).get(*name).cloned())
+                    .collect();
+                values.iter().enumerate().all(|(index, value)| {
+                    !values[..index].iter().any(|existing| existing == value)
+                })
+            })
+            .cloned();
+        if let Some(name) = &name {
+            for variant in variants.iter_mut().filter(|variant| variant.is_object) {
+                variant.discriminant_value =
+                    go_branch_discriminator_tags(&variant.schema).get(name).cloned();
+            }
+        }
+        discriminant = name;
+    }
+    Some(GoUnion {
+        name: union_name.to_string(),
+        nullable,
+        discriminant,
+        variants,
+    })
+}
+
+/// A Pascal-case suffix for a union field name (`idOrName` → `IdOrName`).
+fn go_union_field_suffix(json_name: &str) -> String {
+    go_field_name(json_name)
+}
+
+/// Collects every union in the model set: named `$def` unions (a top-level
+/// `oneOf`) and inline `oneOf` unions on object properties.
+fn collect_go_unions(
+    models: &[&PlannedJsonType],
+    model_names: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, GoUnion>> {
+    let mut unions = BTreeMap::new();
+    for model in models {
+        let schema = decode_schema(model)?;
+        if schema.one_of.is_some() {
+            if let Some(union) = classify_go_union(&model.model_name, &schema, models, model_names) {
+                unions.insert(union.name.clone(), union);
+            }
+            continue;
+        }
+        if let Some(properties) = &schema.properties {
+            for (json_name, property) in properties {
+                if property.one_of.is_some() {
+                    let name = format!("{}{}", model.model_name, go_union_field_suffix(json_name));
+                    if let Some(union) =
+                        classify_go_union(&name, property, models, model_names)
+                    {
+                        unions.insert(union.name.clone(), union);
+                    }
+                }
+            }
+        }
+    }
+    Ok(unions)
+}
+
+/// The union type name a property carries, if any: an inline `oneOf` union named
+/// `<Model><Field>`, or a `$ref` to a named union model.
+fn property_union_name(
+    model_name: &str,
+    json_name: &str,
+    property: &Schema,
+    unions: &BTreeMap<String, GoUnion>,
+) -> Option<String> {
+    if property.one_of.is_some() {
+        let name = format!("{model_name}{}", go_union_field_suffix(json_name));
+        return unions.contains_key(&name).then_some(name);
+    }
+    if let Some(reference) = &property.reference {
+        let name = reference_model_name(reference, &BTreeMap::new());
+        if unions.contains_key(&name) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+/// Emits every union's sealed interface, marker/`Validate` methods, synthesized
+/// wrapper types, and dispatch function.
+fn render_go_unions(output: &mut String, unions: &BTreeMap<String, GoUnion>) {
+    for union in unions.values() {
+        render_go_doc_comment(output, "", None);
+        output.push_str("type ");
+        output.push_str(&union.name);
+        output.push_str(" interface {\n\t");
+        output.push_str(&union.marker_method());
+        output.push_str("()\n\tValidate() error\n}\n\n");
+
+        for variant in &union.variants {
+            if let Some(underlying) = &variant.synthesized {
+                output.push_str("type ");
+                output.push_str(&variant.go_type);
+                output.push(' ');
+                output.push_str(underlying);
+                output.push_str("\n\n");
+            }
+            // Marker method.
+            output.push_str("func (");
+            output.push_str(&variant.go_type);
+            output.push_str(") ");
+            output.push_str(&union.marker_method());
+            output.push_str("() {}\n\n");
+            // A synthesized wrapper needs its own Validate (an object branch
+            // already has one on its POJO).
+            if variant.synthesized.is_some() {
+                render_go_variant_validate(output, variant);
+            }
+        }
+        render_go_union_dispatch(output, union);
+    }
+}
+
+/// The wrapper `Validate` for a synthesized scalar/array variant: re-runs the
+/// branch's own constraints (P12) before assigning/serializing.
+fn render_go_variant_validate(output: &mut String, variant: &GoUnionVariant) {
+    output.push_str("func (v ");
+    output.push_str(&variant.go_type);
+    output.push_str(") Validate() error {\n\tvar errs []Violation\n");
+    let schema = &variant.schema;
+    let underlying = variant.synthesized.as_deref().unwrap_or("");
+    match underlying {
+        "string" => {
+            if schema.has_string_constraints() {
+                render_go_string_checks(output, "string(v)", "", schema, "\t");
+            }
+        }
+        "int64" | "float64" => {
+            if schema.has_numeric_constraints() {
+                let expr = format!("{underlying}(v)");
+                render_go_numeric_checks(output, &expr, "", schema, "\t");
+            }
+        }
+        _ => {
+            if underlying.starts_with("[]") && schema.has_array_constraints() {
+                render_go_array_checks(output, &format!("{underlying}(v)"), "", schema, "\t");
+            }
+        }
+    }
+    output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+}
+
+/// Emits `unmarshal<Union>`: peeks the wire token (then, for a tagged object
+/// union, the discriminant) and routes to exactly one branch, or records a
+/// Violation naming the admissible members.
+fn render_go_union_dispatch(output: &mut String, union: &GoUnion) {
+    let admissible = union.admissible();
+    output.push_str("func unmarshal");
+    output.push_str(&union.name);
+    output.push_str("(raw json.RawMessage, path string, errs *[]Violation) (");
+    output.push_str(&union.name);
+    output.push_str(", bool) {\n");
+    output.push_str("\ttrimmed := bytes.TrimSpace(raw)\n");
+    output.push_str(&format!(
+        "\tif len(trimmed) == 0 {{\n\t\t*errs = append(*errs, Violation{{path, {}}})\n\t\treturn nil, false\n\t}}\n",
+        go_string_literal(&format!("expected one of: {admissible}"))
+    ));
+    output.push_str("\tswitch trimmed[0] {\n");
+
+    // Object branch(es).
+    let object_variants: Vec<&GoUnionVariant> =
+        union.variants.iter().filter(|variant| variant.is_object).collect();
+    if !object_variants.is_empty() {
+        output.push_str("\tcase '{':\n");
+        if let Some(discriminant) = &union.discriminant {
+            output.push_str("\t\tvar obj map[string]json.RawMessage\n");
+            output.push_str("\t\tif err := json.Unmarshal(trimmed, &obj); err != nil {\n\t\t\t*errs = append(*errs, Violation{path, \"expected object\"})\n\t\t\treturn nil, false\n\t\t}\n");
+            output.push_str(&format!(
+                "\t\tdiscRaw, ok := obj[{}]\n",
+                go_string_literal(discriminant)
+            ));
+            output.push_str(&format!(
+                "\t\tif !ok {{\n\t\t\t*errs = append(*errs, Violation{{path, {}}})\n\t\t\treturn nil, false\n\t\t}}\n",
+                go_string_literal(&format!("discriminator {discriminant:?} is required"))
+            ));
+            output.push_str("\t\tswitch string(bytes.TrimSpace(discRaw)) {\n");
+            let mut values_display = Vec::new();
+            for variant in &object_variants {
+                let Some(value) = &variant.discriminant_value else {
+                    continue;
+                };
+                let literal = serde_json::to_string(value).unwrap_or_default();
+                values_display.push(literal.clone());
+                output.push_str(&format!("\t\tcase {}:\n", go_string_literal(&literal)));
+                output.push_str(&format!("\t\t\tvar v {}\n", variant.go_type));
+                output.push_str("\t\t\tmergeNested(errs, path, json.Unmarshal(trimmed, &v))\n");
+                output.push_str("\t\t\treturn v, true\n");
+            }
+            output.push_str("\t\tdefault:\n");
+            output.push_str(&format!(
+                "\t\t\t*errs = append(*errs, Violation{{path, fmt.Sprintf({}, string(bytes.TrimSpace(discRaw)))}})\n",
+                go_string_literal(&format!(
+                    "unknown discriminator {discriminant} %s: expected one of [{}]",
+                    values_display.join(", ")
+                ))
+            ));
+            output.push_str("\t\t\treturn nil, false\n");
+            output.push_str("\t\t}\n");
+        } else {
+            let variant = object_variants[0];
+            output.push_str(&format!("\t\tvar v {}\n", variant.go_type));
+            output.push_str("\t\tmergeNested(errs, path, json.Unmarshal(trimmed, &v))\n");
+            output.push_str("\t\treturn v, true\n");
+        }
+    }
+
+    // Scalar / array branches.
+    for variant in union.variants.iter().filter(|variant| !variant.is_object) {
+        let cases = variant
+            .tokens
+            .iter()
+            .map(|token| go_rune_literal(*token))
+            .collect::<Vec<_>>()
+            .join(", ");
+        output.push_str(&format!("\tcase {cases}:\n"));
+        render_go_scalar_variant_decode(output, variant);
+    }
+
+    output.push_str("\t}\n");
+    output.push_str(&format!(
+        "\t*errs = append(*errs, Violation{{path, {}}})\n\treturn nil, false\n}}\n\n",
+        go_string_literal(&format!("expected one of: {admissible}"))
+    ));
+}
+
+/// A Go rune literal for a wire-token byte (`'{'`, `'"'`, `'-'`, digits). Only
+/// the single-quote and backslash need escaping; the double-quote is literal in
+/// a rune literal.
+fn go_rune_literal(token: char) -> String {
+    match token {
+        '\'' => "'\\''".to_string(),
+        '\\' => "'\\\\'".to_string(),
+        other => format!("'{other}'"),
+    }
+}
+
+fn render_go_scalar_variant_decode(output: &mut String, variant: &GoUnionVariant) {
+    let underlying = variant.synthesized.as_deref().unwrap_or("");
+    match underlying {
+        "string" => {
+            output.push_str("\t\tvar s string\n");
+            output.push_str("\t\tif err := json.Unmarshal(trimmed, &s); err != nil {\n\t\t\t*errs = append(*errs, Violation{path, \"expected string\"})\n\t\t\treturn nil, false\n\t\t}\n");
+            output.push_str(&format!("\t\tv := {}(s)\n", variant.go_type));
+        }
+        "bool" => {
+            output.push_str("\t\tvar b bool\n");
+            output.push_str("\t\tif err := json.Unmarshal(trimmed, &b); err != nil {\n\t\t\t*errs = append(*errs, Violation{path, \"expected boolean\"})\n\t\t\treturn nil, false\n\t\t}\n");
+            output.push_str(&format!("\t\tv := {}(b)\n", variant.go_type));
+        }
+        "int64" => {
+            output.push_str("\t\tdec := json.NewDecoder(bytes.NewReader(trimmed))\n\t\tdec.UseNumber()\n\t\tvar n json.Number\n");
+            output.push_str("\t\tif err := dec.Decode(&n); err != nil {\n\t\t\t*errs = append(*errs, Violation{path, \"expected integer\"})\n\t\t\treturn nil, false\n\t\t}\n");
+            output.push_str("\t\tiv, err := parseSpecInteger(n)\n\t\tif err != nil {\n\t\t\t*errs = append(*errs, Violation{path, err.Error()})\n\t\t\treturn nil, false\n\t\t}\n");
+            output.push_str(&format!("\t\tv := {}(iv)\n", variant.go_type));
+        }
+        "float64" => {
+            output.push_str("\t\tdec := json.NewDecoder(bytes.NewReader(trimmed))\n\t\tdec.UseNumber()\n\t\tvar n json.Number\n");
+            output.push_str("\t\tif err := dec.Decode(&n); err != nil {\n\t\t\t*errs = append(*errs, Violation{path, \"expected number\"})\n\t\t\treturn nil, false\n\t\t}\n");
+            output.push_str("\t\tfv, err := n.Float64()\n\t\tif err != nil {\n\t\t\t*errs = append(*errs, Violation{path, \"expected number\"})\n\t\t\treturn nil, false\n\t\t}\n");
+            output.push_str(&format!("\t\tv := {}(fv)\n", variant.go_type));
+        }
+        other if other.starts_with("[]") => {
+            output.push_str(&format!("\t\tvar arr {other}\n"));
+            output.push_str("\t\tif err := json.Unmarshal(trimmed, &arr); err != nil {\n\t\t\t*errs = append(*errs, Violation{path, \"expected array\"})\n\t\t\treturn nil, false\n\t\t}\n");
+            output.push_str(&format!("\t\tv := {}(arr)\n", variant.go_type));
+        }
+        _ => {
+            output.push_str("\t\treturn nil, false\n");
+            return;
+        }
+    }
+    output.push_str("\t\tmergeNested(errs, path, v.Validate())\n");
+    output.push_str("\t\treturn v, true\n");
 }
 
 fn render_model(
@@ -605,9 +1770,16 @@ fn render_model(
     model: &PlannedJsonType,
     _models: &[&PlannedJsonType],
     model_names: &BTreeMap<String, String>,
+    unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
     let schema = decode_schema(model)?;
-    render_go_doc_comment(output, "", schema.description.as_deref());
+    // A named `oneOf` union model is emitted as a sealed interface by
+    // `render_go_unions`, not as a struct.
+    if schema.one_of.is_some() && unions.contains_key(&model.model_name) {
+        return Ok(());
+    }
+    render_go_pattern_vars(output, model, &schema);
+    render_go_schema_doc(output, "", &model.model_name, &schema, "type");
     output.push_str("type ");
     output.push_str(&model.model_name);
     output.push_str(" struct {\n");
@@ -624,17 +1796,29 @@ fn render_model(
     let properties = schema.properties.as_ref();
     if let Some(properties) = properties {
         for (json_name, property) in properties {
-            render_go_doc_comment(output, "\t", property.description.as_deref());
-            output.push('\t');
-            output.push_str(&go_field_name(json_name));
-            output.push(' ');
-            output.push_str(&go_property_type(
-                &model.model_name,
-                json_name,
+            render_go_schema_doc(
+                output,
+                "\t",
+                &property.go_member_name(json_name),
                 property,
-                required.contains(json_name),
-                model_names,
-            )?);
+                "field",
+            );
+            output.push('\t');
+            output.push_str(&property.go_member_name(json_name));
+            output.push(' ');
+            if let Some(union_name) =
+                property_union_name(&model.model_name, json_name, property, unions)
+            {
+                output.push_str(&union_name);
+            } else {
+                output.push_str(&go_property_type(
+                    &model.model_name,
+                    json_name,
+                    property,
+                    required.contains(json_name),
+                    model_names,
+                )?);
+            }
             output.push_str(" `json:\"");
             output.push_str(json_name);
             if !required.contains(json_name) {
@@ -651,9 +1835,9 @@ fn render_model(
     }
     output.push_str("}\n\n");
     render_default_accessors(output, model, &schema)?;
-    render_validate(output, model, &schema, model_names)?;
-    render_unmarshal_json(output, model, &schema, model_names)?;
-    render_marshal_json(output, model, &schema)?;
+    render_validate(output, model, &schema, model_names, unions)?;
+    render_unmarshal_json(output, model, &schema, model_names, unions)?;
+    render_marshal_json(output, model, &schema, unions)?;
     Ok(())
 }
 
@@ -669,28 +1853,57 @@ fn render_default_accessors(
         let Some(default) = &property.default else {
             continue;
         };
-        let Value::Number(default) = default else {
+        // Materialize-on-read for every scalar kind (P9/P12): the bare field
+        // stays `*T` (set-ness intact); the accessor returns the pointee when
+        // set and the schema default literal when nil. Modeled on proto3's
+        // `GetX()`. See json-schema/features/default.md.
+        let Some((return_type, literal)) = go_default_type_and_literal(property, default) else {
             continue;
         };
+        let field = property.go_member_name(json_name);
         output.push_str("// ");
-        output.push_str(&go_field_name(json_name));
+        output.push_str(&field);
         output.push_str("OrDefault returns ");
-        output.push_str(&go_field_name(json_name));
+        output.push_str(&field);
         output.push_str(" when set, else the schema default.\n");
         output.push_str("func (m ");
         output.push_str(&model.model_name);
         output.push_str(") ");
-        output.push_str(&go_field_name(json_name));
-        output.push_str("OrDefault() int64 {\n");
-        output.push_str("\tif m.");
-        output.push_str(&go_field_name(json_name));
+        output.push_str(&field);
+        output.push_str("OrDefault() ");
+        output.push_str(&return_type);
+        output.push_str(" {\n\tif m.");
+        output.push_str(&field);
         output.push_str(" != nil {\n\t\treturn *m.");
-        output.push_str(&go_field_name(json_name));
+        output.push_str(&field);
         output.push_str("\n\t}\n\treturn ");
-        output.push_str(&default.to_string());
+        output.push_str(&literal);
         output.push_str("\n}\n\n");
     }
     Ok(())
+}
+
+/// The Go return type and literal for a scalar `default` on `property`. Returns
+/// `None` for a composite default (loader-rejected). The type follows the
+/// declared `type` (loader-enforced scalar-compatible), falling back to the
+/// literal's own kind for a typeless (nullable `oneOf`) member.
+fn go_default_type_and_literal(property: &Schema, default: &Value) -> Option<(String, String)> {
+    let declared = property.ty.as_ref().and_then(Value::as_str);
+    match default {
+        Value::String(text) => Some(("string".to_string(), go_string_literal(text))),
+        Value::Bool(flag) => Some(("bool".to_string(), flag.to_string())),
+        Value::Number(number) => {
+            let is_integer = declared == Some("integer")
+                || (declared.is_none()
+                    && number.as_f64().is_some_and(|value| value.fract() == 0.0));
+            if is_integer {
+                Some(("int64".to_string(), go_bound_literal(number, true)))
+            } else {
+                Some(("float64".to_string(), go_bound_literal(number, false)))
+            }
+        }
+        _ => None,
+    }
 }
 
 fn render_validate(
@@ -698,6 +1911,7 @@ fn render_validate(
     model: &PlannedJsonType,
     schema: &Schema,
     model_names: &BTreeMap<String, String>,
+    unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
     output.push_str("func (m ");
     output.push_str(&model.model_name);
@@ -715,19 +1929,43 @@ fn render_validate(
         let _ = value_schema;
     } else if let Some(properties) = &schema.properties {
         for (json_name, property) in properties {
-            let field = format!("m.{}", go_field_name(json_name));
-            if let Some(Value::String(value)) = &property.const_value {
-                output.push_str("\tif ");
-                output.push_str(&field);
-                output.push_str(" != ");
-                output.push_str(&const_value_name(&model.model_name, json_name, value));
-                output.push_str(" {\n\t\terrs = append(errs, Violation{");
-                output.push_str(&go_string_literal(json_name));
-                output.push_str(", `const: must equal \\\"");
-                output.push_str(value);
-                output.push_str("\\\"`})\n\t}\n");
+            let field = format!("m.{}", property.go_member_name(json_name));
+            if property_union_name(&model.model_name, json_name, property, unions).is_some() {
+                // A union field is a sealed interface; re-run the held branch's
+                // constraints (P12), and enforce presence for a required member.
+                if required_fields(schema).contains(json_name) {
+                    output.push_str("\tif ");
+                    output.push_str(&field);
+                    output.push_str(" == nil {\n\t\terrs = append(errs, Violation{");
+                    output.push_str(&go_string_literal(json_name));
+                    output.push_str(", \"required\"})\n\t} else {\n\t\tmergeNested(&errs, ");
+                    output.push_str(&go_string_literal(json_name));
+                    output.push_str(", ");
+                    output.push_str(&field);
+                    output.push_str(".Validate())\n\t}\n");
+                } else {
+                    output.push_str("\tif ");
+                    output.push_str(&field);
+                    output.push_str(" != nil {\n\t\tmergeNested(&errs, ");
+                    output.push_str(&go_string_literal(json_name));
+                    output.push_str(", ");
+                    output.push_str(&field);
+                    output.push_str(".Validate())\n\t}\n");
+                }
+                continue;
             }
-            if property.ty.as_ref().and_then(Value::as_str) == Some("integer") {
+            if is_closed_value_schema(property) {
+                render_go_closed_validate(
+                    output,
+                    &model.model_name,
+                    json_name,
+                    property,
+                    required_fields(schema).contains(json_name),
+                );
+            }
+            if property.ty.as_ref().and_then(Value::as_str) == Some("integer")
+                && !is_closed_value_schema(property)
+            {
                 let expr = if required_fields(schema).contains(json_name) {
                     field.clone()
                 } else {
@@ -747,6 +1985,90 @@ fn render_validate(
                 output.push_str(" > IntegerCap) {\n\t\terrs = append(errs, Violation{");
                 output.push_str(&go_string_literal(json_name));
                 output.push_str(", \"exceeds ±(2^53-1) integer cap\"})\n\t}\n");
+            }
+            if property.has_numeric_constraints()
+                && matches!(
+                    property.ty.as_ref().and_then(Value::as_str),
+                    Some("integer" | "number")
+                )
+            {
+                let required = required_fields(schema).contains(json_name);
+                if required {
+                    render_go_numeric_checks(output, &field, json_name, property, "\t");
+                } else {
+                    output.push_str("\tif ");
+                    output.push_str(&field);
+                    output.push_str(" != nil {\n");
+                    render_go_numeric_checks(
+                        output,
+                        &format!("*{field}"),
+                        json_name,
+                        property,
+                        "\t\t",
+                    );
+                    output.push_str("\t}\n");
+                }
+            }
+            if property.has_string_constraints()
+                && property.ty.as_ref().and_then(Value::as_str) == Some("string")
+                && temporal_kind(property).is_none()
+            {
+                let var_name = go_pattern_var_name(&model.model_name, json_name);
+                let format_var = go_format_var_name(&model.model_name, json_name);
+                if required_fields(schema).contains(json_name) {
+                    render_go_string_checks(output, &field, json_name, property, "\t");
+                    if let Some(pattern) = &property.pattern {
+                        render_go_pattern_check(output, &field, json_name, &var_name, pattern, "\t");
+                    }
+                    if let Some(format) = &property.format {
+                        render_go_format_check(output, &field, json_name, &format_var, format, "\t");
+                    }
+                } else {
+                    output.push_str("\tif ");
+                    output.push_str(&field);
+                    output.push_str(" != nil {\n");
+                    render_go_string_checks(
+                        output,
+                        &format!("*{field}"),
+                        json_name,
+                        property,
+                        "\t\t",
+                    );
+                    if let Some(pattern) = &property.pattern {
+                        render_go_pattern_check(
+                            output,
+                            &format!("*{field}"),
+                            json_name,
+                            &var_name,
+                            pattern,
+                            "\t\t",
+                        );
+                    }
+                    if let Some(format) = &property.format {
+                        render_go_format_check(
+                            output,
+                            &format!("*{field}"),
+                            json_name,
+                            &format_var,
+                            format,
+                            "\t\t",
+                        );
+                    }
+                    output.push_str("\t}\n");
+                }
+            }
+            if property.has_array_constraints()
+                && property.ty.as_ref().and_then(Value::as_str) == Some("array")
+            {
+                if required_fields(schema).contains(json_name) {
+                    render_go_array_checks(output, &field, json_name, property, "\t");
+                } else {
+                    output.push_str("\tif ");
+                    output.push_str(&field);
+                    output.push_str(" != nil {\n");
+                    render_go_array_checks(output, &field, json_name, property, "\t\t");
+                    output.push_str("\t}\n");
+                }
             }
             if property.reference.is_some() {
                 if required_fields(schema).contains(json_name) {
@@ -777,6 +2099,7 @@ fn render_unmarshal_json(
     model: &PlannedJsonType,
     schema: &Schema,
     model_names: &BTreeMap<String, String>,
+    unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
     output.push_str("func (m *");
     output.push_str(&model.model_name);
@@ -815,6 +2138,19 @@ fn render_unmarshal_json(
     output.push_str("\tget := func(k string) *json.RawMessage {\n\t\tif v, ok := all[k]; ok {\n\t\t\treturn &v\n\t\t}\n\t\treturn nil\n\t}\n\t_ = get\n");
     if let Some(properties) = &schema.properties {
         for (json_name, property) in properties {
+            if let Some(union_name) =
+                property_union_name(&model.model_name, json_name, property, unions)
+            {
+                render_union_property_unmarshal(
+                    output,
+                    json_name,
+                    &property.go_member_name(json_name),
+                    &union_name,
+                    required.contains(json_name),
+                    unions,
+                );
+                continue;
+            }
             render_property_unmarshal(
                 output,
                 model,
@@ -825,8 +2161,46 @@ fn render_unmarshal_json(
             )?;
         }
     }
+    // Object member-count and cross-field constraints over the wire member set
+    // (`all` holds every distinct wire key, before default population).
+    render_go_property_count_checks(output, "len(all)", schema, "\t");
+    render_go_dependent_required(output, "all", schema, "\t");
     output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
     Ok(())
+}
+
+/// Decodes a union-typed field: reject an absent required member / an explicit
+/// `null` on a non-nullable union, otherwise dispatch on the wire token.
+fn render_union_property_unmarshal(
+    output: &mut String,
+    json_name: &str,
+    field_name: &str,
+    union_name: &str,
+    required: bool,
+    unions: &BTreeMap<String, GoUnion>,
+) {
+    let nullable = unions.get(union_name).is_some_and(|union| union.nullable);
+    output.push_str("\tif raw := get(");
+    output.push_str(&go_string_literal(json_name));
+    output.push_str("); raw == nil {\n");
+    if required {
+        output.push_str("\t\terrs = append(errs, Violation{");
+        output.push_str(&go_string_literal(json_name));
+        output.push_str(", \"required\"})\n");
+    }
+    output.push_str("\t} else if isNull(*raw) {\n");
+    if !nullable {
+        output.push_str("\t\terrs = append(errs, Violation{");
+        output.push_str(&go_string_literal(json_name));
+        output.push_str(", \"explicit null not allowed\"})\n");
+    }
+    output.push_str("\t} else if v, ok := unmarshal");
+    output.push_str(union_name);
+    output.push_str("(*raw, ");
+    output.push_str(&go_string_literal(json_name));
+    output.push_str(", &errs); ok {\n\t\tm.");
+    output.push_str(field_name);
+    output.push_str(" = v\n\t}\n");
 }
 
 fn render_property_unmarshal(
@@ -837,7 +2211,40 @@ fn render_property_unmarshal(
     required: bool,
     model_names: &BTreeMap<String, String>,
 ) -> Result<()> {
-    let field = go_field_name(json_name);
+    let field = property.go_member_name(json_name);
+    // A materialized temporal: read the wire string, then parse into the native
+    // construct via the parse adapter (regex + calendar/overflow over the wire).
+    if let Some(kind) = temporal_kind(property) {
+        render_temporal_property_unmarshal(
+            output,
+            json_name,
+            &field,
+            kind,
+            required,
+            allows_null(property),
+        );
+        return Ok(());
+    }
+    // A materialized `contentEncoding`: read the wire string, run the pinned
+    // regex + any co-occurring wire-string constraints, then decode into `[]byte`
+    // via the stdlib codec.
+    if let Some(encoding) = content_encoding_kind(property) {
+        render_content_encoding_property_unmarshal(
+            output,
+            &model.model_name,
+            json_name,
+            &field,
+            encoding,
+            required,
+            allows_null(property),
+            property,
+        );
+        return Ok(());
+    }
+    if is_closed_value_schema(property) {
+        render_closed_value_unmarshal(output, &model.model_name, json_name, property, required);
+        return Ok(());
+    }
     if let Some(non_null) = nullable_non_null_schema(property)
         && non_null.reference.is_some()
     {
@@ -857,9 +2264,7 @@ fn render_property_unmarshal(
         );
         return Ok(());
     }
-    if property.ty.as_ref().and_then(Value::as_str) == Some("string")
-        || property.const_value.is_some()
-    {
+    if property.ty.as_ref().and_then(Value::as_str) == Some("string") {
         output.push_str("\tif v, ok := parseStringField(get(");
         output.push_str(&go_string_literal(json_name));
         output.push_str("), ");
@@ -880,14 +2285,28 @@ fn render_property_unmarshal(
         } else {
             output.push_str("&v\n");
         }
-        if let Some(Value::String(value)) = &property.const_value {
-            output.push_str("\t\tif v != ");
-            output.push_str(&const_value_name(&model.model_name, json_name, value));
-            output.push_str(" {\n\t\t\terrs = append(errs, Violation{");
-            output.push_str(&go_string_literal(json_name));
-            output.push_str(", `const: must equal \\\"");
-            output.push_str(value);
-            output.push_str("\\\"`})\n\t\t}\n");
+        if property.has_string_constraints() {
+            render_go_string_checks(output, "v", json_name, property, "\t\t");
+        }
+        if let Some(pattern) = &property.pattern {
+            render_go_pattern_check(
+                output,
+                "v",
+                json_name,
+                &go_pattern_var_name(&model.model_name, json_name),
+                pattern,
+                "\t\t",
+            );
+        }
+        if let Some(format) = &property.format {
+            render_go_format_check(
+                output,
+                "v",
+                json_name,
+                &go_format_var_name(&model.model_name, json_name),
+                format,
+                "\t\t",
+            );
         }
         output.push_str("\t}\n");
         return Ok(());
@@ -899,7 +2318,33 @@ fn render_property_unmarshal(
         output.push_str(&go_string_literal(json_name));
         output.push_str(", ");
         output.push_str(if required { "true" } else { "false" });
-        output.push_str(", false, &errs); ok {\n\t\tm.");
+        output.push_str(", false, &errs); ok {\n");
+        if property.has_numeric_constraints() {
+            render_go_numeric_checks(output, "v", json_name, property, "\t\t");
+        }
+        output.push_str("\t\tm.");
+        output.push_str(&field);
+        output.push_str(" = ");
+        if required {
+            output.push_str("v\n");
+        } else {
+            output.push_str("&v\n");
+        }
+        output.push_str("\t}\n");
+        return Ok(());
+    }
+    if property.ty.as_ref().and_then(Value::as_str) == Some("number") {
+        output.push_str("\tif v, ok := parseNumberField(get(");
+        output.push_str(&go_string_literal(json_name));
+        output.push_str("), ");
+        output.push_str(&go_string_literal(json_name));
+        output.push_str(", ");
+        output.push_str(if required { "true" } else { "false" });
+        output.push_str(", false, &errs); ok {\n");
+        if property.has_numeric_constraints() {
+            render_go_numeric_checks(output, "v", json_name, property, "\t\t");
+        }
+        output.push_str("\t\tm.");
         output.push_str(&field);
         output.push_str(" = ");
         if required {
@@ -951,7 +2396,14 @@ fn render_property_unmarshal(
         output.push_str(&field);
         output.push_str("); err != nil {\n\t\terrs = append(errs, Violation{");
         output.push_str(&go_string_literal(json_name));
-        output.push_str(", \"expected array\"})\n\t}\n");
+        output.push_str(", \"expected array\"})\n\t}");
+        if property.has_array_constraints() {
+            output.push_str(" else {\n");
+            render_go_array_checks(output, &format!("m.{field}"), json_name, property, "\t\t");
+            output.push_str("\t}\n");
+        } else {
+            output.push('\n');
+        }
         return Ok(());
     }
     if allows_null(property) {
@@ -966,6 +2418,43 @@ fn render_property_unmarshal(
         output.push_str(" = &v\n\t}\n");
     }
     Ok(())
+}
+
+/// Decodes a materialized temporal field: read the wire `string` (presence /
+/// null handling via `parseStringField`), then parse it into the native
+/// construct through the parse adapter. A required + non-nullable field is a
+/// value; anything optional or nullable is a pointer.
+fn render_temporal_property_unmarshal(
+    output: &mut String,
+    json_name: &str,
+    field: &str,
+    kind: crate::format::TemporalKind,
+    required: bool,
+    nullable: bool,
+) {
+    let parse_fn = go_temporal_parse_fn(kind);
+    let path = go_string_literal(json_name);
+    output.push_str("\tif s, ok := parseStringField(get(");
+    output.push_str(&path);
+    output.push_str("), ");
+    output.push_str(&path);
+    output.push_str(", ");
+    output.push_str(if required { "true" } else { "false" });
+    output.push_str(", ");
+    output.push_str(if nullable { "true" } else { "false" });
+    output.push_str(", &errs); ok {\n\t\tif v, ok := ");
+    output.push_str(parse_fn);
+    output.push('(');
+    output.push_str(&path);
+    output.push_str(", s, &errs); ok {\n\t\t\tm.");
+    output.push_str(field);
+    output.push_str(" = ");
+    if required && !nullable {
+        output.push_str("v\n");
+    } else {
+        output.push_str("&v\n");
+    }
+    output.push_str("\t\t}\n\t}\n");
 }
 
 fn render_reference_property_unmarshal(
@@ -1015,6 +2504,7 @@ fn render_marshal_json(
     output: &mut String,
     model: &PlannedJsonType,
     schema: &Schema,
+    unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
     output.push_str("func (m ");
     output.push_str(&model.model_name);
@@ -1027,7 +2517,53 @@ fn render_marshal_json(
     let required = required_fields(schema);
     if let Some(properties) = &schema.properties {
         for (json_name, property) in properties {
-            let field = format!("m.{}", go_field_name(json_name));
+            let field = format!("m.{}", property.go_member_name(json_name));
+            if let Some(kind) = temporal_kind(property) {
+                render_temporal_property_marshal(
+                    output,
+                    json_name,
+                    &field,
+                    kind,
+                    required.contains(json_name),
+                    allows_null(property),
+                );
+                continue;
+            }
+            if let Some(encoding) = content_encoding_kind(property) {
+                render_content_encoding_property_marshal(
+                    output,
+                    &model.model_name,
+                    json_name,
+                    &field,
+                    encoding,
+                    required.contains(json_name),
+                    property,
+                );
+                continue;
+            }
+            if let Some(union_name) =
+                property_union_name(&model.model_name, json_name, property, unions)
+            {
+                // A union field marshals its held branch (interface dispatch);
+                // an absent optional union is omitted, a required+nullable one
+                // emits `null`.
+                let nullable = required.contains(json_name)
+                    && unions.get(&union_name).is_some_and(|union| union.nullable);
+                output.push_str("\tif ");
+                output.push_str(&field);
+                output.push_str(" != nil {\n\t\tmarshalField(out, ");
+                output.push_str(&go_string_literal(json_name));
+                output.push_str(", ");
+                output.push_str(&field);
+                output.push_str(", &errs)\n\t}");
+                if nullable {
+                    output.push_str(" else {\n\t\tout[");
+                    output.push_str(&go_string_literal(json_name));
+                    output.push_str("] = json.RawMessage(\"null\")\n\t}");
+                }
+                output.push('\n');
+                continue;
+            }
             if required.contains(json_name) {
                 if allows_null(property) {
                     output.push_str("\tif ");
@@ -1060,8 +2596,54 @@ fn render_marshal_json(
             }
         }
     }
+    // Object member-count and cross-field constraints over the to-be-emitted
+    // member set (`out` holds every key that will actually be written).
+    render_go_property_count_checks(output, "len(out)", schema, "\t");
+    render_go_dependent_required(output, "out", schema, "\t");
     output.push_str("\tif len(errs) > 0 {\n\t\treturn nil, &ValidationError{Violations: errs}\n\t}\n\treturn json.Marshal(out)\n}\n\n");
     Ok(())
+}
+
+/// Serializes a materialized temporal field through the generator-owned
+/// serializer (never the native `time.Time`/`Duration` `MarshalJSON`, which
+/// would emit a full RFC 3339 datetime for date/time and diverge on duration).
+fn render_temporal_property_marshal(
+    output: &mut String,
+    json_name: &str,
+    field: &str,
+    kind: crate::format::TemporalKind,
+    required: bool,
+    nullable: bool,
+) {
+    let format_fn = go_temporal_format_fn(kind);
+    let path = go_string_literal(json_name);
+    if required && !nullable {
+        output.push_str("\tmarshalField(out, ");
+        output.push_str(&path);
+        output.push_str(", ");
+        output.push_str(format_fn);
+        output.push('(');
+        output.push_str(field);
+        output.push_str("), &errs)\n");
+        return;
+    }
+    // Optional or nullable: a pointer. Absent → omitted; a required+nullable
+    // field that is nil emits an explicit `null`.
+    output.push_str("\tif ");
+    output.push_str(field);
+    output.push_str(" != nil {\n\t\tmarshalField(out, ");
+    output.push_str(&path);
+    output.push_str(", ");
+    output.push_str(format_fn);
+    output.push_str("(*");
+    output.push_str(field);
+    output.push_str("), &errs)\n\t}");
+    if required && nullable {
+        output.push_str(" else {\n\t\tout[");
+        output.push_str(&path);
+        output.push_str("] = json.RawMessage(\"null\")\n\t}");
+    }
+    output.push('\n');
 }
 
 fn render_typed_map_methods(
@@ -1074,14 +2656,9 @@ fn render_typed_map_methods(
     output.push_str("func (m ");
     output.push_str(&model.model_name);
     output.push_str(") Validate() error {\n\tvar errs []Violation\n");
-    if let Some(max) = schema.max_properties {
-        output.push_str("\tif len(m.AdditionalProperties) > ");
-        output.push_str(&max.to_string());
-        output.push_str(
-            " {\n\t\terrs = append(errs, Violation{\"\", fmt.Sprintf(\"maxProperties: at most ",
-        );
-        output.push_str(&max.to_string());
-        output.push_str(" (got %d)\", len(m.AdditionalProperties))})\n\t}\n");
+    render_go_property_count_checks(output, "len(m.AdditionalProperties)", schema, "\t");
+    if let Some(subschema) = &schema.property_names {
+        render_go_property_name_checks(output, "m.AdditionalProperties", subschema, "\t");
     }
     output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
     output.push_str("func (m *");
@@ -1094,14 +2671,10 @@ fn render_typed_map_methods(
         output.push_str("\t\tvar s string\n\t\tif err := json.Unmarshal(v, &s); err != nil {\n\t\t\terrs = append(errs, Violation{k, \"expected string\"})\n\t\t\tcontinue\n\t\t}\n\t\tm.AdditionalProperties[k] = s\n");
     }
     output.push_str("\t}\n");
-    if let Some(max) = schema.max_properties {
-        output.push_str("\tif len(m.AdditionalProperties) > ");
-        output.push_str(&max.to_string());
-        output.push_str(
-            " {\n\t\terrs = append(errs, Violation{\"\", fmt.Sprintf(\"maxProperties: at most ",
-        );
-        output.push_str(&max.to_string());
-        output.push_str(" (got %d)\", len(m.AdditionalProperties))})\n\t}\n");
+    // Object member-count and key-shape constraints over the wire member set.
+    render_go_property_count_checks(output, "len(raw)", schema, "\t");
+    if let Some(subschema) = &schema.property_names {
+        render_go_property_name_checks(output, "raw", subschema, "\t");
     }
     output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
     output.push_str("func (m ");
@@ -1109,6 +2682,293 @@ fn render_typed_map_methods(
     output.push_str(") MarshalJSON() ([]byte, error) {\n\tif err := m.Validate(); err != nil {\n\t\treturn nil, err\n\t}\n\tout := make(map[string]string, len(m.AdditionalProperties))\n\tfor k, v := range m.AdditionalProperties {\n\t\tout[k] = v\n\t}\n\treturn json.Marshal(out)\n}\n\n");
     Ok(())
 }
+
+/// True when the model has any materialized temporal `format` property.
+fn model_uses_temporal(model: &PlannedJsonType) -> bool {
+    let Ok(schema) = decode_schema(model) else {
+        return false;
+    };
+    schema.properties.as_ref().is_some_and(|properties| {
+        properties
+            .values()
+            .any(|property| temporal_kind(property).is_some())
+    })
+}
+
+/// Emits the package-level materialized-temporal runtime: the pinned narrowed
+/// regexes, the Gregorian calendar predicate, and the parse/serialize adapters
+/// for `date-time` / `date` / `time` / `duration`. The serializer is
+/// generator-owned (RFC 3339, original offset preserved, `+00:00`/`-00:00` → `Z`,
+/// trailing fractional zeros trimmed; duration canonicalized to time-only). See
+/// `json-schema/features/format.md`.
+fn render_go_temporal_helpers(output: &mut String) {
+    use crate::format::TemporalKind;
+    output.push_str(&format!(
+        "var jsonTemporalDateTimeRE = regexp.MustCompile(`{}`)\n",
+        TemporalKind::DateTime.pattern()
+    ));
+    output.push_str(&format!(
+        "var jsonTemporalDateRE = regexp.MustCompile(`{}`)\n",
+        TemporalKind::Date.pattern()
+    ));
+    output.push_str(&format!(
+        "var jsonTemporalTimeRE = regexp.MustCompile(`{}`)\n",
+        TemporalKind::Time.pattern()
+    ));
+    output.push_str(&format!(
+        "var jsonTemporalDurationRE = regexp.MustCompile(`{}`)\n\n",
+        TemporalKind::Duration.pattern()
+    ));
+    output.push_str(TEMPORAL_HELPER_BODY);
+}
+
+/// The schema-independent body of the materialized-temporal runtime.
+const TEMPORAL_HELPER_BODY: &str = r####"// daysInTemporalMonth returns the Gregorian day count of a 1-based month.
+func daysInTemporalMonth(year, month int) int {
+	switch month {
+	case 1, 3, 5, 7, 8, 10, 12:
+		return 31
+	case 4, 6, 9, 11:
+		return 30
+	case 2:
+		if (year%4 == 0 && year%100 != 0) || year%400 == 0 {
+			return 29
+		}
+		return 28
+	}
+	return 0
+}
+
+// validTemporalCalendar checks day-in-month over a YYYY-MM-DD prefix; the regex
+// has already fixed the digit shape and the month/day ranges.
+func validTemporalCalendar(s string) bool {
+	if len(s) < 10 {
+		return false
+	}
+	year, err1 := strconv.Atoi(s[0:4])
+	month, err2 := strconv.Atoi(s[5:7])
+	day, err3 := strconv.Atoi(s[8:10])
+	if err1 != nil || err2 != nil || err3 != nil {
+		return false
+	}
+	max := daysInTemporalMonth(year, month)
+	return max > 0 && day >= 1 && day <= max
+}
+
+func temporalFracNanos(nanos int) string {
+	if nanos == 0 {
+		return ""
+	}
+	return "." + strings.TrimRight(fmt.Sprintf("%09d", nanos), "0")
+}
+
+func temporalOffset(secs int) string {
+	if secs == 0 {
+		return "Z"
+	}
+	sign := "+"
+	if secs < 0 {
+		sign = "-"
+		secs = -secs
+	}
+	return fmt.Sprintf("%s%02d:%02d", sign, secs/3600, (secs%3600)/60)
+}
+
+// parseDateTime validates the wire string (narrowed regex + calendar) then parses
+// it into a time.Time, uppercasing the case-insensitive T/Z first (Go's parser
+// rejects lowercase). Offset and nanoseconds are preserved; no truncation.
+func parseDateTime(path, s string, errs *[]Violation) (time.Time, bool) {
+	if !jsonTemporalDateTimeRE.MatchString(s) || !validTemporalCalendar(s) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid date-time, got %q", s)})
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, strings.ToUpper(s))
+	if err != nil {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid date-time, got %q", s)})
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// formatDateTime re-serializes via time.RFC3339Nano, which matches the
+// generator-owned form exactly (offset preserved, Z for zero offset, trailing
+// fractional zeros trimmed).
+func formatDateTime(t time.Time) string {
+	return t.Format(time.RFC3339Nano)
+}
+
+func parseDate(path, s string, errs *[]Violation) (time.Time, bool) {
+	if !jsonTemporalDateRE.MatchString(s) || !validTemporalCalendar(s) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid date, got %q", s)})
+		return time.Time{}, false
+	}
+	t, _ := time.Parse("2006-01-02", s)
+	return t, true
+}
+
+func formatDate(t time.Time) string {
+	return t.Format("2006-01-02")
+}
+
+// Go has no time-of-day type; time.Time carries a phantom date. An offset-less
+// value is stored with a sentinel year so the serializer can distinguish it from
+// an explicit Z/offset (whose offset parse yields year 0).
+const temporalNoOffsetYear = 1
+
+func parseTime(path, s string, errs *[]Violation) (time.Time, bool) {
+	if !jsonTemporalTimeRE.MatchString(s) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid time, got %q", s)})
+		return time.Time{}, false
+	}
+	w := strings.ToUpper(s)
+	if t, err := time.Parse("15:04:05.999999999Z07:00", w); err == nil {
+		return t, true
+	}
+	t, err := time.Parse("15:04:05.999999999", w)
+	if err != nil {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid time, got %q", s)})
+		return time.Time{}, false
+	}
+	return time.Date(temporalNoOffsetYear, 1, 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC), true
+}
+
+func formatTime(t time.Time) string {
+	s := fmt.Sprintf("%02d:%02d:%02d%s", t.Hour(), t.Minute(), t.Second(), temporalFracNanos(t.Nanosecond()))
+	if t.Year() != temporalNoOffsetYear {
+		_, off := t.Zone()
+		s += temporalOffset(off)
+	}
+	return s
+}
+
+// parseDuration validates the time-only wire string then sums it into a
+// time.Duration, rejecting an overflow of the int64-nanosecond capacity.
+func parseDuration(path, s string, errs *[]Violation) (time.Duration, bool) {
+	fail := func() (time.Duration, bool) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid duration, got %q", s)})
+		return 0, false
+	}
+	if !jsonTemporalDurationRE.MatchString(s) {
+		return fail()
+	}
+	const maxSeconds = int64(9223372036854775807) / 1000000000
+	var totalSeconds int64
+	num := ""
+	for _, ch := range s[2:] {
+		if ch >= '0' && ch <= '9' {
+			num += string(ch)
+			continue
+		}
+		mag, err := strconv.ParseInt(num, 10, 64)
+		if err != nil {
+			return fail()
+		}
+		num = ""
+		var unit int64
+		switch ch {
+		case 'H':
+			unit = 3600
+		case 'M':
+			unit = 60
+		case 'S':
+			unit = 1
+		}
+		prod := mag * unit
+		if unit != 0 && prod/unit != mag {
+			return fail()
+		}
+		totalSeconds += prod
+		if totalSeconds < 0 || totalSeconds > maxSeconds {
+			return fail()
+		}
+	}
+	return time.Duration(totalSeconds) * time.Second, true
+}
+
+// formatDuration canonicalizes to time-only PT…H…M…S (PT0S for zero); a
+// non-canonical input collapses (PT90M → PT1H30M).
+func formatDuration(d time.Duration) string {
+	total := int64(d / time.Second)
+	if total == 0 {
+		return "PT0S"
+	}
+	out := "PT"
+	if h := total / 3600; h != 0 {
+		out += fmt.Sprintf("%dH", h)
+	}
+	if m := (total % 3600) / 60; m != 0 {
+		out += fmt.Sprintf("%dM", m)
+	}
+	if sec := total % 60; sec != 0 {
+		out += fmt.Sprintf("%dS", sec)
+	}
+	return out
+}
+
+"####;
+
+/// True when the model has any materialized `contentEncoding` property.
+fn model_uses_content_encoding(model: &PlannedJsonType) -> bool {
+    let Ok(schema) = decode_schema(model) else {
+        return false;
+    };
+    schema.properties.as_ref().is_some_and(|properties| {
+        properties
+            .values()
+            .any(|property| content_encoding_kind(property).is_some())
+    })
+}
+
+/// Emits the package-level `contentEncoding` codec: the stdlib base64 /
+/// base64url decode (regex-gated) and canonical encode adapters. The regex is
+/// passed in (compiled once per field at package init); the decoder runs only
+/// after it passes, so no language's lenient decoder can diverge (P1). See
+/// `json-schema/features/contentEncoding.md`.
+fn render_go_content_encoding_helpers(output: &mut String) {
+    output.push_str(CONTENT_ENCODING_HELPER_BODY);
+}
+
+const CONTENT_ENCODING_HELPER_BODY: &str = r####"// decodeBase64 validates the wire string against the pinned canonical base64
+// regex, then decodes it via the standard (padded) alphabet into bytes.
+func decodeBase64(path, s string, re *regexp.Regexp, errs *[]Violation) ([]byte, bool) {
+	if !re.MatchString(s) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be base64-encoded, got %q", s)})
+		return nil, false
+	}
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be base64-encoded, got %q", s)})
+		return nil, false
+	}
+	return b, true
+}
+
+// encodeBase64 re-encodes bytes to canonical padded standard base64.
+func encodeBase64(b []byte) string {
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// decodeBase64URL validates the wire string against the pinned canonical
+// (unpadded) base64url regex, then decodes it via the URL-safe alphabet.
+func decodeBase64URL(path, s string, re *regexp.Regexp, errs *[]Violation) ([]byte, bool) {
+	if !re.MatchString(s) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be base64url-encoded, got %q", s)})
+		return nil, false
+	}
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be base64url-encoded, got %q", s)})
+		return nil, false
+	}
+	return b, true
+}
+
+// encodeBase64URL re-encodes bytes to canonical unpadded URL-safe base64.
+func encodeBase64URL(b []byte) string {
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+"####;
 
 fn decode_schema(model: &PlannedJsonType) -> Result<Schema> {
     serde_json::from_value(model.schema.clone()).map_err(|error| Error::InvalidJsonSchema {
@@ -1146,8 +3006,13 @@ fn go_property_type(
     required: bool,
     model_names: &BTreeMap<String, String>,
 ) -> Result<String> {
-    if let Some(Value::String(_)) = &schema.const_value {
-        return Ok(const_type_name(model_name, json_name));
+    if is_closed_value_schema(schema) {
+        let type_name = const_type_name(model_name, json_name);
+        return Ok(if required {
+            type_name
+        } else {
+            format!("*{type_name}")
+        });
     }
     let mut annotation = go_type_annotation(schema, json_name, model_names)?;
     if !required && !annotation.starts_with("[]") {
@@ -1164,6 +3029,16 @@ fn go_type_annotation(
     json_name: &str,
     model_names: &BTreeMap<String, String>,
 ) -> Result<String> {
+    // A materialized temporal `format` replaces the `string` field type with a
+    // native construct (looking through the `oneOf[…, null]` nullable wrapper).
+    if let Some(kind) = temporal_kind(schema) {
+        return Ok(go_temporal_type(kind).to_string());
+    }
+    // A materialized `contentEncoding` replaces the `string` field type with the
+    // native `[]byte` construct (looking through the `oneOf[…, null]` wrapper).
+    if content_encoding_kind(schema).is_some() {
+        return Ok("[]byte".to_string());
+    }
     if let Some(reference) = &schema.reference {
         return Ok(reference_model_name(reference, model_names));
     }
@@ -1220,6 +3095,206 @@ fn required_fields(schema: &Schema) -> BTreeSet<String> {
         .collect::<BTreeSet<_>>()
 }
 
+/// The materialized `TemporalKind` of a property schema — looking through the
+/// `oneOf[…, null]` nullable wrapper — or `None` when it is not a materialized
+/// temporal string field. See `json-schema/features/format.md` (Materialization).
+fn temporal_kind(schema: &Schema) -> Option<crate::format::TemporalKind> {
+    if let Some(non_null) = nullable_non_null_schema(schema) {
+        return temporal_kind(non_null);
+    }
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
+        return None;
+    }
+    schema
+        .format
+        .as_deref()
+        .and_then(crate::format::TemporalKind::from_name)
+}
+
+/// The materialized `contentEncoding` of a property schema — looking through the
+/// `oneOf[…, null]` nullable wrapper — or `None` when it is not a materialized
+/// bytes string field. See `json-schema/features/contentEncoding.md`.
+fn content_encoding_kind(schema: &Schema) -> Option<crate::content_encoding::Encoding> {
+    if let Some(non_null) = nullable_non_null_schema(schema) {
+        return content_encoding_kind(non_null);
+    }
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
+        return None;
+    }
+    schema
+        .content_encoding
+        .as_deref()
+        .and_then(crate::content_encoding::Encoding::from_name)
+}
+
+/// The generator-owned decode / encode function names for a `contentEncoding`.
+fn go_content_encoding_decode_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
+    match encoding {
+        crate::content_encoding::Encoding::Base64 => "decodeBase64",
+        crate::content_encoding::Encoding::Base64Url => "decodeBase64URL",
+    }
+}
+
+fn go_content_encoding_encode_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
+    match encoding {
+        crate::content_encoding::Encoding::Base64 => "encodeBase64",
+        crate::content_encoding::Encoding::Base64Url => "encodeBase64URL",
+    }
+}
+
+/// Decodes a materialized `contentEncoding` field: read the wire `string`
+/// (presence / null via `parseStringField`), run the pinned regex + co-occurring
+/// wire-string constraints, then decode into `[]byte` via the stdlib codec. A
+/// `[]byte` is nil-able, so an optional field needs no pointer.
+#[allow(clippy::too_many_arguments)]
+fn render_content_encoding_property_unmarshal(
+    output: &mut String,
+    model_name: &str,
+    json_name: &str,
+    field: &str,
+    encoding: crate::content_encoding::Encoding,
+    required: bool,
+    nullable: bool,
+    property: &Schema,
+) {
+    let decode_fn = go_content_encoding_decode_fn(encoding);
+    let re_var = go_content_encoding_var_name(model_name, json_name);
+    let path = go_string_literal(json_name);
+    output.push_str("\tif s, ok := parseStringField(get(");
+    output.push_str(&path);
+    output.push_str("), ");
+    output.push_str(&path);
+    output.push_str(", ");
+    output.push_str(if required { "true" } else { "false" });
+    output.push_str(", ");
+    output.push_str(if nullable { "true" } else { "false" });
+    output.push_str(", &errs); ok {\n");
+    // Co-occurring wire-string constraints re-run over the encoded wire string.
+    if property.min_length.is_some() || property.max_length.is_some() {
+        render_go_string_checks(output, "s", json_name, property, "\t\t");
+    }
+    if let Some(pattern) = &property.pattern {
+        render_go_pattern_check(
+            output,
+            "s",
+            json_name,
+            &go_pattern_var_name(model_name, json_name),
+            pattern,
+            "\t\t",
+        );
+    }
+    output.push_str("\t\tif v, ok := ");
+    output.push_str(decode_fn);
+    output.push('(');
+    output.push_str(&path);
+    output.push_str(", s, ");
+    output.push_str(&re_var);
+    output.push_str(", &errs); ok {\n\t\t\tm.");
+    output.push_str(field);
+    output.push_str(" = v\n\t\t}\n\t}\n");
+}
+
+/// Serializes a materialized `contentEncoding` field through the generator-owned
+/// canonical encoder (bytes → canonical base64 / base64url). A nil `[]byte`
+/// optional field is omitted.
+fn render_content_encoding_property_marshal(
+    output: &mut String,
+    model_name: &str,
+    json_name: &str,
+    field: &str,
+    encoding: crate::content_encoding::Encoding,
+    required: bool,
+    property: &Schema,
+) {
+    let encode_fn = go_content_encoding_encode_fn(encoding);
+    let path = go_string_literal(json_name);
+    let emit_checks = property.min_length.is_some()
+        || property.max_length.is_some()
+        || property.pattern.is_some();
+    let emit_encode = |output: &mut String, indent: &str, value_expr: &str| {
+        if emit_checks {
+            output.push_str(indent);
+            output.push_str("wire := ");
+            output.push_str(encode_fn);
+            output.push('(');
+            output.push_str(value_expr);
+            output.push_str(")\n");
+            if property.min_length.is_some() || property.max_length.is_some() {
+                render_go_string_checks(output, "wire", json_name, property, indent);
+            }
+            if let Some(pattern) = &property.pattern {
+                render_go_pattern_check(
+                    output,
+                    "wire",
+                    json_name,
+                    &go_pattern_var_name(model_name, json_name),
+                    pattern,
+                    indent,
+                );
+            }
+            output.push_str(indent);
+            output.push_str("marshalField(out, ");
+            output.push_str(&path);
+            output.push_str(", wire, &errs)\n");
+        } else {
+            output.push_str(indent);
+            output.push_str("marshalField(out, ");
+            output.push_str(&path);
+            output.push_str(", ");
+            output.push_str(encode_fn);
+            output.push('(');
+            output.push_str(value_expr);
+            output.push_str("), &errs)\n");
+        }
+    };
+    if required {
+        // A required `[]byte` is emitted unconditionally (a nil slice encodes to
+        // the empty string, the canonical zero-byte wire).
+        if emit_checks {
+            output.push_str("\t{\n");
+            emit_encode(output, "\t\t", field);
+            output.push_str("\t}\n");
+        } else {
+            emit_encode(output, "\t", field);
+        }
+        return;
+    }
+    // Optional: a nil slice is absent (omitted).
+    output.push_str("\tif ");
+    output.push_str(field);
+    output.push_str(" != nil {\n");
+    emit_encode(output, "\t\t", field);
+    output.push_str("\t}\n");
+}
+
+/// The Go native type a temporal `format` materializes into.
+fn go_temporal_type(kind: crate::format::TemporalKind) -> &'static str {
+    match kind {
+        crate::format::TemporalKind::Duration => "time.Duration",
+        _ => "time.Time",
+    }
+}
+
+/// The generator-owned serializer function name for a temporal kind.
+fn go_temporal_format_fn(kind: crate::format::TemporalKind) -> &'static str {
+    match kind {
+        crate::format::TemporalKind::DateTime => "formatDateTime",
+        crate::format::TemporalKind::Date => "formatDate",
+        crate::format::TemporalKind::Time => "formatTime",
+        crate::format::TemporalKind::Duration => "formatDuration",
+    }
+}
+
+/// The parse-adapter function name for a temporal kind.
+fn go_temporal_parse_fn(kind: crate::format::TemporalKind) -> &'static str {
+    match kind {
+        crate::format::TemporalKind::DateTime => "parseDateTime",
+        crate::format::TemporalKind::Date => "parseDate",
+        crate::format::TemporalKind::Time => "parseTime",
+        crate::format::TemporalKind::Duration => "parseDuration",
+    }
+}
+
 fn allows_null(schema: &Schema) -> bool {
     schema.const_value.as_ref() == Some(&Value::Null)
         || schema_type_includes(schema, "null")
@@ -1258,12 +3333,234 @@ fn const_type_name(model_name: &str, field_name: &str) -> String {
     format!("{model_name}{}", go_field_name(field_name))
 }
 
-fn const_value_name(model_name: &str, field_name: &str, value: &str) -> String {
+/// True when the schema is a scalar closed value set (`const` or `enum`) that
+/// synthesizes a Go defined type + value constant(s).
+fn is_closed_value_schema(schema: &Schema) -> bool {
+    schema.const_value.is_some() || schema.enum_values.is_some()
+}
+
+/// The scalar values of a `const`/`enum` schema (one for `const`, many for
+/// `enum`).
+fn closed_values(schema: &Schema) -> Vec<Value> {
+    if let Some(value) = &schema.const_value {
+        vec![value.clone()]
+    } else if let Some(values) = &schema.enum_values {
+        values.clone()
+    } else {
+        Vec::new()
+    }
+}
+
+/// The Go underlying primitive for a closed-value defined type.
+fn go_closed_underlying(schema: &Schema) -> &'static str {
+    match schema.ty.as_ref().and_then(Value::as_str) {
+        Some("integer") => "int64",
+        Some("number") => "float64",
+        Some("boolean") => "bool",
+        _ => "string",
+    }
+}
+
+/// Encodes a scalar value to its Go identifier suffix (Stage 1-4 → PascalCase):
+/// strings word-split + camel-cased, digits kept, `.` → `_`, a leading sign →
+/// `Neg`, booleans `True`/`False`.
+fn go_value_suffix(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.to_upper_camel_case(),
+        Value::Bool(flag) => if *flag { "True" } else { "False" }.to_string(),
+        Value::Number(number) => number.to_string().replace('-', "Neg").replace('.', "_"),
+        _ => String::new(),
+    }
+}
+
+fn go_closed_value_name(model_name: &str, field_name: &str, value: &Value) -> String {
     format!(
         "{}{}",
         const_type_name(model_name, field_name),
-        value.to_upper_camel_case()
+        go_value_suffix(value)
     )
+}
+
+/// The Go literal for a scalar value in the defined type's underlying kind.
+fn go_closed_value_literal(value: &Value) -> String {
+    match value {
+        Value::String(text) => go_string_literal(text),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Number(number) => number.to_string(),
+        _ => "nil".to_string(),
+    }
+}
+
+/// The `printf` verb for a value kind (quoted for strings, `%v` otherwise).
+fn go_closed_verb(value: &Value) -> &'static str {
+    match value {
+        Value::String(_) => "%q",
+        _ => "%v",
+    }
+}
+
+/// The comma-joined display of a value set for a reason string.
+fn go_closed_set_display(values: &[Value]) -> String {
+    values
+        .iter()
+        .map(|value| match value {
+            Value::String(text) => format!("{text:?}"),
+            Value::Bool(flag) => flag.to_string(),
+            Value::Number(number) => number.to_string(),
+            _ => String::new(),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The Go expression producing the violation reason for an off-value: a static
+/// `must equal <v>` for a single-value `const`, or an `fmt.Sprintf(... got ...)`
+/// for a multi-value `enum`. `got_expr` is the Go expression holding the
+/// offending value.
+fn go_closed_reason(values: &[Value], got_expr: &str) -> String {
+    if values.len() == 1 {
+        let value = &values[0];
+        let text = match value {
+            Value::String(string) => format!("must equal {string:?}"),
+            Value::Bool(flag) => format!("must equal {flag}"),
+            Value::Number(number) => format!("must equal {number}"),
+            _ => "must equal <const>".to_string(),
+        };
+        go_string_literal(&text)
+    } else {
+        let verb = values.first().map(go_closed_verb).unwrap_or("%v");
+        let template = format!("must be one of [{}], got {verb}", go_closed_set_display(values));
+        format!("fmt.Sprintf({}, {got_expr})", go_string_literal(&template))
+    }
+}
+
+/// Emits the shared-`Validate` closed-value check (const equality / enum
+/// membership) over the in-memory field. Optional fields are guarded on nil.
+fn render_go_closed_validate(
+    output: &mut String,
+    model_name: &str,
+    json_name: &str,
+    property: &Schema,
+    required: bool,
+) {
+    let field = format!("m.{}", property.go_member_name(json_name));
+    let values = closed_values(property);
+    let names = values
+        .iter()
+        .map(|value| go_closed_value_name(model_name, json_name, value))
+        .collect::<Vec<_>>();
+    let (subject, indent) = if required {
+        (field.clone(), "\t".to_string())
+    } else {
+        output.push_str("\tif ");
+        output.push_str(&field);
+        output.push_str(" != nil {\n");
+        (format!("(*{field})"), "\t\t".to_string())
+    };
+    let reason = go_closed_reason(&values, &subject);
+    if values.len() == 1 {
+        output.push_str(&indent);
+        output.push_str("if ");
+        output.push_str(&subject);
+        output.push_str(" != ");
+        output.push_str(&names[0]);
+        output.push_str(" {\n");
+        output.push_str(&indent);
+        output.push_str("\terrs = append(errs, Violation{");
+        output.push_str(&go_string_literal(json_name));
+        output.push_str(", ");
+        output.push_str(&reason);
+        output.push_str("})\n");
+        output.push_str(&indent);
+        output.push_str("}\n");
+    } else {
+        output.push_str(&indent);
+        output.push_str("switch ");
+        output.push_str(&subject);
+        output.push_str(" {\n");
+        output.push_str(&indent);
+        output.push_str("case ");
+        output.push_str(&names.join(", "));
+        output.push_str(":\n");
+        output.push_str(&indent);
+        output.push_str("default:\n");
+        output.push_str(&indent);
+        output.push_str("\terrs = append(errs, Violation{");
+        output.push_str(&go_string_literal(json_name));
+        output.push_str(", ");
+        output.push_str(&reason);
+        output.push_str("})\n");
+        output.push_str(&indent);
+        output.push_str("}\n");
+    }
+    if !required {
+        output.push_str("\t}\n");
+    }
+}
+
+/// Emits the closed-value (`const`/`enum`) unmarshal: parse the underlying
+/// scalar, convert to the defined type, check equality/membership, and assign.
+fn render_closed_value_unmarshal(
+    output: &mut String,
+    model_name: &str,
+    json_name: &str,
+    property: &Schema,
+    required: bool,
+) {
+    let field = property.go_member_name(json_name);
+    let type_name = const_type_name(model_name, json_name);
+    let underlying = go_closed_underlying(property);
+    let parser = match underlying {
+        "int64" => "parseIntegerField",
+        "float64" => "parseNumberField",
+        "bool" => "parseBoolField",
+        _ => "parseStringField",
+    };
+    let values = closed_values(property);
+    let names = values
+        .iter()
+        .map(|value| go_closed_value_name(model_name, json_name, value))
+        .collect::<Vec<_>>();
+    let assign = if required { "typed" } else { "&typed" };
+    let reason = go_closed_reason(&values, "typed");
+    output.push_str("\tif v, ok := ");
+    output.push_str(parser);
+    output.push_str("(get(");
+    output.push_str(&go_string_literal(json_name));
+    output.push_str("), ");
+    output.push_str(&go_string_literal(json_name));
+    output.push_str(", ");
+    output.push_str(if required { "true" } else { "false" });
+    output.push_str(", false, &errs); ok {\n");
+    output.push_str("\t\ttyped := ");
+    output.push_str(&type_name);
+    output.push_str("(v)\n");
+    if values.len() == 1 {
+        output.push_str("\t\tif typed != ");
+        output.push_str(&names[0]);
+        output.push_str(" {\n\t\t\terrs = append(errs, Violation{");
+        output.push_str(&go_string_literal(json_name));
+        output.push_str(", ");
+        output.push_str(&reason);
+        output.push_str("})\n\t\t} else {\n\t\t\tm.");
+        output.push_str(&field);
+        output.push_str(" = ");
+        output.push_str(assign);
+        output.push_str("\n\t\t}\n");
+    } else {
+        output.push_str("\t\tswitch typed {\n\t\tcase ");
+        output.push_str(&names.join(", "));
+        output.push_str(":\n\t\t\tm.");
+        output.push_str(&field);
+        output.push_str(" = ");
+        output.push_str(assign);
+        output.push_str("\n\t\tdefault:\n\t\t\terrs = append(errs, Violation{");
+        output.push_str(&go_string_literal(json_name));
+        output.push_str(", ");
+        output.push_str(&reason);
+        output.push_str("})\n\t\t}\n");
+    }
+    output.push_str("\t}\n");
 }
 
 fn render_go_doc_comment(output: &mut String, indent: &str, doc: Option<&str>) {
@@ -1275,5 +3572,45 @@ fn render_go_doc_comment(output: &mut String, indent: &str, doc: Option<&str>) {
         output.push_str("// ");
         output.push_str(line.trim());
         output.push('\n');
+    }
+}
+
+/// Renders the doc comment for a schema declaration: the `title` summary line
+/// (name-led per the Go godoc convention — `// <Name> <title>`), the
+/// `description` body, and — when `deprecated: true` — a `// Deprecated:`
+/// paragraph (godoc convention; a generic reason, the rationale lives in the
+/// body). See json-schema/features/{title,description,deprecated}.md. `kind` is
+/// "type" or "field", used only in the deprecation reason.
+fn render_go_schema_doc(output: &mut String, indent: &str, name: &str, schema: &Schema, kind: &str) {
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(title) = schema.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        // Name-led first line (golint): don't double the name if the title
+        // already begins with it (case-insensitively).
+        if title.to_lowercase().starts_with(&name.to_lowercase()) {
+            lines.push(title.to_string());
+        } else {
+            lines.push(format!("{name} {title}"));
+        }
+    }
+    if let Some(desc) = schema.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        for line in desc.lines() {
+            lines.push(line.trim().to_string());
+        }
+    }
+    if schema.deprecated == Some(true) {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(format!("Deprecated: This {kind} is deprecated."));
+    }
+    for line in lines {
+        output.push_str(indent);
+        if line.is_empty() {
+            output.push_str("//\n");
+        } else {
+            output.push_str("// ");
+            output.push_str(&line);
+            output.push('\n');
+        }
     }
 }

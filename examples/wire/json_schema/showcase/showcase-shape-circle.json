@@ -1,0 +1,16 @@
+{
+  "kind": "showcase",
+  "revision": 1,
+  "enabled": true,
+  "status": "active",
+  "tier": 1,
+  "scale": 1.5,
+  "name": "Widget",
+  "count": 3,
+  "active": true,
+  "category": "tools",
+  "shape": {
+    "kind": "circle",
+    "radius": 2.5
+  }
+}

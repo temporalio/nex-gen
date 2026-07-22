@@ -15,7 +15,7 @@ from .tree import (
     Palette,
 )
 
-from ._models import (
+from ._recursive import (
     Block,
     Page,
 )

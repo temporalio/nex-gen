@@ -6,7 +6,7 @@ from nexusrpc import Operation, service
 import typing
 import temporalio.workflow
 
-from .._models import (
+from .._recursive import (
     Block,
     Page,
 )

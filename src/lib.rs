@@ -1,11 +1,14 @@
 mod planning;
 
 pub mod add_rpc;
+pub mod content_encoding;
 pub mod descriptors;
 pub mod error;
+pub mod format;
 pub mod generator;
 pub mod language;
 pub mod parser;
+pub mod pattern;
 pub mod resources;
 pub mod spec;
 pub mod validation;
@@ -39,6 +42,9 @@ pub struct GenerateRequest {
     pub output_path: PathBuf,
     pub format: bool,
     pub generate_native_api: bool,
+    /// TypeScript-only: the in-memory representation for materialized temporal
+    /// `format` fields. `Default` is `JsTemporalRepr::String`.
+    pub js_temporal_repr: generator::JsTemporalRepr,
 }
 
 pub struct BuildExamplesRequest {
@@ -59,6 +65,12 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
         } else {
             None
         },
+        java_package_root: if request.language == Language::Java {
+            Some(infer_java_package_root(&request.output_path)?)
+        } else {
+            None
+        },
+        js_temporal_repr: request.js_temporal_repr,
     };
     let generated = generator::generate_files_for_tree_with_mode_and_options(
         request.language,
@@ -125,10 +137,10 @@ pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let languages = if request.languages.is_empty() {
         vec![
-            Language::Dotnet,
             Language::Python,
             Language::TypeScript,
             Language::Go,
+            Language::Java,
         ]
     } else {
         request.languages.clone()
@@ -137,7 +149,7 @@ pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
     for language in languages {
         if !matches!(
             language,
-            Language::Dotnet | Language::Python | Language::TypeScript | Language::Go
+            Language::Python | Language::TypeScript | Language::Go | Language::Java
         ) {
             return Err(error::Error::UnsupportedLanguage { language });
         }
@@ -145,23 +157,11 @@ pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
             ensure_typescript_dependencies(&repo_root)?;
         }
 
-        let example_ids = if language == Language::Go && request.example_ids.is_empty() {
-            vec!["chat".to_string(), "kb".to_string()]
-        } else if request.example_ids.is_empty() {
+        let example_ids = if request.example_ids.is_empty() {
             discover_json_example_ids(&repo_root)?
         } else {
             validate_json_example_ids(&repo_root, language, &request.example_ids)?
         };
-        if language == Language::Go {
-            for example_id in &example_ids {
-                if !matches!(example_id.as_str(), "chat" | "kb") {
-                    return Err(error::Error::UnknownExampleId {
-                        language,
-                        example_id: example_id.clone(),
-                    });
-                }
-            }
-        }
         for example_id in example_ids {
             build_json_example(&repo_root, language, &example_id)?;
         }
@@ -205,6 +205,58 @@ fn infer_go_import_root(output_path: &Path) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// Derives the Java base package from the output directory, analogous to how
+/// `infer_go_import_root` finds a `go.mod` ancestor. The package is the path
+/// components from a `src/main/java` (or `src/test/java`) source-root ancestor
+/// down to the output directory, joined with '.'. When no such ancestor exists,
+/// falls back to the output directory's basename as a single-segment package.
+fn infer_java_package_root(output_path: &Path) -> Result<String> {
+    let output_path = if output_path.is_absolute() {
+        output_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|source| error::Error::ReadFile {
+                path: PathBuf::from("."),
+                source,
+            })?
+            .join(output_path)
+    };
+
+    for ancestor in output_path.ancestors() {
+        let is_source_root = ancestor.file_name().and_then(|name| name.to_str()) == Some("java")
+            && ancestor
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| matches!(name, "main" | "test"))
+            && ancestor
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+                == Some("src");
+        if !is_source_root {
+            continue;
+        }
+        let relative = output_path.strip_prefix(ancestor).unwrap_or(Path::new(""));
+        let segments = relative
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy().into_owned())
+            .filter(|component| !component.is_empty())
+            .collect::<Vec<_>>();
+        if !segments.is_empty() {
+            return Ok(segments.join("."));
+        }
+    }
+
+    let basename = output_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("generated")
+        .to_string();
+    Ok(basename)
+}
+
 fn read_go_module_name(go_mod_path: &Path) -> Result<String> {
     let contents = fs::read_to_string(go_mod_path).map_err(|source| error::Error::ReadFile {
         path: go_mod_path.to_path_buf(),
@@ -223,6 +275,10 @@ fn read_go_module_name(go_mod_path: &Path) -> Result<String> {
 }
 
 fn format_generated_file(language: Language, output_path: &Path) -> Result<()> {
+    if language == Language::Java {
+        // No formatter dependency is required for Java; skip formatting.
+        return Ok(());
+    }
     let (program, args) = formatter_command(language, output_path)?;
     let command = format_formatter_command(program, &args);
     let status = Command::new(program)
@@ -599,6 +655,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
+        js_temporal_repr: Default::default(),
     })?;
     format_example_output(repo_root, language, &output_path)?;
 
@@ -607,13 +664,52 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
 }
 
 fn build_json_example(repo_root: &Path, language: Language, example_id: &str) -> Result<()> {
-    let input_path = json_example_input_path(repo_root, example_id);
-    let definitions_output_path = json_example_output_path(
+    // Default: the string temporal representation, written under the example's
+    // own directory name.
+    build_json_example_variant(
         repo_root,
         language,
         example_id,
-        GenerationMode::DefinitionsOnly,
-    );
+        example_id,
+        generator::JsTemporalRepr::String,
+    )?;
+
+    // TypeScript is the only target with more than one temporal in-memory shape,
+    // selected by `--js-temporal-repr`. Emit the `date` and `temporal` variants
+    // of the `temporal` example into distinct directories so all three modes are
+    // generated and snapshot-tested. Go / Java / Python are unaffected.
+    if language == Language::TypeScript && example_id == "temporal" {
+        build_json_example_variant(
+            repo_root,
+            language,
+            example_id,
+            "temporal-date",
+            generator::JsTemporalRepr::Date,
+        )?;
+        build_json_example_variant(
+            repo_root,
+            language,
+            example_id,
+            "temporal-temporal",
+            generator::JsTemporalRepr::Temporal,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Generates one JSON example (definitions + native-api) from the `input_id`
+/// schema into the `output_id` directory under the given TS temporal repr.
+fn build_json_example_variant(
+    repo_root: &Path,
+    language: Language,
+    input_id: &str,
+    output_id: &str,
+    js_temporal_repr: generator::JsTemporalRepr,
+) -> Result<()> {
+    let input_path = json_example_input_path(repo_root, input_id);
+    let definitions_output_path =
+        json_example_output_path(repo_root, language, output_id, GenerationMode::DefinitionsOnly);
 
     generate_to_file(&GenerateRequest {
         language,
@@ -623,13 +719,14 @@ fn build_json_example(repo_root: &Path, language: Language, example_id: &str) ->
         output_path: definitions_output_path.clone(),
         format: false,
         generate_native_api: false,
+        js_temporal_repr,
     })?;
     format_example_output(repo_root, language, &definitions_output_path)?;
 
     println!("Built {} with nex-gen", definitions_output_path.display());
 
     let api_output_path =
-        json_example_output_path(repo_root, language, example_id, GenerationMode::NativeApi);
+        json_example_output_path(repo_root, language, output_id, GenerationMode::NativeApi);
     generate_to_file(&GenerateRequest {
         language,
         input_paths: vec![input_path],
@@ -638,6 +735,7 @@ fn build_json_example(repo_root: &Path, language: Language, example_id: &str) ->
         output_path: api_output_path.clone(),
         format: false,
         generate_native_api: true,
+        js_temporal_repr,
     })?;
     format_example_output(repo_root, language, &api_output_path)?;
 
@@ -715,6 +813,15 @@ fn json_example_output_path(
         GenerationMode::NativeApi => "api",
         GenerationMode::DefinitionsOnly => "definitions",
     };
+    if language == Language::Java {
+        // Java lands under the Gradle source root so the derived package is
+        // `json_schema.<mode>.<example>`, giving the api/definitions x chat/kb
+        // variants distinct, non-colliding packages.
+        return example_language_root(repo_root, language)
+            .join("src/main/java/json_schema")
+            .join(mode_directory)
+            .join(example_directory_name(language, example_id));
+    }
     example_language_root(repo_root, language)
         .join("json_schema")
         .join(mode_directory)
@@ -736,6 +843,7 @@ fn python_example_package_name(example_id: &str) -> String {
 fn format_example_output(repo_root: &Path, language: Language, output_path: &Path) -> Result<()> {
     let (cwd, program, args): (PathBuf, &str, Vec<String>) = match language {
         Language::Dotnet => return Ok(()),
+        Language::Java => return Ok(()),
         Language::Go => (
             example_language_root(repo_root, language),
             "gofmt",

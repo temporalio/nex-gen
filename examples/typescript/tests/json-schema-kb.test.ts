@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
@@ -16,6 +15,12 @@ import type { PutBlockOutput } from "../json_schema/api/kb/kb/models.ts";
 import type { Category } from "../json_schema/api/kb/tree/category/models.ts";
 import { knowledgeBaseService } from "../json_schema/api/kb/kb/services.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
+import {
+  fixtureBytes,
+  loadFixture as loadFixtureFrom,
+  roundTripFixture,
+  type IntermediateMapper,
+} from "./json-converter-helper.ts";
 
 const wireFixtureDir = new URL("../../wire/json_schema/kb/", import.meta.url);
 const workflowsPath = fileURLToPath(
@@ -23,71 +28,49 @@ const workflowsPath = fileURLToPath(
 );
 
 function loadFixture<T = unknown>(name: string): T {
-  return JSON.parse(readFileSync(new URL(name, wireFixtureDir), "utf8")) as T;
+  return loadFixtureFrom<T>(wireFixtureDir, name);
 }
 
-function expectRoundTrip<T>(
-  name: string,
-  parse: (raw: unknown) => T,
-  serialize: (value: T) => unknown,
-): T {
-  const wire = loadFixture(name);
-  const value = parse(wire);
-  expect(serialize(value)).toEqual(wire);
+// Round-trip a fixture through the Temporal data converter (driven by the
+// generated mapper) and assert the re-serialized JSON is JSON-equal to the
+// fixture. TS mappers preserve explicit nulls, so all KB fixtures use exact
+// JSON-equality (no optional+nullable collapse — unlike Go).
+function expectRoundTrip<T>(name: string, mapper: IntermediateMapper<T>): T {
+  const { value, serialized } = roundTripFixture(
+    mapper,
+    fixtureBytes(wireFixtureDir, name),
+  );
+  expect(serialized).toEqual(loadFixture(name));
   return value;
 }
 
 describe("json-schema KB generated output", () => {
-  test("roundtrips multi-file KB fixtures through mapper helpers", () => {
-    const pageMapper = new PageMapper();
-    const page = expectRoundTrip(
-      "page.json",
-      (raw) => pageMapper.fromIntermediate(raw),
-      (value) => pageMapper.toIntermediate(value),
-    );
+  test("roundtrips multi-file KB fixtures through the Temporal converter", () => {
+    const page = expectRoundTrip("page.json", new PageMapper());
     expect(page.pageId).toBe("page-1");
     expect(page.blocks?.[0]?.blockId).toBe("block-1");
     expect(page.blocks?.[0]?.page).toBeNull();
     expect(page.blocks?.[0]?.style?.bold).toBe(true);
 
-    const blockMapper = new BlockMapper();
-    const block = expectRoundTrip(
-      "block.json",
-      (raw) => blockMapper.fromIntermediate(raw),
-      (value) => blockMapper.toIntermediate(value),
-    );
+    const block = expectRoundTrip("block.json", new BlockMapper());
     expect(block.blockId).toBe("block-1");
     expect(block.page).toBeNull();
 
-    const categoryMapper = new CategoryMapper();
-    const category = expectRoundTrip(
-      "category-tree.json",
-      (raw) => categoryMapper.fromIntermediate(raw),
-      (value) => categoryMapper.toIntermediate(value),
-    );
+    const category = expectRoundTrip("category-tree.json", new CategoryMapper());
     expect(category.children?.[0]?.id).toBe("child");
 
-    const getPageInputMapper = new GetPageInputMapper();
-    const request = expectRoundTrip(
-      "get-page-input.json",
-      (raw) => getPageInputMapper.fromIntermediate(raw),
-      (value) => getPageInputMapper.toIntermediate(value),
-    );
+    const request = expectRoundTrip("get-page-input.json", new GetPageInputMapper());
     expect(request.pageId).toBe("page-1");
 
-    const getCategoryTreeInputMapper = new GetCategoryTreeInputMapper();
     const categoryRequest = expectRoundTrip(
       "get-category-tree-input.json",
-      (raw) => getCategoryTreeInputMapper.fromIntermediate(raw),
-      (value) => getCategoryTreeInputMapper.toIntermediate(value),
+      new GetCategoryTreeInputMapper(),
     );
     expect(categoryRequest.rootId).toBe("root");
 
-    const putBlockOutputMapper = new PutBlockOutputMapper();
     const response = expectRoundTrip(
       "put-block-output.json",
-      (raw) => putBlockOutputMapper.fromIntermediate(raw),
-      (value) => putBlockOutputMapper.toIntermediate(value),
+      new PutBlockOutputMapper(),
     );
     expect(response.revision).toBe(7);
   });

@@ -1,0 +1,47 @@
+{
+  "kind": "showcase",
+  "revision": 1,
+  "enabled": true,
+  "status": "active",
+  "tier": 2,
+  "scale": 1.5,
+  "name": "Widget",
+  "count": 42,
+  "active": true,
+  "nickname": "w",
+  "retries": 5,
+  "verbose": false,
+  "middleName": "Q",
+  "category": "tools",
+  "tags": [
+    "a",
+    "b"
+  ],
+  "aliases": [
+    "alpha",
+    "beta"
+  ],
+  "roles": [
+    "admin",
+    "user"
+  ],
+  "idOrName": "abc",
+  "shape": {
+    "kind": "circle",
+    "radius": 2.5
+  },
+  "address": {
+    "street": "1 Main St",
+    "city": "Springfield",
+    "zip": 90210,
+    "region": "west"
+  },
+  "labels": {
+    "env": "prod",
+    "team": "core"
+  },
+  "settings": {
+    "theme": "dark",
+    "fontSize": 14
+  }
+}

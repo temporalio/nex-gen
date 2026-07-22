@@ -6,13 +6,123 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use std::cell::Cell;
+
 use crate::error::{Error, Result};
-use crate::generator::ExternalModelBackend;
+use crate::format::TemporalKind;
 use crate::generator::typescript::{
     RenderedExternalModelFragments, WireValueConversion, typescript_generated_field_name,
 };
+use crate::generator::{ExternalModelBackend, JsTemporalRepr};
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
+
+thread_local! {
+    /// The active `--js-temporal-repr` while rendering the TS models/runtime.
+    /// Generation is single-threaded per file, so a thread-local avoids threading
+    /// the flag through every recursive `type_annotation`/parser/serializer call.
+    static JS_TEMPORAL_REPR: Cell<JsTemporalRepr> = const { Cell::new(JsTemporalRepr::String) };
+    static USES_TEMPORAL: Cell<bool> = const { Cell::new(false) };
+    static USES_CONTENT_ENCODING: Cell<bool> = const { Cell::new(false) };
+}
+
+fn set_temporal_context(repr: JsTemporalRepr, uses_temporal: bool) {
+    JS_TEMPORAL_REPR.with(|cell| cell.set(repr));
+    USES_TEMPORAL.with(|cell| cell.set(uses_temporal));
+}
+
+fn set_content_encoding_context(uses_content_encoding: bool) {
+    USES_CONTENT_ENCODING.with(|cell| cell.set(uses_content_encoding));
+}
+
+fn active_repr() -> JsTemporalRepr {
+    JS_TEMPORAL_REPR.with(Cell::get)
+}
+
+/// The materialized `TemporalKind` of a schema that is directly a temporal string
+/// (the `oneOf[…, null]` wrapper is handled by the callers' recursion).
+/// The materialized `contentEncoding` of a schema that is directly a bytes
+/// string (the `oneOf[…, null]` wrapper is handled by the callers' recursion).
+fn content_encoding_direct(schema: &Schema) -> Option<crate::content_encoding::Encoding> {
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
+        return None;
+    }
+    schema
+        .content_encoding
+        .as_deref()
+        .and_then(crate::content_encoding::Encoding::from_name)
+}
+
+/// The generator-owned runtime decode / encode function names for a
+/// `contentEncoding`.
+fn ts_content_encoding_parse_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
+    match encoding {
+        crate::content_encoding::Encoding::Base64 => "base64ToBytes",
+        crate::content_encoding::Encoding::Base64Url => "base64UrlToBytes",
+    }
+}
+
+fn ts_content_encoding_serialize_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
+    match encoding {
+        crate::content_encoding::Encoding::Base64 => "bytesToBase64",
+        crate::content_encoding::Encoding::Base64Url => "bytesToBase64Url",
+    }
+}
+
+fn temporal_kind_direct(schema: &Schema) -> Option<TemporalKind> {
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
+        return None;
+    }
+    schema.format.as_deref().and_then(TemporalKind::from_name)
+}
+
+/// The TypeScript in-memory type for a materialized temporal `format` under the
+/// active `--js-temporal-repr`. `time` is always a `string`.
+fn ts_temporal_type(kind: TemporalKind, repr: JsTemporalRepr) -> &'static str {
+    match (kind, repr) {
+        (TemporalKind::Time, _) => "string",
+        (_, JsTemporalRepr::String) => "string",
+        (TemporalKind::DateTime, JsTemporalRepr::Date) => "Date",
+        (TemporalKind::Date | TemporalKind::Duration, JsTemporalRepr::Date) => "string",
+        (TemporalKind::DateTime, JsTemporalRepr::Temporal) => "TemporalApi.ZonedDateTime",
+        (TemporalKind::Date, JsTemporalRepr::Temporal) => "TemporalApi.PlainDate",
+        (TemporalKind::Duration, JsTemporalRepr::Temporal) => "TemporalApi.Duration",
+    }
+}
+
+/// The runtime parse-adapter function name for a temporal kind.
+fn ts_temporal_parse_fn(kind: TemporalKind) -> &'static str {
+    match kind {
+        TemporalKind::DateTime => "parseTemporalDateTime",
+        TemporalKind::Date => "parseTemporalDate",
+        TemporalKind::Time => "parseTemporalTime",
+        TemporalKind::Duration => "parseTemporalDuration",
+    }
+}
+
+/// The serialize expression for a materialized temporal value. `string`-stored
+/// temporals (all of `string` mode, plus `date`/`time`/`duration` in `date` mode
+/// and `time` in `temporal` mode) are already canonical and pass through; the
+/// native-typed ones call a runtime serializer.
+fn ts_temporal_serialize_call(kind: TemporalKind, repr: JsTemporalRepr, value_expr: &str) -> String {
+    let native = matches!(
+        (kind, repr),
+        (TemporalKind::DateTime, JsTemporalRepr::Date)
+            | (TemporalKind::DateTime, JsTemporalRepr::Temporal)
+            | (TemporalKind::Date, JsTemporalRepr::Temporal)
+            | (TemporalKind::Duration, JsTemporalRepr::Temporal)
+    );
+    if !native {
+        return value_expr.to_string();
+    }
+    let func = match kind {
+        TemporalKind::DateTime => "serializeTemporalDateTime",
+        TemporalKind::Date => "serializeTemporalDate",
+        TemporalKind::Duration => "serializeTemporalDuration",
+        TemporalKind::Time => unreachable!("time is always a string"),
+    };
+    format!("{func}({value_expr})")
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 struct Schema {
@@ -20,7 +130,9 @@ struct Schema {
     reference: Option<String>,
     #[serde(rename = "type")]
     ty: Option<Value>,
+    title: Option<String>,
     description: Option<String>,
+    deprecated: Option<bool>,
     properties: Option<IndexMap<String, Schema>>,
     required: Option<Vec<String>>,
     #[serde(rename = "additionalProperties")]
@@ -33,6 +145,732 @@ struct Schema {
     const_value: Option<Value>,
     #[serde(rename = "maxProperties")]
     max_properties: Option<usize>,
+    #[serde(rename = "minProperties")]
+    min_properties: Option<usize>,
+    #[serde(rename = "propertyNames")]
+    property_names: Option<Box<Schema>>,
+    #[serde(rename = "dependentRequired")]
+    dependent_required: Option<IndexMap<String, Vec<String>>>,
+    minimum: Option<serde_json::Number>,
+    maximum: Option<serde_json::Number>,
+    #[serde(rename = "exclusiveMinimum")]
+    exclusive_minimum: Option<serde_json::Number>,
+    #[serde(rename = "exclusiveMaximum")]
+    exclusive_maximum: Option<serde_json::Number>,
+    #[serde(rename = "multipleOf")]
+    multiple_of: Option<serde_json::Number>,
+    #[serde(rename = "minLength")]
+    min_length: Option<u64>,
+    #[serde(rename = "maxLength")]
+    max_length: Option<u64>,
+    pattern: Option<String>,
+    format: Option<String>,
+    #[serde(rename = "contentEncoding")]
+    content_encoding: Option<String>,
+    #[serde(rename = "minItems")]
+    min_items: Option<u64>,
+    #[serde(rename = "maxItems")]
+    max_items: Option<u64>,
+    #[serde(rename = "uniqueItems")]
+    unique_items: Option<bool>,
+    contains: Option<Box<Schema>>,
+    #[serde(rename = "minContains")]
+    min_contains: Option<u64>,
+    #[serde(rename = "maxContains")]
+    max_contains: Option<u64>,
+    #[serde(rename = "enum")]
+    enum_values: Option<Vec<Value>>,
+    #[serde(rename = "x-ts-name")]
+    x_ts_name: Option<String>,
+}
+
+impl Schema {
+    /// The emitted TypeScript member identifier for a property: the `x-ts-name`
+    /// override if present (verbatim), otherwise the camelCased JSON name. The
+    /// wire key is unaffected (the interface pins the original key). See
+    /// json-schema/features/properties.md.
+    fn ts_member_name(&self, json_name: &str) -> String {
+        self.x_ts_name
+            .clone()
+            .unwrap_or_else(|| typescript_generated_field_name(json_name))
+    }
+
+    fn has_numeric_constraints(&self) -> bool {
+        self.minimum.is_some()
+            || self.maximum.is_some()
+            || self.exclusive_minimum.is_some()
+            || self.exclusive_maximum.is_some()
+            || self.multiple_of.is_some()
+    }
+
+    fn has_string_constraints(&self) -> bool {
+        self.min_length.is_some()
+            || self.max_length.is_some()
+            || self.pattern.is_some()
+            || self.format.is_some()
+    }
+
+    fn has_array_constraints(&self) -> bool {
+        self.min_items.is_some()
+            || self.max_items.is_some()
+            || self.unique_items == Some(true)
+            || self.contains.is_some()
+    }
+}
+
+fn ts_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
+    if is_integer
+        && let Some(value) = number.as_f64()
+    {
+        return (value.trunc() as i64).to_string();
+    }
+    number.to_string()
+}
+
+/// Emits the numeric-constraint predicates over `value_expr` (a validated
+/// `number` in scope) into the parser body, pushing Violations.
+fn render_ts_numeric_checks(
+    output: &mut String,
+    value_expr: &str,
+    path_expr: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    let is_integer = schema.ty.as_ref().and_then(Value::as_str) == Some("integer");
+    let mut emit = |condition: String, reason: String| {
+        output.push_str(indent);
+        output.push_str("if (");
+        output.push_str(&condition);
+        output.push_str(") {\n");
+        output.push_str(indent);
+        output.push_str("  violations.push({ path: ");
+        output.push_str(path_expr);
+        output.push_str(", reason: `");
+        output.push_str(&reason);
+        output.push_str("` });\n");
+        output.push_str(indent);
+        output.push_str("}\n");
+    };
+    if let Some(min) = &schema.minimum {
+        let bound = ts_bound_literal(min, is_integer);
+        emit(
+            format!("{value_expr} < {bound}"),
+            format!("must be >= {bound}, got ${{{value_expr}}}"),
+        );
+    }
+    if let Some(max) = &schema.maximum {
+        let bound = ts_bound_literal(max, is_integer);
+        emit(
+            format!("{value_expr} > {bound}"),
+            format!("must be <= {bound}, got ${{{value_expr}}}"),
+        );
+    }
+    if let Some(min) = &schema.exclusive_minimum {
+        let bound = ts_bound_literal(min, is_integer);
+        emit(
+            format!("{value_expr} <= {bound}"),
+            format!("must be > {bound}, got ${{{value_expr}}}"),
+        );
+    }
+    if let Some(max) = &schema.exclusive_maximum {
+        let bound = ts_bound_literal(max, is_integer);
+        emit(
+            format!("{value_expr} >= {bound}"),
+            format!("must be < {bound}, got ${{{value_expr}}}"),
+        );
+    }
+    if let Some(divisor) = &schema.multiple_of {
+        let bound = ts_bound_literal(divisor, is_integer);
+        emit(
+            format!("{value_expr} % {bound} !== 0"),
+            format!("must be a multiple of {bound}, got ${{{value_expr}}}"),
+        );
+    }
+}
+
+/// Emits the string-length predicates (`minLength`/`maxLength`) over
+/// `value_expr` (a validated `string` in scope). Length is the Unicode
+/// code-point count via the spread iterator (`[...s].length`), which is
+/// surrogate-aware — never `s.length` (UTF-16 code units). See
+/// `json-schema/features/maxLength.md`.
+fn render_ts_string_checks(
+    output: &mut String,
+    value_expr: &str,
+    path_expr: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    let mut emit = |condition: String, reason: String| {
+        output.push_str(indent);
+        output.push_str("if (");
+        output.push_str(&condition);
+        output.push_str(") {\n");
+        output.push_str(indent);
+        output.push_str("  violations.push({ path: ");
+        output.push_str(path_expr);
+        output.push_str(", reason: `");
+        output.push_str(&reason);
+        output.push_str("` });\n");
+        output.push_str(indent);
+        output.push_str("}\n");
+    };
+    let length = format!("[...{value_expr}].length");
+    if let Some(min) = schema.min_length {
+        emit(
+            format!("{length} < {min}"),
+            format!("must have length >= {min}, got ${{{length}}}"),
+        );
+    }
+    if let Some(max) = schema.max_length {
+        emit(
+            format!("{length} > {max}"),
+            format!("must have length <= {max}, got ${{{length}}}"),
+        );
+    }
+    drop(emit);
+    if let Some(pattern) = &schema.pattern {
+        render_ts_pattern_check(output, value_expr, path_expr, pattern, indent);
+    }
+    if let Some(format) = &schema.format {
+        render_ts_format_check(output, value_expr, path_expr, format, indent);
+    }
+}
+
+/// Emits the `format` predicate over `value_expr` (a validated `string`): the
+/// length guard (if any) short-circuits **before** the pinned regex, so one
+/// combined condition pushes a single Violation naming the format + value. TS
+/// keeps `$` (JS end-anchor is exception-free). See
+/// `json-schema/features/format.md`.
+fn render_ts_format_check(
+    output: &mut String,
+    value_expr: &str,
+    path_expr: &str,
+    format: &str,
+    indent: &str,
+) {
+    let Some(check) = crate::format::check_for(format) else {
+        return;
+    };
+    let const_name = ts_pattern_const_name(&check.pattern);
+    output.push_str(indent);
+    output.push_str("if (");
+    if let Some(max) = check.max_code_points {
+        output.push_str(&format!("[...{value_expr}].length > {max} || "));
+    }
+    output.push_str(&format!("!{const_name}.test({value_expr})) {{\n"));
+    output.push_str(indent);
+    output.push_str(&format!(
+        "  violations.push({{ path: {path_expr}, reason: `must be a valid {}, got ${{JSON.stringify({value_expr})}}` }});\n",
+        check.name
+    ));
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
+/// The module-level compiled `RegExp` const name for a `pattern`, keyed by the
+/// (normalized) pattern text so identical patterns share one compiled instance
+/// per module. Stable FNV-1a hash → a valid TS identifier.
+fn ts_pattern_const_name(pattern: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in pattern.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("PATTERN_{hash:016X}")
+}
+
+/// Escapes a string for inclusion in a JS template literal (backtick, backslash,
+/// and `${` interpolation), so an emitted `pattern` displays verbatim without
+/// breaking the surrounding `` `...` ``.
+fn ts_template_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace('$', "\\$")
+}
+
+/// Emits the `pattern` predicate over `value_expr` (a validated `string`):
+/// `if (!PAT.test(v)) violations.push(...)`. `.test` is unanchored and — with no
+/// `g` flag — stateless; the const carries the `u` flag (code-point `.`). TS
+/// keeps `$` (JS end-anchor is already exception-free). See
+/// `json-schema/features/pattern.md`.
+fn render_ts_pattern_check(
+    output: &mut String,
+    value_expr: &str,
+    path_expr: &str,
+    pattern: &str,
+    indent: &str,
+) {
+    let const_name = ts_pattern_const_name(pattern);
+    let escaped = ts_template_escape(pattern);
+    output.push_str(indent);
+    output.push_str(&format!("if (!{const_name}.test({value_expr})) {{\n"));
+    output.push_str(indent);
+    output.push_str(&format!(
+        "  violations.push({{ path: {path_expr}, reason: `must match pattern {escaped}, got ${{JSON.stringify({value_expr})}}` }});\n"
+    ));
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
+/// Emits the module-level `const PATTERN_… = new RegExp("…", "u");` for every
+/// distinct `pattern` across `models`' string fields — compiled once per module.
+/// The pattern is the loader-normalized form; TS keeps `$`.
+fn render_pattern_regexes(output: &mut String, models: &[&PlannedJsonType]) -> Result<()> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut emitted = false;
+    for model in models {
+        let schema = decode_schema(model)?;
+        let Some(properties) = &schema.properties else {
+            continue;
+        };
+        for property in properties.values() {
+            let mut emit_const = |pattern: &str| {
+                let name = ts_pattern_const_name(pattern);
+                if seen.insert(name.clone()) {
+                    if !emitted {
+                        output.push('\n');
+                        emitted = true;
+                    }
+                    output.push_str(&format!(
+                        "const {name} = new RegExp({}, \"u\");\n",
+                        typescript_string_literal(pattern)
+                    ));
+                }
+            };
+            if let Some(pattern) = &property.pattern {
+                emit_const(pattern);
+            }
+            if let Some(format) = &property.format
+                && let Some(check) = crate::format::check_for(format)
+            {
+                emit_const(&check.pattern);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Emits the object member-count predicates (`minProperties`/`maxProperties`)
+/// over `count_expr` (the number of distinct wire member keys, one number over
+/// the whole object). See `json-schema/features/minProperties.md`.
+fn render_ts_property_count_checks(
+    output: &mut String,
+    count_expr: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    if let Some(min) = schema.min_properties {
+        output.push_str(indent);
+        output.push_str(&format!("if ({count_expr} < {min}) {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "  violations.push({{ path: '', reason: `must have at least {min} properties, got ${{{count_expr}}}` }});\n"
+        ));
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+    if let Some(max) = schema.max_properties {
+        output.push_str(indent);
+        output.push_str(&format!("if ({count_expr} > {max}) {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "  violations.push({{ path: '', reason: `must have at most {max} properties, got ${{{count_expr}}}` }});\n"
+        ));
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+}
+
+/// Emits the `propertyNames` key-shape predicate over the keys of `keys_expr`
+/// (a `string[]`), applying the (string-length) key subschema to each key. See
+/// `json-schema/features/propertyNames.md`.
+fn render_ts_property_name_checks(
+    output: &mut String,
+    keys_expr: &str,
+    subschema: &Schema,
+    indent: &str,
+) {
+    if subschema.min_length.is_none() && subschema.max_length.is_none() {
+        return;
+    }
+    output.push_str(indent);
+    output.push_str(&format!("for (const key of {keys_expr}) {{\n"));
+    let inner = format!("{indent}  ");
+    let length = "[...key].length";
+    let mut emit = |condition: String, reason: String| {
+        output.push_str(&inner);
+        output.push_str(&format!("if ({condition}) {{\n"));
+        output.push_str(&inner);
+        output.push_str(&format!(
+            "  violations.push({{ path: key, reason: `invalid property name \"${{key}}\": {reason}` }});\n"
+        ));
+        output.push_str(&inner);
+        output.push_str("}\n");
+    };
+    if let Some(min) = subschema.min_length {
+        emit(
+            format!("{length} < {min}"),
+            format!("must have length >= {min}, got ${{{length}}}"),
+        );
+    }
+    if let Some(max) = subschema.max_length {
+        emit(
+            format!("{length} > {max}"),
+            format!("must have length <= {max}, got ${{{length}}}"),
+        );
+    }
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
+/// Emits the `dependentRequired` cross-field presence predicate over the
+/// presence object `obj_expr`: for each present trigger key, each dependent key
+/// must also be present. See `json-schema/features/dependentRequired.md`.
+fn render_ts_dependent_required(
+    output: &mut String,
+    obj_expr: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    let Some(dependent_required) = &schema.dependent_required else {
+        return;
+    };
+    for (trigger, deps) in dependent_required {
+        output.push_str(indent);
+        output.push_str(&format!(
+            "if ({obj_expr}[{}] !== undefined) {{\n",
+            typescript_string_literal(trigger)
+        ));
+        for dep in deps {
+            output.push_str(indent);
+            output.push_str(&format!(
+                "  if ({obj_expr}[{}] === undefined) {{\n",
+                typescript_string_literal(dep)
+            ));
+            output.push_str(indent);
+            output.push_str(&format!(
+                "    violations.push({{ path: {}, reason: `property \"{dep}\" is required when \"{trigger}\" is present` }});\n",
+                typescript_string_literal(dep)
+            ));
+            output.push_str(indent);
+            output.push_str("  }\n");
+        }
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+}
+
+/// Renders a TypeScript literal for a scalar matcher value in the element's
+/// static type.
+fn ts_scalar_literal(value: &Value, element_ty: Option<&str>) -> String {
+    match value {
+        Value::Number(number) => ts_bound_literal(number, element_ty == Some("integer")),
+        _ => typescript_value_literal(value).unwrap_or_else(|_| "undefined".to_string()),
+    }
+}
+
+/// Builds the boolean TypeScript sub-conditions that define "match" for a scalar
+/// `contains` matcher over `elem`. A type-only matcher matches every element, so
+/// an empty condition set renders as the literal `true`.
+fn ts_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) -> String {
+    let is_integer = element_ty == Some("integer");
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(value) = &matcher.const_value {
+        parts.push(format!("{elem} === {}", ts_scalar_literal(value, element_ty)));
+    }
+    if let Some(values) = &matcher.enum_values {
+        let alternatives = values
+            .iter()
+            .map(|value| format!("{elem} === {}", ts_scalar_literal(value, element_ty)))
+            .collect::<Vec<_>>()
+            .join(" || ");
+        if !alternatives.is_empty() {
+            parts.push(format!("({alternatives})"));
+        }
+    }
+    if let Some(min) = &matcher.minimum {
+        parts.push(format!("{elem} >= {}", ts_bound_literal(min, is_integer)));
+    }
+    if let Some(max) = &matcher.maximum {
+        parts.push(format!("{elem} <= {}", ts_bound_literal(max, is_integer)));
+    }
+    if let Some(min) = &matcher.exclusive_minimum {
+        parts.push(format!("{elem} > {}", ts_bound_literal(min, is_integer)));
+    }
+    if let Some(max) = &matcher.exclusive_maximum {
+        parts.push(format!("{elem} < {}", ts_bound_literal(max, is_integer)));
+    }
+    if let Some(divisor) = &matcher.multiple_of {
+        parts.push(format!("{elem} % {} === 0", ts_bound_literal(divisor, is_integer)));
+    }
+    if let Some(min) = matcher.min_length {
+        parts.push(format!("[...{elem}].length >= {min}"));
+    }
+    if let Some(max) = matcher.max_length {
+        parts.push(format!("[...{elem}].length <= {max}"));
+    }
+    if parts.is_empty() {
+        "true".to_string()
+    } else {
+        parts.join(" && ")
+    }
+}
+
+/// Emits the array-constraint predicates over `array_expr` (a built array in
+/// scope) into the parser body, pushing Violations.
+fn render_ts_array_checks(
+    output: &mut String,
+    array_expr: &str,
+    path_expr: &str,
+    schema: &Schema,
+    indent: &str,
+) {
+    let element_ty = schema
+        .items
+        .as_ref()
+        .and_then(|item| item.ty.as_ref())
+        .and_then(Value::as_str);
+    if let Some(min) = schema.min_items {
+        output.push_str(indent);
+        output.push_str(&format!("if ({array_expr}.length < {min}) {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "  violations.push({{ path: {path_expr}, reason: `must have at least {min} items, got ${{{array_expr}.length}}` }});\n"
+        ));
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+    if let Some(max) = schema.max_items {
+        output.push_str(indent);
+        output.push_str(&format!("if ({array_expr}.length > {max}) {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "  violations.push({{ path: {path_expr}, reason: `must have at most {max} items, got ${{{array_expr}.length}}` }});\n"
+        ));
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+    if schema.unique_items == Some(true) {
+        output.push_str(indent);
+        output.push_str("{\n");
+        output.push_str(indent);
+        output.push_str("  const seen = new Map<unknown, number>();\n");
+        output.push_str(indent);
+        output.push_str(&format!("  {array_expr}.forEach((element, index) => {{\n"));
+        output.push_str(indent);
+        output.push_str("    if (seen.has(element)) {\n");
+        output.push_str(indent);
+        output.push_str(&format!(
+            "      violations.push({{ path: {path_expr}, reason: `duplicate items: element at index ${{index}} equals index ${{seen.get(element)}}` }});\n"
+        ));
+        output.push_str(indent);
+        output.push_str("    } else {\n");
+        output.push_str(indent);
+        output.push_str("      seen.set(element, index);\n");
+        output.push_str(indent);
+        output.push_str("    }\n");
+        output.push_str(indent);
+        output.push_str("  });\n");
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+    if let Some(matcher) = &schema.contains {
+        let condition = ts_matcher_condition(matcher, "element", element_ty);
+        let effective_min = schema.min_contains.unwrap_or(1);
+        let inner = format!("{indent}  ");
+        output.push_str(indent);
+        output.push_str("{\n");
+        output.push_str(&inner);
+        output.push_str(&format!(
+            "const matchCount = {array_expr}.filter((element) => {condition}).length;\n"
+        ));
+        if effective_min > 0 {
+            output.push_str(&inner);
+            output.push_str(&format!("if (matchCount < {effective_min}) {{\n"));
+            output.push_str(&inner);
+            if schema.min_contains.is_some() {
+                output.push_str(&format!(
+                    "  violations.push({{ path: {path_expr}, reason: `too few matching items: at least {effective_min}, got ${{matchCount}}` }});\n"
+                ));
+            } else {
+                output.push_str(&format!(
+                    "  violations.push({{ path: {path_expr}, reason: 'no element matches the required schema' }});\n"
+                ));
+            }
+            output.push_str(&inner);
+            output.push_str("}\n");
+        }
+        if let Some(max) = schema.max_contains {
+            output.push_str(&inner);
+            output.push_str(&format!("if (matchCount > {max}) {{\n"));
+            output.push_str(&inner);
+            output.push_str(&format!(
+                "  violations.push({{ path: {path_expr}, reason: `too many matching items: at most {max}, got ${{matchCount}}` }});\n"
+            ));
+            output.push_str(&inner);
+            output.push_str("}\n");
+        }
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+}
+
+/// True when a field schema carries a constraint the serialize path must
+/// re-check over the in-memory value (P12, both directions). Mirrors the
+/// dispatch in `render_ts_field_checks`.
+fn field_needs_serialize_check(schema: &Schema) -> bool {
+    if schema.const_value.is_some() || schema.enum_values.is_some() {
+        return true;
+    }
+    match schema.ty.as_ref().and_then(Value::as_str) {
+        Some("string") => schema.has_string_constraints(),
+        Some("number") | Some("integer") => schema.has_numeric_constraints(),
+        Some("array") => schema.has_array_constraints(),
+        _ => false,
+    }
+}
+
+/// True when a model's `toIntermediate` must run collecting validation before
+/// emitting the wire object: any constrained declared field, a constrained
+/// typed-map value, or an object-level count/name/dependency constraint.
+fn model_needs_serialize_validation(schema: &Schema) -> Result<bool> {
+    if schema.min_properties.is_some()
+        || schema.max_properties.is_some()
+        || schema.dependent_required.is_some()
+        || schema.property_names.is_some()
+    {
+        return Ok(true);
+    }
+    if let Some(value_schema) = typed_map_value_schema(schema)?
+        && field_needs_serialize_check(&value_schema)
+    {
+        return Ok(true);
+    }
+    if let Some(properties) = &schema.properties {
+        for property in properties.values() {
+            if field_needs_serialize_check(property) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Emits the closed value-set membership predicate over `value_expr` (a typed
+/// in-memory value) for the serialize path, pushing the same informative
+/// Violation as the parse path. `compare_exprs` are the admissible JS literals.
+fn render_ts_serialize_closed_check(
+    output: &mut String,
+    compare_exprs: &[String],
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+    reason: &str,
+) {
+    let membership = compare_exprs
+        .iter()
+        .map(|expr| format!("{value_expr} !== {expr}"))
+        .collect::<Vec<_>>()
+        .join(" && ");
+    output.push_str(indent);
+    output.push_str(&format!("if ({membership}) {{\n"));
+    output.push_str(indent);
+    output.push_str(&format!(
+        "  violations.push({{ path: {path_expr}, reason: `{reason}` }});\n"
+    ));
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
+/// Emits the per-field constraint checks over an in-memory `value_expr` for the
+/// serialize path, reusing the same emitters as the parse path (numeric /
+/// string-length / pattern / format / array / enum / const). References,
+/// unions, temporal, and contentEncoding carry no serialize-side field check
+/// here (nested mappers validate their own values; materialized reprs re-encode
+/// losslessly).
+fn render_ts_field_checks(
+    output: &mut String,
+    schema: &Schema,
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+) {
+    if let Some(const_value) = &schema.const_value {
+        let literal =
+            typescript_value_literal(const_value).unwrap_or_else(|_| "undefined".to_string());
+        let reason = format!("must equal {literal}");
+        render_ts_serialize_closed_check(
+            output,
+            std::slice::from_ref(&literal),
+            value_expr,
+            path_expr,
+            indent,
+            &reason,
+        );
+        return;
+    }
+    if let Some(values) = &schema.enum_values {
+        let literals = values
+            .iter()
+            .map(|value| {
+                typescript_value_literal(value).unwrap_or_else(|_| "undefined".to_string())
+            })
+            .collect::<Vec<_>>();
+        let reason = format!(
+            "must be one of [{}], got ${{JSON.stringify({value_expr})}}",
+            literals.join(", ")
+        );
+        render_ts_serialize_closed_check(output, &literals, value_expr, path_expr, indent, &reason);
+        return;
+    }
+    match schema.ty.as_ref().and_then(Value::as_str) {
+        Some("string") if schema.has_string_constraints() => {
+            render_ts_string_checks(output, value_expr, path_expr, schema, indent);
+        }
+        Some("number") | Some("integer") if schema.has_numeric_constraints() => {
+            render_ts_numeric_checks(output, value_expr, path_expr, schema, indent);
+        }
+        Some("array") if schema.has_array_constraints() => {
+            render_ts_array_checks(output, value_expr, path_expr, schema, indent);
+        }
+        _ => {}
+    }
+}
+
+/// Emits the serialize-side validation for one declared property against its
+/// in-memory value (`value.<field>`), guarding a nullable value so the checks
+/// only fire on a materialized (non-null) value. The caller is responsible for
+/// the optional (`!== undefined`) guard.
+fn render_ts_serialize_property_check(
+    output: &mut String,
+    json_name: &str,
+    property: &Schema,
+    indent: &str,
+) {
+    let field_name = property.ts_member_name(json_name);
+    let value_expr = format!("value.{field_name}");
+    let path_expr = typescript_string_literal(json_name);
+    let guard_null = allows_null(property);
+    let body_indent = if guard_null {
+        format!("{indent}  ")
+    } else {
+        indent.to_string()
+    };
+    let mut body = String::new();
+    render_ts_field_checks(&mut body, property, &value_expr, &path_expr, &body_indent);
+    if body.is_empty() {
+        return;
+    }
+    if guard_null {
+        output.push_str(indent);
+        output.push_str(&format!("if ({value_expr} !== null) {{\n"));
+        output.push_str(&body);
+        output.push_str(indent);
+        output.push_str("}\n");
+    } else {
+        output.push_str(&body);
+    }
 }
 
 pub(in crate::generator) fn model_type_ref(json_type: &PlannedJsonType) -> String {
@@ -56,6 +894,8 @@ pub(in crate::generator) struct ModelBackend {
     json_models: Vec<PlannedJsonType>,
     tree_leaf: bool,
     runtime_import_module: String,
+    /// The `--js-temporal-repr` selection for materialized temporal fields.
+    pub(in crate::generator) js_temporal_repr: crate::generator::JsTemporalRepr,
 }
 
 impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
@@ -67,7 +907,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         self.runtime_import_module = if self.tree_leaf {
             root_typescript_runtime_module(&api_plan.module_path)
         } else {
-            "./json".to_string()
+            "./definitions".to_string()
         };
         self.json_models = api_plan
             .external_types()
@@ -82,6 +922,8 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
 
     fn render_models(&self) -> Result<RenderedExternalModelFragments> {
         let json_models = self.json_models.iter().collect::<Vec<_>>();
+        set_temporal_context(self.js_temporal_repr, self.json_models.iter().any(|m| model_uses_temporal(m)));
+        set_content_encoding_context(self.json_models.iter().any(model_uses_content_encoding));
         render_external_models(json_models.as_slice(), &self.runtime_import_module)
     }
 
@@ -89,9 +931,11 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         if self.tree_leaf || self.json_models.is_empty() {
             return Ok(BTreeMap::new());
         }
+        set_temporal_context(self.js_temporal_repr, self.json_models.iter().any(|m| model_uses_temporal(m)));
+        set_content_encoding_context(self.json_models.iter().any(model_uses_content_encoding));
 
         Ok(BTreeMap::from([(
-            PathBuf::from("json.ts"),
+            PathBuf::from("definitions.ts"),
             render_support_file(),
         )]))
     }
@@ -126,7 +970,7 @@ pub(in crate::generator) fn render_support_file() -> String {
 }
 
 fn root_typescript_runtime_module(module_path: &ModulePath) -> String {
-    format!("{}json", "../".repeat(module_path.0.len()))
+    format!("{}definitions", "../".repeat(module_path.0.len()))
 }
 
 fn render_external_models(
@@ -139,6 +983,7 @@ fn render_external_models(
 
     let mut output = String::new();
     render_default_constants(&mut output, json_models)?;
+    render_pattern_regexes(&mut output, json_models)?;
     if !output.is_empty() {
         output.push('\n');
     }
@@ -158,7 +1003,7 @@ fn render_external_models(
         .any(|model| schema_uses_ref(&decode_schema(model).ok()));
 
     Ok(RenderedExternalModelFragments {
-        imports: render_json_model_imports(uses_refs, runtime_import_module),
+        imports: render_json_model_imports(uses_refs, &output, runtime_import_module),
         body: output,
         type_exported_names: json_models
             .iter()
@@ -171,14 +1016,40 @@ fn render_external_models(
     })
 }
 
-fn render_json_model_imports(uses_refs: bool, runtime_import_module: &str) -> String {
+fn render_json_model_imports(uses_refs: bool, body: &str, runtime_import_module: &str) -> String {
     let mut imports = String::new();
+    // Temporal-repr models reference `TemporalApi.*` types in their interfaces.
+    if body.contains("TemporalApi.") {
+        imports.push_str("import { Temporal as TemporalApi } from '@js-temporal/polyfill';\n");
+    }
     imports.push_str("import type { Violation } from \"");
     imports.push_str(runtime_import_module);
     imports.push_str("\";\n");
     imports.push_str("import { ValidationError, isPlainObject");
     if uses_refs {
         imports.push_str(", collect");
+    }
+    // Materialized-temporal parse/serialize adapters referenced by the models.
+    for func in [
+        "parseTemporalDateTime",
+        "parseTemporalDate",
+        "parseTemporalTime",
+        "parseTemporalDuration",
+        "serializeTemporalDateTime",
+        "serializeTemporalDate",
+        "serializeTemporalDuration",
+        "base64ToBytes",
+        "base64UrlToBytes",
+        "bytesToBase64",
+        "bytesToBase64Url",
+    ] {
+        // Match the call form (`func(`) so `parseTemporalDate` is not spuriously
+        // matched inside `parseTemporalDateTime`, or `bytesToBase64` inside
+        // `bytesToBase64Url`.
+        if body.contains(&format!("{func}(")) {
+            imports.push_str(", ");
+            imports.push_str(func);
+        }
     }
     imports.push_str(" } from \"");
     imports.push_str(runtime_import_module);
@@ -187,13 +1058,359 @@ fn render_json_model_imports(uses_refs: bool, runtime_import_module: &str) -> St
 }
 
 fn render_json_runtime_module() -> String {
+    let repr = active_repr();
+    let uses_temporal = USES_TEMPORAL.with(Cell::get);
     let mut output = String::new();
     output.push_str("// Generated by nex-gen. DO NOT EDIT!\n\n");
+    if uses_temporal && repr == JsTemporalRepr::Temporal {
+        output.push_str("import { Temporal as TemporalApi } from '@js-temporal/polyfill';\n\n");
+    }
     render_validator_core(&mut output);
     output.push('\n');
     render_collect_helper(&mut output);
+    if uses_temporal {
+        output.push('\n');
+        render_ts_temporal_helpers(&mut output, repr);
+    }
+    if USES_CONTENT_ENCODING.with(Cell::get) {
+        output.push('\n');
+        render_ts_content_encoding_helpers(&mut output);
+    }
     output
 }
+
+/// True when any property of the model materializes a `contentEncoding`.
+fn model_uses_content_encoding(model: &PlannedJsonType) -> bool {
+    let Ok(schema) = decode_schema(model) else {
+        return false;
+    };
+    schema.properties.as_ref().is_some_and(|properties| {
+        properties.values().any(|property| {
+            content_encoding_direct(property).is_some()
+                || nullable_non_null_schema(property)
+                    .is_some_and(|inner| content_encoding_direct(inner).is_some())
+        })
+    })
+}
+
+/// Emits the generator-owned pure-JS `contentEncoding` codec: the pinned
+/// canonical regexes (the validity oracle) plus base64 / base64url decode +
+/// canonical encode over a `Uint8Array`, using a lookup table and plain
+/// arithmetic — **no `Buffer`, no `atob`/`btoa`** — so the generated TS runs
+/// unchanged in the browser and Node (P4). See `contentEncoding.md`.
+fn render_ts_content_encoding_helpers(output: &mut String) {
+    use crate::content_encoding::Encoding;
+    output.push_str(&format!(
+        "const BASE64_RE = /{}/u;\n",
+        Encoding::Base64.pattern()
+    ));
+    output.push_str(&format!(
+        "const BASE64URL_RE = /{}/u;\n",
+        Encoding::Base64Url.pattern()
+    ));
+    output.push_str(TS_CONTENT_ENCODING_BODY);
+}
+
+const TS_CONTENT_ENCODING_BODY: &str = r####"const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+function buildDecodeTable(alphabet: string): Int16Array {
+  const table = new Int16Array(128).fill(-1);
+  for (let i = 0; i < alphabet.length; i++) {
+    table[alphabet.charCodeAt(i)] = i;
+  }
+  return table;
+}
+
+const BASE64_DECODE = buildDecodeTable(BASE64_ALPHABET);
+const BASE64URL_DECODE = buildDecodeTable(BASE64URL_ALPHABET);
+
+// decodeCanonical assumes the input has already matched the canonical regex, so
+// every non-padding character is a valid alphabet member. Padding (`=`) is
+// stripped by the caller-supplied `stripped` length.
+function decodeCanonical(value: string, table: Int16Array): Uint8Array {
+  let stripped = value.length;
+  while (stripped > 0 && value.charCodeAt(stripped - 1) === 0x3d /* '=' */) {
+    stripped--;
+  }
+  const byteLength = Math.floor((stripped * 6) / 8);
+  const out = new Uint8Array(byteLength);
+  let accumulator = 0;
+  let bits = 0;
+  let outIndex = 0;
+  for (let i = 0; i < stripped; i++) {
+    accumulator = (accumulator << 6) | table[value.charCodeAt(i)];
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[outIndex++] = (accumulator >> bits) & 0xff;
+    }
+  }
+  return out;
+}
+
+function encodeCanonical(bytes: Uint8Array, alphabet: string, pad: boolean): string {
+  let out = '';
+  let accumulator = 0;
+  let bits = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    accumulator = (accumulator << 8) | bytes[i];
+    bits += 8;
+    while (bits >= 6) {
+      bits -= 6;
+      out += alphabet[(accumulator >> bits) & 0x3f];
+    }
+  }
+  if (bits > 0) {
+    out += alphabet[(accumulator << (6 - bits)) & 0x3f];
+  }
+  if (pad) {
+    while (out.length % 4 !== 0) {
+      out += '=';
+    }
+  }
+  return out;
+}
+
+export function base64ToBytes(value: string, path: string, violations: Violation[]): Uint8Array | undefined {
+  if (!BASE64_RE.test(value)) {
+    violations.push({ path, reason: `must be base64-encoded, got ${JSON.stringify(value)}` });
+    return undefined;
+  }
+  return decodeCanonical(value, BASE64_DECODE);
+}
+
+export function bytesToBase64(bytes: Uint8Array): string {
+  return encodeCanonical(bytes, BASE64_ALPHABET, true);
+}
+
+export function base64UrlToBytes(value: string, path: string, violations: Violation[]): Uint8Array | undefined {
+  if (!BASE64URL_RE.test(value)) {
+    violations.push({ path, reason: `must be base64url-encoded, got ${JSON.stringify(value)}` });
+    return undefined;
+  }
+  return decodeCanonical(value, BASE64URL_DECODE);
+}
+
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  return encodeCanonical(bytes, BASE64URL_ALPHABET, false);
+}
+"####;
+
+/// True when any property of the model materializes a temporal `format`.
+fn model_uses_temporal(model: &PlannedJsonType) -> bool {
+    let Ok(schema) = decode_schema(model) else {
+        return false;
+    };
+    schema.properties.as_ref().is_some_and(|properties| {
+        properties.values().any(|property| {
+            temporal_kind_direct(property).is_some()
+                || nullable_non_null_schema(property)
+                    .is_some_and(|inner| temporal_kind_direct(inner).is_some())
+        })
+    })
+}
+
+/// Emits the materialized-temporal runtime for the active repr: the pinned
+/// narrowed regexes, the Gregorian calendar predicate, string canonicalizers,
+/// and the parse/serialize adapters. See `json-schema/features/format.md`.
+fn render_ts_temporal_helpers(output: &mut String, repr: JsTemporalRepr) {
+    output.push_str(&format!(
+        "const TEMPORAL_DATE_TIME_RE = /{}/u;\n",
+        TemporalKind::DateTime.pattern()
+    ));
+    output.push_str(&format!(
+        "const TEMPORAL_DATE_RE = /{}/u;\n",
+        TemporalKind::Date.pattern()
+    ));
+    output.push_str(&format!(
+        "const TEMPORAL_TIME_RE = /{}/u;\n",
+        TemporalKind::Time.pattern()
+    ));
+    output.push_str(&format!(
+        "const TEMPORAL_DURATION_RE = /{}/u;\n",
+        TemporalKind::Duration.pattern()
+    ));
+    output.push_str(TS_TEMPORAL_COMMON);
+
+    let dt_type = ts_temporal_type(TemporalKind::DateTime, repr);
+    let date_type = ts_temporal_type(TemporalKind::Date, repr);
+    let dur_type = ts_temporal_type(TemporalKind::Duration, repr);
+
+    // parseTemporalDateTime
+    output.push_str(&format!(
+        "export function parseTemporalDateTime(value: string, path: string, violations: Violation[]): {dt_type} | undefined {{\n"
+    ));
+    output.push_str("  if (!TEMPORAL_DATE_TIME_RE.test(value) || !validTemporalCalendar(value)) {\n");
+    output.push_str("    violations.push({ path, reason: `must be a valid date-time, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
+    match repr {
+        JsTemporalRepr::String => {
+            output.push_str("  return canonicalizeTemporalDateTime(value);\n");
+        }
+        JsTemporalRepr::Date => {
+            output.push_str("  return new Date(value.toUpperCase());\n");
+        }
+        JsTemporalRepr::Temporal => {
+            output.push_str("  const canon = canonicalizeTemporalDateTime(value);\n");
+            output.push_str("  const zone = canon.endsWith('Z') ? 'UTC' : canon.slice(-6);\n");
+            output.push_str("  return TemporalApi.ZonedDateTime.from(`${canon}[${zone}]`);\n");
+        }
+    }
+    output.push_str("}\n\n");
+
+    // parseTemporalDate
+    output.push_str(&format!(
+        "export function parseTemporalDate(value: string, path: string, violations: Violation[]): {date_type} | undefined {{\n"
+    ));
+    output.push_str("  if (!TEMPORAL_DATE_RE.test(value) || !validTemporalCalendar(value)) {\n");
+    output.push_str("    violations.push({ path, reason: `must be a valid date, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
+    match repr {
+        JsTemporalRepr::Temporal => {
+            output.push_str("  return TemporalApi.PlainDate.from(value);\n");
+        }
+        _ => output.push_str("  return value;\n"),
+    }
+    output.push_str("}\n\n");
+
+    // parseTemporalTime — always a string.
+    output.push_str(
+        "export function parseTemporalTime(value: string, path: string, violations: Violation[]): string | undefined {\n",
+    );
+    output.push_str("  if (!TEMPORAL_TIME_RE.test(value)) {\n");
+    output.push_str("    violations.push({ path, reason: `must be a valid time, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
+    output.push_str("  return canonicalizeTemporalTime(value);\n}\n\n");
+
+    // parseTemporalDuration
+    output.push_str(&format!(
+        "export function parseTemporalDuration(value: string, path: string, violations: Violation[]): {dur_type} | undefined {{\n"
+    ));
+    output.push_str("  if (!TEMPORAL_DURATION_RE.test(value)) {\n");
+    output.push_str("    violations.push({ path, reason: `must be a valid duration, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
+    output.push_str("  const seconds = temporalDurationSeconds(value);\n");
+    output.push_str("  if (seconds === undefined) {\n");
+    output.push_str("    violations.push({ path, reason: `must be a valid duration, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
+    match repr {
+        JsTemporalRepr::Temporal => {
+            output.push_str("  return TemporalApi.Duration.from({ seconds });\n");
+        }
+        _ => output.push_str("  return formatTemporalDuration(seconds);\n"),
+    }
+    output.push_str("}\n");
+
+    // Serializers for native-typed reprs.
+    if repr == JsTemporalRepr::Date {
+        output.push_str(
+            "\nexport function serializeTemporalDateTime(value: Date): string {\n  return value.toISOString();\n}\n",
+        );
+    }
+    if repr == JsTemporalRepr::Temporal {
+        output.push_str(
+            "\nexport function serializeTemporalDateTime(value: TemporalApi.ZonedDateTime): string {\n",
+        );
+        output.push_str("  const s = value.toString({ timeZoneName: 'never' });\n");
+        output.push_str(
+            "  return s.endsWith('+00:00') || s.endsWith('-00:00') ? s.slice(0, -6) + 'Z' : s;\n}\n",
+        );
+        output.push_str(
+            "\nexport function serializeTemporalDate(value: TemporalApi.PlainDate): string {\n  return value.toString();\n}\n",
+        );
+        output.push_str(
+            "\nexport function serializeTemporalDuration(value: TemporalApi.Duration): string {\n  return formatTemporalDuration(value.total({ unit: 'seconds' }));\n}\n",
+        );
+    }
+}
+
+const TS_TEMPORAL_COMMON: &str = r#"const TEMPORAL_DATE_TIME_CAP = /^(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/u;
+const TEMPORAL_TIME_CAP = /^(\d{2}:\d{2}:\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?$/u;
+
+function daysInTemporalMonth(year: number, month: number): number {
+  switch (month) {
+    case 1: case 3: case 5: case 7: case 8: case 10: case 12:
+      return 31;
+    case 4: case 6: case 9: case 11:
+      return 30;
+    case 2:
+      return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28;
+    default:
+      return 0;
+  }
+}
+
+function validTemporalCalendar(value: string): boolean {
+  if (value.length < 10) {
+    return false;
+  }
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  const max = daysInTemporalMonth(year, month);
+  return max > 0 && day >= 1 && day <= max;
+}
+
+function trimTemporalFraction(fraction: string | undefined): string {
+  if (!fraction) {
+    return '';
+  }
+  const trimmed = fraction.replace(/0+$/u, '');
+  return trimmed === '.' ? '' : trimmed;
+}
+
+function normalizeTemporalOffset(offset: string): string {
+  if (offset.toUpperCase() === 'Z' || offset === '+00:00' || offset === '-00:00') {
+    return 'Z';
+  }
+  return offset;
+}
+
+function canonicalizeTemporalDateTime(value: string): string {
+  const m = TEMPORAL_DATE_TIME_CAP.exec(value)!;
+  return `${m[1]}T${m[2]}${trimTemporalFraction(m[3])}${normalizeTemporalOffset(m[4])}`;
+}
+
+function canonicalizeTemporalTime(value: string): string {
+  const m = TEMPORAL_TIME_CAP.exec(value)!;
+  return `${m[1]}${trimTemporalFraction(m[2])}${m[3] ? normalizeTemporalOffset(m[3]) : ''}`;
+}
+
+function temporalDurationSeconds(value: string): number | undefined {
+  let total = 0;
+  let digits = '';
+  for (const ch of value.slice(2)) {
+    if (ch >= '0' && ch <= '9') {
+      digits += ch;
+      continue;
+    }
+    const unit = ch === 'H' ? 3600 : ch === 'M' ? 60 : 1;
+    total += Number(digits) * unit;
+    digits = '';
+    if (total > 9223372036) {
+      return undefined;
+    }
+  }
+  return total;
+}
+
+function formatTemporalDuration(total: number): string {
+  if (total === 0) {
+    return 'PT0S';
+  }
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  let out = 'PT';
+  if (hours) {
+    out += `${hours}H`;
+  }
+  if (minutes) {
+    out += `${minutes}M`;
+  }
+  if (seconds) {
+    out += `${seconds}S`;
+  }
+  return out;
+}
+
+"#;
 
 fn render_validator_core(output: &mut String) {
     output.push_str("/** A single constraint failure, located by JSON path. */\n");
@@ -297,9 +1514,402 @@ fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) ->
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// `oneOf` closed sum types (json-schema/features/oneOf.md)
+// ---------------------------------------------------------------------------
+
+/// A member of a TypeScript union (a native `A | B | …` type).
+#[derive(Debug, Clone)]
+struct TsUnionVariant {
+    ts_type: String,
+    is_object: bool,
+    mapper: Option<String>,
+    discriminant_value: Option<Value>,
+    typeof_guard: Option<&'static str>,
+    is_integer: bool,
+    is_array: bool,
+    label: String,
+}
+
+#[derive(Debug, Clone)]
+struct TsUnion {
+    nullable: bool,
+    discriminant: Option<String>,
+    variants: Vec<TsUnionVariant>,
+}
+
+impl TsUnion {
+    fn admissible(&self) -> String {
+        self.variants
+            .iter()
+            .map(|variant| variant.label.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// True when a schema is a `oneOf` sum type (two or more non-null branches),
+/// rather than the degenerate nullability pattern.
+fn is_ts_union(schema: &Schema) -> bool {
+    schema.one_of.as_ref().is_some_and(|branches| {
+        branches
+            .iter()
+            .filter(|branch| !schema_type_includes(branch, "null"))
+            .count()
+            >= 2
+    })
+}
+
+fn ts_discriminator_const(property: &Schema) -> Option<Value> {
+    if let Some(value) = &property.const_value {
+        return Some(value.clone());
+    }
+    if let Some(values) = &property.enum_values
+        && values.len() == 1
+    {
+        return Some(values[0].clone());
+    }
+    None
+}
+
+fn ts_branch_discriminator_tags(object: &Schema) -> BTreeMap<String, Value> {
+    let required: BTreeSet<String> = object.required.iter().flatten().cloned().collect();
+    let mut tags = BTreeMap::new();
+    if let Some(properties) = &object.properties {
+        for (name, property) in properties {
+            if required.contains(name)
+                && let Some(value) = ts_discriminator_const(property)
+            {
+                tags.insert(name.clone(), value);
+            }
+        }
+    }
+    tags
+}
+
+fn find_ref_model<'a>(
+    reference: &str,
+    models: &'a [&PlannedJsonType],
+) -> Option<&'a PlannedJsonType> {
+    let target = reference_model_name(reference);
+    models
+        .iter()
+        .copied()
+        .find(|model| model.model_name == target || model.full_name == target)
+}
+
+/// Classifies a `oneOf` schema into a TypeScript union, or `None` for the
+/// degenerate nullability pattern.
+fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsUnion> {
+    if !is_ts_union(schema) {
+        return None;
+    }
+    let branches = schema.one_of.as_ref()?;
+    let mut nullable = false;
+    let mut variants: Vec<TsUnionVariant> = Vec::new();
+    let mut object_schemas: Vec<Schema> = Vec::new();
+    for branch in branches {
+        let resolved = if let Some(reference) = &branch.reference {
+            find_ref_model(reference, models)
+                .and_then(|model| decode_schema(model).ok())
+                .unwrap_or_else(|| branch.clone())
+        } else {
+            branch.clone()
+        };
+        let ty = resolved.ty.as_ref().and_then(Value::as_str);
+        match ty {
+            Some("null") => nullable = true,
+            Some("object") => {
+                let name = branch
+                    .reference
+                    .as_ref()
+                    .map(|reference| reference_model_name(reference))
+                    .unwrap_or_else(|| "Record<string, unknown>".to_string());
+                object_schemas.push(resolved.clone());
+                variants.push(TsUnionVariant {
+                    ts_type: name.clone(),
+                    is_object: true,
+                    mapper: Some(mapper_class_name(&name)),
+                    discriminant_value: None,
+                    typeof_guard: None,
+                    is_integer: false,
+                    is_array: false,
+                    label: name,
+                });
+            }
+            Some("string") => variants.push(TsUnionVariant {
+                ts_type: "string".to_string(),
+                is_object: false,
+                mapper: None,
+                discriminant_value: None,
+                typeof_guard: Some("string"),
+                is_integer: false,
+                is_array: false,
+                label: "string".to_string(),
+            }),
+            Some("integer") => variants.push(TsUnionVariant {
+                ts_type: "number".to_string(),
+                is_object: false,
+                mapper: None,
+                discriminant_value: None,
+                typeof_guard: Some("number"),
+                is_integer: true,
+                is_array: false,
+                label: "integer".to_string(),
+            }),
+            Some("number") => variants.push(TsUnionVariant {
+                ts_type: "number".to_string(),
+                is_object: false,
+                mapper: None,
+                discriminant_value: None,
+                typeof_guard: Some("number"),
+                is_integer: false,
+                is_array: false,
+                label: "number".to_string(),
+            }),
+            Some("boolean") => variants.push(TsUnionVariant {
+                ts_type: "boolean".to_string(),
+                is_object: false,
+                mapper: None,
+                discriminant_value: None,
+                typeof_guard: Some("boolean"),
+                is_integer: false,
+                is_array: false,
+                label: "boolean".to_string(),
+            }),
+            Some("array") => {
+                let ts_type = type_annotation(&resolved).unwrap_or_else(|_| "unknown[]".to_string());
+                variants.push(TsUnionVariant {
+                    ts_type: ts_type.clone(),
+                    is_object: false,
+                    mapper: None,
+                    discriminant_value: None,
+                    typeof_guard: None,
+                    is_integer: false,
+                    is_array: true,
+                    label: ts_type,
+                });
+            }
+            _ => {}
+        }
+    }
+    let mut discriminant = None;
+    if object_schemas.len() >= 2 {
+        let mut shared: Option<BTreeMap<String, Value>> = None;
+        for object in &object_schemas {
+            let tags = ts_branch_discriminator_tags(object);
+            shared = Some(match shared {
+                None => tags,
+                Some(existing) => existing
+                    .into_iter()
+                    .filter(|(name, _)| tags.contains_key(name))
+                    .collect(),
+            });
+        }
+        let shared = shared.unwrap_or_default();
+        let name = shared
+            .keys()
+            .find(|name| {
+                let values: Vec<Value> = object_schemas
+                    .iter()
+                    .filter_map(|object| ts_branch_discriminator_tags(object).get(*name).cloned())
+                    .collect();
+                values.iter().enumerate().all(|(index, value)| {
+                    !values[..index].iter().any(|existing| existing == value)
+                })
+            })
+            .cloned();
+        if let Some(name) = &name {
+            let mut object_index = 0;
+            for variant in variants.iter_mut().filter(|variant| variant.is_object) {
+                variant.discriminant_value =
+                    ts_branch_discriminator_tags(&object_schemas[object_index])
+                        .get(name)
+                        .cloned();
+                object_index += 1;
+            }
+        }
+        discriminant = name;
+    }
+    Some(TsUnion {
+        nullable,
+        discriminant,
+        variants,
+    })
+}
+
+/// Emits the parse dispatch for a union value: token / discriminant selection
+/// into `target`, pushing a `Violation` when no branch matches.
+fn render_ts_union_parse(
+    output: &mut String,
+    union: &TsUnion,
+    raw_expr: &str,
+    target: &str,
+    path_expr: &str,
+    indent: &str,
+) {
+    let mut first = true;
+    let mut clause = |output: &mut String, condition: &str| {
+        if first {
+            output.push_str(indent);
+            output.push_str(&format!("if ({condition}) {{\n"));
+            first = false;
+        } else {
+            output.push_str(indent);
+            output.push_str(&format!("}} else if ({condition}) {{\n"));
+        }
+    };
+
+    let object_variants: Vec<&TsUnionVariant> =
+        union.variants.iter().filter(|variant| variant.is_object).collect();
+    if !object_variants.is_empty() {
+        clause(output, &format!("isPlainObject({raw_expr})"));
+        if let Some(discriminant) = &union.discriminant {
+            let disc_key = format!("({raw_expr} as Record<string, unknown>)[{}]", typescript_string_literal(discriminant));
+            output.push_str(indent);
+            output.push_str(&format!("  switch ({disc_key}) {{\n"));
+            let mut values_display = Vec::new();
+            for variant in &object_variants {
+                let Some(value) = &variant.discriminant_value else {
+                    continue;
+                };
+                let literal =
+                    typescript_value_literal(value).unwrap_or_else(|_| "undefined".to_string());
+                values_display.push(literal.clone());
+                output.push_str(indent);
+                output.push_str(&format!("    case {literal}:\n"));
+                output.push_str(indent);
+                output.push_str("      try {\n");
+                output.push_str(indent);
+                output.push_str(&format!(
+                    "        {target} = new {}().fromIntermediate({raw_expr});\n",
+                    variant.mapper.as_deref().unwrap_or("")
+                ));
+                output.push_str(indent);
+                output.push_str("      } catch (error) {\n");
+                output.push_str(indent);
+                output.push_str(&format!("        collect(violations, {path_expr}, error);\n"));
+                output.push_str(indent);
+                output.push_str("      }\n");
+                output.push_str(indent);
+                output.push_str("      break;\n");
+            }
+            output.push_str(indent);
+            output.push_str("    default:\n");
+            output.push_str(indent);
+            output.push_str(&format!(
+                "      violations.push({{ path: {path_expr}, reason: `unknown discriminator {discriminant} ${{String({disc_key})}}: expected one of [{}]` }});\n",
+                values_display.join(", ")
+            ));
+            output.push_str(indent);
+            output.push_str("  }\n");
+        } else {
+            let variant = object_variants[0];
+            output.push_str(indent);
+            output.push_str("  try {\n");
+            output.push_str(indent);
+            output.push_str(&format!(
+                "    {target} = new {}().fromIntermediate({raw_expr});\n",
+                variant.mapper.as_deref().unwrap_or("")
+            ));
+            output.push_str(indent);
+            output.push_str("  } catch (error) {\n");
+            output.push_str(indent);
+            output.push_str(&format!("    collect(violations, {path_expr}, error);\n"));
+            output.push_str(indent);
+            output.push_str("  }\n");
+        }
+    }
+
+    for variant in union.variants.iter().filter(|variant| !variant.is_object) {
+        if variant.is_array {
+            clause(output, &format!("Array.isArray({raw_expr})"));
+        } else if variant.is_integer {
+            clause(
+                output,
+                &format!("typeof {raw_expr} === 'number' && Number.isSafeInteger({raw_expr})"),
+            );
+        } else if let Some(guard) = variant.typeof_guard {
+            clause(output, &format!("typeof {raw_expr} === '{guard}'"));
+        }
+        output.push_str(indent);
+        output.push_str(&format!("  {target} = {raw_expr} as {};\n", variant.ts_type));
+    }
+
+    if union.nullable {
+        clause(output, &format!("{raw_expr} === null"));
+        output.push_str(indent);
+        output.push_str(&format!("  {target} = null as unknown as {};\n", union.variants[0].ts_type));
+    }
+
+    output.push_str(indent);
+    output.push_str("} else {\n");
+    output.push_str(indent);
+    output.push_str(&format!(
+        "  violations.push({{ path: {path_expr}, reason: 'expected one of: {}' }});\n",
+        union.admissible()
+    ));
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
+/// Emits the serialize dispatch for a union def's `toIntermediate`.
+fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &str) {
+    for variant in &union.variants {
+        if variant.is_object {
+            let mapper = variant.mapper.as_deref().unwrap_or("");
+            let member = &variant.ts_type;
+            if let (Some(discriminant), Some(value)) =
+                (&union.discriminant, &variant.discriminant_value)
+            {
+                let literal =
+                    typescript_value_literal(value).unwrap_or_else(|_| "undefined".to_string());
+                output.push_str(&format!(
+                    "  if (({value_expr} as unknown as Record<string, unknown>)[{}] === {literal}) {{\n    return new {mapper}().toIntermediate({value_expr} as {member});\n  }}\n",
+                    typescript_string_literal(discriminant)
+                ));
+            } else {
+                output.push_str(&format!(
+                    "  return new {mapper}().toIntermediate({value_expr} as {member});\n"
+                ));
+            }
+        } else if variant.is_array {
+            output.push_str(&format!(
+                "  if (Array.isArray({value_expr})) {{\n    return {value_expr};\n  }}\n"
+            ));
+        } else if variant.is_integer {
+            output.push_str(&format!(
+                "  if (typeof {value_expr} === 'number' && Number.isSafeInteger({value_expr})) {{\n    return {value_expr};\n  }}\n"
+            ));
+        } else if let Some(guard) = variant.typeof_guard {
+            output.push_str(&format!(
+                "  if (typeof {value_expr} === '{guard}') {{\n    return {value_expr};\n  }}\n"
+            ));
+        }
+    }
+    if union.nullable {
+        output.push_str(&format!(
+            "  if ({value_expr} === null) {{\n    return null;\n  }}\n"
+        ));
+    }
+    output.push_str(&format!(
+        "  throw new ValidationError([{{ path: '', reason: 'expected one of: {}' }}]);\n",
+        union.admissible()
+    ));
+}
+
 fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Result<()> {
     let schema = decode_schema(model)?;
-    render_doc_comment(output, "", schema.description.as_deref());
+    if is_ts_union(&schema) {
+        render_ts_schema_doc(output, "", &schema);
+        output.push_str("export type ");
+        output.push_str(&model.model_name);
+        output.push_str(" = ");
+        output.push_str(&type_annotation(&schema)?);
+        output.push_str(";\n");
+        return Ok(());
+    }
+    render_ts_schema_doc(output, "", &schema);
     output.push_str("export interface ");
     output.push_str(&model.model_name);
     output.push_str(" {\n");
@@ -315,12 +1925,12 @@ fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Resul
     let required = required_fields(&schema);
     if let Some(properties) = &schema.properties {
         for (json_name, property) in properties {
-            render_doc_comment(output, "  ", property.description.as_deref());
+            render_ts_schema_doc(output, "  ", property);
             output.push_str("  ");
             if property.const_value.is_some() {
                 output.push_str("readonly ");
             }
-            output.push_str(&typescript_object_key(&typescript_generated_field_name(
+            output.push_str(&typescript_object_key(&property.ts_member_name(
                 json_name,
             )));
             if !required.contains(json_name) {
@@ -348,6 +1958,33 @@ fn render_model_mapper(
     models: &[&PlannedJsonType],
 ) -> Result<()> {
     let schema = decode_schema(model)?;
+    if let Some(union) = classify_ts_union(&schema, models) {
+        output.push_str("export class ");
+        output.push_str(&mapper_class_name(&model.model_name));
+        output.push_str(" {\n");
+        output.push_str("  public fromIntermediate(raw: unknown): ");
+        output.push_str(&model.model_name);
+        output.push_str(" {\n");
+        output.push_str("    const violations: Violation[] = [];\n");
+        output.push_str("    let out: ");
+        output.push_str(&model.model_name);
+        output.push_str(" = undefined as unknown as ");
+        output.push_str(&model.model_name);
+        output.push_str(";\n");
+        render_ts_union_parse(output, &union, "raw", "out", "''", "    ");
+        output.push_str("    if (violations.length) {\n");
+        output.push_str("      throw new ValidationError(violations);\n");
+        output.push_str("    }\n");
+        output.push_str("    return out;\n");
+        output.push_str("  }\n\n");
+        output.push_str("  public toIntermediate(value: ");
+        output.push_str(&model.model_name);
+        output.push_str("): unknown {\n");
+        render_ts_union_serialize(output, &union, "value");
+        output.push_str("  }\n");
+        output.push_str("}\n");
+        return Ok(());
+    }
     if is_open_object(&schema) {
         render_declared_field_set(output, model, &schema);
         output.push('\n');
@@ -408,7 +2045,7 @@ fn render_model_parser_body(
             )?;
             parsed_fields.push((
                 json_name.clone(),
-                typescript_generated_field_name(json_name),
+                property.ts_member_name(json_name),
             ));
             output.push('\n');
         }
@@ -423,6 +2060,11 @@ fn render_model_parser_body(
     {
         render_open_object_collection(output, model);
     }
+
+    // Object member-count and cross-field constraints over the wire member set
+    // (`raw` holds every distinct wire key, before default population).
+    render_ts_property_count_checks(output, "Object.keys(raw).length", &schema, "  ");
+    render_ts_dependent_required(output, "raw", &schema, "  ");
 
     output.push_str("  if (violations.length) {\n");
     output.push_str("    throw new ValidationError(violations);\n");
@@ -462,6 +2104,14 @@ fn render_model_serializer_body(
     _model: &PlannedJsonType,
     schema: &Schema,
 ) -> Result<()> {
+    // Serialize-side (P12): re-run the shared field validation over the
+    // in-memory model and throw the aggregated `ValidationError` before emitting
+    // the wire object — matching the parse path (both directions over one set of
+    // check emitters).
+    let needs_validation = model_needs_serialize_validation(&schema)?;
+    if needs_validation {
+        output.push_str("  const violations: Violation[] = [];\n");
+    }
     output.push_str("  const out: Record<string, unknown> = {};\n");
 
     if typed_map_value_schema(&schema)?.is_some() {
@@ -470,6 +2120,16 @@ fn render_model_serializer_body(
         );
         output.push_str("    out[key] = entry;\n");
         output.push_str("  }\n");
+        if needs_validation {
+            output.push_str("  const keys = Object.keys(out);\n");
+            render_ts_property_count_checks(output, "keys.length", &schema, "  ");
+            if let Some(subschema) = &schema.property_names {
+                render_ts_property_name_checks(output, "keys", subschema, "  ");
+            }
+            output.push_str("  if (violations.length) {\n");
+            output.push_str("    throw new ValidationError(violations);\n");
+            output.push_str("  }\n");
+        }
         output.push_str("  return out;\n");
         return Ok(());
     }
@@ -477,9 +2137,10 @@ fn render_model_serializer_body(
     let required = required_fields(&schema);
     if let Some(properties) = &schema.properties {
         for (json_name, property) in properties {
-            let field_name = typescript_generated_field_name(json_name);
+            let field_name = property.ts_member_name(json_name);
             let assignment = serialize_expr(property, &format!("value.{field_name}"));
             if required.contains(json_name) {
+                render_ts_serialize_property_check(output, json_name, property, "  ");
                 output.push_str("  out.");
                 output.push_str(json_name);
                 output.push_str(" = ");
@@ -489,6 +2150,7 @@ fn render_model_serializer_body(
                 output.push_str("  if (value.");
                 output.push_str(&field_name);
                 output.push_str(" !== undefined) {\n");
+                render_ts_serialize_property_check(output, json_name, property, "    ");
                 output.push_str("    out.");
                 output.push_str(json_name);
                 output.push_str(" = ");
@@ -505,20 +2167,24 @@ fn render_model_serializer_body(
         output.push_str("    out[key] = entry;\n");
         output.push_str("  }\n");
     }
+    if needs_validation {
+        // Object member-count and cross-field constraints over the to-be-emitted
+        // wire key set (`out` holds every distinct wire key, JSON-named).
+        render_ts_property_count_checks(output, "Object.keys(out).length", &schema, "  ");
+        render_ts_dependent_required(output, "out", &schema, "  ");
+        output.push_str("  if (violations.length) {\n");
+        output.push_str("    throw new ValidationError(violations);\n");
+        output.push_str("  }\n");
+    }
     output.push_str("  return out;\n");
     Ok(())
 }
 
 fn render_typed_map_parser_body(output: &mut String, schema: &Schema, value_schema: &Schema) {
     output.push_str("  const keys = Object.keys(raw);\n");
-    if let Some(max_properties) = schema.max_properties {
-        output.push_str("  if (keys.length > ");
-        output.push_str(&max_properties.to_string());
-        output.push_str(") {\n");
-        output.push_str("    violations.push({ path: '', reason: 'maxProperties: at most ");
-        output.push_str(&max_properties.to_string());
-        output.push_str(" entries' });\n");
-        output.push_str("  }\n");
+    render_ts_property_count_checks(output, "keys.length", schema, "  ");
+    if let Some(subschema) = &schema.property_names {
+        render_ts_property_name_checks(output, "keys", subschema, "  ");
     }
     output.push_str("  const additionalProperties: Record<string, ");
     output.push_str(&type_annotation(value_schema).unwrap_or_else(|_| "unknown".to_string()));
@@ -554,7 +2220,7 @@ fn render_property_parser(
     property: &Schema,
     required: bool,
 ) -> Result<()> {
-    let field_name = typescript_generated_field_name(json_name);
+    let field_name = property.ts_member_name(json_name);
     let annotation = if required {
         type_annotation(property)?
     } else {
@@ -637,6 +2303,18 @@ fn render_property_value_parser(
         );
         return Ok(());
     }
+    if let Some(values) = &property.enum_values {
+        render_enum_parser(output, values, &raw_expr, field_name, &path_expr, "    ");
+        return Ok(());
+    }
+
+    // An inline `oneOf` sum-type union dispatches on the wire token /
+    // discriminant (a `$ref` to a named union routes through its mapper via the
+    // reference path below).
+    if let Some(union) = classify_ts_union(property, models) {
+        render_ts_union_parse(output, &union, &raw_expr, field_name, &path_expr, "    ");
+        return Ok(());
+    }
 
     render_value_parser(
         output, property, &raw_expr, field_name, &path_expr, "    ", false,
@@ -712,6 +2390,78 @@ fn render_value_parser(
         }
     }
 
+    // A materialized temporal: check the wire is a string, then parse into the
+    // repr-appropriate in-memory value via the runtime adapter (undefined on a
+    // validation failure, which has already pushed a Violation).
+    if let Some(kind) = temporal_kind_direct(schema) {
+        let parse_fn = ts_temporal_parse_fn(kind);
+        output.push_str(indent);
+        output.push_str("if (typeof ");
+        output.push_str(raw_expr);
+        output.push_str(" !== 'string') {\n");
+        output.push_str(indent);
+        output.push_str("  violations.push({ path: ");
+        output.push_str(path_expr);
+        output.push_str(", reason: 'expected string' });\n");
+        output.push_str(indent);
+        output.push_str("} else {\n");
+        output.push_str(indent);
+        output.push_str("  const parsed = ");
+        output.push_str(parse_fn);
+        output.push('(');
+        output.push_str(raw_expr);
+        output.push_str(", ");
+        output.push_str(path_expr);
+        output.push_str(", violations);\n");
+        output.push_str(indent);
+        output.push_str("  if (parsed !== undefined) {\n");
+        output.push_str(indent);
+        output.push_str("    ");
+        output.push_str(target);
+        output.push_str(" = parsed;\n");
+        output.push_str(indent);
+        output.push_str("  }\n");
+        output.push_str(indent);
+        output.push_str("}\n");
+        return;
+    }
+
+    // A materialized `contentEncoding`: check the wire is a string, then decode
+    // into a `Uint8Array` via the generator-owned pure-JS codec (undefined on a
+    // validation failure, which has already pushed a Violation).
+    if let Some(encoding) = content_encoding_direct(schema) {
+        let parse_fn = ts_content_encoding_parse_fn(encoding);
+        output.push_str(indent);
+        output.push_str("if (typeof ");
+        output.push_str(raw_expr);
+        output.push_str(" !== 'string') {\n");
+        output.push_str(indent);
+        output.push_str("  violations.push({ path: ");
+        output.push_str(path_expr);
+        output.push_str(", reason: 'expected string' });\n");
+        output.push_str(indent);
+        output.push_str("} else {\n");
+        output.push_str(indent);
+        output.push_str("  const parsed = ");
+        output.push_str(parse_fn);
+        output.push('(');
+        output.push_str(raw_expr);
+        output.push_str(", ");
+        output.push_str(path_expr);
+        output.push_str(", violations);\n");
+        output.push_str(indent);
+        output.push_str("  if (parsed !== undefined) {\n");
+        output.push_str(indent);
+        output.push_str("    ");
+        output.push_str(target);
+        output.push_str(" = parsed;\n");
+        output.push_str(indent);
+        output.push_str("  }\n");
+        output.push_str(indent);
+        output.push_str("}\n");
+        return;
+    }
+
     if let Some(const_value) = &schema.const_value {
         let const_literal =
             typescript_value_literal(const_value).unwrap_or_else(|_| "undefined".to_string());
@@ -727,12 +2477,64 @@ fn render_value_parser(
         return;
     }
 
+    if let Some(values) = &schema.enum_values {
+        render_enum_parser(output, values, raw_expr, target, path_expr, indent);
+        return;
+    }
+
     match schema.ty.as_ref().and_then(Value::as_str) {
+        Some("string") if schema.has_string_constraints() => {
+            output.push_str(indent);
+            output.push_str("if (typeof ");
+            output.push_str(raw_expr);
+            output.push_str(" !== 'string') {\n");
+            output.push_str(indent);
+            output.push_str("  violations.push({ path: ");
+            output.push_str(path_expr);
+            output.push_str(", reason: 'expected string' });\n");
+            output.push_str(indent);
+            output.push_str("} else {\n");
+            output.push_str(indent);
+            output.push_str("  ");
+            output.push_str(target);
+            output.push_str(" = ");
+            output.push_str(raw_expr);
+            output.push_str(";\n");
+            render_ts_string_checks(output, raw_expr, path_expr, schema, &format!("{indent}  "));
+            output.push_str(indent);
+            output.push_str("}\n");
+        }
         Some("string") => {
             render_typeof_parser(output, raw_expr, target, path_expr, indent, "string")
         }
         Some("number") => {
-            render_typeof_parser(output, raw_expr, target, path_expr, indent, "number")
+            output.push_str(indent);
+            output.push_str("if (typeof ");
+            output.push_str(raw_expr);
+            output.push_str(" !== 'number') {\n");
+            output.push_str(indent);
+            output.push_str("  violations.push({ path: ");
+            output.push_str(path_expr);
+            output.push_str(", reason: 'expected number' });\n");
+            output.push_str(indent);
+            output.push_str("} else {\n");
+            output.push_str(indent);
+            output.push_str("  ");
+            output.push_str(target);
+            output.push_str(" = ");
+            output.push_str(raw_expr);
+            output.push_str(";\n");
+            if schema.has_numeric_constraints() {
+                render_ts_numeric_checks(
+                    output,
+                    raw_expr,
+                    path_expr,
+                    schema,
+                    &format!("{indent}  "),
+                );
+            }
+            output.push_str(indent);
+            output.push_str("}\n");
         }
         Some("boolean") => {
             render_typeof_parser(output, raw_expr, target, path_expr, indent, "boolean")
@@ -756,6 +2558,15 @@ fn render_value_parser(
             output.push_str(" = ");
             output.push_str(raw_expr);
             output.push_str(";\n");
+            if schema.has_numeric_constraints() {
+                render_ts_numeric_checks(
+                    output,
+                    raw_expr,
+                    path_expr,
+                    schema,
+                    &format!("{indent}  "),
+                );
+            }
             output.push_str(indent);
             output.push_str("}\n");
         }
@@ -823,6 +2634,83 @@ fn render_typeof_parser(
     output.push_str("}\n");
 }
 
+/// The JS `typeof` guard string for a scalar const/enum value kind.
+fn ts_typeof_guard(value: &Value) -> Option<&'static str> {
+    match value {
+        Value::String(_) => Some("string"),
+        Value::Number(_) => Some("number"),
+        Value::Bool(_) => Some("boolean"),
+        _ => None,
+    }
+}
+
+/// Emits the closed-value (`const` single-value / `enum` multi-value) parser: a
+/// `typeof` guard, a membership check against the fixed set, and the assignment
+/// on success. `compare_exprs` are the JS expressions to test against (a named
+/// const constant for `const`, or inline literals for `enum`); `reason` is the
+/// informative violation message. See `json-schema/features/{const,enum}.md`.
+fn render_closed_value_parser(
+    output: &mut String,
+    values: &[Value],
+    compare_exprs: &[String],
+    raw_expr: &str,
+    target: &str,
+    path_expr: &str,
+    indent: &str,
+    reason: &str,
+) {
+    let guard = values.first().and_then(ts_typeof_guard);
+    let membership = compare_exprs
+        .iter()
+        .map(|expr| format!("{raw_expr} !== {expr}"))
+        .collect::<Vec<_>>()
+        .join(" && ");
+    if let Some(guard) = guard {
+        output.push_str(indent);
+        output.push_str("if (typeof ");
+        output.push_str(raw_expr);
+        output.push_str(" !== '");
+        output.push_str(guard);
+        output.push_str("') {\n");
+        output.push_str(indent);
+        output.push_str("  violations.push({ path: ");
+        output.push_str(path_expr);
+        output.push_str(", reason: 'expected ");
+        output.push_str(guard);
+        output.push_str("' });\n");
+        output.push_str(indent);
+        output.push_str("} else if (");
+    } else {
+        output.push_str(indent);
+        output.push_str("if (");
+    }
+    output.push_str(&membership);
+    output.push_str(") {\n");
+    output.push_str(indent);
+    output.push_str("  violations.push({ path: ");
+    output.push_str(path_expr);
+    output.push_str(", reason: `");
+    output.push_str(reason);
+    output.push_str("` });\n");
+    output.push_str(indent);
+    output.push_str("} else {\n");
+    output.push_str(indent);
+    output.push_str("  ");
+    output.push_str(target);
+    output.push_str(" = ");
+    output.push_str(raw_expr);
+    // The membership check has narrowed `raw` to the base scalar type; cast it to
+    // the closed literal union that types the field.
+    let cast_type = join_union(values.iter().filter_map(typescript_const_annotation).collect());
+    if !cast_type.is_empty() {
+        output.push_str(" as ");
+        output.push_str(&cast_type);
+    }
+    output.push_str(";\n");
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
 fn render_const_parser(
     output: &mut String,
     const_value: &Value,
@@ -832,51 +2720,39 @@ fn render_const_parser(
     indent: &str,
     const_expr: &str,
 ) {
-    if matches!(const_value, Value::String(_)) {
-        output.push_str(indent);
-        output.push_str("if (typeof ");
-        output.push_str(raw_expr);
-        output.push_str(" !== 'string') {\n");
-        output.push_str(indent);
-        output.push_str("  violations.push({ path: ");
-        output.push_str(path_expr);
-        output.push_str(", reason: 'expected string' });\n");
-        output.push_str(indent);
-        output.push_str("} else if (");
-        output.push_str(raw_expr);
-        output.push_str(" !== ");
-        output.push_str(const_expr);
-        output.push_str(") {\n");
-        output.push_str(indent);
-        output.push_str("  violations.push({ path: ");
-        output.push_str(path_expr);
-        output.push_str(", reason: `must equal \"${");
-        output.push_str(const_expr);
-        output.push_str("}\"` });\n");
-        output.push_str(indent);
-        output.push_str("} else {\n");
-    } else {
-        output.push_str(indent);
-        output.push_str("if (");
-        output.push_str(raw_expr);
-        output.push_str(" !== ");
-        output.push_str(const_expr);
-        output.push_str(") {\n");
-        output.push_str(indent);
-        output.push_str("  violations.push({ path: ");
-        output.push_str(path_expr);
-        output.push_str(", reason: 'unexpected const value' });\n");
-        output.push_str(indent);
-        output.push_str("} else {\n");
-    }
-    output.push_str(indent);
-    output.push_str("  ");
-    output.push_str(target);
-    output.push_str(" = ");
-    output.push_str(raw_expr);
-    output.push_str(";\n");
-    output.push_str(indent);
-    output.push_str("}\n");
+    let literal = typescript_value_literal(const_value).unwrap_or_else(|_| "undefined".to_string());
+    let reason = format!("must equal {literal}");
+    render_closed_value_parser(
+        output,
+        std::slice::from_ref(const_value),
+        std::slice::from_ref(&const_expr.to_string()),
+        raw_expr,
+        target,
+        path_expr,
+        indent,
+        &reason,
+    );
+}
+
+fn render_enum_parser(
+    output: &mut String,
+    values: &[Value],
+    raw_expr: &str,
+    target: &str,
+    path_expr: &str,
+    indent: &str,
+) {
+    let literals = values
+        .iter()
+        .map(|value| typescript_value_literal(value).unwrap_or_else(|_| "undefined".to_string()))
+        .collect::<Vec<_>>();
+    let reason = format!(
+        "must be one of [{}], got ${{JSON.stringify({raw_expr})}}",
+        literals.join(", ")
+    );
+    render_closed_value_parser(
+        output, values, &literals, raw_expr, target, path_expr, indent, &reason,
+    );
 }
 
 fn render_array_parser(
@@ -961,6 +2837,15 @@ fn render_array_parser(
     output.push_str("    }\n");
     output.push_str(indent);
     output.push_str("  });\n");
+    if schema.has_array_constraints() {
+        render_ts_array_checks(
+            output,
+            &format!("{target}!"),
+            path_expr,
+            schema,
+            &format!("{indent}  "),
+        );
+    }
     output.push_str(indent);
     output.push_str("}\n");
 }
@@ -1034,6 +2919,17 @@ fn serialize_expr(schema: &Schema, value_expr: &str) -> String {
             mapper_class_name(&model_name)
         );
     }
+    // A materialized temporal re-serializes through the generator-owned
+    // serializer (native-typed reprs) or passes the stored canonical string
+    // through. `string`-stored temporals need no transform.
+    if let Some(kind) = temporal_kind_direct(schema) {
+        return ts_temporal_serialize_call(kind, active_repr(), value_expr);
+    }
+    // A materialized `contentEncoding` re-encodes bytes to the canonical wire
+    // string via the generator-owned pure-JS codec.
+    if let Some(encoding) = content_encoding_direct(schema) {
+        return format!("{}({value_expr})", ts_content_encoding_serialize_fn(encoding));
+    }
     if let Some(branches) = &schema.one_of
         && branches
             .iter()
@@ -1042,7 +2938,10 @@ fn serialize_expr(schema: &Schema, value_expr: &str) -> String {
             .iter()
             .find(|branch| !schema_type_includes(branch, "null"))
     {
-        if non_null.reference.is_some() {
+        if non_null.reference.is_some()
+            || temporal_kind_direct(non_null).is_some()
+            || content_encoding_direct(non_null).is_some()
+        {
             return format!(
                 "{value_expr} === null ? null : {}",
                 serialize_expr(non_null, value_expr)
@@ -1093,8 +2992,32 @@ fn type_annotation(schema: &Schema) -> Result<String> {
     {
         return Ok(annotation);
     }
+    if let Some(values) = &schema.enum_values
+        && !values.is_empty()
+        && values
+            .iter()
+            .all(|value| typescript_const_annotation(value).is_some())
+    {
+        let literals = values
+            .iter()
+            .filter_map(typescript_const_annotation)
+            .collect::<Vec<_>>();
+        return Ok(join_union(literals));
+    }
     if let Some(reference) = &schema.reference {
         return Ok(reference_model_name(reference));
+    }
+    // A materialized temporal `format` field type (per --js-temporal-repr). The
+    // `oneOf[…, null]` nullable wrapper is handled by the `one_of` join below,
+    // which recurses into this branch for the non-null member.
+    if let Some(kind) = temporal_kind_direct(schema) {
+        return Ok(ts_temporal_type(kind, active_repr()).to_string());
+    }
+    // A materialized `contentEncoding` field type: the idiomatic binary
+    // `Uint8Array` in both the browser and Node. The `oneOf[…, null]` wrapper is
+    // handled by the `one_of` join below.
+    if content_encoding_direct(schema).is_some() {
+        return Ok("Uint8Array".to_string());
     }
     if let Some(one_of) = &schema.one_of {
         let values = one_of
@@ -1165,10 +3088,7 @@ fn typescript_const_annotation(value: &Value) -> Option<String> {
         Value::Null => Some("null".to_string()),
         Value::Bool(value) => Some(value.to_string()),
         Value::Number(value) => Some(value.to_string()),
-        Value::String(value) => Some(format!(
-            "{} | (string & {{}})",
-            typescript_string_literal(value)
-        )),
+        Value::String(value) => Some(typescript_string_literal(value)),
         _ => None,
     }
 }
@@ -1198,6 +3118,20 @@ fn is_open_object(schema: &Schema) -> bool {
             .as_ref()
             .is_some_and(|properties| !properties.is_empty())
         && schema.additional_properties.as_ref() != Some(&Value::Bool(false))
+}
+
+/// The single non-null branch of a `oneOf[T, null]` nullable wrapper, if any.
+fn nullable_non_null_schema(schema: &Schema) -> Option<&Schema> {
+    let branches = schema.one_of.as_ref()?;
+    let non_null: Vec<&Schema> = branches
+        .iter()
+        .filter(|branch| !schema_type_includes(branch, "null"))
+        .collect();
+    if non_null.len() == 1 {
+        Some(non_null[0])
+    } else {
+        None
+    }
 }
 
 fn schema_type_includes(schema: &Schema, ty: &str) -> bool {
@@ -1351,6 +3285,28 @@ fn render_doc_comment(output: &mut String, indent: &str, doc: Option<&str>) {
     }
     output.push_str(indent);
     output.push_str(" */\n");
+}
+
+/// Renders the JSDoc for a schema declaration: `title` summary line,
+/// `description` body, and a bare `@deprecated` tag when `deprecated: true`.
+/// See json-schema/features/{title,description,deprecated}.md.
+fn render_ts_schema_doc(output: &mut String, indent: &str, schema: &Schema) {
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(title) = schema.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        lines.push(title.to_string());
+    }
+    if let Some(desc) = schema.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        for line in desc.lines() {
+            lines.push(line.trim().to_string());
+        }
+    }
+    if schema.deprecated == Some(true) {
+        lines.push("@deprecated".to_string());
+    }
+    if lines.is_empty() {
+        return;
+    }
+    render_doc_comment(output, indent, Some(&lines.join("\n")));
 }
 
 fn typescript_object_key(name: &str) -> String {

@@ -11,8 +11,8 @@ use crate::language::Language;
 use crate::planning::{
     PlannedProtoType, PlannedProtoTypeInfo, PlannedResource,
     PlannedResourceMethodBindingSpec as PlannedResourceMethodBinding,
-    PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedSpecData,
-    PlannedType, PlannedTypeFamily,
+    PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedType,
+    PlannedTypeFamily,
 };
 use crate::resources::render_request_plan;
 use crate::spec::{
@@ -49,6 +49,10 @@ const GO_DOC_COMMENT_LINE_LENGTH: usize = 88;
 pub struct GoOptions {
     pub(crate) import_root: Option<String>,
     pub(crate) module_output_paths: BTreeMap<ModulePath, ModulePath>,
+    /// Forces the generated package name, overriding the name derived from the
+    /// spec. Used by the flat Go tree layout so every input file in the closure
+    /// renders into the same package.
+    pub(crate) package_name_override: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -509,7 +513,27 @@ impl GoPackageContext {
                 .as_deref()
                 .map(|root| go_module_import_path(root, &api_plan.module_path))
         });
-        let package_name = import_path.as_ref().map_or_else(
+        let package_name = if let Some(override_name) = &options.package_name_override {
+            go_package_name(override_name)
+        } else {
+            Self::derive_package_name(api_plan, has_json_models, import_path.as_deref())
+        };
+
+        Self {
+            package_name,
+            import_path,
+            import_root: options.import_root.clone(),
+            module_path: api_plan.module_path.clone(),
+            module_output_paths: options.module_output_paths.clone(),
+        }
+    }
+
+    fn derive_package_name(
+        api_plan: &PlannedSpec,
+        has_json_models: bool,
+        import_path: Option<&str>,
+    ) -> String {
+        import_path.map_or_else(
             || {
                 api_plan
                     .services
@@ -553,15 +577,7 @@ impl GoPackageContext {
                     .map(go_package_name)
                     .unwrap_or_else(|| "api".to_string())
             },
-        );
-
-        Self {
-            package_name,
-            import_path,
-            import_root: options.import_root.clone(),
-            module_path: api_plan.module_path.clone(),
-            module_output_paths: options.module_output_paths.clone(),
-        }
+        )
     }
 
     fn is_self_import(&self, import_path: &str) -> bool {
@@ -642,10 +658,12 @@ impl GoPackageContext {
         Ok(Some(go_module_import_path(import_root, output_module_path)))
     }
 
-    pub(in crate::generator) fn shared_json_import_path(&self) -> Option<String> {
-        (!self.module_output_paths.is_empty())
-            .then(|| self.import_root.clone())
-            .flatten()
+    /// Whether the schema-independent runtime lives in a shared `definitions.go`
+    /// in this package rather than inlined into a single generated file. True
+    /// for the flat Go tree layout (multi-input closures), false for the
+    /// single-input special case.
+    pub(in crate::generator) fn has_shared_runtime(&self) -> bool {
+        !self.module_output_paths.is_empty()
     }
 
     fn output_module_path<'a>(&'a self, source_module_path: &'a ModulePath) -> &'a ModulePath {
@@ -704,36 +722,70 @@ fn generate_branch_tree(
         });
     };
 
-    let module_output_paths = go_tree_module_output_paths(&leaves);
-    let mut grouped = BTreeMap::<ModulePath, Vec<&ApiSpecLeaf<PlannedTypeFamily>>>::new();
-    for leaf in &leaves {
-        let output_module = module_output_paths
-            .get(&leaf.module_path)
-            .cloned()
-            .unwrap_or_else(|| leaf.module_path.clone());
-        grouped.entry(output_module).or_default().push(*leaf);
-    }
+    // Go flattens every input file in the closure into one flat package. Map
+    // every leaf module onto the package root so that references between files
+    // -- including cross-directory cycles -- resolve as within-package
+    // (unqualified) references, which the Go compiler handles natively. This is
+    // also what lets the schema-independent runtime live once in the package.
+    let root = ModulePath::default();
+    let module_output_paths = leaves
+        .iter()
+        .map(|leaf| (leaf.module_path.clone(), root.clone()))
+        .collect::<BTreeMap<ModulePath, ModulePath>>();
+
+    // Derive the single package name once (from the import root, falling back to
+    // the spec heuristics), then force every file to render into it.
+    let package_name = {
+        let mut root_spec = leaves[0].spec.clone();
+        root_spec.module_path = root.clone();
+        let mut probe_options = options.clone();
+        probe_options.module_output_paths = module_output_paths.clone();
+        GoPackageContext::new(&root_spec, &probe_options)
+            .package_name
+            .clone()
+    };
 
     let mut files = BTreeMap::new();
     let mut warnings = Vec::new();
+
+    for leaf in &leaves {
+        // Render this input file at the package root so its own types and its
+        // references to sibling files are unqualified within the one package.
+        let mut leaf_spec = leaf.spec.clone();
+        leaf_spec.module_path = root.clone();
+        let mut leaf_options = options.clone();
+        leaf_options.module_output_paths = module_output_paths.clone();
+        leaf_options.package_name_override = Some(package_name.clone());
+        let generated = generate(&leaf_spec, &[], &leaf_options, mode)?;
+        warnings.extend(generated.warnings);
+
+        // `generate` names the single JSON member file `<package>.go`; re-key it
+        // to the flattened module path so each input file gets its own file in
+        // the flat package.
+        let file_name = go_flat_module_file_name(&leaf.module_path);
+        for (_, contents) in generated.files {
+            insert_generated_file(&mut files, file_name.clone(), contents)?;
+        }
+    }
+
+    // The schema-independent runtime lives once in this package as
+    // `definitions.go`, in the same package as the models.
     if go_tree_has_json_models(&leaves) {
         insert_generated_file(
             &mut files,
-            PathBuf::from("json.go"),
-            json::render_support_file(),
+            PathBuf::from("definitions.go"),
+            json::render_definitions_file(&package_name),
         )?;
     }
-    for (output_module, group_leaves) in grouped {
-        let merged = merge_go_tree_group(&output_module, &group_leaves, &module_output_paths)?;
-        let support_fragments = support_fragments_for_plans(&group_leaves, support);
-        let mut group_options = options.clone();
-        group_options.module_output_paths = module_output_paths.clone();
-        let generated = generate(&merged, &support_fragments, &group_options, mode)?;
-        warnings.extend(generated.warnings);
-        let prefix = output_module.to_path_buf();
-        for (path, contents) in generated.files {
-            insert_generated_file(&mut files, prefix.join(path), contents)?;
-        }
+
+    // Hand-written support fragments (rare for JSON inputs) are emitted once.
+    let support_fragments = support_fragments_for_plans(&leaves, support);
+    if !support_fragments.is_empty() {
+        insert_generated_file(
+            &mut files,
+            PathBuf::from("support.go"),
+            render_support_file(&support_fragments, &package_name),
+        )?;
     }
 
     Ok(GeneratedFiles {
@@ -743,6 +795,20 @@ fn generate_branch_tree(
     })
 }
 
+/// Flattens an input file's module path into its `<module>.go` file name in the
+/// one flat Go package: directory separators become `_`, literal underscores are
+/// preserved (see `json-schema/generated-file-layout.md`).
+fn go_flat_module_file_name(module_path: &ModulePath) -> PathBuf {
+    // Branch leaves always carry at least one path segment; the empty fallback
+    // keeps this total.
+    let stem = if module_path.is_root() {
+        "api".to_string()
+    } else {
+        module_path.0.join("_")
+    };
+    PathBuf::from(format!("{stem}.go"))
+}
+
 fn go_tree_has_json_models(leaves: &[&ApiSpecLeaf<PlannedTypeFamily>]) -> bool {
     leaves.iter().any(|leaf| {
         leaf.spec
@@ -750,56 +816,6 @@ fn go_tree_has_json_models(leaves: &[&ApiSpecLeaf<PlannedTypeFamily>]) -> bool {
             .map(|(_, binding)| binding)
             .any(|binding| matches!(binding.external_type, ExternalTypeSpec::Json(_)))
     })
-}
-
-fn merge_go_tree_group(
-    module_path: &ModulePath,
-    leaves: &[&ApiSpecLeaf<PlannedTypeFamily>],
-    module_output_paths: &BTreeMap<ModulePath, ModulePath>,
-) -> Result<PlannedSpec> {
-    let first_leaf = leaves
-        .first()
-        .expect("Go tree package group should not be empty");
-    let mut merged = PlannedSpec {
-        module_path: module_path.clone(),
-        data: PlannedSpecData::default(),
-        version: first_leaf.spec.version.clone(),
-        support: first_leaf.spec.support.clone(),
-        services: Vec::new(),
-        types: BTreeMap::new(),
-    };
-
-    for leaf in leaves {
-        merged.services.extend(leaf.spec.services.iter().cloned());
-        merged
-            .data
-            .module_exports
-            .extend(leaf.spec.data.module_exports.iter().cloned());
-        for (import_module, names) in &leaf.spec.data.module_imports {
-            let output_import_module = module_output_paths
-                .get(import_module)
-                .unwrap_or(import_module);
-            if output_import_module == module_path {
-                continue;
-            }
-            merged
-                .data
-                .module_imports
-                .entry(import_module.clone())
-                .or_default()
-                .extend(names.iter().cloned());
-        }
-        for (name, decl) in &leaf.spec.types {
-            if merged.types.insert(name.clone(), decl.clone()).is_some() {
-                return Err(Error::InvalidJsonSchema {
-                    path: leaf.source_path.clone(),
-                    reason: format!("duplicate planned type `{name}` in Go tree output"),
-                });
-            }
-        }
-    }
-
-    Ok(merged)
 }
 
 fn insert_generated_file(
@@ -836,123 +852,6 @@ fn support_fragments_for_plans(
         .flat_map(|leaf| leaf.spec.support.fragments_for_language(Language::Go))
         .cloned()
         .collect()
-}
-
-fn go_tree_module_output_paths(
-    leaves: &[&ApiSpecLeaf<PlannedTypeFamily>],
-) -> BTreeMap<ModulePath, ModulePath> {
-    let module_indices = leaves
-        .iter()
-        .enumerate()
-        .map(|(index, leaf)| (leaf.module_path.clone(), index))
-        .collect::<BTreeMap<_, _>>();
-    let mut edges = vec![Vec::<usize>::new(); leaves.len()];
-    for (index, leaf) in leaves.iter().enumerate() {
-        for target in leaf.spec.data.module_imports.keys() {
-            if let Some(target_index) = module_indices.get(target) {
-                edges[index].push(*target_index);
-            }
-        }
-    }
-
-    let mut output_paths = BTreeMap::new();
-    for component in strongly_connected_components(&edges) {
-        let output_path = if component.len() == 1 {
-            leaves[component[0]].module_path.clone()
-        } else {
-            common_module_path_for_modules(
-                &component
-                    .iter()
-                    .map(|index| &leaves[*index].module_path)
-                    .collect::<Vec<_>>(),
-            )
-        };
-        for index in component {
-            output_paths.insert(leaves[index].module_path.clone(), output_path.clone());
-        }
-    }
-    output_paths
-}
-
-fn common_module_path_for_modules(modules: &[&ModulePath]) -> ModulePath {
-    let mut segments = modules
-        .first()
-        .map(|module| module.0.clone())
-        .unwrap_or_default();
-    for module in modules.iter().skip(1) {
-        let common_len = segments
-            .iter()
-            .zip(&module.0)
-            .take_while(|(left, right)| left == right)
-            .count();
-        segments.truncate(common_len);
-    }
-    ModulePath(segments)
-}
-
-fn strongly_connected_components(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
-    struct Tarjan<'a> {
-        edges: &'a [Vec<usize>],
-        index: usize,
-        indices: Vec<Option<usize>>,
-        lowlinks: Vec<usize>,
-        stack: Vec<usize>,
-        on_stack: Vec<bool>,
-        components: Vec<Vec<usize>>,
-    }
-
-    impl Tarjan<'_> {
-        fn visit(&mut self, node: usize) {
-            self.indices[node] = Some(self.index);
-            self.lowlinks[node] = self.index;
-            self.index += 1;
-            self.stack.push(node);
-            self.on_stack[node] = true;
-
-            for target in &self.edges[node] {
-                if self.indices[*target].is_none() {
-                    self.visit(*target);
-                    self.lowlinks[node] = self.lowlinks[node].min(self.lowlinks[*target]);
-                } else if self.on_stack[*target] {
-                    self.lowlinks[node] = self.lowlinks[node].min(self.indices[*target].unwrap());
-                }
-            }
-
-            if self.lowlinks[node] == self.indices[node].unwrap() {
-                let mut component = Vec::new();
-                loop {
-                    let item = self
-                        .stack
-                        .pop()
-                        .expect("Tarjan stack should contain current component");
-                    self.on_stack[item] = false;
-                    component.push(item);
-                    if item == node {
-                        break;
-                    }
-                }
-                component.sort_unstable();
-                self.components.push(component);
-            }
-        }
-    }
-
-    let mut tarjan = Tarjan {
-        edges,
-        index: 0,
-        indices: vec![None; edges.len()],
-        lowlinks: vec![0; edges.len()],
-        stack: Vec::new(),
-        on_stack: vec![false; edges.len()],
-        components: Vec::new(),
-    };
-    for node in 0..edges.len() {
-        if tarjan.indices[node].is_none() {
-            tarjan.visit(node);
-        }
-    }
-    tarjan.components.sort();
-    tarjan.components
 }
 
 fn collect_leaf_specs<'a>(

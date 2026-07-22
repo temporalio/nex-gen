@@ -1,0 +1,16 @@
+{
+  "kind": "showcase",
+  "revision": 1,
+  "enabled": true,
+  "status": "pending",
+  "tier": 3,
+  "scale": 2.5,
+  "name": "Widget",
+  "count": 3,
+  "active": true,
+  "category": "tools",
+  "priority": 5,
+  "level": 2,
+  "ratio": 15.0,
+  "step": 9
+}

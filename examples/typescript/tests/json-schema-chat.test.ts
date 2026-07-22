@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -11,33 +10,36 @@ import {
   type Labels,
   type Message,
 } from "../json_schema/definitions/chat/models.ts";
-import { ValidationError } from "../json_schema/definitions/chat/json.ts";
+import { ValidationError } from "../json_schema/definitions/chat/definitions.ts";
+import {
+  fixtureBytes,
+  loadFixture as loadFixtureFrom,
+  roundTripFixture,
+  type IntermediateMapper,
+} from "./json-converter-helper.ts";
 
 const wireFixtureDir = new URL("../../wire/json_schema/chat/", import.meta.url);
 
 function loadFixture(name: string): unknown {
-  return JSON.parse(readFileSync(new URL(name, wireFixtureDir), "utf8"));
+  return loadFixtureFrom(wireFixtureDir, name);
 }
 
-function expectRoundTrip<T>(
-  name: string,
-  parse: (raw: unknown) => T,
-  serialize: (value: T) => unknown,
-): T {
-  const wire = loadFixture(name);
-  const value = parse(wire);
-  expect(serialize(value)).toEqual(wire);
+// Round-trip a fixture through the Temporal data converter (driven by the
+// generated mapper) and assert the re-serialized JSON is JSON-equal to the
+// fixture. TS mappers preserve explicit nulls, so all chat fixtures use exact
+// JSON-equality (no optional+nullable collapse — unlike Go).
+function expectRoundTrip<T>(name: string, mapper: IntermediateMapper<T>): T {
+  const { value, serialized } = roundTripFixture(
+    mapper,
+    fixtureBytes(wireFixtureDir, name),
+  );
+  expect(serialized).toEqual(loadFixture(name));
   return value;
 }
 
 describe("json-schema chat generated definitions", () => {
-  test("roundtrips canonical wire fixtures through mapper helpers", () => {
-    const messageMapper = new MessageMapper();
-    const message = expectRoundTrip(
-      "message-minimal.json",
-      (raw) => messageMapper.fromIntermediate(raw),
-      (value) => messageMapper.toIntermediate(value),
-    );
+  test("roundtrips canonical wire fixtures through the Temporal converter", () => {
+    const message = expectRoundTrip("message-minimal.json", new MessageMapper());
     expect(message).toMatchObject<Message>({
       kind: "text",
       body: "hi",
@@ -45,45 +47,27 @@ describe("json-schema chat generated definitions", () => {
     expect(message.replyToId).toBeUndefined();
     expect(message.priority ?? DEFAULT_PRIORITY).toBe(0);
 
-    const fullMessage = expectRoundTrip(
-      "message-full.json",
-      (raw) => messageMapper.fromIntermediate(raw),
-      (value) => messageMapper.toIntermediate(value),
-    );
+    const fullMessage = expectRoundTrip("message-full.json", new MessageMapper());
     expect(fullMessage.replyToId).toBeNull();
     expect(fullMessage.priority).toBe(7);
 
-    const roomMapper = new RoomMapper();
-    const room = expectRoundTrip(
-      "room-open.json",
-      (raw) => roomMapper.fromIntermediate(raw),
-      (value) => roomMapper.toIntermediate(value),
-    );
+    const room = expectRoundTrip("room-open.json", new RoomMapper());
     expect(room.additionalProperties).toEqual({ "x-extra": 42 });
 
-    const labelsMapper = new LabelsMapper();
-    const labels = expectRoundTrip(
-      "labels.json",
-      (raw) => labelsMapper.fromIntermediate(raw),
-      (value) => labelsMapper.toIntermediate(value),
-    );
+    const labels = expectRoundTrip("labels.json", new LabelsMapper());
     expect(labels).toMatchObject<Labels>({
       additionalProperties: { env: "prod", team: "core" },
     });
 
-    const sendMessageInputMapper = new SendMessageInputMapper();
     const request = expectRoundTrip(
       "send-message-input.json",
-      (raw) => sendMessageInputMapper.fromIntermediate(raw),
-      (value) => sendMessageInputMapper.toIntermediate(value),
+      new SendMessageInputMapper(),
     );
     expect(request.message.body).toBe("hi");
 
-    const sendMessageOutputMapper = new SendMessageOutputMapper();
     const response = expectRoundTrip(
       "send-message-output.json",
-      (raw) => sendMessageOutputMapper.fromIntermediate(raw),
-      (value) => sendMessageOutputMapper.toIntermediate(value),
+      new SendMessageOutputMapper(),
     );
     expect(response.messageId).toBe("m1");
   });
