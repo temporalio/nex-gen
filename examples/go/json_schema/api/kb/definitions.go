@@ -17,6 +17,8 @@ type Violation struct {
 	Reason string
 }
 
+// String implements fmt.Stringer, returning "Path: Reason", or just Reason
+// when Path is empty.
 func (v Violation) String() string {
 	if v.Path == "" {
 		return v.Reason
@@ -30,6 +32,8 @@ type ValidationError struct {
 	Violations []Violation
 }
 
+// Error implements the error interface, joining every Violation into one
+// message.
 func (e *ValidationError) Error() string {
 	parts := make([]string, len(e.Violations))
 	for i, v := range e.Violations {
@@ -70,7 +74,7 @@ func mergeNested(errs *[]Violation, path string, err error) {
 	*errs = append(*errs, Violation{path, err.Error()})
 }
 
-const IntegerCap = 1<<53 - 1
+const integerCap = 1<<53 - 1
 
 var (
 	errFractional = errors.New("not an integer")
@@ -85,7 +89,7 @@ func parseSpecInteger(n json.Number) (int64, error) {
 	if f != math.Trunc(f) {
 		return 0, errFractional
 	}
-	if f < -IntegerCap || f > IntegerCap {
+	if f < -integerCap || f > integerCap {
 		return 0, errRange
 	}
 	i, err := n.Int64()

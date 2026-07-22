@@ -20,6 +20,8 @@ type Violation struct {
 	Reason string
 }
 
+// String implements fmt.Stringer, returning "Path: Reason", or just Reason
+// when Path is empty.
 func (v Violation) String() string {
 	if v.Path == "" {
 		return v.Reason
@@ -33,6 +35,8 @@ type ValidationError struct {
 	Violations []Violation
 }
 
+// Error implements the error interface, joining every Violation into one
+// message.
 func (e *ValidationError) Error() string {
 	parts := make([]string, len(e.Violations))
 	for i, v := range e.Violations {
@@ -73,7 +77,7 @@ func mergeNested(errs *[]Violation, path string, err error) {
 	*errs = append(*errs, Violation{path, err.Error()})
 }
 
-const IntegerCap = 1<<53 - 1
+const integerCap = 1<<53 - 1
 
 var (
 	errFractional = errors.New("not an integer")
@@ -88,7 +92,7 @@ func parseSpecInteger(n json.Number) (int64, error) {
 	if f != math.Trunc(f) {
 		return 0, errFractional
 	}
-	if f < -IntegerCap || f > IntegerCap {
+	if f < -integerCap || f > integerCap {
 		return 0, errRange
 	}
 	i, err := n.Int64()
@@ -209,49 +213,71 @@ func marshalField(out map[string]json.RawMessage, key string, v any, errs *[]Vio
 	out[key] = b
 }
 
+// CircleKind is the closed value set for Circle.kind.
 type CircleKind string
 
+// CircleKindCircle is the CircleKind value "circle".
 const CircleKindCircle CircleKind = "circle"
 
+// ShowcaseKind Discriminator; always "showcase".
 type ShowcaseKind string
 
+// ShowcaseKindShowcase is the ShowcaseKind value "showcase".
 const ShowcaseKindShowcase ShowcaseKind = "showcase"
 
+// ShowcaseRevision Integer const; always 1.
 type ShowcaseRevision int64
 
+// ShowcaseRevision1 is the ShowcaseRevision value 1.
 const ShowcaseRevision1 ShowcaseRevision = 1
 
+// ShowcaseEnabled Boolean const; always true.
 type ShowcaseEnabled bool
 
+// ShowcaseEnabledTrue is the ShowcaseEnabled value true.
 const ShowcaseEnabledTrue ShowcaseEnabled = true
 
+// ShowcaseStatus Closed string value set.
 type ShowcaseStatus string
 
 const (
-	ShowcaseStatusActive   ShowcaseStatus = "active"
+	// ShowcaseStatusActive is the ShowcaseStatus value "active".
+	ShowcaseStatusActive ShowcaseStatus = "active"
+	// ShowcaseStatusInactive is the ShowcaseStatus value "inactive".
 	ShowcaseStatusInactive ShowcaseStatus = "inactive"
-	ShowcaseStatusPending  ShowcaseStatus = "pending"
+	// ShowcaseStatusPending is the ShowcaseStatus value "pending".
+	ShowcaseStatusPending ShowcaseStatus = "pending"
 )
 
+// ShowcaseTier Closed integer value set.
 type ShowcaseTier int64
 
 const (
+	// ShowcaseTier1 is the ShowcaseTier value 1.
 	ShowcaseTier1 ShowcaseTier = 1
+	// ShowcaseTier2 is the ShowcaseTier value 2.
 	ShowcaseTier2 ShowcaseTier = 2
+	// ShowcaseTier3 is the ShowcaseTier value 3.
 	ShowcaseTier3 ShowcaseTier = 3
 )
 
+// ShowcaseScale Closed number value set (exercises the Python float exception: emitted as plain float, validated by membership).
 type ShowcaseScale float64
 
 const (
+	// ShowcaseScale1_5 is the ShowcaseScale value 1.5.
 	ShowcaseScale1_5 ShowcaseScale = 1.5
+	// ShowcaseScale2_5 is the ShowcaseScale value 2.5.
 	ShowcaseScale2_5 ShowcaseScale = 2.5
 )
 
+// SquareKind is the closed value set for Square.kind.
 type SquareKind string
 
+// SquareKindSquare is the SquareKind value "square".
 const SquareKindSquare SquareKind = "square"
 
+// Shape A closed sum type (discriminated union) of Circle | Square, tagged by the shared required `kind` const. Selection reads `kind` and routes to the matching branch; an unknown tag is a Violation.
 type Shape interface {
 	isShape()
 	Validate() error
@@ -297,15 +323,19 @@ func unmarshalShape(raw json.RawMessage, path string, errs *[]Violation) (Shape,
 	return nil, false
 }
 
+// ShowcaseIdOrName is one of: string, integer.
 type ShowcaseIdOrName interface {
 	isShowcaseIdOrName()
 	Validate() error
 }
 
+// ShowcaseIdOrNameString wraps a string value admissible in the ShowcaseIdOrName union.
 type ShowcaseIdOrNameString string
 
 func (ShowcaseIdOrNameString) isShowcaseIdOrName() {}
 
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
 func (v ShowcaseIdOrNameString) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -314,10 +344,13 @@ func (v ShowcaseIdOrNameString) Validate() error {
 	return nil
 }
 
+// ShowcaseIdOrNameInteger wraps a int64 value admissible in the ShowcaseIdOrName union.
 type ShowcaseIdOrNameInteger int64
 
 func (ShowcaseIdOrNameInteger) isShowcaseIdOrName() {}
 
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
 func (v ShowcaseIdOrNameInteger) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -403,18 +436,23 @@ func encodeBase64URL(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// A nested object, open to forward-compatible extension.
+// Address A nested object, open to forward-compatible extension.
 type Address struct {
-	Street string  `json:"street"`
-	City   *string `json:"city,omitempty"`
-	Zip    *int64  `json:"zip,omitempty"`
-	// AdditionalProperties holds unknown members verbatim (forward compat, P13).
+	// Street corresponds to the "street" JSON property.
+	Street string `json:"street"`
+	// City corresponds to the "city" JSON property.
+	City *string `json:"city,omitempty"`
+	// Zip corresponds to the "zip" JSON property.
+	Zip *int64 `json:"zip,omitempty"`
+	// AdditionalProperties holds unknown members verbatim.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Address) Validate() error {
 	var errs []Violation
-	if m.Zip != nil && (*m.Zip < -IntegerCap || *m.Zip > IntegerCap) {
+	if m.Zip != nil && (*m.Zip < -integerCap || *m.Zip > integerCap) {
 		errs = append(errs, Violation{"zip", "exceeds ±(2^53-1) integer cap"})
 	}
 	if len(errs) > 0 {
@@ -423,6 +461,8 @@ func (m Address) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Address) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -459,6 +499,8 @@ func (m *Address) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Address) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -479,11 +521,13 @@ func (m Address) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// A string map with member-count and key-shape constraints: 1 to 3 entries, each key at most 8 code points (minProperties/maxProperties/propertyNames on a map-shaped object).
+// Attributes A string map with member-count and key-shape constraints: 1 to 3 entries, each key at most 8 code points (minProperties/maxProperties/propertyNames on a map-shaped object).
 type Attributes struct {
 	AdditionalProperties map[string]string
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Attributes) Validate() error {
 	var errs []Violation
 	if n := len(m.AdditionalProperties); n < 1 {
@@ -503,6 +547,8 @@ func (m Attributes) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Attributes) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -539,6 +585,8 @@ func (m *Attributes) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Attributes) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -550,14 +598,18 @@ func (m Attributes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// A circle branch of the Shape tagged union.
+// Circle A circle branch of the Shape tagged union.
 type Circle struct {
-	Kind   CircleKind `json:"kind"`
-	Radius float64    `json:"radius"`
-	// AdditionalProperties holds unknown members verbatim (forward compat, P13).
+	// Kind corresponds to the "kind" JSON property.
+	Kind CircleKind `json:"kind"`
+	// Radius corresponds to the "radius" JSON property.
+	Radius float64 `json:"radius"`
+	// AdditionalProperties holds unknown members verbatim.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Circle) Validate() error {
 	var errs []Violation
 	if m.Kind != CircleKindCircle {
@@ -569,6 +621,8 @@ func (m Circle) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Circle) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -607,6 +661,8 @@ func (m *Circle) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Circle) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -624,13 +680,18 @@ func (m Circle) MarshalJSON() ([]byte, error) {
 
 // Contact details with a conditional requirement and a member-count bound: a shipping street requires a shipping zip (dependentRequired), and the object must carry 1 to 3 members (minProperties/maxProperties on a declared-property object).
 type Contact struct {
-	Email          *string `json:"email,omitempty"`
+	// Email corresponds to the "email" JSON property.
+	Email *string `json:"email,omitempty"`
+	// ShippingStreet corresponds to the "shippingStreet" JSON property.
 	ShippingStreet *string `json:"shippingStreet,omitempty"`
-	ShippingZip    *string `json:"shippingZip,omitempty"`
-	// AdditionalProperties holds unknown members verbatim (forward compat, P13).
+	// ShippingZip corresponds to the "shippingZip" JSON property.
+	ShippingZip *string `json:"shippingZip,omitempty"`
+	// AdditionalProperties holds unknown members verbatim.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Contact) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -639,6 +700,8 @@ func (m Contact) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Contact) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -686,6 +749,8 @@ func (m *Contact) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Contact) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -719,11 +784,13 @@ func (m Contact) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Arbitrary string key/value labels (typed map).
+// Labels Arbitrary string key/value labels (typed map).
 type Labels struct {
 	AdditionalProperties map[string]string
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Labels) Validate() error {
 	var errs []Violation
 	if n := len(m.AdditionalProperties); n > 50 {
@@ -735,6 +802,8 @@ func (m Labels) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Labels) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -763,6 +832,8 @@ func (m *Labels) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Labels) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -774,15 +845,19 @@ func (m Labels) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// A closed object; unknown members are rejected.
+// Settings A closed object; unknown members are rejected.
 type Settings struct {
-	Theme    *string `json:"theme,omitempty"`
-	FontSize *int64  `json:"fontSize,omitempty"`
+	// Theme corresponds to the "theme" JSON property.
+	Theme *string `json:"theme,omitempty"`
+	// FontSize corresponds to the "fontSize" JSON property.
+	FontSize *int64 `json:"fontSize,omitempty"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Settings) Validate() error {
 	var errs []Violation
-	if m.FontSize != nil && (*m.FontSize < -IntegerCap || *m.FontSize > IntegerCap) {
+	if m.FontSize != nil && (*m.FontSize < -integerCap || *m.FontSize > integerCap) {
 		errs = append(errs, Violation{"fontSize", "exceeds ±(2^53-1) integer cap"})
 	}
 	if len(errs) > 0 {
@@ -791,6 +866,8 @@ func (m Settings) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Settings) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -823,6 +900,8 @@ func (m *Settings) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Settings) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -852,87 +931,94 @@ var showcaseUrlBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9_-]{4})*(
 // Showcase
 // Root object exercising the supported JSON-Schema feature subset: required and optional fields of every scalar type, optional+nullable and required+nullable members, arrays, a nested object via $ref, a typed-map, a closed object, an open (catch-all) object, a string const, a scalar default, and member docs.
 type Showcase struct {
-	// Discriminator; always "showcase".
+	// Kind Discriminator; always "showcase".
 	Kind ShowcaseKind `json:"kind"`
-	// Integer const; always 1.
+	// Revision Integer const; always 1.
 	Revision ShowcaseRevision `json:"revision"`
-	// Boolean const; always true.
+	// Enabled Boolean const; always true.
 	Enabled ShowcaseEnabled `json:"enabled"`
-	// Closed string value set.
+	// Status Closed string value set.
 	Status ShowcaseStatus `json:"status"`
-	// Closed integer value set.
+	// Tier Closed integer value set.
 	Tier ShowcaseTier `json:"tier"`
-	// Closed number value set (exercises the Python float exception: emitted as plain float, validated by membership).
+	// Scale Closed number value set (exercises the Python float exception: emitted as plain float, validated by membership).
 	Scale ShowcaseScale `json:"scale"`
 	// Name Display name
 	// Required human-readable name, 1 to 64 code points.
 	Name string `json:"name"`
-	// Required integer scalar.
+	// Count Required integer scalar.
 	Count int64 `json:"count"`
-	// Required boolean scalar.
+	// Active Required boolean scalar.
 	Active bool `json:"active"`
-	// Optional short name, at most 12 code points.
+	// Nickname Optional short name, at most 12 code points.
 	Nickname *string `json:"nickname,omitempty"`
-	// Optional code, 2 to 5 code points. Counted in Unicode code points, so a multi-byte value (e.g. "a😀b", 3 code points / 6 UTF-8 bytes) is valid.
+	// Code Optional code, 2 to 5 code points. Counted in Unicode code points, so a multi-byte value (e.g. "a😀b", 3 code points / 6 UTF-8 bytes) is valid.
 	Code *string `json:"code,omitempty"`
-	// Optional product code: 2 to 4 uppercase ASCII letters, anchored (`^[A-Z]{2,4}$`). Exercises the RE2-safe `pattern` gate.
+	// Sku Optional product code: 2 to 4 uppercase ASCII letters, anchored (`^[A-Z]{2,4}$`). Exercises the RE2-safe `pattern` gate.
 	Sku *string `json:"sku,omitempty"`
-	// Optional two-word phrase separated by whitespace (`^\S+\s\S+$`). Exercises the loader's `\s`/`\S` → ASCII-class normalization and the per-target `$` end-anchor rewrite (Python `\Z` / Java `\z`), so a Unicode space (NBSP) and a trailing newline are rejected consistently across all four languages.
+	// Phrase Optional two-word phrase separated by whitespace (`^\S+\s\S+$`). Exercises the loader's `\s`/`\S` → ASCII-class normalization and the per-target `$` end-anchor rewrite (Python `\Z` / Java `\z`), so a Unicode space (NBSP) and a trailing newline are rejected consistently across all four languages.
 	Phrase *string `json:"phrase,omitempty"`
-	// Optional request identifier; asserted RFC 4122 UUID via `format: uuid`. Stays `string`-typed (format assertion, no materialization); the pinned regex is validated identically across all four languages.
+	// RequestId Optional request identifier; asserted RFC 4122 UUID via `format: uuid`. Stays `string`-typed (format assertion, no materialization); the pinned regex is validated identically across all four languages.
 	RequestId *string `json:"requestId,omitempty"`
-	// Optional contact address; asserted ASCII dot-atom `format: email` (single `@`, >=2-label domain, total length <= 254, guard-before-regex).
+	// ContactEmail Optional contact address; asserted ASCII dot-atom `format: email` (single `@`, >=2-label domain, total length <= 254, guard-before-regex).
 	ContactEmail *string `json:"contactEmail,omitempty"`
-	// Optional host name; asserted RFC 1123 `format: hostname` (LDH labels, total length <= 253).
+	// Host Optional host name; asserted RFC 1123 `format: hostname` (LDH labels, total length <= 253).
 	Host *string `json:"host,omitempty"`
-	// Optional homepage; asserted RFC 3986 `format: uri` (scheme required, ASCII only; an IP-literal host is validated by the spliced ipv6 grammar).
+	// Homepage Optional homepage; asserted RFC 3986 `format: uri` (scheme required, ASCII only; an IP-literal host is validated by the spliced ipv6 grammar).
 	Homepage *string `json:"homepage,omitempty"`
-	// Optional gateway address; asserted dotted-quad IPv4 via format ipv4.
+	// Gateway Optional gateway address; asserted dotted-quad IPv4 via format ipv4.
 	Gateway *string `json:"gateway,omitempty"`
-	// Optional binary payload carried as a `contentEncoding: base64` string, materialized to native bytes (Go []byte, TS Uint8Array, Python bytes, Java byte[]). The wire is canonical padded standard base64; a malformed value is rejected by the pinned regex before decode.
+	// Blob Optional binary payload carried as a `contentEncoding: base64` string, materialized to native bytes (Go []byte, TS Uint8Array, Python bytes, Java byte[]). The wire is canonical padded standard base64; a malformed value is rejected by the pinned regex before decode.
 	Blob []byte `json:"blob,omitempty"`
-	// Optional binary payload carried as a `contentEncoding: base64url` string (URL-safe alphabet, unpadded, RFC 4648 §5), materialized to the same native bytes type. The same bytes encode to a different wire than base64 ("Pj4+" vs "Pj4-").
+	// UrlBlob Optional binary payload carried as a `contentEncoding: base64url` string (URL-safe alphabet, unpadded, RFC 4648 §5), materialized to the same native bytes type. The same bytes encode to a different wire than base64 ("Pj4+" vs "Pj4-").
 	UrlBlob []byte `json:"urlBlob,omitempty"`
 	// Retries Retry budget
 	// Optional integer with a schema default.
 	Retries *int64 `json:"retries,omitempty"`
-	Verbose *bool  `json:"verbose,omitempty"`
+	// Verbose corresponds to the "verbose" JSON property.
+	Verbose *bool `json:"verbose,omitempty"`
 	// Greeting
 	// Optional string with a schema default, surfaced on read.
 	Greeting *string `json:"greeting,omitempty"`
 	// Debug flag
 	// Optional boolean with a schema default.
 	Debug *bool `json:"debug,omitempty"`
-	// Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702 @deprecated). Also exercises the per-language identifier override (`x-<lang>-name`, the Stage 4 escape hatch): the emitted code identifier is forced to the idiomatic initialism `LegacyID`/`legacyID` while the wire name stays `legacyId` (json tag / alias / @JsonProperty).
+	// LegacyID Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702 @deprecated). Also exercises the per-language identifier override (`x-<lang>-name`, the Stage 4 escape hatch): the emitted code identifier is forced to the idiomatic initialism `LegacyID`/`legacyID` while the wire name stays `legacyId` (json tag / alias / @JsonProperty).
 	//
 	// Deprecated: This field is deprecated.
 	LegacyID *string `json:"legacyId,omitempty"`
-	// Optional and nullable; may be absent or explicitly null.
+	// MiddleName Optional and nullable; may be absent or explicitly null.
 	MiddleName *string `json:"middleName,omitempty"`
-	// Required but nullable; may be explicitly cleared to null.
+	// Category Required but nullable; may be explicitly cleared to null.
 	Category *string `json:"category"`
-	// Optional integer bounded to the inclusive range [1, 10].
+	// Priority Optional integer bounded to the inclusive range [1, 10].
 	Priority *int64 `json:"priority,omitempty"`
-	// Optional integer that must be strictly greater than 0.
+	// Level Optional integer that must be strictly greater than 0.
 	Level *int64 `json:"level,omitempty"`
-	// Optional number that must be a non-negative multiple of 5.
+	// Ratio Optional number that must be a non-negative multiple of 5.
 	Ratio *float64 `json:"ratio,omitempty"`
-	// Optional integer that must be a multiple of 3.
+	// Step Optional integer that must be a multiple of 3.
 	Step *int64 `json:"step,omitempty"`
-	// Ordered list of free-form tags; 1 to 5 entries.
+	// Tags Ordered list of free-form tags; 1 to 5 entries.
 	Tags []string `json:"tags,omitempty"`
-	// Alternate names; each must be distinct.
+	// Aliases Alternate names; each must be distinct.
 	Aliases []string `json:"aliases,omitempty"`
-	// Access roles; must contain between one and two "admin" entries.
+	// Roles Access roles; must contain between one and two "admin" entries.
 	Roles []string `json:"roles,omitempty"`
-	// Disjoint-kind union (oneOf sum type): the wire value is either a string or an integer, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector.
-	IdOrName   ShowcaseIdOrName `json:"idOrName,omitempty"`
-	Shape      Shape            `json:"shape,omitempty"`
-	Address    *Address         `json:"address,omitempty"`
-	Labels     *Labels          `json:"labels,omitempty"`
-	Settings   *Settings        `json:"settings,omitempty"`
-	Attributes *Attributes      `json:"attributes,omitempty"`
-	Contact    *Contact         `json:"contact,omitempty"`
+	// IdOrName Disjoint-kind union (oneOf sum type): the wire value is either a string or an integer, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector.
+	IdOrName ShowcaseIdOrName `json:"idOrName,omitempty"`
+	// Shape corresponds to the "shape" JSON property.
+	Shape Shape `json:"shape,omitempty"`
+	// Address corresponds to the "address" JSON property.
+	Address *Address `json:"address,omitempty"`
+	// Labels corresponds to the "labels" JSON property.
+	Labels *Labels `json:"labels,omitempty"`
+	// Settings corresponds to the "settings" JSON property.
+	Settings *Settings `json:"settings,omitempty"`
+	// Attributes corresponds to the "attributes" JSON property.
+	Attributes *Attributes `json:"attributes,omitempty"`
+	// Contact corresponds to the "contact" JSON property.
+	Contact *Contact `json:"contact,omitempty"`
 }
 
 // RetriesOrDefault returns Retries when set, else the schema default.
@@ -959,6 +1045,8 @@ func (m Showcase) DebugOrDefault() bool {
 	return false
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Showcase) Validate() error {
 	var errs []Violation
 	if m.Kind != ShowcaseKindShowcase {
@@ -991,7 +1079,7 @@ func (m Showcase) Validate() error {
 	if n := utf8.RuneCountInString(m.Name); n > 64 {
 		errs = append(errs, Violation{"name", fmt.Sprintf("must have length <= 64, got %d", n)})
 	}
-	if m.Count < -IntegerCap || m.Count > IntegerCap {
+	if m.Count < -integerCap || m.Count > integerCap {
 		errs = append(errs, Violation{"count", "exceeds ±(2^53-1) integer cap"})
 	}
 	if m.Nickname != nil {
@@ -1042,10 +1130,10 @@ func (m Showcase) Validate() error {
 			errs = append(errs, Violation{"gateway", fmt.Sprintf("must be a valid ipv4, got %q", *m.Gateway)})
 		}
 	}
-	if m.Retries != nil && (*m.Retries < -IntegerCap || *m.Retries > IntegerCap) {
+	if m.Retries != nil && (*m.Retries < -integerCap || *m.Retries > integerCap) {
 		errs = append(errs, Violation{"retries", "exceeds ±(2^53-1) integer cap"})
 	}
-	if m.Priority != nil && (*m.Priority < -IntegerCap || *m.Priority > IntegerCap) {
+	if m.Priority != nil && (*m.Priority < -integerCap || *m.Priority > integerCap) {
 		errs = append(errs, Violation{"priority", "exceeds ±(2^53-1) integer cap"})
 	}
 	if m.Priority != nil {
@@ -1056,7 +1144,7 @@ func (m Showcase) Validate() error {
 			errs = append(errs, Violation{"priority", fmt.Sprintf("must be <= 10, got %v", *m.Priority)})
 		}
 	}
-	if m.Level != nil && (*m.Level < -IntegerCap || *m.Level > IntegerCap) {
+	if m.Level != nil && (*m.Level < -integerCap || *m.Level > integerCap) {
 		errs = append(errs, Violation{"level", "exceeds ±(2^53-1) integer cap"})
 	}
 	if m.Level != nil {
@@ -1072,7 +1160,7 @@ func (m Showcase) Validate() error {
 			errs = append(errs, Violation{"ratio", fmt.Sprintf("must be a multiple of 5, got %v", *m.Ratio)})
 		}
 	}
-	if m.Step != nil && (*m.Step < -IntegerCap || *m.Step > IntegerCap) {
+	if m.Step != nil && (*m.Step < -integerCap || *m.Step > integerCap) {
 		errs = append(errs, Violation{"step", "exceeds ±(2^53-1) integer cap"})
 	}
 	if m.Step != nil {
@@ -1143,6 +1231,8 @@ func (m Showcase) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Showcase) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -1471,6 +1561,8 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Showcase) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -1588,14 +1680,18 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// A square branch of the Shape tagged union.
+// Square A square branch of the Shape tagged union.
 type Square struct {
+	// Kind corresponds to the "kind" JSON property.
 	Kind SquareKind `json:"kind"`
-	Side float64    `json:"side"`
-	// AdditionalProperties holds unknown members verbatim (forward compat, P13).
+	// Side corresponds to the "side" JSON property.
+	Side float64 `json:"side"`
+	// AdditionalProperties holds unknown members verbatim.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Square) Validate() error {
 	var errs []Violation
 	if m.Kind != SquareKindSquare {
@@ -1607,6 +1703,8 @@ func (m Square) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Square) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -1645,6 +1743,8 @@ func (m *Square) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Square) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -1660,20 +1760,25 @@ func (m Square) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Base-type extension via allOf: WidgetBase is flattened in and the extension branch adds fields, so Widget merges to one standalone object with the union of properties ({id, kind, name, size}) and required ([id, name]). The `size` member is itself an allOf that tightens two numeric bounds to a single interval [10, 20]; a value outside it is rejected by the merged constraint. No allOf survives past the loader.
+// Widget Base-type extension via allOf: WidgetBase is flattened in and the extension branch adds fields, so Widget merges to one standalone object with the union of properties ({id, kind, name, size}) and required ([id, name]). The `size` member is itself an allOf that tightens two numeric bounds to a single interval [10, 20]; a value outside it is rejected by the merged constraint. No allOf survives past the loader.
 type Widget struct {
-	Id   string  `json:"id"`
+	// Id corresponds to the "id" JSON property.
+	Id string `json:"id"`
+	// Kind corresponds to the "kind" JSON property.
 	Kind *string `json:"kind,omitempty"`
-	Name string  `json:"name"`
-	// Optional integer with two allOf branches tightened to [10, 20].
+	// Name corresponds to the "name" JSON property.
+	Name string `json:"name"`
+	// Size Optional integer with two allOf branches tightened to [10, 20].
 	Size *int64 `json:"size,omitempty"`
-	// AdditionalProperties holds unknown members verbatim (forward compat, P13).
+	// AdditionalProperties holds unknown members verbatim.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Widget) Validate() error {
 	var errs []Violation
-	if m.Size != nil && (*m.Size < -IntegerCap || *m.Size > IntegerCap) {
+	if m.Size != nil && (*m.Size < -integerCap || *m.Size > integerCap) {
 		errs = append(errs, Violation{"size", "exceeds ±(2^53-1) integer cap"})
 	}
 	if m.Size != nil {
@@ -1690,6 +1795,8 @@ func (m Widget) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Widget) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -1735,6 +1842,8 @@ func (m *Widget) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Widget) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -1756,14 +1865,18 @@ func (m Widget) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// A base object folded into Widget via allOf. It stays its own type; Widget copies its fields rather than referencing or subtyping it.
+// WidgetBase A base object folded into Widget via allOf. It stays its own type; Widget copies its fields rather than referencing or subtyping it.
 type WidgetBase struct {
-	Id   string  `json:"id"`
+	// Id corresponds to the "id" JSON property.
+	Id string `json:"id"`
+	// Kind corresponds to the "kind" JSON property.
 	Kind *string `json:"kind,omitempty"`
-	// AdditionalProperties holds unknown members verbatim (forward compat, P13).
+	// AdditionalProperties holds unknown members verbatim.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m WidgetBase) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -1772,6 +1885,8 @@ func (m WidgetBase) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *WidgetBase) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -1805,6 +1920,8 @@ func (m *WidgetBase) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m WidgetBase) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())

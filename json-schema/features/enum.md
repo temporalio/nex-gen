@@ -137,7 +137,12 @@ The field is typed with the defined type (`C Color`); the value constants
 are the idiomatic way to set it (`Palette{C: ColorRed}`) and the values
 the validator compares against. This is exactly [[const]]'s shape with
 more than one constant grouped under the type. Each value-constant name is
-`{Type}{EncodedValue}` (see Naming and encoding).
+`{Type}{EncodedValue}` (see Naming and encoding). Doc comments follow
+[[const]]'s rule: the type gets a name-led comment (from the owning
+property's [[title]]/[[description]], else a fallback naming the model and
+field), and **each** value constant gets its own name-led comment stating
+the value it holds (PRINCIPLES.md, Go §1) — not just a comment on the
+`const (...)` block.
 
 **TypeScript.** The **closed union of literals** —
 `c: "red" | "green" | "blue"`. The union closes the field in-language (a

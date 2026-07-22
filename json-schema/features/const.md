@@ -141,7 +141,12 @@ bare primitive requires a deliberate cast (`Priority(4)`) to reach the
 field, so a wrong value is a conscious act, caught by `Validate`. It
 generalizes directly to [[enum]], which lists several constants under one
 type. The value-constant name is `{Type}{EncodedValue}` (see Naming and
-encoding).
+encoding). Both the defined type and each value constant are exported, so
+both carry a name-led doc comment (PRINCIPLES.md, Go §1) — the type's from
+the owning property's [[title]]/[[description]] when present, else a
+fallback naming the declaring model and field; each constant's states the
+value it holds (e.g. `// UserEventKindUser is the UserEventKind value
+"user".`).
 
 **TypeScript.** The **closed literal** of the value — `kind: "user"`,
 `n: 1.5`, `ok: true`. The literal type closes the field in-language (a

@@ -298,6 +298,14 @@ inline scalar/array/object branch synthesizes a variant type named
 `<Union><Kind>` (Go has no nested types → flat, P15-backstopped). Because
 at most one branch occupies each kind, `<Union><Kind>` is unambiguous.
 
+Both the interface type and each synthesized `<Union><Kind>` variant are
+exported, so both carry a name-led doc comment (PRINCIPLES.md, Go §1): the
+interface from the union schema's [[title]]/[[description]] when present,
+else a fallback listing its admissible branch kinds (`// Foo is one of:
+string, []float64, Widget.`); a synthesized variant from its own branch
+schema's [[title]]/[[description]], else a fallback naming the union and
+wrapped kind it belongs to. The unexported marker method needs none.
+
 ### Java
 
 Java 8 baseline (**PRINCIPLES Java §1**) has no sealed interfaces, so the

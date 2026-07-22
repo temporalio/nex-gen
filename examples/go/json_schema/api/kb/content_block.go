@@ -6,20 +6,25 @@ import (
 	"fmt"
 )
 
-// A content block. The other half of the Page <-> Block cross-file cycle. The `page` back-reference is optional + nullable, which terminates the cycle so it is satisfiable.
+// Block A content block. The other half of the Page <-> Block cross-file cycle. The `page` back-reference is optional + nullable, which terminates the cycle so it is satisfiable.
 type Block struct {
+	// BlockId corresponds to the "blockId" JSON property.
 	BlockId string `json:"blockId"`
-	// Non-negative position within the page. Exercises a numeric `minimum` bound over an integer field.
-	Order int64       `json:"order"`
-	Text  *string     `json:"text,omitempty"`
+	// Order Non-negative position within the page. Exercises a numeric `minimum` bound over an integer field.
+	Order int64 `json:"order"`
+	// Text corresponds to the "text" JSON property.
+	Text *string `json:"text,omitempty"`
+	// Style corresponds to the "style" JSON property.
 	Style *BlockStyle `json:"style,omitempty"`
-	// Optional back-reference to the containing page - closes the Page <-> Block cycle. Optional + nullable, so this edge terminates.
+	// Page Optional back-reference to the containing page - closes the Page <-> Block cycle. Optional + nullable, so this edge terminates.
 	Page *Page `json:"page,omitempty"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Block) Validate() error {
 	var errs []Violation
-	if m.Order < -IntegerCap || m.Order > IntegerCap {
+	if m.Order < -integerCap || m.Order > integerCap {
 		errs = append(errs, Violation{"order", "exceeds ±(2^53-1) integer cap"})
 	}
 	if m.Order < 0 {
@@ -34,6 +39,8 @@ func (m Block) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Block) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -93,6 +100,8 @@ func (m *Block) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Block) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -114,15 +123,19 @@ func (m Block) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Non-cyclic helper; stays in the content_block module. All members optional.
+// BlockStyle Non-cyclic helper; stays in the content_block module. All members optional.
 type BlockStyle struct {
-	Bold   *bool  `json:"bold,omitempty"`
+	// Bold corresponds to the "bold" JSON property.
+	Bold *bool `json:"bold,omitempty"`
+	// Indent corresponds to the "indent" JSON property.
 	Indent *int64 `json:"indent,omitempty"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m BlockStyle) Validate() error {
 	var errs []Violation
-	if m.Indent != nil && (*m.Indent < -IntegerCap || *m.Indent > IntegerCap) {
+	if m.Indent != nil && (*m.Indent < -integerCap || *m.Indent > integerCap) {
 		errs = append(errs, Violation{"indent", "exceeds ±(2^53-1) integer cap"})
 	}
 	if m.Indent != nil {
@@ -136,6 +149,8 @@ func (m BlockStyle) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *BlockStyle) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -171,6 +186,8 @@ func (m *BlockStyle) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m BlockStyle) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())

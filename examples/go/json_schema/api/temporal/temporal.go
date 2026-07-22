@@ -20,6 +20,8 @@ type Violation struct {
 	Reason string
 }
 
+// String implements fmt.Stringer, returning "Path: Reason", or just Reason
+// when Path is empty.
 func (v Violation) String() string {
 	if v.Path == "" {
 		return v.Reason
@@ -33,6 +35,8 @@ type ValidationError struct {
 	Violations []Violation
 }
 
+// Error implements the error interface, joining every Violation into one
+// message.
 func (e *ValidationError) Error() string {
 	parts := make([]string, len(e.Violations))
 	for i, v := range e.Violations {
@@ -73,7 +77,7 @@ func mergeNested(errs *[]Violation, path string, err error) {
 	*errs = append(*errs, Violation{path, err.Error()})
 }
 
-const IntegerCap = 1<<53 - 1
+const integerCap = 1<<53 - 1
 
 var (
 	errFractional = errors.New("not an integer")
@@ -88,7 +92,7 @@ func parseSpecInteger(n json.Number) (int64, error) {
 	if f != math.Trunc(f) {
 		return 0, errFractional
 	}
-	if f < -IntegerCap || f > IntegerCap {
+	if f < -integerCap || f > integerCap {
 		return 0, errRange
 	}
 	i, err := n.Int64()
@@ -399,28 +403,30 @@ func formatDuration(d time.Duration) string {
 // Temporal
 // Root object materializing the four RFC 3339 temporal formats as native typed fields: date-time (offset & sub-second precision preserved), date, time (offset preserved when present), and duration (time-only, canonicalized). Covers required, optional, and nullable members of each.
 type Temporal struct {
-	// Required event timestamp; materialized date-time (offset required, sub-second precision & offset preserved on round-trip).
+	// CreatedAt Required event timestamp; materialized date-time (offset required, sub-second precision & offset preserved on round-trip).
 	CreatedAt time.Time `json:"createdAt"`
-	// Required calendar date; materialized date (YYYY-MM-DD, lossless).
+	// Birthday Required calendar date; materialized date (YYYY-MM-DD, lossless).
 	Birthday time.Time `json:"birthday"`
-	// Required wall-clock time; materialized time (offset preserved when present, otherwise offset-less).
+	// Alarm Required wall-clock time; materialized time (offset preserved when present, otherwise offset-less).
 	Alarm time.Time `json:"alarm"`
-	// Required time-only duration; materialized duration, canonicalized to PT…H…M…S (e.g. PT90M → PT1H30M).
+	// Timeout Required time-only duration; materialized duration, canonicalized to PT…H…M…S (e.g. PT90M → PT1H30M).
 	Timeout time.Duration `json:"timeout"`
-	// Optional date-time.
+	// UpdatedAt Optional date-time.
 	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
-	// Optional date.
+	// ExpiresOn Optional date.
 	ExpiresOn *time.Time `json:"expiresOn,omitempty"`
-	// Optional time.
+	// Reminder Optional time.
 	Reminder *time.Time `json:"reminder,omitempty"`
-	// Optional duration.
+	// RetryDelay Optional duration.
 	RetryDelay *time.Duration `json:"retryDelay,omitempty"`
-	// Optional and nullable date-time (may be absent or explicitly null).
+	// DeletedAt Optional and nullable date-time (may be absent or explicitly null).
 	DeletedAt *time.Time `json:"deletedAt,omitempty"`
-	// Optional and nullable date.
+	// ArchivedOn Optional and nullable date.
 	ArchivedOn *time.Time `json:"archivedOn,omitempty"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Temporal) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -429,6 +435,8 @@ func (m Temporal) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Temporal) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -505,6 +513,8 @@ func (m *Temporal) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Temporal) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())

@@ -119,12 +119,12 @@ Strategy per language:
   Integer fields go through a runtime helper that also enforces the
   cross-language integer cap (`±(2^53−1)`):
   ```go
-  // IntegerCap = 1<<53 - 1 = 9007199254740991 (== JS Number.MAX_SAFE_INTEGER)
+  // integerCap = 1<<53 - 1 = 9007199254740991 (== JS Number.MAX_SAFE_INTEGER)
   func parseSpecInteger(n json.Number) (int64, error) {
       f, err := n.Float64()
       if err != nil { return 0, err }
-      if f != math.Trunc(f) { return 0, ErrFractional }         // "1.5" → reject
-      if f < -IntegerCap || f > IntegerCap { return 0, ErrRange } // > ±(2^53-1) → reject
+      if f != math.Trunc(f) { return 0, errFractional }         // "1.5" → reject
+      if f < -integerCap || f > integerCap { return 0, errRange } // > ±(2^53-1) → reject
       i, err := n.Int64()
       if err != nil { return 0, err }                            // belt-and-suspenders
       return i, nil                                              // "1", "1.0", "1e2"

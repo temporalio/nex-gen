@@ -843,23 +843,30 @@ impl ModelBackend {
         }
         let mut output = String::new();
         for service in &api_plan.services {
+            let service_var = go_field_name(&service.name);
             render_go_doc_comment(
                 &mut output,
                 "",
                 service.doc.for_language(crate::language::Language::Go),
+                &format!(
+                    "{service_var} is the Nexus service binding for {:?}.",
+                    service.wire_name
+                ),
             );
             output.push_str("var ");
-            output.push_str(&go_field_name(&service.name));
+            output.push_str(&service_var);
             output.push_str(" = struct {\n");
             output.push_str("\tServiceName string\n");
             for operation in &service.operations {
+                let operation_field = go_field_name(&operation.name);
                 render_go_doc_comment(
                     &mut output,
                     "\t",
                     operation.doc.for_language(crate::language::Language::Go),
+                    &format!("{operation_field} is the {:?} Nexus operation.", operation.wire_name),
                 );
                 output.push('\t');
-                output.push_str(&go_field_name(&operation.name));
+                output.push_str(&operation_field);
                 output.push(' ');
                 render_operation_reference_type(&mut output, operation, api_plan, package, self)?;
                 output.push('\n');
@@ -937,11 +944,17 @@ fn render_service_client(
         output,
         "",
         service.doc.for_language(crate::language::Language::Go),
+        &format!("{client_name} is a client for the {:?} Nexus service.", service.wire_name),
     );
     output.push_str("type ");
     output.push_str(&client_name);
     output.push_str(" struct {\n\tclient workflow.NexusClient\n}\n\n");
 
+    output.push_str("// New");
+    output.push_str(&client_name);
+    output.push_str(" constructs a ");
+    output.push_str(&client_name);
+    output.push_str(" bound to the given Nexus endpoint.\n");
     output.push_str("func New");
     output.push_str(&client_name);
     output.push_str("(endpoint string) *");
@@ -953,15 +966,17 @@ fn render_service_client(
     output.push_str(".ServiceName)}\n}\n\n");
 
     for operation in &service.operations {
+        let operation_field = go_field_name(&operation.name);
         render_go_doc_comment(
             output,
             "",
             operation.doc.for_language(crate::language::Language::Go),
+            &format!("{operation_field} invokes the {:?} Nexus operation.", operation.wire_name),
         );
         output.push_str("func (c *");
         output.push_str(&client_name);
         output.push_str(") ");
-        output.push_str(&go_field_name(&operation.name));
+        output.push_str(&operation_field);
         output.push_str("(ctx workflow.Context");
         let input_expr = if operation.input.is_some() {
             output.push_str(", request ");
@@ -978,7 +993,7 @@ fn render_service_client(
         output.push_str(") workflow.Future {\n\treturn c.client.ExecuteOperation(ctx, ");
         output.push_str(&service_var);
         output.push('.');
-        output.push_str(&go_field_name(&operation.name));
+        output.push_str(&operation_field);
         output.push_str(", ");
         output.push_str(input_expr);
         output.push_str(", workflow.NexusOperationOptions{})\n}\n\n");
@@ -1062,7 +1077,7 @@ fn render_external_models(
     let unions = collect_go_unions(models, model_names)?;
     if !unions.is_empty() {
         output.push('\n');
-        render_go_unions(&mut output, &unions);
+        render_go_unions(&mut output, &unions, models)?;
     }
     if models.iter().any(|model| model_uses_temporal(model)) {
         output.push('\n');
@@ -1138,6 +1153,8 @@ fn render_validator_core(output: &mut String) {
     output.push_str("// Violation is a single constraint failure. Path is the JSON member path\n");
     output.push_str("// (dotted for nested members); Reason is a human-readable message.\n");
     output.push_str("type Violation struct {\n\tPath   string\n\tReason string\n}\n\n");
+    output.push_str("// String implements fmt.Stringer, returning \"Path: Reason\", or just Reason\n");
+    output.push_str("// when Path is empty.\n");
     output.push_str("func (v Violation) String() string {\n");
     output.push_str("\tif v.Path == \"\" {\n\t\treturn v.Reason\n\t}\n");
     output.push_str("\treturn v.Path + \": \" + v.Reason\n}\n\n");
@@ -1145,6 +1162,8 @@ fn render_validator_core(output: &mut String) {
         .push_str("// ValidationError aggregates every Violation found while (de)serializing a\n");
     output.push_str("// value, surfacing them all in one error (never a partial first-failure).\n");
     output.push_str("type ValidationError struct {\n\tViolations []Violation\n}\n\n");
+    output.push_str("// Error implements the error interface, joining every Violation into one\n");
+    output.push_str("// message.\n");
     output.push_str("func (e *ValidationError) Error() string {\n");
     output.push_str("\tparts := make([]string, len(e.Violations))\n");
     output.push_str("\tfor i, v := range e.Violations {\n\t\tparts[i] = v.String()\n\t}\n");
@@ -1164,12 +1183,12 @@ fn render_validator_core(output: &mut String) {
     output
         .push_str("\t\t\t*errs = append(*errs, Violation{p, v.Reason})\n\t\t}\n\t\treturn\n\t}\n");
     output.push_str("\t*errs = append(*errs, Violation{path, err.Error()})\n}\n\n");
-    output.push_str("const IntegerCap = 1<<53 - 1\n\n");
+    output.push_str("const integerCap = 1<<53 - 1\n\n");
     output.push_str("var (\n\terrFractional = errors.New(\"not an integer\")\n\terrRange      = errors.New(\"exceeds ±(2^53-1) integer cap\")\n)\n\n");
     output.push_str("func parseSpecInteger(n json.Number) (int64, error) {\n");
     output.push_str("\tf, err := n.Float64()\n\tif err != nil {\n\t\treturn 0, err\n\t}\n");
     output.push_str("\tif f != math.Trunc(f) {\n\t\treturn 0, errFractional\n\t}\n");
-    output.push_str("\tif f < -IntegerCap || f > IntegerCap {\n\t\treturn 0, errRange\n\t}\n");
+    output.push_str("\tif f < -integerCap || f > integerCap {\n\t\treturn 0, errRange\n\t}\n");
     output.push_str(
         "\ti, err := n.Int64()\n\tif err != nil {\n\t\treturn 0, err\n\t}\n\treturn i, nil\n}\n\n",
     );
@@ -1212,6 +1231,9 @@ fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType])
         type_name: String,
         underlying: &'static str,
         consts: Vec<(String, String)>,
+        model_name: String,
+        field_name: String,
+        schema: Schema,
     }
     let mut declared = Vec::new();
     for model in models {
@@ -1238,6 +1260,9 @@ fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType])
                 type_name,
                 underlying,
                 consts,
+                model_name: model.model_name.clone(),
+                field_name: field_name.clone(),
+                schema: property.clone(),
             });
         }
     }
@@ -1245,6 +1270,17 @@ fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType])
         return Ok(());
     }
     for decl in declared {
+        render_go_schema_doc(
+            output,
+            "",
+            &decl.type_name,
+            &decl.schema,
+            "type",
+            &format!(
+                "{} is the closed value set for {}.{}.",
+                decl.type_name, decl.model_name, decl.field_name
+            ),
+        );
         output.push_str("type ");
         output.push_str(&decl.type_name);
         output.push(' ');
@@ -1252,6 +1288,13 @@ fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType])
         output.push_str("\n\n");
         if decl.consts.len() == 1 {
             let (name, literal) = &decl.consts[0];
+            output.push_str("// ");
+            output.push_str(name);
+            output.push_str(" is the ");
+            output.push_str(&decl.type_name);
+            output.push_str(" value ");
+            output.push_str(literal);
+            output.push_str(".\n");
             output.push_str("const ");
             output.push_str(name);
             output.push(' ');
@@ -1262,7 +1305,13 @@ fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType])
         } else {
             output.push_str("const (\n");
             for (name, literal) in &decl.consts {
-                output.push('\t');
+                output.push_str("\t// ");
+                output.push_str(name);
+                output.push_str(" is the ");
+                output.push_str(&decl.type_name);
+                output.push_str(" value ");
+                output.push_str(literal);
+                output.push_str(".\n\t");
                 output.push_str(name);
                 output.push(' ');
                 output.push_str(&decl.type_name);
@@ -1583,9 +1632,26 @@ fn property_union_name(
 
 /// Emits every union's sealed interface, marker/`Validate` methods, synthesized
 /// wrapper types, and dispatch function.
-fn render_go_unions(output: &mut String, unions: &BTreeMap<String, GoUnion>) {
+fn render_go_unions(
+    output: &mut String,
+    unions: &BTreeMap<String, GoUnion>,
+    models: &[&PlannedJsonType],
+) -> Result<()> {
     for union in unions.values() {
-        render_go_doc_comment(output, "", None);
+        let union_schema = models
+            .iter()
+            .find(|model| model.model_name == union.name)
+            .map(|model| decode_schema(model))
+            .transpose()?
+            .unwrap_or_default();
+        render_go_schema_doc(
+            output,
+            "",
+            &union.name,
+            &union_schema,
+            "type",
+            &format!("{} is one of: {}.", union.name, union.admissible()),
+        );
         output.push_str("type ");
         output.push_str(&union.name);
         output.push_str(" interface {\n\t");
@@ -1594,6 +1660,17 @@ fn render_go_unions(output: &mut String, unions: &BTreeMap<String, GoUnion>) {
 
         for variant in &union.variants {
             if let Some(underlying) = &variant.synthesized {
+                render_go_schema_doc(
+                    output,
+                    "",
+                    &variant.go_type,
+                    &variant.schema,
+                    "type",
+                    &format!(
+                        "{} wraps a {underlying} value admissible in the {} union.",
+                        variant.go_type, union.name
+                    ),
+                );
                 output.push_str("type ");
                 output.push_str(&variant.go_type);
                 output.push(' ');
@@ -1614,11 +1691,14 @@ fn render_go_unions(output: &mut String, unions: &BTreeMap<String, GoUnion>) {
         }
         render_go_union_dispatch(output, union);
     }
+    Ok(())
 }
 
 /// The wrapper `Validate` for a synthesized scalar/array variant: re-runs the
 /// branch's own constraints (P12) before assigning/serializing.
 fn render_go_variant_validate(output: &mut String, variant: &GoUnionVariant) {
+    output.push_str("// Validate checks v against every constraint and returns a *ValidationError\n");
+    output.push_str("// listing any violations.\n");
     output.push_str("func (v ");
     output.push_str(&variant.go_type);
     output.push_str(") Validate() error {\n\tvar errs []Violation\n");
@@ -1792,7 +1872,17 @@ fn render_model(
         return Ok(());
     }
     render_go_pattern_vars(output, model, &schema);
-    render_go_schema_doc(output, "", &model.model_name, &schema, "type");
+    render_go_schema_doc(
+        output,
+        "",
+        &model.model_name,
+        &schema,
+        "type",
+        &format!(
+            "{} is generated from the corresponding JSON Schema definition.",
+            model.model_name
+        ),
+    );
     output.push_str("type ");
     output.push_str(&model.model_name);
     output.push_str(" struct {\n");
@@ -1809,15 +1899,17 @@ fn render_model(
     let properties = schema.properties.as_ref();
     if let Some(properties) = properties {
         for (json_name, property) in properties {
+            let field_name = property.go_member_name(json_name);
             render_go_schema_doc(
                 output,
                 "\t",
-                &property.go_member_name(json_name),
+                &field_name,
                 property,
                 "field",
+                &format!("{field_name} corresponds to the {json_name:?} JSON property."),
             );
             output.push('\t');
-            output.push_str(&property.go_member_name(json_name));
+            output.push_str(&field_name);
             output.push(' ');
             if let Some(union_name) =
                 property_union_name(&model.model_name, json_name, property, unions)
@@ -1842,7 +1934,7 @@ fn render_model(
     }
     if is_open_object(&schema) {
         output.push_str(
-            "\t// AdditionalProperties holds unknown members verbatim (forward compat, P13).\n",
+            "\t// AdditionalProperties holds unknown members verbatim.\n",
         );
         output.push_str("\tAdditionalProperties map[string]json.RawMessage `json:\"-\"`\n");
     }
@@ -1926,6 +2018,8 @@ fn render_validate(
     model_names: &BTreeMap<String, String>,
     unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
+    output.push_str("// Validate checks m against every constraint and returns a *ValidationError\n");
+    output.push_str("// listing any violations.\n");
     output.push_str("func (m ");
     output.push_str(&model.model_name);
     output.push_str(") Validate() error {\n\tvar errs []Violation\n");
@@ -1993,9 +2087,9 @@ fn render_validate(
                 output.push_str(&guard);
                 output.push('(');
                 output.push_str(&expr);
-                output.push_str(" < -IntegerCap || ");
+                output.push_str(" < -integerCap || ");
                 output.push_str(&expr);
-                output.push_str(" > IntegerCap) {\n\t\terrs = append(errs, Violation{");
+                output.push_str(" > integerCap) {\n\t\terrs = append(errs, Violation{");
                 output.push_str(&go_string_literal(json_name));
                 output.push_str(", \"exceeds ±(2^53-1) integer cap\"})\n\t}\n");
             }
@@ -2114,6 +2208,8 @@ fn render_unmarshal_json(
     model_names: &BTreeMap<String, String>,
     unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
+    output.push_str("// UnmarshalJSON parses data into m and validates it, returning a\n");
+    output.push_str("// *ValidationError listing any violations.\n");
     output.push_str("func (m *");
     output.push_str(&model.model_name);
     output.push_str(") UnmarshalJSON(data []byte) error {\n");
@@ -2519,6 +2615,8 @@ fn render_marshal_json(
     schema: &Schema,
     unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
+    output.push_str("// MarshalJSON validates m, then serializes it to JSON, returning a\n");
+    output.push_str("// *ValidationError if validation fails.\n");
     output.push_str("func (m ");
     output.push_str(&model.model_name);
     output.push_str(") MarshalJSON() ([]byte, error) {\n");
@@ -2666,6 +2764,8 @@ fn render_typed_map_methods(
     value_schema: &Schema,
     _model_names: &BTreeMap<String, String>,
 ) -> Result<()> {
+    output.push_str("// Validate checks m against every constraint and returns a *ValidationError\n");
+    output.push_str("// listing any violations.\n");
     output.push_str("func (m ");
     output.push_str(&model.model_name);
     output.push_str(") Validate() error {\n\tvar errs []Violation\n");
@@ -2674,6 +2774,8 @@ fn render_typed_map_methods(
         render_go_property_name_checks(output, "m.AdditionalProperties", subschema, "\t");
     }
     output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+    output.push_str("// UnmarshalJSON parses data into m and validates it, returning a\n");
+    output.push_str("// *ValidationError listing any violations.\n");
     output.push_str("func (m *");
     output.push_str(&model.model_name);
     output.push_str(") UnmarshalJSON(data []byte) error {\n");
@@ -2690,6 +2792,8 @@ fn render_typed_map_methods(
         render_go_property_name_checks(output, "raw", subschema, "\t");
     }
     output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+    output.push_str("// MarshalJSON validates m, then serializes it to JSON, returning a\n");
+    output.push_str("// *ValidationError if validation fails.\n");
     output.push_str("func (m ");
     output.push_str(&model.model_name);
     output.push_str(") MarshalJSON() ([]byte, error) {\n\tif err := m.Validate(); err != nil {\n\t\treturn nil, err\n\t}\n\tout := make(map[string]string, len(m.AdditionalProperties))\n\tfor k, v := range m.AdditionalProperties {\n\t\tout[k] = v\n\t}\n\treturn json.Marshal(out)\n}\n\n");
@@ -3576,11 +3680,13 @@ fn render_closed_value_unmarshal(
     output.push_str("\t}\n");
 }
 
-fn render_go_doc_comment(output: &mut String, indent: &str, doc: Option<&str>) {
-    let Some(doc) = doc.map(str::trim).filter(|doc| !doc.is_empty()) else {
-        return;
-    };
-    for line in doc.lines() {
+/// Renders `doc` (the envelope's `description`, per json-schema/services.md)
+/// as a Go doc comment, falling back to `fallback` (already name-led) when
+/// `doc` is absent — every exported declaration must carry a doc comment
+/// (json-schema/PRINCIPLES.md, Go §1).
+fn render_go_doc_comment(output: &mut String, indent: &str, doc: Option<&str>, fallback: &str) {
+    let text = doc.map(str::trim).filter(|doc| !doc.is_empty()).unwrap_or(fallback);
+    for line in text.lines() {
         output.push_str(indent);
         output.push_str("// ");
         output.push_str(line.trim());
@@ -3593,22 +3699,56 @@ fn render_go_doc_comment(output: &mut String, indent: &str, doc: Option<&str>) {
 /// `description` body, and — when `deprecated: true` — a `// Deprecated:`
 /// paragraph (godoc convention; a generic reason, the rationale lives in the
 /// body). See json-schema/features/{title,description,deprecated}.md. `kind` is
-/// "type" or "field", used only in the deprecation reason.
-fn render_go_schema_doc(output: &mut String, indent: &str, name: &str, schema: &Schema, kind: &str) {
-    let mut lines: Vec<String> = Vec::new();
-    if let Some(title) = schema.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        // Name-led first line (golint): don't double the name if the title
-        // already begins with it (case-insensitively).
-        if title.to_lowercase().starts_with(&name.to_lowercase()) {
-            lines.push(title.to_string());
+/// "type" or "field", used only in the deprecation reason. When neither
+/// `title` nor `description` is present, falls back to `fallback` (already
+/// name-led) so the declaration still carries a comment — every exported
+/// identifier must (json-schema/PRINCIPLES.md, Go §1).
+fn render_go_schema_doc(
+    output: &mut String,
+    indent: &str,
+    name: &str,
+    schema: &Schema,
+    kind: &str,
+    fallback: &str,
+) {
+    // Name-led opening line (golint): don't double the name if the text
+    // already begins with it (case-insensitively).
+    let name_led = |text: &str| {
+        if text.to_lowercase().starts_with(&name.to_lowercase()) {
+            text.to_string()
         } else {
-            lines.push(format!("{name} {title}"));
+            format!("{name} {text}")
         }
+    };
+    let title = schema.title.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    let description = schema
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty());
+    let mut lines: Vec<String> = Vec::new();
+    match (title, description) {
+        (Some(title), description) => {
+            lines.push(name_led(title));
+            for line in description.into_iter().flat_map(str::lines) {
+                lines.push(line.trim().to_string());
+            }
+        }
+        (None, Some(description)) => {
+            // No title: the identifier leads the first line of the
+            // description instead (json-schema/features/description.md).
+            let mut desc_lines = description.lines();
+            if let Some(first) = desc_lines.next() {
+                lines.push(name_led(first.trim()));
+            }
+            for line in desc_lines {
+                lines.push(line.trim().to_string());
+            }
+        }
+        (None, None) => {}
     }
-    if let Some(desc) = schema.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
-        for line in desc.lines() {
-            lines.push(line.trim().to_string());
-        }
+    if lines.is_empty() {
+        lines.push(fallback.to_string());
     }
     if schema.deprecated == Some(true) {
         if !lines.is_empty() {

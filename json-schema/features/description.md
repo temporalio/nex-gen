@@ -130,6 +130,10 @@ Layout rules:
   becomes the summary in doc tools that treat the first sentence as one —
   Javadoc/JSDoc/PEP 257).
 - With **only** a title: just the summary line (see [[title]]).
+- With **neither**: Go still emits a comment — see the fallback rule
+  below (PRINCIPLES.md, Go §1). TypeScript/Python/Java simply emit none
+  (there is no per-language mandate that every declaration carry a doc
+  comment in those languages, unlike Go's `golint`-driven convention).
 - **Paragraphs** in the body (blank lines in the source string) are
   preserved as blank comment lines.
 
@@ -137,8 +141,14 @@ Layout rules:
 identifier being described (`godoc`/`golint`: `// User is …`). The
 name-led rule governs whatever text **opens** the Go comment:
 - title present → the summary line is `// <Name> <title>` (see [[title]]).
-- title absent → the identifier is prefixed to the first line of the
-  description: `// <Name> <first line of description>`.
+- title absent, description present → the identifier is prefixed to the
+  first line of the description: `// <Name> <first line of description>`.
+- **neither present** → the generator supplies a minimal name-led fallback
+  line instead of leaving the declaration undocumented (e.g.
+  `// <Name> is generated from the corresponding JSON Schema definition.`
+  for a type, `// <Name> corresponds to the "<jsonName>" JSON property.`
+  for a field). This is a Go-wide mandate, not a `title`/`description`
+  behavior — see PRINCIPLES.md, Go §1.
 - **Stutter guard:** if that opening text already begins with `<Name>`
   (case-insensitively), the identifier is not doubled — the text is
   emitted as-is. Same guard as [[title]].

@@ -17,6 +17,8 @@ type Violation struct {
 	Reason string
 }
 
+// String implements fmt.Stringer, returning "Path: Reason", or just Reason
+// when Path is empty.
 func (v Violation) String() string {
 	if v.Path == "" {
 		return v.Reason
@@ -30,6 +32,8 @@ type ValidationError struct {
 	Violations []Violation
 }
 
+// Error implements the error interface, joining every Violation into one
+// message.
 func (e *ValidationError) Error() string {
 	parts := make([]string, len(e.Violations))
 	for i, v := range e.Violations {
@@ -70,7 +74,7 @@ func mergeNested(errs *[]Violation, path string, err error) {
 	*errs = append(*errs, Violation{path, err.Error()})
 }
 
-const IntegerCap = 1<<53 - 1
+const integerCap = 1<<53 - 1
 
 var (
 	errFractional = errors.New("not an integer")
@@ -85,7 +89,7 @@ func parseSpecInteger(n json.Number) (int64, error) {
 	if f != math.Trunc(f) {
 		return 0, errFractional
 	}
-	if f < -IntegerCap || f > IntegerCap {
+	if f < -integerCap || f > integerCap {
 		return 0, errRange
 	}
 	i, err := n.Int64()
@@ -206,14 +210,20 @@ func marshalField(out map[string]json.RawMessage, key string, v any, errs *[]Vio
 	out[key] = b
 }
 
+// MessageKind Discriminator; always "text".
 type MessageKind string
 
+// MessageKindText is the MessageKind value "text".
 const MessageKindText MessageKind = "text"
 
+// GetRoomInput is generated from the corresponding JSON Schema definition.
 type GetRoomInput struct {
+	// RoomId corresponds to the "roomId" JSON property.
 	RoomId string `json:"roomId"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m GetRoomInput) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -222,6 +232,8 @@ func (m GetRoomInput) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *GetRoomInput) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -251,6 +263,8 @@ func (m *GetRoomInput) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m GetRoomInput) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -262,11 +276,13 @@ func (m GetRoomInput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Arbitrary string key/value labels.
+// Labels Arbitrary string key/value labels.
 type Labels struct {
 	AdditionalProperties map[string]string
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Labels) Validate() error {
 	var errs []Violation
 	if n := len(m.AdditionalProperties); n > 50 {
@@ -278,6 +294,8 @@ func (m Labels) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Labels) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -306,6 +324,8 @@ func (m *Labels) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Labels) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -317,14 +337,15 @@ func (m Labels) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// A chat message.
+// Message A chat message.
 type Message struct {
-	// Discriminator; always "text".
+	// Kind Discriminator; always "text".
 	Kind MessageKind `json:"kind"`
-	Body string      `json:"body"`
-	// Id of the message this replies to, if any.
+	// Body corresponds to the "body" JSON property.
+	Body string `json:"body"`
+	// ReplyToId Id of the message this replies to, if any.
 	ReplyToId *string `json:"replyToId,omitempty"`
-	// Delivery priority.
+	// Priority Delivery priority.
 	Priority *int64 `json:"priority,omitempty"`
 }
 
@@ -336,12 +357,14 @@ func (m Message) PriorityOrDefault() int64 {
 	return 0
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Message) Validate() error {
 	var errs []Violation
 	if m.Kind != MessageKindText {
 		errs = append(errs, Violation{"kind", "must equal \"text\""})
 	}
-	if m.Priority != nil && (*m.Priority < -IntegerCap || *m.Priority > IntegerCap) {
+	if m.Priority != nil && (*m.Priority < -integerCap || *m.Priority > integerCap) {
 		errs = append(errs, Violation{"priority", "exceeds ±(2^53-1) integer cap"})
 	}
 	if len(errs) > 0 {
@@ -350,6 +373,8 @@ func (m Message) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Message) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -393,6 +418,8 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Message) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -411,18 +438,24 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// A chat room. Open to forward-compatible extension.
+// Room A chat room. Open to forward-compatible extension.
 type Room struct {
-	RoomId      string `json:"roomId"`
+	// RoomId corresponds to the "roomId" JSON property.
+	RoomId string `json:"roomId"`
+	// DisplayName corresponds to the "displayName" JSON property.
 	DisplayName string `json:"displayName"`
-	// Room topic; may be explicitly cleared to null.
-	Topic   *string  `json:"topic"`
+	// Topic Room topic; may be explicitly cleared to null.
+	Topic *string `json:"topic"`
+	// Members corresponds to the "members" JSON property.
 	Members []string `json:"members,omitempty"`
-	Labels  *Labels  `json:"labels,omitempty"`
-	// AdditionalProperties holds unknown members verbatim (forward compat, P13).
+	// Labels corresponds to the "labels" JSON property.
+	Labels *Labels `json:"labels,omitempty"`
+	// AdditionalProperties holds unknown members verbatim.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Room) Validate() error {
 	var errs []Violation
 	if m.Labels != nil {
@@ -434,6 +467,8 @@ func (m Room) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Room) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -487,6 +522,8 @@ func (m *Room) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Room) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -513,12 +550,16 @@ func (m Room) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Request to post a message.
+// SendMessageInput Request to post a message.
 type SendMessageInput struct {
-	RoomId  string  `json:"roomId"`
+	// RoomId corresponds to the "roomId" JSON property.
+	RoomId string `json:"roomId"`
+	// Message corresponds to the "message" JSON property.
 	Message Message `json:"message"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m SendMessageInput) Validate() error {
 	var errs []Violation
 	mergeNested(&errs, "message", m.Message.Validate())
@@ -528,6 +569,8 @@ func (m SendMessageInput) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *SendMessageInput) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -564,6 +607,8 @@ func (m *SendMessageInput) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m SendMessageInput) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -576,10 +621,14 @@ func (m SendMessageInput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// SendMessageOutput is generated from the corresponding JSON Schema definition.
 type SendMessageOutput struct {
+	// MessageId corresponds to the "messageId" JSON property.
 	MessageId string `json:"messageId"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m SendMessageOutput) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -588,6 +637,8 @@ func (m SendMessageOutput) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *SendMessageOutput) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -617,6 +668,8 @@ func (m *SendMessageOutput) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m SendMessageOutput) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())

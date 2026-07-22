@@ -5,15 +5,20 @@ import (
 	"encoding/json"
 )
 
-// A page. One half of the Page <-> Block cross-file cycle. Because the cycle spans two input files, Page and Block hoist together into Python's _recursive.py; the non-cyclic PageMeta helper stays in this module.
+// Page A page. One half of the Page <-> Block cross-file cycle. Because the cycle spans two input files, Page and Block hoist together into Python's _recursive.py; the non-cyclic PageMeta helper stays in this module.
 type Page struct {
-	PageId string   `json:"pageId"`
-	Title  string   `json:"title"`
-	Meta   PageMeta `json:"meta"`
-	// Ordered content blocks. Cross-file `$ref` to block.json (same directory); the array is the terminating edge of the cycle.
+	// PageId corresponds to the "pageId" JSON property.
+	PageId string `json:"pageId"`
+	// Title corresponds to the "title" JSON property.
+	Title string `json:"title"`
+	// Meta corresponds to the "meta" JSON property.
+	Meta PageMeta `json:"meta"`
+	// Blocks Ordered content blocks. Cross-file `$ref` to block.json (same directory); the array is the terminating edge of the cycle.
 	Blocks []Block `json:"blocks,omitempty"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Page) Validate() error {
 	var errs []Violation
 	mergeNested(&errs, "meta", m.Meta.Validate())
@@ -23,6 +28,8 @@ func (m Page) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Page) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -68,6 +75,8 @@ func (m *Page) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Page) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -84,15 +93,19 @@ func (m Page) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Non-cyclic helper. Referenced only by Page, references nothing recursive, so it stays in the content_page module even though Page is hoisted.
+// PageMeta Non-cyclic helper. Referenced only by Page, references nothing recursive, so it stays in the content_page module even though Page is hoisted.
 type PageMeta struct {
-	Author    string `json:"author"`
+	// Author corresponds to the "author" JSON property.
+	Author string `json:"author"`
+	// WordCount corresponds to the "wordCount" JSON property.
 	WordCount *int64 `json:"wordCount,omitempty"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m PageMeta) Validate() error {
 	var errs []Violation
-	if m.WordCount != nil && (*m.WordCount < -IntegerCap || *m.WordCount > IntegerCap) {
+	if m.WordCount != nil && (*m.WordCount < -integerCap || *m.WordCount > integerCap) {
 		errs = append(errs, Violation{"wordCount", "exceeds ±(2^53-1) integer cap"})
 	}
 	if len(errs) > 0 {
@@ -101,6 +114,8 @@ func (m PageMeta) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *PageMeta) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -133,6 +148,8 @@ func (m *PageMeta) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m PageMeta) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())

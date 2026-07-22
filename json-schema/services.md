@@ -182,7 +182,11 @@ than guessing — so this spec need not anticipate it now.
 Service key → per-language identifier; operation key → Go `PascalCase`
 field, TS/Java `camelCase`, Python `snake_case` (the shared
 [[properties]] 4-stage algorithm). `description` → the language's native
-doc comment.
+doc comment. `description` is optional at both levels ([[input-files]]);
+when absent, Go still emits a name-led fallback comment on the service
+binding, client, constructor, and each operation entry/method (every
+exported Go declaration must carry one — PRINCIPLES.md, Go §1). The other
+three languages simply emit no comment, as elsewhere ([[description]]).
 
 | Aspect | Go | TypeScript | Python | Java |
 |---|---|---|---|---|

@@ -29,6 +29,7 @@ type KnowledgeBaseServiceClient struct {
 	client workflow.NexusClient
 }
 
+// NewKnowledgeBaseServiceClient constructs a KnowledgeBaseServiceClient bound to the given Nexus endpoint.
 func NewKnowledgeBaseServiceClient(endpoint string) *KnowledgeBaseServiceClient {
 	return &KnowledgeBaseServiceClient{client: workflow.NewNexusClient(endpoint, KnowledgeBaseService.ServiceName)}
 }
@@ -48,10 +49,14 @@ func (c *KnowledgeBaseServiceClient) GetCategoryTree(ctx workflow.Context, reque
 	return c.client.ExecuteOperation(ctx, KnowledgeBaseService.GetCategoryTree, request, workflow.NexusOperationOptions{})
 }
 
+// GetCategoryTreeInput is generated from the corresponding JSON Schema definition.
 type GetCategoryTreeInput struct {
+	// RootId corresponds to the "rootId" JSON property.
 	RootId string `json:"rootId"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m GetCategoryTreeInput) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -60,6 +65,8 @@ func (m GetCategoryTreeInput) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *GetCategoryTreeInput) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -89,6 +96,8 @@ func (m *GetCategoryTreeInput) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m GetCategoryTreeInput) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -100,10 +109,14 @@ func (m GetCategoryTreeInput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// GetPageInput is generated from the corresponding JSON Schema definition.
 type GetPageInput struct {
+	// PageId corresponds to the "pageId" JSON property.
 	PageId string `json:"pageId"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m GetPageInput) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -112,6 +125,8 @@ func (m GetPageInput) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *GetPageInput) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -141,6 +156,8 @@ func (m *GetPageInput) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m GetPageInput) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -152,14 +169,19 @@ func (m GetPageInput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// PutBlockOutput is generated from the corresponding JSON Schema definition.
 type PutBlockOutput struct {
-	BlockId  string `json:"blockId"`
-	Revision int64  `json:"revision"`
+	// BlockId corresponds to the "blockId" JSON property.
+	BlockId string `json:"blockId"`
+	// Revision corresponds to the "revision" JSON property.
+	Revision int64 `json:"revision"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m PutBlockOutput) Validate() error {
 	var errs []Violation
-	if m.Revision < -IntegerCap || m.Revision > IntegerCap {
+	if m.Revision < -integerCap || m.Revision > integerCap {
 		errs = append(errs, Violation{"revision", "exceeds ±(2^53-1) integer cap"})
 	}
 	if len(errs) > 0 {
@@ -168,6 +190,8 @@ func (m PutBlockOutput) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *PutBlockOutput) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -200,6 +224,8 @@ func (m *PutBlockOutput) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m PutBlockOutput) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())

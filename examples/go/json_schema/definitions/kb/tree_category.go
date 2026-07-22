@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 )
 
-// A node in a self-recursive category tree. The root of this file is itself a type (pure JSON Schema file), named Category from the basename.
+// Category A node in a self-recursive category tree. The root of this file is itself a type (pure JSON Schema file), named Category from the basename.
 type Category struct {
-	Id   string `json:"id"`
+	// Id corresponds to the "id" JSON property.
+	Id string `json:"id"`
+	// Name corresponds to the "name" JSON property.
 	Name string `json:"name"`
-	// Sub-categories. A within-file self-cycle via `$ref: '#'`; the possibly-empty array is the terminating edge, so it stays in this module.
+	// Children Sub-categories. A within-file self-cycle via `$ref: '#'`; the possibly-empty array is the terminating edge, so it stays in this module.
 	Children []Category `json:"children,omitempty"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Category) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -21,6 +25,8 @@ func (m Category) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Category) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -59,6 +65,8 @@ func (m *Category) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Category) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -74,11 +82,14 @@ func (m Category) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// A dead $def - defined but never referenced anywhere. Still generated and exported as intended reusable API surface (see the $ref spec).
+// Palette A dead $def - defined but never referenced anywhere. Still generated and exported as intended reusable API surface (see the $ref spec).
 type Palette struct {
+	// Swatches corresponds to the "swatches" JSON property.
 	Swatches []string `json:"swatches"`
 }
 
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
 func (m Palette) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
@@ -87,6 +98,8 @@ func (m Palette) Validate() error {
 	return nil
 }
 
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
 func (m *Palette) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -120,6 +133,8 @@ func (m *Palette) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
 func (m Palette) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
