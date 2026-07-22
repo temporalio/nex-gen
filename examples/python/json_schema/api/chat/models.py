@@ -6,10 +6,10 @@ import typing
 import pydantic
 import pydantic_core
 
-from .definitions import (
+from ._definitions import (
     SpecInt,
-    emit_set_fields,
-    reject_explicit_null,
+    _emit_set_fields,
+    _reject_explicit_null,
 )
 
 
@@ -25,7 +25,7 @@ class GetRoomInput(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class Labels(pydantic.BaseModel):
@@ -117,7 +117,7 @@ class Message(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class Room(pydantic.BaseModel):
@@ -149,14 +149,14 @@ class Room(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return reject_explicit_null(cls, data, handler)
+        return _reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class SendMessageInput(pydantic.BaseModel):
@@ -175,7 +175,7 @@ class SendMessageInput(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class SendMessageOutput(pydantic.BaseModel):
@@ -190,4 +190,4 @@ class SendMessageOutput(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)

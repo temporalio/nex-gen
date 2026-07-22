@@ -14,6 +14,22 @@ import pydantic.functional_validators
 import pydantic_core
 
 
+__all__ = [
+    "SpecInt",
+    "DateTimeField",
+    "DateField",
+    "TimeField",
+    "DurationField",
+    "Base64Field",
+    "Base64UrlField",
+    "_check_multiple_of",
+    "_check_pattern",
+    "_check_format",
+    "_reject_explicit_null",
+    "_emit_set_fields",
+]
+
+
 _INTEGER_CAP = (1 << 53) - 1
 
 
@@ -38,7 +54,7 @@ SpecInt: typing.TypeAlias = typing.Annotated[
 ]
 
 
-def check_multiple_of(
+def _check_multiple_of(
     divisor: float,
 ) -> typing.Callable[[float], float]:
     """Builds an AfterValidator asserting `math.fmod`-exact divisibility for number fields."""
@@ -51,7 +67,7 @@ def check_multiple_of(
     return validate
 
 
-def check_pattern(
+def _check_pattern(
     pattern: str,
 ) -> typing.Callable[[str], str]:
     """Builds an AfterValidator asserting an unanchored, ASCII-class regex match for string fields."""
@@ -66,7 +82,7 @@ def check_pattern(
     return validate
 
 
-def check_format(
+def _check_format(
     format_name: str,
     pattern: str,
     max_code_points: int | None = None,
@@ -280,7 +296,7 @@ Base64UrlField: typing.TypeAlias = typing.Annotated[
 ]
 
 
-def reject_explicit_null(
+def _reject_explicit_null(
     cls: type[pydantic.BaseModel],
     data: object,
     handler: typing.Callable[[object], typing.Any],
@@ -331,7 +347,7 @@ def reject_explicit_null(
     return instance
 
 
-def emit_set_fields(
+def _emit_set_fields(
     model: pydantic.BaseModel,
     handler: typing.Callable[[pydantic.BaseModel], typing.Any],
 ) -> dict[str, object]:

@@ -5,9 +5,9 @@ from __future__ import annotations
 import typing
 import pydantic
 
-from ..definitions import (
+from .._definitions import (
     SpecInt,
-    emit_set_fields,
+    _emit_set_fields,
 )
 
 
@@ -23,7 +23,7 @@ class GetCategoryTreeInput(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class GetPageInput(pydantic.BaseModel):
@@ -38,7 +38,7 @@ class GetPageInput(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class PutBlockOutput(pydantic.BaseModel):
@@ -55,4 +55,4 @@ class PutBlockOutput(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)

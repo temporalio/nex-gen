@@ -5,10 +5,10 @@ from __future__ import annotations
 import typing
 import pydantic
 
-from ...definitions import (
+from ..._definitions import (
     SpecInt,
-    emit_set_fields,
-    reject_explicit_null,
+    _emit_set_fields,
+    _reject_explicit_null,
 )
 
 
@@ -34,11 +34,11 @@ class BlockStyle(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return reject_explicit_null(cls, data, handler)
+        return _reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)

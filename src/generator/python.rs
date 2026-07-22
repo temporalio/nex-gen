@@ -2544,7 +2544,7 @@ pub(crate) fn render_tree_support_files(
     }
 
     BTreeMap::from([(
-        PathBuf::from("definitions.py"),
+        PathBuf::from("_definitions.py"),
         python_json::render_support_file(),
     )])
 }

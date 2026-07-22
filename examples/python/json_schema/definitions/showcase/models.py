@@ -7,15 +7,15 @@ import typing_extensions
 import pydantic
 import pydantic_core
 
-from .definitions import (
+from ._definitions import (
     Base64Field,
     Base64UrlField,
     SpecInt,
-    check_format,
-    check_multiple_of,
-    check_pattern,
-    emit_set_fields,
-    reject_explicit_null,
+    _check_format,
+    _check_multiple_of,
+    _check_pattern,
+    _emit_set_fields,
+    _reject_explicit_null,
 )
 
 
@@ -43,14 +43,14 @@ class Address(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return reject_explicit_null(cls, data, handler)
+        return _reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class Attributes(pydantic.BaseModel):
@@ -167,7 +167,7 @@ class Circle(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class Contact(pydantic.BaseModel):
@@ -247,14 +247,14 @@ class Contact(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return reject_explicit_null(cls, data, handler)
+        return _reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class Labels(pydantic.BaseModel):
@@ -329,14 +329,14 @@ class Settings(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return reject_explicit_null(cls, data, handler)
+        return _reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class Showcase(pydantic.BaseModel):
@@ -391,7 +391,7 @@ class Showcase(pydantic.BaseModel):
     """
 
     sku: (
-        typing.Annotated[str, pydantic.AfterValidator(check_pattern("^[A-Z]{2,4}\\Z"))]
+        typing.Annotated[str, pydantic.AfterValidator(_check_pattern("^[A-Z]{2,4}\\Z"))]
         | None
     ) = pydantic.Field(default=None)
     """Optional product code: 2 to 4 uppercase ASCII letters, anchored (`^[A-Z]{2,4}$`).
@@ -402,7 +402,7 @@ class Showcase(pydantic.BaseModel):
         typing.Annotated[
             str,
             pydantic.AfterValidator(
-                check_pattern(
+                _check_pattern(
                     "^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+\\Z"
                 )
             ),
@@ -419,7 +419,7 @@ class Showcase(pydantic.BaseModel):
         typing.Annotated[
             str,
             pydantic.AfterValidator(
-                check_format(
+                _check_format(
                     "uuid",
                     "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\Z",
                 )
@@ -436,7 +436,7 @@ class Showcase(pydantic.BaseModel):
         typing.Annotated[
             str,
             pydantic.AfterValidator(
-                check_format(
+                _check_format(
                     "email",
                     "^[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+\\Z",
                     254,
@@ -453,7 +453,7 @@ class Showcase(pydantic.BaseModel):
         typing.Annotated[
             str,
             pydantic.AfterValidator(
-                check_format(
+                _check_format(
                     "hostname",
                     "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\Z",
                     253,
@@ -470,7 +470,7 @@ class Showcase(pydantic.BaseModel):
         typing.Annotated[
             str,
             pydantic.AfterValidator(
-                check_format(
+                _check_format(
                     "uri",
                     "^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)\\Z",
                 )
@@ -486,7 +486,7 @@ class Showcase(pydantic.BaseModel):
         typing.Annotated[
             str,
             pydantic.AfterValidator(
-                check_format(
+                _check_format(
                     "ipv4",
                     "^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\Z",
                 )
@@ -554,7 +554,7 @@ class Showcase(pydantic.BaseModel):
     """Optional integer that must be strictly greater than 0."""
 
     ratio: (
-        typing.Annotated[float, pydantic.AfterValidator(check_multiple_of(5))] | None
+        typing.Annotated[float, pydantic.AfterValidator(_check_multiple_of(5))] | None
     ) = pydantic.Field(default=None, ge=5)
     """Optional number that must be a non-negative multiple of 5."""
 
@@ -792,14 +792,14 @@ class Showcase(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return reject_explicit_null(cls, data, handler)
+        return _reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class Square(pydantic.BaseModel):
@@ -834,7 +834,7 @@ class Square(pydantic.BaseModel):
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class Widget(pydantic.BaseModel):
@@ -869,14 +869,14 @@ class Widget(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return reject_explicit_null(cls, data, handler)
+        return _reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 class WidgetBase(pydantic.BaseModel):
@@ -901,14 +901,14 @@ class WidgetBase(pydantic.BaseModel):
         data: object,
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
-        return reject_explicit_null(cls, data, handler)
+        return _reject_explicit_null(cls, data, handler)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self,
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return emit_set_fields(self, handler)
+        return _emit_set_fields(self, handler)
 
 
 """A closed sum type (discriminated union) of Circle | Square, tagged by the shared

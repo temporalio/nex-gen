@@ -165,7 +165,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         self.runtime_import_module = if self.tree_leaf {
             root_python_runtime_module(&api_plan.module_path)
         } else {
-            ".definitions".to_string()
+            "._definitions".to_string()
         };
         let mut json_models = api_plan
             .external_types()
@@ -191,7 +191,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         }
 
         Ok(BTreeMap::from([(
-            PathBuf::from("definitions.py"),
+            PathBuf::from("_definitions.py"),
             render_support_file(),
         )]))
     }
@@ -349,7 +349,7 @@ pub(in crate::generator) fn tree_model_hoists(
 
 fn render_hoisted_models_module(hoists: &JsonModelHoistPlan) -> Result<String> {
     let models = hoists.hoisted_models.iter().collect::<Vec<_>>();
-    let model_fragments = render_external_models(models.as_slice(), ".definitions")?;
+    let model_fragments = render_external_models(models.as_slice(), "._definitions")?;
     let mut body = model_fragments.body.clone();
     if !model_fragments.post_model_statements.is_empty() {
         if !body.is_empty() {
@@ -506,7 +506,7 @@ pub(in crate::generator) fn render_support_file() -> String {
 }
 
 fn root_python_runtime_module(module_path: &ModulePath) -> String {
-    format!("{}{}", ".".repeat(module_path.0.len() + 1), "definitions")
+    format!("{}{}", ".".repeat(module_path.0.len() + 1), "_definitions")
 }
 
 pub(in crate::generator) fn render_external_models(
@@ -588,13 +588,13 @@ pub(in crate::generator) fn render_external_models(
         runtime_imports.insert("SpecInt".to_string());
     }
     if needs_multiple_of_helper {
-        runtime_imports.insert("check_multiple_of".to_string());
+        runtime_imports.insert("_check_multiple_of".to_string());
     }
     if needs_pattern_helper {
-        runtime_imports.insert("check_pattern".to_string());
+        runtime_imports.insert("_check_pattern".to_string());
     }
     if needs_format_helper {
-        runtime_imports.insert("check_format".to_string());
+        runtime_imports.insert("_check_format".to_string());
     }
     // Import the materialized-temporal field aliases actually referenced by the
     // rendered models (defined once in the runtime module).
@@ -611,10 +611,10 @@ pub(in crate::generator) fn render_external_models(
         }
     }
     if needs_optional_non_nullable_helper {
-        runtime_imports.insert("reject_explicit_null".to_string());
+        runtime_imports.insert("_reject_explicit_null".to_string());
     }
     if needs_set_fields_helper {
-        runtime_imports.insert("emit_set_fields".to_string());
+        runtime_imports.insert("_emit_set_fields".to_string());
     }
     if !runtime_imports.is_empty() {
         relative_imports.insert(runtime_import_module.to_string(), runtime_imports);
@@ -754,6 +754,29 @@ fn render_json_runtime_module() -> String {
     output.push_str("import pydantic\n");
     output.push_str("import pydantic.functional_validators\n");
     output.push_str("import pydantic_core\n\n\n");
+    // The underscore-prefixed helpers below are still imported by sibling
+    // generated modules (e.g. `models.py`); listing them keeps type checkers
+    // from flagging them as unused private symbols.
+    output.push_str("__all__ = [\n");
+    for name in [
+        "SpecInt",
+        "DateTimeField",
+        "DateField",
+        "TimeField",
+        "DurationField",
+        "Base64Field",
+        "Base64UrlField",
+        "_check_multiple_of",
+        "_check_pattern",
+        "_check_format",
+        "_reject_explicit_null",
+        "_emit_set_fields",
+    ] {
+        output.push_str("    \"");
+        output.push_str(name);
+        output.push_str("\",\n");
+    }
+    output.push_str("]\n\n\n");
     render_spec_int_helper(&mut output);
     output.push_str("\n\n");
     render_multiple_of_helper(&mut output);
@@ -1005,7 +1028,7 @@ Base64UrlField: typing.TypeAlias = typing.Annotated[
 "#;
 
 fn render_multiple_of_helper(output: &mut String) {
-    output.push_str("def check_multiple_of(\n");
+    output.push_str("def _check_multiple_of(\n");
     output.push_str("    divisor: float,\n");
     output.push_str(") -> typing.Callable[[float], float]:\n");
     output.push_str(
@@ -1023,7 +1046,7 @@ fn render_multiple_of_helper(output: &mut String) {
 }
 
 fn render_pattern_helper(output: &mut String) {
-    output.push_str("def check_pattern(\n");
+    output.push_str("def _check_pattern(\n");
     output.push_str("    pattern: str,\n");
     output.push_str(") -> typing.Callable[[str], str]:\n");
     output.push_str(
@@ -1042,13 +1065,13 @@ fn render_pattern_helper(output: &mut String) {
     output.push_str("    return validate\n");
 }
 
-/// Emits the `check_format` runtime helper: an AfterValidator that asserts a
+/// Emits the `_check_format` runtime helper: an AfterValidator that asserts a
 /// string matches a pinned `format` regex, with an optional total-length guard
 /// run **first** (short-circuit — the email order neutralizes a matcher-recursion
 /// hazard). `len(value)` is the Unicode code-point count. See
 /// `json-schema/features/format.md`.
 fn render_format_helper(output: &mut String) {
-    output.push_str("def check_format(\n");
+    output.push_str("def _check_format(\n");
     output.push_str("    format_name: str,\n");
     output.push_str("    pattern: str,\n");
     output.push_str("    max_code_points: int | None = None,\n");
@@ -1146,7 +1169,7 @@ fn render_model(
         if let Some(divisor) = property.number_multiple_of() {
             *needs_multiple_of_helper = true;
             annotation = format!(
-                "typing.Annotated[{annotation}, pydantic.AfterValidator(check_multiple_of({}))]",
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_multiple_of({}))]",
                 py_bound_literal(divisor, false)
             );
         }
@@ -1159,7 +1182,7 @@ fn render_model(
             // `json-schema/features/pattern.md`.
             let rewritten = crate::pattern::rewrite_end_anchor(pattern, r"\Z");
             annotation = format!(
-                "typing.Annotated[{annotation}, pydantic.AfterValidator(check_pattern({}))]",
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_pattern({}))]",
                 python_string_literal(&rewritten)
             );
         }
@@ -1169,14 +1192,14 @@ fn render_model(
         {
             *needs_format_helper = true;
             // Per-target `$`→`\Z` rewrite (strict end-of-string, no trailing-`\n`
-            // exception), matching `check_pattern`.
+            // exception), matching `_check_pattern`.
             let rewritten = crate::pattern::rewrite_end_anchor(&check.pattern, r"\Z");
             let max_arg = match check.max_code_points {
                 Some(max) => format!(", {max}"),
                 None => String::new(),
             };
             annotation = format!(
-                "typing.Annotated[{annotation}, pydantic.AfterValidator(check_format({}, {}{max_arg}))]",
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_format({}, {}{max_arg}))]",
                 python_string_literal(check.name),
                 python_string_literal(&rewritten)
             );
@@ -1514,7 +1537,7 @@ fn render_object_constraints_validator(output: &mut String, schema: &Schema) {
 }
 
 fn render_optional_non_nullable_helper(output: &mut String) {
-    output.push_str("def reject_explicit_null(\n");
+    output.push_str("def _reject_explicit_null(\n");
     output.push_str("    cls: type[pydantic.BaseModel],\n");
     output.push_str("    data: object,\n");
     output.push_str("    handler: typing.Callable[[object], typing.Any],\n");
@@ -1571,7 +1594,7 @@ fn render_optional_non_nullable_helper(output: &mut String) {
 }
 
 fn render_set_fields_helper(output: &mut String) {
-    output.push_str("def emit_set_fields(\n");
+    output.push_str("def _emit_set_fields(\n");
     output.push_str("    model: pydantic.BaseModel,\n");
     output.push_str("    handler: typing.Callable[[pydantic.BaseModel], typing.Any],\n");
     output.push_str(") -> dict[str, object]:\n");
@@ -1860,7 +1883,7 @@ fn render_optional_non_nullable_validator(output: &mut String, fields: &BTreeSet
     output.push_str("        data: object,\n");
     output.push_str("        handler: typing.Callable[[object], typing.Any],\n");
     output.push_str("    ) -> typing.Any:\n");
-    output.push_str("        return reject_explicit_null(cls, data, handler)\n");
+    output.push_str("        return _reject_explicit_null(cls, data, handler)\n");
 }
 
 fn render_set_fields_serializer(output: &mut String) {
@@ -1869,7 +1892,7 @@ fn render_set_fields_serializer(output: &mut String) {
     output.push_str("        self,\n");
     output.push_str("        handler: typing.Callable[[pydantic.BaseModel], typing.Any],\n");
     output.push_str("    ) -> dict[str, object]:\n");
-    output.push_str("        return emit_set_fields(self, handler)\n");
+    output.push_str("        return _emit_set_fields(self, handler)\n");
 }
 
 fn render_field_expr(
