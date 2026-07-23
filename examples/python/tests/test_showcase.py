@@ -123,7 +123,9 @@ def test_const_default_and_reject_null_semantics() -> None:
         _ = Showcase.model_validate({**enum_base, "scale": 3.5})
     assert "must be one of [1.5, 2.5]" in str(scale_exc.value)
     # A valid alternative member is accepted.
-    ok = Showcase.model_validate({**enum_base, "status": "pending", "tier": 3, "scale": 2.5})
+    ok = Showcase.model_validate(
+        {**enum_base, "status": "pending", "tier": 3, "scale": 2.5}
+    )
     assert ok.status == "pending"
     assert ok.scale == 2.5
 
@@ -151,7 +153,9 @@ def test_labels_typed_map_and_settings_closed_object() -> None:
         _ = Settings.model_validate({"theme": "dark", "unknown": 1})
 
 
-def test_canonical_wire_fixtures_roundtrip_through_temporal_pydantic_converter() -> None:
+def test_canonical_wire_fixtures_roundtrip_through_temporal_pydantic_converter() -> (
+    None
+):
     minimal = typing.cast(
         Showcase, roundtrip_fixture("showcase-minimal.json", Showcase)
     )
@@ -341,9 +345,7 @@ def test_pattern_constraints_roundtrip_and_reject() -> None:
 
 def test_format_constraints_roundtrip_and_reject() -> None:
     # uuid/email/hostname/uri/ipv4 round-trip (string-typed, no materialization).
-    formats = typing.cast(
-        Showcase, roundtrip_fixture("showcase-format.json", Showcase)
-    )
+    formats = typing.cast(Showcase, roundtrip_fixture("showcase-format.json", Showcase))
     assert formats.request_id == "de305d54-75b4-431b-adb2-eb6b9e546013"
     assert formats.contact_email == "user@example.com"
     assert formats.host == "api.example.com"
@@ -456,17 +458,15 @@ def test_object_constraints_roundtrip_and_reject() -> None:
     # propertyNames maxLength:8 — an over-long key (code-point length).
     with pytest.raises(ValidationError) as excinfo:
         _ = Attributes.model_validate({"toolongkey": "1"})
-    assert (
-        'invalid property name "toolongkey": must have length <= 8, got 10'
-        in str(excinfo.value)
+    assert 'invalid property name "toolongkey": must have length <= 8, got 10' in str(
+        excinfo.value
     )
 
     # dependentRequired — a shipping street present without a shipping zip.
     with pytest.raises(ValidationError) as excinfo:
         _ = Contact.model_validate({"shippingStreet": "1 Main St"})
-    assert (
-        'property "shippingZip" is required when "shippingStreet" is present'
-        in str(excinfo.value)
+    assert 'property "shippingZip" is required when "shippingStreet" is present' in str(
+        excinfo.value
     )
 
     # minProperties:1 on a declared-property object — an empty object.
@@ -475,9 +475,7 @@ def test_object_constraints_roundtrip_and_reject() -> None:
     assert "must have at least 1 properties, got 0" in str(excinfo.value)
 
     # A satisfied dependency validates.
-    ok = Contact.model_validate(
-        {"shippingStreet": "1 Main St", "shippingZip": "90210"}
-    )
+    ok = Contact.model_validate({"shippingStreet": "1 Main St", "shippingZip": "90210"})
     assert ok.shipping_zip == "90210"
 
 
@@ -558,9 +556,7 @@ def test_content_encoding_roundtrip_and_reject() -> None:
     # blob (base64) and urlBlob (base64url) round-trip: JSON string on the wire,
     # native `bytes` in the model, re-encoded byte-identically. The same bytes
     # (">>>") encode differently per encoding ("Pj4+" vs "Pj4-").
-    parsed = typing.cast(
-        Showcase, roundtrip_fixture("showcase-bytes.json", Showcase)
-    )
+    parsed = typing.cast(Showcase, roundtrip_fixture("showcase-bytes.json", Showcase))
     assert parsed.blob == b">>>"
     assert parsed.url_blob == b">>>"
 
