@@ -849,7 +849,10 @@ def _parse_date_time(value: object) -> object:
         return value
     if _TEMPORAL_DATE_TIME_RE.match(value) is None or not _valid_temporal_calendar(value):
         raise ValueError(f"must be a valid date-time, got {value!r}")
-    return datetime.datetime.fromisoformat(value.upper())
+    normalized = value.upper()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    return datetime.datetime.fromisoformat(normalized)
 
 
 def _parse_date(value: object) -> object:
@@ -865,7 +868,10 @@ def _parse_time(value: object) -> object:
         return value
     if _TEMPORAL_TIME_RE.match(value) is None:
         raise ValueError(f"must be a valid time, got {value!r}")
-    return datetime.time.fromisoformat(value.upper())
+    normalized = value.upper()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    return datetime.time.fromisoformat(normalized)
 
 
 def _parse_duration(value: object) -> object:
