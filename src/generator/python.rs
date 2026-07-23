@@ -7303,7 +7303,7 @@ class Example(enum.Enum):
         assert!(output.contains("args: list[typing.Any] | None = None"));
         assert!(!output.contains("namespace: str | None = None"));
         assert!(output.contains("dataclasses.field(default_factory=workflow_namespace)"));
-        assert!(output.contains("message.namespace = self.namespace"));
+        assert!(output.contains("message.namespace = value.namespace"));
         assert!(output.contains("result = await handle"));
         assert!(output.contains(
             "from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )"
@@ -7332,10 +7332,10 @@ class Example(enum.Enum):
                 "versioning_override: temporalio.common.VersioningOverride | None = None"
             )
         );
-        assert!(output.contains("workflow_id_reuse_policy_to_proto(self.id_reuse_policy)"));
-        assert!(output.contains("if self.id_conflict_policy is not None:"));
-        assert!(output.contains("workflow_id_conflict_policy_to_proto(self.id_conflict_policy)"));
-        assert!(output.contains("message.input.CopyFrom(payloads_to_proto(self.args))"));
+        assert!(output.contains("workflow_id_reuse_policy_to_proto(value.id_reuse_policy)"));
+        assert!(output.contains("if value.id_conflict_policy is not None:"));
+        assert!(output.contains("workflow_id_conflict_policy_to_proto(value.id_conflict_policy)"));
+        assert!(output.contains("message.input.CopyFrom(payloads_to_proto(value.args))"));
         assert!(!output.contains("header:"));
         assert!(!output.contains("header_to_proto("));
         assert!(!output.contains("links:"));
