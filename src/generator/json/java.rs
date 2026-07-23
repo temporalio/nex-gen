@@ -110,7 +110,7 @@ impl ArrayConstraints {
 /// A pinned string `format` lowered for Java: the canonical name (for the
 /// reason), the pinned regex with the per-target `$`→`\z` rewrite already
 /// applied, and the optional total-length guard. See
-/// `json-schema/features/format.md`.
+/// `specs/json-schema/features/format.md`.
 #[derive(Debug, Clone)]
 struct JavaFormat {
     name: &'static str,
@@ -124,7 +124,7 @@ struct StringLengthConstraints {
     max_length: Option<u64>,
     /// The loader-normalized `pattern` with the per-target `$`→`\z` rewrite
     /// already applied (Java's strict end-of-input anchor). See
-    /// `json-schema/features/pattern.md`.
+    /// `specs/json-schema/features/pattern.md`.
     pattern: Option<String>,
     /// A pinned `format` check (regex + optional length guard) on the same node.
     format: Option<JavaFormat>,
@@ -266,7 +266,7 @@ fn render_java_numeric_checks(
 /// `value_expr` (a validated `String` in scope) into the collecting
 /// deserializer, appending `Violation`s. Length is the Unicode code-point count
 /// via `codePointCount(0, length())` (never `length()`, which is the UTF-16
-/// code-unit count) — see `json-schema/features/maxLength.md`.
+/// code-unit count) — see `specs/json-schema/features/maxLength.md`.
 fn render_java_string_checks(
     output: &mut String,
     value_expr: &str,
@@ -337,7 +337,7 @@ fn java_format_field_name(java_name: &str) -> String {
 /// Emits the object member-count predicates (`minProperties`/`maxProperties`)
 /// over `size_expr` (the number of distinct wire member keys, one number over
 /// the whole object) into the collecting deserializer. See
-/// `json-schema/features/minProperties.md`.
+/// `specs/json-schema/features/minProperties.md`.
 fn render_java_property_count_checks(
     output: &mut String,
     size_expr: &str,
@@ -359,7 +359,7 @@ fn render_java_property_count_checks(
 /// Emits the `propertyNames` key-shape predicate over the keys of `node_expr`,
 /// applying the (string-length) key subschema to each key. `codePointCount`
 /// counts Unicode code points — spec-correct. See
-/// `json-schema/features/propertyNames.md`.
+/// `specs/json-schema/features/propertyNames.md`.
 fn render_java_property_name_checks(
     output: &mut String,
     node_expr: &str,
@@ -394,7 +394,7 @@ fn render_java_property_name_checks(
 /// Emits the `dependentRequired` cross-field presence predicate over
 /// `node_expr` (the parsed wire tree): for each present trigger key, each
 /// dependent key must also be present. See
-/// `json-schema/features/dependentRequired.md`.
+/// `specs/json-schema/features/dependentRequired.md`.
 fn render_java_dependent_required(
     output: &mut String,
     node_expr: &str,
@@ -864,7 +864,7 @@ fn java_content_encoding_format_fn(encoding: crate::content_encoding::Encoding) 
 }
 
 // ---------------------------------------------------------------------------
-// `oneOf` closed sum types (json-schema/features/oneOf.md)
+// `oneOf` closed sum types (specs/json-schema/features/oneOf.md)
 // ---------------------------------------------------------------------------
 
 /// A member of a Java union (a sealed-by-convention interface).
@@ -1723,7 +1723,7 @@ fn assemble_file(
 
 /// Composes the doc-comment text from a `title` (summary line) and a
 /// `description` (body); returns `None` when both are empty. See
-/// json-schema/features/{title,description}.md.
+/// specs/json-schema/features/{title,description}.md.
 fn compose_doc(title: Option<&str>, description: Option<&str>) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
     if let Some(title) = title.map(str::trim).filter(|t| !t.is_empty()) {
@@ -1744,7 +1744,7 @@ fn compose_doc(title: Option<&str>, description: Option<&str>) -> Option<String>
 /// Renders the Javadoc for a schema declaration (title summary + description
 /// body, plus an `@deprecated` tag when deprecated) followed by the
 /// `@Deprecated` annotation. `kind` is "type" or "field". See
-/// json-schema/features/deprecated.md.
+/// specs/json-schema/features/deprecated.md.
 fn render_java_schema_doc(
     output: &mut String,
     indent: &str,
@@ -2250,7 +2250,7 @@ fn render_java_serialize_dependent_required(
 
 /// Emits the `propertyNames` key-shape predicate over the keys of a typed map's
 /// in-memory `values` for the serialize path. See
-/// `json-schema/features/propertyNames.md`.
+/// `specs/json-schema/features/propertyNames.md`.
 fn render_java_serialize_property_name_checks(
     output: &mut String,
     keys_expr: &str,
@@ -3496,7 +3496,7 @@ pub(in crate::generator) fn model_uses_content_encoding(model: &PlannedJsonType)
 /// Runtime `Base64Support.java`: the pinned canonical base64 / base64url regexes
 /// (the validity oracle) and the `java.util.Base64` decode / canonical encode
 /// adapters. The decoder runs only after the regex passes, so no lenient decoder
-/// can diverge (P1). See `json-schema/features/contentEncoding.md`.
+/// can diverge (P1). See `specs/json-schema/features/contentEncoding.md`.
 pub(in crate::generator) fn render_base64_support_file(package: &str) -> String {
     use crate::content_encoding::Encoding;
     let mut output = String::new();

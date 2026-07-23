@@ -358,7 +358,7 @@ fn insert_leaf_at(
 
 /// Whether a module-path segment collides with a name the generators reserve
 /// for their own emitted files (the union across languages — see
-/// `json-schema/generated-file-layout.md`). Reserving the union means a name
+/// `specs/json-schema/generated-file-layout.md`). Reserving the union means a name
 /// reserved in *any* target is rejected for *all*, keeping the flat package
 /// coherent everywhere.
 fn is_reserved_module_name(segment: &str) -> bool {
@@ -666,7 +666,7 @@ fn validate_document(path: &Path, doc: &Document) -> Result<()> {
     // A definitions-only pure file (only `$defs`, plus optional `description` /
     // `$schema`, and no `nexusrpc`) is a definitions bucket, not a type: it has
     // no file-root type and contributes its `$defs` alone. See
-    // `json-schema/input-files.md` (Definitions-only exception). We reject only
+    // `specs/json-schema/input-files.md` (Definitions-only exception). We reject only
     // a plain file that carries neither a root schema nor any `$defs`.
     let has_defs = doc.defs.as_ref().is_some_and(|defs| !defs.is_empty());
     if !has_nexus_envelope && !root_is_schema_shaped(&doc.root) && !has_defs {
@@ -686,7 +686,7 @@ fn validate_model_schema(path: &Path, schema: &Schema, context: &str) -> Result<
     // A named `oneOf` union (a `$def` whose body is a supported sum type) is a
     // model in its own right; the structural sum-type checks (decidable
     // selector, disjoint kinds, discriminator) run in the ref-resolving union
-    // pass. See `json-schema/features/oneOf.md`.
+    // pass. See `specs/json-schema/features/oneOf.md`.
     if schema.one_of.is_some() && schema.ty.is_none() {
         return validate_schema_tree(path, schema, context);
     }
@@ -742,7 +742,7 @@ fn validate_schema_node(
         for (name, property) in properties {
             // `default` on a `required` member is dead metadata (a required
             // member is never absent, so its default never applies) → reject
-            // (P7.1). See `json-schema/features/default.md`.
+            // (P7.1). See `specs/json-schema/features/default.md`.
             if property.extra.contains_key("default") && required.contains(&name.as_str()) {
                 return Err(Error::InvalidJsonSchema {
                     path: path.to_path_buf(),
@@ -949,7 +949,7 @@ fn validate_schema_common(path: &Path, schema: &Schema, context: &str) -> Result
 
 /// Requires every leaf schema to name an explicit, known `type`, and requires
 /// `type: object` / `type: array` to carry a concrete shape (see
-/// `json-schema/features/type.md`). A `oneOf` / `$ref` schema is exempt — its
+/// `specs/json-schema/features/type.md`). A `oneOf` / `$ref` schema is exempt — its
 /// shape comes from the branches or the referenced target; `allOf` is merged
 /// away before validation runs. Not called for union branches (their kind is
 /// checked by the sum-type pass).
@@ -1007,7 +1007,7 @@ fn validate_type_presence(path: &Path, schema: &Schema, context: &str) -> Result
     Ok(())
 }
 
-/// Load-time validation of `required` (see `json-schema/features/required.md`):
+/// Load-time validation of `required` (see `specs/json-schema/features/required.md`):
 /// the value must be an array of unique property-name strings, and every name
 /// must be declared in `properties` (P7.1 — a mandatory member with no declared
 /// shape is undecidable).
@@ -1057,7 +1057,7 @@ fn validate_required(path: &Path, schema: &Schema, context: &str) -> Result<()> 
 /// Rejects the two unsupported spellings of `type`: the array form
 /// (`["string","null"]`) and a standalone `type: "null"`. Both are degenerate
 /// or ambiguous here — nullability is modeled with the dedicated
-/// `oneOf:[{type:T},{type:"null"}]` convention (see `json-schema/features/type.md`
+/// `oneOf:[{type:T},{type:"null"}]` convention (see `specs/json-schema/features/type.md`
 /// and `nullability.md`). A `type: "null"` is legal *only* as one branch of that
 /// `oneOf`, so this check is skipped for union branches by the caller.
 fn validate_type_form(path: &Path, schema: &Schema, context: &str) -> Result<()> {
@@ -1080,7 +1080,7 @@ fn validate_type_form(path: &Path, schema: &Schema, context: &str) -> Result<()>
 
 /// Load-time validation of the numeric-constraint keywords (`minimum`,
 /// `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`). See
-/// `json-schema/features/maximum.md` and `multipleOf.md` for the authoritative
+/// `specs/json-schema/features/maximum.md` and `multipleOf.md` for the authoritative
 /// rules. The keywords remain in the schema `extra` map for the backends; this
 /// only rejects statically unsatisfiable / unsupported forms with fix-its.
 fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> Result<()> {
@@ -1292,7 +1292,7 @@ fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> 
 }
 
 /// Load-time validation of the string-length keywords (`minLength`,
-/// `maxLength`). See `json-schema/features/maxLength.md` for the authoritative
+/// `maxLength`). See `specs/json-schema/features/maxLength.md` for the authoritative
 /// rules. Length is counted in Unicode code points. The keywords remain in the
 /// schema `extra` map for the backends; this only rejects statically
 /// unsatisfiable / unsupported forms with fix-its.
@@ -1391,7 +1391,7 @@ fn validate_string_constraints(path: &Path, schema: &Schema, context: &str) -> R
 /// Load-time gate for the `format` keyword (JSON Schema 2020-12 §7). We opt into
 /// `format-assertion` semantics for a curated portable subset and reject
 /// everything else at load, so no `format` silently no-ops (P10). See
-/// `json-schema/features/format.md` and `crate::format`.
+/// `specs/json-schema/features/format.md` and `crate::format`.
 ///
 /// Rejects (P7 / P7.1): a non-string `format` value, a `format` on a
 /// non-`string` node, an unknown/non-standard name (with a fix-it), a
@@ -1471,7 +1471,7 @@ fn validate_format(path: &Path, schema: &Schema, context: &str) -> Result<()> {
 /// We opt into assertion + materialization for the two byte-transform encodings
 /// (`base64` / `base64url`, materialized to a native bytes type) and reject every
 /// other encoding at load, so no `contentEncoding` silently no-ops (P10). See
-/// `json-schema/features/contentEncoding.md` and `crate::content_encoding`.
+/// `specs/json-schema/features/contentEncoding.md` and `crate::content_encoding`.
 ///
 /// Rejects (P7 / P7.1): a non-string `contentEncoding` value, a
 /// `contentEncoding` on a non-`string` node, an unsupported encoding (with a
@@ -1599,7 +1599,7 @@ fn scalar_kinds_compatible(a: &str, b: &str) -> bool {
 
 /// Load-time validation of the `default` annotation's own shape. `default` is a
 /// pure annotation (no validator); the only load obligations are shape checks
-/// (see `json-schema/features/default.md`). The `const`+`default` /
+/// (see `specs/json-schema/features/default.md`). The `const`+`default` /
 /// `enum`+`default` interactions live in `validate_const_enum`, and the
 /// default-against-constraint checks live in the numeric/string/content
 /// validators; the `default` on a `required` member is caught at the parent
@@ -1673,7 +1673,7 @@ fn validate_annotations(path: &Path, schema: &Schema, context: &str) -> Result<(
     }
     // `description` — the doc body; may span paragraphs, but an empty or
     // whitespace-only string renders a dead doc body (see
-    // `json-schema/features/description.md`).
+    // `specs/json-schema/features/description.md`).
     if let Some(description) = &schema.description
         && description.trim().is_empty()
     {
@@ -1698,13 +1698,13 @@ fn validate_annotations(path: &Path, schema: &Schema, context: &str) -> Result<(
         ));
     }
     // `examples` — accepted and ignored (inert); its array-MUST is not enforced
-    // while dropped (see json-schema/features/examples.md). No check.
+    // while dropped (see specs/json-schema/features/examples.md). No check.
     Ok(())
 }
 
 /// Load-time validation of the array-constraint keywords (`minItems`,
 /// `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`). See
-/// `json-schema/features/{minItems,maxItems,uniqueItems,contains,minContains,maxContains}.md`
+/// `specs/json-schema/features/{minItems,maxItems,uniqueItems,contains,minContains,maxContains}.md`
 /// for the authoritative rules. The keywords remain in the schema `extra` map
 /// for the backends; this only rejects statically unsatisfiable / unsupported
 /// (deferred) forms with fix-its.
@@ -1945,7 +1945,7 @@ fn validate_array_constraints(path: &Path, schema: &Schema, context: &str) -> Re
 
 /// Load-time validation of the object-constraint keywords (`minProperties`,
 /// `maxProperties`, `propertyNames`, `dependentRequired`). See
-/// `json-schema/features/{minProperties,maxProperties,propertyNames,dependentRequired}.md`
+/// `specs/json-schema/features/{minProperties,maxProperties,propertyNames,dependentRequired}.md`
 /// for the authoritative rules. The keywords remain in the schema `extra` map
 /// (or the typed fields) for the backends; this only rejects statically
 /// unsatisfiable / unsupported (deferred) forms with fix-its.
@@ -2170,8 +2170,8 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
 }
 
 /// Load-time validation of the `const` and `enum` keywords (the closed
-/// value-set primitives). See `json-schema/features/const.md` and
-/// `json-schema/features/enum.md` for the authoritative rules. Both keep their
+/// value-set primitives). See `specs/json-schema/features/const.md` and
+/// `specs/json-schema/features/enum.md` for the authoritative rules. Both keep their
 /// values in the schema `extra` map for the backends; this rejects statically
 /// unsatisfiable / unsupported / degenerate forms with fix-its and enforces the
 /// P15 synthesized-name (value → identifier) collision rule.
@@ -2428,7 +2428,7 @@ fn find_mandatory_cycle(
 
 /// Rejects an unsatisfiable recursion cycle — one whose every edge is
 /// mandatory-and-single-valued (required + non-nullable + non-collection), so no
-/// finite instance exists. See `json-schema/features/ref.md` (Recursion &
+/// finite instance exists. See `specs/json-schema/features/ref.md` (Recursion &
 /// satisfiability). Conservative: it only builds edges it can prove mandatory,
 /// so any cycle it finds is genuinely unsatisfiable.
 fn validate_reference_satisfiability(
@@ -2827,7 +2827,7 @@ fn branch_discriminator_tags(object: &Schema) -> BTreeMap<String, Value> {
 
 /// Validates a `oneOf` as a supported closed sum type (or the degenerate
 /// nullability pattern, which [[nullability]] owns). See
-/// `json-schema/features/oneOf.md` for the full acceptance rules.
+/// `specs/json-schema/features/oneOf.md` for the full acceptance rules.
 fn validate_one_of(
     path: &Path,
     canonical_path: &Path,
@@ -2960,7 +2960,7 @@ fn validate_one_of(
 }
 
 /// Whether a service/operation key matches its identifier regex (see
-/// `json-schema/services.md`): `^[A-Z][a-zA-Z\d]+$` for services (`first_upper`)
+/// `specs/json-schema/services.md`): `^[A-Z][a-zA-Z\d]+$` for services (`first_upper`)
 /// and `^[a-z][a-zA-Z\d]+$` for operations — a leading letter of the required
 /// case followed by one or more ASCII alphanumerics.
 fn name_matches(name: &str, first_upper: bool) -> bool {
@@ -3143,7 +3143,7 @@ fn operation_model_type(
     }
 
     validate_model_schema(path, schema, &format!("operation {operation_key} {suffix}"))?;
-    // Inline I/O must be an object (see `json-schema/services.md`). After
+    // Inline I/O must be an object (see `specs/json-schema/services.md`). After
     // `validate_model_schema` a non-`$ref` inline schema is either `type: object`
     // or a `oneOf` union; a union is not a valid operation input/output.
     require_object_io(
@@ -3179,7 +3179,7 @@ fn operation_model_type(
 /// inline `type: object`, a `$ref` to one, or an `allOf` that merged to one
 /// (merges run before this). Following bare-`$ref` chains, a target that lands
 /// on a `oneOf` union or a scalar/array is a load reject — a union has no single
-/// extensible shape. See `json-schema/services.md`.
+/// extensible shape. See `specs/json-schema/services.md`.
 fn require_object_io(
     path: &Path,
     canonical_path: &Path,
@@ -3471,7 +3471,7 @@ fn normalize_children(
 /// node's own `pattern` during the normalize pass so the value flows to the
 /// backends already normalized (`\s`/`\S` expanded to the explicit ASCII class;
 /// `$` kept canonical for the per-target backend rewrite). See
-/// `json-schema/features/pattern.md`.
+/// `specs/json-schema/features/pattern.md`.
 ///
 /// Rejects (P7 / P7.1): a non-string `pattern` value, a `pattern` on a
 /// non-`string` node, a non-portable regex (backtracking / inline flags /
@@ -4378,7 +4378,7 @@ fn normalize(path: &Path) -> PathBuf {
 // ---------------------------------------------------------------------------
 // P15 identifier namespace + `x-<lang>-name` override escape hatch.
 //
-// See json-schema/features/properties.md (Stage 1-4 + the override), and
+// See specs/json-schema/features/properties.md (Stage 1-4 + the override), and
 // PRINCIPLES.md P15 (one identifier namespace per scope; synthesized-name
 // collisions reject at load, never mangle; the escape hatch is the override).
 //
@@ -5220,7 +5220,7 @@ services:
     fn ref_with_sibling_keywords_merges() {
         // `$ref`-with-siblings is the implicit-`allOf` sugar: the referenced
         // target is folded in and the use-site siblings extend it (see
-        // json-schema/features/allOf.md). No longer a reject.
+        // specs/json-schema/features/allOf.md). No longer a reject.
         let spec = parse(
             r##"
 nexusrpc: "1.0.0"
@@ -6631,7 +6631,7 @@ properties:
         assert!(error.contains("legal identifier"), "{error}");
     }
 
-    // ---- `allOf` load-time merge (json-schema/features/allOf.md) ----
+    // ---- `allOf` load-time merge (specs/json-schema/features/allOf.md) ----
 
     /// Parses `input` and returns the merged JSON schema value of the named
     /// generated model (a `$defs` entry or the document root).
@@ -6907,7 +6907,7 @@ $defs:
         assert!(error.contains("cycle"), "{error}");
     }
 
-    // --- `oneOf` sum types (json-schema/features/oneOf.md) ---
+    // --- `oneOf` sum types (specs/json-schema/features/oneOf.md) ---
 
     fn union_doc_result(doc: &str) -> Result<ApiSpec> {
         parse_api_spec_from_json_schema_for_language(
@@ -7448,7 +7448,7 @@ $defs:
         );
     }
 
-    // --- `required` load-time validation (json-schema/features/required.md) ---
+    // --- `required` load-time validation (specs/json-schema/features/required.md) ---
 
     #[test]
     fn rejects_required_not_array() {

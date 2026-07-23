@@ -127,7 +127,7 @@ pub enum GenerationMode {
 /// The TypeScript in-memory representation of a materialized temporal `format`
 /// field, selected by the `--js-temporal-repr` generator flag (P16 API parity).
 /// Affects **only** the TypeScript output; Go / Java / Python are unchanged. See
-/// `json-schema/features/format.md` (JS temporal representation).
+/// `specs/json-schema/features/format.md` (JS temporal representation).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum JsTemporalRepr {
     /// Every temporal is a `string` holding the generator-serialized form

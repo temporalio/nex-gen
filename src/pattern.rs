@@ -1,8 +1,8 @@
 //! The RE2-safe portable subset for the JSON-Schema `pattern` keyword: a
 //! load-time compile gate + `\s`/`\S` normalization (target-agnostic) plus the
 //! per-target `$` end-anchor rewrite applied by the Python/Java backends. See
-//! `json-schema/features/pattern.md` for the authoritative rules and the
-//! `json-schema/research/{rust_regex_gate,ws_normalize,pattern_conformance}`
+//! `specs/json-schema/features/pattern.md` for the authoritative rules and the
+//! `specs/json-schema/research/{rust_regex_gate,ws_normalize,pattern_conformance}`
 //! corpora that pinned every rule below.
 //!
 //! The gate is pure Rust — it compiles the pattern with the `regex` crate (the
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn conformance_corpus_gate_agrees() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../json-schema/research/pattern_conformance/corpus.json"
+            "../specs/json-schema/research/pattern_conformance/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs array") {

@@ -82,7 +82,7 @@ impl Schema {
     /// The emitted Python attribute identifier for a property: the `x-py-name`
     /// override if present (used verbatim), otherwise the snake-cased JSON name.
     /// The wire name (`json_name`) is unaffected — the `Field(alias=...)` pin
-    /// keeps the contract stable. See json-schema/features/properties.md.
+    /// keeps the contract stable. See specs/json-schema/features/properties.md.
     fn py_member_name(&self, json_name: &str) -> String {
         self.x_py_name
             .clone()
@@ -797,7 +797,7 @@ fn render_json_runtime_module() -> String {
 /// Gregorian calendar predicate, the parse (`BeforeValidator`) + generator-owned
 /// serialize (`PlainSerializer`) adapters, and the four `Annotated` field
 /// aliases (`DateTimeField` / `DateField` / `TimeField` / `DurationField`). See
-/// `json-schema/features/format.md`. We do NOT use Pydantic's native `datetime`
+/// `specs/json-schema/features/format.md`. We do NOT use Pydantic's native `datetime`
 /// coercion (it accepts a missing offset and normalizes differently).
 fn render_temporal_helpers(output: &mut String) {
     use crate::format::TemporalKind;
@@ -973,7 +973,7 @@ DurationField: typing.TypeAlias = typing.Annotated[
 /// adapters, and the two `Annotated` bytes field aliases. We own the codec via
 /// the model hooks rather than lean on Pydantic's `Base64Bytes`, for full control
 /// of the accept/reject line and the canonical output. See
-/// `json-schema/features/contentEncoding.md`.
+/// `specs/json-schema/features/contentEncoding.md`.
 fn render_content_encoding_helpers(output: &mut String) {
     use crate::content_encoding::Encoding;
     output.push_str(&format!(
@@ -1073,7 +1073,7 @@ fn render_pattern_helper(output: &mut String) {
 /// string matches a pinned `format` regex, with an optional total-length guard
 /// run **first** (short-circuit — the email order neutralizes a matcher-recursion
 /// hazard). `len(value)` is the Unicode code-point count. See
-/// `json-schema/features/format.md`.
+/// `specs/json-schema/features/format.md`.
 fn render_format_helper(output: &mut String) {
     output.push_str("def _check_format(\n");
     output.push_str("    format_name: str,\n");
@@ -1120,7 +1120,7 @@ fn render_model(
         _ => "allow",
     };
     // Native deprecation marker (PEP 702) on the type; `category=None` is the
-    // no-runtime-warning form. See json-schema/features/deprecated.md.
+    // no-runtime-warning form. See specs/json-schema/features/deprecated.md.
     if schema.deprecated == Some(true) {
         output.push_str(
             "@typing_extensions.deprecated(\"This type is deprecated.\", category=None)\n",
@@ -1183,7 +1183,7 @@ fn render_model(
             *needs_pattern_helper = true;
             // Per-target `$`→`\Z` rewrite: `re`'s `\Z` is the strict
             // end-of-string anchor (no trailing-`\n` exception). See
-            // `json-schema/features/pattern.md`.
+            // `specs/json-schema/features/pattern.md`.
             let rewritten = crate::pattern::rewrite_end_anchor(pattern, r"\Z");
             annotation = format!(
                 "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_pattern({}))]",
@@ -1209,7 +1209,7 @@ fn render_model(
             );
         }
         // Native deprecation marker (PEP 702) on the field; `category=None` is
-        // the no-runtime-warning form. See json-schema/features/deprecated.md.
+        // the no-runtime-warning form. See specs/json-schema/features/deprecated.md.
         if property.deprecated == Some(true) {
             annotation = format!(
                 "typing.Annotated[{annotation}, typing_extensions.deprecated(\"This field is deprecated.\", category=None)]"
@@ -1814,7 +1814,7 @@ fn render_const_validators(output: &mut String, fields: &[(String, String, Value
 /// presence is owned by `required`); a present out-of-set value raises an
 /// aggregated `enum` error naming the set and the offending value. String/int/
 /// bool enums are additionally closed by their `Literal` annotation; float enums
-/// (plain `float`) rest on this check alone. See `json-schema/features/enum.md`.
+/// (plain `float`) rest on this check alone. See `specs/json-schema/features/enum.md`.
 fn render_enum_validators(
     output: &mut String,
     fields: &[(String, String, Vec<Value>)],
@@ -1972,7 +1972,7 @@ fn render_field_expr(
 }
 
 /// Composes a docstring from a `title` (summary line) and `description` (body);
-/// returns `None` when both are empty. See json-schema/features/{title,description}.md.
+/// returns `None` when both are empty. See specs/json-schema/features/{title,description}.md.
 fn compose_python_doc(title: Option<&str>, description: Option<&str>) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
     if let Some(title) = title.map(str::trim).filter(|t| !t.is_empty()) {

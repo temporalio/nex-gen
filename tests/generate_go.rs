@@ -1237,7 +1237,7 @@ fn go_rejects_inputs_flattening_to_the_same_module_file() {
     // Two distinct input files -- `full_name.json` at the root and
     // `full/name.json` in a subdirectory -- flatten to the same Go module file
     // `full_name.go`. Go collapses the whole closure into one flat package, so
-    // the emit layer rejects the collision (json-schema/generated-file-layout.md).
+    // the emit layer rejects the collision (specs/json-schema/generated-file-layout.md).
     let temp_dir = unique_output_path("go-json-flatten-collision");
     fs::create_dir_all(temp_dir.join("full")).unwrap();
     let schema = |title: &str| {

@@ -79,7 +79,7 @@ impl Schema {
     /// The emitted Go field identifier for a property: the `x-go-name` override
     /// if present (used verbatim), otherwise the PascalCased JSON name. The wire
     /// name is unaffected (the `json:"<name>"` tag pins it). See
-    /// json-schema/features/properties.md.
+    /// specs/json-schema/features/properties.md.
     fn go_member_name(&self, json_name: &str) -> String {
         self.x_go_name
             .clone()
@@ -192,7 +192,7 @@ fn render_go_numeric_checks(
 /// Emits the string-length predicates (`minLength`/`maxLength`) over
 /// `value_expr` (a `string` already in scope), appending Violations to `errs`.
 /// Length is the Unicode code-point count via `utf8.RuneCountInString` (never
-/// `len`, which is the UTF-8 byte count) — see `json-schema/features/maxLength.md`.
+/// `len`, which is the UTF-8 byte count) — see `specs/json-schema/features/maxLength.md`.
 /// Shared by the parse (`UnmarshalJSON`) and serialize (`Validate`) paths per P12.
 fn render_go_string_checks(
     output: &mut String,
@@ -245,7 +245,7 @@ fn go_unexported(name: &str) -> String {
 /// The package-level compiled-regex var name for a `pattern` on `json_name` of
 /// `model_name` — unique per (model, field) so the pattern compiles once at
 /// package init (the load-time gate already proved it compiles). See
-/// `json-schema/features/pattern.md`.
+/// `specs/json-schema/features/pattern.md`.
 fn go_pattern_var_name(model_name: &str, json_name: &str) -> String {
     go_unexported(&format!("{model_name}{}Pattern", go_field_name(json_name)))
 }
@@ -291,7 +291,7 @@ fn render_go_pattern_vars(output: &mut String, model: &PlannedJsonType, schema: 
 }
 
 /// The package-level compiled-regex var name for a `contentEncoding` on
-/// `json_name` of `model_name`. See `json-schema/features/contentEncoding.md`.
+/// `json_name` of `model_name`. See `specs/json-schema/features/contentEncoding.md`.
 fn go_content_encoding_var_name(model_name: &str, json_name: &str) -> String {
     go_unexported(&format!(
         "{model_name}{}ContentEncoding",
@@ -300,7 +300,7 @@ fn go_content_encoding_var_name(model_name: &str, json_name: &str) -> String {
 }
 
 /// The package-level compiled-regex var name for a `format` on `json_name` of
-/// `model_name`. See `json-schema/features/format.md`.
+/// `model_name`. See `specs/json-schema/features/format.md`.
 fn go_format_var_name(model_name: &str, json_name: &str) -> String {
     go_unexported(&format!("{model_name}{}Format", go_field_name(json_name)))
 }
@@ -309,7 +309,7 @@ fn go_format_var_name(model_name: &str, json_name: &str) -> String {
 /// length guard (if any) short-circuits **before** the pinned regex, so a single
 /// combined condition pushes one Violation naming the format + value. Shared by
 /// the parse (`UnmarshalJSON`) and serialize (`Validate`) paths per P12. See
-/// `json-schema/features/format.md`.
+/// `specs/json-schema/features/format.md`.
 fn render_go_format_check(
     output: &mut String,
     value_expr: &str,
@@ -349,7 +349,7 @@ fn render_go_format_check(
 /// Emits the `pattern` predicate over `value_expr` (a `string` in scope):
 /// `if !<var>.MatchString(v) { push Violation }`. `MatchString` is unanchored
 /// (RE2), ASCII-class, code-point `.`. Shared by the parse (`UnmarshalJSON`) and
-/// serialize (`Validate`) paths per P12. See `json-schema/features/pattern.md`.
+/// serialize (`Validate`) paths per P12. See `specs/json-schema/features/pattern.md`.
 fn render_go_pattern_check(
     output: &mut String,
     value_expr: &str,
@@ -568,7 +568,7 @@ fn render_go_array_checks(
 /// one number over the whole object, never a per-bucket sum), appending
 /// Violations to `errs`. Shared by the deserialize (`UnmarshalJSON`, counting
 /// wire keys) and serialize (`MarshalJSON`, counting to-be-emitted keys) paths
-/// per P12. See `json-schema/features/minProperties.md`.
+/// per P12. See `specs/json-schema/features/minProperties.md`.
 fn render_go_property_count_checks(
     output: &mut String,
     count_expr: &str,
@@ -601,7 +601,7 @@ fn render_go_property_count_checks(
 /// applying the (string-length) key subschema to each key `k` and pushing a
 /// `Violation{k, "invalid property name \"k\": <why>"}` per bad key. Reuses the
 /// string-length assertions applied to keys instead of values. See
-/// `json-schema/features/propertyNames.md`.
+/// `specs/json-schema/features/propertyNames.md`.
 fn render_go_property_name_checks(
     output: &mut String,
     map_expr: &str,
@@ -646,7 +646,7 @@ fn render_go_property_name_checks(
 /// Emits the `dependentRequired` cross-field presence predicate over the
 /// presence set `map_expr` (`all` on the wire deserialize path, `out` on the
 /// serialize path): for each present trigger key, each dependent key must also
-/// be present. See `json-schema/features/dependentRequired.md`.
+/// be present. See `specs/json-schema/features/dependentRequired.md`.
 fn render_go_dependent_required(
     output: &mut String,
     map_expr: &str,
@@ -1248,7 +1248,7 @@ fn render_validator_core(output: &mut String) {
 /// constants. Each scalar `const`/`enum` field synthesizes a defined type over
 /// the primitive (`type ShowcaseStatus string`) plus one typed constant per
 /// member (`const ShowcaseStatusActive ShowcaseStatus = "active"`). See
-/// `json-schema/features/{const,enum}.md`.
+/// `specs/json-schema/features/{const,enum}.md`.
 fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType]) -> Result<()> {
     struct Declared {
         type_name: String,
@@ -1349,7 +1349,7 @@ fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType])
 }
 
 // ---------------------------------------------------------------------------
-// `oneOf` closed sum types (json-schema/features/oneOf.md)
+// `oneOf` closed sum types (specs/json-schema/features/oneOf.md)
 // ---------------------------------------------------------------------------
 
 /// A single member of a Go union (sealed interface).
@@ -1987,7 +1987,7 @@ fn render_default_accessors(
         // Materialize-on-read for every scalar kind (P9/P12): the bare field
         // stays `*T` (set-ness intact); the accessor returns the pointee when
         // set and the schema default literal when nil. Modeled on proto3's
-        // `GetX()`. See json-schema/features/default.md.
+        // `GetX()`. See specs/json-schema/features/default.md.
         let Some((return_type, literal)) = go_default_type_and_literal(property, default) else {
             continue;
         };
@@ -2854,7 +2854,7 @@ fn model_uses_temporal(model: &PlannedJsonType) -> bool {
 /// for `date-time` / `date` / `time` / `duration`. The serializer is
 /// generator-owned (RFC 3339, original offset preserved, `+00:00`/`-00:00` → `Z`,
 /// trailing fractional zeros trimmed; duration canonicalized to time-only). See
-/// `json-schema/features/format.md`.
+/// `specs/json-schema/features/format.md`.
 fn render_go_temporal_helpers(output: &mut String) {
     use crate::format::TemporalKind;
     output.push_str(&format!(
@@ -3077,7 +3077,7 @@ fn model_uses_content_encoding(model: &PlannedJsonType) -> bool {
 /// base64url decode (regex-gated) and canonical encode adapters. The regex is
 /// passed in (compiled once per field at package init); the decoder runs only
 /// after it passes, so no language's lenient decoder can diverge (P1). See
-/// `json-schema/features/contentEncoding.md`.
+/// `specs/json-schema/features/contentEncoding.md`.
 fn render_go_content_encoding_helpers(output: &mut String) {
     output.push_str(CONTENT_ENCODING_HELPER_BODY);
 }
@@ -3251,7 +3251,7 @@ fn required_fields(schema: &Schema) -> BTreeSet<String> {
 
 /// The materialized `TemporalKind` of a property schema — looking through the
 /// `oneOf[…, null]` nullable wrapper — or `None` when it is not a materialized
-/// temporal string field. See `json-schema/features/format.md` (Materialization).
+/// temporal string field. See `specs/json-schema/features/format.md` (Materialization).
 fn temporal_kind(schema: &Schema) -> Option<crate::format::TemporalKind> {
     if let Some(non_null) = nullable_non_null_schema(schema) {
         return temporal_kind(non_null);
@@ -3267,7 +3267,7 @@ fn temporal_kind(schema: &Schema) -> Option<crate::format::TemporalKind> {
 
 /// The materialized `contentEncoding` of a property schema — looking through the
 /// `oneOf[…, null]` nullable wrapper — or `None` when it is not a materialized
-/// bytes string field. See `json-schema/features/contentEncoding.md`.
+/// bytes string field. See `specs/json-schema/features/contentEncoding.md`.
 fn content_encoding_kind(schema: &Schema) -> Option<crate::content_encoding::Encoding> {
     if let Some(non_null) = nullable_non_null_schema(schema) {
         return content_encoding_kind(non_null);
@@ -3720,10 +3720,10 @@ fn render_closed_value_unmarshal(
     output.push_str("\t}\n");
 }
 
-/// Renders `doc` (the envelope's `description`, per json-schema/services.md)
+/// Renders `doc` (the envelope's `description`, per specs/json-schema/services.md)
 /// as a Go doc comment, falling back to `fallback` (already name-led) when
 /// `doc` is absent — every exported declaration must carry a doc comment
-/// (json-schema/PRINCIPLES.md, Go §1).
+/// (specs/json-schema/PRINCIPLES.md, Go §1).
 fn render_go_doc_comment(output: &mut String, indent: &str, doc: Option<&str>, fallback: &str) {
     let text = doc
         .map(str::trim)
@@ -3741,11 +3741,11 @@ fn render_go_doc_comment(output: &mut String, indent: &str, doc: Option<&str>, f
 /// (name-led per the Go godoc convention — `// <Name> <title>`), the
 /// `description` body, and — when `deprecated: true` — a `// Deprecated:`
 /// paragraph (godoc convention; a generic reason, the rationale lives in the
-/// body). See json-schema/features/{title,description,deprecated}.md. `kind` is
+/// body). See specs/json-schema/features/{title,description,deprecated}.md. `kind` is
 /// "type" or "field", used only in the deprecation reason. When neither
 /// `title` nor `description` is present, falls back to `fallback` (already
 /// name-led) so the declaration still carries a comment — every exported
-/// identifier must (json-schema/PRINCIPLES.md, Go §1).
+/// identifier must (specs/json-schema/PRINCIPLES.md, Go §1).
 fn render_go_schema_doc(
     output: &mut String,
     indent: &str,
@@ -3783,7 +3783,7 @@ fn render_go_schema_doc(
         }
         (None, Some(description)) => {
             // No title: the identifier leads the first line of the
-            // description instead (json-schema/features/description.md).
+            // description instead (specs/json-schema/features/description.md).
             let mut desc_lines = description.lines();
             if let Some(first) = desc_lines.next() {
                 lines.push(name_led(first.trim()));

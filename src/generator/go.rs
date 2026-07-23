@@ -797,7 +797,7 @@ fn generate_branch_tree(
 
 /// Flattens an input file's module path into its `<module>.go` file name in the
 /// one flat Go package: directory separators become `_`, literal underscores are
-/// preserved (see `json-schema/generated-file-layout.md`).
+/// preserved (see `specs/json-schema/generated-file-layout.md`).
 fn go_flat_module_file_name(module_path: &ModulePath) -> PathBuf {
     // Branch leaves always carry at least one path segment; the empty fallback
     // keeps this total.

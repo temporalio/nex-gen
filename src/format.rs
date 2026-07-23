@@ -4,7 +4,7 @@
 //! where a regex alone is insufficient — a shared **length guard**. The
 //! generators emit the same regex the loader validates literals against, so a
 //! value accepted (or rejected) by one language is accepted (or rejected) by all
-//! (P1). See `json-schema/features/format.md` for the authoritative rules and
+//! (P1). See `specs/json-schema/features/format.md` for the authoritative rules and
 //! the `research/format_{conformance,email,hostname,uri}/` corpora that pinned
 //! every pattern and length below.
 //!
@@ -39,7 +39,7 @@ pub const SUPPORTED_FORMATS: [&str; 7] = [
 /// native typed model fields (Go `time.Time`, Java `OffsetDateTime`, Python
 /// `datetime`, …) rather than a bare `string`, and asserted with a **narrowed**
 /// grammar (leap second `:60` rejected; `duration` is time-only). See
-/// `json-schema/features/format.md` (Materialization) and `TemporalKind`.
+/// `specs/json-schema/features/format.md` (Materialization) and `TemporalKind`.
 pub const TEMPORAL_FORMATS: [&str; 4] = ["date-time", "date", "time", "duration"];
 
 /// The four materialized temporal formats. Each carries a language-native typed
@@ -305,9 +305,9 @@ fn ipv6_body() -> String {
 /// rejects. Wrapped in `^(?:…)$` for anchored matching.
 fn uri_body(reference: bool) -> &'static str {
     if reference {
-        include_str!("../json-schema/research/format_uri/pinned_body_uriref.body")
+        include_str!("../specs/json-schema/research/format_uri/pinned_body_uriref.body")
     } else {
-        include_str!("../json-schema/research/format_uri/pinned_body.body")
+        include_str!("../specs/json-schema/research/format_uri/pinned_body.body")
     }
 }
 
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn materialized_temporal_conformance_with_leap_narrowing() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../json-schema/research/format_conformance/corpus.json"
+            "../specs/json-schema/research/format_conformance/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs") {
@@ -543,7 +543,7 @@ mod tests {
         // Every VALID wire in the clock corpus (minus `:60`) must pass the
         // materialized check so the parse adapter never rejects a round-trip case.
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../json-schema/research/format_materialize_clock/corpus.json"
+            "../specs/json-schema/research/format_materialize_clock/corpus.json"
         ))
         .expect("corpus parses");
         for (key, kind) in [
@@ -569,7 +569,7 @@ mod tests {
     fn conformance_corpora_agree() {
         // format_conformance: uuid / ipv4 / ipv6 (skip temporal rows).
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../json-schema/research/format_conformance/corpus.json"
+            "../specs/json-schema/research/format_conformance/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs") {
@@ -590,7 +590,7 @@ mod tests {
     #[test]
     fn hostname_corpus_agrees() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../json-schema/research/format_hostname/corpus.json"
+            "../specs/json-schema/research/format_hostname/corpus.json"
         ))
         .expect("corpus parses");
         for case in corpus["cases"].as_array().expect("cases") {
@@ -607,7 +607,7 @@ mod tests {
     #[test]
     fn uri_corpus_all_uri() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../json-schema/research/format_uri/corpus.json"
+            "../specs/json-schema/research/format_uri/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs") {
@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn email_corpus_agrees() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../json-schema/research/format_email/corpus.json"
+            "../specs/json-schema/research/format_email/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs") {

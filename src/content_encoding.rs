@@ -4,7 +4,7 @@
 //! alphabet, unpadded, RFC 4648 §5) — lowering both to a language-native bytes
 //! type (Go `[]byte`, Java `byte[]`, Python `bytes`, TS `Uint8Array`). Every
 //! other encoding is rejected at load. See
-//! `json-schema/features/contentEncoding.md` for the authoritative rules.
+//! `specs/json-schema/features/contentEncoding.md` for the authoritative rules.
 //!
 //! Like [[format]], the validity check is a **generator-owned** pinned regex
 //! over the wire string (through the [[pattern]] RE2-safe gate) — not a

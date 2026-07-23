@@ -192,7 +192,7 @@ impl Schema {
     /// The emitted TypeScript member identifier for a property: the `x-ts-name`
     /// override if present (verbatim), otherwise the camelCased JSON name. The
     /// wire key is unaffected (the interface pins the original key). See
-    /// json-schema/features/properties.md.
+    /// specs/json-schema/features/properties.md.
     fn ts_member_name(&self, json_name: &str) -> String {
         self.x_ts_name
             .clone()
@@ -294,7 +294,7 @@ fn render_ts_numeric_checks(
 /// `value_expr` (a validated `string` in scope). Length is the Unicode
 /// code-point count via the spread iterator (`[...s].length`), which is
 /// surrogate-aware — never `s.length` (UTF-16 code units). See
-/// `json-schema/features/maxLength.md`.
+/// `specs/json-schema/features/maxLength.md`.
 fn render_ts_string_checks(
     output: &mut String,
     value_expr: &str,
@@ -342,7 +342,7 @@ fn render_ts_string_checks(
 /// length guard (if any) short-circuits **before** the pinned regex, so one
 /// combined condition pushes a single Violation naming the format + value. TS
 /// keeps `$` (JS end-anchor is exception-free). See
-/// `json-schema/features/format.md`.
+/// `specs/json-schema/features/format.md`.
 fn render_ts_format_check(
     output: &mut String,
     value_expr: &str,
@@ -395,7 +395,7 @@ fn ts_template_escape(value: &str) -> String {
 /// `if (!PAT.test(v)) violations.push(...)`. `.test` is unanchored and — with no
 /// `g` flag — stateless; the const carries the `u` flag (code-point `.`). TS
 /// keeps `$` (JS end-anchor is already exception-free). See
-/// `json-schema/features/pattern.md`.
+/// `specs/json-schema/features/pattern.md`.
 fn render_ts_pattern_check(
     output: &mut String,
     value_expr: &str,
@@ -455,7 +455,7 @@ fn render_pattern_regexes(output: &mut String, models: &[&PlannedJsonType]) -> R
 
 /// Emits the object member-count predicates (`minProperties`/`maxProperties`)
 /// over `count_expr` (the number of distinct wire member keys, one number over
-/// the whole object). See `json-schema/features/minProperties.md`.
+/// the whole object). See `specs/json-schema/features/minProperties.md`.
 fn render_ts_property_count_checks(
     output: &mut String,
     count_expr: &str,
@@ -486,7 +486,7 @@ fn render_ts_property_count_checks(
 
 /// Emits the `propertyNames` key-shape predicate over the keys of `keys_expr`
 /// (a `string[]`), applying the (string-length) key subschema to each key. See
-/// `json-schema/features/propertyNames.md`.
+/// `specs/json-schema/features/propertyNames.md`.
 fn render_ts_property_name_checks(
     output: &mut String,
     keys_expr: &str,
@@ -528,7 +528,7 @@ fn render_ts_property_name_checks(
 
 /// Emits the `dependentRequired` cross-field presence predicate over the
 /// presence object `obj_expr`: for each present trigger key, each dependent key
-/// must also be present. See `json-schema/features/dependentRequired.md`.
+/// must also be present. See `specs/json-schema/features/dependentRequired.md`.
 fn render_ts_dependent_required(
     output: &mut String,
     obj_expr: &str,
@@ -1227,7 +1227,7 @@ fn model_uses_temporal(model: &PlannedJsonType) -> bool {
 
 /// Emits the materialized-temporal runtime for the active repr: the pinned
 /// narrowed regexes, the Gregorian calendar predicate, string canonicalizers,
-/// and the parse/serialize adapters. See `json-schema/features/format.md`.
+/// and the parse/serialize adapters. See `specs/json-schema/features/format.md`.
 fn render_ts_temporal_helpers(output: &mut String, repr: JsTemporalRepr) {
     output.push_str(&format!(
         "const TEMPORAL_DATE_TIME_RE = /{}/u;\n",
@@ -1530,7 +1530,7 @@ fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) ->
 }
 
 // ---------------------------------------------------------------------------
-// `oneOf` closed sum types (json-schema/features/oneOf.md)
+// `oneOf` closed sum types (specs/json-schema/features/oneOf.md)
 // ---------------------------------------------------------------------------
 
 /// A member of a TypeScript union (a native `A | B | …` type).
@@ -2674,7 +2674,7 @@ fn ts_typeof_guard(value: &Value) -> Option<&'static str> {
 /// `typeof` guard, a membership check against the fixed set, and the assignment
 /// on success. `compare_exprs` are the JS expressions to test against (a named
 /// const constant for `const`, or inline literals for `enum`); `reason` is the
-/// informative violation message. See `json-schema/features/{const,enum}.md`.
+/// informative violation message. See `specs/json-schema/features/{const,enum}.md`.
 fn render_closed_value_parser(
     output: &mut String,
     values: &[Value],
@@ -3323,7 +3323,7 @@ fn render_doc_comment(output: &mut String, indent: &str, doc: Option<&str>) {
 
 /// Renders the JSDoc for a schema declaration: `title` summary line,
 /// `description` body, and a bare `@deprecated` tag when `deprecated: true`.
-/// See json-schema/features/{title,description,deprecated}.md.
+/// See specs/json-schema/features/{title,description,deprecated}.md.
 fn render_ts_schema_doc(output: &mut String, indent: &str, schema: &Schema) {
     let mut lines: Vec<String> = Vec::new();
     if let Some(title) = schema
