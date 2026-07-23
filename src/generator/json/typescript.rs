@@ -54,19 +54,22 @@ fn content_encoding_direct(schema: &Schema) -> Option<crate::content_encoding::E
 }
 
 /// The generator-owned runtime decode / encode function names for a
-/// `contentEncoding`.
-fn ts_content_encoding_parse_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
-    match encoding {
+/// `contentEncoding`, qualified under [`DEFINITIONS_NAMESPACE`] for use in
+/// model-body call sites.
+fn ts_content_encoding_parse_fn(encoding: crate::content_encoding::Encoding) -> String {
+    let name = match encoding {
         crate::content_encoding::Encoding::Base64 => "base64ToBytes",
         crate::content_encoding::Encoding::Base64Url => "base64UrlToBytes",
-    }
+    };
+    format!("{DEFINITIONS_NAMESPACE}.{name}")
 }
 
-fn ts_content_encoding_serialize_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
-    match encoding {
+fn ts_content_encoding_serialize_fn(encoding: crate::content_encoding::Encoding) -> String {
+    let name = match encoding {
         crate::content_encoding::Encoding::Base64 => "bytesToBase64",
         crate::content_encoding::Encoding::Base64Url => "bytesToBase64Url",
-    }
+    };
+    format!("{DEFINITIONS_NAMESPACE}.{name}")
 }
 
 fn temporal_kind_direct(schema: &Schema) -> Option<TemporalKind> {
@@ -90,14 +93,16 @@ fn ts_temporal_type(kind: TemporalKind, repr: TsDateTimeTypes) -> &'static str {
     }
 }
 
-/// The runtime parse-adapter function name for a temporal kind.
-fn ts_temporal_parse_fn(kind: TemporalKind) -> &'static str {
-    match kind {
+/// The runtime parse-adapter function name for a temporal kind, qualified
+/// under [`DEFINITIONS_NAMESPACE`] for use in model-body call sites.
+fn ts_temporal_parse_fn(kind: TemporalKind) -> String {
+    let name = match kind {
         TemporalKind::DateTime => "parseTemporalDateTime",
         TemporalKind::Date => "parseTemporalDate",
         TemporalKind::Time => "parseTemporalTime",
         TemporalKind::Duration => "parseTemporalDuration",
-    }
+    };
+    format!("{DEFINITIONS_NAMESPACE}.{name}")
 }
 
 /// The serialize expression for a materialized temporal value. `string`-stored
@@ -125,7 +130,7 @@ fn ts_temporal_serialize_call(
         TemporalKind::Duration => "serializeTemporalDuration",
         TemporalKind::Time => unreachable!("time is always a string"),
     };
-    format!("{func}({value_expr})")
+    format!("{DEFINITIONS_NAMESPACE}.{func}({value_expr})")
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -1012,12 +1017,8 @@ fn render_external_models(
         render_model_mapper(&mut output, model, json_models)?;
     }
 
-    let uses_refs = json_models
-        .iter()
-        .any(|model| schema_uses_ref(&decode_schema(model).ok()));
-
     Ok(RenderedExternalModelFragments {
-        imports: render_json_model_imports(uses_refs, &output, runtime_import_module),
+        imports: render_json_model_imports(&output, runtime_import_module),
         body: output,
         type_exported_names: json_models
             .iter()
@@ -1030,42 +1031,23 @@ fn render_external_models(
     })
 }
 
-fn render_json_model_imports(uses_refs: bool, body: &str, runtime_import_module: &str) -> String {
+/// The namespace under which every generated `models.ts` imports its sibling
+/// `definitions.ts` runtime module, so the generated file doesn't pollute its
+/// own module namespace with generic names (`ValidationError`, `collect`, …)
+/// that could collide with user-authored identifiers.
+const DEFINITIONS_NAMESPACE: &str = "__nexGenDefinitions";
+
+fn render_json_model_imports(body: &str, runtime_import_module: &str) -> String {
     let mut imports = String::new();
     // Temporal-repr models reference `TemporalApi.*` types in their interfaces.
     if body.contains("TemporalApi.") {
         imports.push_str("import { Temporal as TemporalApi } from '@js-temporal/polyfill';\n");
     }
-    imports.push_str("import type { Violation } from \"");
-    imports.push_str(runtime_import_module);
-    imports.push_str("\";\n");
-    imports.push_str("import { ValidationError, isPlainObject");
-    if uses_refs {
-        imports.push_str(", collect");
-    }
-    // Materialized-temporal parse/serialize adapters referenced by the models.
-    for func in [
-        "parseTemporalDateTime",
-        "parseTemporalDate",
-        "parseTemporalTime",
-        "parseTemporalDuration",
-        "serializeTemporalDateTime",
-        "serializeTemporalDate",
-        "serializeTemporalDuration",
-        "base64ToBytes",
-        "base64UrlToBytes",
-        "bytesToBase64",
-        "bytesToBase64Url",
-    ] {
-        // Match the call form (`func(`) so `parseTemporalDate` is not spuriously
-        // matched inside `parseTemporalDateTime`, or `bytesToBase64` inside
-        // `bytesToBase64Url`.
-        if body.contains(&format!("{func}(")) {
-            imports.push_str(", ");
-            imports.push_str(func);
-        }
-    }
-    imports.push_str(" } from \"");
+    // `ValidationError`/`isPlainObject`/`Violation` are referenced by every
+    // generated model's parser, so the import is always live.
+    imports.push_str("import * as ");
+    imports.push_str(DEFINITIONS_NAMESPACE);
+    imports.push_str(" from \"");
     imports.push_str(runtime_import_module);
     imports.push_str("\";\n");
     imports
@@ -1783,7 +1765,10 @@ fn render_ts_union_parse(
         .filter(|variant| variant.is_object)
         .collect();
     if !object_variants.is_empty() {
-        clause(output, &format!("isPlainObject({raw_expr})"));
+        clause(
+            output,
+            &format!("{DEFINITIONS_NAMESPACE}.isPlainObject({raw_expr})"),
+        );
         if let Some(discriminant) = &union.discriminant {
             let disc_key = format!(
                 "({raw_expr} as Record<string, unknown>)[{}]",
@@ -1812,7 +1797,7 @@ fn render_ts_union_parse(
                 output.push_str("      } catch (error) {\n");
                 output.push_str(indent);
                 output.push_str(&format!(
-                    "        collect(violations, {path_expr}, error);\n"
+                    "        {DEFINITIONS_NAMESPACE}.collect(violations, {path_expr}, error);\n"
                 ));
                 output.push_str(indent);
                 output.push_str("      }\n");
@@ -1840,7 +1825,9 @@ fn render_ts_union_parse(
             output.push_str(indent);
             output.push_str("  } catch (error) {\n");
             output.push_str(indent);
-            output.push_str(&format!("    collect(violations, {path_expr}, error);\n"));
+            output.push_str(&format!(
+                "    {DEFINITIONS_NAMESPACE}.collect(violations, {path_expr}, error);\n"
+            ));
             output.push_str(indent);
             output.push_str("  }\n");
         }
@@ -1924,7 +1911,7 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
         ));
     }
     output.push_str(&format!(
-        "  throw new ValidationError([{{ path: '', reason: 'expected one of: {}' }}]);\n",
+        "  throw new {DEFINITIONS_NAMESPACE}.ValidationError([{{ path: '', reason: 'expected one of: {}' }}]);\n",
         union.admissible()
     ));
 }
@@ -1994,7 +1981,9 @@ fn render_model_mapper(
         output.push_str("  public fromIntermediate(raw: unknown): ");
         output.push_str(&model.model_name);
         output.push_str(" {\n");
-        output.push_str("    const violations: Violation[] = [];\n");
+        output.push_str(&format!(
+            "    const violations: {DEFINITIONS_NAMESPACE}.Violation[] = [];\n"
+        ));
         output.push_str("    let out: ");
         output.push_str(&model.model_name);
         output.push_str(" = undefined as unknown as ");
@@ -2002,7 +1991,9 @@ fn render_model_mapper(
         output.push_str(";\n");
         render_ts_union_parse(output, &union, "raw", "out", "''", "    ");
         output.push_str("    if (violations.length) {\n");
-        output.push_str("      throw new ValidationError(violations);\n");
+        output.push_str(&format!(
+            "      throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+        ));
         output.push_str("    }\n");
         output.push_str("    return out;\n");
         output.push_str("  }\n\n");
@@ -2050,9 +2041,15 @@ fn render_model_parser_body(
     schema: &Schema,
     models: &[&PlannedJsonType],
 ) -> Result<()> {
-    output.push_str("  const violations: Violation[] = [];\n");
-    output.push_str("  if (!isPlainObject(raw)) {\n");
-    output.push_str("    throw new ValidationError([{ path: '', reason: 'expected object' }]);\n");
+    output.push_str(&format!(
+        "  const violations: {DEFINITIONS_NAMESPACE}.Violation[] = [];\n"
+    ));
+    output.push_str(&format!(
+        "  if (!{DEFINITIONS_NAMESPACE}.isPlainObject(raw)) {{\n"
+    ));
+    output.push_str(&format!(
+        "    throw new {DEFINITIONS_NAMESPACE}.ValidationError([{{ path: '', reason: 'expected object' }}]);\n"
+    ));
     output.push_str("  }\n\n");
 
     if let Some(value_schema) = typed_map_value_schema(&schema)? {
@@ -2093,7 +2090,9 @@ fn render_model_parser_body(
     render_ts_dependent_required(output, "raw", &schema, "  ");
 
     output.push_str("  if (violations.length) {\n");
-    output.push_str("    throw new ValidationError(violations);\n");
+    output.push_str(&format!(
+        "    throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+    ));
     output.push_str("  }\n");
     output.push_str("  const out: ");
     output.push_str(&model.model_name);
@@ -2136,7 +2135,9 @@ fn render_model_serializer_body(
     // check emitters).
     let needs_validation = model_needs_serialize_validation(&schema)?;
     if needs_validation {
-        output.push_str("  const violations: Violation[] = [];\n");
+        output.push_str(&format!(
+            "  const violations: {DEFINITIONS_NAMESPACE}.Violation[] = [];\n"
+        ));
     }
     output.push_str("  const out: Record<string, unknown> = {};\n");
 
@@ -2153,7 +2154,9 @@ fn render_model_serializer_body(
                 render_ts_property_name_checks(output, "keys", subschema, "  ");
             }
             output.push_str("  if (violations.length) {\n");
-            output.push_str("    throw new ValidationError(violations);\n");
+            output.push_str(&format!(
+                "    throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+            ));
             output.push_str("  }\n");
         }
         output.push_str("  return out;\n");
@@ -2199,7 +2202,9 @@ fn render_model_serializer_body(
         render_ts_property_count_checks(output, "Object.keys(out).length", &schema, "  ");
         render_ts_dependent_required(output, "out", &schema, "  ");
         output.push_str("  if (violations.length) {\n");
-        output.push_str("    throw new ValidationError(violations);\n");
+        output.push_str(&format!(
+            "    throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+        ));
         output.push_str("  }\n");
     }
     output.push_str("  return out;\n");
@@ -2233,7 +2238,9 @@ fn render_typed_map_parser_body(output: &mut String, schema: &Schema, value_sche
     output.push_str("    }\n");
     output.push_str("  }\n");
     output.push_str("  if (violations.length) {\n");
-    output.push_str("    throw new ValidationError(violations);\n");
+    output.push_str(&format!(
+        "    throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+    ));
     output.push_str("  }\n");
     output.push_str("  return { additionalProperties };\n");
 }
@@ -2372,7 +2379,7 @@ fn render_value_parser(
         output.push_str(indent);
         output.push_str("} catch (error) {\n");
         output.push_str(indent);
-        output.push_str("  collect(violations, ");
+        output.push_str(&format!("  {DEFINITIONS_NAMESPACE}.collect(violations, "));
         output.push_str(path_expr);
         output.push_str(", error);\n");
         output.push_str(indent);
@@ -2433,7 +2440,7 @@ fn render_value_parser(
         output.push_str("} else {\n");
         output.push_str(indent);
         output.push_str("  const parsed = ");
-        output.push_str(parse_fn);
+        output.push_str(&parse_fn);
         output.push('(');
         output.push_str(raw_expr);
         output.push_str(", ");
@@ -2469,7 +2476,7 @@ fn render_value_parser(
         output.push_str("} else {\n");
         output.push_str(indent);
         output.push_str("  const parsed = ");
-        output.push_str(parse_fn);
+        output.push_str(&parse_fn);
         output.push('(');
         output.push_str(raw_expr);
         output.push_str(", ");
@@ -3176,34 +3183,6 @@ fn schema_type_includes(schema: &Schema, ty: &str) -> bool {
             .any(|value| value.as_str().is_some_and(|value| value == ty)),
         _ => false,
     }
-}
-
-fn schema_uses_ref(schema: &Option<Schema>) -> bool {
-    let Some(schema) = schema else {
-        return false;
-    };
-    schema.reference.is_some()
-        || schema.properties.as_ref().is_some_and(|properties| {
-            properties
-                .values()
-                .any(|schema| schema_uses_ref(&Some(schema.clone())))
-        })
-        || schema
-            .items
-            .as_ref()
-            .is_some_and(|items| schema_uses_ref(&Some((**items).clone())))
-        || schema.one_of.as_ref().is_some_and(|branches| {
-            branches
-                .iter()
-                .any(|schema| schema_uses_ref(&Some(schema.clone())))
-        })
-        || schema
-            .additional_properties
-            .as_ref()
-            .and_then(|additional_properties| {
-                serde_json::from_value::<Schema>(additional_properties.clone()).ok()
-            })
-            .is_some_and(|schema| schema_uses_ref(&Some(schema)))
 }
 
 fn join_union(values: Vec<String>) -> String {
