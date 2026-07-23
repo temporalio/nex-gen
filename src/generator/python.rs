@@ -3675,8 +3675,7 @@ fn render_service_module(
                 {
                     if !operation.output_ref.contains('.') {
                         model_type_imports.insert(operation.output_ref.clone());
-                    } else if let Some(type_name) =
-                        operation.output_ref.strip_prefix("_recursive.")
+                    } else if let Some(type_name) = operation.output_ref.strip_prefix("_recursive.")
                     {
                         model_type_imports.insert(type_name.to_string());
                     }

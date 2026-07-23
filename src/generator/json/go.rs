@@ -324,9 +324,7 @@ fn render_go_format_check(
     output.push_str(indent);
     output.push_str("if ");
     if let Some(max) = check.max_code_points {
-        output.push_str(&format!(
-            "utf8.RuneCountInString({value_expr}) > {max} || "
-        ));
+        output.push_str(&format!("utf8.RuneCountInString({value_expr}) > {max} || "));
     }
     output.push_str("!");
     output.push_str(var_name);
@@ -402,7 +400,10 @@ fn go_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) 
     let is_integer = element_ty == Some("integer");
     let mut parts: Vec<String> = Vec::new();
     if let Some(value) = &matcher.const_value {
-        parts.push(format!("{elem} == {}", go_scalar_literal(value, element_ty)));
+        parts.push(format!(
+            "{elem} == {}",
+            go_scalar_literal(value, element_ty)
+        ));
     }
     if let Some(values) = &matcher.enum_values {
         let alternatives = values
@@ -615,7 +616,9 @@ fn render_go_property_name_checks(
     let inner = format!("{indent}\t");
     let mut emit = |condition: &str, reason: &str| {
         output.push_str(&inner);
-        output.push_str(&format!("if n := utf8.RuneCountInString(k); {condition} {{\n"));
+        output.push_str(&format!(
+            "if n := utf8.RuneCountInString(k); {condition} {{\n"
+        ));
         output.push_str(&inner);
         output.push_str(&format!(
             "\terrs = append(errs, Violation{{k, fmt.Sprintf({}, k, n)}})\n",
@@ -625,10 +628,16 @@ fn render_go_property_name_checks(
         output.push_str("}\n");
     };
     if let Some(min) = subschema.min_length {
-        emit(&format!("n < {min}"), &format!("must have length >= {min}, got %d"));
+        emit(
+            &format!("n < {min}"),
+            &format!("must have length >= {min}, got %d"),
+        );
     }
     if let Some(max) = subschema.max_length {
-        emit(&format!("n > {max}"), &format!("must have length <= {max}, got %d"));
+        emit(
+            &format!("n > {max}"),
+            &format!("must have length <= {max}, got %d"),
+        );
     }
     output.push_str(indent);
     output.push_str("}\n");
@@ -863,7 +872,10 @@ impl ModelBackend {
                     &mut output,
                     "\t",
                     operation.doc.for_language(crate::language::Language::Go),
-                    &format!("{operation_field} is the {:?} Nexus operation.", operation.wire_name),
+                    &format!(
+                        "{operation_field} is the {:?} Nexus operation.",
+                        operation.wire_name
+                    ),
                 );
                 output.push('\t');
                 output.push_str(&operation_field);
@@ -944,7 +956,10 @@ fn render_service_client(
         output,
         "",
         service.doc.for_language(crate::language::Language::Go),
-        &format!("{client_name} is a client for the {:?} Nexus service.", service.wire_name),
+        &format!(
+            "{client_name} is a client for the {:?} Nexus service.",
+            service.wire_name
+        ),
     );
     output.push_str("type ");
     output.push_str(&client_name);
@@ -971,7 +986,10 @@ fn render_service_client(
             output,
             "",
             operation.doc.for_language(crate::language::Language::Go),
-            &format!("{operation_field} invokes the {:?} Nexus operation.", operation.wire_name),
+            &format!(
+                "{operation_field} invokes the {:?} Nexus operation.",
+                operation.wire_name
+            ),
         );
         output.push_str("func (c *");
         output.push_str(&client_name);
@@ -1083,7 +1101,10 @@ fn render_external_models(
         output.push('\n');
         render_go_temporal_helpers(&mut output);
     }
-    if models.iter().any(|model| model_uses_content_encoding(model)) {
+    if models
+        .iter()
+        .any(|model| model_uses_content_encoding(model))
+    {
         output.push('\n');
         render_go_content_encoding_helpers(&mut output);
     }
@@ -1153,7 +1174,9 @@ fn render_validator_core(output: &mut String) {
     output.push_str("// Violation is a single constraint failure. Path is the JSON member path\n");
     output.push_str("// (dotted for nested members); Reason is a human-readable message.\n");
     output.push_str("type Violation struct {\n\tPath   string\n\tReason string\n}\n\n");
-    output.push_str("// String implements fmt.Stringer, returning \"Path: Reason\", or just Reason\n");
+    output.push_str(
+        "// String implements fmt.Stringer, returning \"Path: Reason\", or just Reason\n",
+    );
     output.push_str("// when Path is empty.\n");
     output.push_str("func (v Violation) String() string {\n");
     output.push_str("\tif v.Path == \"\" {\n\t\treturn v.Reason\n\t}\n");
@@ -1552,15 +1575,17 @@ fn classify_go_union(
                     .iter()
                     .filter_map(|object| go_branch_discriminator_tags(object).get(*name).cloned())
                     .collect();
-                values.iter().enumerate().all(|(index, value)| {
-                    !values[..index].iter().any(|existing| existing == value)
-                })
+                values
+                    .iter()
+                    .enumerate()
+                    .all(|(index, value)| !values[..index].iter().any(|existing| existing == value))
             })
             .cloned();
         if let Some(name) = &name {
             for variant in variants.iter_mut().filter(|variant| variant.is_object) {
-                variant.discriminant_value =
-                    go_branch_discriminator_tags(&variant.schema).get(name).cloned();
+                variant.discriminant_value = go_branch_discriminator_tags(&variant.schema)
+                    .get(name)
+                    .cloned();
             }
         }
         discriminant = name;
@@ -1588,7 +1613,8 @@ fn collect_go_unions(
     for model in models {
         let schema = decode_schema(model)?;
         if schema.one_of.is_some() {
-            if let Some(union) = classify_go_union(&model.model_name, &schema, models, model_names) {
+            if let Some(union) = classify_go_union(&model.model_name, &schema, models, model_names)
+            {
                 unions.insert(union.name.clone(), union);
             }
             continue;
@@ -1597,9 +1623,7 @@ fn collect_go_unions(
             for (json_name, property) in properties {
                 if property.one_of.is_some() {
                     let name = format!("{}{}", model.model_name, go_union_field_suffix(json_name));
-                    if let Some(union) =
-                        classify_go_union(&name, property, models, model_names)
-                    {
+                    if let Some(union) = classify_go_union(&name, property, models, model_names) {
                         unions.insert(union.name.clone(), union);
                     }
                 }
@@ -1697,7 +1721,8 @@ fn render_go_unions(
 /// The wrapper `Validate` for a synthesized scalar/array variant: re-runs the
 /// branch's own constraints (P12) before assigning/serializing.
 fn render_go_variant_validate(output: &mut String, variant: &GoUnionVariant) {
-    output.push_str("// Validate checks v against every constraint and returns a *ValidationError\n");
+    output
+        .push_str("// Validate checks v against every constraint and returns a *ValidationError\n");
     output.push_str("// listing any violations.\n");
     output.push_str("func (v ");
     output.push_str(&variant.go_type);
@@ -1743,8 +1768,11 @@ fn render_go_union_dispatch(output: &mut String, union: &GoUnion) {
     output.push_str("\tswitch trimmed[0] {\n");
 
     // Object branch(es).
-    let object_variants: Vec<&GoUnionVariant> =
-        union.variants.iter().filter(|variant| variant.is_object).collect();
+    let object_variants: Vec<&GoUnionVariant> = union
+        .variants
+        .iter()
+        .filter(|variant| variant.is_object)
+        .collect();
     if !object_variants.is_empty() {
         output.push_str("\tcase '{':\n");
         if let Some(discriminant) = &union.discriminant {
@@ -1933,9 +1961,7 @@ fn render_model(
         }
     }
     if is_open_object(&schema) {
-        output.push_str(
-            "\t// AdditionalProperties holds unknown members verbatim.\n",
-        );
+        output.push_str("\t// AdditionalProperties holds unknown members verbatim.\n");
         output.push_str("\tAdditionalProperties map[string]json.RawMessage `json:\"-\"`\n");
     }
     output.push_str("}\n\n");
@@ -2018,7 +2044,8 @@ fn render_validate(
     model_names: &BTreeMap<String, String>,
     unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
-    output.push_str("// Validate checks m against every constraint and returns a *ValidationError\n");
+    output
+        .push_str("// Validate checks m against every constraint and returns a *ValidationError\n");
     output.push_str("// listing any violations.\n");
     output.push_str("func (m ");
     output.push_str(&model.model_name);
@@ -2125,10 +2152,19 @@ fn render_validate(
                 if required_fields(schema).contains(json_name) {
                     render_go_string_checks(output, &field, json_name, property, "\t");
                     if let Some(pattern) = &property.pattern {
-                        render_go_pattern_check(output, &field, json_name, &var_name, pattern, "\t");
+                        render_go_pattern_check(
+                            output, &field, json_name, &var_name, pattern, "\t",
+                        );
                     }
                     if let Some(format) = &property.format {
-                        render_go_format_check(output, &field, json_name, &format_var, format, "\t");
+                        render_go_format_check(
+                            output,
+                            &field,
+                            json_name,
+                            &format_var,
+                            format,
+                            "\t",
+                        );
                     }
                 } else {
                     output.push_str("\tif ");
@@ -2764,7 +2800,8 @@ fn render_typed_map_methods(
     value_schema: &Schema,
     _model_names: &BTreeMap<String, String>,
 ) -> Result<()> {
-    output.push_str("// Validate checks m against every constraint and returns a *ValidationError\n");
+    output
+        .push_str("// Validate checks m against every constraint and returns a *ValidationError\n");
     output.push_str("// listing any violations.\n");
     output.push_str("func (m ");
     output.push_str(&model.model_name);
@@ -3546,7 +3583,10 @@ fn go_closed_reason(values: &[Value], got_expr: &str) -> String {
         go_string_literal(&text)
     } else {
         let verb = values.first().map(go_closed_verb).unwrap_or("%v");
-        let template = format!("must be one of [{}], got {verb}", go_closed_set_display(values));
+        let template = format!(
+            "must be one of [{}], got {verb}",
+            go_closed_set_display(values)
+        );
         format!("fmt.Sprintf({}, {got_expr})", go_string_literal(&template))
     }
 }
@@ -3685,7 +3725,10 @@ fn render_closed_value_unmarshal(
 /// `doc` is absent — every exported declaration must carry a doc comment
 /// (json-schema/PRINCIPLES.md, Go §1).
 fn render_go_doc_comment(output: &mut String, indent: &str, doc: Option<&str>, fallback: &str) {
-    let text = doc.map(str::trim).filter(|doc| !doc.is_empty()).unwrap_or(fallback);
+    let text = doc
+        .map(str::trim)
+        .filter(|doc| !doc.is_empty())
+        .unwrap_or(fallback);
     for line in text.lines() {
         output.push_str(indent);
         output.push_str("// ");
@@ -3720,7 +3763,11 @@ fn render_go_schema_doc(
             format!("{name} {text}")
         }
     };
-    let title = schema.title.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    let title = schema
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
     let description = schema
         .description
         .as_deref()

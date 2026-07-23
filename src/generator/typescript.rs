@@ -90,7 +90,14 @@ fn generate_tree(
     insert_branch_index_file(&mut files, branch)?;
     insert_files(&mut files, render_tree_support_files(branch))?;
     for node in branch.children.values() {
-        generate_tree_node(node, support, mode, js_temporal_repr, &mut files, &mut warnings)?;
+        generate_tree_node(
+            node,
+            support,
+            mode,
+            js_temporal_repr,
+            &mut files,
+            &mut warnings,
+        )?;
     }
     Ok(GeneratedFiles {
         layout: crate::generator::GeneratedOutputLayout::Directory,
@@ -110,8 +117,7 @@ fn generate_tree_node(
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            let generated =
-                generate_leaf(&leaf.spec, &support_fragments, mode, js_temporal_repr)?;
+            let generated = generate_leaf(&leaf.spec, &support_fragments, mode, js_temporal_repr)?;
             warnings.extend(generated.warnings);
             let prefix = leaf.module_path.to_path_buf();
             for (path, mut contents) in generated.files {

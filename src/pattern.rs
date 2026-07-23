@@ -324,11 +324,14 @@ mod tests {
         for pair in corpus["pairs"].as_array().expect("pairs array") {
             let id = pair["id"].as_str().unwrap_or("<no id>");
             let pattern = pair["pattern"].as_str().expect("pattern string");
-            let expect_reject = pair["expect_gate_reject"].as_bool().unwrap_or(false)
-                || id == "case-inline-flag";
+            let expect_reject =
+                pair["expect_gate_reject"].as_bool().unwrap_or(false) || id == "case-inline-flag";
             let result = gate_and_normalize(pattern);
             if expect_reject {
-                assert!(result.is_err(), "pair `{id}` ({pattern:?}) should gate-reject");
+                assert!(
+                    result.is_err(),
+                    "pair `{id}` ({pattern:?}) should gate-reject"
+                );
             } else {
                 assert!(
                     result.is_ok(),

@@ -136,9 +136,7 @@ impl Schema {
 }
 
 fn py_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
-    if is_integer
-        && let Some(value) = number.as_f64()
-    {
+    if is_integer && let Some(value) = number.as_f64() {
         return (value.trunc() as i64).to_string();
     }
     number.to_string()
@@ -1512,8 +1510,10 @@ fn render_object_constraints_validator(output: &mut String, schema: &Schema) {
                 ));
                 output.push_str("                errors.append(\n");
                 output.push_str("                    pydantic_core.InitErrorDetails(\n");
-                output.push_str("                        type=pydantic_core.PydanticCustomError(\n");
-                let reason = format!("property \"{dep}\" is required when \"{trigger}\" is present");
+                output
+                    .push_str("                        type=pydantic_core.PydanticCustomError(\n");
+                let reason =
+                    format!("property \"{dep}\" is required when \"{trigger}\" is present");
                 output.push_str(&format!(
                     "                            \"dependent_required\", {}\n",
                     python_string_literal(&reason)
@@ -1643,7 +1643,10 @@ fn py_matcher_condition(matcher: &Schema, elem: &str) -> Result<String> {
         parts.push(format!("{elem} < {}", py_bound_literal(max, is_integer)));
     }
     if let Some(divisor) = &matcher.multiple_of {
-        parts.push(format!("{elem} % {} == 0", py_bound_literal(divisor, is_integer)));
+        parts.push(format!(
+            "{elem} % {} == 0",
+            py_bound_literal(divisor, is_integer)
+        ));
     }
     if let Some(min) = matcher.min_length {
         parts.push(format!("len({elem}) >= {min}"));
@@ -1661,7 +1664,10 @@ fn py_matcher_condition(matcher: &Schema, elem: &str) -> Result<String> {
 /// Emits one `_validate_arrays` after-validator covering every array field that
 /// needs `uniqueItems` / `contains` enforcement (both lack a native Pydantic
 /// equivalent). Violations aggregate into a single `pydantic.ValidationError`.
-fn render_array_validators(output: &mut String, fields: &[(String, String, &Schema)]) -> Result<()> {
+fn render_array_validators(
+    output: &mut String,
+    fields: &[(String, String, &Schema)],
+) -> Result<()> {
     if fields.is_empty() {
         return Ok(());
     }
@@ -1681,7 +1687,8 @@ fn render_array_validators(output: &mut String, fields: &[(String, String, &Sche
             output.push_str("                if element in seen:\n");
             output.push_str("                    errors.append(\n");
             output.push_str("                        pydantic_core.InitErrorDetails(\n");
-            output.push_str("                            type=pydantic_core.PydanticCustomError(\n");
+            output
+                .push_str("                            type=pydantic_core.PydanticCustomError(\n");
             output.push_str(
                 "                                \"unique_items\", typing.cast(typing.Any, f\"duplicate items: element at index {index} equals index {seen[element]}\")\n",
             );
@@ -1928,9 +1935,7 @@ fn render_field_expr(
         if let Some(max) = &property.exclusive_maximum {
             arguments.push(format!("lt={}", py_bound_literal(max, is_integer)));
         }
-        if is_integer
-            && let Some(divisor) = &property.multiple_of
-        {
+        if is_integer && let Some(divisor) = &property.multiple_of {
             arguments.push(format!("multiple_of={}", py_bound_literal(divisor, true)));
         }
     }

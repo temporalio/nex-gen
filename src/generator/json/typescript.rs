@@ -104,7 +104,11 @@ fn ts_temporal_parse_fn(kind: TemporalKind) -> &'static str {
 /// temporals (all of `string` mode, plus `date`/`time`/`duration` in `date` mode
 /// and `time` in `temporal` mode) are already canonical and pass through; the
 /// native-typed ones call a runtime serializer.
-fn ts_temporal_serialize_call(kind: TemporalKind, repr: JsTemporalRepr, value_expr: &str) -> String {
+fn ts_temporal_serialize_call(
+    kind: TemporalKind,
+    repr: JsTemporalRepr,
+    value_expr: &str,
+) -> String {
     let native = matches!(
         (kind, repr),
         (TemporalKind::DateTime, JsTemporalRepr::Date)
@@ -219,9 +223,7 @@ impl Schema {
 }
 
 fn ts_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
-    if is_integer
-        && let Some(value) = number.as_f64()
-    {
+    if is_integer && let Some(value) = number.as_f64() {
         return (value.trunc() as i64).to_string();
     }
     number.to_string()
@@ -577,7 +579,10 @@ fn ts_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) 
     let is_integer = element_ty == Some("integer");
     let mut parts: Vec<String> = Vec::new();
     if let Some(value) = &matcher.const_value {
-        parts.push(format!("{elem} === {}", ts_scalar_literal(value, element_ty)));
+        parts.push(format!(
+            "{elem} === {}",
+            ts_scalar_literal(value, element_ty)
+        ));
     }
     if let Some(values) = &matcher.enum_values {
         let alternatives = values
@@ -602,7 +607,10 @@ fn ts_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) 
         parts.push(format!("{elem} < {}", ts_bound_literal(max, is_integer)));
     }
     if let Some(divisor) = &matcher.multiple_of {
-        parts.push(format!("{elem} % {} === 0", ts_bound_literal(divisor, is_integer)));
+        parts.push(format!(
+            "{elem} % {} === 0",
+            ts_bound_literal(divisor, is_integer)
+        ));
     }
     if let Some(min) = matcher.min_length {
         parts.push(format!("[...{elem}].length >= {min}"));
@@ -922,7 +930,10 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
 
     fn render_models(&self) -> Result<RenderedExternalModelFragments> {
         let json_models = self.json_models.iter().collect::<Vec<_>>();
-        set_temporal_context(self.js_temporal_repr, self.json_models.iter().any(|m| model_uses_temporal(m)));
+        set_temporal_context(
+            self.js_temporal_repr,
+            self.json_models.iter().any(|m| model_uses_temporal(m)),
+        );
         set_content_encoding_context(self.json_models.iter().any(model_uses_content_encoding));
         render_external_models(json_models.as_slice(), &self.runtime_import_module)
     }
@@ -931,7 +942,10 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         if self.tree_leaf || self.json_models.is_empty() {
             return Ok(BTreeMap::new());
         }
-        set_temporal_context(self.js_temporal_repr, self.json_models.iter().any(|m| model_uses_temporal(m)));
+        set_temporal_context(
+            self.js_temporal_repr,
+            self.json_models.iter().any(|m| model_uses_temporal(m)),
+        );
         set_content_encoding_context(self.json_models.iter().any(model_uses_content_encoding));
 
         Ok(BTreeMap::from([(
@@ -1241,7 +1255,8 @@ fn render_ts_temporal_helpers(output: &mut String, repr: JsTemporalRepr) {
     output.push_str(&format!(
         "export function parseTemporalDateTime(value: string, path: string, violations: Violation[]): {dt_type} | undefined {{\n"
     ));
-    output.push_str("  if (!TEMPORAL_DATE_TIME_RE.test(value) || !validTemporalCalendar(value)) {\n");
+    output
+        .push_str("  if (!TEMPORAL_DATE_TIME_RE.test(value) || !validTemporalCalendar(value)) {\n");
     output.push_str("    violations.push({ path, reason: `must be a valid date-time, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
     match repr {
         JsTemporalRepr::String => {
@@ -1678,7 +1693,8 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                 label: "boolean".to_string(),
             }),
             Some("array") => {
-                let ts_type = type_annotation(&resolved).unwrap_or_else(|_| "unknown[]".to_string());
+                let ts_type =
+                    type_annotation(&resolved).unwrap_or_else(|_| "unknown[]".to_string());
                 variants.push(TsUnionVariant {
                     ts_type: ts_type.clone(),
                     is_object: false,
@@ -1714,9 +1730,10 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                     .iter()
                     .filter_map(|object| ts_branch_discriminator_tags(object).get(*name).cloned())
                     .collect();
-                values.iter().enumerate().all(|(index, value)| {
-                    !values[..index].iter().any(|existing| existing == value)
-                })
+                values
+                    .iter()
+                    .enumerate()
+                    .all(|(index, value)| !values[..index].iter().any(|existing| existing == value))
             })
             .cloned();
         if let Some(name) = &name {
@@ -1760,12 +1777,18 @@ fn render_ts_union_parse(
         }
     };
 
-    let object_variants: Vec<&TsUnionVariant> =
-        union.variants.iter().filter(|variant| variant.is_object).collect();
+    let object_variants: Vec<&TsUnionVariant> = union
+        .variants
+        .iter()
+        .filter(|variant| variant.is_object)
+        .collect();
     if !object_variants.is_empty() {
         clause(output, &format!("isPlainObject({raw_expr})"));
         if let Some(discriminant) = &union.discriminant {
-            let disc_key = format!("({raw_expr} as Record<string, unknown>)[{}]", typescript_string_literal(discriminant));
+            let disc_key = format!(
+                "({raw_expr} as Record<string, unknown>)[{}]",
+                typescript_string_literal(discriminant)
+            );
             output.push_str(indent);
             output.push_str(&format!("  switch ({disc_key}) {{\n"));
             let mut values_display = Vec::new();
@@ -1788,7 +1811,9 @@ fn render_ts_union_parse(
                 output.push_str(indent);
                 output.push_str("      } catch (error) {\n");
                 output.push_str(indent);
-                output.push_str(&format!("        collect(violations, {path_expr}, error);\n"));
+                output.push_str(&format!(
+                    "        collect(violations, {path_expr}, error);\n"
+                ));
                 output.push_str(indent);
                 output.push_str("      }\n");
                 output.push_str(indent);
@@ -1833,13 +1858,19 @@ fn render_ts_union_parse(
             clause(output, &format!("typeof {raw_expr} === '{guard}'"));
         }
         output.push_str(indent);
-        output.push_str(&format!("  {target} = {raw_expr} as {};\n", variant.ts_type));
+        output.push_str(&format!(
+            "  {target} = {raw_expr} as {};\n",
+            variant.ts_type
+        ));
     }
 
     if union.nullable {
         clause(output, &format!("{raw_expr} === null"));
         output.push_str(indent);
-        output.push_str(&format!("  {target} = null as unknown as {};\n", union.variants[0].ts_type));
+        output.push_str(&format!(
+            "  {target} = null as unknown as {};\n",
+            union.variants[0].ts_type
+        ));
     }
 
     output.push_str(indent);
@@ -1930,9 +1961,7 @@ fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Resul
             if property.const_value.is_some() {
                 output.push_str("readonly ");
             }
-            output.push_str(&typescript_object_key(&property.ts_member_name(
-                json_name,
-            )));
+            output.push_str(&typescript_object_key(&property.ts_member_name(json_name)));
             if !required.contains(json_name) {
                 output.push('?');
             }
@@ -2043,10 +2072,7 @@ fn render_model_parser_body(
                 property,
                 required.contains(json_name),
             )?;
-            parsed_fields.push((
-                json_name.clone(),
-                property.ts_member_name(json_name),
-            ));
+            parsed_fields.push((json_name.clone(), property.ts_member_name(json_name)));
             output.push('\n');
         }
     }
@@ -2701,7 +2727,12 @@ fn render_closed_value_parser(
     output.push_str(raw_expr);
     // The membership check has narrowed `raw` to the base scalar type; cast it to
     // the closed literal union that types the field.
-    let cast_type = join_union(values.iter().filter_map(typescript_const_annotation).collect());
+    let cast_type = join_union(
+        values
+            .iter()
+            .filter_map(typescript_const_annotation)
+            .collect(),
+    );
     if !cast_type.is_empty() {
         output.push_str(" as ");
         output.push_str(&cast_type);
@@ -2928,7 +2959,10 @@ fn serialize_expr(schema: &Schema, value_expr: &str) -> String {
     // A materialized `contentEncoding` re-encodes bytes to the canonical wire
     // string via the generator-owned pure-JS codec.
     if let Some(encoding) = content_encoding_direct(schema) {
-        return format!("{}({value_expr})", ts_content_encoding_serialize_fn(encoding));
+        return format!(
+            "{}({value_expr})",
+            ts_content_encoding_serialize_fn(encoding)
+        );
     }
     if let Some(branches) = &schema.one_of
         && branches
@@ -3292,10 +3326,20 @@ fn render_doc_comment(output: &mut String, indent: &str, doc: Option<&str>) {
 /// See json-schema/features/{title,description,deprecated}.md.
 fn render_ts_schema_doc(output: &mut String, indent: &str, schema: &Schema) {
     let mut lines: Vec<String> = Vec::new();
-    if let Some(title) = schema.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+    if let Some(title) = schema
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
         lines.push(title.to_string());
     }
-    if let Some(desc) = schema.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+    if let Some(desc) = schema
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
         for line in desc.lines() {
             lines.push(line.trim().to_string());
         }

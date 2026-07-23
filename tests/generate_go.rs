@@ -518,9 +518,7 @@ fn go_json_generation_matches_checked_in_output() {
                             generated
                                 .contains("func NewKnowledgeBaseServiceClient(endpoint string)")
                         );
-                        assert!(
-                            generated.contains("nexus.OperationReference[GetPageInput, Page]")
-                        );
+                        assert!(generated.contains("nexus.OperationReference[GetPageInput, Page]"));
                         assert!(
                             generated.contains("nexus.OperationReference[Block, PutBlockOutput]")
                         );
@@ -534,20 +532,23 @@ fn go_json_generation_matches_checked_in_output() {
                         assert!(generated.contains("type Showcase struct"));
                         assert!(generated.contains("func (m Showcase) RetriesOrDefault() int64"));
                         // Scalar defaults of every kind materialize on read.
-                        assert!(generated.contains(
-                            "func (m Showcase) GreetingOrDefault() string {"
-                        ));
+                        assert!(
+                            generated.contains("func (m Showcase) GreetingOrDefault() string {")
+                        );
                         assert!(generated.contains("return \"hello\""));
-                        assert!(generated
-                            .contains("func (m Showcase) DebugOrDefault() bool {"));
+                        assert!(generated.contains("func (m Showcase) DebugOrDefault() bool {"));
                         // `title` → name-led doc summary; `deprecated` → godoc marker.
                         assert!(generated.contains("// Retries Retry budget"));
-                        assert!(generated
-                            .contains("// Deprecated: This field is deprecated."));
+                        assert!(generated.contains("// Deprecated: This field is deprecated."));
                         // `x-go-name` override (Stage 4): the emitted identifier
                         // is the forced initialism while the wire name is pinned.
-                        assert!(generated.contains("LegacyID *string `json:\"legacyId,omitempty\"`"));
-                        assert!(generated.contains("marshalField(out, \"legacyId\", *m.LegacyID, &errs)"));
+                        assert!(
+                            generated.contains("LegacyID *string `json:\"legacyId,omitempty\"`")
+                        );
+                        assert!(
+                            generated
+                                .contains("marshalField(out, \"legacyId\", *m.LegacyID, &errs)")
+                        );
                         assert!(!generated.contains("LegacyId "));
                         assert!(!generated.contains("Service = struct"));
                         assert!(!generated.contains("ServiceClient"));
@@ -1245,7 +1246,11 @@ fn go_rejects_inputs_flattening_to_the_same_module_file() {
         )
     };
     fs::write(temp_dir.join("full_name.json"), schema("FlatThing")).unwrap();
-    fs::write(temp_dir.join("full").join("name.json"), schema("NestedThing")).unwrap();
+    fs::write(
+        temp_dir.join("full").join("name.json"),
+        schema("NestedThing"),
+    )
+    .unwrap();
     let output_path = temp_dir.join("output");
 
     let result = generate_to_file(&GenerateRequest {

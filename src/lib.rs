@@ -708,8 +708,12 @@ fn build_json_example_variant(
     js_temporal_repr: generator::JsTemporalRepr,
 ) -> Result<()> {
     let input_path = json_example_input_path(repo_root, input_id);
-    let definitions_output_path =
-        json_example_output_path(repo_root, language, output_id, GenerationMode::DefinitionsOnly);
+    let definitions_output_path = json_example_output_path(
+        repo_root,
+        language,
+        output_id,
+        GenerationMode::DefinitionsOnly,
+    );
 
     generate_to_file(&GenerateRequest {
         language,

@@ -153,11 +153,9 @@ services:
 
     #[test]
     fn generic_loader_rejects_unsupported_input_format() {
-        let error = load_api_spec_for_language_with_inputs(
-            Language::Python,
-            &[PathBuf::from("api.txt")],
-        )
-        .unwrap_err();
+        let error =
+            load_api_spec_for_language_with_inputs(Language::Python, &[PathBuf::from("api.txt")])
+                .unwrap_err();
 
         assert!(error.to_string().contains("unsupported input format"));
     }

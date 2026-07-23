@@ -87,7 +87,10 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
 
         let rendered = read_java_files(&output_path);
         let expected = read_java_files(&java_example_output_path(&root, mode, example_id));
-        assert_eq!(rendered, expected, "snapshot mismatch for {mode}/{example_id}");
+        assert_eq!(
+            rendered, expected,
+            "snapshot mismatch for {mode}/{example_id}"
+        );
         if example_id == "showcase" {
             let all = rendered.values().cloned().collect::<Vec<_>>().join("\n");
             // Scalar defaults surface on read via the generated getter default.

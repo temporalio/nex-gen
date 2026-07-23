@@ -372,7 +372,9 @@ fn render_java_property_name_checks(
     output.push_str(&format!(
         "{indent}Iterator<String> propertyNameKeys = {node_expr}.fieldNames();\n{indent}while (propertyNameKeys.hasNext()) {{\n"
     ));
-    output.push_str(&format!("{indent}    String pnKey = propertyNameKeys.next();\n"));
+    output.push_str(&format!(
+        "{indent}    String pnKey = propertyNameKeys.next();\n"
+    ));
     output.push_str(&format!(
         "{indent}    int pnLength = pnKey.codePointCount(0, pnKey.length());\n"
     ));
@@ -430,9 +432,7 @@ fn java_scalar_literal(value: &Value, element_ty: &JavaType) -> String {
     match value {
         Value::String(text) => java_string_literal(text),
         Value::Bool(boolean) => boolean.to_string(),
-        Value::Number(number) => {
-            java_bound_literal(number, matches!(element_ty, JavaType::Long))
-        }
+        Value::Number(number) => java_bound_literal(number, matches!(element_ty, JavaType::Long)),
         _ => "null".to_string(),
     }
 }
@@ -479,13 +479,20 @@ fn java_matcher_condition(matcher: &Schema, elem: &str, element_ty: &JavaType) -
         parts.push(format!("{elem} < {}", java_bound_literal(max, is_integer)));
     }
     if let Some(divisor) = &matcher.multiple_of {
-        parts.push(format!("{elem} % {} == 0", java_bound_literal(divisor, is_integer)));
+        parts.push(format!(
+            "{elem} % {} == 0",
+            java_bound_literal(divisor, is_integer)
+        ));
     }
     if let Some(min) = matcher.min_length {
-        parts.push(format!("{elem}.codePointCount(0, {elem}.length()) >= {min}"));
+        parts.push(format!(
+            "{elem}.codePointCount(0, {elem}.length()) >= {min}"
+        ));
     }
     if let Some(max) = matcher.max_length {
-        parts.push(format!("{elem}.codePointCount(0, {elem}.length()) <= {max}"));
+        parts.push(format!(
+            "{elem}.codePointCount(0, {elem}.length()) <= {max}"
+        ));
     }
     if parts.is_empty() {
         "true".to_string()
@@ -522,8 +529,12 @@ fn render_java_array_checks(
         output.push_str(&format!(
             "{indent}for (int index = 0; index < {list}.size(); index++) {{\n"
         ));
-        output.push_str(&format!("{indent}    {boxed} element = {list}.get(index);\n"));
-        output.push_str(&format!("{indent}    Integer priorIndex = seen.get(element);\n"));
+        output.push_str(&format!(
+            "{indent}    {boxed} element = {list}.get(index);\n"
+        ));
+        output.push_str(&format!(
+            "{indent}    Integer priorIndex = seen.get(element);\n"
+        ));
         output.push_str(&format!("{indent}    if (priorIndex != null) {{\n"));
         output.push_str(&format!(
             "{indent}        violations.add(new Violation({json}, \"duplicate items: element at index \" + index + \" equals index \" + priorIndex));\n"
@@ -641,7 +652,10 @@ pub(in crate::generator) struct JavaContext<'a> {
 }
 
 impl JavaContext<'_> {
-    pub(in crate::generator) fn package_for_module(base_package: &str, module: &[String]) -> String {
+    pub(in crate::generator) fn package_for_module(
+        base_package: &str,
+        module: &[String],
+    ) -> String {
         if module.is_empty() {
             base_package.to_string()
         } else {
@@ -722,11 +736,16 @@ enum JavaType {
     Double,
     Boolean,
     String,
-    Ref { package: String, class: String },
+    Ref {
+        package: String,
+        class: String,
+    },
     List(Box<JavaType>),
     /// A `oneOf` sum type — a sealed-by-convention interface. `class` is the
     /// (possibly nested) interface name.
-    Union { class: String },
+    Union {
+        class: String,
+    },
     /// A materialized temporal `format` (native `java.time` construct, or a
     /// validated+canonicalized `String` for `time` — no single `java.time` type
     /// holds both offset-bearing and offset-less time). See `format.md`.
@@ -936,7 +955,8 @@ fn classify_java_union(
     let mut variants: Vec<JavaUnionVariant> = Vec::new();
     let mut object_schemas: Vec<Schema> = Vec::new();
     for branch in branches {
-        let (member_schema, object_class, member_full) = if let Some(reference) = &branch.reference {
+        let (member_schema, object_class, member_full) = if let Some(reference) = &branch.reference
+        {
             let full = strip_ref(reference).to_string();
             let member_schema = all_models
                 .get(&full)
@@ -1042,19 +1062,19 @@ fn classify_java_union(
                     .iter()
                     .filter_map(|object| java_branch_discriminator_tags(object).get(*name).cloned())
                     .collect();
-                values.iter().enumerate().all(|(index, value)| {
-                    !values[..index].iter().any(|existing| existing == value)
-                })
+                values
+                    .iter()
+                    .enumerate()
+                    .all(|(index, value)| !values[..index].iter().any(|existing| existing == value))
             })
             .cloned();
         if let Some(name) = &name {
             let mut object_index = 0;
             for variant in variants.iter_mut().filter(|variant| variant.is_object) {
-                variant.discriminant_value = java_branch_discriminator_tags(
-                    &object_schemas[object_index],
-                )
-                .get(name)
-                .cloned();
+                variant.discriminant_value =
+                    java_branch_discriminator_tags(&object_schemas[object_index])
+                        .get(name)
+                        .cloned();
                 object_index += 1;
             }
         }
@@ -1108,7 +1128,10 @@ impl FieldPlan {
     fn is_primitive(&self) -> bool {
         self.required
             && !self.nullable
-            && matches!(self.ty, JavaType::Long | JavaType::Double | JavaType::Boolean)
+            && matches!(
+                self.ty,
+                JavaType::Long | JavaType::Double | JavaType::Boolean
+            )
     }
 
     fn nullable_annotation(&self) -> bool {
@@ -1354,11 +1377,16 @@ pub(in crate::generator) fn render_model_file(
             module,
             registry,
         };
-        if let Some(union) =
-            classify_java_union(&other.model_name, false, &other_schema, all_models, &other_context)
-            && union.variants.iter().any(|variant| {
-                variant.member_full_name.as_deref() == Some(model.full_name.as_str())
-            })
+        if let Some(union) = classify_java_union(
+            &other.model_name,
+            false,
+            &other_schema,
+            all_models,
+            &other_context,
+        ) && union
+            .variants
+            .iter()
+            .any(|variant| variant.member_full_name.as_deref() == Some(model.full_name.as_str()))
         {
             implements.push(other.model_name.clone());
         }
@@ -1370,7 +1398,15 @@ pub(in crate::generator) fn render_model_file(
     let mut refs = BTreeSet::new();
     match &kind {
         ModelKind::Object { open, fields } => {
-            render_object_class(&mut body, class, &schema, *open, fields, &implements, &mut refs);
+            render_object_class(
+                &mut body,
+                class,
+                &schema,
+                *open,
+                fields,
+                &implements,
+                &mut refs,
+            );
         }
         ModelKind::TypedMap {
             value,
@@ -1396,7 +1432,14 @@ fn render_union_interface(
             underlying.collect_refs(refs);
         }
     }
-    render_java_schema_doc(output, "", schema.title.as_deref(), schema.description.as_deref(), schema.deprecated == Some(true), "type");
+    render_java_schema_doc(
+        output,
+        "",
+        schema.title.as_deref(),
+        schema.description.as_deref(),
+        schema.deprecated == Some(true),
+        "type",
+    );
     output.push_str(&format!("public interface {} {{\n", union.interface));
     output.push_str(&format!(
         "    static @Nullable {} fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {{\n",
@@ -1417,8 +1460,11 @@ fn render_union_dispatch_body(
     indent: &str,
 ) {
     let admissible = union.admissible();
-    let object_variants: Vec<&JavaUnionVariant> =
-        union.variants.iter().filter(|variant| variant.is_object).collect();
+    let object_variants: Vec<&JavaUnionVariant> = union
+        .variants
+        .iter()
+        .filter(|variant| variant.is_object)
+        .collect();
     if !object_variants.is_empty() {
         output.push_str(&format!("{indent}if ({node}.isObject()) {{\n"));
         if let Some(discriminant) = &union.discriminant {
@@ -1436,10 +1482,22 @@ fn render_union_dispatch_body(
                 let Some(value) = &variant.discriminant_value else {
                     continue;
                 };
-                let text = value.as_str().map(str::to_string).unwrap_or_else(|| value.to_string());
+                let text = value
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| value.to_string());
                 values_display.push(text.clone());
-                output.push_str(&format!("{indent}        case {}:\n", java_string_literal(&text)));
-                render_union_read_object(output, variant, node, path, &format!("{indent}            "));
+                output.push_str(&format!(
+                    "{indent}        case {}:\n",
+                    java_string_literal(&text)
+                ));
+                render_union_read_object(
+                    output,
+                    variant,
+                    node,
+                    path,
+                    &format!("{indent}            "),
+                );
             }
             output.push_str(&format!("{indent}        default:\n"));
             output.push_str(&format!(
@@ -1461,7 +1519,9 @@ fn render_union_dispatch_body(
         output.push_str(&format!("{indent}}}\n"));
     }
     if union.nullable {
-        output.push_str(&format!("{indent}if ({node}.isNull()) {{\n{indent}    return null;\n{indent}}}\n"));
+        output.push_str(&format!(
+            "{indent}if ({node}.isNull()) {{\n{indent}    return null;\n{indent}}}\n"
+        ));
     }
     output.push_str(&format!(
         "{indent}violations.add(new Violation({path}, {}));\n{indent}return null;\n",
@@ -1482,7 +1542,9 @@ fn render_union_read_object(
         "{indent}    return context.readTreeAsValue({node}, {}.class);\n",
         variant.class
     ));
-    output.push_str(&format!("{indent}}} catch (ValidationException nested) {{\n"));
+    output.push_str(&format!(
+        "{indent}}} catch (ValidationException nested) {{\n"
+    ));
     output.push_str(&format!(
         "{indent}    for (Violation violation : nested.getViolations()) {{\n{indent}        violations.add(violation.withPathPrefix({path}));\n{indent}    }}\n"
     ));
@@ -1536,7 +1598,10 @@ fn render_union_read_scalar(
 /// Renders an inline union's nested interface and scalar/array wrapper classes
 /// inside the enclosing POJO.
 fn render_nested_union(output: &mut String, union: &JavaUnion) {
-    output.push_str(&format!("    public interface {} {{}}\n\n", union.interface));
+    output.push_str(&format!(
+        "    public interface {} {{}}\n\n",
+        union.interface
+    ));
     for variant in &union.variants {
         let Some(underlying) = &variant.underlying else {
             continue;
@@ -1749,7 +1814,14 @@ fn render_object_class(
         field.ty.collect_refs(refs);
     }
 
-    render_java_schema_doc(output, "", schema.title.as_deref(), schema.description.as_deref(), schema.deprecated == Some(true), "type");
+    render_java_schema_doc(
+        output,
+        "",
+        schema.title.as_deref(),
+        schema.description.as_deref(),
+        schema.deprecated == Some(true),
+        "type",
+    );
     let implements_clause = if implements.is_empty() {
         String::new()
     } else {
@@ -1831,7 +1903,9 @@ fn render_object_class(
         if field.deprecated {
             // Native marker on the public getter: `@Deprecated` annotation plus a
             // Javadoc `@deprecated` tag (the rationale lives on the field above).
-            output.push_str("    /**\n     * @deprecated This field is deprecated.\n     */\n    @Deprecated\n");
+            output.push_str(
+                "    /**\n     * @deprecated This field is deprecated.\n     */\n    @Deprecated\n",
+            );
         }
         output.push_str(&format!(
             "    public {return_type} get{}() {{\n        return {};\n    }}\n\n",
@@ -1915,7 +1989,10 @@ fn render_equals_hashcode_tostring(
         if field.is_primitive() {
             comparisons.push(format!("this.{0} == that.{0}", field.java_name));
         } else {
-            comparisons.push(format!("Objects.equals(this.{0}, that.{0})", field.java_name));
+            comparisons.push(format!(
+                "Objects.equals(this.{0}, that.{0})",
+                field.java_name
+            ));
         }
     }
     if open {
@@ -2046,11 +2123,21 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
                 &field.string_length,
                 &inner,
             ),
-            JavaType::Long if !field.numeric.is_empty() => {
-                render_java_numeric_checks(&mut body, &accessor, &json, &field.numeric, true, &inner)
-            }
+            JavaType::Long if !field.numeric.is_empty() => render_java_numeric_checks(
+                &mut body,
+                &accessor,
+                &json,
+                &field.numeric,
+                true,
+                &inner,
+            ),
             JavaType::Double if !field.numeric.is_empty() => render_java_numeric_checks(
-                &mut body, &accessor, &json, &field.numeric, false, &inner,
+                &mut body,
+                &accessor,
+                &json,
+                &field.numeric,
+                false,
+                &inner,
             ),
             JavaType::List(element_ty) if !field.array.is_empty() => render_java_array_checks(
                 &mut body,
@@ -2070,7 +2157,9 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
         // A stored primitive is always present; a bare block scopes the locals.
         output.push_str(&format!("{indent}{{\n{body}{indent}}}\n"));
     } else {
-        output.push_str(&format!("{indent}if ({accessor} != null) {{\n{body}{indent}}}\n"));
+        output.push_str(&format!(
+            "{indent}if ({accessor} != null) {{\n{body}{indent}}}\n"
+        ));
     }
 }
 
@@ -2318,7 +2407,9 @@ fn write_value_statement(ty: &JavaType, json: &str, accessor: &str, indent: &str
             java_content_encoding_format_fn(*encoding)
         ),
         JavaType::Ref { .. } | JavaType::List(_) | JavaType::Union { .. } => {
-            format!("{indent}gen.writeFieldName({json});\n{indent}serializers.defaultSerializeValue({accessor}, gen);\n")
+            format!(
+                "{indent}gen.writeFieldName({json});\n{indent}serializers.defaultSerializeValue({accessor}, gen);\n"
+            )
         }
     }
 }
@@ -2343,7 +2434,10 @@ fn render_object_deserializer(
         "                violations.add(new Violation(\"\", \"expected object\"));\n                throw new ValidationException(violations);\n            }\n",
     );
 
-    let known: BTreeSet<&str> = fields.iter().map(|field| field.json_name.as_str()).collect();
+    let known: BTreeSet<&str> = fields
+        .iter()
+        .map(|field| field.json_name.as_str())
+        .collect();
     if open {
         output.push_str(
             "            Map<String, JsonNode> additionalProperties = new LinkedHashMap<>();\n",
@@ -2353,7 +2447,10 @@ fn render_object_deserializer(
         output.push_str("                String key = fieldNames.next();\n");
         output.push_str("                switch (key) {\n");
         for name in &known {
-            output.push_str(&format!("                    case {}:\n", java_string_literal(name)));
+            output.push_str(&format!(
+                "                    case {}:\n",
+                java_string_literal(name)
+            ));
         }
         if !known.is_empty() {
             output.push_str("                        break;\n");
@@ -2368,7 +2465,10 @@ fn render_object_deserializer(
         output.push_str("                String key = fieldNames.next();\n");
         output.push_str("                switch (key) {\n");
         for name in &known {
-            output.push_str(&format!("                    case {}:\n", java_string_literal(name)));
+            output.push_str(&format!(
+                "                    case {}:\n",
+                java_string_literal(name)
+            ));
         }
         if !known.is_empty() {
             output.push_str("                        break;\n");
@@ -2416,7 +2516,10 @@ fn render_field_deserialize(output: &mut String, field: &FieldPlan) {
             JavaType::Boolean => "false",
             _ => "null",
         };
-        output.push_str(&format!("{indent}{} {name} = {init};\n", field.field_type()));
+        output.push_str(&format!(
+            "{indent}{} {name} = {init};\n",
+            field.field_type()
+        ));
     } else {
         output.push_str(&format!("{indent}{} {name} = null;\n", field.field_type()));
     }
@@ -2439,7 +2542,18 @@ fn render_field_deserialize(output: &mut String, field: &FieldPlan) {
     if let Some(union) = &field.union {
         render_union_field_parse(output, union, name, &json, &format!("{indent}        "));
     } else {
-        render_parse_value(output, &field.ty, name, &json, &field.java_name, &field.closed_values, &field.numeric, &field.string_length, &field.array, &format!("{indent}        "));
+        render_parse_value(
+            output,
+            &field.ty,
+            name,
+            &json,
+            &field.java_name,
+            &field.closed_values,
+            &field.numeric,
+            &field.string_length,
+            &field.array,
+            &format!("{indent}        "),
+        );
     }
     output.push_str(&format!("{indent}    }}\n"));
     output.push_str(&format!("{indent}}}\n"));
@@ -2465,7 +2579,10 @@ fn render_union_field_parse(
     for variant in &union.variants {
         let keyword = if first { "if" } else { "} else if" };
         first = false;
-        output.push_str(&format!("{indent}{keyword} (field.{}()) {{\n", variant.node_test));
+        output.push_str(&format!(
+            "{indent}{keyword} (field.{}()) {{\n",
+            variant.node_test
+        ));
         match variant.underlying.as_ref() {
             Some(JavaType::String) => output.push_str(&format!(
                 "{indent}    {target} = new {}(field.textValue());\n",
@@ -2509,7 +2626,15 @@ fn render_parse_value(
     indent: &str,
 ) {
     if !closed_values.is_empty() {
-        render_java_closed_parse(output, ty, target, json, field_java_name, closed_values, indent);
+        render_java_closed_parse(
+            output,
+            ty,
+            target,
+            json,
+            field_java_name,
+            closed_values,
+            indent,
+        );
         return;
     }
     match ty {
@@ -2609,7 +2734,9 @@ fn render_parse_value(
             output.push_str(&format!(
                 "{indent}    {target} = context.readTreeAsValue(field, {class}.class);\n"
             ));
-            output.push_str(&format!("{indent}}} catch (ValidationException nested) {{\n"));
+            output.push_str(&format!(
+                "{indent}}} catch (ValidationException nested) {{\n"
+            ));
             output.push_str(&format!(
                 "{indent}    for (Violation violation : nested.getViolations()) {{\n"
             ));
@@ -2636,11 +2763,20 @@ fn render_parse_value(
             output.push_str(&format!(
                 "{indent}    for (int index = 0; index < field.size(); index++) {{\n"
             ));
-            output.push_str(&format!("{indent}        JsonNode element = field.get(index);\n"));
+            output.push_str(&format!(
+                "{indent}        JsonNode element = field.get(index);\n"
+            ));
             output.push_str(&format!(
                 "{indent}        String elementPath = {json} + \"[\" + index + \"]\";\n"
             ));
-            render_parse_element(output, inner, "items", "element", "elementPath", &format!("{indent}        "));
+            render_parse_element(
+                output,
+                inner,
+                "items",
+                "element",
+                "elementPath",
+                &format!("{indent}        "),
+            );
             output.push_str(&format!("{indent}    }}\n"));
             output.push_str(&format!("{indent}    {target} = items;\n"));
             if !array.is_empty() {
@@ -2697,7 +2833,9 @@ fn render_parse_element(
                 "{indent}    violations.add(new Violation({path_var}, \"expected number\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
-            output.push_str(&format!("{indent}    {list}.add({element}.doubleValue());\n"));
+            output.push_str(&format!(
+                "{indent}    {list}.add({element}.doubleValue());\n"
+            ));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Boolean => {
@@ -2706,7 +2844,9 @@ fn render_parse_element(
                 "{indent}    violations.add(new Violation({path_var}, \"expected boolean\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
-            output.push_str(&format!("{indent}    {list}.add({element}.booleanValue());\n"));
+            output.push_str(&format!(
+                "{indent}    {list}.add({element}.booleanValue());\n"
+            ));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Ref { class, .. } => {
@@ -2714,7 +2854,9 @@ fn render_parse_element(
             output.push_str(&format!(
                 "{indent}    {list}.add(context.readTreeAsValue({element}, {class}.class));\n"
             ));
-            output.push_str(&format!("{indent}}} catch (ValidationException nested) {{\n"));
+            output.push_str(&format!(
+                "{indent}}} catch (ValidationException nested) {{\n"
+            ));
             output.push_str(&format!(
                 "{indent}    for (Violation violation : nested.getViolations()) {{\n"
             ));
@@ -2783,7 +2925,9 @@ fn render_parse_map_value(
                 "{indent}    violations.add(new Violation({key_var}, \"expected string value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
-            output.push_str(&format!("{indent}    {map}.put({key_var}, {element}.textValue());\n"));
+            output.push_str(&format!(
+                "{indent}    {map}.put({key_var}, {element}.textValue());\n"
+            ));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Long => {
@@ -2821,7 +2965,9 @@ fn render_parse_map_value(
             output.push_str(&format!(
                 "{indent}    {map}.put({key_var}, context.readTreeAsValue({element}, {class}.class));\n"
             ));
-            output.push_str(&format!("{indent}}} catch (ValidationException nested) {{\n"));
+            output.push_str(&format!(
+                "{indent}}} catch (ValidationException nested) {{\n"
+            ));
             output.push_str(&format!(
                 "{indent}    for (Violation violation : nested.getViolations()) {{\n"
             ));
@@ -2883,7 +3029,14 @@ fn render_typed_map_class(
     refs: &mut BTreeSet<(String, String)>,
 ) {
     value.collect_refs(refs);
-    render_java_schema_doc(output, "", schema.title.as_deref(), schema.description.as_deref(), schema.deprecated == Some(true), "type");
+    render_java_schema_doc(
+        output,
+        "",
+        schema.title.as_deref(),
+        schema.description.as_deref(),
+        schema.deprecated == Some(true),
+        "type",
+    );
     output.push_str(&format!(
         "@JsonSerialize(using = {class}.Serializer.class)\n@JsonDeserialize(using = {class}.Deserializer.class)\npublic final class {class} {{\n"
     ));
@@ -2975,7 +3128,14 @@ fn render_typed_map_class(
     output.push_str(
         "                    violations.add(new Violation(key, \"explicit null not allowed\"));\n                    continue;\n                }\n",
     );
-    render_parse_map_value(output, value, "values", "element", "key", "                ");
+    render_parse_map_value(
+        output,
+        value,
+        "values",
+        "element",
+        "key",
+        "                ",
+    );
     output.push_str("            }\n");
     let _ = max_properties;
     // Object member-count and key-shape constraints over the distinct wire keys
@@ -3214,7 +3374,9 @@ pub(in crate::generator) fn render_violation_file(package: &str) -> String {
     output.push_str(GENERATED_HEADER);
     output.push_str(&format!("package {package};\n\n"));
     output.push_str("import org.jspecify.annotations.Nullable;\n\n");
-    output.push_str("/** A single constraint failure: a JSON member path and a human-readable reason. */\n");
+    output.push_str(
+        "/** A single constraint failure: a JSON member path and a human-readable reason. */\n",
+    );
     output.push_str("public final class Violation {\n");
     output.push_str("    private final String path;\n    private final String reason;\n\n");
     output.push_str("    public Violation(String path, String reason) {\n        this.path = path;\n        this.reason = reason;\n    }\n\n");
@@ -3224,11 +3386,15 @@ pub(in crate::generator) fn render_violation_file(package: &str) -> String {
     output.push_str("        if (path == null || path.isEmpty()) {\n            return new Violation(prefix, reason);\n        }\n");
     output.push_str("        return new Violation(prefix + \".\" + path, reason);\n    }\n\n");
     output.push_str("    @Override\n    public String toString() {\n");
-    output.push_str("        if (path == null || path.isEmpty()) {\n            return reason;\n        }\n");
+    output.push_str(
+        "        if (path == null || path.isEmpty()) {\n            return reason;\n        }\n",
+    );
     output.push_str("        return path + \": \" + reason;\n    }\n\n");
     output.push_str("    @Override\n    public boolean equals(@Nullable Object other) {\n");
     output.push_str("        if (this == other) {\n            return true;\n        }\n");
-    output.push_str("        if (!(other instanceof Violation)) {\n            return false;\n        }\n");
+    output.push_str(
+        "        if (!(other instanceof Violation)) {\n            return false;\n        }\n",
+    );
     output.push_str("        Violation that = (Violation) other;\n");
     output.push_str("        return java.util.Objects.equals(path, that.path) && java.util.Objects.equals(reason, that.reason);\n    }\n\n");
     output.push_str("    @Override\n    public int hashCode() {\n        return java.util.Objects.hash(path, reason);\n    }\n");
@@ -3245,18 +3411,26 @@ pub(in crate::generator) fn render_validation_exception_file(package: &str) -> S
     output.push_str("import java.util.ArrayList;\n");
     output.push_str("import java.util.Collections;\n");
     output.push_str("import java.util.List;\n\n");
-    output.push_str("/** Aggregates every {@link Violation} found while (de)serializing a value. */\n");
+    output.push_str(
+        "/** Aggregates every {@link Violation} found while (de)serializing a value. */\n",
+    );
     output.push_str("public final class ValidationException extends JsonMappingException {\n");
     output.push_str("    private final List<Violation> violations;\n\n");
     output.push_str("    public ValidationException(List<Violation> violations) {\n");
     output.push_str("        super((java.io.Closeable) null, buildMessage(violations));\n");
     output.push_str("        this.violations = Collections.unmodifiableList(new ArrayList<>(violations));\n    }\n\n");
-    output.push_str("    public List<Violation> getViolations() {\n        return violations;\n    }\n\n");
+    output.push_str(
+        "    public List<Violation> getViolations() {\n        return violations;\n    }\n\n",
+    );
     output.push_str("    private static String buildMessage(List<Violation> violations) {\n");
     output.push_str("        StringBuilder builder = new StringBuilder();\n");
-    output.push_str("        builder.append(violations.size()).append(\" validation error(s): \");\n");
+    output.push_str(
+        "        builder.append(violations.size()).append(\" validation error(s): \");\n",
+    );
     output.push_str("        for (int index = 0; index < violations.size(); index++) {\n");
-    output.push_str("            if (index > 0) {\n                builder.append(\"; \");\n            }\n");
+    output.push_str(
+        "            if (index > 0) {\n                builder.append(\"; \");\n            }\n",
+    );
     output.push_str("            builder.append(violations.get(index).toString());\n        }\n");
     output.push_str("        return builder.toString();\n    }\n");
     output.push_str("}\n");
@@ -3271,7 +3445,9 @@ pub(in crate::generator) fn render_spec_numbers_file(package: &str) -> String {
     output.push_str("import com.fasterxml.jackson.databind.JsonNode;\n");
     output.push_str("import java.util.List;\n");
     output.push_str("import org.jspecify.annotations.Nullable;\n\n");
-    output.push_str("/** Shared spec-number parsing enforcing the JSON Schema integer semantics. */\n");
+    output.push_str(
+        "/** Shared spec-number parsing enforcing the JSON Schema integer semantics. */\n",
+    );
     output.push_str("public final class SpecNumbers {\n");
     output.push_str("    public static final long INTEGER_CAP = (1L << 53) - 1;\n\n");
     output.push_str("    private SpecNumbers() {}\n\n");
@@ -3281,7 +3457,8 @@ pub(in crate::generator) fn render_spec_numbers_file(package: &str) -> String {
     output.push_str("        double value = node.doubleValue();\n");
     output.push_str("        if (Double.isNaN(value) || Double.isInfinite(value) || value != Math.floor(value)) {\n");
     output.push_str("            violations.add(new Violation(path, \"not an integer\"));\n            return null;\n        }\n");
-    output.push_str("        if (value < -(double) INTEGER_CAP || value > (double) INTEGER_CAP) {\n");
+    output
+        .push_str("        if (value < -(double) INTEGER_CAP || value > (double) INTEGER_CAP) {\n");
     output.push_str("            violations.add(new Violation(path, \"exceeds \\u00b1(2^53-1) integer cap\"));\n            return null;\n        }\n");
     output.push_str("        return node.longValue();\n    }\n");
     output.push_str("}\n");
@@ -3296,9 +3473,8 @@ pub(in crate::generator) fn model_uses_temporal(model: &PlannedJsonType) -> bool
     schema.properties.as_ref().is_some_and(|properties| {
         properties.values().any(|property| {
             temporal_kind_direct(property).is_some()
-                || nullable_non_null_schema(property).is_some_and(|inner| {
-                    temporal_kind_direct(inner).is_some()
-                })
+                || nullable_non_null_schema(property)
+                    .is_some_and(|inner| temporal_kind_direct(inner).is_some())
         })
     })
 }
@@ -3403,7 +3579,9 @@ pub(in crate::generator) fn render_temporal_support_file(package: &str) -> Strin
     output.push_str("import java.util.List;\n");
     output.push_str("import java.util.regex.Pattern;\n");
     output.push_str("import org.jspecify.annotations.Nullable;\n\n");
-    output.push_str("/** Shared materialized-temporal parse/serialize helpers (generator-owned). */\n");
+    output.push_str(
+        "/** Shared materialized-temporal parse/serialize helpers (generator-owned). */\n",
+    );
     output.push_str("public final class TemporalSupport {\n");
     output.push_str("    private TemporalSupport() {}\n\n");
     output.push_str(&format!(
@@ -3422,7 +3600,9 @@ pub(in crate::generator) fn render_temporal_support_file(package: &str) -> Strin
         "    private static final Pattern DURATION = Pattern.compile({});\n",
         java_string_literal(TemporalKind::Duration.pattern())
     ));
-    output.push_str("    private static final long MAX_DURATION_SECONDS = Long.MAX_VALUE / 1_000_000_000L;\n\n");
+    output.push_str(
+        "    private static final long MAX_DURATION_SECONDS = Long.MAX_VALUE / 1_000_000_000L;\n\n",
+    );
     output.push_str(TEMPORAL_SUPPORT_BODY);
     output.push_str("}\n");
     output

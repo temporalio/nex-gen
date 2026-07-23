@@ -403,8 +403,9 @@ mod tests {
     fn pinned_patterns_pass_the_pattern_gate() {
         for name in SUPPORTED_FORMATS {
             let check = check_for(name).expect("supported");
-            crate::pattern::gate_and_normalize(&check.pattern)
-                .unwrap_or_else(|error| panic!("{name} pinned pattern rejected by gate: {error:?}"));
+            crate::pattern::gate_and_normalize(&check.pattern).unwrap_or_else(|error| {
+                panic!("{name} pinned pattern rejected by gate: {error:?}")
+            });
         }
     }
 
@@ -525,7 +526,10 @@ mod tests {
         // Canonicalization.
         assert_eq!(canonicalize_duration("PT90M").as_deref(), Some("PT1H30M"));
         assert_eq!(canonicalize_duration("PT3600S").as_deref(), Some("PT1H"));
-        assert_eq!(canonicalize_duration("PT1H30M15S").as_deref(), Some("PT1H30M15S"));
+        assert_eq!(
+            canonicalize_duration("PT1H30M15S").as_deref(),
+            Some("PT1H30M15S")
+        );
         assert_eq!(canonicalize_duration("PT0S").as_deref(), Some("PT0S"));
         // Overflow.
         assert!(!is_valid_materialized(
@@ -592,7 +596,11 @@ mod tests {
         for case in corpus["cases"].as_array().expect("cases") {
             let instance = case["instance"].as_str().expect("instance string");
             let expect = case["valid"].as_bool().expect("valid");
-            assert_eq!(is_valid("hostname", instance), expect, "hostname {instance:?}");
+            assert_eq!(
+                is_valid("hostname", instance),
+                expect,
+                "hostname {instance:?}"
+            );
         }
     }
 

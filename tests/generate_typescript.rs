@@ -331,8 +331,9 @@ fn typescript_json_example_generation_matches_checked_in_output() {
             Some(repr),
         );
         let rendered = read_typescript_output_files(&output_path);
-        let expected =
-            read_typescript_output_files(&typescript_json_definitions_output_path(&root, output_id));
+        let expected = read_typescript_output_files(&typescript_json_definitions_output_path(
+            &root, output_id,
+        ));
         assert_eq!(rendered, expected, "snapshot mismatch for {output_id}");
         fs::remove_dir_all(output_path).unwrap();
     }

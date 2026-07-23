@@ -14,8 +14,8 @@ use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::planning::{
-    PlannedSpec, PlannedType, PlannedTypeFamily, PlanningMode,
-    build_api_plans_for_tree_with_mode, build_leaf_api_plan_with_mode,
+    PlannedSpec, PlannedType, PlannedTypeFamily, PlanningMode, build_api_plans_for_tree_with_mode,
+    build_leaf_api_plan_with_mode,
 };
 use crate::resources::ensure_unique_resource_names;
 use crate::spec::{ApiSpec, RecordSpec};
@@ -210,8 +210,12 @@ pub(crate) fn generate_files_for_tree_with_mode_and_options(
     validate_tree_specs(&tree.root, descriptors, language)?;
     let planned_tree = match tree.root {
         ApiSpecNode::Leaf(leaf) => {
-            let planned =
-                build_leaf_api_plan_with_mode(leaf.spec, descriptors, planning_mode(mode), language)?;
+            let planned = build_leaf_api_plan_with_mode(
+                leaf.spec,
+                descriptors,
+                planning_mode(mode),
+                language,
+            )?;
             ApiSpecTree {
                 root: ApiSpecNode::Leaf(crate::workspace::ApiSpecLeaf {
                     module_path: leaf.module_path,
@@ -259,9 +263,7 @@ fn generate_files_from_planned_tree(
         Language::Go => generate_go_tree(tree, support, mode, options),
         Language::Java => java::generate(tree, support, mode, options.java_package_root.as_deref()),
         Language::Python => python::generate(tree, support, mode),
-        Language::TypeScript => {
-            typescript::generate(tree, support, mode, options.js_temporal_repr)
-        }
+        Language::TypeScript => typescript::generate(tree, support, mode, options.js_temporal_repr),
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = if mode == GenerationMode::NativeApi {

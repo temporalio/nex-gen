@@ -751,7 +751,12 @@ fn validate_schema_node(
                     ),
                 });
             }
-            validate_schema_node(path, property, &format!("{context}.properties.{name}"), false)?;
+            validate_schema_node(
+                path,
+                property,
+                &format!("{context}.properties.{name}"),
+                false,
+            )?;
         }
     }
     if let Some(items) = &schema.items {
@@ -813,16 +818,36 @@ fn validate_schema_node(
 /// feature spec).
 fn unsupported_keyword_reason(keyword: &str) -> &'static str {
     match keyword {
-        "anyOf" => "`anyOf` is not supported; a value-level union is expressed with a `oneOf` of pairwise-disjoint kinds",
-        "if" | "then" | "else" => "conditional schemas (`if`/`then`/`else`) are not supported; model the alternatives as a `oneOf`",
-        "prefixItems" => "tuple arrays (`prefixItems`) are not supported; use a single uniform `items` element type",
-        "unevaluatedProperties" => "`unevaluatedProperties` is not supported; bound extra members with `additionalProperties` (`true`, `false`, or a value schema)",
-        "unevaluatedItems" => "`unevaluatedItems` is not supported; bound the element type with `items`",
-        "dependentSchemas" => "`dependentSchemas` is not supported; a conditional subschema has no static shape — split the variants into explicit types",
-        "patternProperties" => "`patternProperties` is not supported; use a typed map (`additionalProperties: {type: ...}`) or enumerate the keys under `properties`",
-        "nullable" => "OAS 3.0 `nullable` is not supported; model a nullable field with `oneOf: [{type: T}, {type: \"null\"}]`",
-        "$anchor" | "$dynamicRef" | "$dynamicAnchor" => "`$anchor`/`$dynamicRef`/`$dynamicAnchor` are not supported; use a plain `$ref`",
-        "$vocabulary" => "`$vocabulary` is not supported; it is a meta-schema keyword with no place in a type schema (the dialect is pinned to 2020-12)",
+        "anyOf" => {
+            "`anyOf` is not supported; a value-level union is expressed with a `oneOf` of pairwise-disjoint kinds"
+        }
+        "if" | "then" | "else" => {
+            "conditional schemas (`if`/`then`/`else`) are not supported; model the alternatives as a `oneOf`"
+        }
+        "prefixItems" => {
+            "tuple arrays (`prefixItems`) are not supported; use a single uniform `items` element type"
+        }
+        "unevaluatedProperties" => {
+            "`unevaluatedProperties` is not supported; bound extra members with `additionalProperties` (`true`, `false`, or a value schema)"
+        }
+        "unevaluatedItems" => {
+            "`unevaluatedItems` is not supported; bound the element type with `items`"
+        }
+        "dependentSchemas" => {
+            "`dependentSchemas` is not supported; a conditional subschema has no static shape — split the variants into explicit types"
+        }
+        "patternProperties" => {
+            "`patternProperties` is not supported; use a typed map (`additionalProperties: {type: ...}`) or enumerate the keys under `properties`"
+        }
+        "nullable" => {
+            "OAS 3.0 `nullable` is not supported; model a nullable field with `oneOf: [{type: T}, {type: \"null\"}]`"
+        }
+        "$anchor" | "$dynamicRef" | "$dynamicAnchor" => {
+            "`$anchor`/`$dynamicRef`/`$dynamicAnchor` are not supported; use a plain `$ref`"
+        }
+        "$vocabulary" => {
+            "`$vocabulary` is not supported; it is a meta-schema keyword with no place in a type schema (the dialect is pinned to 2020-12)"
+        }
         other => panic!("unsupported-keyword reason requested for unhandled keyword `{other}`"),
     }
 }
@@ -1569,10 +1594,7 @@ fn scalar_kinds_compatible(a: &str, b: &str) -> bool {
     if a == b {
         return true;
     }
-    matches!(
-        (a, b),
-        ("integer", "number") | ("number", "integer")
-    )
+    matches!((a, b), ("integer", "number") | ("number", "integer"))
 }
 
 /// Load-time validation of the `default` annotation's own shape. `default` is a
@@ -1748,9 +1770,12 @@ fn validate_array_constraints(path: &Path, schema: &Schema, context: &str) -> Re
         ));
     }
 
-    let items_kind = scalar_type(schema.items.as_ref().and_then(|item| {
-        item.ty.as_ref().and_then(Value::as_str)
-    }));
+    let items_kind = scalar_type(
+        schema
+            .items
+            .as_ref()
+            .and_then(|item| item.ty.as_ref().and_then(Value::as_str)),
+    );
     let items_is_scalar = items_kind.is_some();
 
     // `uniqueItems` must be a boolean; `true` over a composite element type is
@@ -1786,12 +1811,14 @@ fn validate_array_constraints(path: &Path, schema: &Schema, context: &str) -> Re
         // matcher. `{}`/`true` degenerate to "non-empty" (use `minItems: 1`);
         // `false` matches nothing.
         let matcher: Schema = match contains_value {
-            Value::Object(_) => serde_json::from_value(contains_value.clone()).map_err(|error| {
-                Error::InvalidJsonSchema {
-                    path: path.to_path_buf(),
-                    reason: format!("{context}: `contains` is not a valid schema: {error}"),
-                }
-            })?,
+            Value::Object(_) => {
+                serde_json::from_value(contains_value.clone()).map_err(|error| {
+                    Error::InvalidJsonSchema {
+                        path: path.to_path_buf(),
+                        reason: format!("{context}: `contains` is not a valid schema: {error}"),
+                    }
+                })?
+            }
             _ => {
                 return reject(format!(
                     "{context}: `contains` must be a schema object with a scalar matcher (a bare `{{}}`/`true`/`false` is not a matcher — use `minItems`)"
@@ -1815,7 +1842,11 @@ fn validate_array_constraints(path: &Path, schema: &Schema, context: &str) -> Re
             .extra
             .get("enum")
             .and_then(Value::as_array)
-            .is_some_and(|values| values.iter().any(|value| scalar_value_kind(value).is_none()));
+            .is_some_and(|values| {
+                values
+                    .iter()
+                    .any(|value| scalar_value_kind(value).is_none())
+            });
 
         // Composite matcher — an object/array-typed matcher, a `$ref`, or a
         // composite `const`/`enum` value — is deferred.
@@ -2035,12 +2066,16 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
             ));
         }
         let subschema: Schema = match property_names {
-            Value::Object(_) => serde_json::from_value(property_names.clone()).map_err(|error| {
-                Error::InvalidJsonSchema {
-                    path: path.to_path_buf(),
-                    reason: format!("{context}: `propertyNames` is not a valid schema: {error}"),
-                }
-            })?,
+            Value::Object(_) => {
+                serde_json::from_value(property_names.clone()).map_err(|error| {
+                    Error::InvalidJsonSchema {
+                        path: path.to_path_buf(),
+                        reason: format!(
+                            "{context}: `propertyNames` is not a valid schema: {error}"
+                        ),
+                    }
+                })?
+            }
             _ => {
                 return reject(format!(
                     "{context}: `propertyNames` must be a string schema constraining the keys (a bare `{{}}`/`true` asserts nothing — property names are always strings)"
@@ -2056,8 +2091,8 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
         // The subschema must carry a supported string assertion. Only the
         // string-length keywords (`minLength`/`maxLength`) lower today; a bare
         // `type: string` asserts nothing (keys are already strings) → reject.
-        let has_length = subschema.extra.contains_key("minLength")
-            || subschema.extra.contains_key("maxLength");
+        let has_length =
+            subschema.extra.contains_key("minLength") || subschema.extra.contains_key("maxLength");
         if !has_length {
             for unsupported in ["pattern", "enum", "const", "format"] {
                 if subschema.extra.contains_key(unsupported) {
@@ -2843,7 +2878,10 @@ fn validate_one_of(
     ] {
         let count = kinds.iter().filter(|value| **value == kind).count();
         if count > 1 {
-            if matches!(kind, BranchKind::String | BranchKind::Integer | BranchKind::Number) {
+            if matches!(
+                kind,
+                BranchKind::String | BranchKind::Integer | BranchKind::Number
+            ) {
                 return reject(format!(
                     "{context}: two `oneOf` branches share the `{}` kind; a same-kind scalar choice is an `enum` (or `const` union), not a `oneOf`",
                     kind.label()
@@ -2886,9 +2924,10 @@ fn validate_one_of(
                 .iter()
                 .filter_map(|object| branch_discriminator_tags(object).get(name).cloned())
                 .collect();
-            let distinct = values.iter().enumerate().all(|(index, value)| {
-                !values[..index].iter().any(|existing| existing == value)
-            });
+            let distinct = values
+                .iter()
+                .enumerate()
+                .all(|(index, value)| !values[..index].iter().any(|existing| existing == value));
             if distinct {
                 qualifying.push(name);
             }
@@ -3252,7 +3291,14 @@ fn normalize_document(
     }
     if root_is_schema_shaped(&doc.root) && !doc.root.is_bare_ref() {
         let mut cycle = Vec::new();
-        doc.root = normalize_schema(path, canonical_path, &doc.root, ctx, &mut cycle, "root schema")?;
+        doc.root = normalize_schema(
+            path,
+            canonical_path,
+            &doc.root,
+            ctx,
+            &mut cycle,
+            "root schema",
+        )?;
     }
     if let Some(services) = &mut doc.services {
         for (service_name, service) in services.iter_mut() {
@@ -3561,7 +3607,9 @@ fn expand_branches(
             .ok_or_else(|| {
                 merge_reject(
                     path,
-                    format!("{context}: `$ref` `{reference}` does not resolve to a known JSON model"),
+                    format!(
+                        "{context}: `$ref` `{reference}` does not resolve to a known JSON model"
+                    ),
                 )
             })?
             .clone();
@@ -3595,20 +3643,16 @@ fn expand_branches(
                         serde_json::from_value(entry.clone()).map_err(|error| {
                             merge_reject(
                                 path,
-                                format!("{context}: `allOf[{index}]` is not a valid schema: {error}"),
+                                format!(
+                                    "{context}: `allOf[{index}]` is not a valid schema: {error}"
+                                ),
                             )
                         })?;
                     if entry_schema == Schema::default() {
                         continue;
                     }
-                    let sub = expand_branches(
-                        path,
-                        canonical_path,
-                        &entry_schema,
-                        ctx,
-                        cycle,
-                        context,
-                    )?;
+                    let sub =
+                        expand_branches(path, canonical_path, &entry_schema, ctx, cycle, context)?;
                     branches.extend(sub);
                 }
                 _ => {
@@ -3642,12 +3686,7 @@ fn merge_branch_list(path: &Path, branches: Vec<Schema>, context: &str) -> Resul
 
 /// Merges two schemas that both constrain the same value, then finalizes the
 /// result (collapses cross-keyword numeric-bound pairs, resolves `const`+`enum`).
-fn merge_schema_pair(
-    path: &Path,
-    acc: Schema,
-    branch: &Schema,
-    context: &str,
-) -> Result<Schema> {
+fn merge_schema_pair(path: &Path, acc: Schema, branch: &Schema, context: &str) -> Result<Schema> {
     let mut merged = merge_two(path, acc, branch, context)?;
     finalize_merged(path, &mut merged, context)?;
     Ok(merged)
@@ -3665,7 +3704,12 @@ fn merge_two(path: &Path, mut acc: Schema, branch: &Schema, context: &str) -> Re
     if branch.description.is_some() {
         acc.description = branch.description.clone();
     }
-    acc.properties = merge_properties(path, acc.properties.take(), branch.properties.clone(), context)?;
+    acc.properties = merge_properties(
+        path,
+        acc.properties.take(),
+        branch.properties.clone(),
+        context,
+    )?;
     acc.required = merge_required(acc.required.take(), branch.required.clone());
     acc.additional_properties = merge_additional_properties(
         path,
@@ -3864,7 +3908,9 @@ fn merge_extra_value(
         "enum" => intersect_enum(path, acc, branch, context),
         "const" => Err(merge_reject(
             path,
-            format!("{context}: `allOf` branches declare conflicting `const` values ({acc} vs {branch})"),
+            format!(
+                "{context}: `allOf` branches declare conflicting `const` values ({acc} vs {branch})"
+            ),
         )),
         "format" => Err(merge_reject(
             path,
@@ -3889,16 +3935,29 @@ fn merge_extra_value(
         "patternProperties" | "propertyNames" => {
             if let (Value::Object(_), Value::Object(_)) = (acc, branch) {
                 let acc_schema: Schema = serde_json::from_value(acc.clone()).map_err(|error| {
-                    merge_reject(path, format!("{context}: `{key}` is not a valid schema: {error}"))
+                    merge_reject(
+                        path,
+                        format!("{context}: `{key}` is not a valid schema: {error}"),
+                    )
                 })?;
                 let branch_schema: Schema =
                     serde_json::from_value(branch.clone()).map_err(|error| {
-                        merge_reject(path, format!("{context}: `{key}` is not a valid schema: {error}"))
+                        merge_reject(
+                            path,
+                            format!("{context}: `{key}` is not a valid schema: {error}"),
+                        )
                     })?;
-                let merged =
-                    merge_schema_pair(path, acc_schema, &branch_schema, &format!("{context}.{key}"))?;
+                let merged = merge_schema_pair(
+                    path,
+                    acc_schema,
+                    &branch_schema,
+                    &format!("{context}.{key}"),
+                )?;
                 Ok(serde_json::to_value(&merged).map_err(|error| {
-                    merge_reject(path, format!("{context}: failed to preserve `{key}`: {error}"))
+                    merge_reject(
+                        path,
+                        format!("{context}: failed to preserve `{key}`: {error}"),
+                    )
                 })?)
             } else {
                 Ok(branch.clone())
@@ -3925,14 +3984,18 @@ fn numeric_extreme(
     context: &str,
 ) -> Result<Value> {
     let parse = |value: &Value| -> Result<f64> {
-        value.as_f64().ok_or_else(|| {
-            merge_reject(path, format!("{context}: `{key}` must be a number"))
-        })
+        value
+            .as_f64()
+            .ok_or_else(|| merge_reject(path, format!("{context}: `{key}` must be a number")))
     };
     let a = parse(acc)?;
     let b = parse(branch)?;
     let keep_acc = if keep_max { a >= b } else { a <= b };
-    Ok(if keep_acc { acc.clone() } else { branch.clone() })
+    Ok(if keep_acc {
+        acc.clone()
+    } else {
+        branch.clone()
+    })
 }
 
 /// Merges two `multipleOf` divisors to their least common multiple. Both are
@@ -4373,37 +4436,176 @@ fn ident_is_reserved(language: Language, name: &str) -> bool {
     match language {
         Language::Go => matches!(
             name,
-            "break" | "case" | "chan" | "const" | "continue" | "default" | "defer" | "else"
-                | "fallthrough" | "for" | "func" | "go" | "goto" | "if" | "import" | "interface"
-                | "map" | "package" | "range" | "return" | "select" | "struct" | "switch"
-                | "type" | "var"
+            "break"
+                | "case"
+                | "chan"
+                | "const"
+                | "continue"
+                | "default"
+                | "defer"
+                | "else"
+                | "fallthrough"
+                | "for"
+                | "func"
+                | "go"
+                | "goto"
+                | "if"
+                | "import"
+                | "interface"
+                | "map"
+                | "package"
+                | "range"
+                | "return"
+                | "select"
+                | "struct"
+                | "switch"
+                | "type"
+                | "var"
         ),
         Language::TypeScript => matches!(
             name,
-            "break" | "case" | "catch" | "class" | "const" | "continue" | "debugger" | "default"
-                | "delete" | "do" | "else" | "enum" | "export" | "extends" | "false" | "finally"
-                | "for" | "function" | "if" | "import" | "in" | "instanceof" | "new" | "null"
-                | "return" | "super" | "switch" | "this" | "throw" | "true" | "try" | "typeof"
-                | "var" | "void" | "while" | "with" | "yield" | "as" | "implements" | "interface"
-                | "let" | "package" | "private" | "protected" | "public" | "static"
+            "break"
+                | "case"
+                | "catch"
+                | "class"
+                | "const"
+                | "continue"
+                | "debugger"
+                | "default"
+                | "delete"
+                | "do"
+                | "else"
+                | "enum"
+                | "export"
+                | "extends"
+                | "false"
+                | "finally"
+                | "for"
+                | "function"
+                | "if"
+                | "import"
+                | "in"
+                | "instanceof"
+                | "new"
+                | "null"
+                | "return"
+                | "super"
+                | "switch"
+                | "this"
+                | "throw"
+                | "true"
+                | "try"
+                | "typeof"
+                | "var"
+                | "void"
+                | "while"
+                | "with"
+                | "yield"
+                | "as"
+                | "implements"
+                | "interface"
+                | "let"
+                | "package"
+                | "private"
+                | "protected"
+                | "public"
+                | "static"
         ),
         Language::Python => matches!(
             name,
-            "False" | "None" | "True" | "and" | "as" | "assert" | "async" | "await" | "break"
-                | "class" | "continue" | "def" | "del" | "elif" | "else" | "except" | "finally"
-                | "for" | "from" | "global" | "if" | "import" | "in" | "is" | "lambda"
-                | "nonlocal" | "not" | "or" | "pass" | "raise" | "return" | "try" | "while"
-                | "with" | "yield" | "match" | "case"
+            "False"
+                | "None"
+                | "True"
+                | "and"
+                | "as"
+                | "assert"
+                | "async"
+                | "await"
+                | "break"
+                | "class"
+                | "continue"
+                | "def"
+                | "del"
+                | "elif"
+                | "else"
+                | "except"
+                | "finally"
+                | "for"
+                | "from"
+                | "global"
+                | "if"
+                | "import"
+                | "in"
+                | "is"
+                | "lambda"
+                | "nonlocal"
+                | "not"
+                | "or"
+                | "pass"
+                | "raise"
+                | "return"
+                | "try"
+                | "while"
+                | "with"
+                | "yield"
+                | "match"
+                | "case"
         ),
         Language::Java => matches!(
             name,
-            "abstract" | "assert" | "boolean" | "break" | "byte" | "case" | "catch" | "char"
-                | "class" | "const" | "continue" | "default" | "do" | "double" | "else" | "enum"
-                | "extends" | "final" | "finally" | "float" | "for" | "goto" | "if" | "implements"
-                | "import" | "instanceof" | "int" | "interface" | "long" | "native" | "new"
-                | "package" | "private" | "protected" | "public" | "return" | "short" | "static"
-                | "strictfp" | "super" | "switch" | "synchronized" | "this" | "throw" | "throws"
-                | "transient" | "try" | "void" | "volatile" | "while" | "true" | "false" | "null"
+            "abstract"
+                | "assert"
+                | "boolean"
+                | "break"
+                | "byte"
+                | "case"
+                | "catch"
+                | "char"
+                | "class"
+                | "const"
+                | "continue"
+                | "default"
+                | "do"
+                | "double"
+                | "else"
+                | "enum"
+                | "extends"
+                | "final"
+                | "finally"
+                | "float"
+                | "for"
+                | "goto"
+                | "if"
+                | "implements"
+                | "import"
+                | "instanceof"
+                | "int"
+                | "interface"
+                | "long"
+                | "native"
+                | "new"
+                | "package"
+                | "private"
+                | "protected"
+                | "public"
+                | "return"
+                | "short"
+                | "static"
+                | "strictfp"
+                | "super"
+                | "switch"
+                | "synchronized"
+                | "this"
+                | "throw"
+                | "throws"
+                | "transient"
+                | "try"
+                | "void"
+                | "volatile"
+                | "while"
+                | "true"
+                | "false"
+                | "null"
         ),
         _ => false,
     }
@@ -4623,11 +4825,14 @@ fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<(
         let ExternalTypeSpec::Json(json) = &binding.external_type else {
             continue;
         };
-        let schema: Schema =
-            serde_json::from_value(json.schema.clone()).map_err(|error| Error::InvalidJsonSchema {
+        let schema: Schema = serde_json::from_value(json.schema.clone()).map_err(|error| {
+            Error::InvalidJsonSchema {
                 path: PathBuf::from("<json-schema>"),
-                reason: format!("failed to decode JSON model `{full_name}` for the P15 pass: {error}"),
-            })?;
+                reason: format!(
+                    "failed to decode JSON model `{full_name}` for the P15 pass: {error}"
+                ),
+            }
+        })?;
         let context = format!("`{}`", json.name.local_name());
         validate_overrides_in_schema(language, &schema, &context)?;
         let module_key = json
@@ -4644,17 +4849,28 @@ fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<(
     }
 
     // Group modules → their own top-level namespace.
-    let module_keys: BTreeSet<String> =
-        models.iter().map(|model| model.module_key.clone()).collect();
+    let module_keys: BTreeSet<String> = models
+        .iter()
+        .map(|model| model.module_key.clone())
+        .collect();
     for module_key in &module_keys {
         let mut top = Namespace::default();
-        for model in models.iter().filter(|model| &model.module_key == module_key) {
+        for model in models
+            .iter()
+            .filter(|model| &model.module_key == module_key)
+        {
             top.insert(
                 language,
                 model.type_ident.clone(),
                 format!("type `{}`", model.full_name),
             )?;
-            collect_synthesized_top_level(language, model.full_name.as_str(), &model.type_ident, &model.schema, &mut top)?;
+            collect_synthesized_top_level(
+                language,
+                model.full_name.as_str(),
+                &model.type_ident,
+                &model.schema,
+                &mut top,
+            )?;
             validate_member_scope(language, model.full_name.as_str(), &model.schema)?;
         }
         // Services and their derived bindings live in the root module scope of
@@ -4788,7 +5004,10 @@ fn validate_member_scope(language: Language, model_full_name: &str, schema: &Sch
             if required.contains(json_name.as_str()) {
                 continue;
             }
-            let accessor = format!("{}OrDefault", member_identifier(Language::Go, json_name, property));
+            let accessor = format!(
+                "{}OrDefault",
+                member_identifier(Language::Go, json_name, property)
+            );
             scope.insert(
                 language,
                 accessor,
@@ -4845,7 +5064,10 @@ fn collect_ts_default_constants(
             let ident = if field_count(json_name) == 1 {
                 format!("DEFAULT_{field_shouty}")
             } else {
-                format!("DEFAULT_{}_{field_shouty}", model.type_ident.to_shouty_snake_case())
+                format!(
+                    "DEFAULT_{}_{field_shouty}",
+                    model.type_ident.to_shouty_snake_case()
+                )
             };
             top.insert(
                 Language::TypeScript,
@@ -5490,12 +5712,10 @@ properties:
     #[test]
     fn rejects_materialized_leap_second_literal() {
         // Materialized narrowing: `:60` cannot be held by a native type.
-        let error = numeric_reject(
-            "type: string\nformat: date-time\nconst: \"2021-12-31T23:59:60Z\"",
-        );
-        assert!(error.contains("is not a valid date-time"), "{error}");
         let error =
-            numeric_reject("type: string\nformat: time\nconst: \"23:59:60Z\"");
+            numeric_reject("type: string\nformat: date-time\nconst: \"2021-12-31T23:59:60Z\"");
+        assert!(error.contains("is not a valid date-time"), "{error}");
+        let error = numeric_reject("type: string\nformat: time\nconst: \"23:59:60Z\"");
         assert!(error.contains("is not a valid time"), "{error}");
     }
 
@@ -5506,26 +5726,25 @@ properties:
             let error = numeric_reject(&format!(
                 "type: string\nformat: duration\nconst: \"{literal}\""
             ));
-            assert!(error.contains("is not a valid duration"), "{literal}: {error}");
+            assert!(
+                error.contains("is not a valid duration"),
+                "{literal}: {error}"
+            );
         }
     }
 
     #[test]
     fn rejects_missing_offset_date_time_literal() {
         // Materialized `date-time` requires an offset.
-        let error = numeric_reject(
-            "type: string\nformat: date-time\nconst: \"2021-06-15T12:30:45\"",
-        );
+        let error =
+            numeric_reject("type: string\nformat: date-time\nconst: \"2021-06-15T12:30:45\"");
         assert!(error.contains("is not a valid date-time"), "{error}");
     }
 
     #[test]
     fn rejects_const_violating_format() {
         let error = numeric_reject("type: string\nformat: uuid\nconst: not-a-uuid");
-        assert!(
-            error.contains("is not a valid uuid"),
-            "{error}"
-        );
+        assert!(error.contains("is not a valid uuid"), "{error}");
     }
 
     #[test]
@@ -5571,7 +5790,14 @@ properties:
 
     #[test]
     fn rejects_unsupported_content_encoding() {
-        for encoding in ["base32", "base16", "quoted-printable", "7bit", "8bit", "binary"] {
+        for encoding in [
+            "base32",
+            "base16",
+            "quoted-printable",
+            "7bit",
+            "8bit",
+            "binary",
+        ] {
             let error = numeric_reject(&format!("type: string\ncontentEncoding: {encoding}"));
             assert!(
                 error.contains(&format!("`contentEncoding: {encoding}` is not supported")),
@@ -5583,9 +5809,8 @@ properties:
 
     #[test]
     fn rejects_content_media_type_alongside_content_encoding() {
-        let error = numeric_reject(
-            "type: string\ncontentEncoding: base64\ncontentMediaType: image/png",
-        );
+        let error =
+            numeric_reject("type: string\ncontentEncoding: base64\ncontentMediaType: image/png");
         assert!(error.contains("contentMediaType"), "{error}");
         assert!(error.contains("not supported"), "{error}");
     }
@@ -5642,7 +5867,8 @@ properties:
 
     #[test]
     fn rejects_empty_items_interval() {
-        let error = numeric_reject("type: array\nitems: { type: string }\nminItems: 5\nmaxItems: 2");
+        let error =
+            numeric_reject("type: array\nitems: { type: string }\nminItems: 5\nmaxItems: 2");
         assert!(error.contains("empty range"), "{error}");
     }
 
@@ -5676,10 +5902,12 @@ properties:
 
     #[test]
     fn rejects_type_incompatible_contains_matcher() {
-        let error = numeric_reject(
-            "type: array\nitems: { type: string }\ncontains: { type: integer }",
+        let error =
+            numeric_reject("type: array\nitems: { type: string }\ncontains: { type: integer }");
+        assert!(
+            error.contains("incompatible with the element type"),
+            "{error}"
         );
-        assert!(error.contains("incompatible with the element type"), "{error}");
     }
 
     #[test]
@@ -5714,8 +5942,7 @@ properties:
 
     #[test]
     fn rejects_non_boolean_unique_items() {
-        let error =
-            numeric_reject("type: array\nitems: { type: string }\nuniqueItems: \"true\"");
+        let error = numeric_reject("type: array\nitems: { type: string }\nuniqueItems: \"true\"");
         assert!(error.contains("`uniqueItems` must be a boolean"), "{error}");
     }
 
@@ -5861,8 +6088,7 @@ properties:
 
     #[test]
     fn rejects_non_integer_min_properties() {
-        let error =
-            numeric_reject("type: object\nadditionalProperties: true\nminProperties: -1");
+        let error = numeric_reject("type: object\nadditionalProperties: true\nminProperties: -1");
         assert!(error.contains("non-negative integer"), "{error}");
     }
 
@@ -5884,9 +6110,7 @@ properties:
 
     #[test]
     fn rejects_bare_true_property_names() {
-        let error = numeric_reject(
-            "type: object\nadditionalProperties: true\npropertyNames: true",
-        );
+        let error = numeric_reject("type: object\nadditionalProperties: true\npropertyNames: true");
         assert!(error.contains("string schema constraining"), "{error}");
     }
 
@@ -5911,7 +6135,10 @@ properties:
         let error = numeric_reject(
             "type: object\nproperties: { a: {type: string} }\ndependentRequired: { a: b }",
         );
-        assert!(error.contains("must be an array of property-name strings"), "{error}");
+        assert!(
+            error.contains("must be an array of property-name strings"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -6031,7 +6258,10 @@ $defs:
         let error = api_spec_tree_from_json_schema_sources(Language::Python, sources)
             .expect_err("two sources mapping to the same module path should be rejected")
             .to_string();
-        assert!(error.contains("duplicate JSON schema module path"), "{error}");
+        assert!(
+            error.contains("duplicate JSON schema module path"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -6095,7 +6325,10 @@ $defs:
             ("if", "type: string\nif: { type: string }"),
             ("then", "type: string\nthen: { type: string }"),
             ("else", "type: string\nelse: { type: string }"),
-            ("prefixItems", "type: array\nprefixItems: [{ type: string }]"),
+            (
+                "prefixItems",
+                "type: array\nprefixItems: [{ type: string }]",
+            ),
             ("unevaluatedItems", "type: array\nunevaluatedItems: false"),
             (
                 "unevaluatedProperties",
@@ -6111,7 +6344,10 @@ $defs:
             ),
             ("readOnly", "type: string\nreadOnly: true"),
             ("writeOnly", "type: string\nwriteOnly: true"),
-            ("contentMediaType", "type: string\ncontentMediaType: image/png"),
+            (
+                "contentMediaType",
+                "type: string\ncontentMediaType: image/png",
+            ),
             (
                 "contentSchema",
                 "type: string\ncontentSchema: { type: object }",
@@ -6133,7 +6369,10 @@ $defs:
     #[test]
     fn rejects_read_only_false() {
         let error = structural_reject("type: string\nreadOnly: false");
-        assert!(error.contains("`readOnly`/`writeOnly` is not supported"), "{error}");
+        assert!(
+            error.contains("`readOnly`/`writeOnly` is not supported"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -6510,7 +6749,10 @@ properties:
 "##,
             "Api",
         );
-        assert_eq!(schema["properties"]["s"]["enum"], serde_json::json!(["b", "c"]));
+        assert_eq!(
+            schema["properties"]["s"]["enum"],
+            serde_json::json!(["b", "c"])
+        );
     }
 
     #[test]
@@ -6599,9 +6841,7 @@ properties:
 
     #[test]
     fn rejects_all_of_combinator_branch_not() {
-        let error = numeric_reject(
-            "allOf:\n  - { type: object }\n  - { not: { type: integer } }",
-        );
+        let error = numeric_reject("allOf:\n  - { type: object }\n  - { not: { type: integer } }");
         assert!(error.contains("cannot be `not`"), "{error}");
     }
 
@@ -6786,7 +7026,10 @@ properties:
       - { type: number }
 "#,
         );
-        assert!(error.contains("integer") && error.contains("number"), "{error}");
+        assert!(
+            error.contains("integer") && error.contains("number"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -6872,7 +7115,10 @@ properties:
     oneOf: []
 "#,
         );
-        assert!(error.contains("non-empty") || error.contains("single-branch"), "{error}");
+        assert!(
+            error.contains("non-empty") || error.contains("single-branch"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -7048,7 +7294,10 @@ properties:
   userId: { type: string }
 "#,
         );
-        assert!(error.contains("collision") && error.contains("UserId"), "{error}");
+        assert!(
+            error.contains("collision") && error.contains("UserId"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -7078,7 +7327,10 @@ properties:
   code: { type: string, x-go-name: "2fa" }
 "#,
         );
-        assert!(error.contains("x-go-name") && error.contains("legal"), "{error}");
+        assert!(
+            error.contains("x-go-name") && error.contains("legal"),
+            "{error}"
+        );
 
         // A reserved-word override is rejected.
         let error = reject_for(
@@ -7115,7 +7367,10 @@ $defs:
       label: { type: string }
 "##;
         let error = reject_for(Language::Go, input);
-        assert!(error.contains("collision") && error.contains("PaletteColor"), "{error}");
+        assert!(
+            error.contains("collision") && error.contains("PaletteColor"),
+            "{error}"
+        );
         // Python synthesizes no defined type, so the same schema is accepted.
         parse_for(Language::Python, input).expect("Python has no such synthesized type");
     }
@@ -7132,7 +7387,10 @@ properties:
   fooOrDefault: { type: string }
 "#;
         let error = reject_for(Language::Go, input);
-        assert!(error.contains("collision") && error.contains("FooOrDefault"), "{error}");
+        assert!(
+            error.contains("collision") && error.contains("FooOrDefault"),
+            "{error}"
+        );
         // Python surfaces the default natively (no accessor), so no clash.
         parse_for(Language::Python, input).expect("Python has no OrDefault accessor");
     }
@@ -7158,7 +7416,10 @@ $defs:
     properties: { b: { type: string } }
 "#,
         );
-        assert!(error.contains("collision") && error.contains("CreateInput"), "{error}");
+        assert!(
+            error.contains("collision") && error.contains("CreateInput"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -7181,40 +7442,39 @@ $defs:
     properties: { b: { type: string } }
 "#,
         );
-        assert!(error.contains("collision") && error.contains("Widget"), "{error}");
+        assert!(
+            error.contains("collision") && error.contains("Widget"),
+            "{error}"
+        );
     }
 
     // --- `required` load-time validation (json-schema/features/required.md) ---
 
     #[test]
     fn rejects_required_not_array() {
-        let error = numeric_reject(
-            "type: object\nproperties:\n  a: { type: string }\nrequired: id",
-        );
+        let error =
+            numeric_reject("type: object\nproperties:\n  a: { type: string }\nrequired: id");
         assert!(error.contains("must be an array"), "{error}");
     }
 
     #[test]
     fn rejects_required_non_string_element() {
-        let error = numeric_reject(
-            "type: object\nproperties:\n  id: { type: string }\nrequired: [1]",
-        );
+        let error =
+            numeric_reject("type: object\nproperties:\n  id: { type: string }\nrequired: [1]");
         assert!(error.contains("only property-name strings"), "{error}");
     }
 
     #[test]
     fn rejects_required_duplicate() {
-        let error = numeric_reject(
-            "type: object\nproperties:\n  id: { type: string }\nrequired: [id, id]",
-        );
+        let error =
+            numeric_reject("type: object\nproperties:\n  id: { type: string }\nrequired: [id, id]");
         assert!(error.contains("more than once"), "{error}");
     }
 
     #[test]
     fn rejects_required_name_not_in_properties() {
-        let error = numeric_reject(
-            "type: object\nproperties:\n  id: { type: string }\nrequired: [name]",
-        );
+        let error =
+            numeric_reject("type: object\nproperties:\n  id: { type: string }\nrequired: [name]");
         assert!(error.contains("not declared in `properties`"), "{error}");
     }
 
@@ -7289,10 +7549,7 @@ properties:
         let error = numeric_reject(
             "allOf:\n  - { type: array, contains: { const: 1 } }\n  - { type: array, contains: { const: 2 } }",
         );
-        assert!(
-            error.contains("different `contains` matchers"),
-            "{error}"
-        );
+        assert!(error.contains("different `contains` matchers"), "{error}");
     }
 
     #[test]

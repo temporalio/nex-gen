@@ -113,7 +113,10 @@ pub(crate) fn generate(
     }
     // The materialized-contentEncoding runtime is emitted only when a model uses
     // a `contentEncoding`, so non-bytes packages stay lean.
-    if all_models.values().any(java_json::model_uses_content_encoding) {
+    if all_models
+        .values()
+        .any(java_json::model_uses_content_encoding)
+    {
         insert_file(
             &mut files,
             PathBuf::from("Base64Support.java"),
@@ -176,7 +179,10 @@ fn render_service_file(
     imports.insert("io.nexusrpc.Service".to_string());
 
     let mut body = String::new();
-    render_service_javadoc(&mut body, service.doc.for_language(crate::language::Language::Java));
+    render_service_javadoc(
+        &mut body,
+        service.doc.for_language(crate::language::Language::Java),
+    );
     body.push_str(&format!(
         "@Service(name = {})\npublic interface {} {{\n",
         java_string_literal(&service.wire_name),

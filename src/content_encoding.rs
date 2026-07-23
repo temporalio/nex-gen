@@ -113,8 +113,18 @@ mod tests {
             classify("base64url"),
             EncodingClass::Supported(Encoding::Base64Url)
         ));
-        for name in ["base16", "quoted-printable", "7bit", "8bit", "binary", "hex"] {
-            assert!(matches!(classify(name), EncodingClass::Unsupported), "{name}");
+        for name in [
+            "base16",
+            "quoted-printable",
+            "7bit",
+            "8bit",
+            "binary",
+            "hex",
+        ] {
+            assert!(
+                matches!(classify(name), EncodingClass::Unsupported),
+                "{name}"
+            );
         }
     }
 

@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use nex_gen::generator::JsTemporalRepr;
 use nex_gen::language::Language;
 use nex_gen::parser::write_prepared_wit_directory;
-use nex_gen::generator::JsTemporalRepr;
 use nex_gen::{
     AddRpcRequest, BuildExamplesRequest, GenerateRequest, add_rpc_to_file, build_examples,
     build_json_examples, generate_to_file,
