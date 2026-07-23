@@ -263,7 +263,9 @@ fn generate_files_from_planned_tree(
         Language::Go => generate_go_tree(tree, support, mode, options),
         Language::Java => java::generate(tree, support, mode, options.java_package_root.as_deref()),
         Language::Python => python::generate(tree, support, mode),
-        Language::TypeScript => typescript::generate(tree, support, mode, options.ts_date_time_types),
+        Language::TypeScript => {
+            typescript::generate(tree, support, mode, options.ts_date_time_types)
+        }
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = if mode == GenerationMode::NativeApi {

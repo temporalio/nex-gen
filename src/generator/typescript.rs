@@ -117,7 +117,8 @@ fn generate_tree_node(
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            let generated = generate_leaf(&leaf.spec, &support_fragments, mode, ts_date_time_types)?;
+            let generated =
+                generate_leaf(&leaf.spec, &support_fragments, mode, ts_date_time_types)?;
             warnings.extend(generated.warnings);
             let prefix = leaf.module_path.to_path_buf();
             for (path, mut contents) in generated.files {
