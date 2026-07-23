@@ -43,8 +43,8 @@ pub struct GenerateRequest {
     pub format: bool,
     pub generate_native_api: bool,
     /// TypeScript-only: the in-memory representation for materialized temporal
-    /// `format` fields. `Default` is `JsTemporalRepr::String`.
-    pub js_temporal_repr: generator::JsTemporalRepr,
+    /// `format` fields. `Default` is `TsDateTimeTypes::String`.
+    pub ts_date_time_types: generator::TsDateTimeTypes,
 }
 
 pub struct BuildExamplesRequest {
@@ -70,7 +70,7 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
         } else {
             None
         },
-        js_temporal_repr: request.js_temporal_repr,
+        ts_date_time_types: request.ts_date_time_types,
     };
     let generated = generator::generate_files_for_tree_with_mode_and_options(
         request.language,
@@ -655,7 +655,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
-        js_temporal_repr: Default::default(),
+        ts_date_time_types: Default::default(),
     })?;
     format_example_output(repo_root, language, &output_path)?;
 
@@ -671,11 +671,11 @@ fn build_json_example(repo_root: &Path, language: Language, example_id: &str) ->
         language,
         example_id,
         example_id,
-        generator::JsTemporalRepr::String,
+        generator::TsDateTimeTypes::String,
     )?;
 
     // TypeScript is the only target with more than one temporal in-memory shape,
-    // selected by `--js-temporal-repr`. Emit the `date` and `temporal` variants
+    // selected by `--ts-date-time-types`. Emit the `date` and `temporal` variants
     // of the `temporal` example into distinct directories so all three modes are
     // generated and snapshot-tested. Go / Java / Python are unaffected.
     if language == Language::TypeScript && example_id == "temporal" {
@@ -684,14 +684,14 @@ fn build_json_example(repo_root: &Path, language: Language, example_id: &str) ->
             language,
             example_id,
             "temporal-date",
-            generator::JsTemporalRepr::Date,
+            generator::TsDateTimeTypes::Date,
         )?;
         build_json_example_variant(
             repo_root,
             language,
             example_id,
             "temporal-temporal",
-            generator::JsTemporalRepr::Temporal,
+            generator::TsDateTimeTypes::Temporal,
         )?;
     }
 
@@ -705,7 +705,7 @@ fn build_json_example_variant(
     language: Language,
     input_id: &str,
     output_id: &str,
-    js_temporal_repr: generator::JsTemporalRepr,
+    ts_date_time_types: generator::TsDateTimeTypes,
 ) -> Result<()> {
     let input_path = json_example_input_path(repo_root, input_id);
     let definitions_output_path = json_example_output_path(
@@ -723,7 +723,7 @@ fn build_json_example_variant(
         output_path: definitions_output_path.clone(),
         format: false,
         generate_native_api: false,
-        js_temporal_repr,
+        ts_date_time_types,
     })?;
     format_example_output(repo_root, language, &definitions_output_path)?;
 
@@ -739,7 +739,7 @@ fn build_json_example_variant(
         output_path: api_output_path.clone(),
         format: false,
         generate_native_api: true,
-        js_temporal_repr,
+        ts_date_time_types,
     })?;
     format_example_output(repo_root, language, &api_output_path)?;
 

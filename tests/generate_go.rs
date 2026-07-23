@@ -24,7 +24,7 @@ fn generate_to_string_with_inputs(
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
-        js_temporal_repr: Default::default(),
+        ts_date_time_types: Default::default(),
     })?;
     let rendered = if output_path.is_file() {
         fs::read_to_string(&output_path)?
@@ -1261,7 +1261,7 @@ fn go_rejects_inputs_flattening_to_the_same_module_file() {
         output_path,
         format: false,
         generate_native_api: false,
-        js_temporal_repr: Default::default(),
+        ts_date_time_types: Default::default(),
     });
 
     let error = result
@@ -1298,7 +1298,7 @@ fn go_rejects_reserved_generated_name_collision() {
         output_path,
         format: false,
         generate_native_api: false,
-        js_temporal_repr: Default::default(),
+        ts_date_time_types: Default::default(),
     });
 
     let error = result

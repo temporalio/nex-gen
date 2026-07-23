@@ -81,7 +81,7 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
             output_path: output_path.clone(),
             format: false,
             generate_native_api,
-            js_temporal_repr: Default::default(),
+            ts_date_time_types: Default::default(),
         })
         .unwrap();
 

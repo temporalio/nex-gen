@@ -13,21 +13,21 @@ use crate::format::TemporalKind;
 use crate::generator::typescript::{
     RenderedExternalModelFragments, WireValueConversion, typescript_generated_field_name,
 };
-use crate::generator::{ExternalModelBackend, JsTemporalRepr};
+use crate::generator::{ExternalModelBackend, TsDateTimeTypes};
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
 thread_local! {
-    /// The active `--js-temporal-repr` while rendering the TS models/runtime.
+    /// The active `--ts-date-time-types` while rendering the TS models/runtime.
     /// Generation is single-threaded per file, so a thread-local avoids threading
     /// the flag through every recursive `type_annotation`/parser/serializer call.
-    static JS_TEMPORAL_REPR: Cell<JsTemporalRepr> = const { Cell::new(JsTemporalRepr::String) };
+    static TS_DATE_TIME_TYPES: Cell<TsDateTimeTypes> = const { Cell::new(TsDateTimeTypes::String) };
     static USES_TEMPORAL: Cell<bool> = const { Cell::new(false) };
     static USES_CONTENT_ENCODING: Cell<bool> = const { Cell::new(false) };
 }
 
-fn set_temporal_context(repr: JsTemporalRepr, uses_temporal: bool) {
-    JS_TEMPORAL_REPR.with(|cell| cell.set(repr));
+fn set_temporal_context(repr: TsDateTimeTypes, uses_temporal: bool) {
+    TS_DATE_TIME_TYPES.with(|cell| cell.set(repr));
     USES_TEMPORAL.with(|cell| cell.set(uses_temporal));
 }
 
@@ -35,8 +35,8 @@ fn set_content_encoding_context(uses_content_encoding: bool) {
     USES_CONTENT_ENCODING.with(|cell| cell.set(uses_content_encoding));
 }
 
-fn active_repr() -> JsTemporalRepr {
-    JS_TEMPORAL_REPR.with(Cell::get)
+fn active_repr() -> TsDateTimeTypes {
+    TS_DATE_TIME_TYPES.with(Cell::get)
 }
 
 /// The materialized `TemporalKind` of a schema that is directly a temporal string
@@ -77,16 +77,16 @@ fn temporal_kind_direct(schema: &Schema) -> Option<TemporalKind> {
 }
 
 /// The TypeScript in-memory type for a materialized temporal `format` under the
-/// active `--js-temporal-repr`. `time` is always a `string`.
-fn ts_temporal_type(kind: TemporalKind, repr: JsTemporalRepr) -> &'static str {
+/// active `--ts-date-time-types`. `time` is always a `string`.
+fn ts_temporal_type(kind: TemporalKind, repr: TsDateTimeTypes) -> &'static str {
     match (kind, repr) {
         (TemporalKind::Time, _) => "string",
-        (_, JsTemporalRepr::String) => "string",
-        (TemporalKind::DateTime, JsTemporalRepr::Date) => "Date",
-        (TemporalKind::Date | TemporalKind::Duration, JsTemporalRepr::Date) => "string",
-        (TemporalKind::DateTime, JsTemporalRepr::Temporal) => "TemporalApi.ZonedDateTime",
-        (TemporalKind::Date, JsTemporalRepr::Temporal) => "TemporalApi.PlainDate",
-        (TemporalKind::Duration, JsTemporalRepr::Temporal) => "TemporalApi.Duration",
+        (_, TsDateTimeTypes::String) => "string",
+        (TemporalKind::DateTime, TsDateTimeTypes::Date) => "Date",
+        (TemporalKind::Date | TemporalKind::Duration, TsDateTimeTypes::Date) => "string",
+        (TemporalKind::DateTime, TsDateTimeTypes::Temporal) => "TemporalApi.ZonedDateTime",
+        (TemporalKind::Date, TsDateTimeTypes::Temporal) => "TemporalApi.PlainDate",
+        (TemporalKind::Duration, TsDateTimeTypes::Temporal) => "TemporalApi.Duration",
     }
 }
 
@@ -106,15 +106,15 @@ fn ts_temporal_parse_fn(kind: TemporalKind) -> &'static str {
 /// native-typed ones call a runtime serializer.
 fn ts_temporal_serialize_call(
     kind: TemporalKind,
-    repr: JsTemporalRepr,
+    repr: TsDateTimeTypes,
     value_expr: &str,
 ) -> String {
     let native = matches!(
         (kind, repr),
-        (TemporalKind::DateTime, JsTemporalRepr::Date)
-            | (TemporalKind::DateTime, JsTemporalRepr::Temporal)
-            | (TemporalKind::Date, JsTemporalRepr::Temporal)
-            | (TemporalKind::Duration, JsTemporalRepr::Temporal)
+        (TemporalKind::DateTime, TsDateTimeTypes::Date)
+            | (TemporalKind::DateTime, TsDateTimeTypes::Temporal)
+            | (TemporalKind::Date, TsDateTimeTypes::Temporal)
+            | (TemporalKind::Duration, TsDateTimeTypes::Temporal)
     );
     if !native {
         return value_expr.to_string();
@@ -902,8 +902,8 @@ pub(in crate::generator) struct ModelBackend {
     json_models: Vec<PlannedJsonType>,
     tree_leaf: bool,
     runtime_import_module: String,
-    /// The `--js-temporal-repr` selection for materialized temporal fields.
-    pub(in crate::generator) js_temporal_repr: crate::generator::JsTemporalRepr,
+    /// The `--ts-date-time-types` selection for materialized temporal fields.
+    pub(in crate::generator) ts_date_time_types: crate::generator::TsDateTimeTypes,
 }
 
 impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
@@ -931,7 +931,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
     fn render_models(&self) -> Result<RenderedExternalModelFragments> {
         let json_models = self.json_models.iter().collect::<Vec<_>>();
         set_temporal_context(
-            self.js_temporal_repr,
+            self.ts_date_time_types,
             self.json_models.iter().any(|m| model_uses_temporal(m)),
         );
         set_content_encoding_context(self.json_models.iter().any(model_uses_content_encoding));
@@ -943,7 +943,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
             return Ok(BTreeMap::new());
         }
         set_temporal_context(
-            self.js_temporal_repr,
+            self.ts_date_time_types,
             self.json_models.iter().any(|m| model_uses_temporal(m)),
         );
         set_content_encoding_context(self.json_models.iter().any(model_uses_content_encoding));
@@ -1076,7 +1076,7 @@ fn render_json_runtime_module() -> String {
     let uses_temporal = USES_TEMPORAL.with(Cell::get);
     let mut output = String::new();
     output.push_str("// Generated by nex-gen. DO NOT EDIT!\n\n");
-    if uses_temporal && repr == JsTemporalRepr::Temporal {
+    if uses_temporal && repr == TsDateTimeTypes::Temporal {
         output.push_str("import { Temporal as TemporalApi } from '@js-temporal/polyfill';\n\n");
     }
     render_validator_core(&mut output);
@@ -1228,7 +1228,7 @@ fn model_uses_temporal(model: &PlannedJsonType) -> bool {
 /// Emits the materialized-temporal runtime for the active repr: the pinned
 /// narrowed regexes, the Gregorian calendar predicate, string canonicalizers,
 /// and the parse/serialize adapters. See `specs/json-schema/features/format.md`.
-fn render_ts_temporal_helpers(output: &mut String, repr: JsTemporalRepr) {
+fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
     output.push_str(&format!(
         "const TEMPORAL_DATE_TIME_RE = /{}/u;\n",
         TemporalKind::DateTime.pattern()
@@ -1259,13 +1259,13 @@ fn render_ts_temporal_helpers(output: &mut String, repr: JsTemporalRepr) {
         .push_str("  if (!TEMPORAL_DATE_TIME_RE.test(value) || !validTemporalCalendar(value)) {\n");
     output.push_str("    violations.push({ path, reason: `must be a valid date-time, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
     match repr {
-        JsTemporalRepr::String => {
+        TsDateTimeTypes::String => {
             output.push_str("  return canonicalizeTemporalDateTime(value);\n");
         }
-        JsTemporalRepr::Date => {
+        TsDateTimeTypes::Date => {
             output.push_str("  return new Date(value.toUpperCase());\n");
         }
-        JsTemporalRepr::Temporal => {
+        TsDateTimeTypes::Temporal => {
             output.push_str("  const canon = canonicalizeTemporalDateTime(value);\n");
             output.push_str("  const zone = canon.endsWith('Z') ? 'UTC' : canon.slice(-6);\n");
             output.push_str("  return TemporalApi.ZonedDateTime.from(`${canon}[${zone}]`);\n");
@@ -1280,7 +1280,7 @@ fn render_ts_temporal_helpers(output: &mut String, repr: JsTemporalRepr) {
     output.push_str("  if (!TEMPORAL_DATE_RE.test(value) || !validTemporalCalendar(value)) {\n");
     output.push_str("    violations.push({ path, reason: `must be a valid date, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
     match repr {
-        JsTemporalRepr::Temporal => {
+        TsDateTimeTypes::Temporal => {
             output.push_str("  return TemporalApi.PlainDate.from(value);\n");
         }
         _ => output.push_str("  return value;\n"),
@@ -1305,7 +1305,7 @@ fn render_ts_temporal_helpers(output: &mut String, repr: JsTemporalRepr) {
     output.push_str("  if (seconds === undefined) {\n");
     output.push_str("    violations.push({ path, reason: `must be a valid duration, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
     match repr {
-        JsTemporalRepr::Temporal => {
+        TsDateTimeTypes::Temporal => {
             output.push_str("  return TemporalApi.Duration.from({ seconds });\n");
         }
         _ => output.push_str("  return formatTemporalDuration(seconds);\n"),
@@ -1313,12 +1313,12 @@ fn render_ts_temporal_helpers(output: &mut String, repr: JsTemporalRepr) {
     output.push_str("}\n");
 
     // Serializers for native-typed reprs.
-    if repr == JsTemporalRepr::Date {
+    if repr == TsDateTimeTypes::Date {
         output.push_str(
             "\nexport function serializeTemporalDateTime(value: Date): string {\n  return value.toISOString();\n}\n",
         );
     }
-    if repr == JsTemporalRepr::Temporal {
+    if repr == TsDateTimeTypes::Temporal {
         output.push_str(
             "\nexport function serializeTemporalDateTime(value: TemporalApi.ZonedDateTime): string {\n",
         );
@@ -3041,7 +3041,7 @@ fn type_annotation(schema: &Schema) -> Result<String> {
     if let Some(reference) = &schema.reference {
         return Ok(reference_model_name(reference));
     }
-    // A materialized temporal `format` field type (per --js-temporal-repr). The
+    // A materialized temporal `format` field type (per --ts-date-time-types). The
     // `oneOf[…, null]` nullable wrapper is handled by the `one_of` join below,
     // which recurses into this branch for the non-null member.
     if let Some(kind) = temporal_kind_direct(schema) {

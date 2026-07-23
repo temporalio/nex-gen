@@ -219,7 +219,7 @@ precision** and diverges only where a chosen type cannot. `date`, `time`, and
 round-trip may lose information** across ordinary targets — which target, and
 how much, is tabulated below.
 
-| Format | Go | Java | Python | TS (per `--js-temporal-repr`) | Wire form |
+| Format | Go | Java | Python | TS (per `--ts-date-time-types`) | Wire form |
 |---|---|---|---|---|---|
 | `date-time` | `time.Time` | `OffsetDateTime` | `datetime` (aware) | `string` / `Date` / `Temporal.ZonedDateTime` | RFC 3339, **original offset & sub-second precision preserved** (per-target loss below) |
 | `date` | `time.Time`† | `LocalDate` | `date` | `string` / `Temporal.PlainDate` | `YYYY-MM-DD` (lossless) |
@@ -230,8 +230,8 @@ how much, is tabulated below.
 † Go has no date-only / time-of-day type; `time.Time` carries a phantom date /
 time-of-day the serializer ignores (an offset still rides in its zone).
 
-**The TS column** lists the `string` default and the `--js-temporal-repr=temporal`
-type; `date-time` additionally offers `Date` under `--js-temporal-repr=date`
+**The TS column** lists the `string` default and the `--ts-date-time-types=temporal`
+type; `date-time` additionally offers `Date` under `--ts-date-time-types=date`
 (no other format has a built-in `Date` analog). TS `date` never uses `Date` —
 a `Date` is a UTC **instant** that misreads a plain date under local
 `getHours()`, so its proper typed form is `Temporal.PlainDate`.
@@ -242,7 +242,7 @@ fractional seconds at the value's own precision with trailing zeros trimmed (no
 fractional part when zero). `Temporal.ZonedDateTime` preserves the offset too
 (serialized with `.toString({ timeZoneName: 'never' })`, then the same
 `+00:00`→`Z` normalization). The **one** target that cannot carry an offset is
-TS `date-time` under `--js-temporal-repr=date`, whose `Date.toISOString()`
+TS `date-time` under `--ts-date-time-types=date`, whose `Date.toISOString()`
 folds to a UTC instant (always 3 digits). The serializer is **owned, not
 native**, because the stdlib emitters disagree
 (`research/format_materialize_clock/`): Java `OffsetDateTime.toString` pads to
@@ -258,9 +258,9 @@ rules above.
 | Go | `time.Time` | offset + **nanosecond** preserved — lossless |
 | Java | `OffsetDateTime` | offset + **nanosecond** preserved — lossless |
 | Python | `datetime` (aware) | offset preserved, **sub-microsecond truncated** (the type's resolution) |
-| TS `--js-temporal-repr=string` (default) | `string` | serialized form stored — lossless |
-| TS `--js-temporal-repr=date` | `Date` | UTC instant at **millisecond** — offset folded to UTC, sub-ms lost |
-| TS `--js-temporal-repr=temporal` | `Temporal.ZonedDateTime` | offset + **nanosecond** preserved — lossless |
+| TS `--ts-date-time-types=string` (default) | `string` | serialized form stored — lossless |
+| TS `--ts-date-time-types=date` | `Date` | UTC instant at **millisecond** — offset folded to UTC, sub-ms lost |
+| TS `--ts-date-time-types=temporal` | `Temporal.ZonedDateTime` | offset + **nanosecond** preserved — lossless |
 
 So `2021-06-15T12:30:45.123456789+02:00` keeps its offset and nanoseconds in Go
 / Java / TS `string` / TS `Temporal.ZonedDateTime`, loses the trailing `789` in
@@ -279,12 +279,12 @@ more offset-drop merging distinct values. RFC 3339 keeps the `time` offset
 types are used only when an offset is present (Java falls back to `LocalTime`,
 Python to a naive `time`; Go's phantom `time.Time` and the TS `string` carry
 either). Temporal has **no** offset-bearing time-only type (`PlainTime` would
-drop the offset), so under `--js-temporal-repr=temporal` `time` stays a
+drop the offset), so under `--ts-date-time-types=temporal` `time` stays a
 `string` — the one temporal that is not a `Temporal` type, precisely to keep
 its offset. **`duration` canonicalizes** value-preserving non-canonical inputs
 (`PT90M` → `PT1H30M`, `PT3600S` → `PT1H`) **byte-identically across languages**.
 
-**JS temporal representation (`--js-temporal-repr`).** JS is the only target
+**JS temporal representation (`--ts-date-time-types`).** JS is the only target
 with more than one reasonable in-memory shape for a temporal — a lossy legacy
 `Date`, the new `Temporal` API, or a plain `string` — so **one** generator-wide
 flag (a CLI option, and the equivalent API option per **P16**) selects the TS
@@ -292,7 +292,7 @@ type for **all four** temporal formats at once. It affects **only** the TS
 output; Go / Java / Python are unchanged, and choosing a lossy TS shape does
 **not** pull the other targets down (no truncation propagates across languages):
 
-| `--js-temporal-repr` | `date-time` | `date` | `time` | `duration` |
+| `--ts-date-time-types` | `date-time` | `date` | `time` | `duration` |
 |---|---|---|---|---|
 | `string` (default) | `string` | `string` | `string` | `string` |
 | `date` | `Date` | `string` | `string` | `string` |
@@ -337,7 +337,7 @@ per-node (and available as a generator-wide mode).
 round-trip behavior (`// format: date-time — offset & precision preserved;
 round-trip may lose precision beyond this type's resolution`) so any loss is
 visible in the generated source (**P2**). The only lossy TS mode is legacy
-`--js-temporal-repr=date`, whose comment names the UTC-instant fold and
+`--ts-date-time-types=date`, whose comment names the UTC-instant fold and
 millisecond resolution; `temporal` (`ZonedDateTime`) is lossless like the
 default.
 
@@ -384,14 +384,14 @@ add back the `|60` seconds alternative; `duration` uses the full
 | Language | Strategy (materialized temporal) |
 |---|---|
 | Go | Parse adapter: run the pinned regex + `validRFC3339(...)` over the wire string, pushing a `Violation` on failure; else `t, _ := time.Parse(time.RFC3339, strings.ToUpper(s))` → store `t` **as parsed** (offset and nanoseconds retained; no `UTC()`, no truncation) for `date-time`, or `time.Parse("2006-01-02", s)` (`date`); `duration` parses the `PT…` components into a `time.Duration`. Encode adapter: `t.Format(time.RFC3339Nano)` (offset preserved, `Z` for zero offset, trailing-zero fractional trimmed). `regexp.MustCompile` compiled once at init. |
-| TypeScript | Parse adapter: pinned regex (`/…/u`) + calendar/range check, then per `--js-temporal-repr`: **`string`** (default) store the generator-serialized string for every temporal; **`date`** `new Date(s)` for `date-time` (others string); **`temporal`** `Temporal.ZonedDateTime.from` (`date-time`, in the wire's offset zone) / `PlainDate.from` (`date`) / `Duration.from` (`duration`), with `time` staying a string. Encode adapter: **`string`** emit the stored string; **`date`** `date-time` → `.toISOString()` (UTC, ms, 3 digits); **`temporal`** the value's `.toString()` — `ZonedDateTime.toString({ timeZoneName: 'never' })` (offset kept, then `+00:00`→`Z`), `PlainDate` / `Duration` exact. |
+| TypeScript | Parse adapter: pinned regex (`/…/u`) + calendar/range check, then per `--ts-date-time-types`: **`string`** (default) store the generator-serialized string for every temporal; **`date`** `new Date(s)` for `date-time` (others string); **`temporal`** `Temporal.ZonedDateTime.from` (`date-time`, in the wire's offset zone) / `PlainDate.from` (`date`) / `Duration.from` (`duration`), with `time` staying a string. Encode adapter: **`string`** emit the stored string; **`date`** `date-time` → `.toISOString()` (UTC, ms, 3 digits); **`temporal`** the value's `.toString()` — `ZonedDateTime.toString({ timeZoneName: 'never' })` (offset kept, then `+00:00`→`Z`), `PlainDate` / `Duration` exact. |
 | Python | Parse adapter (an `AfterValidator` / model hook): regex + calendar over the wire string, then `datetime.fromisoformat(s.upper())` **retaining the parsed offset** (`date-time`; `datetime`'s native microsecond resolution truncates any finer input — the one Python-side loss), `date.fromisoformat(s)` (`date`), `time.fromisoformat(s)` **retaining any offset** as an aware `time` (`time`), or parse `PT…` into a `timedelta` (`duration`). Encode: generator-owned string via `@model_serializer` (offset preserved, fractional trimmed). We do **not** use Pydantic's native `datetime` coercion (it accepts a missing offset and normalizes differently). |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex + calendar over the `String`, then `OffsetDateTime.parse(s)` **retaining the offset and nanoseconds** (no `atOffset(UTC)`, no `truncatedTo`) (`date-time`), `LocalDate.parse` (`date`), `OffsetTime.parse` **retaining the offset** (or `LocalTime.parse` when the wire omits it) (`time`), or `Duration.parse` for the `PT…` form. The `Serializer` emits the **generator-owned** string (offset preserved, fractional trimmed) — **not** `Duration.toString()` for `.NET` parity and **not** the BCL serializer (`.NET XmlConvert` rolls `PT24H`→`P1D`). |
 
 There is **no truncation floor**: Go and Java retain nanoseconds, Python its
 native microseconds (finer input truncated there only), and the generator-owned
 serializer trims trailing-zero fractional digits so equal values agree
-byte-for-byte wherever the types are equally capable. Under `--js-temporal-repr`,
+byte-for-byte wherever the types are equally capable. Under `--ts-date-time-types`,
 `Temporal.ZonedDateTime` keeps the offset (byte-identical with Go/Java); only
 the legacy TS `date` mode is a UTC-instant fold.
 
@@ -476,7 +476,7 @@ Representative cases:
 - **`date`**: `2020-02-29` OK; `2021-02-29` / `2021-13-01` → fail.
 - **`time`**: `12:30:45+02:00` → `12:30:45+02:00` (**offset preserved** in every
   language and mode, trailing-zero fractional trimmed; a `string` in TS
-  including `--js-temporal-repr=temporal`).
+  including `--ts-date-time-types=temporal`).
 - **`duration`**: `PT90M` → `PT1H30M`; `PT0S` OK; `P1Y` / `P4W` / `P1D` →
   **load reject** (materialized time-only); overflow `PT<huge>H` → `Violation`.
 - Combined with a failing [[minLength]] / [[maxLength]] / [[pattern]] or a
@@ -492,7 +492,7 @@ Representative cases:
   `string`; a mismatch is a load reject (**P7.1**). For a materialized
   temporal the **emitted field type is the native construct** where the target
   has one (the wire is still a JSON string); in TS that is governed by
-  `--js-temporal-repr` — `string` (default) keeps all four temporals as
+  `--ts-date-time-types` — `string` (default) keeps all four temporals as
   `string`, `date` gives only `date-time` a `Date`, and `temporal` uses the
   matching `Temporal` type for each.
 - **[[const]] / [[default]] / [[enum]]**: a supplied string literal MUST
@@ -543,7 +543,7 @@ get divergent verdicts across the seven native URI parsers.
    string opt-out's accessor. Deferred pending demand.
 3. **A `Temporal` type for `time`.** `time` is lossless everywhere (offset
    preserved), but it is the one temporal that stays a `string` under
-   `--js-temporal-repr=temporal`, because Temporal ships no offset-bearing
+   `--ts-date-time-types=temporal`, because Temporal ships no offset-bearing
    time-only type (`PlainTime` would drop the offset). If Temporal later adds
    one — or if a schema's `time` is known offset-less — `PlainTime` could
    materialize it. Ruby (prospective) likewise has no time-of-day type.

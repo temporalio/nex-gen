@@ -125,11 +125,11 @@ pub enum GenerationMode {
 }
 
 /// The TypeScript in-memory representation of a materialized temporal `format`
-/// field, selected by the `--js-temporal-repr` generator flag (P16 API parity).
+/// field, selected by the `--ts-date-time-types` generator flag (P16 API parity).
 /// Affects **only** the TypeScript output; Go / Java / Python are unchanged. See
 /// `specs/json-schema/features/format.md` (JS temporal representation).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum JsTemporalRepr {
+pub enum TsDateTimeTypes {
     /// Every temporal is a `string` holding the generator-serialized form
     /// (lossless, still materialized — the narrowed grammar rejects `:60`).
     #[default]
@@ -194,9 +194,9 @@ pub fn generate_files_for_tree_with_mode(
 pub(crate) struct GenerateFilesOptions {
     pub(crate) go_import_root: Option<String>,
     pub(crate) java_package_root: Option<String>,
-    /// The TypeScript temporal representation (`--js-temporal-repr`); ignored by
+    /// The TypeScript temporal representation (`--ts-date-time-types`); ignored by
     /// the non-TypeScript backends.
-    pub(crate) js_temporal_repr: JsTemporalRepr,
+    pub(crate) ts_date_time_types: TsDateTimeTypes,
 }
 
 pub(crate) fn generate_files_for_tree_with_mode_and_options(
@@ -263,7 +263,7 @@ fn generate_files_from_planned_tree(
         Language::Go => generate_go_tree(tree, support, mode, options),
         Language::Java => java::generate(tree, support, mode, options.java_package_root.as_deref()),
         Language::Python => python::generate(tree, support, mode),
-        Language::TypeScript => typescript::generate(tree, support, mode, options.js_temporal_repr),
+        Language::TypeScript => typescript::generate(tree, support, mode, options.ts_date_time_types),
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = if mode == GenerationMode::NativeApi {

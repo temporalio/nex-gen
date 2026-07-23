@@ -155,7 +155,7 @@ fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[Pa
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
-        js_temporal_repr: Default::default(),
+        ts_date_time_types: Default::default(),
     })
     .unwrap();
     let rendered = if output_path.is_file() {
@@ -221,7 +221,7 @@ fn generate_formatted_json_typescript_output(
 
 /// Like `generate_formatted_json_typescript_output`, but reads the input from
 /// `input_id` (so the repr variants reuse `temporal.yaml`) and threads an
-/// optional `--js-temporal-repr`.
+/// optional `--ts-date-time-types`.
 fn generate_formatted_json_typescript_output_repr(
     root: &Path,
     input_id: &str,
@@ -242,7 +242,7 @@ fn generate_formatted_json_typescript_output_repr(
         output_path.to_str().unwrap(),
     ];
     if let Some(repr) = repr {
-        args.push("--js-temporal-repr");
+        args.push("--ts-date-time-types");
         args.push(repr);
     }
     if !generate_native_api {
@@ -320,7 +320,7 @@ fn typescript_json_example_generation_matches_checked_in_output() {
         }
         fs::remove_dir_all(output_path).unwrap();
     }
-    // The `--js-temporal-repr` date/temporal variants of the temporal example.
+    // The `--ts-date-time-types` date/temporal variants of the temporal example.
     for (output_id, repr) in [("temporal-date", "date"), ("temporal-temporal", "temporal")] {
         let output_path = unique_output_path(&format!("typescript-json-{output_id}"));
         generate_formatted_json_typescript_output_repr(

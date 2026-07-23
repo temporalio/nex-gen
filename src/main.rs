@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
-use nex_gen::generator::JsTemporalRepr;
+use nex_gen::generator::TsDateTimeTypes;
 use nex_gen::language::Language;
 use nex_gen::parser::write_prepared_wit_directory;
 use nex_gen::{
@@ -51,23 +51,23 @@ struct GenerateArgs {
     generate_native_api: bool,
     /// TypeScript-only: the in-memory representation for materialized temporal
     /// `format` fields (date-time/date/time/duration). Ignored for other targets.
-    #[arg(long = "js-temporal-repr", value_enum, default_value_t = CliJsTemporalRepr::String)]
-    js_temporal_repr: CliJsTemporalRepr,
+    #[arg(long = "ts-date-time-types", value_enum, default_value_t = CliTsDateTimeTypes::String)]
+    ts_date_time_types: CliTsDateTimeTypes,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-enum CliJsTemporalRepr {
+enum CliTsDateTimeTypes {
     String,
     Date,
     Temporal,
 }
 
-impl From<CliJsTemporalRepr> for JsTemporalRepr {
-    fn from(value: CliJsTemporalRepr) -> Self {
+impl From<CliTsDateTimeTypes> for TsDateTimeTypes {
+    fn from(value: CliTsDateTimeTypes) -> Self {
         match value {
-            CliJsTemporalRepr::String => JsTemporalRepr::String,
-            CliJsTemporalRepr::Date => JsTemporalRepr::Date,
-            CliJsTemporalRepr::Temporal => JsTemporalRepr::Temporal,
+            CliTsDateTimeTypes::String => TsDateTimeTypes::String,
+            CliTsDateTimeTypes::Date => TsDateTimeTypes::Date,
+            CliTsDateTimeTypes::Temporal => TsDateTimeTypes::Temporal,
         }
     }
 }
@@ -154,7 +154,7 @@ fn main() -> ExitCode {
             output_path: args.output,
             format: args.format,
             generate_native_api: args.generate_native_api,
-            js_temporal_repr: args.js_temporal_repr.into(),
+            ts_date_time_types: args.ts_date_time_types.into(),
         }),
         Commands::BuildExamples(args) => build_examples(&BuildExamplesRequest {
             languages: args.langs.into_iter().map(Language::from).collect(),

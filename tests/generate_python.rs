@@ -151,7 +151,7 @@ fn generate_python_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
-        js_temporal_repr: Default::default(),
+        ts_date_time_types: Default::default(),
     })
     .unwrap();
     let rendered = if output_path.is_file() {
