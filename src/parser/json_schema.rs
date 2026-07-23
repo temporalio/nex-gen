@@ -442,6 +442,7 @@ fn parse_json_documents(sources: Vec<(PathBuf, String)>) -> Result<ParsedJsonDoc
 
     validate_model_refs(&docs, &models)?;
     validate_all_unions(&docs, &models)?;
+    validate_reference_satisfiability(&docs, &models)?;
 
     Ok(ParsedJsonDocuments { docs, models })
 }
@@ -633,10 +634,16 @@ fn validate_document(path: &Path, doc: &Document) -> Result<()> {
                 .to_string(),
         });
     }
-    if !has_nexus_envelope && !root_is_schema_shaped(&doc.root) {
+    // A definitions-only pure file (only `$defs`, plus optional `description` /
+    // `$schema`, and no `nexusrpc`) is a definitions bucket, not a type: it has
+    // no file-root type and contributes its `$defs` alone. See
+    // `json-schema/input-files.md` (Definitions-only exception). We reject only
+    // a plain file that carries neither a root schema nor any `$defs`.
+    let has_defs = doc.defs.as_ref().is_some_and(|defs| !defs.is_empty());
+    if !has_nexus_envelope && !root_is_schema_shaped(&doc.root) && !has_defs {
         return Err(Error::InvalidJsonSchema {
             path: path.to_path_buf(),
-            reason: "plain JSON schema files must define a root schema".to_string(),
+            reason: "plain JSON schema files must define a root schema or `$defs`".to_string(),
         });
     }
     Ok(())
@@ -689,7 +696,13 @@ fn validate_schema_node(
     validate_object_constraints(path, schema, context)?;
     validate_const_enum(path, schema, context)?;
     validate_default(path, schema, context)?;
+    // Runs after the value keywords so a composite `const`/`enum`/`default` on a
+    // shapeless `type: object` reports the more specific value diagnostic first.
+    if !is_union_branch {
+        validate_type_presence(path, schema, context)?;
+    }
     validate_annotations(path, schema, context)?;
+    validate_required(path, schema, context)?;
     if let Some(properties) = &schema.properties {
         let required: Vec<&str> = schema
             .required
@@ -724,23 +737,65 @@ fn validate_schema_node(
             validate_schema_node(path, branch, &format!("{context}.oneOf"), true)?;
         }
     }
-    if let Some(additional) = &schema.additional_properties
-        && additional.is_object()
-    {
-        let additional_schema =
-            serde_json::from_value::<Schema>(additional.clone()).map_err(|error| {
-                Error::InvalidJsonSchema {
-                    path: path.to_path_buf(),
-                    reason: format!("{context}.additionalProperties is invalid: {error}"),
+    if let Some(additional) = &schema.additional_properties {
+        match additional {
+            // `true` (open map) / `false` (closed object) are the accepted flags.
+            Value::Bool(_) => {}
+            Value::Object(_) => {
+                let additional_schema = serde_json::from_value::<Schema>(additional.clone())
+                    .map_err(|error| Error::InvalidJsonSchema {
+                        path: path.to_path_buf(),
+                        reason: format!("{context}.additionalProperties is invalid: {error}"),
+                    })?;
+                // `additionalProperties: {}` — the empty schema — means "any value",
+                // exactly what `true` means; require the unambiguous spelling. The
+                // pre-validation normalize pass re-serializes an empty schema into a
+                // null-filled object, so compare against the default rather than an
+                // empty map.
+                if additional_schema == Schema::default() {
+                    return Err(Error::InvalidJsonSchema {
+                        path: path.to_path_buf(),
+                        reason: format!(
+                            "{context}.additionalProperties: an empty schema `{{}}` means any value; write `additionalProperties: true` instead"
+                        ),
+                    });
                 }
-            })?;
-        validate_schema_tree(
-            path,
-            &additional_schema,
-            &format!("{context}.additionalProperties"),
-        )?;
+                validate_schema_tree(
+                    path,
+                    &additional_schema,
+                    &format!("{context}.additionalProperties"),
+                )?;
+            }
+            _ => {
+                return Err(Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!(
+                        "{context}.additionalProperties must be `true`, `false`, or a schema object"
+                    ),
+                });
+            }
+        }
     }
     Ok(())
+}
+
+/// The fix-it reason for an unsupported keyword: points at the coherent
+/// in-subset alternative rather than a bare "not supported" (see each keyword's
+/// feature spec).
+fn unsupported_keyword_reason(keyword: &str) -> &'static str {
+    match keyword {
+        "anyOf" => "`anyOf` is not supported; a value-level union is expressed with a `oneOf` of pairwise-disjoint kinds",
+        "if" | "then" | "else" => "conditional schemas (`if`/`then`/`else`) are not supported; model the alternatives as a `oneOf`",
+        "prefixItems" => "tuple arrays (`prefixItems`) are not supported; use a single uniform `items` element type",
+        "unevaluatedProperties" => "`unevaluatedProperties` is not supported; bound extra members with `additionalProperties` (`true`, `false`, or a value schema)",
+        "unevaluatedItems" => "`unevaluatedItems` is not supported; bound the element type with `items`",
+        "dependentSchemas" => "`dependentSchemas` is not supported; a conditional subschema has no static shape — split the variants into explicit types",
+        "patternProperties" => "`patternProperties` is not supported; use a typed map (`additionalProperties: {type: ...}`) or enumerate the keys under `properties`",
+        "nullable" => "OAS 3.0 `nullable` is not supported; model a nullable field with `oneOf: [{type: T}, {type: \"null\"}]`",
+        "$anchor" | "$dynamicRef" | "$dynamicAnchor" => "`$anchor`/`$dynamicRef`/`$dynamicAnchor` are not supported; use a plain `$ref`",
+        "$vocabulary" => "`$vocabulary` is not supported; it is a meta-schema keyword with no place in a type schema (the dialect is pinned to 2020-12)",
+        other => panic!("unsupported-keyword reason requested for unhandled keyword `{other}`"),
+    }
 }
 
 fn validate_schema_common(path: &Path, schema: &Schema, context: &str) -> Result<()> {
@@ -764,9 +819,29 @@ fn validate_schema_common(path: &Path, schema: &Schema, context: &str) -> Result
             reason: format!("{context}: remote `$ref` `{reference}` is not supported"),
         });
     }
+    // `not` has degenerate forms the spec calls out with distinct diagnostics.
+    if let Some(negated) = schema.extra.get("not") {
+        let reason = match negated {
+            Value::Object(map) if map.is_empty() => {
+                "`not: {}` is unsatisfiable — it accepts no instance (a dead type)"
+            }
+            Value::Bool(true) => {
+                "`not: true` is unsatisfiable — it accepts no instance (a dead type)"
+            }
+            Value::Bool(false) => {
+                "`not: false` is a no-op — it constrains nothing (a dead keyword); remove it"
+            }
+            _ => {
+                "`not` is not supported; state the positive `type`/constraints, or enumerate the admissible values with `enum`, rather than what is disallowed"
+            }
+        };
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("{context}: {reason}"),
+        });
+    }
     for keyword in [
         "anyOf",
-        "not",
         "if",
         "then",
         "else",
@@ -784,7 +859,7 @@ fn validate_schema_common(path: &Path, schema: &Schema, context: &str) -> Result
         if schema.extra.contains_key(keyword) {
             return Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
-                reason: format!("{context}: `{keyword}` is not supported"),
+                reason: format!("{context}: {}", unsupported_keyword_reason(keyword)),
             });
         }
     }
@@ -814,6 +889,113 @@ fn validate_schema_common(path: &Path, schema: &Schema, context: &str) -> Result
                 "{context}: `contentSchema` is not supported; a schema over encoded string content has no native lowering (drop it, or model the decoded value as its own typed member)"
             ),
         });
+    }
+    Ok(())
+}
+
+/// Requires every leaf schema to name an explicit, known `type`, and requires
+/// `type: object` / `type: array` to carry a concrete shape (see
+/// `json-schema/features/type.md`). A `oneOf` / `$ref` schema is exempt — its
+/// shape comes from the branches or the referenced target; `allOf` is merged
+/// away before validation runs. Not called for union branches (their kind is
+/// checked by the sum-type pass).
+fn validate_type_presence(path: &Path, schema: &Schema, context: &str) -> Result<()> {
+    if schema.reference.is_some() || schema.one_of.is_some() {
+        return Ok(());
+    }
+    let reject = |reason: String| {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason,
+        })
+    };
+    // The array `type` form and standalone `type: "null"` are rejected earlier
+    // by `validate_type_form`, so here an unreadable `type` means it is absent.
+    let Some(name) = schema.ty.as_ref().and_then(Value::as_str) else {
+        return reject(format!(
+            "{context}: a leaf schema requires an explicit `type`; add one (e.g. `type: object`), or supply the shape via `oneOf`, `allOf`, or `$ref`"
+        ));
+    };
+    const KNOWN: [&str; 7] = [
+        "null", "boolean", "object", "array", "number", "string", "integer",
+    ];
+    if !KNOWN.contains(&name) {
+        return reject(format!(
+            "{context}: unknown `type` `{name}`; use one of `null`, `boolean`, `object`, `array`, `number`, `string`, `integer`"
+        ));
+    }
+    match name {
+        "object" => {
+            if schema.properties.is_none() && schema.additional_properties.is_none() {
+                return reject(format!(
+                    "{context}: `type: object` needs an explicit shape; add `properties: {{...}}` (typed struct), `additionalProperties: true` (open map), or `additionalProperties: false` (closed empty object)"
+                ));
+            }
+        }
+        "array" => {
+            if schema.items.is_none() {
+                return reject(format!(
+                    "{context}: `type: array` needs an explicit element type; add `items: {{...}}`"
+                ));
+            }
+        }
+        _ => {
+            if schema.properties.is_some() || schema.additional_properties.is_some() {
+                return reject(format!(
+                    "{context}: `properties`/`additionalProperties` require `type: object`"
+                ));
+            }
+            if schema.items.is_some() {
+                return reject(format!("{context}: `items` requires `type: array`"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Load-time validation of `required` (see `json-schema/features/required.md`):
+/// the value must be an array of unique property-name strings, and every name
+/// must be declared in `properties` (P7.1 — a mandatory member with no declared
+/// shape is undecidable).
+fn validate_required(path: &Path, schema: &Schema, context: &str) -> Result<()> {
+    let Some(value) = &schema.required else {
+        return Ok(());
+    };
+    let reject = |reason: String| {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason,
+        })
+    };
+    let Some(entries) = value.as_array() else {
+        return reject(format!(
+            "{context}: `required` must be an array of property-name strings"
+        ));
+    };
+    let mut names: BTreeSet<&str> = BTreeSet::new();
+    for entry in entries {
+        let Some(name) = entry.as_str() else {
+            return reject(format!(
+                "{context}: `required` may contain only property-name strings; `{entry}` is not a string"
+            ));
+        };
+        if !names.insert(name) {
+            return reject(format!(
+                "{context}: `required` lists `{name}` more than once; entries must be unique"
+            ));
+        }
+    }
+    let declared: BTreeSet<&str> = schema
+        .properties
+        .as_ref()
+        .map(|properties| properties.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    for &name in &names {
+        if !declared.contains(name) {
+            return reject(format!(
+                "{context}: `required` names `{name}`, which is not declared in `properties`; add it to `properties` or remove it from `required`"
+            ));
+        }
     }
     Ok(())
 }
@@ -998,7 +1180,34 @@ fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> 
         }
     }
 
-    // A `const`/`default` literal on the same node must satisfy the bounds.
+    // A pinned literal (`const`/`default`) or any closed-set `enum` member on the
+    // same node must satisfy the bounds — a value the field can never legally
+    // hold is a schema bug (P13.1).
+    let bound_violation = |value: f64| -> Option<String> {
+        if let Some(max) = maximum
+            && value > max
+        {
+            Some(format!("must be <= {max}"))
+        } else if let Some(min) = minimum
+            && value < min
+        {
+            Some(format!("must be >= {min}"))
+        } else if let Some(excl) = exclusive_maximum
+            && value >= excl
+        {
+            Some(format!("must be < {excl}"))
+        } else if let Some(excl) = exclusive_minimum
+            && value <= excl
+        {
+            Some(format!("must be > {excl}"))
+        } else if let Some(divisor) = multiple_of
+            && (value / divisor).fract() != 0.0
+        {
+            Some(format!("must be a multiple of {divisor}"))
+        } else {
+            None
+        }
+    };
     for literal_key in ["const", "default"] {
         let Some(Value::Number(number)) = schema.extra.get(literal_key) else {
             continue;
@@ -1006,32 +1215,22 @@ fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> 
         let Some(value) = number.as_f64() else {
             continue;
         };
-        let mut violation = None;
-        if let Some(max) = maximum
-            && value > max
-        {
-            violation = Some(format!("must be <= {max}"));
-        } else if let Some(min) = minimum
-            && value < min
-        {
-            violation = Some(format!("must be >= {min}"));
-        } else if let Some(excl) = exclusive_maximum
-            && value >= excl
-        {
-            violation = Some(format!("must be < {excl}"));
-        } else if let Some(excl) = exclusive_minimum
-            && value <= excl
-        {
-            violation = Some(format!("must be > {excl}"));
-        } else if let Some(divisor) = multiple_of
-            && (value / divisor).fract() != 0.0
-        {
-            violation = Some(format!("must be a multiple of {divisor}"));
-        }
-        if let Some(reason) = violation {
+        if let Some(reason) = bound_violation(value) {
             return reject(format!(
                 "{context}: `{literal_key}` value {value} violates the numeric bounds ({reason})"
             ));
+        }
+    }
+    if let Some(Value::Array(members)) = schema.extra.get("enum") {
+        for member in members {
+            let Some(value) = member.as_f64() else {
+                continue;
+            };
+            if let Some(reason) = bound_violation(value) {
+                return reject(format!(
+                    "{context}: `enum` value {value} violates the numeric bounds ({reason})"
+                ));
+            }
         }
     }
 
@@ -1420,6 +1619,16 @@ fn validate_annotations(path: &Path, schema: &Schema, context: &str) -> Result<(
                 "{context}: `title` must be a single line (it is the doc-comment summary); move the prose to `description`"
             ));
         }
+    }
+    // `description` — the doc body; may span paragraphs, but an empty or
+    // whitespace-only string renders a dead doc body (see
+    // `json-schema/features/description.md`).
+    if let Some(description) = &schema.description
+        && description.trim().is_empty()
+    {
+        return reject(format!(
+            "{context}: `description` must not be empty or whitespace-only; drop it, or give it text"
+        ));
     }
     // `deprecated` — the spec's own MUST: boolean. `false` is accepted and inert.
     if let Some(value) = schema.extra.get("deprecated")
@@ -2066,6 +2275,155 @@ fn encode_value_identifier(value: &Value) -> Option<String> {
     }
 }
 
+/// Accumulates the named-model targets that an instance of `schema` is *forced*
+/// to contain: a required, non-nullable, single-valued (non-collection) `$ref`,
+/// descending through required inline objects. Collection-wrapped, optional, or
+/// nullable edges terminate the chain and contribute nothing. Ref-resolution
+/// errors are ignored here — they surface in `validate_model_refs`.
+fn collect_mandatory_targets(
+    path: &Path,
+    canonical_path: &Path,
+    schema: &Schema,
+    doc_paths: &BTreeSet<PathBuf>,
+    out: &mut Vec<TypeKey>,
+) {
+    if schema.is_bare_ref() {
+        if let Some(reference) = &schema.reference
+            && let Ok(key) = resolve_ref_key(path, canonical_path, reference, doc_paths)
+        {
+            out.push(key);
+        }
+        return;
+    }
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("object") {
+        return;
+    }
+    let Some(properties) = &schema.properties else {
+        return;
+    };
+    let required: BTreeSet<&str> = schema
+        .required
+        .as_ref()
+        .and_then(Value::as_array)
+        .map(|values| values.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    for (name, property) in properties {
+        if !required.contains(name.as_str()) || property.one_of.is_some() {
+            // Optional, or a nullable/union `oneOf` edge — the chain can terminate.
+            continue;
+        }
+        if property.is_bare_ref() {
+            if let Some(reference) = &property.reference
+                && let Ok(key) = resolve_ref_key(path, canonical_path, reference, doc_paths)
+            {
+                out.push(key);
+            }
+        } else if property.ty.as_ref().and_then(Value::as_str) == Some("object") {
+            collect_mandatory_targets(path, canonical_path, property, doc_paths, out);
+        }
+        // `array` / `additionalProperties` / scalar members terminate the chain.
+    }
+}
+
+/// Depth-first search for a cycle in the mandatory-edge graph, returning the
+/// cycle path (`A → B → A`) if one exists. `state`: 0 = unvisited, 1 = on the
+/// current stack, 2 = fully explored.
+fn find_mandatory_cycle(
+    node: &TypeKey,
+    edges: &BTreeMap<TypeKey, Vec<TypeKey>>,
+    state: &mut BTreeMap<TypeKey, u8>,
+    stack: &mut Vec<TypeKey>,
+) -> Option<Vec<TypeKey>> {
+    state.insert(node.clone(), 1);
+    stack.push(node.clone());
+    if let Some(targets) = edges.get(node) {
+        for target in targets {
+            match state.get(target).copied().unwrap_or(0) {
+                1 => {
+                    let start = stack
+                        .iter()
+                        .position(|entry| entry == target)
+                        .expect("a node on the stack is present in the stack");
+                    let mut cycle = stack[start..].to_vec();
+                    cycle.push(target.clone());
+                    return Some(cycle);
+                }
+                0 => {
+                    if let Some(cycle) = find_mandatory_cycle(target, edges, state, stack) {
+                        return Some(cycle);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    stack.pop();
+    state.insert(node.clone(), 2);
+    None
+}
+
+/// Rejects an unsatisfiable recursion cycle — one whose every edge is
+/// mandatory-and-single-valued (required + non-nullable + non-collection), so no
+/// finite instance exists. See `json-schema/features/ref.md` (Recursion &
+/// satisfiability). Conservative: it only builds edges it can prove mandatory,
+/// so any cycle it finds is genuinely unsatisfiable.
+fn validate_reference_satisfiability(
+    docs: &IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &BTreeMap<TypeKey, JsonModel>,
+) -> Result<()> {
+    let doc_paths: BTreeSet<PathBuf> = docs.keys().cloned().collect();
+    let mut edges: BTreeMap<TypeKey, Vec<TypeKey>> = BTreeMap::new();
+    for (key, model) in models {
+        let source_path = docs
+            .get(&model.canonical_path)
+            .map(|(path, _)| path.clone())
+            .unwrap_or_else(|| model.canonical_path.clone());
+        let mut targets = Vec::new();
+        collect_mandatory_targets(
+            &source_path,
+            &model.canonical_path,
+            &model.schema,
+            &doc_paths,
+            &mut targets,
+        );
+        let mut seen = BTreeSet::new();
+        targets.retain(|target| models.contains_key(target) && seen.insert(target.clone()));
+        edges.insert(key.clone(), targets);
+    }
+
+    let mut state: BTreeMap<TypeKey, u8> = models.keys().map(|key| (key.clone(), 0)).collect();
+    for key in models.keys() {
+        if state.get(key).copied() != Some(0) {
+            continue;
+        }
+        let mut stack = Vec::new();
+        if let Some(cycle) = find_mandatory_cycle(key, &edges, &mut state, &mut stack) {
+            let display = |type_key: &TypeKey| {
+                models
+                    .get(type_key)
+                    .map(|model| model.full_name.clone())
+                    .unwrap_or_else(|| match type_key {
+                        TypeKey::Root(path) => root_type_name(path),
+                        TypeKey::Def(_, name) => name.clone(),
+                    })
+            };
+            let path = cycle.iter().map(display).collect::<Vec<_>>().join(" → ");
+            let report_path = cycle
+                .first()
+                .and_then(model_key_path)
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("<json-schema>"));
+            return Err(Error::InvalidJsonSchema {
+                path: report_path,
+                reason: format!(
+                    "unsatisfiable recursion cycle `{path}`: every edge is a required, non-nullable, single-valued `$ref`, so no finite value can satisfy it — break the cycle by making an edge optional, nullable (`oneOf: [{{...}}, {{type: \"null\"}}]`), or wrapping it in an array"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn validate_model_refs(
     docs: &IndexMap<PathBuf, (PathBuf, Document)>,
     models: &BTreeMap<TypeKey, JsonModel>,
@@ -2533,6 +2891,24 @@ fn validate_one_of(
     Ok(())
 }
 
+/// Whether a service/operation key matches its identifier regex (see
+/// `json-schema/services.md`): `^[A-Z][a-zA-Z\d]+$` for services (`first_upper`)
+/// and `^[a-z][a-zA-Z\d]+$` for operations — a leading letter of the required
+/// case followed by one or more ASCII alphanumerics.
+fn name_matches(name: &str, first_upper: bool) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    let first_ok = if first_upper {
+        first.is_ascii_uppercase()
+    } else {
+        first.is_ascii_lowercase()
+    };
+    let rest: Vec<char> = chars.collect();
+    first_ok && !rest.is_empty() && rest.iter().all(char::is_ascii_alphanumeric)
+}
+
 fn build_service(
     path: &Path,
     canonical_path: &Path,
@@ -2543,6 +2919,14 @@ fn build_service(
     module_paths: Option<&BTreeMap<PathBuf, ModulePath>>,
     external_types: &mut BTreeMap<String, ExternalTypeBindingSpec>,
 ) -> Result<ServiceSpec> {
+    if !name_matches(service_key, true) {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "service name `{service_key}` must match `^[A-Z][a-zA-Z\\d]+$` (start uppercase, then letters/digits); set the wire name via `fqn` if it must differ"
+            ),
+        });
+    }
     if service.operations.is_empty() {
         return Err(Error::InvalidJsonSchema {
             path: path.to_path_buf(),
@@ -2594,6 +2978,14 @@ fn build_operation(
     module_paths: Option<&BTreeMap<PathBuf, ModulePath>>,
     external_types: &mut BTreeMap<String, ExternalTypeBindingSpec>,
 ) -> Result<OperationSpec> {
+    if !name_matches(operation_key, false) {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "operation name `{operation_key}` must match `^[a-z][a-zA-Z\\d]+$` (start lowercase, then letters/digits); set the wire name via `fqn` if it must differ"
+            ),
+        });
+    }
     let operation_name = operation_key.to_upper_camel_case();
     let input = operation
         .input
@@ -2660,6 +3052,15 @@ fn operation_model_type(
     validate_schema_common(path, schema, &format!("operation {operation_key} {suffix}"))?;
     if let Some(reference) = &schema.reference {
         let model = resolve_ref(path, canonical_path, reference, docs, models)?;
+        require_object_io(
+            path,
+            canonical_path,
+            &model.schema,
+            operation_key,
+            suffix,
+            docs,
+            models,
+        )?;
         insert_json_external_type(external_types, model, docs, models, module_paths)?;
         collect_schema_model_refs(
             &model.canonical_path,
@@ -2674,6 +3075,18 @@ fn operation_model_type(
     }
 
     validate_model_schema(path, schema, &format!("operation {operation_key} {suffix}"))?;
+    // Inline I/O must be an object (see `json-schema/services.md`). After
+    // `validate_model_schema` a non-`$ref` inline schema is either `type: object`
+    // or a `oneOf` union; a union is not a valid operation input/output.
+    require_object_io(
+        path,
+        canonical_path,
+        schema,
+        operation_key,
+        suffix,
+        docs,
+        models,
+    )?;
     let model_name = format!("{}{}", operation_key.to_upper_camel_case(), suffix);
     let model = JsonModel {
         full_name: format!("{service_name}.{model_name}"),
@@ -2692,6 +3105,51 @@ fn operation_model_type(
         external_types,
     )?;
     json_model_type(&model, docs, models, module_paths)
+}
+
+/// Requires an operation `input`/`output` to resolve to an object type: an
+/// inline `type: object`, a `$ref` to one, or an `allOf` that merged to one
+/// (merges run before this). Following bare-`$ref` chains, a target that lands
+/// on a `oneOf` union or a scalar/array is a load reject — a union has no single
+/// extensible shape. See `json-schema/services.md`.
+fn require_object_io(
+    path: &Path,
+    canonical_path: &Path,
+    schema: &Schema,
+    operation_key: &str,
+    suffix: &str,
+    docs: &IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &BTreeMap<TypeKey, JsonModel>,
+) -> Result<()> {
+    let mut current = schema.clone();
+    let mut current_canonical = canonical_path.to_path_buf();
+    let mut guard = 0usize;
+    loop {
+        if current.ty.as_ref().and_then(Value::as_str) == Some("object") {
+            return Ok(());
+        }
+        if current.is_bare_ref() {
+            let reference = current
+                .reference
+                .clone()
+                .expect("a bare `$ref` carries a reference");
+            let model = resolve_ref(path, &current_canonical, &reference, docs, models)?;
+            current_canonical = model.canonical_path.clone();
+            current = model.schema.clone();
+            guard += 1;
+            if guard > models.len() + 1 {
+                break;
+            }
+            continue;
+        }
+        break;
+    }
+    Err(Error::InvalidJsonSchema {
+        path: path.to_path_buf(),
+        reason: format!(
+            "operation `{operation_key}` {suffix} must resolve to an object; a `oneOf` union or a scalar/array type is not a valid operation input/output — reference an object type, or wrap the value in a single-field object"
+        ),
+    })
 }
 
 /// Builds an `InvalidJsonSchema` error for the merge/normalization pass.
@@ -3955,6 +4413,27 @@ fn recase_member(language: Language, json_name: &str) -> String {
     }
 }
 
+/// If a JSON member name recases to an identifier that cannot be emitted as-is
+/// in `language` — syntactically invalid (e.g. a leading digit) or a reserved
+/// word — returns the offending recased identifier and a short reason. P15
+/// forbids auto-mangling, so such a member must carry an `x-<lang>-name`
+/// override; returns `None` when the recased name is directly usable.
+fn member_identifier_defect(language: Language, json_name: &str) -> Option<(String, &'static str)> {
+    let base = match language {
+        Language::Go => json_name.to_upper_camel_case(),
+        Language::TypeScript | Language::Java => json_name.to_lower_camel_case(),
+        Language::Python => json_name.to_snake_case(),
+        _ => return None,
+    };
+    if !ident_is_syntactically_valid(&base) {
+        return Some((base, "is not a valid identifier"));
+    }
+    if ident_is_reserved(language, &base) {
+        return Some((base, "is a reserved word"));
+    }
+    None
+}
+
 /// The emitted member identifier for a property: the `x-<lang>-name` override if
 /// present, otherwise the recased JSON name.
 fn member_identifier(language: Language, json_name: &str, property: &Schema) -> String {
@@ -4230,10 +4709,36 @@ fn validate_member_scope(language: Language, model_full_name: &str, schema: &Sch
     };
     let mut scope = Namespace::default();
     for (json_name, property) in properties {
+        // P15: a member whose recased name is invalid/reserved is rejected, not
+        // silently mangled — the `x-<lang>-name` override is the escape hatch.
+        if override_name(language, property).is_none()
+            && let Some((ident, reason)) = member_identifier_defect(language, json_name)
+        {
+            return Err(Error::InvalidJsonSchema {
+                path: PathBuf::from("<json-schema>"),
+                reason: format!(
+                    "member `{model_full_name}.{json_name}` recases to `{ident}`, which {reason} in {} output; add an `{}` override with a valid identifier (P15 — the generator never auto-mangles)",
+                    language.as_str(),
+                    lang_name_keyword(language).unwrap_or("x-<lang>-name"),
+                ),
+            });
+        }
         scope.insert(
             language,
             member_identifier(language, json_name, property),
             format!("member `{model_full_name}.{json_name}`"),
+        )?;
+    }
+    // An open struct (anything but `additionalProperties: false`) emits a
+    // synthesized catch-all member holding unknown keys; its identifier shares
+    // the member scope, so a declared member colliding with it rejects (P15)
+    // rather than silently overwriting the catch-all.
+    let is_open = !matches!(&schema.additional_properties, Some(Value::Bool(false)));
+    if is_open {
+        scope.insert(
+            language,
+            recase_member(language, "additionalProperties"),
+            format!("`{model_full_name}` additional-properties catch-all"),
         )?;
     }
     // Go `<Field>OrDefault()` accessor (scalar `default` on an optional member).
@@ -4498,6 +5003,152 @@ $defs:
         assert!(input.schema["$ref"].is_null());
     }
 
+    fn doc_reject(input: &str) -> String {
+        parse_api_spec_from_json_schema_for_language(
+            Language::Python,
+            input,
+            PathBuf::from("api.yaml"),
+        )
+        .unwrap_err()
+        .to_string()
+    }
+
+    #[test]
+    fn rejects_wrong_nexusrpc_version() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.1.0"
+services:
+  ChatService:
+    operations:
+      ping: {}
+"##,
+        );
+        assert!(error.contains("`nexusrpc` must be exactly"), "{error}");
+        assert!(error.contains("1.0.0"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_string_nexusrpc() {
+        let error = doc_reject(
+            r##"
+nexusrpc: 1
+services:
+  ChatService:
+    operations:
+      ping: {}
+"##,
+        );
+        assert!(error.contains("`nexusrpc` must be exactly"), "{error}");
+    }
+
+    #[test]
+    fn rejects_wrong_schema_dialect() {
+        let error = doc_reject(
+            r##"
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+properties:
+  a: { type: string }
+"##,
+        );
+        assert!(error.contains("`$schema` must be"), "{error}");
+        assert!(error.contains("2020-12"), "{error}");
+    }
+
+    #[test]
+    fn rejects_schema_shaped_root_in_nexus_doc() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+type: object
+properties:
+  a: { type: string }
+"##,
+        );
+        assert!(error.contains("envelope"), "{error}");
+    }
+
+    #[test]
+    fn rejects_services_without_nexusrpc() {
+        let error = doc_reject(
+            r##"
+services:
+  ChatService:
+    operations:
+      ping: {}
+"##,
+        );
+        assert!(error.contains("`services` require"), "{error}");
+    }
+
+    #[test]
+    fn rejects_service_without_operations() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  Chat:
+    operations: {}
+"##,
+        );
+        assert!(error.contains("at least one operation"), "{error}");
+    }
+
+    #[test]
+    fn rejects_empty_inline_operation_io() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  Chat:
+    operations:
+      getRoom:
+        input: {}
+"##,
+        );
+        assert!(error.contains("must be `type: object`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_object_inline_operation_io() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  Chat:
+    operations:
+      getRoom:
+        input: { type: string }
+"##,
+        );
+        assert!(error.contains("must be `type: object`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_plain_file_without_root_schema() {
+        let error = doc_reject(
+            r##"
+description: just a description with no schema keywords
+"##,
+        );
+        assert!(error.contains("must define a root schema"), "{error}");
+    }
+
+    #[test]
+    fn rejects_empty_input_set() {
+        let error = api_spec_from_json_schema_sources(Language::Python, vec![])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("at least one JSON schema input"), "{error}");
+    }
+
+    #[test]
+    fn rejects_malformed_yaml() {
+        let error = doc_reject("type: object\n  bad: : indentation: [");
+        assert!(error.contains("failed to parse JSON schema"), "{error}");
+    }
+
     fn numeric_reject(field_schema: &str) -> String {
         let input = format!(
             r#"
@@ -4571,6 +5222,42 @@ properties:
     }
 
     #[test]
+    fn rejects_non_number_numeric_bound() {
+        let error = numeric_reject("type: integer\nminimum: \"0\"");
+        assert!(error.contains("`minimum` must be a number"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_number_multiple_of() {
+        let error = numeric_reject("type: integer\nmultipleOf: \"2\"");
+        assert!(error.contains("`multipleOf` must be a number"), "{error}");
+    }
+
+    #[test]
+    fn rejects_redundant_minimum_exclusive_minimum() {
+        let error = numeric_reject("type: integer\nminimum: 0\nexclusiveMinimum: 2");
+        assert!(error.contains("exactly one"), "{error}");
+    }
+
+    #[test]
+    fn rejects_boolean_exclusive_minimum_form() {
+        let error = numeric_reject("type: integer\nminimum: 0\nexclusiveMinimum: true");
+        assert!(error.contains("boolean form"), "{error}");
+    }
+
+    #[test]
+    fn rejects_default_violating_bound() {
+        let error = numeric_reject("type: integer\nmaximum: 5\ndefault: 9");
+        assert!(error.contains("violates the numeric bounds"), "{error}");
+    }
+
+    #[test]
+    fn rejects_unsatisfiable_integer_range_with_multiple_of() {
+        let error = numeric_reject("type: integer\nminimum: 3\nmaximum: 3\nmultipleOf: 2");
+        assert!(error.contains("no multiple of"), "{error}");
+    }
+
+    #[test]
     fn rejects_string_length_on_non_string_field() {
         let error = numeric_reject("type: integer\nminLength: 3");
         assert!(error.contains("require `type: string`"), "{error}");
@@ -4586,6 +5273,29 @@ properties:
     fn rejects_const_string_violating_max_length() {
         let error = numeric_reject("type: string\nmaxLength: 2\nconst: abc");
         assert!(error.contains("exceeding `maxLength`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_negative_max_length() {
+        let error = numeric_reject("type: string\nmaxLength: -1");
+        assert!(error.contains("non-negative integer"), "{error}");
+    }
+
+    #[test]
+    fn rejects_const_below_min_length() {
+        let error = numeric_reject("type: string\nminLength: 5\nconst: ab");
+        assert!(error.contains("below `minLength`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_enum_string_violating_max_length() {
+        let error = numeric_reject("type: string\nmaxLength: 2\nenum: [ok, toolong]");
+        assert!(error.contains("exceeding `maxLength`"), "{error}");
+    }
+
+    #[test]
+    fn accepts_zero_min_length() {
+        numeric_accept("type: string\nminLength: 0");
     }
 
     #[test]
@@ -4640,6 +5350,29 @@ properties:
     fn rejects_const_violating_pattern() {
         let error = numeric_reject("type: string\npattern: ^[a-z]+$\nconst: AB");
         assert!(error.contains("does not match `pattern`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_string_pattern_value() {
+        let error = numeric_reject("type: string\npattern: 5");
+        assert!(error.contains("`pattern` must be a string"), "{error}");
+    }
+
+    #[test]
+    fn rejects_enum_violating_pattern() {
+        let error = numeric_reject("type: string\npattern: \"^[a-z]+$\"\nenum: [ok, AB]");
+        assert!(error.contains("does not match `pattern`"), "{error}");
+    }
+
+    #[test]
+    fn accepts_empty_pattern() {
+        numeric_accept("type: string\npattern: \"\"");
+    }
+
+    #[test]
+    fn rejects_pattern_lookbehind() {
+        let error = numeric_reject("type: string\npattern: \"(?<=x)y\"");
+        assert!(error.contains("not portable"), "{error}");
     }
 
     #[test]
@@ -4773,6 +5506,12 @@ properties:
     }
 
     #[test]
+    fn rejects_enum_violating_format() {
+        let error = numeric_reject("type: string\nformat: uuid\nenum: [not-a-uuid]");
+        assert!(error.contains("is not a valid uuid"), "{error}");
+    }
+
+    #[test]
     fn accepts_materialized_content_encodings() {
         for encoding in ["base64", "base64url"] {
             numeric_accept(&format!("type: string\ncontentEncoding: {encoding}"));
@@ -4834,6 +5573,15 @@ properties:
         let error = numeric_reject("type: string\ncontentEncoding: base64url\nconst: \"aGk=\"");
         assert!(
             error.contains("is not valid base64url-encoded data"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_enum_violating_content_encoding() {
+        let error = numeric_reject("type: string\ncontentEncoding: base64\nenum: [\"a-b_\"]");
+        assert!(
+            error.contains("is not valid base64-encoded data"),
             "{error}"
         );
     }
@@ -4919,6 +5667,47 @@ properties:
             "type: array\nitems: { type: string }\ncontains: { const: x }\nmaxContains: 0",
         );
         assert!(error.contains("empty range"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_integer_min_items() {
+        let error = numeric_reject("type: array\nitems: { type: string }\nminItems: -1");
+        assert!(error.contains("non-negative integer"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_integer_max_contains() {
+        let error = numeric_reject(
+            "type: array\nitems: { type: string }\ncontains: { const: x }\nmaxContains: -1",
+        );
+        assert!(error.contains("non-negative integer"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_boolean_unique_items() {
+        let error =
+            numeric_reject("type: array\nitems: { type: string }\nuniqueItems: \"true\"");
+        assert!(error.contains("`uniqueItems` must be a boolean"), "{error}");
+    }
+
+    #[test]
+    fn rejects_min_contains_above_max_contains() {
+        let error = numeric_reject(
+            "type: array\nitems: { type: string }\ncontains: { const: x }\nminContains: 3\nmaxContains: 1",
+        );
+        assert!(error.contains("exceeds `maxContains`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_max_contains_without_contains() {
+        let error = numeric_reject("type: array\nitems: { type: string }\nmaxContains: 2");
+        assert!(error.contains("require a sibling `contains`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_schema_contains_value() {
+        let error = numeric_reject("type: array\nitems: { type: string }\ncontains: 5");
+        assert!(error.contains("must be a schema object"), "{error}");
     }
 
     #[test]
@@ -5042,6 +5831,78 @@ properties:
     }
 
     #[test]
+    fn rejects_non_integer_min_properties() {
+        let error =
+            numeric_reject("type: object\nadditionalProperties: true\nminProperties: -1");
+        assert!(error.contains("non-negative integer"), "{error}");
+    }
+
+    #[test]
+    fn rejects_max_properties_below_required_count() {
+        let error = numeric_reject(
+            "type: object\nproperties: { a: {type: string}, b: {type: string}, c: {type: string} }\nrequired: [a, b, c]\nmaxProperties: 2",
+        );
+        assert!(error.contains("is below the"), "{error}");
+    }
+
+    #[test]
+    fn rejects_property_names_without_map_host() {
+        let error = numeric_reject(
+            "type: object\nadditionalProperties: false\npropertyNames: { type: string, maxLength: 8 }",
+        );
+        assert!(error.contains("requires a map host"), "{error}");
+    }
+
+    #[test]
+    fn rejects_bare_true_property_names() {
+        let error = numeric_reject(
+            "type: object\nadditionalProperties: true\npropertyNames: true",
+        );
+        assert!(error.contains("string schema constraining"), "{error}");
+    }
+
+    #[test]
+    fn rejects_unsupported_property_names_assertion() {
+        let error = numeric_reject(
+            "type: object\nadditionalProperties: true\npropertyNames: { type: string, pattern: \"^x\" }",
+        );
+        assert!(error.contains("not yet supported"), "{error}");
+    }
+
+    #[test]
+    fn rejects_dependent_required_value_not_object() {
+        let error = numeric_reject(
+            "type: object\nproperties: { a: {type: string} }\ndependentRequired: []",
+        );
+        assert!(error.contains("object mapping"), "{error}");
+    }
+
+    #[test]
+    fn rejects_dependent_required_value_not_array() {
+        let error = numeric_reject(
+            "type: object\nproperties: { a: {type: string} }\ndependentRequired: { a: b }",
+        );
+        assert!(error.contains("must be an array of property-name strings"), "{error}");
+    }
+
+    #[test]
+    fn rejects_dependent_required_non_string_element() {
+        let error = numeric_reject(
+            "type: object\nproperties: { a: {type: string} }\ndependentRequired: { a: [1] }",
+        );
+        assert!(error.contains("property-name strings"), "{error}");
+    }
+
+    #[test]
+    fn rejects_dependent_required_undeclared_trigger() {
+        let error = numeric_reject(
+            "type: object\nproperties: { b: {type: string} }\ndependentRequired: { a: [b] }",
+        );
+        assert!(error.contains("trigger `a`"), "{error}");
+        assert!(error.contains("not declared"), "{error}");
+    }
+
+    #[test]
     fn accepts_valid_object_constraints() {
         let input = r#"
 $schema: https://json-schema.org/draft/2020-12/schema
@@ -5120,6 +5981,68 @@ $defs:
         assert_eq!(input.name.as_str(), "GetRoomInput");
     }
 
+    /// A minimal pure JSON Schema document whose root type is named `title`.
+    fn module_collision_source(path: &str, title: &str) -> JsonSource {
+        JsonSource {
+            path: PathBuf::from(path),
+            source_root: PathBuf::from("."),
+            relative_path: PathBuf::from(path),
+            input: format!("title: {title}\ntype: object\nproperties:\n  id: {{ type: string }}\n"),
+        }
+    }
+
+    #[test]
+    fn rejects_two_sources_with_the_same_module_path() {
+        // `foo.yaml` and `foo.json` are distinct input files but both strip to
+        // module path `foo`, so the second leaf collides with the first.
+        let sources = vec![
+            module_collision_source("foo.yaml", "FooYaml"),
+            module_collision_source("foo.json", "FooJson"),
+        ];
+        let error = api_spec_tree_from_json_schema_sources(Language::Python, sources)
+            .expect_err("two sources mapping to the same module path should be rejected")
+            .to_string();
+        assert!(error.contains("duplicate JSON schema module path"), "{error}");
+    }
+
+    #[test]
+    fn rejects_source_module_path_conflicting_with_a_branch() {
+        // `foo.yaml` occupies leaf `foo`; `foo/bar.yaml` then needs `foo` to be a
+        // branch, so its insertion conflicts with the existing module.
+        let sources = vec![
+            module_collision_source("foo.yaml", "Foo"),
+            module_collision_source("foo/bar.yaml", "Bar"),
+        ];
+        let error = api_spec_tree_from_json_schema_sources(Language::Python, sources)
+            .expect_err("a source colliding with an existing module branch should be rejected")
+            .to_string();
+        assert!(error.contains("conflicts with another module"), "{error}");
+    }
+
+    #[test]
+    fn rejects_remote_http_ref() {
+        let error = numeric_reject("$ref: \"https://example.com/s.json\"");
+        assert!(error.contains("remote `$ref`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_ref_into_non_defs() {
+        let error = numeric_reject("$ref: \"#/properties/x/items\"");
+        assert!(
+            error.contains("must point at a `$defs` entry or file root"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_unresolvable_defs_ref() {
+        let error = numeric_reject("$ref: \"#/$defs/Missing\"");
+        assert!(
+            error.contains("does not resolve to a known JSON model"),
+            "{error}"
+        );
+    }
+
     /// Parses a single object property `value` carrying `field_schema` and
     /// returns the load error string (for the `const`/`enum` reject cases).
     fn const_enum_reject(field_schema: &str) -> String {
@@ -5176,6 +6099,18 @@ $defs:
                 "expected `{keyword}` reject, got: {error}"
             );
         }
+    }
+
+    #[test]
+    fn rejects_read_only_false() {
+        let error = structural_reject("type: string\nreadOnly: false");
+        assert!(error.contains("`readOnly`/`writeOnly` is not supported"), "{error}");
+    }
+
+    #[test]
+    fn rejects_nullable_keyword() {
+        let error = structural_reject("type: string\nnullable: true");
+        assert!(error.contains("`nullable` is not supported"), "{error}");
     }
 
     #[test]
@@ -5392,6 +6327,42 @@ properties:
         assert!(error.contains("more than once"), "{error}");
     }
 
+    #[test]
+    fn rejects_enum_default_not_in_set() {
+        let error = const_enum_reject("type: string\nenum: [a, b]\ndefault: c");
+        assert!(error.contains("not a member"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_ascii_const() {
+        let error = const_enum_reject("type: string\nconst: \"café\"");
+        assert!(error.contains("must be ASCII"), "{error}");
+    }
+
+    #[test]
+    fn rejects_whitespace_const() {
+        let error = const_enum_reject("type: string\nconst: \"user admin\"");
+        assert!(error.contains("must not contain whitespace"), "{error}");
+    }
+
+    #[test]
+    fn rejects_null_enum_member() {
+        let error = const_enum_reject("type: string\nenum: [a, null]");
+        assert!(error.contains("`enum: null`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_composite_enum_member() {
+        let error = const_enum_reject("type: object\nenum: [{ a: 1 }]");
+        assert!(error.contains("composite"), "{error}");
+    }
+
+    #[test]
+    fn rejects_unencodable_enum_member() {
+        let error = const_enum_reject("type: string\nenum: [\"-\", x]");
+        assert!(error.contains("legal identifier"), "{error}");
+    }
+
     // ---- `allOf` load-time merge (json-schema/features/allOf.md) ----
 
     /// Parses `input` and returns the merged JSON schema value of the named
@@ -5595,6 +6566,52 @@ properties:
             "allOf:\n  - { type: integer, minimum: 10 }\n  - { type: integer, maximum: 5 }",
         );
         assert!(error.contains("empty range"), "{error}");
+    }
+
+    #[test]
+    fn rejects_all_of_combinator_branch_not() {
+        let error = numeric_reject(
+            "allOf:\n  - { type: object }\n  - { not: { type: integer } }",
+        );
+        assert!(error.contains("cannot be `not`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_all_of_differing_format() {
+        let error = numeric_reject(
+            "allOf:\n  - { type: string, format: email }\n  - { type: string, format: uri }",
+        );
+        assert!(error.contains("different `format`s"), "{error}");
+    }
+
+    #[test]
+    fn rejects_all_of_distinct_patterns() {
+        let error = numeric_reject(
+            "allOf:\n  - { type: string, pattern: \"^a\" }\n  - { type: string, pattern: \"z$\" }",
+        );
+        assert!(error.contains("different `pattern`s"), "{error}");
+    }
+
+    #[test]
+    fn rejects_all_of_conflicting_const_enum() {
+        let error = numeric_reject(
+            "allOf:\n  - { type: integer, const: 5 }\n  - { type: integer, enum: [1, 2] }",
+        );
+        assert!(
+            error.contains("not a member of the merged `enum`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_all_of_unresolvable_ref_branch() {
+        let error = numeric_reject(
+            "allOf:\n  - { $ref: \"#/$defs/Missing\" }\n  - { type: object, properties: {} }",
+        );
+        assert!(
+            error.contains("does not resolve to a known JSON model"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -5845,6 +6862,114 @@ properties:
         assert!(error.contains("classifiable"), "{error}");
     }
 
+    #[test]
+    fn rejects_one_of_nested_one_of() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string }
+      - oneOf:
+          - { type: integer }
+          - { type: boolean }
+"#,
+        );
+        assert!(error.contains("cannot itself be a `oneOf`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_one_of_two_array_branches() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: array, items: { type: string } }
+      - { type: array, items: { type: integer } }
+"#,
+        );
+        assert!(error.contains("no decidable selector"), "{error}");
+    }
+
+    #[test]
+    fn rejects_one_of_duplicate_null_branches() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string }
+      - { type: "null" }
+      - { type: "null" }
+"#,
+        );
+        assert!(error.contains("`null` kind"), "{error}");
+    }
+
+    #[test]
+    fn rejects_one_of_ambiguous_discriminator() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - type: object
+        required: [kind, variant]
+        properties:
+          kind: { type: string, const: a }
+          variant: { type: string, const: x }
+      - type: object
+        required: [kind, variant]
+        properties:
+          kind: { type: string, const: b }
+          variant: { type: string, const: y }
+"#,
+        );
+        assert!(error.contains("more than one qualifying"), "{error}");
+    }
+
+    #[test]
+    fn accepts_nullable_multi_kind_union() {
+        union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string }
+      - { type: array, items: { type: number } }
+      - { type: "null" }
+"#,
+        )
+        .expect("nullable multi-kind union should load");
+    }
+
+    #[test]
+    fn rejects_null_only_two_branch_one_of() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: "null" }
+      - { type: "null" }
+"#,
+        );
+        assert!(error.contains("`null` kind"), "{error}");
+    }
+
     // ----- P15 identifier namespace + `x-<lang>-name` override -----
 
     fn parse_for(language: Language, input: &str) -> Result<ApiSpec> {
@@ -6028,5 +7153,379 @@ $defs:
 "#,
         );
         assert!(error.contains("collision") && error.contains("Widget"), "{error}");
+    }
+
+    // --- `required` load-time validation (json-schema/features/required.md) ---
+
+    #[test]
+    fn rejects_required_not_array() {
+        let error = numeric_reject(
+            "type: object\nproperties:\n  a: { type: string }\nrequired: id",
+        );
+        assert!(error.contains("must be an array"), "{error}");
+    }
+
+    #[test]
+    fn rejects_required_non_string_element() {
+        let error = numeric_reject(
+            "type: object\nproperties:\n  id: { type: string }\nrequired: [1]",
+        );
+        assert!(error.contains("only property-name strings"), "{error}");
+    }
+
+    #[test]
+    fn rejects_required_duplicate() {
+        let error = numeric_reject(
+            "type: object\nproperties:\n  id: { type: string }\nrequired: [id, id]",
+        );
+        assert!(error.contains("more than once"), "{error}");
+    }
+
+    #[test]
+    fn rejects_required_name_not_in_properties() {
+        let error = numeric_reject(
+            "type: object\nproperties:\n  id: { type: string }\nrequired: [name]",
+        );
+        assert!(error.contains("not declared in `properties`"), "{error}");
+    }
+
+    // --- `type` presence / shape (validate_type_presence) ---
+
+    #[test]
+    fn rejects_missing_type_on_leaf() {
+        let error = numeric_reject("description: hi");
+        assert!(
+            error.contains("a leaf schema requires an explicit `type`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_type_name() {
+        let error = numeric_reject("type: foobar");
+        assert!(error.contains("unknown `type`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_object_without_shape() {
+        let error = numeric_reject("type: object");
+        assert!(error.contains("needs an explicit shape"), "{error}");
+    }
+
+    #[test]
+    fn rejects_array_without_items() {
+        let error = numeric_reject("type: array");
+        assert!(error.contains("needs an explicit element type"), "{error}");
+    }
+
+    #[test]
+    fn rejects_object_keyword_on_scalar() {
+        let error = numeric_reject("type: string\nproperties:\n  a: { type: string }");
+        assert!(error.contains("require `type: object`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_items_on_scalar() {
+        let error = numeric_reject("type: string\nitems: { type: string }");
+        assert!(error.contains("`items` requires `type: array`"), "{error}");
+    }
+
+    #[test]
+    fn accepts_empty_properties_object() {
+        numeric_accept("type: object\nproperties: {}");
+    }
+
+    // --- `additionalProperties` value shape (validate_schema_node) ---
+
+    #[test]
+    fn rejects_non_schema_additional_properties() {
+        let error = numeric_reject("type: object\nadditionalProperties: \"yes\"");
+        assert!(
+            error.contains("must be `true`, `false`, or a schema object"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_object_additional_properties() {
+        let error = numeric_reject("type: object\nadditionalProperties: {}");
+        assert!(
+            error.contains("write `additionalProperties: true` instead"),
+            "{error}"
+        );
+    }
+
+    // --- `enum` vs numeric bound (numeric literal loop) ---
+
+    #[test]
+    fn rejects_enum_violating_numeric_bound() {
+        let error = numeric_reject("type: integer\nmaximum: 5\nenum: [1, 7]");
+        assert!(
+            error.contains("`enum` value 7 violates the numeric bounds"),
+            "{error}"
+        );
+    }
+
+    // --- `description` annotation (validate_annotations) ---
+
+    #[test]
+    fn rejects_empty_description() {
+        let error = numeric_reject("type: string\ndescription: \"\"");
+        assert!(error.contains("`description` must not be empty"), "{error}");
+    }
+
+    #[test]
+    fn rejects_whitespace_description() {
+        let error = numeric_reject("type: string\ndescription: \"   \"");
+        assert!(error.contains("`description` must not be empty"), "{error}");
+    }
+
+    // --- operation I/O must resolve to an object (require_object_io) ---
+
+    #[test]
+    fn rejects_ref_union_operation_io() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  ChatService:
+    operations:
+      pick:
+        input: { $ref: "#/$defs/Thing" }
+$defs:
+  Thing:
+    oneOf:
+      - type: object
+        properties: { kind: { type: string, const: a } }
+        required: [kind]
+      - type: object
+        properties: { kind: { type: string, const: b } }
+        required: [kind]
+"##,
+        );
+        assert!(error.contains("must resolve to an object"), "{error}");
+    }
+
+    #[test]
+    fn rejects_inline_union_operation_io() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  ChatService:
+    operations:
+      pick:
+        input:
+          oneOf:
+            - { type: string }
+            - { type: integer }
+"##,
+        );
+        assert!(error.contains("must resolve to an object"), "{error}");
+    }
+
+    // --- service / operation names (name_matches) ---
+
+    #[test]
+    fn rejects_invalid_service_name() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  chatService:
+    operations:
+      ping: {}
+"##,
+        );
+        assert!(error.contains("must match `^[A-Z]"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_operation_name() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  ChatService:
+    operations:
+      PollMessages: {}
+"##,
+        );
+        assert!(error.contains("must match `^[a-z]"), "{error}");
+    }
+
+    // --- reserved / invalid member identifiers (validate_member_scope) ---
+
+    #[test]
+    fn rejects_reserved_member_without_override() {
+        let error = doc_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  class: { type: string }
+"#,
+        );
+        assert!(error.contains("is a reserved word"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_member_identifier() {
+        let error = doc_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  "2fa": { type: string }
+"#,
+        );
+        assert!(error.contains("is not a valid identifier"), "{error}");
+    }
+
+    // --- `not` per-form diagnostics (validate_schema_common) ---
+
+    #[test]
+    fn rejects_not_empty_unsatisfiable() {
+        let error = numeric_reject("not: {}");
+        assert!(error.contains("unsatisfiable"), "{error}");
+    }
+
+    #[test]
+    fn rejects_not_true_unsatisfiable() {
+        let error = numeric_reject("not: true");
+        assert!(error.contains("unsatisfiable"), "{error}");
+    }
+
+    #[test]
+    fn rejects_not_false_noop() {
+        let error = numeric_reject("not: false");
+        assert!(error.contains("no-op"), "{error}");
+    }
+
+    #[test]
+    fn rejects_not_double_negation() {
+        let error = numeric_reject("not: { not: { type: string } }");
+        assert!(error.contains("not supported"), "{error}");
+    }
+
+    // --- unsatisfiable recursion cycles (validate_reference_satisfiability) ---
+
+    #[test]
+    fn rejects_unsatisfiable_self_reference() {
+        let error = doc_reject(
+            r##"
+$defs:
+  Node:
+    type: object
+    properties:
+      next: { $ref: "#/$defs/Node" }
+    required: [next]
+"##,
+        );
+        assert!(error.contains("unsatisfiable recursion cycle"), "{error}");
+    }
+
+    #[test]
+    fn rejects_unsatisfiable_mutual_recursion() {
+        let error = doc_reject(
+            r##"
+$defs:
+  A:
+    type: object
+    properties:
+      b: { $ref: "#/$defs/B" }
+    required: [b]
+  B:
+    type: object
+    properties:
+      a: { $ref: "#/$defs/A" }
+    required: [a]
+"##,
+        );
+        assert!(error.contains("unsatisfiable recursion cycle"), "{error}");
+    }
+
+    #[test]
+    fn accepts_array_wrapped_recursion() {
+        parse(
+            r##"
+$defs:
+  Tree:
+    type: object
+    properties:
+      children:
+        type: array
+        items: { $ref: "#/$defs/Tree" }
+    required: [children]
+"##,
+        );
+    }
+
+    #[test]
+    fn accepts_optional_recursion() {
+        parse(
+            r##"
+$defs:
+  Node:
+    type: object
+    properties:
+      next: { $ref: "#/$defs/Node" }
+"##,
+        );
+    }
+
+    // --- catch-all collision (validate_member_scope) ---
+
+    #[test]
+    fn rejects_member_colliding_with_catch_all() {
+        let error = doc_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  additionalProperties: { type: string }
+"#,
+        );
+        assert!(error.contains("catch-all"), "{error}");
+        assert!(error.contains("collision"), "{error}");
+    }
+
+    #[test]
+    fn accepts_additional_properties_member_when_closed() {
+        parse(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+properties:
+  additionalProperties: { type: string }
+"#,
+        );
+    }
+
+    // --- definitions-only file (validate_document) ---
+
+    #[test]
+    fn accepts_definitions_only_file() {
+        let spec = parse(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+description: A definitions bucket.
+$defs:
+  Thing:
+    type: object
+    properties:
+      id: { type: string }
+"#,
+        );
+        assert!(spec.external_type_binding("Thing").is_some());
+    }
+
+    // --- cross-file `$ref` target must be in the input set (resolve_ref_key) ---
+
+    #[test]
+    fn rejects_ref_target_file_not_in_input_set() {
+        let error = numeric_reject("$ref: \"missing.yaml#/$defs/X\"");
+        assert!(error.contains("not in the input set"), "{error}");
     }
 }

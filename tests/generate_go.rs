@@ -1231,6 +1231,45 @@ interface doc-service {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+#[test]
+fn go_rejects_inputs_flattening_to_the_same_module_file() {
+    // Two distinct input files -- `full_name.json` at the root and
+    // `full/name.json` in a subdirectory -- flatten to the same Go module file
+    // `full_name.go`. Go collapses the whole closure into one flat package, so
+    // the emit layer rejects the collision (json-schema/generated-file-layout.md).
+    let temp_dir = unique_output_path("go-json-flatten-collision");
+    fs::create_dir_all(temp_dir.join("full")).unwrap();
+    let schema = |title: &str| {
+        format!(
+            "{{\n  \"title\": \"{title}\",\n  \"type\": \"object\",\n  \"properties\": {{ \"id\": {{ \"type\": \"string\" }} }}\n}}\n"
+        )
+    };
+    fs::write(temp_dir.join("full_name.json"), schema("FlatThing")).unwrap();
+    fs::write(temp_dir.join("full").join("name.json"), schema("NestedThing")).unwrap();
+    let output_path = temp_dir.join("output");
+
+    let result = generate_to_file(&GenerateRequest {
+        language: nex_gen::language::Language::Go,
+        input_paths: vec![temp_dir.clone()],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path,
+        format: false,
+        generate_native_api: false,
+        js_temporal_repr: Default::default(),
+    });
+
+    let error = result
+        .expect_err("inputs flattening to the same Go module file should be rejected")
+        .to_string();
+    assert!(error.contains("full_name.go"), "{error}");
+    assert!(
+        error.contains("conflicts with another generated file"),
+        "{error}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
     let dir_path = root.join("examples/json-inputs").join(example_id);
     if dir_path.is_dir() {

@@ -132,15 +132,19 @@ Each is optional, and when present **must be an object type** — a Nexus
 payload is always a structured message:
 
 - **`$ref` to `$defs`** → reuse that named type ([[ref]] type-name
-  rules). The target **must resolve to an object type** (`type: object`);
-  a `$ref` to a scalar/array/enum/const type → **load reject**.
-- **Inline schema** → must be `type: object` (with `properties` and/or
-  `additionalProperties`), **promoted to a synthesized named type**
-  `<OperationPascal>Input` / `<OperationPascal>Output` (e.g.
-  `SendMessageInput`), a normal top-level type in the declaring module
-  that enters the package-wide namespace and the P15 collision pass. A
-  non-object inline form (`type: string`, `type: array`, …) or a
-  shapeless `type: object` → **load reject** (P7.1).
+  rules). The target **must resolve to an object type** — a `type: object`
+  schema, or an [[allOf]] that merges to one (the merge runs at load). A
+  `$ref` to a scalar/array/enum/const type, or to a [[oneOf]] **union**,
+  → **load reject**: a union has no single extensible shape.
+- **Inline schema** → must be an **object**: either `type: object` (with
+  `properties` and/or `additionalProperties`) or an [[allOf]] that
+  resolves to one (merged/flattened at load). It is **promoted to a
+  synthesized named type** `<OperationPascal>Input` /
+  `<OperationPascal>Output` (e.g. `SendMessageInput`), a normal top-level
+  type in the declaring module that enters the package-wide namespace and
+  the P15 collision pass. A non-object inline form (`type: string`,
+  `type: array`, a `oneOf` union, …) or a shapeless `type: object` →
+  **load reject** (P7.1).
 - **Omitted** → void / empty (this is *no* I/O, distinct from a non-object
   I/O), encoded per target: Go `nexus.NoValue`, TS `void`, Python `None`.
   **Java distinguishes the two sides** (verified below): an absent
