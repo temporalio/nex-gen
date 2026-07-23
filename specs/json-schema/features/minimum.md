@@ -38,7 +38,7 @@ Loader behavior (mirror of [[maximum]] with `≥`):
 - `minimum` on a non-numeric [[type]] → reject (**P7.1**).
 - **On an `integer` field the bound MUST be integer-valued** — `minimum:0.0`
   accepted (≡ `0`), `minimum:0.5` rejected with a fix-it (same Pydantic
-  build constraint as [[maximum]]; see `json-schema/research/pyd_numeric_probe.py`).
+  build constraint as [[maximum]]).
 - On a `number` field any finite bound is accepted.
 - `minimum` below the [[type]] integer cap `−(2^53−1)` on an `integer`
   field is redundant (cap already rejects) but allowed.

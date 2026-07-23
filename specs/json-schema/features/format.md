@@ -27,13 +27,10 @@ value, and the wire is produced by **re-serializing** it — with **no
 truncation** (offset and sub-second precision preserved to each type's
 resolution), `date-time` being the one format whose round-trip may lose
 information, and only at a target type's genuine limit. Every rule below was
-verified value-for-value across all
-four runtime targets **plus** the Rust gate and the prospective .NET / Ruby
-targets by the corpora under `research/format_conformance/`,
-`research/format_email/`, `research/format_hostname/`,
-`research/format_duration/`, `research/format_uri/`,
-`research/format_materialize_clock/`, and
-`research/format_materialize_duration/`.
+verified value-for-value across all four runtime targets **plus** the Rust
+gate and the prospective .NET / Ruby targets by conformance corpora
+covering UUID/IP/date-time, email, hostname, duration, URI, and clock/
+duration materialization.
 
 ## Spec summary
 
@@ -90,23 +87,23 @@ annotated — the assertion behavior is self-documenting rather than implicit.
   - `ipv4` — dotted-quad, each octet `0–255`, no leading zeros.
   - `ipv6` — RFC 4291 (full, `::`-compressed, and IPv4-tail forms).
   - `uri`, `uri-reference` — RFC 3986, ASCII-only, at high fidelity
-    (`research/format_uri/`, 72 pairs, 7/7 agree, including the IP-literal
-    tightening below). The IP-literal host `[…]` is validated semantically by
-    splicing in the pinned `ipv6` grammar (below).
+    (`json-schema/corpora/format_uri/`, 72 pairs, 7/7 agree, including the
+    IP-literal tightening below). The IP-literal host `[…]` is validated
+    semantically by splicing in the pinned `ipv6` grammar (below).
 - **Pinned regex + a length guard** (RE2 has no total-length lookahead, so
   a cheap `code_point_count` check rides alongside the regex in the shared
   `Validate`):
   - `hostname` — RFC 1123 LDH labels; each label ≤63, **total ≤253**
-    (`research/format_hostname/`, 41 pairs, 7/7 agree).
+    (`json-schema/corpora/format_hostname/`, 41 pairs, 7/7 agree).
   - `email` — a well-defined **ASCII dot-atom** subset of RFC 5321 (no
     quoted locals, comments, IP-literals, or IDN); **total ≤254**, the
     guard runs *before* the regex to neutralize a Java matcher hazard
-    (`research/format_email/`, 56 pairs, 7/7 agree).
+    (`json-schema/corpora/format_email/`, 56 pairs, 7/7 agree).
 - **Pinned regex (syntax) + a shared calendar/range predicate, and
   materialized** (below): `date`, `date-time`, `time`, `duration` — RFC 3339
   profile; the predicate enforces day-in-month, the Gregorian leap-year
   rule, and the offset numeric range
-  (`research/format_conformance/`, 124 pairs, 7/7 agree).
+  (`json-schema/corpora/format_conformance/`, 124 pairs, 7/7 agree).
 
 **Deferred (rejected at load, "not yet supported"):** `idn-email`,
 `idn-hostname`, `iri`, `iri-reference` (all need **IDNA / Unicode** handling
@@ -146,8 +143,8 @@ node (below):
   node. No stdlib temporal type can store `:60`, and native parsers **split**
   on it: Go / Java / Python / .NET *reject*, while **JS `Temporal` and Ruby
   silently clamp** `:60`→`:59` (corruption — `Temporal` clamps even with
-  `{overflow:'reject'}`) (`research/format_materialize_clock/`). Since the
-  owned validator rejects `:60` before any native parse runs, no target ever
+  `{overflow:'reject'}`) (`json-schema/corpora/format_materialize_clock/`).
+  Since the owned validator rejects `:60` before any native parse runs, no target ever
   reaches the clamp — but the split is exactly why we reject uniformly rather
   than delegate. A **string-opt-out** node keeps accepting `:60` (the current
   pure-assertion contract).
@@ -156,8 +153,7 @@ node (below):
   days) are **rejected** on a materialized node, because no stdlib
   fixed-duration type (`time.Duration`, `timedelta`, `java.time.Duration`,
   `TimeSpan`) can represent calendar-variable years/months without a
-  reference date (`research/format_materialize_duration/`). A
-  **string-opt-out** node keeps the full duration grammar.
+  reference date. A **string-opt-out** node keeps the full duration grammar.
 
 Both narrowings are strictly *more* restrictive (no previously-rejected value
 becomes accepted) and are the price of the idiomatic typed field.
@@ -245,7 +241,7 @@ fractional part when zero). `Temporal.ZonedDateTime` preserves the offset too
 TS `date-time` under `--ts-date-time-types=date`, whose `Date.toISOString()`
 folds to a UTC instant (always 3 digits). The serializer is **owned, not
 native**, because the stdlib emitters disagree
-(`research/format_materialize_clock/`): Java `OffsetDateTime.toString` pads to
+(`json-schema/corpora/format_materialize_clock/`): Java `OffsetDateTime.toString` pads to
 fixed 3/6/9-digit groups (no trailing-zero trim), and Python `isoformat` emits
 `.500000` and `+00:00` rather than `.5` / `Z` — only Go `RFC3339Nano` and
 Temporal's `.toString({ fractionalSecondDigits: 'auto' })` already match the
@@ -356,10 +352,10 @@ with the normalized anchors):
 |---|---|---|
 | `uuid` | `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$` | — |
 | `ipv4` | `^(?:(25[0-5]\|2[0-4][0-9]\|1[0-9][0-9]\|[1-9]?[0-9])\.){3}(25[0-5]\|2[0-4][0-9]\|1[0-9][0-9]\|[1-9]?[0-9])$` | — |
-| `ipv6` | RFC 4291 — see `research/format_conformance/` (authoritative form) | — |
+| `ipv6` | RFC 4291 — see `json-schema/corpora/format_conformance/` (authoritative form) | — |
 | `hostname` | `^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$` | length ≤253 |
-| `email` | ASCII dot-atom — see `research/format_email/` | length ≤254 (runs **first**) |
-| `uri` / `uri-reference` | RFC 3986 ASCII — see `research/format_uri/pinned_body.json` | IP-literal host: pinned `ipv6` grammar |
+| `email` | ASCII dot-atom — see `json-schema/corpora/format_email/` | length ≤254 (runs **first**) |
+| `uri` / `uri-reference` | RFC 3986 ASCII — see `json-schema/corpora/format_uri/pinned_body.body` | IP-literal host: pinned `ipv6` grammar |
 
 For a **materialized temporal**, the pinned regex + calendar/range predicate
 run in the **parse adapter over the wire string** (that is where `:60`,
@@ -379,7 +375,7 @@ materialized, `:60`-rejecting grammar):
 
 *(A string-opt-out temporal node keeps the wider grammar: `time` / `date-time`
 add back the `|60` seconds alternative; `duration` uses the full
-`PnYnMnDTnHnMnS` / `PnW` grammar from `research/format_duration/`.)*
+`PnYnMnDTnHnMnS` / `PnW` grammar.)*
 
 | Language | Strategy (materialized temporal) |
 |---|---|
@@ -453,10 +449,11 @@ compiled constant; the load gate proves it compiles, so the emitted
 ### Runtime fixtures (validator + round-trip)
 
 Per-format accept/reject is exercised by the conformance corpora
-(`research/format_conformance/` 124, `format_email/` 56, `format_hostname/`
-41, `format_duration/` 68, `format_uri/` 72); the materialization round-trips
-by `research/format_materialize_clock/` and
-`research/format_materialize_duration/` (the clock corpus proves the current
+(`json-schema/corpora/format_conformance/` 124,
+`json-schema/corpora/format_email/` 56, `json-schema/corpora/format_hostname/`
+41, duration 68, `json-schema/corpora/format_uri/` 72); the materialization
+round-trips by the `json-schema/corpora/format_materialize_clock/` and
+materialize-duration corpora (the clock corpus proves the current
 offset-preserving, no-truncation behavior — 0 mismatches across Go / Java /
 Python / TS `string` / TS `temporal`, with Python sub-µs truncation, the legacy
 TS `date` UTC fold, and the `:60` skip landing exactly as tabulated).
@@ -537,8 +534,7 @@ get divergent verdicts across the seven native URI parsers.
    `duration` is narrowed to time-only so it can be a native type. To also
    support calendar durations (`P1Y`, `P4W`), a **generated component struct**
    (`{years,months,weeks,days,hours,minutes,seconds}`) round-trips the full
-   grammar byte-identically in all six languages
-   (`research/format_materialize_duration/`, design B) — a candidate
+   grammar byte-identically in all six languages (design B) — a candidate
    representation for a node that needs Y/M/W, or the behavior behind the
    string opt-out's accessor. Deferred pending demand.
 3. **A `Temporal` type for `time`.** `time` is lossless everywhere (offset

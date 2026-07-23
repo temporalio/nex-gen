@@ -35,14 +35,13 @@ to both `integer` and `number` fields.
 Rationale (citing [[PRINCIPLES.md]]):
 - **P1 (identical cross-language validation).** Divisibility must produce
   the *same* accept/reject in Go, TypeScript, Python, and Java for the
-  same `(schema, instance)`. Empirically (`json-schema/research/`):
+  same `(schema, instance)`. Empirically:
   - **Integer divisor → exact and portable.** Integer modulo (`integer`
     fields) and IEEE `fmod` (`number` fields) agree value-for-value across
     all four: Go `math.Mod`, Java `%`, JS `%`, and Python `math.fmod`
     return identical results, and Pydantic's native `multiple_of` matches
     them for integer divisors (`10.0`/`6.0` accepted, `7.5` rejected,
-    `1e300` accepted for divisor `2` — see `fmod_probe/main.go`,
-    `pyd_numeric_probe.py`).
+    `1e300` accepted for divisor `2`).
   - **Fractional divisor → the languages disagree.** `fmod` treats the
     stored doubles literally, so `0.3 % 0.1 == 0.09999999999999998` and
     `1.1 % 0.1 == 2.77e-17` — i.e. Go/Java/JS/Python all *reject* `0.3`

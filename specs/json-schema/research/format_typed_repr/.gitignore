@@ -1,5 +1,0 @@
-# .NET build output from `dotnet run --project typed_cs.csproj`
-bin/
-obj/
-# Java single-file mode leaves nothing; guard against classic `javac` runs
-*.class

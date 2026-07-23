@@ -61,10 +61,9 @@ Rationale (citing [[PRINCIPLES.md]]):
   value set is a contract change and surfaces as one (**P13.2**: the wire is
   forward-compatible for unknown *fields*, **not** for unknown
   `const`/`enum` *values* — **P13.1**). An **open enum** (accept-and-preserve unknown
-  members, e.g. TS `"red" | (string & {})`) was prototyped
-  (`research/const_open_enum_probe.py`) and **rejected**: P13.1 governs, so
-  the value set is closed in every language and the unknown value is a
-  loud failure.
+  members, e.g. TS `"red" | (string & {})`) was considered and **rejected**:
+  P13.1 governs, so the value set is closed in every language and the
+  unknown value is a loud failure.
 - **No auto-emit.** Like [[const]], `enum` is validated, not
   force-written: the generator validates that the value is one of the set
   on every model — constructed in-language or deserialized — and never

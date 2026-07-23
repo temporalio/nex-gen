@@ -47,8 +47,7 @@ Loader behavior:
   `maximum:5.5` is **rejected** with a fix-it ("use an integer bound, or
   make the field `number`"). Empirically Pydantic cannot even represent a
   fractional `le` on an `int` field — `Field(le=5.5)` fails to build with
-  "'le' must be coercible to an integer" (see
-  `json-schema/research/pyd_numeric_probe.py`) — and an integer bound lets
+  "'le' must be coercible to an integer" — and an integer bound lets
   all four languages compare against one integer value with no
   float/round ambiguity.
 - On a `number` field any finite numeric bound is accepted.

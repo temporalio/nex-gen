@@ -53,7 +53,7 @@ member keys present on the wire**, taken at the deserialize boundary
 the wire and does not count (see Interactions). Count the wire object as a
 single number; do **not** sum a declared-fields bucket and an extras
 bucket separately (case-mapping can route a key to either, and in Pydantic
-the two sets overlap — verified `json-schema/research/pyd_minprops_probe.py`).
+the two sets overlap).
 
 | Language | Strategy |
 |---|---|

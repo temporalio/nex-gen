@@ -11,7 +11,7 @@ supported form is narrowed to the **portable (RE2-safe) subset** matched
 with **unanchored search** and **ASCII** class semantics. That
 configuration was validated against an **83-pair conformance corpus** run
 through all four runtime engines plus the Rust gate
-(`json-schema/research/pattern_conformance/`), which proved the compile
+(`json-schema/corpora/pattern_conformance/`), which proved the compile
 gate + pinned flags alone is *not* enough — three further constructs
 (inline flags, `\s`/`\S`, and the `$` anchor) compile everywhere yet match
 differently. Each gets an explicit rule: inline flags are **rejected**, and
@@ -60,7 +60,7 @@ Rationale (citing [[PRINCIPLES.md]]):
 - **P1 (identical cross-language validation).** The same
   `(pattern, instance)` must produce the same accept/reject in Go, TS,
   Python, and Java. The four engines diverge on the axes below; each is
-  pinned to the portable choice (verified in `string_probe`), and the
+  pinned to the portable choice, and the
   conformance corpus then caught three more (**Conformance-verified gate
   rules**, further below):
   1. **Dialect.** The *regular* engines — Rust's `regex` crate (what the
@@ -72,9 +72,8 @@ Rationale (citing [[PRINCIPLES.md]]):
      with the Rust `regex` crate** (below; pure Rust, no Go toolchain), and
      the rejected non-regular constructs are exactly the ones with no
      portable linear-time semantics anyway. Rust `regex` and Go RE2 are the
-     same family and reject the identical construct set — verified in
-     `research/rust_regex_gate/` (Rust) against `research/string_probe/main.go`
-     (Go).
+     same family and reject the identical construct set — verified
+     directly against each other.
   2. **Anchoring.** The spec says regexes are *not* implicitly anchored,
      so we use each engine's **unanchored search**: Go `MatchString`, JS
      `RegExp.test`, Python `re.search`, Java `Matcher.find`. The footgun
@@ -104,7 +103,7 @@ Rationale (citing [[PRINCIPLES.md]]):
 
 **Conformance-verified gate rules (beyond no-backtracking).** An 83-pair
 `(pattern, instance)` corpus run through all four runtime engines + the
-Rust gate (`research/pattern_conformance/`) showed the compile gate +
+Rust gate (`json-schema/corpora/pattern_conformance/`) showed the compile gate +
 pinned flags is **not** sufficient — three constructs compile in *every*
 engine yet match differently, so each gets an explicit rule:
 1. **Inline flag groups `(?i)` / `(?flags:…)` → reject.** JS `RegExp`
@@ -155,8 +154,7 @@ locating each `\s`/`\S` Perl node (with its `negated` flag, enclosing-class
 context, and byte span) to splice the rewrite, and locating the `$`
 assertion for the anchor rewrite. The AST is escape-safe for free: an
 escaped `\$` or a literal `s` from `\\s` produces no assertion / Perl node
-and is left untouched. Still pure Rust, no Go toolchain (verified in
-`research/rust_regex_gate/` `ast_detect` and `research/ws_normalize/`).
+and is left untouched. Still pure Rust, no Go toolchain.
 
 This is the same "support the portable subset, reject the hazardous form
 at load, deferred not excluded" posture as [[multipleOf]] (fractional
@@ -176,10 +174,9 @@ Loader behavior:
   subset, which every target's runtime engine accepts. The gate then walks
   the `regex-syntax` **AST** for the three conformance rules below. It never
   runs a production match, so the `regex` crate's *own* default semantics
-  (e.g. Unicode-aware `\d` — it matches U+0663, verified in
-  `research/rust_regex_gate/`) are irrelevant here; runtime matching is
-  pinned per target (ASCII classes, code-point `.`, unanchored) in the
-  Validator mapping.
+  (e.g. Unicode-aware `\d` — it matches U+0663, verified) are irrelevant
+  here; runtime matching is pinned per target (ASCII classes, code-point
+  `.`, unanchored) in the Validator mapping.
 - **Inline flag group `(?i)` / `(?flags:…)` → reject** — not ECMA-262; JS
   cannot compile it (Conformance-verified gate rules).
 - **`\s` / `\S` → normalized** to `[\t\n\x0B\f\r ]` / `[^\t\n\x0B\f\r ]` in
@@ -229,7 +226,7 @@ with them.
 |---|---|
 | Go | Package-level `var patRe = regexp.MustCompile(<pattern>)` (compiled once at init; the load-time gate already proved it compiles). The shared `Validate` checks `if !patRe.MatchString(v) { push(Violation{Path, Reason: fmt.Sprintf("must match pattern %q, got %q", <pattern>, v)}) }` — `MatchString` is unanchored; RE2 is ASCII-class + rune-`.`. Collected into one `ValidationError`. |
 | TypeScript | Module-level ``const PAT_RE = /<pattern>/u;`` (or `new RegExp(<pattern>, "u")` when the literal can't be spelled). **The `u` flag is mandatory** (code-point `.`; verified). ``if (!PAT_RE.test(v)) push(Violation{path, reason: `must match pattern ${PAT_RE}, got ${JSON.stringify(v)}`})``. `test` is unanchored and — with no `g` flag — stateless. Throw one `ValidationError`. |
-| Python | Module-level `PAT_RE = re.compile(<pattern>, re.ASCII)` (with the `$`→`\Z` normalization applied) and an explicit `AfterValidator` on the field: `if PAT_RE.search(v) is None: raise ValueError(...)`, aggregating into `pydantic.ValidationError`. **`re.search` (unanchored), `re.ASCII` (ASCII `\d\w\s`).** We deliberately do **not** use Pydantic's native `pattern=`/`StringConstraints(pattern=…)`: it matches with pydantic-core's Rust `regex` engine, whose `\d\w\s` are **Unicode** (verified — `^\d+$` accepts Arabic-Indic `٣`, and `\w`/`\s` accept accented letters / NBSP), so it disagrees with our pinned ASCII on 4/32 corpus pairs (`research/pydantic_pattern_probe.py`, pydantic 2.13.4). Its anchoring (unanchored) and dot (code point) *do* match `re.search`, and it rejects lookaround/backref at model-build time — but the class divergence is a hard blocker, so we standardize the runtime match on `re` + `re.ASCII` + `search` for provable P1 (the same reasoning [[multipleOf]] uses to reject Pydantic's tolerant native `multiple_of`). Using the same `regex` crate for the loader's *compile gate* is not contradictory — there we trust it for *compilability*, never for match semantics. |
+| Python | Module-level `PAT_RE = re.compile(<pattern>, re.ASCII)` (with the `$`→`\Z` normalization applied) and an explicit `AfterValidator` on the field: `if PAT_RE.search(v) is None: raise ValueError(...)`, aggregating into `pydantic.ValidationError`. **`re.search` (unanchored), `re.ASCII` (ASCII `\d\w\s`).** We deliberately do **not** use Pydantic's native `pattern=`/`StringConstraints(pattern=…)`: it matches with pydantic-core's Rust `regex` engine, whose `\d\w\s` are **Unicode** (verified — `^\d+$` accepts Arabic-Indic `٣`, and `\w`/`\s` accept accented letters / NBSP), so it disagrees with our pinned ASCII on 4/32 corpus pairs (pydantic 2.13.4). Its anchoring (unanchored) and dot (code point) *do* match `re.search`, and it rejects lookaround/backref at model-build time — but the class divergence is a hard blocker, so we standardize the runtime match on `re` + `re.ASCII` + `search` for provable P1 (the same reasoning [[multipleOf]] uses to reject Pydantic's tolerant native `multiple_of`). Using the same `regex` crate for the loader's *compile gate* is not contradictory — there we trust it for *compilability*, never for match semantics. |
 | Java | Static `private static final Pattern PAT_RE = Pattern.compile(<pattern>);` (**default flags** — ASCII `\d\w\s`, code-point `.`; with the `$`→`\z` normalization applied). The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `String` and checks `if (!PAT_RE.matcher(v).find())`, pushing a `Violation{path, "must match pattern " + <pattern> + ", got " + v}` into the single `ValidationException`. **`Matcher.find` (unanchored), never `matches()`** (which anchors the whole input — verified footgun). Not bean-validation `@Pattern`. |
 
 **Informative `reason` strings.** The `Violation` `reason` names the
@@ -244,7 +241,7 @@ emitted `MustCompile`/`Pattern.compile` be unconditional — its job is to
 turn any runtime compile failure into a load-time reject. The one
 gate-accepted-but-runtime-uncompilable case the corpus found (JS and inline
 flags) is now a gate reject, so every emitted pattern compiles in its
-target; the corpus (`research/pattern_conformance/`) stays as the
+target; the corpus (`json-schema/corpora/pattern_conformance/`) stays as the
 regression guard against any future-discovered edge.
 
 ### Serialize-side (P12)
@@ -295,11 +292,9 @@ is projected from the native value on the encode side.
 The per-`(pattern, instance)` match behavior — unanchored search, ASCII
 class semantics, code-point `.`, and the `\s`/`\S` and `$` normalizations —
 is exercised by the **83-pair conformance corpus**
-(`research/pattern_conformance/corpus.json`), run through all four runtime
-engines plus the prospective .NET/Ruby (`compare.py`, `compare_ruby.py`,
-`dotnet_runner/`) and the Rust gate; `research/ws_normalize/` covers the
-`\s`/`\S` rewrite. That corpus is this keyword's regression suite — new
-edge cases are added there, not enumerated here.
+(`json-schema/corpora/pattern_conformance/corpus.json`), run through all
+four runtime engines plus the Rust gate. That corpus is this keyword's
+regression suite — new edge cases are added there, not enumerated here.
 
 Fixtures outside the corpus (validator integration, not pure matching):
 - Combined with a failing [[minLength]]/[[maxLength]] or sibling field →
@@ -347,7 +342,7 @@ case) and **normalize** `\s`/`\S` (→ explicit ASCII class) and `$` (→ per-
 target end-anchor); the 83-pair corpus confirms the four runtimes then agree
 value-for-value. The **residual risk** is only an edge the corpus hasn't yet
 exercised (e.g. some `\b` word-boundary or `.`-newline corner); the corpus
-(`research/pattern_conformance/`) is the regression guard and grows into the
+(`json-schema/corpora/pattern_conformance/`) is the regression guard and grows into the
 [[type]] cross-language conformance-suite item. Since the gate is the Rust
 `regex` crate rather than the four runtime engines themselves, any
 *acceptance* edge it and a target disagree on also lands there.
@@ -355,7 +350,7 @@ exercised (e.g. some `\b` word-boundary or `.`-newline corner); the corpus
 ### Prospective targets (.NET, Ruby)
 
 Not current targets, but both are planned. Conformance was verified against
-the same corpus (`research/pattern_conformance/`), and both are feasible
+the same corpus (`json-schema/corpora/pattern_conformance/`), and both are feasible
 with **per-target emission transforms only — no new gate rules**. The
 findings (record them here so the recipe survives to implementation time):
 
@@ -379,7 +374,7 @@ per-engine flag/anchor treatment.
    a semantics-preserving rewrite — `(?i)` → case-fold expansion or a real
    flag channel, backtracking → a portable rewrite where one exists or a
    shared engine, multi-member `[\S…]` → a positive form if one is found —
-   each gated on the conformance corpus (`research/pattern_conformance/`)
+   each gated on the conformance corpus (`json-schema/corpora/pattern_conformance/`)
    still agreeing across all targets (incl. the prospective .NET/Ruby).
    Revisit on demand (mirrors [[multipleOf]]'s fractional-divisor and
    [[patternProperties]]' single-pattern carve-outs). `\s`/`\S` and `$` were
