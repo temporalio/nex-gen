@@ -26,10 +26,7 @@ function jsonPayload(data: Uint8Array) {
  * the typed model. This proves the generated type hint (the mapper) drives
  * converter-based deserialization.
  */
-export function decodeFixture<T>(
-  mapper: IntermediateMapper<T>,
-  bytes: Uint8Array,
-): T {
+export function decodeFixture<T>(mapper: IntermediateMapper<T>, bytes: Uint8Array): T {
   const intermediate = defaultPayloadConverter.fromPayload(jsonPayload(bytes));
   return mapper.fromIntermediate(intermediate);
 }

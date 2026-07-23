@@ -22,10 +22,7 @@ import {
   type IntermediateMapper,
 } from "./json-converter-helper.ts";
 
-const wireFixtureDir = new URL(
-  "../../wire/json_schema/showcase/",
-  import.meta.url,
-);
+const wireFixtureDir = new URL("../../wire/json_schema/showcase/", import.meta.url);
 
 function loadFixture(name: string): unknown {
   return loadFixtureFrom(wireFixtureDir, name);
@@ -199,9 +196,9 @@ describe("json-schema showcase generated definitions", () => {
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, status: "archived" }),
     ).toThrow(/must be one of \["active", "inactive", "pending"\], got "archived"/);
-    expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, tier: 9 }),
-    ).toThrow(/must be one of \[1, 2, 3\], got 9/);
+    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, tier: 9 })).toThrow(
+      /must be one of \[1, 2, 3\], got 9/,
+    );
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, scale: 3.5 }),
     ).toThrow(/must be one of \[1.5, 2.5\], got 3.5/);
@@ -210,26 +207,30 @@ describe("json-schema showcase generated definitions", () => {
     ).toThrow(/must equal true/);
     // Valid enum/const values are accepted.
     expect(
-      new ShowcaseMapper().fromIntermediate({ ...base, status: "pending", tier: 3, scale: 2.5 })
-        .status,
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        status: "pending",
+        tier: 3,
+        scale: 2.5,
+      }).status,
     ).toBe("pending");
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, priority: 99 }),
     ).toThrow(/must be <= 10, got 99/);
-    expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, level: 0 }),
-    ).toThrow(/must be > 0, got 0/);
-    expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, step: 7 }),
-    ).toThrow(/must be a multiple of 3, got 7/);
-    expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, ratio: 7 }),
-    ).toThrow(/must be a multiple of 5, got 7/);
+    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, level: 0 })).toThrow(
+      /must be > 0, got 0/,
+    );
+    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, step: 7 })).toThrow(
+      /must be a multiple of 3, got 7/,
+    );
+    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, ratio: 7 })).toThrow(
+      /must be a multiple of 5, got 7/,
+    );
 
     // String-length bounds fire at runtime, counted in code points.
-    expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, code: "a" }),
-    ).toThrow(/must have length >= 2, got 1/);
+    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, code: "a" })).toThrow(
+      /must have length >= 2, got 1/,
+    );
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, code: "abcdef" }),
     ).toThrow(/must have length <= 5, got 6/);
@@ -239,15 +240,15 @@ describe("json-schema showcase generated definitions", () => {
     ).toThrow(/must have length <= 5, got 6/);
     // A multi-byte value within the code-point bound is accepted (byte count 6
     // would exceed maxLength:5 — proving code points, not bytes).
-    expect(
-      new ShowcaseMapper().fromIntermediate({ ...base, code: "a😀b" }).code,
-    ).toBe("a😀b");
+    expect(new ShowcaseMapper().fromIntermediate({ ...base, code: "a😀b" }).code).toBe(
+      "a😀b",
+    );
 
     // Array constraints fire at runtime with informative reasons.
     // Too few / too many items (minItems:1 / maxItems:5).
-    expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, tags: [] }),
-    ).toThrow(/must have at least 1 items, got 0/);
+    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, tags: [] })).toThrow(
+      /must have at least 1 items, got 0/,
+    );
     expect(() =>
       new ShowcaseMapper().fromIntermediate({
         ...base,
@@ -299,9 +300,9 @@ describe("json-schema showcase generated definitions", () => {
     };
 
     // Lowercase / too-long sku.
-    expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, sku: "ab" }),
-    ).toThrow(/must match pattern/);
+    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, sku: "ab" })).toThrow(
+      /must match pattern/,
+    );
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, sku: "ABCDE" }),
     ).toThrow(/must match pattern/);
@@ -365,7 +366,10 @@ describe("json-schema showcase generated definitions", () => {
 
     // Single-label email domain (user@localhost) is rejected.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, contactEmail: "user@localhost" }),
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        contactEmail: "user@localhost",
+      }),
     ).toThrow(/must be a valid email, got "user@localhost"/);
 
     // ipv4 octet out of range.
@@ -402,16 +406,14 @@ describe("json-schema showcase generated definitions", () => {
       new AttributesMapper().fromIntermediate({ a: "1", b: "2", c: "3", d: "4" }),
     ).toThrow(/must have at most 3 properties, got 4/);
     // propertyNames maxLength:8 — an over-long key.
-    expect(() =>
-      new AttributesMapper().fromIntermediate({ toolongkey: "1" }),
-    ).toThrow(/invalid property name "toolongkey": must have length <= 8, got 10/);
+    expect(() => new AttributesMapper().fromIntermediate({ toolongkey: "1" })).toThrow(
+      /invalid property name "toolongkey": must have length <= 8, got 10/,
+    );
 
     // dependentRequired — a shipping street present without a shipping zip.
     expect(() =>
       new ContactMapper().fromIntermediate({ shippingStreet: "1 Main St" }),
-    ).toThrow(
-      /property "shippingZip" is required when "shippingStreet" is present/,
-    );
+    ).toThrow(/property "shippingZip" is required when "shippingStreet" is present/);
     // minProperties:1 on a declared-property object — an empty object.
     expect(() => new ContactMapper().fromIntermediate({})).toThrow(
       /must have at least 1 properties, got 0/,
@@ -426,22 +428,13 @@ describe("json-schema showcase generated definitions", () => {
       new ShowcaseMapper(),
     );
     expect(asString.idOrName).toBe("abc");
-    const asInt = expectRoundTrip(
-      "showcase-union-int.json",
-      new ShowcaseMapper(),
-    );
+    const asInt = expectRoundTrip("showcase-union-int.json", new ShowcaseMapper());
     expect(asInt.idOrName).toBe(7);
 
     // Discriminated (tagged) union (Circle | Square) selected by `kind`.
-    const circle = expectRoundTrip(
-      "showcase-shape-circle.json",
-      new ShowcaseMapper(),
-    );
+    const circle = expectRoundTrip("showcase-shape-circle.json", new ShowcaseMapper());
     expect(circle.shape).toMatchObject({ kind: "circle", radius: 2.5 });
-    const square = expectRoundTrip(
-      "showcase-shape-square.json",
-      new ShowcaseMapper(),
-    );
+    const square = expectRoundTrip("showcase-shape-square.json", new ShowcaseMapper());
     expect(square.shape).toMatchObject({ kind: "square", side: 4 });
 
     const base = {
@@ -475,7 +468,9 @@ describe("json-schema showcase generated definitions", () => {
     // A valid model round-trips; mutating a single field to an out-of-spec value
     // and re-serializing (toIntermediate) is rejected before any wire object is
     // produced, with the same informative reason as the parse path.
-    const full = new ShowcaseMapper().fromIntermediate(loadFixture("showcase-full.json"));
+    const full = new ShowcaseMapper().fromIntermediate(
+      loadFixture("showcase-full.json"),
+    );
 
     // Numeric bound: an in-memory value past `maximum` fails to serialize.
     expect(() =>
@@ -488,9 +483,9 @@ describe("json-schema showcase generated definitions", () => {
     ).toThrow(/must have length <= 5, got 6/);
 
     // Pattern: an in-memory off-pattern value fails to serialize.
-    expect(() =>
-      new ShowcaseMapper().toIntermediate({ ...full, sku: "xyz" }),
-    ).toThrow(/must match pattern/);
+    expect(() => new ShowcaseMapper().toIntermediate({ ...full, sku: "xyz" })).toThrow(
+      /must match pattern/,
+    );
 
     // Format: an in-memory malformed uuid fails to serialize.
     expect(() =>
@@ -520,9 +515,9 @@ describe("json-schema showcase generated definitions", () => {
 
     // allOf-merged bound: an in-memory `size` past the tightened maximum fails.
     const widget = new WidgetMapper().fromIntermediate(loadFixture("widget.json"));
-    expect(() =>
-      new WidgetMapper().toIntermediate({ ...widget, size: 25 }),
-    ).toThrow(/must be <= 20, got 25/);
+    expect(() => new WidgetMapper().toIntermediate({ ...widget, size: 25 })).toThrow(
+      /must be <= 20, got 25/,
+    );
 
     // Object dependentRequired: a shipping street with no zip fails to serialize.
     expect(() =>

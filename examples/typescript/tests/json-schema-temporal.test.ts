@@ -31,12 +31,18 @@ describe("json-schema temporal (--js-temporal-repr=string, default)", () => {
     expect(value.createdAt).toBe("2021-06-15T12:30:45.123456+02:00");
     expect(value.timeout).toBe("PT1H30M");
 
-    const minimal = roundTripFixture(new StringTemporalMapper(), bytes("temporal-minimal.json"));
+    const minimal = roundTripFixture(
+      new StringTemporalMapper(),
+      bytes("temporal-minimal.json"),
+    );
     expect(minimal.serialized).toEqual(load("temporal-minimal.json"));
   });
 
   test("non-canonical input is canonicalized (uppercase T/Z, +00:00 -> Z, PT90M -> PT1H30M)", () => {
-    const value = decodeFixture(new StringTemporalMapper(), bytes("temporal-canonicalize.json"));
+    const value = decodeFixture(
+      new StringTemporalMapper(),
+      bytes("temporal-canonicalize.json"),
+    );
     expect(encodeModel(new StringTemporalMapper(), value)).toEqual({
       createdAt: "2021-06-15T12:30:45Z",
       birthday: "2021-02-28",
@@ -66,7 +72,10 @@ describe("json-schema temporal (--js-temporal-repr=date)", () => {
     expect(value.createdAt).toBeInstanceOf(Date);
     expect((value.createdAt as Date).toISOString()).toBe("2021-06-15T10:30:45.123Z");
     expect(value.birthday).toBe("2021-06-15"); // stays string
-    const serialized = encodeModel(new DateTemporalMapper(), value) as Record<string, unknown>;
+    const serialized = encodeModel(new DateTemporalMapper(), value) as Record<
+      string,
+      unknown
+    >;
     expect(serialized.createdAt).toBe("2021-06-15T10:30:45.123Z");
     expect(serialized.timeout).toBe("PT1H30M");
   });
@@ -90,7 +99,10 @@ describe("json-schema temporal (--js-temporal-repr=temporal)", () => {
   });
 
   test("non-canonical input canonicalizes through Temporal types", () => {
-    const value = decodeFixture(new TemporalTemporalMapper(), bytes("temporal-canonicalize.json"));
+    const value = decodeFixture(
+      new TemporalTemporalMapper(),
+      bytes("temporal-canonicalize.json"),
+    );
     expect(encodeModel(new TemporalTemporalMapper(), value)).toEqual({
       createdAt: "2021-06-15T12:30:45Z",
       birthday: "2021-02-28",
