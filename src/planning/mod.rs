@@ -799,6 +799,7 @@ impl<'a> ApiPlanner<'a> {
             input,
             output,
             output_transform: operation.output_transform.clone(),
+            serialization_context: operation.serialization_context.clone(),
             data: PlannedOperationData {
                 output_resource_return: plan_operation_resource_return(output_resource_return),
             },
@@ -1855,6 +1856,7 @@ mod tests {
                         proto_name,
                     )))),
                     output_transform: None,
+                    serialization_context: LanguageStringSpec::default(),
                     data: (),
                 }],
                 resources: Vec::new(),

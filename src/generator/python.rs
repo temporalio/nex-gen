@@ -645,6 +645,7 @@ impl<'a> ApiPlanner<'a> {
                     package_model_names,
                     &resource_names,
                     &resource_operation_owners,
+                    &support_names,
                     self.api_plan,
                     self.model_hoists,
                 )
@@ -1231,6 +1232,10 @@ impl<'a> ApiPlanner<'a> {
                     .for_language(crate::language::Language::Python)
                     .map(str::to_string)
             }),
+            serialization_context_expr: operation
+                .serialization_context
+                .for_language(crate::language::Language::Python)
+                .map(str::to_string),
             output_resource_return,
             output_direct_result,
             output_none: operation.output_type().is_none(),
@@ -1919,6 +1924,12 @@ fn render_record_models(
             .record(&model.full_name)
             .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
         let wire_block = external_models.render_record_wire_block(model, planned_model);
+        if let Some(wire_block) = &wire_block {
+            for line in &wire_block.pre_class_lines {
+                body.push_str(line);
+                body.push('\n');
+            }
+        }
         render_record_model(&mut body, model, wire_block.as_ref());
         if let Some(wire_block) = wire_block {
             wire_blocks.insert(model.full_name.clone(), wire_block);
@@ -1944,12 +1955,7 @@ fn render_record_models(
         module_imports,
         relative_imports: BTreeMap::new(),
         exported_names: models.iter().map(|model| model.name.clone()).collect(),
-        allows_private_wire_access: wire_blocks.values().any(|wire_block| {
-            wire_block
-                .class_body_lines
-                .iter()
-                .any(|line| line.contains("._temporal_"))
-        }),
+        allows_private_wire_access: false,
     }
 }
 
@@ -1959,8 +1965,16 @@ fn render_record_model(
     wire_block: Option<&RenderedRecordWireBlock>,
 ) {
     if model_needs_keyword_only_dataclass(model) {
+        if let Some(decorator) = wire_block.and_then(|block| block.decorator.as_deref()) {
+            output.push_str(decorator);
+            output.push('\n');
+        }
         output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
     } else {
+        if let Some(decorator) = wire_block.and_then(|block| block.decorator.as_deref()) {
+            output.push_str(decorator);
+            output.push('\n');
+        }
         output.push_str("@dataclasses.dataclass(slots=True)\n");
     }
     output.push_str("class ");
@@ -2314,6 +2328,7 @@ struct RenderedOperation<'a> {
     output_type_parameters: BTreeSet<String>,
     output_type_expr: String,
     output_transform_expr: Option<String>,
+    serialization_context_expr: Option<String>,
     output_resource_return: Option<PlannedOperationResourceReturn>,
     output_direct_result: bool,
     output_none: bool,
@@ -2391,6 +2406,8 @@ pub(in crate::generator) struct RenderedField {
 #[derive(Debug, Default)]
 pub(in crate::generator) struct RenderedRecordWireBlock {
     pub(in crate::generator) imports: PythonImports,
+    pub(in crate::generator) pre_class_lines: Vec<String>,
+    pub(in crate::generator) decorator: Option<String>,
     pub(in crate::generator) class_body_lines: Vec<String>,
 }
 
@@ -3275,7 +3292,12 @@ fn render_optional_python_imports_with_skipped_language_modules(
             wrote_any = true;
         }
     }
-    let used_module_imports = used_python_module_imports(body, module_imports);
+    let mut used_module_imports = used_python_module_imports(body, module_imports);
+    for (_, module_path) in simple_imports {
+        if body_uses_python_module_path(body, module_path) {
+            used_module_imports.remove(module_path);
+        }
+    }
     wrote_any |= render_language_python_imports(
         output,
         body,
@@ -3535,10 +3557,6 @@ fn render_models_module(
 
     let mut output = String::new();
     render_generated_file_header(&mut output);
-    if model_fragments.allows_private_wire_access {
-        output.push('\n');
-        output.push_str("# pyright: reportPrivateUsage=false\n");
-    }
     output.push('\n');
     let import_scan_body = if model_hoists.is_none() && api_plan.data.module_imports.is_empty() {
         body.clone()
@@ -4215,6 +4233,7 @@ fn render_package_init(
     model_names: &[String],
     _resource_names: &[String],
     resource_operation_owners: &BTreeMap<String, String>,
+    support_names: &[String],
     _api_plan: &PlannedSpec,
     _model_hoists: Option<&PythonModelHoists>,
 ) -> String {
@@ -4235,11 +4254,24 @@ fn render_package_init(
         .filter(|service| service.endpoint.is_none())
         .map(endpoint_service_object_name)
         .collect::<Vec<_>>();
+    let operation_registry_body = render_operation_registry_body(services);
+    let operation_registry_support_names =
+        used_python_symbol_imports(&operation_registry_body, support_names);
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
     if !model_names.is_empty() {
         render_named_python_import(&mut output, ".models", model_names);
+    }
+    if services
+        .iter()
+        .any(|service| !service.operations.is_empty())
+    {
+        output.push_str("import collections.abc\n");
+        output.push_str("import typing\n");
+        output.push_str("\n");
+        output.push_str("import nexusrpc\n");
+        output.push_str("import temporalio.converter\n");
     }
     if !service_object_names.is_empty() {
         render_named_python_import(&mut output, ".services", &service_object_names);
@@ -4267,6 +4299,9 @@ fn render_package_init(
             }
         }
     }
+    if !operation_registry_support_names.is_empty() {
+        render_named_python_import(&mut output, "._support", &operation_registry_support_names);
+    }
     output.push_str("\n__all__ = [\n");
     for name in model_names {
         output.push_str("    ");
@@ -4284,30 +4319,55 @@ fn render_package_init(
         output.push_str(",\n");
     }
     output.push_str("]\n");
-    if services
+    output.push_str(&operation_registry_body);
+    output
+}
+
+fn render_operation_registry_body(services: &[RenderedService<'_>]) -> String {
+    if !services
         .iter()
         .any(|service| !service.operations.is_empty())
     {
-        output.push_str("\n\n__nexus_operation_registry__ = {\n");
-        for service in services {
-            for operation in &service.operations {
-                output.push_str("    (\n");
-                output.push_str("        \"");
-                output.push_str(service.wire_name);
-                output.push_str("\",\n");
-                output.push_str("        \"");
-                output.push_str(operation.wire_name);
-                output.push_str("\",\n");
-                output.push_str("    ): ");
-                output.push_str("_services.");
-                output.push_str(service.name);
-                output.push('.');
-                output.push_str(&operation.attr_name);
+        return String::new();
+    }
+
+    let mut output = String::new();
+    output.push_str("\n\n_InputT = typing.TypeVar(\"_InputT\")\n");
+    output.push_str("_OutputT = typing.TypeVar(\"_OutputT\")\n");
+    output.push_str(
+        "\n\n_SerializationContextFactory = collections.abc.Callable[\n    [_InputT], temporalio.converter.SerializationContext\n]\n",
+    );
+    output.push_str("\n\nclass _NexusOperationInfo(typing.Generic[_InputT, _OutputT]):\n");
+    output.push_str(
+        "    def __init__(\n        self,\n        *,\n        operation: nexusrpc.Operation[_InputT, _OutputT],\n        serialization_context: _SerializationContextFactory[_InputT] | None = None,\n    ) -> None:\n",
+    );
+    output.push_str("        self.operation: nexusrpc.Operation[_InputT, _OutputT] = operation\n");
+    output.push_str("        self.serialization_context: _SerializationContextFactory[_InputT] | None = serialization_context\n");
+    output.push_str("\n\n__nexus_operation_registry__ = {\n");
+    for service in services {
+        for operation in &service.operations {
+            output.push_str("    (\n");
+            output.push_str("        \"");
+            output.push_str(service.wire_name);
+            output.push_str("\",\n");
+            output.push_str("        \"");
+            output.push_str(operation.wire_name);
+            output.push_str("\",\n");
+            output.push_str("    ): _NexusOperationInfo(\n");
+            output.push_str("        operation=_services.");
+            output.push_str(service.name);
+            output.push('.');
+            output.push_str(&operation.attr_name);
+            output.push_str(",\n");
+            if let Some(serialization_context) = &operation.serialization_context_expr {
+                output.push_str("        serialization_context=");
+                output.push_str(serialization_context);
                 output.push_str(",\n");
             }
+            output.push_str("    ),\n");
         }
-        output.push_str("}\n");
     }
+    output.push_str("}\n");
     output
 }
 

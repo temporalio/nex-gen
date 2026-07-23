@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import collections.abc
+import typing
+
+import nexusrpc
+import temporalio.converter
 from . import services as _services
 from .operations.get_user import get_user
 from ._resources.user import update_email
@@ -20,29 +25,63 @@ __all__ = [
 ]
 
 
+_InputT = typing.TypeVar("_InputT")
+_OutputT = typing.TypeVar("_OutputT")
+
+
+_SerializationContextFactory = collections.abc.Callable[
+    [_InputT], temporalio.converter.SerializationContext
+]
+
+
+class _NexusOperationInfo(typing.Generic[_InputT, _OutputT]):
+    def __init__(
+        self,
+        *,
+        operation: nexusrpc.Operation[_InputT, _OutputT],
+        serialization_context: _SerializationContextFactory[_InputT] | None = None,
+    ) -> None:
+        self.operation: nexusrpc.Operation[_InputT, _OutputT] = operation
+        self.serialization_context: _SerializationContextFactory[_InputT] | None = (
+            serialization_context
+        )
+
+
 __nexus_operation_registry__ = {
     (
         "TypeShowcase",
         "GetUser",
-    ): _services.TypeShowcase.get_user,
+    ): _NexusOperationInfo(
+        operation=_services.TypeShowcase.get_user,
+    ),
     (
         "TypeShowcase",
         "UpdateEmail",
-    ): _services.TypeShowcase.update_email,
+    ): _NexusOperationInfo(
+        operation=_services.TypeShowcase.update_email,
+    ),
     (
         "TypeShowcase",
         "Rename",
-    ): _services.TypeShowcase.rename,
+    ): _NexusOperationInfo(
+        operation=_services.TypeShowcase.rename,
+    ),
     (
         "TypeShowcase",
         "SetProfile",
-    ): _services.TypeShowcase.set_profile,
+    ): _NexusOperationInfo(
+        operation=_services.TypeShowcase.set_profile,
+    ),
     (
         "TypeShowcase",
         "RecordSync",
-    ): _services.TypeShowcase.record_sync,
+    ): _NexusOperationInfo(
+        operation=_services.TypeShowcase.record_sync,
+    ),
     (
         "TypeShowcase",
         "Deactivate",
-    ): _services.TypeShowcase.deactivate,
+    ): _NexusOperationInfo(
+        operation=_services.TypeShowcase.deactivate,
+    ),
 }

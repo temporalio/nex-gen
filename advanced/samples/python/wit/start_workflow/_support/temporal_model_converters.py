@@ -13,7 +13,13 @@ import temporalio.nexus.system
 
 
 def _current_payload_converter() -> temporalio_converter.PayloadConverter:
-    return temporalio.nexus.system.current_user_payload_converter()
+    current = getattr(temporalio.nexus.system, "_current_user_payload_converter")
+    return typing.cast(temporalio_converter.PayloadConverter, current())
+
+
+class SignalWithStartWorkflowModelRequest(typing.Protocol):
+    namespace: str
+    id: str
 
 
 def retry_policy_from_proto(
@@ -76,6 +82,15 @@ def workflow_namespace() -> str:
     from temporalio.workflow import info
 
     return info().namespace
+
+
+def signal_with_start_workflow_serialization_context(
+    request: SignalWithStartWorkflowModelRequest,
+) -> temporalio_converter.WorkflowSerializationContext:
+    return temporalio_converter.WorkflowSerializationContext(
+        namespace=request.namespace,
+        workflow_id=request.id,
+    )
 
 
 def payloads_to_proto(

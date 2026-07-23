@@ -18,9 +18,10 @@ import wit.type_roundtrip.services as type_roundtrip_services
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "wit" / "type_roundtrip"
 TASK_QUEUE = "demo-task-queue"
 
-ACTIVITY_OPTIONS_OPERATION = type_roundtrip.__nexus_operation_registry__[
+ACTIVITY_OPTIONS_OPERATION_INFO = type_roundtrip.__nexus_operation_registry__[
     ("TypeRoundtripService", "ActivityOptionsOperation")
 ]
+ACTIVITY_OPTIONS_OPERATION = ACTIVITY_OPTIONS_OPERATION_INFO.operation
 
 
 @service_handler(service=type_roundtrip_services.TypeRoundtripService)
@@ -35,7 +36,8 @@ class TypeRoundtripServiceHandler:
         input: type_roundtrip_models.ActivityOptions,
     ) -> type_roundtrip_models.ActivityOptions:
         self.calls.append(("ActivityOptionsOperation", input))
-        proto = input._temporal_to_intermediate()
+        converter = getattr(input, "__temporal_transfer_type_converter")
+        proto = converter.to_transfer_type(input)
         assert proto.HasField("retry_policy")
         assert proto.task_queue.name == TASK_QUEUE
         assert proto.schedule_to_close_timeout.seconds == 7
@@ -88,8 +90,14 @@ def test_generated_metadata() -> None:
     assert (
         type_roundtrip.__nexus_operation_registry__[
             ("TypeRoundtripService", "ActivityOptionsOperation")
-        ]
+        ].operation
         is ACTIVITY_OPTIONS_OPERATION
+    )
+    assert (
+        type_roundtrip.__nexus_operation_registry__[
+            ("TypeRoundtripService", "ActivityOptionsOperation")
+        ].serialization_context
+        is None
     )
     assert not hasattr(type_roundtrip, "TypeRoundtripService")
     assert not hasattr(type_roundtrip, "ActivityOptions")
@@ -102,15 +110,16 @@ def test_activity_options_round_trip() -> None:
         schedule_to_close_timeout=datetime.timedelta(seconds=7),
         priority=priority(),
     )
-    activity_proto = activity_options._temporal_to_intermediate()
+    converter = getattr(
+        type_roundtrip_models.ActivityOptions, "__temporal_transfer_type_converter"
+    )
+    activity_proto = converter.to_transfer_type(activity_options)
     assert activity_proto.HasField("retry_policy")
     assert activity_proto.task_queue.name == TASK_QUEUE
     assert activity_proto.schedule_to_close_timeout.seconds == 7
     assert activity_proto.priority.priority_key == 4
     round_tripped_activity = (
-        type_roundtrip_models.ActivityOptions._temporal_from_intermediate(
-            activity_proto
-        )
+        converter.from_transfer_type(activity_proto)
     )
     assert isinstance(
         round_tripped_activity.retry_policy, temporalio.common.RetryPolicy

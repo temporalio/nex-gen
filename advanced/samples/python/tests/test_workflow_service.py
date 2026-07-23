@@ -10,6 +10,7 @@ import uuid
 from nexusrpc import Operation
 from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
 import temporalio.common
+import temporalio.converter
 from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
@@ -22,12 +23,13 @@ import wit.workflow_service.services as workflow_service_services
 APP_ROOT = Path(__file__).resolve().parent
 OUTPUT_PATH = APP_ROOT.parent / "wit" / "workflow_service"
 
-SIGNAL_WITH_START_OPERATION = workflow_service.__nexus_operation_registry__[
+SIGNAL_WITH_START_OPERATION_INFO = workflow_service.__nexus_operation_registry__[
     (
         "temporal.api.workflowservice.v1.WorkflowService",
         "SignalWithStartWorkflowExecution",
     )
 ]
+SIGNAL_WITH_START_OPERATION = SIGNAL_WITH_START_OPERATION_INFO.operation
 
 TASK_QUEUE = "demo-task-queue"
 REQUEST_ID = "example-request"
@@ -375,17 +377,29 @@ def test_generated_metadata() -> None:
     assert OUTPUT_PATH.exists(), f"expected generated package at {OUTPUT_PATH}"
     signal_operation = SIGNAL_WITH_START_OPERATION
     registry = workflow_service.__nexus_operation_registry__
+    signal_operation_info = registry[
+        (
+            "temporal.api.workflowservice.v1.WorkflowService",
+            "SignalWithStartWorkflowExecution",
+        )
+    ]
 
     assert isinstance(signal_operation, Operation)
-    assert (
-        registry[
-            (
-                "temporal.api.workflowservice.v1.WorkflowService",
-                "SignalWithStartWorkflowExecution",
-            )
-        ]
-        is signal_operation
+    assert signal_operation_info.operation is signal_operation
+    assert signal_operation_info.serialization_context is not None
+    request = workflow_service_models.SignalWithStartWorkflowRequest(
+        workflow="ExampleWorkflow",
+        id="target-workflow-id",
+        task_queue=TASK_QUEUE,
+        signal="wake_up",
+        namespace="target-namespace",
     )
+    serialization_context = signal_operation_info.serialization_context(request)
+    assert isinstance(
+        serialization_context, temporalio.converter.WorkflowSerializationContext
+    )
+    assert serialization_context.namespace == "target-namespace"
+    assert serialization_context.workflow_id == "target-workflow-id"
     assert not hasattr(workflow_service, "WorkflowService")
     assert not hasattr(workflow_service, "SignalWithStartWorkflowRequest")
     assert not hasattr(workflow_service, "UserMetadata")

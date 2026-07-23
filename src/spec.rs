@@ -445,6 +445,7 @@ pub struct OperationSpec<F: TypeNameFamily = AuthoredNames> {
     pub input: Option<TypeSpec<F>>,
     pub output: Option<TypeSpec<F>>,
     pub output_transform: Option<OperationOutputTransformSpec>,
+    pub serialization_context: LanguageStringSpec,
     pub data: F::OperationData,
 }
 
@@ -477,6 +478,7 @@ impl<F: TypeNameFamily> OperationSpec<F> {
             input: self.input.map(|input| input.map_names_with(map)),
             output: self.output.map(|output| output.map_names_with(map)),
             output_transform: self.output_transform,
+            serialization_context: self.serialization_context,
             data,
         }
     }

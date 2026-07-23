@@ -2957,6 +2957,7 @@ fn build_operation(
         service_name,
         &operation_name,
     )?;
+    let serialization_context = build_operation_serialization_context(&directives, path, &context)?;
     let output = if let Some(output_type) = function.result.as_ref() {
         Some(
             find_operation_type_spec(resolve, output_type, path, &context)?.ok_or_else(|| {
@@ -2994,6 +2995,7 @@ fn build_operation(
         input: Some(input),
         output,
         output_transform,
+        serialization_context,
         data: (),
     })
 }
@@ -3088,6 +3090,38 @@ fn build_operation_output_transform(
             operation: operation_name.to_string(),
         })
     }
+}
+
+fn build_operation_serialization_context(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<LanguageStringSpec> {
+    let Some(directive) = directive(directives, "serialization-context", path, context)? else {
+        return Ok(LanguageStringSpec::default());
+    };
+
+    let spec = directive_language_string(directive);
+    for (language, helper) in spec
+        .default
+        .iter()
+        .map(|helper| ("default", helper.as_str()))
+        .chain(
+            spec.by_language
+                .iter()
+                .map(|(language, helper)| (language_key(*language), helper.as_str())),
+        )
+    {
+        if !is_valid_support_helper_path(helper) {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context: context.to_string(),
+                directive: "@nexus.serialization-context".to_string(),
+                reason: format!("invalid `{language}` support helper `{helper}`"),
+            });
+        }
+    }
+    Ok(spec)
 }
 
 pub(crate) fn select_world(

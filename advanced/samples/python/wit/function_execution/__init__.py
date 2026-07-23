@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import collections.abc
+import typing
+
+import nexusrpc
+import temporalio.converter
 from . import services as _services
 from .operations.execute_function import execute_function
 from .operations.execute_counted_function import execute_counted_function
@@ -18,25 +23,57 @@ __all__ = [
 ]
 
 
+_InputT = typing.TypeVar("_InputT")
+_OutputT = typing.TypeVar("_OutputT")
+
+
+_SerializationContextFactory = collections.abc.Callable[
+    [_InputT], temporalio.converter.SerializationContext
+]
+
+
+class _NexusOperationInfo(typing.Generic[_InputT, _OutputT]):
+    def __init__(
+        self,
+        *,
+        operation: nexusrpc.Operation[_InputT, _OutputT],
+        serialization_context: _SerializationContextFactory[_InputT] | None = None,
+    ) -> None:
+        self.operation: nexusrpc.Operation[_InputT, _OutputT] = operation
+        self.serialization_context: _SerializationContextFactory[_InputT] | None = (
+            serialization_context
+        )
+
+
 __nexus_operation_registry__ = {
     (
         "FunctionExecution",
         "ExecuteFunction",
-    ): _services.FunctionExecution.execute_function,
+    ): _NexusOperationInfo(
+        operation=_services.FunctionExecution.execute_function,
+    ),
     (
         "FunctionExecution",
         "ExecuteCountedFunction",
-    ): _services.FunctionExecution.execute_counted_function,
+    ): _NexusOperationInfo(
+        operation=_services.FunctionExecution.execute_counted_function,
+    ),
     (
         "FunctionExecution",
         "ExecuteNamedFunction",
-    ): _services.FunctionExecution.execute_named_function,
+    ): _NexusOperationInfo(
+        operation=_services.FunctionExecution.execute_named_function,
+    ),
     (
         "FunctionExecution",
         "ExecuteVarargsFunction",
-    ): _services.FunctionExecution.execute_varargs_function,
+    ): _NexusOperationInfo(
+        operation=_services.FunctionExecution.execute_varargs_function,
+    ),
     (
         "FunctionExecution",
         "ExecuteNamedVarargsFunction",
-    ): _services.FunctionExecution.execute_named_varargs_function,
+    ): _NexusOperationInfo(
+        operation=_services.FunctionExecution.execute_named_varargs_function,
+    ),
 }

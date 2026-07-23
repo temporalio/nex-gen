@@ -534,7 +534,7 @@ fn python_request_models_are_bidirectional_wire_models() {
     assert!(!rendered.contains("namespace: str | None"));
     assert!(rendered.contains("namespace: str = ("));
     assert!(rendered.contains("dataclasses.field(default_factory=workflow_namespace)"));
-    assert!(rendered.contains("message.namespace = self.namespace"));
+    assert!(rendered.contains("message.namespace = value.namespace"));
     assert!(rendered.contains("result = await handle"));
     assert!(rendered.contains(
         "from temporalio.workflow import (\n        create_nexus_client,\n        get_external_workflow_handle,\n    )"
@@ -633,10 +633,29 @@ fn python_request_models_are_bidirectional_wire_models() {
     assert!(rendered.contains("user_metadata=user_metadata,"));
     assert!(rendered.contains("return await _signal_with_start_workflow(request)"));
     assert!(rendered.contains("payloads_to_proto(self.args)"));
-    assert!(models.contains("def _temporal_from_intermediate("));
+    assert!(models.contains("def _temporal_from_transfer_type("));
+    assert!(models.contains("@temporalio.converter.transfer_type_convertible("));
     assert!(!models.contains("def from_proto("));
     assert!(models.contains("from ._support import ("));
     assert!(models.contains("retry_policy_to_proto,"));
+    assert!(
+        rendered.contains("from ._support import signal_with_start_workflow_serialization_context")
+    );
+    assert!(rendered.contains(
+        "): _NexusOperationInfo(\n        operation=_services.WorkflowService.signal_with_start_workflow,\n        serialization_context=signal_with_start_workflow_serialization_context,\n    ),"
+    ));
+    assert!(rendered.contains(
+        "handle = await nexus_client.start_operation(\n        operation=\"SignalWithStartWorkflowExecution\",\n        input=request,\n        output_type=SignalWithStartWorkflowResponse,\n    )"
+    ));
+    assert!(rendered.contains(
+        "class SignalWithStartWorkflowModelRequest(typing.Protocol):\n    namespace: str\n    id: str"
+    ));
+    assert!(rendered.contains(
+        "def signal_with_start_workflow_serialization_context(\n    request: SignalWithStartWorkflowModelRequest,\n) -> temporalio_converter.WorkflowSerializationContext:"
+    ));
+    assert!(rendered.contains(
+        "return temporalio_converter.WorkflowSerializationContext(\n        namespace=request.namespace,\n        workflow_id=request.id,\n    )"
+    ));
 
     let type_roundtrip_rendered = generate_python_to_string(
         &example_input_paths(&root, TYPE_ROUNDTRIP_EXAMPLE_ID),

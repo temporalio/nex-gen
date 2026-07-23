@@ -20,15 +20,18 @@ import wit.start_workflow.models as start_workflow_models
 import wit.start_workflow.services as start_workflow_services
 from wit.start_workflow._resources import StartedWorkflow
 
-START_WORKFLOW_OPERATION = start_workflow.__nexus_operation_registry__[
+START_WORKFLOW_OPERATION_INFO = start_workflow.__nexus_operation_registry__[
     ("StartWorkflowService", "StartWorkflow")
 ]
-RESTART_WORKFLOW_OPERATION = start_workflow.__nexus_operation_registry__[
+START_WORKFLOW_OPERATION = START_WORKFLOW_OPERATION_INFO.operation
+RESTART_WORKFLOW_OPERATION_INFO = start_workflow.__nexus_operation_registry__[
     ("StartWorkflowService", "RestartWorkflow")
 ]
-CANCEL_WORKFLOW_OPERATION = start_workflow.__nexus_operation_registry__[
+RESTART_WORKFLOW_OPERATION = RESTART_WORKFLOW_OPERATION_INFO.operation
+CANCEL_WORKFLOW_OPERATION_INFO = start_workflow.__nexus_operation_registry__[
     ("StartWorkflowService", "CancelWorkflow")
 ]
+CANCEL_WORKFLOW_OPERATION = CANCEL_WORKFLOW_OPERATION_INFO.operation
 
 
 @workflow.defn
@@ -126,13 +129,16 @@ def test_generated_metadata() -> None:
 
     assert isinstance(start_operation, Operation)
     assert start_operation.name == "StartWorkflow"
-    assert registry[("StartWorkflowService", "StartWorkflow")] is start_operation
+    assert registry[("StartWorkflowService", "StartWorkflow")].operation is start_operation
+    assert registry[("StartWorkflowService", "StartWorkflow")].serialization_context is None
     assert isinstance(cancel_operation, Operation)
     assert cancel_operation.name == "CancelWorkflow"
-    assert registry[("StartWorkflowService", "CancelWorkflow")] is cancel_operation
+    assert registry[("StartWorkflowService", "CancelWorkflow")].operation is cancel_operation
+    assert registry[("StartWorkflowService", "CancelWorkflow")].serialization_context is None
     assert isinstance(restart_operation, Operation)
     assert restart_operation.name == "RestartWorkflow"
-    assert registry[("StartWorkflowService", "RestartWorkflow")] is restart_operation
+    assert registry[("StartWorkflowService", "RestartWorkflow")].operation is restart_operation
+    assert registry[("StartWorkflowService", "RestartWorkflow")].serialization_context is None
     assert not hasattr(start_workflow, "WorkflowService")
     assert not hasattr(start_workflow, "StartWorkflowExecutionRequest")
     assert not hasattr(start_workflow, "StartedWorkflow")
@@ -140,7 +146,10 @@ def test_generated_metadata() -> None:
 
 def test_workflow_execution_serializes() -> None:
     request = start_workflow_models.WorkflowExecution(workflow_id="workflow-id")
-    proto = request._temporal_to_intermediate()
+    converter = getattr(
+        start_workflow_models.WorkflowExecution, "__temporal_transfer_type_converter"
+    )
+    proto = converter.to_transfer_type(request)
 
     assert proto.workflow_id == "workflow-id"
     assert proto.run_id == ""

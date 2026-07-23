@@ -17,18 +17,22 @@ import wit.type_showcase.models as type_showcase_models
 import wit.type_showcase.services as type_showcase_services
 from wit.type_showcase._resources import User
 
-GET_USER_OPERATION = type_showcase.__nexus_operation_registry__[
+GET_USER_OPERATION_INFO = type_showcase.__nexus_operation_registry__[
     ("TypeShowcase", "GetUser")
 ]
-UPDATE_EMAIL_OPERATION = type_showcase.__nexus_operation_registry__[
+GET_USER_OPERATION = GET_USER_OPERATION_INFO.operation
+UPDATE_EMAIL_OPERATION_INFO = type_showcase.__nexus_operation_registry__[
     ("TypeShowcase", "UpdateEmail")
 ]
-RENAME_OPERATION = type_showcase.__nexus_operation_registry__[
+UPDATE_EMAIL_OPERATION = UPDATE_EMAIL_OPERATION_INFO.operation
+RENAME_OPERATION_INFO = type_showcase.__nexus_operation_registry__[
     ("TypeShowcase", "Rename")
 ]
-DEACTIVATE_OPERATION = type_showcase.__nexus_operation_registry__[
+RENAME_OPERATION = RENAME_OPERATION_INFO.operation
+DEACTIVATE_OPERATION_INFO = type_showcase.__nexus_operation_registry__[
     ("TypeShowcase", "Deactivate")
 ]
+DEACTIVATE_OPERATION = DEACTIVATE_OPERATION_INFO.operation
 
 
 def user_profile() -> type_showcase_models.UserProfile:
@@ -166,22 +170,33 @@ def test_generated_metadata() -> None:
 
     assert isinstance(GET_USER_OPERATION, Operation)
     assert GET_USER_OPERATION.name == "GetUser"
-    assert registry[("TypeShowcase", "GetUser")] is GET_USER_OPERATION
+    assert registry[("TypeShowcase", "GetUser")].operation is GET_USER_OPERATION
+    assert registry[("TypeShowcase", "GetUser")].serialization_context is None
     assert isinstance(UPDATE_EMAIL_OPERATION, Operation)
     assert UPDATE_EMAIL_OPERATION.name == "UpdateEmail"
-    assert registry[("TypeShowcase", "UpdateEmail")] is UPDATE_EMAIL_OPERATION
+    assert (
+        registry[("TypeShowcase", "UpdateEmail")].operation
+        is UPDATE_EMAIL_OPERATION
+    )
+    assert registry[("TypeShowcase", "UpdateEmail")].serialization_context is None
     assert isinstance(RENAME_OPERATION, Operation)
     assert RENAME_OPERATION.name == "Rename"
-    assert registry[("TypeShowcase", "Rename")] is RENAME_OPERATION
-    set_profile_operation = type_showcase.__nexus_operation_registry__[
+    assert registry[("TypeShowcase", "Rename")].operation is RENAME_OPERATION
+    assert registry[("TypeShowcase", "Rename")].serialization_context is None
+    set_profile_operation_info = type_showcase.__nexus_operation_registry__[
         ("TypeShowcase", "SetProfile")
     ]
+    set_profile_operation = set_profile_operation_info.operation
     assert isinstance(set_profile_operation, Operation)
     assert set_profile_operation.name == "SetProfile"
-    assert registry[("TypeShowcase", "SetProfile")] is set_profile_operation
+    assert registry[("TypeShowcase", "SetProfile")].operation is set_profile_operation
+    assert registry[("TypeShowcase", "SetProfile")].serialization_context is None
     assert isinstance(DEACTIVATE_OPERATION, Operation)
     assert DEACTIVATE_OPERATION.name == "Deactivate"
-    assert registry[("TypeShowcase", "Deactivate")] is DEACTIVATE_OPERATION
+    assert (
+        registry[("TypeShowcase", "Deactivate")].operation is DEACTIVATE_OPERATION
+    )
+    assert registry[("TypeShowcase", "Deactivate")].serialization_context is None
     assert not hasattr(type_showcase, "TypeShowcase")
     assert not hasattr(type_showcase, "User")
     assert not hasattr(type_showcase_models, "DeactivateResponse")

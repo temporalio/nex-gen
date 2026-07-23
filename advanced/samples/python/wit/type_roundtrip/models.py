@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import dataclasses
+import typing_extensions
 import datetime
 import temporalio.common
 import temporalio.api.activity.v1.message_pb2
+import temporalio.converter
 
 from ._support import (
     duration_from_proto,
@@ -19,22 +21,25 @@ from ._support import (
 )
 
 
-@dataclasses.dataclass(slots=True, kw_only=True)
-class ActivityOptions:
-    task_queue: str | None = None
-    retry_policy: temporalio.common.RetryPolicy
-    schedule_to_close_timeout: datetime.timedelta | None = None
-    priority: temporalio.common.Priority | None = None
+class _ActivityOptionsTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        "ActivityOptions", temporalio.api.activity.v1.message_pb2.ActivityOptions
+    ]
+):
+    transfer_type: (
+        type[temporalio.api.activity.v1.message_pb2.ActivityOptions] | None
+    ) = temporalio.api.activity.v1.message_pb2.ActivityOptions
 
-    @classmethod
-    def _temporal_from_intermediate(
-        cls,
-        proto: temporalio.api.activity.v1.message_pb2.ActivityOptions,
-    ) -> ActivityOptions:
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: temporalio.api.activity.v1.message_pb2.ActivityOptions,
+    ) -> "ActivityOptions":
+        proto = value
         if not proto.HasField("retry_policy"):
             raise ValueError("missing required field ActivityOptions.retry_policy")
         retry_policy = retry_policy_from_proto(proto.retry_policy)
-        return cls(
+        return ActivityOptions(
             task_queue=task_queue_from_proto(proto.task_queue)
             if proto.HasField("task_queue")
             else None,
@@ -49,17 +54,28 @@ class ActivityOptions:
             else None,
         )
 
-    def _temporal_to_intermediate(
+    @typing_extensions.override
+    def to_transfer_type(
         self,
+        value: "ActivityOptions",
     ) -> temporalio.api.activity.v1.message_pb2.ActivityOptions:
         message = temporalio.api.activity.v1.message_pb2.ActivityOptions()
-        if self.task_queue is not None:
-            message.task_queue.CopyFrom(task_queue_to_proto(self.task_queue))
-        message.retry_policy.CopyFrom(retry_policy_to_proto(self.retry_policy))
-        if self.schedule_to_close_timeout is not None:
+        if value.task_queue is not None:
+            message.task_queue.CopyFrom(task_queue_to_proto(value.task_queue))
+        message.retry_policy.CopyFrom(retry_policy_to_proto(value.retry_policy))
+        if value.schedule_to_close_timeout is not None:
             message.schedule_to_close_timeout.CopyFrom(
-                duration_to_proto(self.schedule_to_close_timeout)
+                duration_to_proto(value.schedule_to_close_timeout)
             )
-        if self.priority is not None:
-            message.priority.CopyFrom(priority_to_proto(self.priority))
+        if value.priority is not None:
+            message.priority.CopyFrom(priority_to_proto(value.priority))
         return message
+
+
+@temporalio.converter.transfer_type_convertible(_ActivityOptionsTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class ActivityOptions:
+    task_queue: str | None = None
+    retry_policy: temporalio.common.RetryPolicy
+    schedule_to_close_timeout: datetime.timedelta | None = None
+    priority: temporalio.common.Priority | None = None

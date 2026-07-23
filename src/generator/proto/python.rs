@@ -209,8 +209,8 @@ fn generated_wire_conversion(
     if let Some(model_name) = generated_message_model_name(model_type, planned_model) {
         return Some(WireValueConversion {
             annotation: model_name.clone(),
-            from_wire: format!("{model_name}._temporal_from_intermediate({{wire}})"),
-            to_wire: "{value}._temporal_to_intermediate()".to_string(),
+            from_wire: format!("_{model_name}TransferTypeConverter().from_transfer_type({{wire}})"),
+            to_wire: format!("_{model_name}TransferTypeConverter().to_transfer_type({{value}})"),
             imports: PythonImports::default(),
             supports_unpacked_input: true,
         });
@@ -636,27 +636,39 @@ fn render_record_wire_block(
 
     let proto_ref = record_python_ref(planned_model)?;
     let mut output = String::new();
+    let converter_name = format!("_{}TransferTypeConverter", model.name);
+    let mut pre_class_lines = vec![
+        format!(
+            "class {converter_name}(temporalio.converter.TransferTypeConverter[\"{}\", {}]):",
+            model.name, proto_ref.type_ref
+        ),
+        format!(
+            "    transfer_type: type[{}] | None = {}",
+            proto_ref.type_ref, proto_ref.type_ref
+        ),
+        String::new(),
+    ];
     let mut wrote_method = false;
     if model.capabilities.from_wire {
         if !model.fields.is_empty() {
             output.push('\n');
         }
-        output.push_str("    @classmethod\n");
-        output.push_str("    def _temporal_from_intermediate(\n");
-        output.push_str("        cls,\n");
-        output.push_str(if model.fields.is_empty() {
-            "        _wire: "
-        } else {
-            "        proto: "
-        });
+        output.push_str("    @typing_extensions.override\n");
+        output.push_str("    def from_transfer_type(\n");
+        output.push_str("        self,\n");
+        output.push_str("        value: ");
         output.push_str(&proto_ref.type_ref);
         output.push_str(",\n");
-        output.push_str("    ) -> ");
+        output.push_str("    ) -> \"");
         output.push_str(&model.name);
-        output.push_str(":\n");
+        output.push_str("\":\n");
         if model.fields.is_empty() {
-            output.push_str("        return cls()\n");
+            output.push_str("        del value\n");
+            output.push_str("        return ");
+            output.push_str(&model.name);
+            output.push_str("()\n");
         } else {
+            output.push_str("        proto = value\n");
             for ((field_name, planned_field), rendered_field) in planned_model
                 .fields
                 .iter()
@@ -680,7 +692,9 @@ fn render_record_wire_block(
                 }
             }
 
-            output.push_str("        return cls(\n");
+            output.push_str("        return ");
+            output.push_str(&model.name);
+            output.push_str("(\n");
             for ((field_name, planned_field), rendered_field) in planned_model
                 .fields
                 .iter()
@@ -718,14 +732,21 @@ fn render_record_wire_block(
                 output.push('\n');
             }
         }
-        output.push_str("    def _temporal_to_intermediate(\n");
+        output.push_str("    @typing_extensions.override\n");
+        output.push_str("    def to_transfer_type(\n");
         output.push_str("        self,\n");
+        output.push_str("        value: \"");
+        output.push_str(&model.name);
+        output.push_str("\",\n");
         output.push_str("    ) -> ");
         output.push_str(&proto_ref.type_ref);
         output.push_str(":\n");
         output.push_str("        message = ");
         output.push_str(&proto_ref.type_ref);
         output.push_str("()\n");
+        if model.fields.is_empty() {
+            output.push_str("        del value\n");
+        }
         for ((field_name, planned_field), rendered_field) in planned_model
             .fields
             .iter()
@@ -733,7 +754,7 @@ fn render_record_wire_block(
             .map(|(name, field)| (name.as_str(), field))
             .zip(model.fields.iter())
         {
-            let value_expr = format!("self.{}", rendered_field.attr_name);
+            let value_expr = format!("value.{}", rendered_field.attr_name);
             let write = field_write_for_rendered_field(
                 field_name,
                 planned_field,
@@ -751,10 +772,19 @@ fn render_record_wire_block(
 
     Some(RenderedRecordWireBlock {
         imports: PythonImports {
-            module_imports: [proto_ref.module_path].into_iter().collect(),
+            module_imports: [proto_ref.module_path, "temporalio.converter".to_string()]
+                .into_iter()
+                .collect(),
             ..PythonImports::default()
         },
-        class_body_lines: output.lines().map(str::to_string).collect(),
+        pre_class_lines: {
+            pre_class_lines.extend(output.lines().map(str::to_string));
+            pre_class_lines
+        },
+        decorator: Some(format!(
+            "@temporalio.converter.transfer_type_convertible({converter_name})"
+        )),
+        class_body_lines: Vec::new(),
     })
 }
 

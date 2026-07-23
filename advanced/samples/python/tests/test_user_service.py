@@ -17,12 +17,14 @@ import wit.user_service.models as user_service_models
 import wit.user_service.services as user_service_services
 from wit.user_service._resources import User
 
-GET_USER_OPERATION = user_service.__nexus_operation_registry__[
+GET_USER_OPERATION_INFO = user_service.__nexus_operation_registry__[
     ("UserService", "GetUser")
 ]
-UPDATE_EMAIL_OPERATION = user_service.__nexus_operation_registry__[
+GET_USER_OPERATION = GET_USER_OPERATION_INFO.operation
+UPDATE_EMAIL_OPERATION_INFO = user_service.__nexus_operation_registry__[
     ("UserService", "UpdateEmail")
 ]
+UPDATE_EMAIL_OPERATION = UPDATE_EMAIL_OPERATION_INFO.operation
 
 
 def user_resource(
@@ -77,10 +79,12 @@ def test_generated_metadata() -> None:
 
     assert isinstance(GET_USER_OPERATION, Operation)
     assert GET_USER_OPERATION.name == "GetUser"
-    assert registry[("UserService", "GetUser")] is GET_USER_OPERATION
+    assert registry[("UserService", "GetUser")].operation is GET_USER_OPERATION
+    assert registry[("UserService", "GetUser")].serialization_context is None
     assert isinstance(UPDATE_EMAIL_OPERATION, Operation)
     assert UPDATE_EMAIL_OPERATION.name == "UpdateEmail"
-    assert registry[("UserService", "UpdateEmail")] is UPDATE_EMAIL_OPERATION
+    assert registry[("UserService", "UpdateEmail")].operation is UPDATE_EMAIL_OPERATION
+    assert registry[("UserService", "UpdateEmail")].serialization_context is None
     assert hasattr(user_service, "UserServiceClient")
     assert not hasattr(user_service, "get_user")
     assert not hasattr(user_service, "update_email")

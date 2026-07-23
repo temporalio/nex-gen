@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import collections.abc
+import typing
+
+import nexusrpc
+import temporalio.converter
 from . import services as _services
 from .operations.activity_options_operation import activity_options_operation
 
@@ -10,9 +15,33 @@ __all__ = [
 ]
 
 
+_InputT = typing.TypeVar("_InputT")
+_OutputT = typing.TypeVar("_OutputT")
+
+
+_SerializationContextFactory = collections.abc.Callable[
+    [_InputT], temporalio.converter.SerializationContext
+]
+
+
+class _NexusOperationInfo(typing.Generic[_InputT, _OutputT]):
+    def __init__(
+        self,
+        *,
+        operation: nexusrpc.Operation[_InputT, _OutputT],
+        serialization_context: _SerializationContextFactory[_InputT] | None = None,
+    ) -> None:
+        self.operation: nexusrpc.Operation[_InputT, _OutputT] = operation
+        self.serialization_context: _SerializationContextFactory[_InputT] | None = (
+            serialization_context
+        )
+
+
 __nexus_operation_registry__ = {
     (
         "TypeRoundtripService",
         "ActivityOptionsOperation",
-    ): _services.TypeRoundtripService.activity_options_operation,
+    ): _NexusOperationInfo(
+        operation=_services.TypeRoundtripService.activity_options_operation,
+    ),
 }
