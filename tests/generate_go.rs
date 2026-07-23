@@ -1270,6 +1270,40 @@ fn go_rejects_inputs_flattening_to_the_same_module_file() {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+#[test]
+fn go_rejects_reserved_generated_name_collision() {
+    // An input file whose module segment is `definitions` would collide with the
+    // schema-independent runtime file `definitions.go`. The loader rejects it up
+    // front as a reserved module name (before the Go emit layer would raise a
+    // `GeneratedFileConflict`). Two inputs are used so the reserved file carries a
+    // real module segment rather than flattening to the root `api.go`.
+    let temp_dir = unique_output_path("go-json-reserved-name");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let schema =
+        "{\n  \"type\": \"object\",\n  \"properties\": { \"id\": { \"type\": \"string\" } }\n}\n";
+    fs::write(temp_dir.join("definitions.json"), schema).unwrap();
+    fs::write(temp_dir.join("other.json"), schema).unwrap();
+    let output_path = temp_dir.join("output");
+
+    let result = generate_to_file(&GenerateRequest {
+        language: nex_gen::language::Language::Go,
+        input_paths: vec![temp_dir.clone()],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path,
+        format: false,
+        generate_native_api: false,
+        js_temporal_repr: Default::default(),
+    });
+
+    let error = result
+        .expect_err("an input mapping to the reserved `definitions` module should be rejected")
+        .to_string();
+    assert!(error.contains("reserved module name"), "{error}");
+    assert!(error.contains("definitions"), "{error}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
     let dir_path = root.join("examples/json-inputs").join(example_id);
     if dir_path.is_dir() {

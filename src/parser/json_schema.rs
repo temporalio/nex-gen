@@ -261,6 +261,23 @@ fn api_spec_tree_from_json_schema_sources(
         });
     }
 
+    for source in &sources {
+        let module_path = module_path_from_relative_source(&source.relative_path);
+        if let Some(segment) = module_path
+            .0
+            .iter()
+            .find(|segment| is_reserved_module_name(segment))
+        {
+            return Err(Error::InvalidJsonSchema {
+                path: source.path.clone(),
+                reason: format!(
+                    "input `{}` maps to the reserved module name `{segment}`, which collides with a generated file (models/services/definitions/index/_recursive); rename the input file or directory",
+                    source.relative_path.display()
+                ),
+            });
+        }
+    }
+
     let mut root = ApiSpecBranch {
         module_path: ModulePath::default(),
         children: BTreeMap::new(),
@@ -337,6 +354,18 @@ fn insert_leaf_at(
         });
     };
     insert_leaf_at(child_branch, &rest[0], &rest[1..], leaf)
+}
+
+/// Whether a module-path segment collides with a name the generators reserve
+/// for their own emitted files (the union across languages — see
+/// `json-schema/generated-file-layout.md`). Reserving the union means a name
+/// reserved in *any* target is rejected for *all*, keeping the flat package
+/// coherent everywhere.
+fn is_reserved_module_name(segment: &str) -> bool {
+    matches!(
+        segment,
+        "definitions" | "_recursive" | "models" | "services" | "index" | "__init__"
+    )
 }
 
 fn module_path_from_relative_source(path: &Path) -> ModulePath {
@@ -7216,6 +7245,158 @@ $defs:
     fn rejects_array_without_items() {
         let error = numeric_reject("type: array");
         assert!(error.contains("needs an explicit element type"), "{error}");
+    }
+
+    // --- coverage: loader-time rejects found reachable-but-untested ---
+
+    #[test]
+    fn rejects_contains_scalar_matcher_over_composite_element() {
+        // The element type is a valid (empty) object, so the array itself loads;
+        // it is the `contains` matcher over a composite element that is deferred.
+        let error = numeric_reject(
+            "type: array\nitems: { type: object, properties: {} }\ncontains: { const: x }",
+        );
+        assert!(
+            error.contains("`contains` over a composite element type"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_branch_type() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: object, properties: { k: { type: string } }, required: [k] }
+      - { type: qux }
+"#,
+        );
+        assert!(error.contains("unrecognized `type: qux`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_array_enum() {
+        let error = numeric_reject("type: string\nenum: 5");
+        assert!(error.contains("`enum` must be an array"), "{error}");
+    }
+
+    #[test]
+    fn rejects_all_of_differing_contains() {
+        let error = numeric_reject(
+            "allOf:\n  - { type: array, contains: { const: 1 } }\n  - { type: array, contains: { const: 2 } }",
+        );
+        assert!(
+            error.contains("different `contains` matchers"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_all_of_entry_not_a_schema() {
+        let error = numeric_reject(
+            "allOf:\n  - { type: object, properties: { a: { type: string } } }\n  - 5",
+        );
+        assert!(error.contains("must be a schema object"), "{error}");
+    }
+
+    #[test]
+    fn rejects_all_of_merges_to_empty() {
+        let error = numeric_reject("allOf: [true, true]");
+        assert!(error.contains("empty schema"), "{error}");
+    }
+
+    #[test]
+    fn rejects_exclusive_empty_integer_interval() {
+        let error = numeric_reject("type: integer\nexclusiveMinimum: 1\nexclusiveMaximum: 2");
+        assert!(error.contains("empty range"), "{error}");
+    }
+
+    #[test]
+    fn rejects_exclusive_boundary_empty_interval() {
+        let error = numeric_reject("type: number\nminimum: 5\nexclusiveMaximum: 5");
+        assert!(error.contains("empty range"), "{error}");
+    }
+
+    #[test]
+    fn rejects_shapeless_array_element() {
+        let error = numeric_reject("type: array\nitems: {}");
+        assert!(
+            error.contains("a leaf schema requires an explicit `type`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_subset_array_element() {
+        let error = numeric_reject("type: array\nitems: { type: object }");
+        assert!(error.contains("needs an explicit shape"), "{error}");
+    }
+
+    #[test]
+    fn rejects_tuple_items() {
+        // A tuple-form `items` (an array of schemas) does not deserialize into the
+        // single-schema `items` slot, so it fails at parse time.
+        let error = numeric_reject("type: array\nitems: [ { type: string } ]");
+        assert!(error.contains("failed to parse JSON schema"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_schema_items() {
+        let error = numeric_reject("type: array\nitems: 5");
+        assert!(error.contains("failed to parse JSON schema"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_string_title() {
+        let error = numeric_reject("type: string\ntitle: 42");
+        assert!(error.contains("failed to parse JSON schema"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_string_description() {
+        let error = numeric_reject("type: string\ndescription: 42");
+        assert!(error.contains("failed to parse JSON schema"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_object_properties() {
+        let error = numeric_reject("type: object\nproperties: []");
+        assert!(error.contains("failed to parse JSON schema"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_string_x_lang_name_override() {
+        let error = reject_for(
+            Language::Go,
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  code: { type: string, x-go-name: 42 }
+"#,
+        );
+        assert!(
+            error.contains("`x-go-name` must be a string identifier"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_reserved_module_name() {
+        // A source file whose relative path strips to a reserved module segment
+        // (`models`) collides with a generated file name.
+        let sources = vec![
+            module_collision_source("models.yaml", "Models"),
+            module_collision_source("other.yaml", "Other"),
+        ];
+        let error = api_spec_tree_from_json_schema_sources(Language::Python, sources)
+            .expect_err("a source mapping to a reserved module name should be rejected")
+            .to_string();
+        assert!(error.contains("reserved module name"), "{error}");
     }
 
     #[test]
