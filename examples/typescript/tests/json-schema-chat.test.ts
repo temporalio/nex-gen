@@ -7,10 +7,10 @@ import {
   RoomMapper,
   SendMessageInputMapper,
   SendMessageOutputMapper,
+  ValidationError,
   type Labels,
   type Message,
-} from "../json_schema/definitions/chat/models.ts";
-import { ValidationError } from "../json_schema/definitions/chat/definitions.ts";
+} from "../json_schema/definitions/chat/index.ts";
 import {
   fixtureBytes,
   loadFixture as loadFixtureFrom,

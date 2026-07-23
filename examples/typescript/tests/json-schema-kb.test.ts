@@ -2,18 +2,20 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
 
-import { BlockMapper } from "../json_schema/definitions/kb/content/block/models.ts";
-import { PageMapper } from "../json_schema/definitions/kb/content/page/models.ts";
-import { CategoryMapper } from "../json_schema/definitions/kb/tree/category/models.ts";
 import {
+  BlockMapper,
+  CategoryMapper,
   GetCategoryTreeInputMapper,
   GetPageInputMapper,
+  PageMapper,
   PutBlockOutputMapper,
-} from "../json_schema/definitions/kb/kb/models.ts";
-import type { Page } from "../json_schema/api/kb/content/page/models.ts";
-import type { PutBlockOutput } from "../json_schema/api/kb/kb/models.ts";
-import type { Category } from "../json_schema/api/kb/tree/category/models.ts";
-import { knowledgeBaseService } from "../json_schema/api/kb/kb/services.ts";
+} from "../json_schema/definitions/kb/index.ts";
+import {
+  knowledgeBaseService,
+  type Category,
+  type Page,
+  type PutBlockOutput,
+} from "../json_schema/api/kb/index.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 import {
   fixtureBytes,

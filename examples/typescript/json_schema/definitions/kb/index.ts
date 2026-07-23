@@ -3,3 +3,5 @@
 export * from "./content";
 export * from "./kb";
 export * from "./tree";
+export { ValidationError } from "./definitions";
+export type { Violation } from "./definitions";

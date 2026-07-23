@@ -87,8 +87,11 @@ fn generate_tree(
 ) -> Result<GeneratedFiles> {
     let mut files = BTreeMap::new();
     let mut warnings = Vec::new();
-    insert_branch_index_file(&mut files, branch)?;
-    insert_files(&mut files, render_tree_support_files(branch))?;
+    let tree_support_files = render_tree_support_files(branch);
+    let has_json_runtime_module = mode != GenerationMode::NativeApi
+        && tree_support_files.contains_key(&PathBuf::from("definitions.ts"));
+    insert_branch_index_file(&mut files, branch, has_json_runtime_module)?;
+    insert_files(&mut files, tree_support_files)?;
     for node in branch.children.values() {
         generate_tree_node(
             node,
@@ -132,7 +135,7 @@ fn generate_tree_node(
             Ok(())
         }
         ApiSpecNode::Branch(branch) => {
-            insert_branch_index_file(files, branch)?;
+            insert_branch_index_file(files, branch, false)?;
             for node in branch.children.values() {
                 generate_tree_node(node, support, mode, ts_date_time_types, files, warnings)?;
             }
@@ -144,6 +147,7 @@ fn generate_tree_node(
 fn insert_branch_index_file(
     files: &mut BTreeMap<PathBuf, String>,
     branch: &ApiSpecBranch<PlannedTypeFamily>,
+    has_json_runtime_module: bool,
 ) -> Result<()> {
     let mut path = branch.module_path.to_path_buf();
     path.push("index.ts");
@@ -152,6 +156,10 @@ fn insert_branch_index_file(
         contents.push_str("export * from './");
         contents.push_str(name);
         contents.push_str("';\n");
+    }
+    if has_json_runtime_module {
+        contents.push_str("export { ValidationError } from './definitions';\n");
+        contents.push_str("export type { Violation } from './definitions';\n");
     }
     insert_generated_file(files, path, contents)
 }
@@ -406,7 +414,7 @@ impl<'a> ApiPlanner<'a> {
             let input_conversion = self.resolve_message_value_conversion(input);
             let input_model =
                 input_full_name.and_then(|input_full_name| self.models.get(input_full_name));
-            let model_name = input_model.map(|model| model.name.clone());
+            let model_name = self.locally_defined_model_name(input);
             let type_parameters = input_model
                 .map(|model| {
                     model
@@ -471,7 +479,35 @@ impl<'a> ApiPlanner<'a> {
             }),
             output_resource_return,
             output_direct_result: operation.output_direct_result(),
+            output_model_name: operation
+                .output_type()
+                .and_then(|output| self.locally_defined_model_name(output)),
         })
+    }
+
+    /// The public model interface name for `model_type`, when it's defined in
+    /// *this* module — a WIT record, or a JSON external type whose module path
+    /// matches the current leaf's own (no module path at all, for flat specs
+    /// with no `$ref` module tree, also counts as local). Types defined
+    /// elsewhere are surfaced from their own module's index instead, since
+    /// re-exporting them here would name a file that doesn't declare them.
+    fn locally_defined_model_name(&self, model_type: &PlannedType) -> Option<String> {
+        match model_type {
+            PlannedType::Record(record) => self
+                .models
+                .get(record.full_name.as_str())
+                .map(|model| model.name.clone()),
+            PlannedType::External(ExternalTypeSpec::Json(json_type))
+                if json_type
+                    .module_path
+                    .as_ref()
+                    .map(|module_path| *module_path == self.api_plan.module_path)
+                    .unwrap_or(true) =>
+            {
+                Some(json_type.model_name.clone())
+            }
+            _ => None,
+        }
     }
 
     fn operation_type_annotation(&self, model_type: &PlannedType) -> String {
@@ -2481,6 +2517,7 @@ struct RenderedOperation<'a> {
     output_transform_expr: Option<String>,
     output_resource_return: Option<PlannedOperationResourceReturn>,
     output_direct_result: bool,
+    output_model_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -2740,13 +2777,15 @@ fn render_module_files(
         .iter()
         .cloned()
         .collect();
+    let json_runtime_files = external_models.render_support_files()?;
+    let has_json_runtime_module = json_runtime_files.contains_key(&PathBuf::from("definitions.ts"));
     let mut files = BTreeMap::<PathBuf, String>::new();
     files.insert(
         "index.ts".into(),
         if mode == GenerationMode::NativeApi {
-            render_index_module(services)
+            render_index_module(services, &model_fragments.type_exported_names)
         } else {
-            render_definitions_only_index_module(services, &model_fragments.value_exported_names)
+            render_definitions_only_index_module(services, has_json_runtime_module)
         },
     );
     files.insert(
@@ -2827,7 +2866,7 @@ fn render_module_files(
     if let Some(support_source) = support_source {
         files.insert("support.ts".into(), render_support_module(support_source));
     }
-    files.extend(external_models.render_support_files()?);
+    files.extend(json_runtime_files);
     Ok(GeneratedFiles::directory(files))
 }
 
@@ -3077,7 +3116,7 @@ fn render_generated_module(imports: String, body: String) -> String {
 
 fn render_definitions_only_index_module(
     services: &[RenderedService<'_>],
-    model_value_exports: &BTreeSet<String>,
+    has_json_runtime_module: bool,
 ) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
@@ -3085,20 +3124,13 @@ fn render_definitions_only_index_module(
     if !services.is_empty() {
         output.push_str("export * from './services';\n");
     }
-    if !model_value_exports.is_empty() {
-        output.push_str("export { ");
-        output.push_str(
-            &model_value_exports
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", "),
-        );
-        output.push_str(" } from './models';\n");
-    }
-    output.push_str("export type * from './models';\n");
+    output.push_str("export * from './models';\n");
     if services.iter().any(|service| !service.resources.is_empty()) {
         output.push_str("export * from './resources';\n");
+    }
+    if has_json_runtime_module {
+        output.push_str("export { ValidationError } from './definitions';\n");
+        output.push_str("export type { Violation } from './definitions';\n");
     }
     output
 }
@@ -3107,7 +3139,10 @@ fn render_support_module(support_source: &str) -> String {
     render_generated_module(String::new(), support_source.to_string())
 }
 
-fn render_index_module(services: &[RenderedService<'_>]) -> String {
+fn render_index_module(
+    services: &[RenderedService<'_>],
+    model_type_names: &BTreeSet<String>,
+) -> String {
     let mut body = String::new();
     for service in services {
         if service.endpoint.is_some() {
@@ -3120,26 +3155,51 @@ fn render_index_module(services: &[RenderedService<'_>]) -> String {
             }
         } else {
             body.push_str("export { ");
+            body.push_str(&service.attr_name);
+            body.push_str(", ");
             body.push_str(&endpoint_service_class_name(service));
             body.push_str(" } from './services';\n");
         }
     }
-    let mut input_model_names = services
+    let mut model_names = services
         .iter()
         .flat_map(|service| {
-            service.operations.iter().filter_map(|operation| {
+            service.operations.iter().flat_map(|operation| {
+                let output_model_name = service
+                    .endpoint
+                    .is_none()
+                    .then(|| operation.output_model_name.as_deref())
+                    .flatten();
                 operation
                     .input
                     .as_ref()
                     .and_then(|input| input.model_name.as_deref())
+                    .into_iter()
+                    .chain(output_model_name)
             })
         })
         .collect::<Vec<_>>();
-    input_model_names.sort();
-    input_model_names.dedup();
-    if !input_model_names.is_empty() {
+    model_names.sort();
+    model_names.dedup();
+    if !model_names.is_empty() {
         body.push_str("export type { ");
-        body.push_str(&input_model_names.join(", "));
+        body.push_str(&model_names.join(", "));
+        body.push_str(" } from './models';\n");
+    } else if services.is_empty() && !model_type_names.is_empty() {
+        // A model-only module (no services of its own) has no operation-derived
+        // name list to narrow to, so export the model types it declares directly
+        // — a named list, not `export type *`, since the latter would also sweep
+        // up same-named value-only helpers (e.g. `requiredField`) declared per
+        // leaf, causing ambiguous-export errors once sibling leaves are
+        // re-exported together from a shared branch index.
+        body.push_str("export type { ");
+        body.push_str(
+            &model_type_names
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
         body.push_str(" } from './models';\n");
     }
     render_generated_module(String::new(), body)

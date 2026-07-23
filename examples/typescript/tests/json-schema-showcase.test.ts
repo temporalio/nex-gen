@@ -10,11 +10,11 @@ import {
   LabelsMapper,
   SettingsMapper,
   ShowcaseMapper,
+  ValidationError,
   WidgetMapper,
   type Showcase,
   type Widget,
-} from "../json_schema/definitions/showcase/models.ts";
-import { ValidationError } from "../json_schema/definitions/showcase/definitions.ts";
+} from "../json_schema/definitions/showcase/index.ts";
 import {
   fixtureBytes,
   loadFixture as loadFixtureFrom,
