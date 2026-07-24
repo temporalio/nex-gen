@@ -92,7 +92,7 @@ mod tests {
         let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
             .env("PATH", formatter_path_env(&temp_dir))
             .args([
-                "typescript",
+                "ts",
                 "--input",
                 sample_input_path(&root).to_str().unwrap(),
                 "--input",
@@ -127,7 +127,7 @@ mod tests {
         );
         assert!(
             !Command::new(binary)
-                .args(["generate", "python", "--ts-date-time-types", "date"])
+                .args(["generate", "python", "--date-time-types", "date"])
                 .status()
                 .unwrap()
                 .success()

@@ -18,7 +18,7 @@ use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
 thread_local! {
-    /// The active `--ts-date-time-types` while rendering the TS models/runtime.
+    /// The active `--date-time-types` while rendering the TS models/runtime.
     /// Generation is single-threaded per file, so a thread-local avoids threading
     /// the flag through every recursive `type_annotation`/parser/serializer call.
     static TS_DATE_TIME_TYPES: Cell<TsDateTimeTypes> = const { Cell::new(TsDateTimeTypes::String) };
@@ -80,7 +80,7 @@ fn temporal_kind_direct(schema: &Schema) -> Option<TemporalKind> {
 }
 
 /// The TypeScript in-memory type for a materialized temporal `format` under the
-/// active `--ts-date-time-types`. `time` is always a `string`.
+/// active `--date-time-types`. `time` is always a `string`.
 fn ts_temporal_type(kind: TemporalKind, repr: TsDateTimeTypes) -> &'static str {
     match (kind, repr) {
         (TemporalKind::Time, _) => "string",
@@ -907,7 +907,7 @@ pub(in crate::generator) struct ModelBackend {
     json_models: Vec<PlannedJsonType>,
     tree_leaf: bool,
     runtime_import_module: String,
-    /// The `--ts-date-time-types` selection for materialized temporal fields.
+    /// The `--date-time-types` selection for materialized temporal fields.
     pub(in crate::generator) ts_date_time_types: crate::generator::TsDateTimeTypes,
 }
 
@@ -3048,7 +3048,7 @@ fn type_annotation(schema: &Schema) -> Result<String> {
     if let Some(reference) = &schema.reference {
         return Ok(reference_model_name(reference));
     }
-    // A materialized temporal `format` field type (per --ts-date-time-types). The
+    // A materialized temporal `format` field type (per --date-time-types). The
     // `oneOf[…, null]` nullable wrapper is handled by the `one_of` join below,
     // which recurses into this branch for the non-null member.
     if let Some(kind) = temporal_kind_direct(schema) {

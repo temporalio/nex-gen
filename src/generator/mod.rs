@@ -125,7 +125,7 @@ pub enum GenerationMode {
 }
 
 /// The TypeScript in-memory representation of a materialized temporal `format`
-/// field, selected by the `--ts-date-time-types` generator flag (P16 API parity).
+/// field, selected by the `--date-time-types` generator flag (P16 API parity).
 /// Affects **only** the TypeScript output; Go / Java / Python are unchanged. See
 /// `specs/json-schema/features/format.md` (JS temporal representation).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -194,7 +194,7 @@ pub fn generate_files_for_tree_with_mode(
 pub(crate) struct GenerateFilesOptions {
     pub(crate) go_import_root: Option<String>,
     pub(crate) java_package_root: Option<String>,
-    /// The TypeScript temporal representation (`--ts-date-time-types`); ignored by
+    /// The TypeScript temporal representation (`--date-time-types`); ignored by
     /// the non-TypeScript backends.
     pub(crate) ts_date_time_types: TsDateTimeTypes,
 }

@@ -675,7 +675,7 @@ fn build_json_example(repo_root: &Path, language: Language, example_id: &str) ->
     )?;
 
     // TypeScript is the only target with more than one temporal in-memory shape,
-    // selected by `--ts-date-time-types`. Emit the `date` and `temporal` variants
+    // selected by `--date-time-types`. Emit the `date` and `temporal` variants
     // of the `temporal` example into distinct directories so all three modes are
     // generated and snapshot-tested. Go / Java / Python are unaffected.
     if language == Language::TypeScript && example_id == "temporal" {

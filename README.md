@@ -107,6 +107,8 @@ cargo run -- python \
 
 Generate TypeScript:
 
+(`ts` is an alias for `typescript`.)
+
 ```bash
 cargo run -- typescript \
   --input examples/inputs/user-service.wit \

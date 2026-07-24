@@ -59,6 +59,7 @@ enum GenerateLanguage {
     Go(GenerateArgs),
     Java(GenerateArgs),
     Python(GenerateArgs),
+    #[command(alias = "ts")]
     Typescript(TypescriptGenerateArgs),
 }
 
@@ -68,7 +69,7 @@ struct TypescriptGenerateArgs {
     common: GenerateArgs,
     /// TypeScript-only: the in-memory representation for materialized temporal
     /// `format` fields (date-time/date/time/duration).
-    #[arg(long = "ts-date-time-types", value_enum, default_value_t = CliTsDateTimeTypes::String)]
+    #[arg(long = "date-time-types", value_enum, default_value_t = CliTsDateTimeTypes::String)]
     ts_date_time_types: CliTsDateTimeTypes,
 }
 
@@ -173,11 +174,19 @@ fn normalize_cli_args(mut args: Vec<OsString>) -> Vec<OsString> {
     if args
         .get(1)
         .and_then(|arg| arg.to_str())
-        .is_some_and(GenerateLanguage::has_subcommand)
+        .is_some_and(is_generate_subcommand)
     {
         args.insert(1, "generate".into());
     }
     args
+}
+
+fn is_generate_subcommand(name: &str) -> bool {
+    GenerateLanguage::augment_subcommands(clap::Command::new("generate"))
+        .get_subcommands()
+        .any(|command| {
+            command.get_name() == name || command.get_all_aliases().any(|alias| alias == name)
+        })
 }
 
 impl From<GenerateLanguage> for GenerateRequest {
