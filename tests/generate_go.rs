@@ -144,7 +144,6 @@ fn generate_formatted_go_output(root: &Path, example_id: &str, output_path: &Pat
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "go",
             "--input",
             input_path(root, example_id).to_str().unwrap(),
@@ -154,6 +153,7 @@ fn generate_formatted_go_output(root: &Path, example_id: &str, output_path: &Pat
             descriptor_path(root).to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
+            "--native-api",
         ])
         .status()
         .unwrap();
@@ -191,7 +191,6 @@ fn cli_generates_go_support_file_from_parameter() {
     let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "go",
             "--input",
             input_path(&root, "user-service").to_str().unwrap(),
@@ -237,7 +236,6 @@ fn cli_generates_go_with_package_self_imports_removed() {
     let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "go",
             "--input",
             temp_input_path.to_str().unwrap(),
@@ -1342,15 +1340,14 @@ fn generate_formatted_go_json_output(
     let mut command = Command::new(env!("CARGO_BIN_EXE_nex-gen"));
     command.args([
         "generate",
-        "--lang",
         "go",
         "--input",
         json_input_path(root, example_id).to_str().unwrap(),
         "--output",
         output_path.to_str().unwrap(),
     ]);
-    if !native_api {
-        command.arg("--no-native-api");
+    if native_api {
+        command.arg("--native-api");
     }
     let status = command.status().unwrap();
     assert!(status.success());

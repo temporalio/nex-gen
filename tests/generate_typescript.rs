@@ -173,7 +173,6 @@ fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_pa
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "typescript",
             "--input",
             input_path(root, example_id).to_str().unwrap(),
@@ -183,6 +182,7 @@ fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_pa
             descriptor_path(root).to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
+            "--native-api",
         ])
         .status()
         .unwrap();
@@ -234,7 +234,6 @@ fn generate_formatted_json_typescript_output_repr(
     let input_path = json_input_path(root, input_id);
     let mut args = vec![
         "generate",
-        "--lang",
         "typescript",
         "--input",
         input_path.to_str().unwrap(),
@@ -245,8 +244,8 @@ fn generate_formatted_json_typescript_output_repr(
         args.push("--ts-date-time-types");
         args.push(repr);
     }
-    if !generate_native_api {
-        args.push("--no-native-api");
+    if generate_native_api {
+        args.push("--native-api");
     }
 
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
@@ -384,7 +383,6 @@ fn cli_generates_typescript_support_file_from_parameter() {
     let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "typescript",
             "--input",
             input_path(&root, "user-service").to_str().unwrap(),

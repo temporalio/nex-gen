@@ -167,7 +167,6 @@ fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: 
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "python",
             "--input",
             input_path(root, example_id).to_str().unwrap(),
@@ -177,6 +176,7 @@ fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: 
             descriptor_path(root).to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
+            "--native-api",
         ])
         .status()
         .unwrap();
@@ -208,15 +208,14 @@ fn generate_formatted_json_python_output(
     let input_path = json_input_path(root, example_id);
     let mut args = vec![
         "generate",
-        "--lang",
         "python",
         "--input",
         input_path.to_str().unwrap(),
         "--output",
         output_path.to_str().unwrap(),
     ];
-    if !generate_native_api {
-        args.push("--no-native-api");
+    if generate_native_api {
+        args.push("--native-api");
     }
 
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
@@ -343,7 +342,6 @@ fn cli_generates_wit_direct_example_without_descriptors() {
     let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "python",
             "--input",
             input_path(&root, "user-service").to_str().unwrap(),
@@ -364,7 +362,7 @@ fn cli_generates_wit_direct_example_without_descriptors() {
 }
 
 #[test]
-fn cli_generates_definitions_without_native_api_or_endpoint() {
+fn cli_defaults_to_definitions_without_native_api_or_endpoint() {
     let temp_dir = unique_output_path("python-definitions-only");
     fs::create_dir_all(&temp_dir).unwrap();
     let input_path = temp_dir.join("input.wit");
@@ -396,13 +394,11 @@ interface example-service {
     let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "python",
             "--input",
             input_path.to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
-            "--no-native-api",
         ])
         .output()
         .unwrap();
@@ -436,7 +432,6 @@ fn cli_generates_python_support_file_from_parameter() {
     let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "python",
             "--input",
             input_path(&root, "user-service").to_str().unwrap(),

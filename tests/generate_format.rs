@@ -60,7 +60,6 @@ mod tests {
             .env("PATH", formatter_path_env(&temp_dir))
             .args([
                 "generate",
-                "--lang",
                 "python",
                 "--input",
                 sample_input_path(&root).to_str().unwrap(),
@@ -95,7 +94,6 @@ mod tests {
             .env("PATH", formatter_path_env(&temp_dir))
             .args([
                 "generate",
-                "--lang",
                 "typescript",
                 "--input",
                 sample_input_path(&root).to_str().unwrap(),
@@ -116,5 +114,32 @@ mod tests {
         assert!(rendered.contains("// formatted by test"));
 
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn cli_rejects_legacy_and_target_specific_options() {
+        let binary = env!("CARGO_BIN_EXE_nex-gen");
+
+        assert!(
+            !Command::new(binary)
+                .args(["generate", "--lang", "python"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            !Command::new(binary)
+                .args(["generate", "python", "--ts-date-time-types", "date"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            !Command::new(binary)
+                .args(["generate", "python", "--no-native-api"])
+                .status()
+                .unwrap()
+                .success()
+        );
     }
 }

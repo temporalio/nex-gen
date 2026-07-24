@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use nex_gen::generator::TsDateTimeTypes;
 use nex_gen::language::Language;
 use nex_gen::parser::write_prepared_wit_directory;
@@ -20,7 +20,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Generate(GenerateArgs),
+    Generate {
+        #[command(subcommand)]
+        language: GenerateLanguage,
+    },
     #[command(about = "Rebuild the checked-in WIT example outputs")]
     BuildExamples(BuildExamplesArgs),
     #[command(about = "Rebuild the checked-in JSON schema example outputs")]
@@ -35,8 +38,6 @@ enum Commands {
 
 #[derive(Args)]
 struct GenerateArgs {
-    #[arg(long, value_enum)]
-    lang: CliLanguage,
     #[arg(long = "input", required = true)]
     inputs: Vec<PathBuf>,
     #[arg(long = "support-file")]
@@ -47,10 +48,25 @@ struct GenerateArgs {
     output: PathBuf,
     #[arg(long)]
     format: bool,
-    #[arg(long = "no-native-api", action = ArgAction::SetFalse, default_value_t = true)]
+    #[arg(long = "native-api")]
     generate_native_api: bool,
+}
+
+#[derive(Subcommand)]
+enum GenerateLanguage {
+    Dotnet(GenerateArgs),
+    Go(GenerateArgs),
+    Java(GenerateArgs),
+    Python(GenerateArgs),
+    Typescript(TypescriptGenerateArgs),
+}
+
+#[derive(Args)]
+struct TypescriptGenerateArgs {
+    #[command(flatten)]
+    common: GenerateArgs,
     /// TypeScript-only: the in-memory representation for materialized temporal
-    /// `format` fields (date-time/date/time/duration). Ignored for other targets.
+    /// `format` fields (date-time/date/time/duration).
     #[arg(long = "ts-date-time-types", value_enum, default_value_t = CliTsDateTimeTypes::String)]
     ts_date_time_types: CliTsDateTimeTypes,
 }
@@ -101,33 +117,12 @@ struct DebugWitDirArgs {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-enum CliLanguage {
-    Dotnet,
-    Go,
-    Java,
-    Python,
-    Typescript,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum ExampleCliLanguage {
     Dotnet,
     Go,
     Java,
     Python,
     Typescript,
-}
-
-impl From<CliLanguage> for Language {
-    fn from(value: CliLanguage) -> Self {
-        match value {
-            CliLanguage::Dotnet => Language::Dotnet,
-            CliLanguage::Go => Language::Go,
-            CliLanguage::Java => Language::Java,
-            CliLanguage::Python => Language::Python,
-            CliLanguage::Typescript => Language::TypeScript,
-        }
-    }
 }
 
 impl From<ExampleCliLanguage> for Language {
@@ -146,16 +141,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Generate(args) => generate_to_file(&GenerateRequest {
-            language: args.lang.into(),
-            input_paths: args.inputs,
-            support_paths: args.support_paths,
-            descriptor_paths: args.descriptors,
-            output_path: args.output,
-            format: args.format,
-            generate_native_api: args.generate_native_api,
-            ts_date_time_types: args.ts_date_time_types.into(),
-        }),
+        Commands::Generate { language } => generate_to_file(&language.into()),
         Commands::BuildExamples(args) => build_examples(&BuildExamplesRequest {
             languages: args.langs.into_iter().map(Language::from).collect(),
             example_ids: args.example_ids,
@@ -178,6 +164,32 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("{error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+impl From<GenerateLanguage> for GenerateRequest {
+    fn from(value: GenerateLanguage) -> Self {
+        let (language, args, ts_date_time_types) = match value {
+            GenerateLanguage::Dotnet(args) => (Language::Dotnet, args, Default::default()),
+            GenerateLanguage::Go(args) => (Language::Go, args, Default::default()),
+            GenerateLanguage::Java(args) => (Language::Java, args, Default::default()),
+            GenerateLanguage::Python(args) => (Language::Python, args, Default::default()),
+            GenerateLanguage::Typescript(args) => (
+                Language::TypeScript,
+                args.common,
+                args.ts_date_time_types.into(),
+            ),
+        };
+        Self {
+            language,
+            input_paths: args.inputs,
+            support_paths: args.support_paths,
+            descriptor_paths: args.descriptors,
+            output_path: args.output,
+            format: args.format,
+            generate_native_api: args.generate_native_api,
+            ts_date_time_types,
         }
     }
 }

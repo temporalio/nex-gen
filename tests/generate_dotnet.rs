@@ -144,7 +144,6 @@ fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "dotnet",
             "--input",
             input_path(root, example_id).to_str().unwrap(),
@@ -154,6 +153,7 @@ fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
             descriptor_path(root).to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
+            "--native-api",
         ])
         .status()
         .unwrap();
@@ -206,7 +206,6 @@ fn cli_generates_dotnet_support_file_from_parameter() {
     let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
             "generate",
-            "--lang",
             "dotnet",
             "--input",
             input_path(&root, "user-service").to_str().unwrap(),
