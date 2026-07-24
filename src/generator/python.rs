@@ -5,7 +5,7 @@ use heck::{ToShoutySnakeCase, ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
 use crate::error::{Error, Result};
-use crate::generator::json::python as python_json;
+use crate::generator::json_schema::python as python_json;
 use crate::generator::proto::python as python_proto;
 use crate::generator::{
     ExternalModelBackend, GeneratedFiles, GenerationMode, ModelWireCapabilities,

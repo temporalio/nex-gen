@@ -4,7 +4,7 @@ use std::path::PathBuf;
 pub(crate) mod dotnet;
 pub(crate) mod go;
 pub(crate) mod java;
-pub(crate) mod json;
+pub(crate) mod json_schema;
 pub(crate) mod proto;
 pub(crate) mod python;
 pub(crate) mod typescript;

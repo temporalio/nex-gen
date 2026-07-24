@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use heck::{ToLowerCamelCase, ToUpperCamelCase};
 
 use crate::error::{Error, Result};
-use crate::generator::json::dotnet as dotnet_json;
+use crate::generator::json_schema::dotnet as dotnet_json;
 use crate::generator::proto::dotnet as dotnet_proto;
 use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;

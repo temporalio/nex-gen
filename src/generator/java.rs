@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use heck::ToLowerCamelCase;
 
 use crate::error::{Error, Result};
-use crate::generator::json::java as java_json;
-use crate::generator::json::java::JavaContext;
+use crate::generator::json_schema::java as java_json;
+use crate::generator::json_schema::java::JavaContext;
 use crate::generator::{GeneratedFiles, GeneratedOutputLayout, GenerationMode};
 use crate::planning::{PlannedJsonType, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, ServiceSpec, TypeSpec};
