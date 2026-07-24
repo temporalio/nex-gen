@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn conformance_corpus_gate_agrees() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../specs/json-schema/corpora/pattern_conformance/corpus.json"
+            "../../specs/json-schema/corpora/pattern_conformance/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs array") {

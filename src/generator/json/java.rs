@@ -138,14 +138,14 @@ impl StringLengthConstraints {
             pattern: schema
                 .pattern
                 .as_deref()
-                .map(|pattern| crate::pattern::rewrite_end_anchor(pattern, r"\z")),
+                .map(|pattern| crate::json_schema::pattern::rewrite_end_anchor(pattern, r"\z")),
             format: schema
                 .format
                 .as_deref()
-                .and_then(crate::format::check_for)
+                .and_then(crate::json_schema::format::check_for)
                 .map(|check| JavaFormat {
                     name: check.name,
-                    pattern: crate::pattern::rewrite_end_anchor(&check.pattern, r"\z"),
+                    pattern: crate::json_schema::pattern::rewrite_end_anchor(&check.pattern, r"\z"),
                     max_code_points: check.max_code_points,
                 }),
         }
@@ -749,10 +749,10 @@ enum JavaType {
     /// A materialized temporal `format` (native `java.time` construct, or a
     /// validated+canonicalized `String` for `time` — no single `java.time` type
     /// holds both offset-bearing and offset-less time). See `format.md`.
-    Temporal(crate::format::TemporalKind),
+    Temporal(crate::json_schema::format::TemporalKind),
     /// A materialized `contentEncoding` (native `byte[]`; the wire is a JSON
     /// string carrying the encoded form). See `contentEncoding.md`.
-    Bytes(crate::content_encoding::Encoding),
+    Bytes(crate::json_schema::content_encoding::Encoding),
 }
 
 impl JavaType {
@@ -793,73 +793,79 @@ impl JavaType {
 /// The (fully-qualified) Java type a materialized temporal `format` maps to.
 /// `time` stays a `String` because no single `java.time` type holds both an
 /// offset-bearing and an offset-less time-of-day.
-fn java_temporal_type(kind: crate::format::TemporalKind) -> &'static str {
+fn java_temporal_type(kind: crate::json_schema::format::TemporalKind) -> &'static str {
     match kind {
-        crate::format::TemporalKind::DateTime => "OffsetDateTime",
-        crate::format::TemporalKind::Date => "LocalDate",
-        crate::format::TemporalKind::Time => "String",
-        crate::format::TemporalKind::Duration => "Duration",
+        crate::json_schema::format::TemporalKind::DateTime => "OffsetDateTime",
+        crate::json_schema::format::TemporalKind::Date => "LocalDate",
+        crate::json_schema::format::TemporalKind::Time => "String",
+        crate::json_schema::format::TemporalKind::Duration => "Duration",
     }
 }
 
 /// The `TemporalSupport` static method name that parses this kind from the wire.
-fn java_temporal_parse_fn(kind: crate::format::TemporalKind) -> &'static str {
+fn java_temporal_parse_fn(kind: crate::json_schema::format::TemporalKind) -> &'static str {
     match kind {
-        crate::format::TemporalKind::DateTime => "parseDateTime",
-        crate::format::TemporalKind::Date => "parseDate",
-        crate::format::TemporalKind::Time => "parseTime",
-        crate::format::TemporalKind::Duration => "parseDuration",
+        crate::json_schema::format::TemporalKind::DateTime => "parseDateTime",
+        crate::json_schema::format::TemporalKind::Date => "parseDate",
+        crate::json_schema::format::TemporalKind::Time => "parseTime",
+        crate::json_schema::format::TemporalKind::Duration => "parseDuration",
     }
 }
 
 /// The `TemporalSupport` static method that serializes this kind (`None` for
 /// `time`, which is already a canonical `String` written directly).
-fn java_temporal_format_fn(kind: crate::format::TemporalKind) -> Option<&'static str> {
+fn java_temporal_format_fn(kind: crate::json_schema::format::TemporalKind) -> Option<&'static str> {
     match kind {
-        crate::format::TemporalKind::DateTime => Some("formatDateTime"),
-        crate::format::TemporalKind::Date => Some("formatDate"),
-        crate::format::TemporalKind::Time => None,
-        crate::format::TemporalKind::Duration => Some("formatDuration"),
+        crate::json_schema::format::TemporalKind::DateTime => Some("formatDateTime"),
+        crate::json_schema::format::TemporalKind::Date => Some("formatDate"),
+        crate::json_schema::format::TemporalKind::Time => None,
+        crate::json_schema::format::TemporalKind::Duration => Some("formatDuration"),
     }
 }
 
 /// The materialized `TemporalKind` of a schema that is directly a temporal
 /// string (the `oneOf[…, null]` wrapper is handled by `java_type_for` recursion).
-fn temporal_kind_direct(schema: &Schema) -> Option<crate::format::TemporalKind> {
+fn temporal_kind_direct(schema: &Schema) -> Option<crate::json_schema::format::TemporalKind> {
     if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
         return None;
     }
     schema
         .format
         .as_deref()
-        .and_then(crate::format::TemporalKind::from_name)
+        .and_then(crate::json_schema::format::TemporalKind::from_name)
 }
 
 /// The materialized `contentEncoding` of a schema that is directly a bytes
 /// string (the `oneOf[…, null]` wrapper is handled by `java_type_for` recursion).
-fn content_encoding_direct(schema: &Schema) -> Option<crate::content_encoding::Encoding> {
+fn content_encoding_direct(
+    schema: &Schema,
+) -> Option<crate::json_schema::content_encoding::Encoding> {
     if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
         return None;
     }
     schema
         .content_encoding
         .as_deref()
-        .and_then(crate::content_encoding::Encoding::from_name)
+        .and_then(crate::json_schema::content_encoding::Encoding::from_name)
 }
 
 /// The `Base64Support` static method that decodes this encoding from the wire.
-fn java_content_encoding_parse_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
+fn java_content_encoding_parse_fn(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> &'static str {
     match encoding {
-        crate::content_encoding::Encoding::Base64 => "parseBase64",
-        crate::content_encoding::Encoding::Base64Url => "parseBase64Url",
+        crate::json_schema::content_encoding::Encoding::Base64 => "parseBase64",
+        crate::json_schema::content_encoding::Encoding::Base64Url => "parseBase64Url",
     }
 }
 
 /// The `Base64Support` static method that serializes this encoding to the wire.
-fn java_content_encoding_format_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
+fn java_content_encoding_format_fn(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> &'static str {
     match encoding {
-        crate::content_encoding::Encoding::Base64 => "formatBase64",
-        crate::content_encoding::Encoding::Base64Url => "formatBase64Url",
+        crate::json_schema::content_encoding::Encoding::Base64 => "formatBase64",
+        crate::json_schema::content_encoding::Encoding::Base64Url => "formatBase64Url",
     }
 }
 
@@ -3498,7 +3504,7 @@ pub(in crate::generator) fn model_uses_content_encoding(model: &PlannedJsonType)
 /// adapters. The decoder runs only after the regex passes, so no lenient decoder
 /// can diverge (P1). See `specs/json-schema/features/contentEncoding.md`.
 pub(in crate::generator) fn render_base64_support_file(package: &str) -> String {
-    use crate::content_encoding::Encoding;
+    use crate::json_schema::content_encoding::Encoding;
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
     output.push_str(&format!("package {package};\n\n"));
@@ -3566,7 +3572,7 @@ const BASE64_SUPPORT_BODY: &str = r####"    public static byte @Nullable [] pars
 /// duration canonicalized time-only) — NOT `Duration.toString()` (for .NET
 /// parity) nor Jackson's native temporal serializers. See `format.md`.
 pub(in crate::generator) fn render_temporal_support_file(package: &str) -> String {
-    use crate::format::TemporalKind;
+    use crate::json_schema::format::TemporalKind;
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
     output.push_str(&format!("package {package};\n\n"));

@@ -1,14 +1,12 @@
 mod planning;
 
 pub mod add_rpc;
-pub mod content_encoding;
 pub mod descriptors;
 pub mod error;
-pub mod format;
 pub mod generator;
+pub mod json_schema;
 pub mod language;
 pub mod parser;
-pub mod pattern;
 pub mod resources;
 pub mod spec;
 pub mod validation;

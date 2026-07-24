@@ -97,9 +97,9 @@ mod tests {
     fn pinned_patterns_pass_the_pattern_gate() {
         for name in SUPPORTED_ENCODINGS {
             let encoding = Encoding::from_name(name).expect("supported");
-            crate::pattern::gate_and_normalize(encoding.pattern()).unwrap_or_else(|error| {
-                panic!("{name} pinned pattern rejected by gate: {error:?}")
-            });
+            crate::json_schema::pattern::gate_and_normalize(encoding.pattern()).unwrap_or_else(
+                |error| panic!("{name} pinned pattern rejected by gate: {error:?}"),
+            );
         }
     }
 

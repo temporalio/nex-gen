@@ -800,7 +800,7 @@ fn render_json_runtime_module() -> String {
 /// `specs/json-schema/features/format.md`. We do NOT use Pydantic's native `datetime`
 /// coercion (it accepts a missing offset and normalizes differently).
 fn render_temporal_helpers(output: &mut String) {
-    use crate::format::TemporalKind;
+    use crate::json_schema::format::TemporalKind;
     output.push_str(&format!(
         "_TEMPORAL_DATE_TIME_RE = re.compile(r\"{}\")\n",
         TemporalKind::DateTime.pattern()
@@ -975,17 +975,17 @@ DurationField: typing.TypeAlias = typing.Annotated[
 /// of the accept/reject line and the canonical output. See
 /// `specs/json-schema/features/contentEncoding.md`.
 fn render_content_encoding_helpers(output: &mut String) {
-    use crate::content_encoding::Encoding;
+    use crate::json_schema::content_encoding::Encoding;
     output.push_str(&format!(
         "_BASE64_RE = re.compile({}, re.ASCII)\n",
-        python_string_literal(&crate::pattern::rewrite_end_anchor(
+        python_string_literal(&crate::json_schema::pattern::rewrite_end_anchor(
             Encoding::Base64.pattern(),
             r"\Z"
         ))
     ));
     output.push_str(&format!(
         "_BASE64URL_RE = re.compile({}, re.ASCII)\n",
-        python_string_literal(&crate::pattern::rewrite_end_anchor(
+        python_string_literal(&crate::json_schema::pattern::rewrite_end_anchor(
             Encoding::Base64Url.pattern(),
             r"\Z"
         ))
@@ -1184,7 +1184,7 @@ fn render_model(
             // Per-target `$`→`\Z` rewrite: `re`'s `\Z` is the strict
             // end-of-string anchor (no trailing-`\n` exception). See
             // `specs/json-schema/features/pattern.md`.
-            let rewritten = crate::pattern::rewrite_end_anchor(pattern, r"\Z");
+            let rewritten = crate::json_schema::pattern::rewrite_end_anchor(pattern, r"\Z");
             annotation = format!(
                 "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_pattern({}))]",
                 python_string_literal(&rewritten)
@@ -1192,12 +1192,12 @@ fn render_model(
         }
         if let Some(format) = &property.format
             && property.ty.as_ref().and_then(Value::as_str) == Some("string")
-            && let Some(check) = crate::format::check_for(format)
+            && let Some(check) = crate::json_schema::format::check_for(format)
         {
             *needs_format_helper = true;
             // Per-target `$`→`\Z` rewrite (strict end-of-string, no trailing-`\n`
             // exception), matching `_check_pattern`.
-            let rewritten = crate::pattern::rewrite_end_anchor(&check.pattern, r"\Z");
+            let rewritten = crate::json_schema::pattern::rewrite_end_anchor(&check.pattern, r"\Z");
             let max_arg = match check.max_code_points {
                 Some(max) => format!(", {max}"),
                 None => String::new(),
@@ -2031,43 +2031,47 @@ fn decode_schema(model: &PlannedJsonType) -> Result<Schema> {
 
 /// The materialized `TemporalKind` of a schema that is directly a temporal
 /// string (not looking through `oneOf`, which `annotation` handles by recursion).
-fn temporal_kind_direct(schema: &Schema) -> Option<crate::format::TemporalKind> {
+fn temporal_kind_direct(schema: &Schema) -> Option<crate::json_schema::format::TemporalKind> {
     if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
         return None;
     }
     schema
         .format
         .as_deref()
-        .and_then(crate::format::TemporalKind::from_name)
+        .and_then(crate::json_schema::format::TemporalKind::from_name)
 }
 
 /// The runtime-module `Annotated` alias name for a materialized `contentEncoding`.
-fn content_encoding_field_alias(encoding: crate::content_encoding::Encoding) -> &'static str {
+fn content_encoding_field_alias(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> &'static str {
     match encoding {
-        crate::content_encoding::Encoding::Base64 => "Base64Field",
-        crate::content_encoding::Encoding::Base64Url => "Base64UrlField",
+        crate::json_schema::content_encoding::Encoding::Base64 => "Base64Field",
+        crate::json_schema::content_encoding::Encoding::Base64Url => "Base64UrlField",
     }
 }
 
 /// The materialized `contentEncoding` of a schema that is directly a bytes string
 /// (the `oneOf[…, null]` wrapper is handled by `annotation` recursion).
-fn content_encoding_direct(schema: &Schema) -> Option<crate::content_encoding::Encoding> {
+fn content_encoding_direct(
+    schema: &Schema,
+) -> Option<crate::json_schema::content_encoding::Encoding> {
     if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
         return None;
     }
     schema
         .content_encoding
         .as_deref()
-        .and_then(crate::content_encoding::Encoding::from_name)
+        .and_then(crate::json_schema::content_encoding::Encoding::from_name)
 }
 
 /// The runtime-module `Annotated` alias name for a materialized temporal kind.
-fn temporal_field_alias(kind: crate::format::TemporalKind) -> &'static str {
+fn temporal_field_alias(kind: crate::json_schema::format::TemporalKind) -> &'static str {
     match kind {
-        crate::format::TemporalKind::DateTime => "DateTimeField",
-        crate::format::TemporalKind::Date => "DateField",
-        crate::format::TemporalKind::Time => "TimeField",
-        crate::format::TemporalKind::Duration => "DurationField",
+        crate::json_schema::format::TemporalKind::DateTime => "DateTimeField",
+        crate::json_schema::format::TemporalKind::Date => "DateField",
+        crate::json_schema::format::TemporalKind::Time => "TimeField",
+        crate::json_schema::format::TemporalKind::Duration => "DurationField",
     }
 }
 

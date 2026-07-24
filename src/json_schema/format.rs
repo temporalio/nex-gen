@@ -1,6 +1,6 @@
 //! The asserted string `format` subset (JSON Schema 2020-12 §7). Each supported
 //! format lowers to a **generator-owned** check: a pinned, portable, RE2-safe
-//! regex (proven compilable by the [[pattern]] gate, `crate::pattern`) plus —
+//! regex (proven compilable by the [[pattern]] gate, `crate::json_schema::pattern`) plus —
 //! where a regex alone is insufficient — a shared **length guard**. The
 //! generators emit the same regex the loader validates literals against, so a
 //! value accepted (or rejected) by one language is accepted (or rejected) by all
@@ -306,9 +306,9 @@ fn ipv6_body() -> String {
 /// rejects. Wrapped in `^(?:…)$` for anchored matching.
 fn uri_body(reference: bool) -> &'static str {
     if reference {
-        include_str!("../specs/json-schema/corpora/format_uri/pinned_body_uriref.body")
+        include_str!("../../specs/json-schema/corpora/format_uri/pinned_body_uriref.body")
     } else {
-        include_str!("../specs/json-schema/corpora/format_uri/pinned_body.body")
+        include_str!("../../specs/json-schema/corpora/format_uri/pinned_body.body")
     }
 }
 
@@ -404,9 +404,9 @@ mod tests {
     fn pinned_patterns_pass_the_pattern_gate() {
         for name in SUPPORTED_FORMATS {
             let check = check_for(name).expect("supported");
-            crate::pattern::gate_and_normalize(&check.pattern).unwrap_or_else(|error| {
-                panic!("{name} pinned pattern rejected by gate: {error:?}")
-            });
+            crate::json_schema::pattern::gate_and_normalize(&check.pattern).unwrap_or_else(
+                |error| panic!("{name} pinned pattern rejected by gate: {error:?}"),
+            );
         }
     }
 
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn materialized_temporal_conformance_with_leap_narrowing() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../specs/json-schema/corpora/format_conformance/corpus.json"
+            "../../specs/json-schema/corpora/format_conformance/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs") {
@@ -544,7 +544,7 @@ mod tests {
         // Every VALID wire in the clock corpus (minus `:60`) must pass the
         // materialized check so the parse adapter never rejects a round-trip case.
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../specs/json-schema/corpora/format_materialize_clock/corpus.json"
+            "../../specs/json-schema/corpora/format_materialize_clock/corpus.json"
         ))
         .expect("corpus parses");
         for (key, kind) in [
@@ -570,7 +570,7 @@ mod tests {
     fn conformance_corpora_agree() {
         // format_conformance: uuid / ipv4 / ipv6 (skip temporal rows).
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../specs/json-schema/corpora/format_conformance/corpus.json"
+            "../../specs/json-schema/corpora/format_conformance/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs") {
@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn hostname_corpus_agrees() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../specs/json-schema/corpora/format_hostname/corpus.json"
+            "../../specs/json-schema/corpora/format_hostname/corpus.json"
         ))
         .expect("corpus parses");
         for case in corpus["cases"].as_array().expect("cases") {
@@ -608,7 +608,7 @@ mod tests {
     #[test]
     fn uri_corpus_all_uri() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../specs/json-schema/corpora/format_uri/corpus.json"
+            "../../specs/json-schema/corpora/format_uri/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs") {
@@ -621,7 +621,7 @@ mod tests {
     #[test]
     fn email_corpus_agrees() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../specs/json-schema/corpora/format_email/corpus.json"
+            "../../specs/json-schema/corpora/format_email/corpus.json"
         ))
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs") {

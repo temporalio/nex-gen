@@ -9,11 +9,11 @@ use serde_json::Value;
 use std::cell::Cell;
 
 use crate::error::{Error, Result};
-use crate::format::TemporalKind;
 use crate::generator::typescript::{
     RenderedExternalModelFragments, WireValueConversion, typescript_generated_field_name,
 };
 use crate::generator::{ExternalModelBackend, TsDateTimeTypes};
+use crate::json_schema::format::TemporalKind;
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
@@ -43,31 +43,37 @@ fn active_repr() -> TsDateTimeTypes {
 /// (the `oneOf[…, null]` wrapper is handled by the callers' recursion).
 /// The materialized `contentEncoding` of a schema that is directly a bytes
 /// string (the `oneOf[…, null]` wrapper is handled by the callers' recursion).
-fn content_encoding_direct(schema: &Schema) -> Option<crate::content_encoding::Encoding> {
+fn content_encoding_direct(
+    schema: &Schema,
+) -> Option<crate::json_schema::content_encoding::Encoding> {
     if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
         return None;
     }
     schema
         .content_encoding
         .as_deref()
-        .and_then(crate::content_encoding::Encoding::from_name)
+        .and_then(crate::json_schema::content_encoding::Encoding::from_name)
 }
 
 /// The generator-owned runtime decode / encode function names for a
 /// `contentEncoding`, qualified under [`DEFINITIONS_NAMESPACE`] for use in
 /// model-body call sites.
-fn ts_content_encoding_parse_fn(encoding: crate::content_encoding::Encoding) -> String {
+fn ts_content_encoding_parse_fn(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> String {
     let name = match encoding {
-        crate::content_encoding::Encoding::Base64 => "base64ToBytes",
-        crate::content_encoding::Encoding::Base64Url => "base64UrlToBytes",
+        crate::json_schema::content_encoding::Encoding::Base64 => "base64ToBytes",
+        crate::json_schema::content_encoding::Encoding::Base64Url => "base64UrlToBytes",
     };
     format!("{DEFINITIONS_NAMESPACE}.{name}")
 }
 
-fn ts_content_encoding_serialize_fn(encoding: crate::content_encoding::Encoding) -> String {
+fn ts_content_encoding_serialize_fn(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> String {
     let name = match encoding {
-        crate::content_encoding::Encoding::Base64 => "bytesToBase64",
-        crate::content_encoding::Encoding::Base64Url => "bytesToBase64Url",
+        crate::json_schema::content_encoding::Encoding::Base64 => "bytesToBase64",
+        crate::json_schema::content_encoding::Encoding::Base64Url => "bytesToBase64Url",
     };
     format!("{DEFINITIONS_NAMESPACE}.{name}")
 }
@@ -355,7 +361,7 @@ fn render_ts_format_check(
     format: &str,
     indent: &str,
 ) {
-    let Some(check) = crate::format::check_for(format) else {
+    let Some(check) = crate::json_schema::format::check_for(format) else {
         return;
     };
     let const_name = ts_pattern_const_name(&check.pattern);
@@ -449,7 +455,7 @@ fn render_pattern_regexes(output: &mut String, models: &[&PlannedJsonType]) -> R
                 emit_const(pattern);
             }
             if let Some(format) = &property.format
-                && let Some(check) = crate::format::check_for(format)
+                && let Some(check) = crate::json_schema::format::check_for(format)
             {
                 emit_const(&check.pattern);
             }
@@ -1090,7 +1096,7 @@ fn model_uses_content_encoding(model: &PlannedJsonType) -> bool {
 /// arithmetic — **no `Buffer`, no `atob`/`btoa`** — so the generated TS runs
 /// unchanged in the browser and Node (P4). See `contentEncoding.md`.
 fn render_ts_content_encoding_helpers(output: &mut String) {
-    use crate::content_encoding::Encoding;
+    use crate::json_schema::content_encoding::Encoding;
     output.push_str(&format!(
         "const BASE64_RE = /{}/u;\n",
         Encoding::Base64.pattern()
