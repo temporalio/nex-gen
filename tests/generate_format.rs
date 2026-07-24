@@ -59,7 +59,6 @@ mod tests {
         let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
             .env("PATH", formatter_path_env(&temp_dir))
             .args([
-                "generate",
                 "python",
                 "--input",
                 sample_input_path(&root).to_str().unwrap(),
@@ -93,7 +92,6 @@ mod tests {
         let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
             .env("PATH", formatter_path_env(&temp_dir))
             .args([
-                "generate",
                 "typescript",
                 "--input",
                 sample_input_path(&root).to_str().unwrap(),

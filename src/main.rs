@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -138,7 +139,7 @@ impl From<ExampleCliLanguage> for Language {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(normalize_cli_args(std::env::args_os().collect()));
 
     let result = match cli.command {
         Commands::Generate { language } => generate_to_file(&language.into()),
@@ -166,6 +167,17 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn normalize_cli_args(mut args: Vec<OsString>) -> Vec<OsString> {
+    if args
+        .get(1)
+        .and_then(|arg| arg.to_str())
+        .is_some_and(GenerateLanguage::has_subcommand)
+    {
+        args.insert(1, "generate".into());
+    }
+    args
 }
 
 impl From<GenerateLanguage> for GenerateRequest {

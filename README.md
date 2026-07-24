@@ -100,7 +100,7 @@ interface user-service {
 Generate Python:
 
 ```bash
-cargo run -- generate python \
+cargo run -- python \
   --input examples/inputs/user-service.wit \
   --output /tmp/user_service
 ```
@@ -108,7 +108,7 @@ cargo run -- generate python \
 Generate TypeScript:
 
 ```bash
-cargo run -- generate typescript \
+cargo run -- typescript \
   --input examples/inputs/user-service.wit \
   --output /tmp/user-service
 ```
@@ -116,7 +116,7 @@ cargo run -- generate typescript \
 Generate Go:
 
 ```bash
-cargo run -- generate go \
+cargo run -- go \
   --input examples/inputs/user-service.wit \
   --output /tmp/userservice
 ```
@@ -124,7 +124,7 @@ cargo run -- generate go \
 Generate .NET:
 
 ```bash
-cargo run -- generate dotnet \
+cargo run -- dotnet \
   --input examples/inputs/user-service.wit \
   --output /tmp/user-service-dotnet
 ```
@@ -172,7 +172,7 @@ layout as `@nexus.support` fragments. .NET support files infer their support
 namespace from the C# `namespace` declaration in the file:
 
 ```bash
-cargo run -- generate python \
+cargo run -- python \
   --input examples/inputs/user-service.wit \
   --support-file /path/to/custom_support.py \
   --output /tmp/user_service
@@ -245,7 +245,7 @@ interface workflow-service {
 Generate a proto-backed example:
 
 ```bash
-cargo run -- generate python \
+cargo run -- python \
   --input examples/inputs/workflow-service.wit \
   --input examples/inputs/deps \
   --descriptors examples/descriptors/temporal_api.bin \
