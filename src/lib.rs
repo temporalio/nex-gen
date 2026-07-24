@@ -545,7 +545,7 @@ fn filter_available_example_ids(
 }
 
 fn discover_json_example_ids(repo_root: &Path) -> Result<Vec<String>> {
-    let input_root = repo_root.join("examples/json-inputs");
+    let input_root = repo_root.join("examples/json-schema-inputs");
     let mut ids = fs::read_dir(&input_root)
         .map_err(|source| error::Error::ReadFile {
             path: input_root.clone(),
@@ -561,11 +561,29 @@ fn discover_json_example_ids(repo_root: &Path) -> Result<Vec<String>> {
             if !is_json_schema_input_path(&path) {
                 return None;
             }
-            Some(path.file_stem()?.to_string_lossy().into_owned())
+            Some(json_schema_input_stem(&path)?)
         })
         .collect::<Vec<_>>();
     ids.sort();
     Ok(ids)
+}
+
+/// Derives an example id from a JSON-Schema input file name, stripping the
+/// real extension and, if present, the `.nexusrpc` naming-convention infix
+/// that marks a file as carrying a Nexus service/operation envelope (see
+/// `chat.nexusrpc.yaml`, `showcase.nexusrpc.yaml`).
+fn json_schema_input_stem(path: &Path) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    let without_extension = file_name
+        .strip_suffix(".json")
+        .or_else(|| file_name.strip_suffix(".yaml"))
+        .or_else(|| file_name.strip_suffix(".yml"))?;
+    Some(
+        without_extension
+            .strip_suffix(".nexusrpc")
+            .unwrap_or(without_extension)
+            .to_string(),
+    )
 }
 
 fn directory_contains_input_file(path: &Path) -> bool {
@@ -769,21 +787,20 @@ fn example_input_path(repo_root: &Path, example_id: &str) -> PathBuf {
 }
 
 fn json_example_input_path(repo_root: &Path, example_id: &str) -> PathBuf {
-    let dir_path = repo_root.join("examples/json-inputs").join(example_id);
+    let input_root = repo_root.join("examples/json-schema-inputs");
+    let dir_path = input_root.join(example_id);
     if dir_path.is_dir() {
         return dir_path;
     }
     for extension in ["yaml", "yml", "json"] {
-        let path = repo_root
-            .join("examples/json-inputs")
-            .join(format!("{example_id}.{extension}"));
-        if path.is_file() {
-            return path;
+        for stem in [example_id.to_string(), format!("{example_id}.nexusrpc")] {
+            let path = input_root.join(format!("{stem}.{extension}"));
+            if path.is_file() {
+                return path;
+            }
         }
     }
-    repo_root
-        .join("examples/json-inputs")
-        .join(format!("{example_id}.yaml"))
+    input_root.join(format!("{example_id}.yaml"))
 }
 
 fn example_linked_input_paths(repo_root: &Path) -> Vec<PathBuf> {

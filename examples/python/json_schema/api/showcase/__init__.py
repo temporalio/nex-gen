@@ -2,5 +2,17 @@
 
 from __future__ import annotations
 
+from .services import ShowcaseServiceClient
+from . import services as _services
 
-__all__ = []
+__all__ = [
+    "ShowcaseServiceClient",
+]
+
+
+__nexus_operation_registry__ = {
+    (
+        "example.showcase.v1.ShowcaseService",
+        "GetShowcase",
+    ): _services.ShowcaseService.get_showcase,
+}

@@ -11,7 +11,35 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/nexus-rpc/sdk-go/nexus"
+	"go.temporal.io/sdk/workflow"
 )
+
+// Fetch the showcase payload.
+var ShowcaseService = struct {
+	ServiceName string
+	// Fetch a showcase by id.
+	GetShowcase nexus.OperationReference[GetShowcaseInput, Showcase]
+}{
+	ServiceName: "example.showcase.v1.ShowcaseService",
+	GetShowcase: nexus.NewOperationReference[GetShowcaseInput, Showcase]("GetShowcase"),
+}
+
+// Fetch the showcase payload.
+type ShowcaseServiceClient struct {
+	client workflow.NexusClient
+}
+
+// NewShowcaseServiceClient constructs a ShowcaseServiceClient bound to the given Nexus endpoint.
+func NewShowcaseServiceClient(endpoint string) *ShowcaseServiceClient {
+	return &ShowcaseServiceClient{client: workflow.NewNexusClient(endpoint, ShowcaseService.ServiceName)}
+}
+
+// Fetch a showcase by id.
+func (c *ShowcaseServiceClient) GetShowcase(ctx workflow.Context, request GetShowcaseInput) workflow.Future {
+	return c.client.ExecuteOperation(ctx, ShowcaseService.GetShowcase, request, workflow.NexusOperationOptions{})
+}
 
 // Violation is a single constraint failure. Path is the JSON member path
 // (dotted for nested members); Reason is a human-readable message.
@@ -1674,6 +1702,66 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	if m.Contact != nil {
 		marshalField(out, "contact", *m.Contact, &errs)
 	}
+	if len(errs) > 0 {
+		return nil, &ValidationError{Violations: errs}
+	}
+	return json.Marshal(out)
+}
+
+// GetShowcaseInput is generated from the corresponding JSON Schema definition.
+type GetShowcaseInput struct {
+	// Id corresponds to the "id" JSON property.
+	Id string `json:"id"`
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m GetShowcaseInput) Validate() error {
+	var errs []Violation
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *GetShowcaseInput) UnmarshalJSON(data []byte) error {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	var errs []Violation
+	for k := range all {
+		switch k {
+		case "id":
+		default:
+			errs = append(errs, Violation{k, "unknown field"})
+		}
+	}
+	get := func(k string) *json.RawMessage {
+		if v, ok := all[k]; ok {
+			return &v
+		}
+		return nil
+	}
+	_ = get
+	if v, ok := parseStringField(get("id"), "id", true, false, &errs); ok {
+		m.Id = v
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m GetShowcaseInput) MarshalJSON() ([]byte, error) {
+	var errs []Violation
+	addViolations(&errs, m.Validate())
+	out := map[string]json.RawMessage{}
+	marshalField(out, "id", m.Id, &errs)
 	if len(errs) > 0 {
 		return nil, &ValidationError{Violations: errs}
 	}

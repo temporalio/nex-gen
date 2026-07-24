@@ -722,12 +722,13 @@ impl JavaContext<'_> {
 }
 
 fn strip_extension(name: &str) -> &str {
-    for extension in [".json", ".yaml", ".yml"] {
-        if let Some(stripped) = name.strip_suffix(extension) {
-            return stripped;
-        }
-    }
-    name
+    let without_extension = [".json", ".yaml", ".yml"]
+        .into_iter()
+        .find_map(|extension| name.strip_suffix(extension))
+        .unwrap_or(name);
+    without_extension
+        .strip_suffix(".nexusrpc")
+        .unwrap_or(without_extension)
 }
 
 #[derive(Debug, Clone)]

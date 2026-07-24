@@ -1680,6 +1680,66 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// GetShowcaseInput is generated from the corresponding JSON Schema definition.
+type GetShowcaseInput struct {
+	// Id corresponds to the "id" JSON property.
+	Id string `json:"id"`
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m GetShowcaseInput) Validate() error {
+	var errs []Violation
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *GetShowcaseInput) UnmarshalJSON(data []byte) error {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	var errs []Violation
+	for k := range all {
+		switch k {
+		case "id":
+		default:
+			errs = append(errs, Violation{k, "unknown field"})
+		}
+	}
+	get := func(k string) *json.RawMessage {
+		if v, ok := all[k]; ok {
+			return &v
+		}
+		return nil
+	}
+	_ = get
+	if v, ok := parseStringField(get("id"), "id", true, false, &errs); ok {
+		m.Id = v
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m GetShowcaseInput) MarshalJSON() ([]byte, error) {
+	var errs []Violation
+	addViolations(&errs, m.Validate())
+	out := map[string]json.RawMessage{}
+	marshalField(out, "id", m.Id, &errs)
+	if len(errs) > 0 {
+		return nil, &ValidationError{Violations: errs}
+	}
+	return json.Marshal(out)
+}
+
 // Square A square branch of the Shape tagged union.
 type Square struct {
 	// Kind corresponds to the "kind" JSON property.

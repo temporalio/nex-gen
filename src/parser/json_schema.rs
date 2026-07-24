@@ -373,12 +373,24 @@ fn module_path_from_relative_source(path: &Path) -> ModulePath {
         .components()
         .map(|component| component.as_os_str().to_string_lossy().to_string())
         .collect::<Vec<_>>();
-    if let Some(last) = segments.last_mut()
-        && let Some(stem) = Path::new(last).file_stem()
-    {
-        *last = stem.to_string_lossy().to_string();
+    if let Some(last) = segments.last_mut() {
+        *last = strip_json_schema_extension(last).to_string();
     }
     ModulePath(segments)
+}
+
+/// Strips a JSON-Schema input file's extension and, if present, the
+/// `.nexusrpc` naming-convention infix that marks the file as carrying a
+/// Nexus service/operation envelope (e.g. `chat.nexusrpc.yaml` -> `chat`).
+fn strip_json_schema_extension(name: &str) -> &str {
+    let without_extension = name
+        .strip_suffix(".json")
+        .or_else(|| name.strip_suffix(".yaml"))
+        .or_else(|| name.strip_suffix(".yml"))
+        .unwrap_or(name);
+    without_extension
+        .strip_suffix(".nexusrpc")
+        .unwrap_or(without_extension)
 }
 
 #[cfg(test)]
@@ -4352,8 +4364,8 @@ fn root_is_schema_shaped(root: &Schema) -> bool {
 }
 
 fn root_type_name(path: &Path) -> String {
-    path.file_stem()
-        .map(|value| value.to_string_lossy().to_string())
+    path.file_name()
+        .map(|value| strip_json_schema_extension(&value.to_string_lossy()).to_string())
         .unwrap_or_else(|| "Root".to_string())
 }
 

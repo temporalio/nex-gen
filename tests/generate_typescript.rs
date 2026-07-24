@@ -66,12 +66,18 @@ fn typescript_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
 }
 
 fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
-    let dir_path = root.join("examples/json-inputs").join(example_id);
+    let input_root = root.join("examples/json-schema-inputs");
+    let dir_path = input_root.join(example_id);
     if dir_path.is_dir() {
         return dir_path;
     }
-    root.join("examples/json-inputs")
-        .join(format!("{example_id}.yaml"))
+    for stem in [example_id.to_string(), format!("{example_id}.nexusrpc")] {
+        let path = input_root.join(format!("{stem}.yaml"));
+        if path.is_file() {
+            return path;
+        }
+    }
+    input_root.join(format!("{example_id}.yaml"))
 }
 
 fn typescript_example_ids(root: &Path) -> Vec<String> {

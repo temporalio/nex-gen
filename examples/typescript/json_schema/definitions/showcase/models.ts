@@ -248,6 +248,10 @@ export interface Showcase {
   contact?: Contact;
 }
 
+export interface GetShowcaseInput {
+  id: string;
+}
+
 /**
  * A square branch of the Shape tagged union.
  */
@@ -1946,6 +1950,46 @@ export class ShowcaseMapper {
     if (violations.length) {
       throw new __nexGenDefinitions.ValidationError(violations);
     }
+    return out;
+  }
+}
+
+export class GetShowcaseInputMapper {
+  public fromIntermediate(raw: unknown): GetShowcaseInput {
+    const violations: __nexGenDefinitions.Violation[] = [];
+    if (!__nexGenDefinitions.isPlainObject(raw)) {
+      throw new __nexGenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let id: string = undefined as unknown as string;
+    if (raw.id === undefined || raw.id === null) {
+      violations.push({ path: "id", reason: "required" });
+    } else {
+      if (typeof raw.id !== "string") {
+        violations.push({ path: "id", reason: "expected string" });
+      } else {
+        id = raw.id;
+      }
+    }
+
+    for (const key of Object.keys(raw)) {
+      if (key !== "id") {
+        violations.push({ path: key, reason: "unknown field" });
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexGenDefinitions.ValidationError(violations);
+    }
+    const out: GetShowcaseInput = { id };
+    return out;
+  }
+
+  public toIntermediate(value: GetShowcaseInput): unknown {
+    const out: Record<string, unknown> = {};
+    out.id = value.id;
     return out;
   }
 }

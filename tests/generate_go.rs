@@ -524,8 +524,6 @@ fn go_json_generation_matches_checked_in_output() {
                             "func (c *KnowledgeBaseServiceClient) GetPage(ctx workflow.Context, request GetPageInput) workflow.Future"
                         ));
                     }
-                    // showcase is a pure JSON Schema file (no service), so even
-                    // in native-api mode it emits only models, no service glue.
                     "showcase" => {
                         assert!(generated.contains("type Showcase struct"));
                         assert!(generated.contains("func (m Showcase) RetriesOrDefault() int64"));
@@ -548,8 +546,20 @@ fn go_json_generation_matches_checked_in_output() {
                                 .contains("marshalField(out, \"legacyId\", *m.LegacyID, &errs)")
                         );
                         assert!(!generated.contains("LegacyId "));
-                        assert!(!generated.contains("Service = struct"));
-                        assert!(!generated.contains("ServiceClient"));
+                        // showcase carries a minimal service/operation so the
+                        // generator's service glue gets round-trip coverage too.
+                        assert!(generated.contains("var ShowcaseService = struct"));
+                        assert!(generated.contains("type ShowcaseServiceClient struct"));
+                        assert!(
+                            generated.contains("func NewShowcaseServiceClient(endpoint string)")
+                        );
+                        assert!(
+                            generated
+                                .contains("nexus.OperationReference[GetShowcaseInput, Showcase]")
+                        );
+                        assert!(generated.contains(
+                            "func (c *ShowcaseServiceClient) GetShowcase(ctx workflow.Context, request GetShowcaseInput) workflow.Future"
+                        ));
                     }
                     // temporal is a pure JSON Schema file materializing the four
                     // temporal formats into native Go types.
@@ -1308,20 +1318,20 @@ fn go_rejects_reserved_generated_name_collision() {
 }
 
 fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
-    let dir_path = root.join("examples/json-inputs").join(example_id);
+    let input_root = root.join("examples/json-schema-inputs");
+    let dir_path = input_root.join(example_id);
     if dir_path.is_dir() {
         return dir_path;
     }
     for extension in ["yaml", "yml", "json"] {
-        let path = root
-            .join("examples/json-inputs")
-            .join(format!("{example_id}.{extension}"));
-        if path.is_file() {
-            return path;
+        for stem in [example_id.to_string(), format!("{example_id}.nexusrpc")] {
+            let path = input_root.join(format!("{stem}.{extension}"));
+            if path.is_file() {
+                return path;
+            }
         }
     }
-    root.join("examples/json-inputs")
-        .join(format!("{example_id}.yaml"))
+    input_root.join(format!("{example_id}.yaml"))
 }
 
 fn go_json_output_path(root: &Path, mode: &str, example_id: &str) -> PathBuf {

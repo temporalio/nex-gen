@@ -802,6 +802,21 @@ class Showcase(pydantic.BaseModel):
         return _emit_set_fields(self, handler)
 
 
+class GetShowcaseInput(pydantic.BaseModel):
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="forbid"
+    )
+
+    id: str = pydantic.Field()
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return _emit_set_fields(self, handler)
+
+
 class Square(pydantic.BaseModel):
     """A square branch of the Shape tagged union."""
 
