@@ -23,7 +23,7 @@ use crate::spec::{
 };
 use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
-use super::json::go as json;
+use super::json_schema::go as json;
 use super::proto::go as proto;
 
 type FunctionArgsSpec = GenericFunctionArgsSpec<PlannedTypeFamily>;

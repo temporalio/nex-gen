@@ -21,7 +21,7 @@ use crate::spec::{
 };
 use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
-mod json;
+mod json_schema;
 mod proto;
 
 pub(crate) use proto::{message_model_name, relative_descriptor_name};

@@ -9,11 +9,11 @@ use serde_json::Value;
 use std::cell::Cell;
 
 use crate::error::{Error, Result};
-use crate::format::TemporalKind;
 use crate::generator::typescript::{
     RenderedExternalModelFragments, WireValueConversion, typescript_generated_field_name,
 };
 use crate::generator::{ExternalModelBackend, TsDateTimeTypes};
+use crate::json_schema::format::TemporalKind;
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
@@ -43,31 +43,37 @@ fn active_repr() -> TsDateTimeTypes {
 /// (the `oneOf[…, null]` wrapper is handled by the callers' recursion).
 /// The materialized `contentEncoding` of a schema that is directly a bytes
 /// string (the `oneOf[…, null]` wrapper is handled by the callers' recursion).
-fn content_encoding_direct(schema: &Schema) -> Option<crate::content_encoding::Encoding> {
+fn content_encoding_direct(
+    schema: &Schema,
+) -> Option<crate::json_schema::content_encoding::Encoding> {
     if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
         return None;
     }
     schema
         .content_encoding
         .as_deref()
-        .and_then(crate::content_encoding::Encoding::from_name)
+        .and_then(crate::json_schema::content_encoding::Encoding::from_name)
 }
 
 /// The generator-owned runtime decode / encode function names for a
 /// `contentEncoding`, qualified under [`DEFINITIONS_NAMESPACE`] for use in
 /// model-body call sites.
-fn ts_content_encoding_parse_fn(encoding: crate::content_encoding::Encoding) -> String {
+fn ts_content_encoding_parse_fn(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> String {
     let name = match encoding {
-        crate::content_encoding::Encoding::Base64 => "base64ToBytes",
-        crate::content_encoding::Encoding::Base64Url => "base64UrlToBytes",
+        crate::json_schema::content_encoding::Encoding::Base64 => "base64ToBytes",
+        crate::json_schema::content_encoding::Encoding::Base64Url => "base64UrlToBytes",
     };
     format!("{DEFINITIONS_NAMESPACE}.{name}")
 }
 
-fn ts_content_encoding_serialize_fn(encoding: crate::content_encoding::Encoding) -> String {
+fn ts_content_encoding_serialize_fn(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> String {
     let name = match encoding {
-        crate::content_encoding::Encoding::Base64 => "bytesToBase64",
-        crate::content_encoding::Encoding::Base64Url => "bytesToBase64Url",
+        crate::json_schema::content_encoding::Encoding::Base64 => "bytesToBase64",
+        crate::json_schema::content_encoding::Encoding::Base64Url => "bytesToBase64Url",
     };
     format!("{DEFINITIONS_NAMESPACE}.{name}")
 }
@@ -87,9 +93,9 @@ fn ts_temporal_type(kind: TemporalKind, repr: TsDateTimeTypes) -> &'static str {
         (_, TsDateTimeTypes::String) => "string",
         (TemporalKind::DateTime, TsDateTimeTypes::Date) => "Date",
         (TemporalKind::Date | TemporalKind::Duration, TsDateTimeTypes::Date) => "string",
-        (TemporalKind::DateTime, TsDateTimeTypes::Temporal) => "TemporalApi.ZonedDateTime",
-        (TemporalKind::Date, TsDateTimeTypes::Temporal) => "TemporalApi.PlainDate",
-        (TemporalKind::Duration, TsDateTimeTypes::Temporal) => "TemporalApi.Duration",
+        (TemporalKind::DateTime, TsDateTimeTypes::Temporal) => "Temporal.ZonedDateTime",
+        (TemporalKind::Date, TsDateTimeTypes::Temporal) => "Temporal.PlainDate",
+        (TemporalKind::Duration, TsDateTimeTypes::Temporal) => "Temporal.Duration",
     }
 }
 
@@ -355,7 +361,7 @@ fn render_ts_format_check(
     format: &str,
     indent: &str,
 ) {
-    let Some(check) = crate::format::check_for(format) else {
+    let Some(check) = crate::json_schema::format::check_for(format) else {
         return;
     };
     let const_name = ts_pattern_const_name(&check.pattern);
@@ -449,7 +455,7 @@ fn render_pattern_regexes(output: &mut String, models: &[&PlannedJsonType]) -> R
                 emit_const(pattern);
             }
             if let Some(format) = &property.format
-                && let Some(check) = crate::format::check_for(format)
+                && let Some(check) = crate::json_schema::format::check_for(format)
             {
                 emit_const(&check.pattern);
             }
@@ -1018,7 +1024,7 @@ fn render_external_models(
     }
 
     Ok(RenderedExternalModelFragments {
-        imports: render_json_model_imports(&output, runtime_import_module),
+        imports: render_json_model_imports(runtime_import_module),
         body: output,
         type_exported_names: json_models
             .iter()
@@ -1037,12 +1043,10 @@ fn render_external_models(
 /// that could collide with user-authored identifiers.
 const DEFINITIONS_NAMESPACE: &str = "__nexGenDefinitions";
 
-fn render_json_model_imports(body: &str, runtime_import_module: &str) -> String {
+fn render_json_model_imports(runtime_import_module: &str) -> String {
     let mut imports = String::new();
-    // Temporal-repr models reference `TemporalApi.*` types in their interfaces.
-    if body.contains("TemporalApi.") {
-        imports.push_str("import { Temporal as TemporalApi } from '@js-temporal/polyfill';\n");
-    }
+    // Temporal-repr models reference the ambient global `Temporal.*` types
+    // (TS 6's `esnext.temporal` lib) — no import required (P4).
     // `ValidationError`/`isPlainObject`/`Violation` are referenced by every
     // generated model's parser, so the import is always live.
     imports.push_str("import * as ");
@@ -1058,9 +1062,6 @@ fn render_json_runtime_module() -> String {
     let uses_temporal = USES_TEMPORAL.with(Cell::get);
     let mut output = String::new();
     output.push_str("// Generated by nex-gen. DO NOT EDIT!\n\n");
-    if uses_temporal && repr == TsDateTimeTypes::Temporal {
-        output.push_str("import { Temporal as TemporalApi } from '@js-temporal/polyfill';\n\n");
-    }
     render_validator_core(&mut output);
     output.push('\n');
     render_collect_helper(&mut output);
@@ -1095,7 +1096,7 @@ fn model_uses_content_encoding(model: &PlannedJsonType) -> bool {
 /// arithmetic — **no `Buffer`, no `atob`/`btoa`** — so the generated TS runs
 /// unchanged in the browser and Node (P4). See `contentEncoding.md`.
 fn render_ts_content_encoding_helpers(output: &mut String) {
-    use crate::content_encoding::Encoding;
+    use crate::json_schema::content_encoding::Encoding;
     output.push_str(&format!(
         "const BASE64_RE = /{}/u;\n",
         Encoding::Base64.pattern()
@@ -1250,7 +1251,7 @@ fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
         TsDateTimeTypes::Temporal => {
             output.push_str("  const canon = canonicalizeTemporalDateTime(value);\n");
             output.push_str("  const zone = canon.endsWith('Z') ? 'UTC' : canon.slice(-6);\n");
-            output.push_str("  return TemporalApi.ZonedDateTime.from(`${canon}[${zone}]`);\n");
+            output.push_str("  return Temporal.ZonedDateTime.from(`${canon}[${zone}]`);\n");
         }
     }
     output.push_str("}\n\n");
@@ -1263,7 +1264,7 @@ fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
     output.push_str("    violations.push({ path, reason: `must be a valid date, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
     match repr {
         TsDateTimeTypes::Temporal => {
-            output.push_str("  return TemporalApi.PlainDate.from(value);\n");
+            output.push_str("  return Temporal.PlainDate.from(value);\n");
         }
         _ => output.push_str("  return value;\n"),
     }
@@ -1288,7 +1289,7 @@ fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
     output.push_str("    violations.push({ path, reason: `must be a valid duration, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
     match repr {
         TsDateTimeTypes::Temporal => {
-            output.push_str("  return TemporalApi.Duration.from({ seconds });\n");
+            output.push_str("  return Temporal.Duration.from({ seconds });\n");
         }
         _ => output.push_str("  return formatTemporalDuration(seconds);\n"),
     }
@@ -1302,17 +1303,17 @@ fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
     }
     if repr == TsDateTimeTypes::Temporal {
         output.push_str(
-            "\nexport function serializeTemporalDateTime(value: TemporalApi.ZonedDateTime): string {\n",
+            "\nexport function serializeTemporalDateTime(value: Temporal.ZonedDateTime): string {\n",
         );
         output.push_str("  const s = value.toString({ timeZoneName: 'never' });\n");
         output.push_str(
             "  return s.endsWith('+00:00') || s.endsWith('-00:00') ? s.slice(0, -6) + 'Z' : s;\n}\n",
         );
         output.push_str(
-            "\nexport function serializeTemporalDate(value: TemporalApi.PlainDate): string {\n  return value.toString();\n}\n",
+            "\nexport function serializeTemporalDate(value: Temporal.PlainDate): string {\n  return value.toString();\n}\n",
         );
         output.push_str(
-            "\nexport function serializeTemporalDuration(value: TemporalApi.Duration): string {\n  return formatTemporalDuration(value.total({ unit: 'seconds' }));\n}\n",
+            "\nexport function serializeTemporalDuration(value: Temporal.Duration): string {\n  return formatTemporalDuration(value.total({ unit: 'seconds' }));\n}\n",
         );
     }
 }

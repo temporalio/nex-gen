@@ -6,7 +6,7 @@ use heck::{ToKebabCase, ToLowerCamelCase, ToShoutySnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
 use crate::error::{Error, Result};
-use crate::generator::json::typescript as typescript_json;
+use crate::generator::json_schema::typescript as typescript_json;
 use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::proto::typescript::{
     model_typescript_interface_ref, model_typescript_type_id, typescript_replacement_type_name,

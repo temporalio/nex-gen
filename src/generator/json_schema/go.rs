@@ -270,7 +270,7 @@ fn render_go_pattern_vars(output: &mut String, model: &PlannedJsonType, schema: 
             output.push_str(")\n");
         }
         if let Some(format) = &property.format
-            && let Some(check) = crate::format::check_for(format)
+            && let Some(check) = crate::json_schema::format::check_for(format)
         {
             // Go keeps the `$` end-anchor (RE2 is exception-free); the pinned
             // regex compiles once at package init.
@@ -318,7 +318,7 @@ fn render_go_format_check(
     format: &str,
     indent: &str,
 ) {
-    let Some(check) = crate::format::check_for(format) else {
+    let Some(check) = crate::json_schema::format::check_for(format) else {
         return;
     };
     output.push_str(indent);
@@ -2573,7 +2573,7 @@ fn render_temporal_property_unmarshal(
     output: &mut String,
     json_name: &str,
     field: &str,
-    kind: crate::format::TemporalKind,
+    kind: crate::json_schema::format::TemporalKind,
     required: bool,
     nullable: bool,
 ) {
@@ -2758,7 +2758,7 @@ fn render_temporal_property_marshal(
     output: &mut String,
     json_name: &str,
     field: &str,
-    kind: crate::format::TemporalKind,
+    kind: crate::json_schema::format::TemporalKind,
     required: bool,
     nullable: bool,
 ) {
@@ -2856,7 +2856,7 @@ fn model_uses_temporal(model: &PlannedJsonType) -> bool {
 /// trailing fractional zeros trimmed; duration canonicalized to time-only). See
 /// `specs/json-schema/features/format.md`.
 fn render_go_temporal_helpers(output: &mut String) {
-    use crate::format::TemporalKind;
+    use crate::json_schema::format::TemporalKind;
     output.push_str(&format!(
         "var jsonTemporalDateTimeRE = regexp.MustCompile(`{}`)\n",
         TemporalKind::DateTime.pattern()
@@ -3252,7 +3252,7 @@ fn required_fields(schema: &Schema) -> BTreeSet<String> {
 /// The materialized `TemporalKind` of a property schema — looking through the
 /// `oneOf[…, null]` nullable wrapper — or `None` when it is not a materialized
 /// temporal string field. See `specs/json-schema/features/format.md` (Materialization).
-fn temporal_kind(schema: &Schema) -> Option<crate::format::TemporalKind> {
+fn temporal_kind(schema: &Schema) -> Option<crate::json_schema::format::TemporalKind> {
     if let Some(non_null) = nullable_non_null_schema(schema) {
         return temporal_kind(non_null);
     }
@@ -3262,13 +3262,15 @@ fn temporal_kind(schema: &Schema) -> Option<crate::format::TemporalKind> {
     schema
         .format
         .as_deref()
-        .and_then(crate::format::TemporalKind::from_name)
+        .and_then(crate::json_schema::format::TemporalKind::from_name)
 }
 
 /// The materialized `contentEncoding` of a property schema — looking through the
 /// `oneOf[…, null]` nullable wrapper — or `None` when it is not a materialized
 /// bytes string field. See `specs/json-schema/features/contentEncoding.md`.
-fn content_encoding_kind(schema: &Schema) -> Option<crate::content_encoding::Encoding> {
+fn content_encoding_kind(
+    schema: &Schema,
+) -> Option<crate::json_schema::content_encoding::Encoding> {
     if let Some(non_null) = nullable_non_null_schema(schema) {
         return content_encoding_kind(non_null);
     }
@@ -3278,21 +3280,25 @@ fn content_encoding_kind(schema: &Schema) -> Option<crate::content_encoding::Enc
     schema
         .content_encoding
         .as_deref()
-        .and_then(crate::content_encoding::Encoding::from_name)
+        .and_then(crate::json_schema::content_encoding::Encoding::from_name)
 }
 
 /// The generator-owned decode / encode function names for a `contentEncoding`.
-fn go_content_encoding_decode_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
+fn go_content_encoding_decode_fn(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> &'static str {
     match encoding {
-        crate::content_encoding::Encoding::Base64 => "decodeBase64",
-        crate::content_encoding::Encoding::Base64Url => "decodeBase64URL",
+        crate::json_schema::content_encoding::Encoding::Base64 => "decodeBase64",
+        crate::json_schema::content_encoding::Encoding::Base64Url => "decodeBase64URL",
     }
 }
 
-fn go_content_encoding_encode_fn(encoding: crate::content_encoding::Encoding) -> &'static str {
+fn go_content_encoding_encode_fn(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> &'static str {
     match encoding {
-        crate::content_encoding::Encoding::Base64 => "encodeBase64",
-        crate::content_encoding::Encoding::Base64Url => "encodeBase64URL",
+        crate::json_schema::content_encoding::Encoding::Base64 => "encodeBase64",
+        crate::json_schema::content_encoding::Encoding::Base64Url => "encodeBase64URL",
     }
 }
 
@@ -3306,7 +3312,7 @@ fn render_content_encoding_property_unmarshal(
     model_name: &str,
     json_name: &str,
     field: &str,
-    encoding: crate::content_encoding::Encoding,
+    encoding: crate::json_schema::content_encoding::Encoding,
     required: bool,
     nullable: bool,
     property: &Schema,
@@ -3356,7 +3362,7 @@ fn render_content_encoding_property_marshal(
     model_name: &str,
     json_name: &str,
     field: &str,
-    encoding: crate::content_encoding::Encoding,
+    encoding: crate::json_schema::content_encoding::Encoding,
     required: bool,
     property: &Schema,
 ) {
@@ -3422,30 +3428,30 @@ fn render_content_encoding_property_marshal(
 }
 
 /// The Go native type a temporal `format` materializes into.
-fn go_temporal_type(kind: crate::format::TemporalKind) -> &'static str {
+fn go_temporal_type(kind: crate::json_schema::format::TemporalKind) -> &'static str {
     match kind {
-        crate::format::TemporalKind::Duration => "time.Duration",
+        crate::json_schema::format::TemporalKind::Duration => "time.Duration",
         _ => "time.Time",
     }
 }
 
 /// The generator-owned serializer function name for a temporal kind.
-fn go_temporal_format_fn(kind: crate::format::TemporalKind) -> &'static str {
+fn go_temporal_format_fn(kind: crate::json_schema::format::TemporalKind) -> &'static str {
     match kind {
-        crate::format::TemporalKind::DateTime => "formatDateTime",
-        crate::format::TemporalKind::Date => "formatDate",
-        crate::format::TemporalKind::Time => "formatTime",
-        crate::format::TemporalKind::Duration => "formatDuration",
+        crate::json_schema::format::TemporalKind::DateTime => "formatDateTime",
+        crate::json_schema::format::TemporalKind::Date => "formatDate",
+        crate::json_schema::format::TemporalKind::Time => "formatTime",
+        crate::json_schema::format::TemporalKind::Duration => "formatDuration",
     }
 }
 
 /// The parse-adapter function name for a temporal kind.
-fn go_temporal_parse_fn(kind: crate::format::TemporalKind) -> &'static str {
+fn go_temporal_parse_fn(kind: crate::json_schema::format::TemporalKind) -> &'static str {
     match kind {
-        crate::format::TemporalKind::DateTime => "parseDateTime",
-        crate::format::TemporalKind::Date => "parseDate",
-        crate::format::TemporalKind::Time => "parseTime",
-        crate::format::TemporalKind::Duration => "parseDuration",
+        crate::json_schema::format::TemporalKind::DateTime => "parseDateTime",
+        crate::json_schema::format::TemporalKind::Date => "parseDate",
+        crate::json_schema::format::TemporalKind::Time => "parseTime",
+        crate::json_schema::format::TemporalKind::Duration => "parseDuration",
     }
 }
 

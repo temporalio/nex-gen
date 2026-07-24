@@ -1391,7 +1391,7 @@ fn validate_string_constraints(path: &Path, schema: &Schema, context: &str) -> R
 /// Load-time gate for the `format` keyword (JSON Schema 2020-12 §7). We opt into
 /// `format-assertion` semantics for a curated portable subset and reject
 /// everything else at load, so no `format` silently no-ops (P10). See
-/// `specs/json-schema/features/format.md` and `crate::format`.
+/// `specs/json-schema/features/format.md` and `crate::json_schema::format`.
 ///
 /// Rejects (P7 / P7.1): a non-string `format` value, a `format` on a
 /// non-`string` node, an unknown/non-standard name (with a fix-it), a
@@ -1421,22 +1421,22 @@ fn validate_format(path: &Path, schema: &Schema, context: &str) -> Result<()> {
         return reject(format!("{context}: `format` requires `type: string`"));
     }
 
-    let format_name = match crate::format::classify(format) {
-        crate::format::FormatClass::Supported(check) => check.name,
+    let format_name = match crate::json_schema::format::classify(format) {
+        crate::json_schema::format::FormatClass::Supported(check) => check.name,
         // The temporal formats are materialized into native typed fields with a
         // narrowed grammar (leap `:60` rejected; `duration` time-only). Any
         // supplied literal is validated against that materialized grammar below.
-        crate::format::FormatClass::Temporal(kind) => kind.name(),
-        crate::format::FormatClass::Deferred => {
+        crate::json_schema::format::FormatClass::Temporal(kind) => kind.name(),
+        crate::json_schema::format::FormatClass::Deferred => {
             return reject(format!(
                 "{context}: `format: {format}` is not yet supported (deferred); \
                  it needs IDNA/Unicode or templating handling that is not yet portable"
             ));
         }
-        crate::format::FormatClass::Unknown => {
+        crate::json_schema::format::FormatClass::Unknown => {
             return reject(format!(
                 "{context}: unknown `format: {format}`; supported formats are {}",
-                crate::format::SUPPORTED_FORMATS.join(", ")
+                crate::json_schema::format::SUPPORTED_FORMATS.join(", ")
             ));
         }
     };
@@ -1444,7 +1444,7 @@ fn validate_format(path: &Path, schema: &Schema, context: &str) -> Result<()> {
     // A supplied `const`/`default`/`enum` string literal on the same node must
     // satisfy the format at load (the literal-vs-constraint obligation).
     let check_literal = |literal: &str, source: &str| -> Result<()> {
-        if !crate::format::is_valid(format, literal) {
+        if !crate::json_schema::format::is_valid(format, literal) {
             return reject(format!(
                 "{context}: `{source}` value {literal:?} is not a valid {format_name}"
             ));
@@ -1471,7 +1471,7 @@ fn validate_format(path: &Path, schema: &Schema, context: &str) -> Result<()> {
 /// We opt into assertion + materialization for the two byte-transform encodings
 /// (`base64` / `base64url`, materialized to a native bytes type) and reject every
 /// other encoding at load, so no `contentEncoding` silently no-ops (P10). See
-/// `specs/json-schema/features/contentEncoding.md` and `crate::content_encoding`.
+/// `specs/json-schema/features/contentEncoding.md` and `crate::json_schema::content_encoding`.
 ///
 /// Rejects (P7 / P7.1): a non-string `contentEncoding` value, a
 /// `contentEncoding` on a non-`string` node, an unsupported encoding (with a
@@ -1506,13 +1506,13 @@ fn validate_content_encoding(path: &Path, schema: &Schema, context: &str) -> Res
         ));
     }
 
-    let encoding = match crate::content_encoding::classify(encoding_name) {
-        crate::content_encoding::EncodingClass::Supported(encoding) => encoding,
-        crate::content_encoding::EncodingClass::Unsupported => {
+    let encoding = match crate::json_schema::content_encoding::classify(encoding_name) {
+        crate::json_schema::content_encoding::EncodingClass::Supported(encoding) => encoding,
+        crate::json_schema::content_encoding::EncodingClass::Unsupported => {
             return reject(format!(
                 "{context}: `contentEncoding: {encoding_name}` is not supported; \
                  supported encodings are {}",
-                crate::content_encoding::SUPPORTED_ENCODINGS.join(", ")
+                crate::json_schema::content_encoding::SUPPORTED_ENCODINGS.join(", ")
             ));
         }
     };
@@ -1533,7 +1533,7 @@ fn validate_content_encoding(path: &Path, schema: &Schema, context: &str) -> Res
     // well-formed for the declared encoding at load (the literal-vs-constraint
     // obligation), and is thereby stored / echoed in its canonical form.
     let check_literal = |literal: &str, source: &str| -> Result<()> {
-        if !crate::content_encoding::is_valid(encoding, literal) {
+        if !crate::json_schema::content_encoding::is_valid(encoding, literal) {
             return reject(format!(
                 "{context}: `{source}` value {literal:?} is not valid {}-encoded data",
                 encoding.name()
@@ -3497,7 +3497,7 @@ fn normalize_pattern(path: &Path, schema: &mut Schema, context: &str) -> Result<
         ));
     }
 
-    let normalized = crate::pattern::gate_and_normalize(&pattern)
+    let normalized = crate::json_schema::pattern::gate_and_normalize(&pattern)
         .map_err(|error| merge_reject(path, format!("{context}: {}", error.0)))?;
 
     // A supplied string literal on the same node must match the pattern at load
