@@ -51,6 +51,19 @@ pub struct BuildExamplesRequest {
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
+    // `write_generated_files` removes an existing output directory before
+    // writing, so a resolved output path with no name at all (the
+    // filesystem root, or `..` past it) must be rejected up front rather
+    // than risking `fs::remove_dir_all` on it.
+    if absolute_output_path(&request.output_path)?
+        .file_name()
+        .is_none()
+    {
+        return Err(error::Error::OutputPathIsRoot {
+            path: request.output_path.clone(),
+        });
+    }
+
     let tree = crate::parser::load_api_spec_tree_for_language_with_inputs(
         request.language,
         &request.input_paths,
@@ -58,10 +71,10 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
     let descriptors = DescriptorIndex::load_many(&request.descriptor_paths)?;
     let support = load_support_files_for_tree(request.language, &tree, &request.support_paths)?;
     let options = GenerateFilesOptions {
-        go_import_root: if request.language == Language::Go {
-            infer_go_import_root(&request.output_path)?
+        go_output_dir_name: if request.language == Language::Go {
+            output_dir_name(&request.output_path)?
         } else {
-            None
+            String::new()
         },
         java_package_root: if request.language == Language::Java {
             Some(infer_java_package_root(&request.output_path)?)
@@ -171,48 +184,38 @@ pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
     Ok(())
 }
 
-fn infer_go_import_root(output_path: &Path) -> Result<Option<String>> {
-    let output_path = if output_path.is_absolute() {
-        output_path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|source| error::Error::ReadFile {
-                path: PathBuf::from("."),
-                source,
-            })?
-            .join(output_path)
-    };
-
-    for ancestor in output_path.ancestors() {
-        let go_mod_path = ancestor.join("go.mod");
-        if !go_mod_path.is_file() {
-            continue;
-        }
-        let module_name = read_go_module_name(&go_mod_path)?;
-        let relative_output = output_path.strip_prefix(ancestor).unwrap_or(Path::new(""));
-        let relative_output = relative_output
-            .components()
-            .map(|component| component.as_os_str().to_string_lossy())
-            .filter(|component| !component.is_empty())
-            .collect::<Vec<_>>()
-            .join("/");
-        return Ok(Some(if relative_output.is_empty() {
-            module_name
-        } else {
-            format!("{module_name}/{relative_output}")
-        }));
-    }
-
-    Ok(None)
+/// The output directory's basename, used as the Go package name — matching
+/// the Go convention that a package's name is its directory's name. Resolved
+/// against the working directory so relative paths, including `.` and `..`,
+/// name the real directory rather than being read as a literal path segment
+/// (`Path::file_name` returns `None` for a path that lexically terminates in
+/// `.` or `..`).
+///
+/// `generate_to_file` already rejects an output path that resolves to the
+/// filesystem root before this runs, so `OutputPathIsRoot` here is
+/// unreachable through that caller; the check exists so this function is
+/// correct standing alone. A non-UTF-8 path component is a real, if rare,
+/// case: reported as an error rather than guessed at.
+fn output_dir_name(output_path: &Path) -> Result<String> {
+    let resolved = absolute_output_path(output_path)?;
+    let name = resolved
+        .file_name()
+        .ok_or_else(|| error::Error::OutputPathIsRoot {
+            path: output_path.to_path_buf(),
+        })?;
+    name.to_str()
+        .map(str::to_string)
+        .ok_or_else(|| error::Error::OutputPathNotUtf8 {
+            path: output_path.to_path_buf(),
+        })
 }
 
-/// Derives the Java base package from the output directory, analogous to how
-/// `infer_go_import_root` finds a `go.mod` ancestor. The package is the path
-/// components from a `src/main/java` (or `src/test/java`) source-root ancestor
-/// down to the output directory, joined with '.'. When no such ancestor exists,
-/// falls back to the output directory's basename as a single-segment package.
-fn infer_java_package_root(output_path: &Path) -> Result<String> {
-    let output_path = if output_path.is_absolute() {
+/// Resolves `output_path` to an absolute, lexically normalized path: relative
+/// paths are joined onto the working directory, then `.`/`..` components are
+/// collapsed without touching the filesystem (the output directory may not
+/// exist yet, so this can't just `fs::canonicalize`).
+fn absolute_output_path(output_path: &Path) -> Result<PathBuf> {
+    let absolute = if output_path.is_absolute() {
         output_path.to_path_buf()
     } else {
         std::env::current_dir()
@@ -222,6 +225,32 @@ fn infer_java_package_root(output_path: &Path) -> Result<String> {
             })?
             .join(output_path)
     };
+    Ok(normalize_path(&absolute))
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir
+                if matches!(normalized.last(), Some(std::path::Component::Normal(_))) =>
+            {
+                normalized.pop();
+            }
+            other => normalized.push(other),
+        }
+    }
+    normalized.into_iter().collect()
+}
+
+/// Derives the Java base package from the output directory. The package is
+/// the path components from a `src/main/java` (or `src/test/java`)
+/// source-root ancestor down to the output directory, joined with '.'. When
+/// no such ancestor exists, falls back to the output directory's basename as
+/// a single-segment package.
+fn infer_java_package_root(output_path: &Path) -> Result<String> {
+    let output_path = absolute_output_path(output_path)?;
 
     for ancestor in output_path.ancestors() {
         let is_source_root = ancestor.file_name().and_then(|name| name.to_str()) == Some("java")
@@ -256,23 +285,6 @@ fn infer_java_package_root(output_path: &Path) -> Result<String> {
         .unwrap_or("generated")
         .to_string();
     Ok(basename)
-}
-
-fn read_go_module_name(go_mod_path: &Path) -> Result<String> {
-    let contents = fs::read_to_string(go_mod_path).map_err(|source| error::Error::ReadFile {
-        path: go_mod_path.to_path_buf(),
-        source,
-    })?;
-    contents
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("module "))
-        .map(str::trim)
-        .filter(|module| !module.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| error::Error::InvalidGeneratedPath {
-            path: go_mod_path.to_path_buf(),
-            reason: "go.mod does not contain a module directive".to_string(),
-        })
 }
 
 fn format_generated_file(language: Language, output_path: &Path) -> Result<()> {
@@ -947,7 +959,9 @@ fn format_command(program: &str, args: &[String]) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{format_formatter_command, formatter_command, infer_dotnet_namespace};
+    use super::{
+        format_formatter_command, formatter_command, infer_dotnet_namespace, output_dir_name,
+    };
     use crate::language::Language;
 
     #[test]
@@ -970,6 +984,48 @@ mod tests {
             format_formatter_command(program, &args),
             "prettier --write --print-width 88 output"
         );
+    }
+
+    #[test]
+    fn output_dir_name_resolves_plain_absolute_path() {
+        assert_eq!(output_dir_name(Path::new("/tmp/foo/bar")).unwrap(), "bar");
+    }
+
+    #[test]
+    fn output_dir_name_collapses_trailing_current_dir() {
+        // `Path::file_name` alone returns `None` for a path that lexically
+        // terminates in `.`; normalization must resolve it to the real
+        // directory name instead.
+        assert_eq!(output_dir_name(Path::new("/tmp/foo/bar/.")).unwrap(), "bar");
+    }
+
+    #[test]
+    fn output_dir_name_collapses_trailing_parent_dir() {
+        // Same for a path that lexically terminates in `..`: it must resolve
+        // to the parent directory's real name, not `None`.
+        assert_eq!(
+            output_dir_name(Path::new("/tmp/foo/bar/..")).unwrap(),
+            "foo"
+        );
+    }
+
+    #[test]
+    fn output_dir_name_collapses_internal_parent_dir() {
+        assert_eq!(
+            output_dir_name(Path::new("/tmp/foo/../bar")).unwrap(),
+            "bar"
+        );
+    }
+
+    #[test]
+    fn output_dir_name_rejects_filesystem_root() {
+        // `generate_to_file` also rejects a root output path up front, but
+        // this function must be correct standing alone rather than relying
+        // on that caller.
+        assert!(matches!(
+            output_dir_name(Path::new("/")).unwrap_err(),
+            crate::error::Error::OutputPathIsRoot { path } if path == Path::new("/")
+        ));
     }
 
     #[test]

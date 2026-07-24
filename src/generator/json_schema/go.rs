@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::go::{
     GoPackageContext, PlannedMessageSource, PlannedMessageType, PlannedValueType, go_field_name,
-    go_package_name, go_string_literal,
+    go_string_literal,
 };
 use crate::generator::json_schema::build_json_name_manifest;
 use crate::language::Language;
@@ -698,29 +698,20 @@ pub(in crate::generator) struct ModelFragments {
 
 #[derive(Debug)]
 pub(in crate::generator) struct ModelBackend {
-    package: GoPackageContext,
     include_service_imports: bool,
-    shared_runtime: bool,
     json_models: Vec<PlannedJsonType>,
     local_json_models: Vec<PlannedJsonType>,
     model_names: BTreeMap<String, String>,
-    imports: BTreeMap<String, String>,
     manifest: NameManifest,
 }
 
 impl ModelBackend {
-    pub(in crate::generator) fn new(
-        package: GoPackageContext,
-        include_service_imports: bool,
-    ) -> Self {
+    pub(in crate::generator) fn new(include_service_imports: bool) -> Self {
         Self {
-            shared_runtime: package.has_shared_runtime(),
-            package,
             include_service_imports,
             json_models: Vec::new(),
             local_json_models: Vec::new(),
             model_names: BTreeMap::new(),
-            imports: BTreeMap::new(),
             manifest: NameManifest::default(),
         }
     }
@@ -730,6 +721,11 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
     type ModelFragments = ModelFragments;
     type WireConversion = ();
 
+    // Go flattens every input file in a generate closure into one flat
+    // package (see `specs/json-schema/generated-file-layout.md`), so every
+    // JSON model and cross-file service reference resolves as a local,
+    // unqualified name -- there is never a real cross-package Go import to
+    // emit here.
     fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
         // Resolve every emitted identifier once (overrides applied), then adopt
         // the resolved type name as each model's `model_name` so every
@@ -752,45 +748,32 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
             .collect();
         self.local_json_models.clear();
         self.model_names.clear();
-        self.imports.clear();
 
-        let mut aliases = BTreeMap::<String, String>::new();
         for model in &self.json_models {
-            let module_path = model.module_path.as_ref().unwrap_or(&api_plan.module_path);
-            let emitted_name =
-                if let Some(import_path) = self.package.module_import_path(module_path)? {
-                    let alias = aliases
-                        .entry(import_path.clone())
-                        .or_insert_with(|| unique_import_alias(&import_path, &self.imports))
-                        .clone();
-                    self.imports.insert(import_path, alias.clone());
-                    format!("{alias}.{}", model.model_name)
-                } else {
-                    self.local_json_models.push(model.clone());
-                    model.model_name.clone()
-                };
+            // Go flattens every input file in a generate closure into one flat
+            // package, so every model is a local, unqualified name -- there is
+            // never a cross-package import to alias here.
+            self.local_json_models.push(model.clone());
             // A resolved `$ref` is `#/$defs/<full_name>`; register that form too
             // so `reference_model_name` resolves through the manifest instead of
             // recasing the ref segment (which would drop a type override).
             self.model_names
-                .insert(model.full_name.clone(), emitted_name.clone());
-            self.model_names
-                .insert(format!("#/$defs/{}", model.full_name), emitted_name);
+                .insert(model.full_name.clone(), model.model_name.clone());
+            self.model_names.insert(
+                format!("#/$defs/{}", model.full_name),
+                model.model_name.clone(),
+            );
         }
         if self.include_service_imports && !api_plan.services.is_empty() {
             for (module_path, names) in &api_plan.data.module_imports {
-                let Some(import_path) = self.package.module_import_path(module_path)? else {
-                    continue;
-                };
-                let alias = imports_alias(&mut self.imports, &import_path);
                 for name in names {
                     self.model_names.insert(
                         format!("{}#{name}", module_path.as_module_key()),
-                        format!("{alias}.{name}"),
+                        name.clone(),
                     );
                     self.model_names.insert(
                         format!("{}#/$defs/{name}", module_path.as_module_key()),
-                        format!("{alias}.{name}"),
+                        name.clone(),
                     );
                 }
             }
@@ -802,7 +785,6 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
         render_external_models(
             &self.local_json_models.iter().collect::<Vec<_>>(),
             &self.model_names,
-            self.shared_runtime,
         )
     }
 
@@ -845,13 +827,6 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
 impl ModelBackend {
     pub(in crate::generator) fn is_active(&self) -> bool {
         !self.json_models.is_empty()
-    }
-
-    pub(in crate::generator) fn imports(&self) -> Vec<(String, String)> {
-        self.imports
-            .iter()
-            .map(|(path, alias)| (path.clone(), alias.clone()))
-            .collect()
     }
 
     fn json_model_type_annotation(&self, json_type: &PlannedJsonType) -> String {
@@ -946,34 +921,6 @@ impl ModelBackend {
         }
         Ok(output)
     }
-}
-
-fn unique_import_alias(import_path: &str, imports: &BTreeMap<String, String>) -> String {
-    let base = import_path
-        .rsplit('/')
-        .next()
-        .filter(|segment| !segment.is_empty())
-        .map(go_package_name)
-        .unwrap_or_else(|| "api".to_string());
-    if !imports.values().any(|alias| alias == &base) {
-        return base;
-    }
-    for index in 2.. {
-        let alias = format!("{base}{index}");
-        if !imports.values().any(|existing| existing == &alias) {
-            return alias;
-        }
-    }
-    unreachable!("unbounded alias suffix search should find a free alias")
-}
-
-fn imports_alias(imports: &mut BTreeMap<String, String>, import_path: &str) -> String {
-    if let Some(alias) = imports.get(import_path) {
-        return alias.clone();
-    }
-    let alias = unique_import_alias(import_path, imports);
-    imports.insert(import_path.to_string(), alias.clone());
-    alias
 }
 
 /// The emitted Go identifier for an operation: the verbatim per-language
@@ -1121,7 +1068,6 @@ fn operation_io_type(
 fn render_external_models(
     models: &[&PlannedJsonType],
     model_names: &BTreeMap<String, String>,
-    shared_runtime: bool,
 ) -> Result<ModelFragments> {
     if models.is_empty() {
         return Ok(ModelFragments::default());
@@ -1129,16 +1075,6 @@ fn render_external_models(
 
     let mut imports = BTreeSet::from(["encoding/json".to_string()]);
     let mut output = String::new();
-    if !shared_runtime {
-        imports.extend([
-            "bytes".to_string(),
-            "errors".to_string(),
-            "fmt".to_string(),
-            "math".to_string(),
-            "strings".to_string(),
-        ]);
-        render_validator_core(&mut output);
-    }
     render_const_discriminators(&mut output, models)?;
     let unions = collect_go_unions(models, model_names)?;
     if !unions.is_empty() {
@@ -1159,6 +1095,9 @@ fn render_external_models(
     for model in models {
         output.push('\n');
         render_model(&mut output, model, models, model_names, &unions)?;
+    }
+    if output.contains("bytes.") {
+        imports.insert("bytes".to_string());
     }
     if output.contains("fmt.") {
         imports.insert("fmt".to_string());

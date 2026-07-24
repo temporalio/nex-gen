@@ -65,8 +65,10 @@ than in a per-input subdirectory. A single `chat.yaml` → package `chat/`
 holding `models.py`, `services.py`, the shared `definitions.py`, and the
 `__init__.py` aggregator side by side. No per-input subdirectory, and no
 `_recursive` (a cross-file cycle is impossible with one file). The
-models/services split and the shared-runtime file are still present in the
-nesting languages; Go emits one `<package>.go` with everything inline.
+models/services split and the shared-runtime file are still present in
+every language, Go included: Go always emits the one input's `<package>.go`
+alongside its own `definitions.go`, the same shared-runtime layout it uses
+for multi-input closures.
 
 ## Files per language
 
@@ -94,7 +96,7 @@ All output lands at the package root (no per-input subdirectory, no
 |---|---|
 | **Python** | `models.py` (+ `services.py`), the shared `definitions.py`, and the `__init__.py` aggregator — the same split as multi-input, flattened to the package root |
 | **TypeScript** | `models.ts` (+ `services.ts`), `definitions.ts`, `index.ts` |
-| **Go** | one `<package>.go` — types, services, and runtime inline |
+| **Go** | one `<package>.go` (types and services) + the shared `definitions.go` |
 | **Java** | one `.java` per public class + the runtime classes; nothing to aggregate |
 
 ## The shared `definitions` file
@@ -102,8 +104,8 @@ All output lands at the package root (no per-input subdirectory, no
 Holds the schema-independent runtime, defined once per package (`definitions.py`
 / `definitions.ts` / `definitions.go`; Java splits it into one class file each). For
 Python/TypeScript/Java it sits at the package root; for Go it sits in the
-one flat package. In single-input Go it is inlined into the one
-`<package>.go`.
+one flat package, always as its own `definitions.go` file regardless of how
+many input files that package aggregates.
 
 - Error types — a **single aggregating error holding a list of
   `Violation { path, reason }`**, identical in spirit across all four

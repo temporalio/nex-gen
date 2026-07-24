@@ -42,6 +42,12 @@ pub enum Error {
     #[error("refusing to overwrite existing path `{path}`")]
     OutputPathExists { path: PathBuf },
 
+    #[error("refusing to generate into `{path}`: the output path resolves to the filesystem root")]
+    OutputPathIsRoot { path: PathBuf },
+
+    #[error("output path `{path}`'s final component is not valid UTF-8")]
+    OutputPathNotUtf8 { path: PathBuf },
+
     #[error("failed to run formatter `{command}` for `{path}`: {source}")]
     RunFormatter {
         path: PathBuf,
@@ -263,6 +269,20 @@ pub enum Error {
 
     #[error("Go proto conversion for {context} is not supported: {reason}")]
     UnsupportedGoProtoConversion { context: String, reason: String },
+
+    #[error(
+        "`@nexus.namespace go=\"{namespace}\"` implies Go package `{expected_package}`, but the output directory resolves to package `{actual_package}`; point `--output` at a directory named `{expected_package}`"
+    )]
+    GoNamespacePackageMismatch {
+        namespace: String,
+        expected_package: String,
+        actual_package: String,
+    },
+
+    #[error(
+        "output directory name `{output_dir_name}` has no ASCII letters, digits, or underscores to build a Go package name from; rename the output directory"
+    )]
+    GoPackageNameEmpty { output_dir_name: String },
 
     #[error("type override `{type_name}` cannot use `{property}`")]
     UnsupportedTypeOverrideProperty {

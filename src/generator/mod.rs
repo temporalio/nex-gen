@@ -192,7 +192,7 @@ pub fn generate_files_for_tree_with_mode(
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct GenerateFilesOptions {
-    pub(crate) go_import_root: Option<String>,
+    pub(crate) go_output_dir_name: String,
     pub(crate) java_package_root: Option<String>,
     /// The TypeScript temporal representation (`--date-time-types`); ignored by
     /// the non-TypeScript backends.
@@ -293,7 +293,7 @@ fn generate_go_tree(
         tree,
         support,
         &go::GoOptions {
-            import_root: options.go_import_root,
+            output_dir_name: options.go_output_dir_name,
             ..go::GoOptions::default()
         },
         mode,

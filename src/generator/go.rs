@@ -47,12 +47,11 @@ const GO_DOC_COMMENT_LINE_LENGTH: usize = 88;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GoOptions {
-    pub(crate) import_root: Option<String>,
-    pub(crate) module_output_paths: BTreeMap<ModulePath, ModulePath>,
-    /// Forces the generated package name, overriding the name derived from the
-    /// spec. Used by the flat Go tree layout so every input file in the closure
-    /// renders into the same package.
-    pub(crate) package_name_override: Option<String>,
+    /// The output directory's basename, matching the Go convention that a
+    /// package's name is its directory's name. Always a real, valid-UTF-8,
+    /// non-root name -- `generate_to_file` resolves and validates it before
+    /// generation runs.
+    pub(crate) output_dir_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -492,92 +491,60 @@ fn planned_value_type(value_type: &PlannedType, spec: &PlannedSpec) -> PlannedVa
 pub(in crate::generator) struct GoPackageContext {
     package_name: String,
     import_path: Option<String>,
-    import_root: Option<String>,
-    module_path: ModulePath,
-    module_output_paths: BTreeMap<ModulePath, ModulePath>,
 }
 
 impl GoPackageContext {
-    fn new(api_plan: &PlannedSpec, options: &GoOptions) -> Self {
-        let has_json_models = api_plan
-            .external_types()
-            .any(|(_, binding)| matches!(binding.external_type, ExternalTypeSpec::Json(_)));
-        let explicit_import_path = api_plan
+    fn new(api_plan: &PlannedSpec, options: &GoOptions) -> Result<Self> {
+        // `@nexus.namespace go="..."` is WIT-only (the JSON schema parser
+        // never populates a per-language namespace), and it names an
+        // *existing* Go package this generated code is meant to become part
+        // of -- so any reference to that import path elsewhere in the
+        // generated code is a self-reference, not an import, and must be
+        // unqualified accordingly.
+        let import_path = api_plan
             .services
             .first()
             .and_then(|service| service.namespace.for_language(Language::Go))
             .map(str::to_string);
-        let import_path = explicit_import_path.or_else(|| {
-            options
-                .import_root
-                .as_deref()
-                .map(|root| go_module_import_path(root, &api_plan.module_path))
-        });
-        let package_name = if let Some(override_name) = &options.package_name_override {
-            go_package_name(override_name)
-        } else {
-            Self::derive_package_name(api_plan, has_json_models, import_path.as_deref())
-        };
+        let package_name = Self::derive_package_name(&options.output_dir_name)?;
 
-        Self {
-            package_name,
-            import_path,
-            import_root: options.import_root.clone(),
-            module_path: api_plan.module_path.clone(),
-            module_output_paths: options.module_output_paths.clone(),
-        }
-    }
-
-    fn derive_package_name(
-        api_plan: &PlannedSpec,
-        has_json_models: bool,
-        import_path: Option<&str>,
-    ) -> String {
-        import_path.map_or_else(
-            || {
-                api_plan
-                    .services
-                    .first()
-                    .and_then(|service| service.endpoint.as_deref())
-                    .map(go_package_name)
-                    .or_else(|| {
-                        if has_json_models {
-                            api_plan
-                                .module_path
-                                .0
-                                .last()
-                                .map(|segment| go_package_name(segment))
-                                .or_else(|| {
-                                    api_plan
-                                        .services
-                                        .first()
-                                        .map(|service| {
-                                            service
-                                                .name
-                                                .strip_suffix("Service")
-                                                .unwrap_or(&service.name)
-                                                .to_string()
-                                        })
-                                        .map(|name| go_package_name(&name))
-                                })
-                        } else {
-                            api_plan
-                                .services
-                                .first()
-                                .map(|service| go_package_name(&service.wire_name))
-                        }
-                    })
-                    .unwrap_or_else(|| "api".to_string())
-            },
-            |import_path| {
+        if let Some(import_path) = &import_path {
+            let namespace_package_name = go_package_name(
                 import_path
                     .rsplit('/')
                     .next()
                     .filter(|segment| !segment.is_empty())
-                    .map(go_package_name)
-                    .unwrap_or_else(|| "api".to_string())
-            },
-        )
+                    .unwrap_or(import_path),
+            );
+            if namespace_package_name != package_name {
+                return Err(Error::GoNamespacePackageMismatch {
+                    namespace: import_path.clone(),
+                    expected_package: namespace_package_name,
+                    actual_package: package_name,
+                });
+            }
+        }
+
+        Ok(Self {
+            package_name,
+            import_path,
+        })
+    }
+
+    /// The package name is the output directory's basename, matching the Go
+    /// convention that a package's name is its directory's name.
+    /// `go_package_name` strips everything but ASCII alphanumerics and `_`,
+    /// so a directory name with none of those (e.g. non-ASCII or
+    /// punctuation-only) sanitizes to empty; that's rejected outright rather
+    /// than guessed at.
+    fn derive_package_name(output_dir_name: &str) -> Result<String> {
+        let package_name = go_package_name(output_dir_name);
+        if package_name.is_empty() {
+            return Err(Error::GoPackageNameEmpty {
+                output_dir_name: output_dir_name.to_string(),
+            });
+        }
+        Ok(package_name)
     }
 
     fn is_self_import(&self, import_path: &str) -> bool {
@@ -636,48 +603,6 @@ impl GoPackageContext {
         let qualifier = format!("{}.", self.package_name);
         code_expr.replace(&qualifier, "")
     }
-
-    pub(in crate::generator) fn module_import_path(
-        &self,
-        source_module_path: &ModulePath,
-    ) -> Result<Option<String>> {
-        let output_module_path = self.output_module_path(source_module_path);
-        if output_module_path == &self.module_path {
-            return Ok(None);
-        }
-        let Some(import_root) = self.import_root.as_deref() else {
-            return Err(Error::InvalidJsonSchema {
-                path: PathBuf::from("<go-tree-generator>"),
-                reason: format!(
-                    "Go tree output references module `{}` from module `{}`, but no Go module import root could be inferred from the output path",
-                    source_module_path.as_module_key(),
-                    self.module_path.as_module_key(),
-                ),
-            });
-        };
-        Ok(Some(go_module_import_path(import_root, output_module_path)))
-    }
-
-    /// Whether the schema-independent runtime lives in a shared `definitions.go`
-    /// in this package rather than inlined into a single generated file. True
-    /// for the flat Go tree layout (multi-input closures), false for the
-    /// single-input special case.
-    pub(in crate::generator) fn has_shared_runtime(&self) -> bool {
-        !self.module_output_paths.is_empty()
-    }
-
-    fn output_module_path<'a>(&'a self, source_module_path: &'a ModulePath) -> &'a ModulePath {
-        self.module_output_paths
-            .get(source_module_path)
-            .unwrap_or(source_module_path)
-    }
-}
-
-fn go_module_import_path(import_root: &str, module_path: &ModulePath) -> String {
-    if module_path.is_root() {
-        return import_root.to_string();
-    }
-    format!("{}/{}", import_root, module_path.as_module_key())
 }
 
 /// Entry point for the Go code generator.
@@ -702,9 +627,31 @@ pub(crate) fn generate_tree(
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     match &tree.root {
-        ApiSpecNode::Leaf(leaf) => generate(&leaf.spec, &support.fragments, options, mode),
+        ApiSpecNode::Leaf(leaf) => generate_single_leaf(leaf, support, options, mode),
         ApiSpecNode::Branch(branch) => generate_branch_tree(branch, support, options, mode),
     }
+}
+
+/// Generates a closure of exactly one input file. Go's package layout is
+/// uniform regardless of closure size, so -- just like the multi-input
+/// flattened layout -- the schema-independent runtime lives in its own
+/// `definitions.go` alongside the one model file, rather than inlined into it.
+fn generate_single_leaf(
+    leaf: &ApiSpecLeaf<PlannedTypeFamily>,
+    support: &SupportFiles,
+    options: &GoOptions,
+    mode: GenerationMode,
+) -> Result<GeneratedFiles> {
+    let mut generated = generate(&leaf.spec, &support.fragments, options, mode)?;
+    if go_tree_has_json_models(&[leaf]) {
+        let package_name = GoPackageContext::new(&leaf.spec, options)?.package_name;
+        insert_generated_file(
+            &mut generated.files,
+            PathBuf::from("definitions.go"),
+            json::render_definitions_file(&package_name),
+        )?;
+    }
+    Ok(generated)
 }
 
 fn generate_branch_tree(
@@ -722,28 +669,17 @@ fn generate_branch_tree(
         });
     };
 
-    // Go flattens every input file in the closure into one flat package. Map
-    // every leaf module onto the package root so that references between files
-    // -- including cross-directory cycles -- resolve as within-package
-    // (unqualified) references, which the Go compiler handles natively. This is
-    // also what lets the schema-independent runtime live once in the package.
+    // Go flattens every input file in the closure into one flat package, so
+    // references between files -- including cross-directory cycles --
+    // resolve as within-package (unqualified) references, which the Go
+    // compiler handles natively. This is also what lets the
+    // schema-independent runtime live once in the package.
     let root = ModulePath::default();
-    let module_output_paths = leaves
-        .iter()
-        .map(|leaf| (leaf.module_path.clone(), root.clone()))
-        .collect::<BTreeMap<ModulePath, ModulePath>>();
 
-    // Derive the single package name once (from the import root, falling back to
-    // the spec heuristics), then force every file to render into it.
-    let package_name = {
-        let mut root_spec = leaves[0].spec.clone();
-        root_spec.module_path = root.clone();
-        let mut probe_options = options.clone();
-        probe_options.module_output_paths = module_output_paths.clone();
-        GoPackageContext::new(&root_spec, &probe_options)
-            .package_name
-            .clone()
-    };
+    // Every file derives its package name from the shared output directory, so
+    // the whole closure renders into one package. Derive it once here for the
+    // shared `definitions.go` runtime file below.
+    let package_name = GoPackageContext::new(&leaves[0].spec, options)?.package_name;
 
     let mut files = BTreeMap::new();
     let mut warnings = Vec::new();
@@ -753,10 +689,7 @@ fn generate_branch_tree(
         // references to sibling files are unqualified within the one package.
         let mut leaf_spec = leaf.spec.clone();
         leaf_spec.module_path = root.clone();
-        let mut leaf_options = options.clone();
-        leaf_options.module_output_paths = module_output_paths.clone();
-        leaf_options.package_name_override = Some(package_name.clone());
-        let generated = generate(&leaf_spec, &[], &leaf_options, mode)?;
+        let generated = generate(&leaf_spec, &[], options, mode)?;
         warnings.extend(generated.warnings);
 
         // `generate` names the single JSON member file `<package>.go`; re-key it
@@ -883,10 +816,7 @@ impl GoExternalModels {
             .external_types()
             .any(|(_, binding)| matches!(binding.external_type, ExternalTypeSpec::Json(_)))
         {
-            Self::Json(json::ModelBackend::new(
-                package,
-                mode == GenerationMode::NativeApi,
-            ))
+            Self::Json(json::ModelBackend::new(mode == GenerationMode::NativeApi))
         } else {
             Self::Proto(proto::ModelBackend::new(package))
         }
@@ -917,7 +847,10 @@ impl GoExternalModels {
 
     fn imports(&self) -> Vec<(String, String)> {
         match self {
-            Self::Json(backend) => backend.imports(),
+            // Go flattens every JSON-schema input file into one flat
+            // package, so there is never a real cross-package import to
+            // emit here.
+            Self::Json(_) => Vec::new(),
             Self::Proto(backend) => backend
                 .imports()
                 .paths()
@@ -1006,7 +939,7 @@ struct ApiPlanner<'a> {
 
 impl<'a> ApiPlanner<'a> {
     fn new(api_plan: &'a PlannedSpec, options: &GoOptions, mode: GenerationMode) -> Result<Self> {
-        let package = GoPackageContext::new(api_plan, options);
+        let package = GoPackageContext::new(api_plan, options)?;
         let mut imports = BTreeSet::new();
 
         // Re-scan all resolved type expressions to collect import paths.

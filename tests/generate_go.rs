@@ -212,9 +212,11 @@ fn cli_generates_go_support_file_from_parameter() {
     );
     // The explicit support file is emitted even though the WIT-direct
     // user-service package performs no proto conversion, and its package
-    // declaration is rewritten to the generated package name.
+    // declaration is rewritten to the generated package name, which is the
+    // output directory's basename (Go convention: package name = directory
+    // name).
     let support_contents = fs::read_to_string(output_path.join("support.go")).unwrap();
-    assert!(support_contents.starts_with("package userservice\n"));
+    assert!(support_contents.starts_with("package output\n"));
     assert!(support_contents.contains("func CustomSupportHook() string"));
     assert!(output_path.join("userservice.go").is_file());
     assert!(!output_path.join("api.go").exists());
@@ -225,7 +227,11 @@ fn cli_generates_go_support_file_from_parameter() {
 fn cli_generates_go_with_package_self_imports_removed() {
     let root = project_root();
     let temp_dir = unique_output_path("go-namespace");
-    let output_path = temp_dir.join("output");
+    // The output directory's basename must match the last path segment of
+    // `@nexus.namespace go="..."` -- the generated package name always comes
+    // from the output directory, and this generated code is declared to live
+    // inside the real `go.temporal.io/sdk/workflow` package.
+    let output_path = temp_dir.join("workflow");
     fs::create_dir_all(&temp_dir).unwrap();
     let temp_input_path = temp_dir.join("user-service.wit");
     let input = fs::read_to_string(input_path(&root, "user-service"))
@@ -263,6 +269,68 @@ fn cli_generates_go_with_package_self_imports_removed() {
     assert!(!api.contains("const GetUserOp"));
     assert!(api.contains("NexusOperationOptions{}"));
     fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn cli_rejects_go_output_directory_mismatched_with_namespace() {
+    let root = project_root();
+    let temp_dir = unique_output_path("go-namespace-mismatch");
+    // Deliberately mismatched: the namespace says `workflow`, but the output
+    // directory is named `output`.
+    let output_path = temp_dir.join("output");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let temp_input_path = temp_dir.join("user-service.wit");
+    let input = fs::read_to_string(input_path(&root, "user-service"))
+        .unwrap()
+        .replace(
+            "interface user-service {",
+            "/// @nexus.namespace go=\"go.temporal.io/sdk/workflow\"\ninterface user-service {",
+        );
+    fs::write(&temp_input_path, input).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args([
+            "generate",
+            "go",
+            "--input",
+            temp_input_path.to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("go.temporal.io/sdk/workflow"), "{stderr}");
+    assert!(stderr.contains("package `workflow`"), "{stderr}");
+    assert!(stderr.contains("package `output`"), "{stderr}");
+    assert!(!output_path.exists());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn cli_rejects_output_at_filesystem_root() {
+    // `write_generated_files` removes an existing output directory before
+    // writing; generating into `/` must be rejected up front rather than
+    // ever risking `fs::remove_dir_all` on the filesystem root. This check
+    // is language-agnostic, exercised here via `generate go`.
+    let root = project_root();
+    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+        .args([
+            "generate",
+            "go",
+            "--input",
+            input_path(&root, "user-service").to_str().unwrap(),
+            "--output",
+            "/",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("filesystem root"), "{stderr}");
 }
 
 #[test]
@@ -641,6 +709,31 @@ fn go_json_generation_matches_checked_in_output() {
             fs::remove_dir_all(temp_dir).unwrap();
         }
     }
+}
+
+#[test]
+fn go_json_package_name_derives_from_output_directory_name() {
+    // The Go package name for a JSON-schema input must come from the output
+    // directory's basename (Go convention: package name = directory name),
+    // not from an unrelated signal like the input's service name.
+    let root = project_root();
+    let temp_dir = unique_output_path("go-json-package-name-fallback");
+    let output_path = temp_dir.join("widgets");
+    generate_to_file(&GenerateRequest {
+        language: nex_gen::language::Language::Go,
+        input_paths: vec![json_input_path(&root, "chat")],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: true,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let generated = fs::read_to_string(output_path.join("widgets.go")).unwrap();
+    assert!(generated.starts_with("// Code generated by nex-gen. DO NOT EDIT.\npackage widgets\n"));
+    fs::remove_dir_all(temp_dir).unwrap();
 }
 
 #[test]
