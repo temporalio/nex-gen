@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   AddressMapper,
   AttributesMapper,
-  ContactMapper,
+  ContactTsMapper,
   DEFAULT_DEBUG,
   DEFAULT_GREETING,
   DEFAULT_RETRIES,
@@ -393,7 +393,7 @@ describe("json-schema showcase generated definitions", () => {
     // Valid map and object round-trip.
     const attributes = expectRoundTrip("attributes.json", new AttributesMapper());
     expect(attributes.additionalProperties).toEqual({ host: "a", port: "8080" });
-    const contact = expectRoundTrip("contact.json", new ContactMapper());
+    const contact = expectRoundTrip("contact.json", new ContactTsMapper());
     expect(contact.shippingStreet).toBe("1 Main St");
     expect(contact.shippingZip).toBe("90210");
 
@@ -412,10 +412,10 @@ describe("json-schema showcase generated definitions", () => {
 
     // dependentRequired — a shipping street present without a shipping zip.
     expect(() =>
-      new ContactMapper().fromIntermediate({ shippingStreet: "1 Main St" }),
+      new ContactTsMapper().fromIntermediate({ shippingStreet: "1 Main St" }),
     ).toThrow(/property "shippingZip" is required when "shippingStreet" is present/);
     // minProperties:1 on a declared-property object — an empty object.
-    expect(() => new ContactMapper().fromIntermediate({})).toThrow(
+    expect(() => new ContactTsMapper().fromIntermediate({})).toThrow(
       /must have at least 1 properties, got 0/,
     );
   });
@@ -521,7 +521,7 @@ describe("json-schema showcase generated definitions", () => {
 
     // Object dependentRequired: a shipping street with no zip fails to serialize.
     expect(() =>
-      new ContactMapper().toIntermediate({
+      new ContactTsMapper().toIntermediate({
         shippingStreet: "1 Main St",
         additionalProperties: {},
       }),

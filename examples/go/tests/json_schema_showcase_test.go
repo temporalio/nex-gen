@@ -393,7 +393,7 @@ func TestJSONSchemaShowcaseObjectConstraints(t *testing.T) {
 	require.Equal(t, "a", attributes.AdditionalProperties["host"])
 	require.Equal(t, "8080", attributes.AdditionalProperties["port"])
 
-	contact := roundTripJSONEq[apishowcase.Contact](t, dc, "showcase", "contact.json")
+	contact := roundTripJSONEq[apishowcase.ContactGo](t, dc, "showcase", "contact.json")
 	require.NotNil(t, contact.ShippingStreet)
 	require.Equal(t, "1 Main St", *contact.ShippingStreet)
 	require.NotNil(t, contact.ShippingZip)
@@ -415,7 +415,7 @@ func TestJSONSchemaShowcaseObjectConstraints(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `invalid property name "toolongkey": must have length <= 8, got 10`)
 
-	var out apishowcase.Contact
+	var out apishowcase.ContactGo
 	// A shipping street present without a shipping zip (dependentRequired).
 	err = dc.FromPayload(jsonPayload([]byte(`{"shippingStreet":"1 Main St"}`)), &out)
 	require.Error(t, err)
@@ -429,7 +429,7 @@ func TestJSONSchemaShowcaseObjectConstraints(t *testing.T) {
 	// Serialize side (P12): an in-memory Contact with a shipping street but no
 	// zip fails to marshal.
 	street := "1 Main St"
-	badContact := apishowcase.Contact{ShippingStreet: &street}
+	badContact := apishowcase.ContactGo{ShippingStreet: &street}
 	_, serr := dc.ToPayload(badContact)
 	require.Error(t, serr)
 	require.Contains(t, serr.Error(), `property "shippingZip" is required when "shippingStreet" is present`)
@@ -485,9 +485,9 @@ func TestJSONSchemaShowcaseClosedValues(t *testing.T) {
 
 	full := roundTripJSONEq[apishowcase.Showcase](t, dc, "showcase", "showcase-full.json")
 	require.Equal(t, apishowcase.ShowcaseKindShowcase, full.Kind)
-	require.Equal(t, apishowcase.ShowcaseRevision1, full.Revision)
+	require.Equal(t, apishowcase.RevisionGo, full.Revision)
 	require.Equal(t, apishowcase.ShowcaseEnabledTrue, full.Enabled)
-	require.Equal(t, apishowcase.ShowcaseStatusActive, full.Status)
+	require.Equal(t, apishowcase.ActiveGo, full.Status)
 	require.Equal(t, apishowcase.ShowcaseTier2, full.Tier)
 	require.Equal(t, apishowcase.ShowcaseScale1_5, full.Scale)
 

@@ -12,6 +12,9 @@ use crate::generator::go::{
     GoPackageContext, PlannedMessageSource, PlannedMessageType, PlannedValueType, go_field_name,
     go_package_name, go_string_literal,
 };
+use crate::generator::json_schema::build_json_name_manifest;
+use crate::language::Language;
+use crate::parser::NameManifest;
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, OperationSpec, RecordSpec, TypeSpec};
 
@@ -73,6 +76,10 @@ struct Schema {
     enum_values: Option<Vec<Value>>,
     #[serde(rename = "x-go-name")]
     x_go_name: Option<String>,
+    #[serde(rename = "x-go-const-name")]
+    x_go_const_name: Option<String>,
+    #[serde(rename = "x-go-enum-names")]
+    x_go_enum_names: Option<IndexMap<String, String>>,
 }
 
 impl Schema {
@@ -698,6 +705,7 @@ pub(in crate::generator) struct ModelBackend {
     local_json_models: Vec<PlannedJsonType>,
     model_names: BTreeMap<String, String>,
     imports: BTreeMap<String, String>,
+    manifest: NameManifest,
 }
 
 impl ModelBackend {
@@ -713,6 +721,7 @@ impl ModelBackend {
             local_json_models: Vec::new(),
             model_names: BTreeMap::new(),
             imports: BTreeMap::new(),
+            manifest: NameManifest::default(),
         }
     }
 }
@@ -722,12 +731,23 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
     type WireConversion = ();
 
     fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+        // Resolve every emitted identifier once (overrides applied), then adopt
+        // the resolved type name as each model's `model_name` so every
+        // downstream derivation (struct decl, unions, const defined types,
+        // `$ref` targets) follows the same identifier — no re-derivation.
+        self.manifest = build_json_name_manifest(Language::Go, api_plan)?;
         self.json_models = api_plan
             .external_types()
             .map(|(_, binding)| binding)
             .filter_map(|binding| match &binding.external_type {
                 ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
                 _ => None,
+            })
+            .map(|mut json_type| {
+                if let Some(resolved) = self.manifest.type_name(&json_type.full_name) {
+                    json_type.model_name = resolved.to_string();
+                }
+                json_type
             })
             .collect();
         self.local_json_models.clear();
@@ -737,21 +757,25 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
         let mut aliases = BTreeMap::<String, String>::new();
         for model in &self.json_models {
             let module_path = model.module_path.as_ref().unwrap_or(&api_plan.module_path);
-            if let Some(import_path) = self.package.module_import_path(module_path)? {
-                let alias = aliases
-                    .entry(import_path.clone())
-                    .or_insert_with(|| unique_import_alias(&import_path, &self.imports))
-                    .clone();
-                self.imports.insert(import_path, alias.clone());
-                self.model_names.insert(
-                    model.full_name.clone(),
-                    format!("{alias}.{}", model.model_name),
-                );
-            } else {
-                self.local_json_models.push(model.clone());
-                self.model_names
-                    .insert(model.full_name.clone(), model.model_name.clone());
-            }
+            let emitted_name =
+                if let Some(import_path) = self.package.module_import_path(module_path)? {
+                    let alias = aliases
+                        .entry(import_path.clone())
+                        .or_insert_with(|| unique_import_alias(&import_path, &self.imports))
+                        .clone();
+                    self.imports.insert(import_path, alias.clone());
+                    format!("{alias}.{}", model.model_name)
+                } else {
+                    self.local_json_models.push(model.clone());
+                    model.model_name.clone()
+                };
+            // A resolved `$ref` is `#/$defs/<full_name>`; register that form too
+            // so `reference_model_name` resolves through the manifest instead of
+            // recasing the ref segment (which would drop a type override).
+            self.model_names
+                .insert(model.full_name.clone(), emitted_name.clone());
+            self.model_names
+                .insert(format!("#/$defs/{}", model.full_name), emitted_name);
         }
         if self.include_service_imports && !api_plan.services.is_empty() {
             for (module_path, names) in &api_plan.data.module_imports {
@@ -852,7 +876,10 @@ impl ModelBackend {
         }
         let mut output = String::new();
         for service in &api_plan.services {
-            let service_var = go_field_name(&service.name);
+            let service_var = service
+                .code_name
+                .clone()
+                .unwrap_or_else(|| go_field_name(&service.name));
             render_go_doc_comment(
                 &mut output,
                 "",
@@ -867,7 +894,7 @@ impl ModelBackend {
             output.push_str(" = struct {\n");
             output.push_str("\tServiceName string\n");
             for operation in &service.operations {
-                let operation_field = go_field_name(&operation.name);
+                let operation_field = go_operation_field(operation);
                 render_go_doc_comment(
                     &mut output,
                     "\t",
@@ -889,7 +916,7 @@ impl ModelBackend {
             output.push_str(",\n");
             for operation in &service.operations {
                 output.push('\t');
-                output.push_str(&go_field_name(&operation.name));
+                output.push_str(&go_operation_field(operation));
                 output.push_str(": nexus.NewOperationReference[");
                 output.push_str(&operation_io_type(
                     operation.input.as_ref(),
@@ -943,6 +970,16 @@ fn imports_alias(imports: &mut BTreeMap<String, String>, import_path: &str) -> S
     alias
 }
 
+/// The emitted Go identifier for an operation: the verbatim per-language
+/// `x-<lang>-name` override when present, else the derived field name. Mirrors
+/// the service `code_name` handling; never affects the wire name.
+fn go_operation_field(operation: &crate::spec::OperationSpec<PlannedTypeFamily>) -> String {
+    operation
+        .code_name
+        .clone()
+        .unwrap_or_else(|| go_field_name(&operation.name))
+}
+
 fn render_service_client(
     output: &mut String,
     service: &crate::spec::ServiceSpec<PlannedTypeFamily>,
@@ -950,7 +987,10 @@ fn render_service_client(
     package: &GoPackageContext,
     backend: &ModelBackend,
 ) -> Result<()> {
-    let service_var = go_field_name(&service.name);
+    let service_var = service
+        .code_name
+        .clone()
+        .unwrap_or_else(|| go_field_name(&service.name));
     let client_name = format!("{service_var}Client");
     render_go_doc_comment(
         output,
@@ -981,7 +1021,7 @@ fn render_service_client(
     output.push_str(".ServiceName)}\n}\n\n");
 
     for operation in &service.operations {
-        let operation_field = go_field_name(&operation.name);
+        let operation_field = go_operation_field(operation);
         render_go_doc_comment(
             output,
             "",
@@ -1274,7 +1314,7 @@ fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType])
                 .iter()
                 .map(|value| {
                     (
-                        go_closed_value_name(&model.model_name, field_name, value),
+                        go_closed_value_name(property, &model.model_name, field_name, value),
                         go_closed_value_literal(value),
                     )
                 })
@@ -3533,7 +3573,32 @@ fn go_value_suffix(value: &Value) -> String {
     }
 }
 
-fn go_closed_value_name(model_name: &str, field_name: &str, value: &Value) -> String {
+/// The verbatim value-constant override for a `const`/`enum` value, if the
+/// schema carries one: `x-go-const-name` replaces the single `const`'s constant,
+/// and an `x-go-enum-names` entry (keyed by the wire value's string form)
+/// replaces an enum member's constant. Mirrors `value_constant_override` in
+/// `src/parser/json_schema.rs` so the P15 collision pass and emission agree —
+/// keep the two lookups identical (const gates on `const`, else enum by string
+/// key).
+fn go_value_constant_override<'a>(schema: &'a Schema, value: &Value) -> Option<&'a str> {
+    if schema.const_value.is_some() {
+        schema.x_go_const_name.as_deref()
+    } else if let (Some(map), Value::String(key)) = (&schema.x_go_enum_names, value) {
+        map.get(key).map(String::as_str)
+    } else {
+        None
+    }
+}
+
+fn go_closed_value_name(
+    schema: &Schema,
+    model_name: &str,
+    field_name: &str,
+    value: &Value,
+) -> String {
+    if let Some(name) = go_value_constant_override(schema, value) {
+        return name.to_string();
+    }
     format!(
         "{}{}",
         const_type_name(model_name, field_name),
@@ -3610,7 +3675,7 @@ fn render_go_closed_validate(
     let values = closed_values(property);
     let names = values
         .iter()
-        .map(|value| go_closed_value_name(model_name, json_name, value))
+        .map(|value| go_closed_value_name(property, model_name, json_name, value))
         .collect::<Vec<_>>();
     let (subject, indent) = if required {
         (field.clone(), "\t".to_string())
@@ -3682,7 +3747,7 @@ fn render_closed_value_unmarshal(
     let values = closed_values(property);
     let names = values
         .iter()
-        .map(|value| go_closed_value_name(model_name, json_name, value))
+        .map(|value| go_closed_value_name(property, model_name, json_name, value))
         .collect::<Vec<_>>();
     let assign = if required { "typed" } else { "&typed" };
     let reason = go_closed_reason(&values, "typed");

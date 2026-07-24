@@ -13,24 +13,36 @@ from .models import (
 
 
 @service(name="example.showcase.v1.ShowcaseService")
-class ShowcaseService:
-    """Fetch the showcase payload."""
+class ShowcaseServicePy:
+    """Fetch the showcase payload. Also exercises the service-level `x-<lang>-name`
+    override: the emitted service code identifier is renamed to the derived name plus a
+    per-language suffix (Go var `ShowcaseServiceGo`, TS const `showcaseServiceTs`,
+    Python class `ShowcaseServicePy`, Java interface `ShowcaseServiceJava`) while the
+    wire service name / `@Service` / `ServiceName` string stays
+    `example.showcase.v1.ShowcaseService`.
+    """
 
-    get_showcase: Operation[
+    get_showcase_py: Operation[
         GetShowcaseInput,
         Showcase,
     ] = Operation(name="GetShowcase")
-    """Fetch a showcase by id."""
+    """Fetch a showcase by id. Also exercises the operation-level `x-<lang>-name` override:
+    the emitted operation code identifier is renamed to the derived name plus a
+    per-language suffix (Go `GetShowcaseGo`, TS `getShowcaseTs`, Python
+    `get_showcase_py`, Java `getShowcaseJava`) while the wire operation name stays
+    `GetShowcase` and the synthesized I/O type stays `GetShowcaseInput` (derived from
+    the operation key, not the override).
+    """
 
 
-class ShowcaseServiceClient:
+class ShowcaseServicePyClient:
     def __init__(self, endpoint: str) -> None:
         self._nexus_client: typing.Any = temporalio.workflow.create_nexus_client(
             service="example.showcase.v1.ShowcaseService",
             endpoint=endpoint,
         )
 
-    async def get_showcase(
+    async def get_showcase_py(
         self,
         request: GetShowcaseInput,
     ) -> temporalio.workflow.NexusOperationHandle[Showcase]:

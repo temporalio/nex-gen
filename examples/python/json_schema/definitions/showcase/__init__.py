@@ -6,7 +6,7 @@ from .models import (
     Address,
     Attributes,
     Circle,
-    Contact,
+    ContactPy,
     GetShowcaseInput,
     Labels,
     Settings,
@@ -16,13 +16,13 @@ from .models import (
     Widget,
     WidgetBase,
 )
-from .services import ShowcaseService
+from .services import ShowcaseServicePy
 
 __all__ = [
     "Address",
     "Attributes",
     "Circle",
-    "Contact",
+    "ContactPy",
     "GetShowcaseInput",
     "Labels",
     "Settings",
@@ -31,5 +31,5 @@ __all__ = [
     "Square",
     "Widget",
     "WidgetBase",
-    "ShowcaseService",
+    "ShowcaseServicePy",
 ]

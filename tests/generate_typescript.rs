@@ -307,9 +307,9 @@ fn typescript_json_example_generation_matches_checked_in_output() {
             assert!(all.contains("Retry budget"));
             // `x-ts-name` override (Stage 4): the interface member + (de)serialize
             // use the override while the wire key stays `legacyId`.
-            assert!(all.contains("legacyID?: string;"));
-            assert!(all.contains("legacyID = raw.legacyId;"));
-            assert!(all.contains("out.legacyId = value.legacyID;"));
+            assert!(all.contains("legacyIdTs?: string;"));
+            assert!(all.contains("legacyIdTs = raw.legacyId;"));
+            assert!(all.contains("out.legacyId = value.legacyIdTs;"));
         }
         fs::remove_dir_all(output_path).unwrap();
     }

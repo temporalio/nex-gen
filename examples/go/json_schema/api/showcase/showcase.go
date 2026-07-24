@@ -16,29 +16,29 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// Fetch the showcase payload.
-var ShowcaseService = struct {
+// Fetch the showcase payload. Also exercises the service-level `x-<lang>-name` override: the emitted service code identifier is renamed to the derived name plus a per-language suffix (Go var `ShowcaseServiceGo`, TS const `showcaseServiceTs`, Python class `ShowcaseServicePy`, Java interface `ShowcaseServiceJava`) while the wire service name / `@Service` / `ServiceName` string stays `example.showcase.v1.ShowcaseService`.
+var ShowcaseServiceGo = struct {
 	ServiceName string
-	// Fetch a showcase by id.
-	GetShowcase nexus.OperationReference[GetShowcaseInput, Showcase]
+	// Fetch a showcase by id. Also exercises the operation-level `x-<lang>-name` override: the emitted operation code identifier is renamed to the derived name plus a per-language suffix (Go `GetShowcaseGo`, TS `getShowcaseTs`, Python `get_showcase_py`, Java `getShowcaseJava`) while the wire operation name stays `GetShowcase` and the synthesized I/O type stays `GetShowcaseInput` (derived from the operation key, not the override).
+	GetShowcaseGo nexus.OperationReference[GetShowcaseInput, Showcase]
 }{
-	ServiceName: "example.showcase.v1.ShowcaseService",
-	GetShowcase: nexus.NewOperationReference[GetShowcaseInput, Showcase]("GetShowcase"),
+	ServiceName:   "example.showcase.v1.ShowcaseService",
+	GetShowcaseGo: nexus.NewOperationReference[GetShowcaseInput, Showcase]("GetShowcase"),
 }
 
-// Fetch the showcase payload.
-type ShowcaseServiceClient struct {
+// Fetch the showcase payload. Also exercises the service-level `x-<lang>-name` override: the emitted service code identifier is renamed to the derived name plus a per-language suffix (Go var `ShowcaseServiceGo`, TS const `showcaseServiceTs`, Python class `ShowcaseServicePy`, Java interface `ShowcaseServiceJava`) while the wire service name / `@Service` / `ServiceName` string stays `example.showcase.v1.ShowcaseService`.
+type ShowcaseServiceGoClient struct {
 	client workflow.NexusClient
 }
 
-// NewShowcaseServiceClient constructs a ShowcaseServiceClient bound to the given Nexus endpoint.
-func NewShowcaseServiceClient(endpoint string) *ShowcaseServiceClient {
-	return &ShowcaseServiceClient{client: workflow.NewNexusClient(endpoint, ShowcaseService.ServiceName)}
+// NewShowcaseServiceGoClient constructs a ShowcaseServiceGoClient bound to the given Nexus endpoint.
+func NewShowcaseServiceGoClient(endpoint string) *ShowcaseServiceGoClient {
+	return &ShowcaseServiceGoClient{client: workflow.NewNexusClient(endpoint, ShowcaseServiceGo.ServiceName)}
 }
 
-// Fetch a showcase by id.
-func (c *ShowcaseServiceClient) GetShowcase(ctx workflow.Context, request GetShowcaseInput) workflow.Future {
-	return c.client.ExecuteOperation(ctx, ShowcaseService.GetShowcase, request, workflow.NexusOperationOptions{})
+// Fetch a showcase by id. Also exercises the operation-level `x-<lang>-name` override: the emitted operation code identifier is renamed to the derived name plus a per-language suffix (Go `GetShowcaseGo`, TS `getShowcaseTs`, Python `get_showcase_py`, Java `getShowcaseJava`) while the wire operation name stays `GetShowcase` and the synthesized I/O type stays `GetShowcaseInput` (derived from the operation key, not the override).
+func (c *ShowcaseServiceGoClient) GetShowcaseGo(ctx workflow.Context, request GetShowcaseInput) workflow.Future {
+	return c.client.ExecuteOperation(ctx, ShowcaseServiceGo.GetShowcaseGo, request, workflow.NexusOperationOptions{})
 }
 
 // Violation is a single constraint failure. Path is the JSON member path
@@ -253,11 +253,11 @@ type ShowcaseKind string
 // ShowcaseKindShowcase is the ShowcaseKind value "showcase".
 const ShowcaseKindShowcase ShowcaseKind = "showcase"
 
-// ShowcaseRevision Integer const; always 1.
+// ShowcaseRevision Integer const; always 1. Also exercises the single-`const` value override: `x-go-const-name`/`x-java-const-name` rename the emitted constant to the derived name plus a per-language suffix (Go `RevisionGo`, Java `REVISION_JAVA`) while the wire value stays `1`. TS/Python are inert here (no const override keyword — the value is emitted as a plain literal type).
 type ShowcaseRevision int64
 
-// ShowcaseRevision1 is the ShowcaseRevision value 1.
-const ShowcaseRevision1 ShowcaseRevision = 1
+// RevisionGo is the ShowcaseRevision value 1.
+const RevisionGo ShowcaseRevision = 1
 
 // ShowcaseEnabled Boolean const; always true.
 type ShowcaseEnabled bool
@@ -265,12 +265,12 @@ type ShowcaseEnabled bool
 // ShowcaseEnabledTrue is the ShowcaseEnabled value true.
 const ShowcaseEnabledTrue ShowcaseEnabled = true
 
-// ShowcaseStatus Closed string value set.
+// ShowcaseStatus Closed string value set. Also exercises the enum value-constant override: `x-go-enum-names`/`x-java-enum-names` rename the `active` value's emitted constant to the value name plus a per-language suffix (Go `ActiveGo`, Java `ACTIVE_JAVA`) while the wire value stays `active`. TS/Python are inert here (no enum override keyword).
 type ShowcaseStatus string
 
 const (
-	// ShowcaseStatusActive is the ShowcaseStatus value "active".
-	ShowcaseStatusActive ShowcaseStatus = "active"
+	// ActiveGo is the ShowcaseStatus value "active".
+	ActiveGo ShowcaseStatus = "active"
 	// ShowcaseStatusInactive is the ShowcaseStatus value "inactive".
 	ShowcaseStatusInactive ShowcaseStatus = "inactive"
 	// ShowcaseStatusPending is the ShowcaseStatus value "pending".
@@ -706,8 +706,8 @@ func (m Circle) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Contact details with a conditional requirement and a member-count bound: a shipping street requires a shipping zip (dependentRequired), and the object must carry 1 to 3 members (minProperties/maxProperties on a declared-property object).
-type Contact struct {
+// ContactGo Contact details with a conditional requirement and a member-count bound: a shipping street requires a shipping zip (dependentRequired), and the object must carry 1 to 3 members (minProperties/maxProperties on a declared-property object). Also exercises the type-level `x-<lang>-name` override (the Stage 4 escape hatch): the emitted type is renamed to the derived name plus a per-language suffix (Go `ContactGo`, TS `ContactTs`, Python `ContactPy`, Java `ContactJava`) at its declaration and at every `$ref`, while the wire `$ref` name stays `Contact`.
+type ContactGo struct {
 	// Email corresponds to the "email" JSON property.
 	Email *string `json:"email,omitempty"`
 	// ShippingStreet corresponds to the "shippingStreet" JSON property.
@@ -720,7 +720,7 @@ type Contact struct {
 
 // Validate checks m against every constraint and returns a *ValidationError
 // listing any violations.
-func (m Contact) Validate() error {
+func (m ContactGo) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -730,7 +730,7 @@ func (m Contact) Validate() error {
 
 // UnmarshalJSON parses data into m and validates it, returning a
 // *ValidationError listing any violations.
-func (m *Contact) UnmarshalJSON(data []byte) error {
+func (m *ContactGo) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
 		return err
@@ -779,7 +779,7 @@ func (m *Contact) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
 // *ValidationError if validation fails.
-func (m Contact) MarshalJSON() ([]byte, error) {
+func (m ContactGo) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
 	out := map[string]json.RawMessage{}
@@ -961,11 +961,11 @@ var showcaseUrlBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9_-]{4})*(
 type Showcase struct {
 	// Kind Discriminator; always "showcase".
 	Kind ShowcaseKind `json:"kind"`
-	// Revision Integer const; always 1.
+	// Revision Integer const; always 1. Also exercises the single-`const` value override: `x-go-const-name`/`x-java-const-name` rename the emitted constant to the derived name plus a per-language suffix (Go `RevisionGo`, Java `REVISION_JAVA`) while the wire value stays `1`. TS/Python are inert here (no const override keyword — the value is emitted as a plain literal type).
 	Revision ShowcaseRevision `json:"revision"`
 	// Enabled Boolean const; always true.
 	Enabled ShowcaseEnabled `json:"enabled"`
-	// Status Closed string value set.
+	// Status Closed string value set. Also exercises the enum value-constant override: `x-go-enum-names`/`x-java-enum-names` rename the `active` value's emitted constant to the value name plus a per-language suffix (Go `ActiveGo`, Java `ACTIVE_JAVA`) while the wire value stays `active`. TS/Python are inert here (no enum override keyword).
 	Status ShowcaseStatus `json:"status"`
 	// Tier Closed integer value set.
 	Tier ShowcaseTier `json:"tier"`
@@ -1011,10 +1011,10 @@ type Showcase struct {
 	// Debug flag
 	// Optional boolean with a schema default.
 	Debug *bool `json:"debug,omitempty"`
-	// LegacyID Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702 @deprecated). Also exercises the per-language identifier override (`x-<lang>-name`, the Stage 4 escape hatch): the emitted code identifier is forced to the idiomatic initialism `LegacyID`/`legacyID` while the wire name stays `legacyId` (json tag / alias / @JsonProperty).
+	// LegacyIdGo Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702 @deprecated). Also exercises the property-level `x-<lang>-name` override (the Stage 4 escape hatch): the emitted member identifier is renamed to the derived name plus a per-language suffix (Go `LegacyIdGo`, TS `legacyIdTs`, Python `legacy_id_py`, Java `legacyIdJava`) while the wire name stays `legacyId` (json tag / alias / @JsonProperty).
 	//
 	// Deprecated: This field is deprecated.
-	LegacyID *string `json:"legacyId,omitempty"`
+	LegacyIdGo *string `json:"legacyId,omitempty"`
 	// MiddleName Optional and nullable; may be absent or explicitly null.
 	MiddleName *string `json:"middleName,omitempty"`
 	// Category Required but nullable; may be explicitly cleared to null.
@@ -1046,7 +1046,7 @@ type Showcase struct {
 	// Attributes corresponds to the "attributes" JSON property.
 	Attributes *Attributes `json:"attributes,omitempty"`
 	// Contact corresponds to the "contact" JSON property.
-	Contact *Contact `json:"contact,omitempty"`
+	Contact *ContactGo `json:"contact,omitempty"`
 }
 
 // RetriesOrDefault returns Retries when set, else the schema default.
@@ -1080,14 +1080,14 @@ func (m Showcase) Validate() error {
 	if m.Kind != ShowcaseKindShowcase {
 		errs = append(errs, Violation{"kind", "must equal \"showcase\""})
 	}
-	if m.Revision != ShowcaseRevision1 {
+	if m.Revision != RevisionGo {
 		errs = append(errs, Violation{"revision", "must equal 1"})
 	}
 	if m.Enabled != ShowcaseEnabledTrue {
 		errs = append(errs, Violation{"enabled", "must equal true"})
 	}
 	switch m.Status {
-	case ShowcaseStatusActive, ShowcaseStatusInactive, ShowcaseStatusPending:
+	case ActiveGo, ShowcaseStatusInactive, ShowcaseStatusPending:
 	default:
 		errs = append(errs, Violation{"status", fmt.Sprintf("must be one of [\"active\",\"inactive\",\"pending\"], got %q", m.Status)})
 	}
@@ -1291,7 +1291,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	}
 	if v, ok := parseIntegerField(get("revision"), "revision", true, false, &errs); ok {
 		typed := ShowcaseRevision(v)
-		if typed != ShowcaseRevision1 {
+		if typed != RevisionGo {
 			errs = append(errs, Violation{"revision", "must equal 1"})
 		} else {
 			m.Revision = typed
@@ -1308,7 +1308,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	if v, ok := parseStringField(get("status"), "status", true, false, &errs); ok {
 		typed := ShowcaseStatus(v)
 		switch typed {
-		case ShowcaseStatusActive, ShowcaseStatusInactive, ShowcaseStatusPending:
+		case ActiveGo, ShowcaseStatusInactive, ShowcaseStatusPending:
 			m.Status = typed
 		default:
 			errs = append(errs, Violation{"status", fmt.Sprintf("must be one of [\"active\",\"inactive\",\"pending\"], got %q", typed)})
@@ -1427,7 +1427,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 		m.Debug = &v
 	}
 	if v, ok := parseStringField(get("legacyId"), "legacyId", false, false, &errs); ok {
-		m.LegacyID = &v
+		m.LegacyIdGo = &v
 	}
 	if v, ok := parseStringField(get("middleName"), "middleName", false, true, &errs); ok {
 		m.MiddleName = &v
@@ -1576,7 +1576,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"contact", "explicit null not allowed"})
 	} else {
-		var tmp Contact
+		var tmp ContactGo
 		if err := json.Unmarshal(*raw, &tmp); err != nil {
 			mergeNested(&errs, "contact", err)
 		} else {
@@ -1649,8 +1649,8 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	if m.Debug != nil {
 		marshalField(out, "debug", *m.Debug, &errs)
 	}
-	if m.LegacyID != nil {
-		marshalField(out, "legacyId", *m.LegacyID, &errs)
+	if m.LegacyIdGo != nil {
+		marshalField(out, "legacyId", *m.LegacyIdGo, &errs)
 	}
 	if m.MiddleName != nil {
 		marshalField(out, "middleName", *m.MiddleName, &errs)

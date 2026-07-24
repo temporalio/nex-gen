@@ -540,29 +540,46 @@ fn go_json_generation_matches_checked_in_output() {
                         assert!(generated.contains("// Retries Retry budget"));
                         assert!(generated.contains("// Deprecated: This field is deprecated."));
                         // `x-go-name` override (Stage 4): the emitted identifier
-                        // is the forced initialism while the wire name is pinned.
+                        // is the derived name plus a `Go` suffix; the wire name
+                        // (json tag) is pinned.
                         assert!(
-                            generated.contains("LegacyID *string `json:\"legacyId,omitempty\"`")
+                            generated.contains("LegacyIdGo *string `json:\"legacyId,omitempty\"`")
                         );
                         assert!(
                             generated
-                                .contains("marshalField(out, \"legacyId\", *m.LegacyID, &errs)")
+                                .contains("marshalField(out, \"legacyId\", *m.LegacyIdGo, &errs)")
                         );
-                        assert!(!generated.contains("LegacyId "));
+                        // Value-constant overrides (Go-specific keys): the single
+                        // `const` and the `active` enum value emit renamed
+                        // constants while the wire values stay `1` / "active".
+                        assert!(generated.contains("RevisionGo ShowcaseRevision = 1"));
+                        assert!(generated.contains("ActiveGo ShowcaseStatus = \"active\""));
+                        // Type-level override: `Contact` emits as `ContactGo`
+                        // at its declaration and at every `$ref`.
+                        assert!(generated.contains("type ContactGo struct"));
+                        assert!(
+                            generated.contains("Contact *ContactGo `json:\"contact,omitempty\"`")
+                        );
                         // showcase carries a minimal service/operation so the
                         // generator's service glue gets round-trip coverage too.
-                        assert!(generated.contains("var ShowcaseService = struct"));
-                        assert!(generated.contains("type ShowcaseServiceClient struct"));
+                        // The service/operation `x-go-name` overrides rename the
+                        // emitted identifiers while the wire names are pinned.
+                        assert!(generated.contains("var ShowcaseServiceGo = struct"));
+                        assert!(generated.contains("type ShowcaseServiceGoClient struct"));
                         assert!(
-                            generated.contains("func NewShowcaseServiceClient(endpoint string)")
+                            generated.contains("func NewShowcaseServiceGoClient(endpoint string)")
                         );
                         assert!(
                             generated
                                 .contains("nexus.OperationReference[GetShowcaseInput, Showcase]")
                         );
                         assert!(generated.contains(
-                            "func (c *ShowcaseServiceClient) GetShowcase(ctx workflow.Context, request GetShowcaseInput) workflow.Future"
+                            "func (c *ShowcaseServiceGoClient) GetShowcaseGo(ctx workflow.Context, request GetShowcaseInput) workflow.Future"
                         ));
+                        // The wire service/operation names are unaffected by the
+                        // code-identifier overrides.
+                        assert!(generated.contains("\"example.showcase.v1.ShowcaseService\""));
+                        assert!(generated.contains("(\"GetShowcase\")"));
                     }
                     // temporal is a pure JSON Schema file materializing the four
                     // temporal formats into native Go types.

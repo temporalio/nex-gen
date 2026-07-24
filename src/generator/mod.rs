@@ -18,7 +18,7 @@ use crate::planning::{
     build_leaf_api_plan_with_mode,
 };
 use crate::resources::ensure_unique_resource_names;
-use crate::spec::{ApiSpec, RecordSpec};
+use crate::spec::{ApiSpec, ExternalTypeSpec, RecordSpec, TypeDeclSpec};
 use crate::validation::validate_external_type_bindings;
 use crate::workspace::{ApiSpecNode, ApiSpecTree};
 
@@ -208,7 +208,7 @@ pub(crate) fn generate_files_for_tree_with_mode_and_options(
     options: GenerateFilesOptions,
 ) -> Result<GeneratedFiles> {
     validate_tree_specs(&tree.root, descriptors, language)?;
-    let planned_tree = match tree.root {
+    let mut planned_tree = match tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let planned = build_leaf_api_plan_with_mode(
                 leaf.spec,
@@ -229,7 +229,41 @@ pub(crate) fn generate_files_for_tree_with_mode_and_options(
             build_api_plans_for_tree_with_mode(tree, descriptors, planning_mode(mode), language)?
         }
     };
+    // Resolve every emitted type identifier once against the name manifest and
+    // adopt it as each JSON model's `model_name`, so every consumer — the JSON
+    // model backends, the outer service/file-name/I/O emitters — reads the same
+    // (override-applied) identifier. This is the single resolution point per
+    // language; the per-backend `$ref` fixups then only re-route ref recasing.
+    apply_name_manifest_to_planned_tree(&mut planned_tree.root, language)?;
     generate_files_from_planned_tree(language, &planned_tree, support, mode, options)
+}
+
+/// Overwrites each planned JSON model's `model_name` with its manifest-resolved
+/// identifier (honoring `x-<lang>-name` type overrides) across every leaf.
+fn apply_name_manifest_to_planned_tree(
+    node: &mut ApiSpecNode<PlannedTypeFamily>,
+    language: Language,
+) -> Result<()> {
+    match node {
+        ApiSpecNode::Leaf(leaf) => {
+            let manifest = json_schema::build_json_name_manifest(language, &leaf.spec)?;
+            for decl in leaf.spec.types.values_mut() {
+                if let TypeDeclSpec::External(binding) = decl
+                    && let ExternalTypeSpec::Json(json) = &mut binding.external_type
+                    && let Some(resolved) = manifest.type_name(&json.full_name)
+                {
+                    json.model_name = resolved.to_string();
+                }
+            }
+            Ok(())
+        }
+        ApiSpecNode::Branch(branch) => {
+            for child in branch.children.values_mut() {
+                apply_name_manifest_to_planned_tree(child, language)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn validate_tree_specs(

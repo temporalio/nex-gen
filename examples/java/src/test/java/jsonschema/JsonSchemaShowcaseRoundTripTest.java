@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 import json_schema.api.showcase.Address;
 import json_schema.api.showcase.Attributes;
 import json_schema.api.showcase.Circle;
-import json_schema.api.showcase.Contact;
+import json_schema.api.showcase.ContactJava;
 import json_schema.api.showcase.Labels;
 import json_schema.api.showcase.Settings;
 import json_schema.api.showcase.Showcase;
@@ -84,10 +84,10 @@ final class JsonSchemaShowcaseRoundTripTest {
         // Closed value-set fields (const on integer/boolean, enum on string/
         // integer/number) round-trip to their in-memory constants.
         assertEquals(1L, minimal.getRevision());
-        assertEquals(1L, Showcase.REVISION);
+        assertEquals(1L, Showcase.REVISION_JAVA);
         assertTrue(minimal.getEnabled());
         assertEquals("active", minimal.getStatus());
-        assertEquals(Showcase.STATUS_ACTIVE, minimal.getStatus());
+        assertEquals(Showcase.ACTIVE_JAVA, minimal.getStatus());
         assertEquals(1L, minimal.getTier());
         assertEquals(1.5, minimal.getScale());
         assertEquals("Widget", minimal.getName());
@@ -455,7 +455,7 @@ final class JsonSchemaShowcaseRoundTripTest {
         assertEquals("a", attributes.getValues().get("host"));
         assertEquals("8080", attributes.getValues().get("port"));
 
-        Contact contact = roundTrip("contact.json", Contact.class);
+        ContactJava contact = roundTrip("contact.json", ContactJava.class);
         assertEquals("1 Main St", contact.getShippingStreet());
         assertEquals("90210", contact.getShippingZip());
 
@@ -490,8 +490,8 @@ final class JsonSchemaShowcaseRoundTripTest {
         RuntimeException missingDep = assertThrows(RuntimeException.class, () ->
                 CONVERTER.fromPayload(
                         jsonPayload("{\"shippingStreet\":\"1 Main St\"}".getBytes(StandardCharsets.UTF_8)),
-                        Contact.class,
-                        Contact.class));
+                        ContactJava.class,
+                        ContactJava.class));
         assertTrue(
                 messageChain(missingDep).contains("property \"shippingZip\" is required when \"shippingStreet\" is present"),
                 messageChain(missingDep));
@@ -500,8 +500,8 @@ final class JsonSchemaShowcaseRoundTripTest {
         RuntimeException emptyContact = assertThrows(RuntimeException.class, () ->
                 CONVERTER.fromPayload(
                         jsonPayload("{}".getBytes(StandardCharsets.UTF_8)),
-                        Contact.class,
-                        Contact.class));
+                        ContactJava.class,
+                        ContactJava.class));
         assertTrue(messageChain(emptyContact).contains("must have at least 1 properties, got 0"), messageChain(emptyContact));
     }
 
@@ -666,7 +666,7 @@ final class JsonSchemaShowcaseRoundTripTest {
 
         // Object dependentRequired: a shipping street with no zip fails to serialize.
         RuntimeException dep = assertThrows(RuntimeException.class, () ->
-                CONVERTER.toPayload(new Contact(
+                CONVERTER.toPayload(new ContactJava(
                         null, "1 Main St", null, new java.util.LinkedHashMap<>())));
         assertTrue(
                 messageChain(dep).contains("property \"shippingZip\" is required when \"shippingStreet\" is present"),

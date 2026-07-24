@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -8,12 +9,15 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
+use crate::generator::json_schema::build_json_name_manifest;
 use crate::generator::python::{
     PythonImports, PythonModelHoists, RenderedModelFragments, WireValueConversion,
     module_common_prefix_len, python_field_name, python_string_literal,
     render_generated_file_header, render_named_python_import, render_optional_python_imports,
     render_python_docstring,
 };
+use crate::language::Language;
+use crate::parser::NameManifest;
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 use crate::workspace::{ApiSpecBranch, ApiSpecNode};
@@ -142,6 +146,19 @@ fn py_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
     number.to_string()
 }
 
+thread_local! {
+    /// Resolved type identifiers keyed by both `full_name` and the `#/$defs/<full_name>`
+    /// `$ref` form, so `reference_model_name` follows the same name manifest as the
+    /// declaration (honoring `x-py-name` overrides) instead of recasing the ref segment.
+    /// Generation is single-threaded per file, so a thread-local avoids threading the map
+    /// through every recursive `annotation` call that resolves a `$ref`.
+    static REF_NAMES: RefCell<BTreeMap<String, String>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+fn set_ref_names(ref_names: &BTreeMap<String, String>) {
+    REF_NAMES.with(|cell| cell.borrow_mut().clone_from(ref_names));
+}
+
 pub(in crate::generator) fn model_type_ref(json_type: &PlannedJsonType) -> String {
     json_type.model_name.clone()
 }
@@ -152,6 +169,10 @@ pub(in crate::generator) struct ModelBackend {
     hoisted_json_models: Vec<PlannedJsonType>,
     tree_leaf: bool,
     runtime_import_module: String,
+    /// Resolved emitted identifiers (with `x-py-name` overrides applied).
+    manifest: NameManifest,
+    /// Resolved type names keyed by `full_name` and the `#/$defs/<full_name>` ref form.
+    ref_names: BTreeMap<String, String>,
 }
 
 impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
@@ -165,20 +186,44 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         } else {
             "._definitions".to_string()
         };
-        let mut json_models = api_plan
+        // Resolve every emitted identifier once (overrides applied), then adopt the
+        // resolved type name as each model's `model_name` so every downstream derivation
+        // (class decl, union `TypeAlias`, `model_type_ref`) follows the same identifier.
+        // `$ref` targets are resolved via `ref_names` below.
+        self.manifest = build_json_name_manifest(Language::Python, api_plan)?;
+        let mut json_models: Vec<PlannedJsonType> = api_plan
             .external_types()
             .map(|(_, binding)| binding)
             .filter_map(|binding| match &binding.external_type {
                 ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
                 _ => None,
             })
+            .map(|mut json_type| {
+                if let Some(resolved) = self.manifest.type_name(&json_type.full_name) {
+                    json_type.model_name = resolved.to_string();
+                }
+                json_type
+            })
             .collect();
         self.json_models = std::mem::take(&mut json_models);
         self.hoisted_json_models = Vec::new();
+        self.ref_names.clear();
+        for model in &self.json_models {
+            // A resolved `$ref` is `#/$defs/<full_name>`; register that form (plus the
+            // bare `full_name`) so `reference_model_name` resolves through the manifest
+            // instead of recasing the ref segment (which would drop a type override).
+            self.ref_names
+                .insert(model.full_name.clone(), model.model_name.clone());
+            self.ref_names.insert(
+                format!("#/$defs/{}", model.full_name),
+                model.model_name.clone(),
+            );
+        }
         Ok(())
     }
 
     fn render_models(&self) -> Result<RenderedModelFragments> {
+        set_ref_names(&self.ref_names);
         let json_models = self.json_models.iter().collect::<Vec<_>>();
         render_external_models(json_models.as_slice(), &self.runtime_import_module)
     }
@@ -2251,6 +2296,9 @@ fn optional_annotation(annotation: &str) -> String {
 }
 
 fn reference_model_name(reference: &str) -> String {
+    if let Some(resolved) = REF_NAMES.with(|cell| cell.borrow().get(reference).cloned()) {
+        return resolved;
+    }
     let name = reference
         .split('#')
         .next_back()

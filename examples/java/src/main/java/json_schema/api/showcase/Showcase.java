@@ -93,9 +93,9 @@ public final class Showcase {
     }
 
     public static final String KIND = "showcase";
-    public static final long REVISION = 1L;
+    public static final long REVISION_JAVA = 1L;
     public static final boolean ENABLED = true;
-    public static final String STATUS_ACTIVE = "active";
+    public static final String ACTIVE_JAVA = "active";
     public static final String STATUS_INACTIVE = "inactive";
     public static final String STATUS_PENDING = "pending";
     public static final long TIER_1 = 1L;
@@ -117,7 +117,7 @@ public final class Showcase {
      */
     private final String kind;
     /**
-     * Integer const; always 1.
+     * Integer const; always 1. Also exercises the single-`const` value override: `x-go-const-name`/`x-java-const-name` rename the emitted constant to the derived name plus a per-language suffix (Go `RevisionGo`, Java `REVISION_JAVA`) while the wire value stays `1`. TS/Python are inert here (no const override keyword — the value is emitted as a plain literal type).
      */
     private final long revision;
     /**
@@ -125,7 +125,7 @@ public final class Showcase {
      */
     private final boolean enabled;
     /**
-     * Closed string value set.
+     * Closed string value set. Also exercises the enum value-constant override: `x-go-enum-names`/`x-java-enum-names` rename the `active` value's emitted constant to the value name plus a per-language suffix (Go `ActiveGo`, Java `ACTIVE_JAVA`) while the wire value stays `active`. TS/Python are inert here (no enum override keyword).
      */
     private final String status;
     /**
@@ -210,9 +210,9 @@ public final class Showcase {
      */
     private final @Nullable Boolean debug;
     /**
-     * Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702 @deprecated). Also exercises the per-language identifier override (`x-<lang>-name`, the Stage 4 escape hatch): the emitted code identifier is forced to the idiomatic initialism `LegacyID`/`legacyID` while the wire name stays `legacyId` (json tag / alias / @JsonProperty).
+     * Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702 @deprecated). Also exercises the property-level `x-<lang>-name` override (the Stage 4 escape hatch): the emitted member identifier is renamed to the derived name plus a per-language suffix (Go `LegacyIdGo`, TS `legacyIdTs`, Python `legacy_id_py`, Java `legacyIdJava`) while the wire name stays `legacyId` (json tag / alias / @JsonProperty).
      */
-    private final @Nullable String legacyID;
+    private final @Nullable String legacyIdJava;
     /**
      * Optional and nullable; may be absent or explicitly null.
      */
@@ -258,9 +258,9 @@ public final class Showcase {
     private final @Nullable Labels labels;
     private final @Nullable Settings settings;
     private final @Nullable Attributes attributes;
-    private final @Nullable Contact contact;
+    private final @Nullable ContactJava contact;
 
-    public Showcase(String kind, long revision, boolean enabled, String status, long tier, double scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyID, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Shape shape, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable Contact contact) {
+    public Showcase(String kind, long revision, boolean enabled, String status, long tier, double scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Shape shape, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
         this.kind = kind;
         this.revision = revision;
         this.enabled = enabled;
@@ -285,7 +285,7 @@ public final class Showcase {
         this.verbose = verbose;
         this.greeting = greeting;
         this.debug = debug;
-        this.legacyID = legacyID;
+        this.legacyIdJava = legacyIdJava;
         this.middleName = middleName;
         this.category = category;
         this.priority = priority;
@@ -416,8 +416,8 @@ public final class Showcase {
      * @deprecated This field is deprecated.
      */
     @Deprecated
-    public @Nullable String getLegacyID() {
-        return legacyID;
+    public @Nullable String getLegacyIdJava() {
+        return legacyIdJava;
     }
 
     public @Nullable String getMiddleName() {
@@ -480,7 +480,7 @@ public final class Showcase {
         return attributes;
     }
 
-    public @Nullable Contact getContact() {
+    public @Nullable ContactJava getContact() {
         return contact;
     }
 
@@ -517,7 +517,7 @@ public final class Showcase {
             && Objects.equals(this.verbose, that.verbose)
             && Objects.equals(this.greeting, that.greeting)
             && Objects.equals(this.debug, that.debug)
-            && Objects.equals(this.legacyID, that.legacyID)
+            && Objects.equals(this.legacyIdJava, that.legacyIdJava)
             && Objects.equals(this.middleName, that.middleName)
             && Objects.equals(this.category, that.category)
             && Objects.equals(this.priority, that.priority)
@@ -538,7 +538,7 @@ public final class Showcase {
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyID, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, shape, address, labels, settings, attributes, contact);
+        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, shape, address, labels, settings, attributes, contact);
     }
 
     @Override
@@ -568,7 +568,7 @@ public final class Showcase {
             + ", verbose=" + verbose
             + ", greeting=" + greeting
             + ", debug=" + debug
-            + ", legacyID=" + legacyID
+            + ", legacyIdJava=" + legacyIdJava
             + ", middleName=" + middleName
             + ", category=" + category
             + ", priority=" + priority
@@ -598,7 +598,7 @@ public final class Showcase {
                 }
             }
             {
-                if (!(value.revision == REVISION)) {
+                if (!(value.revision == REVISION_JAVA)) {
                     violations.add(new Violation("revision", "must equal 1"));
                 }
             }
@@ -608,7 +608,7 @@ public final class Showcase {
                 }
             }
             if (value.status != null) {
-                if (!(STATUS_ACTIVE.equals(value.status) || STATUS_INACTIVE.equals(value.status) || STATUS_PENDING.equals(value.status))) {
+                if (!(ACTIVE_JAVA.equals(value.status) || STATUS_INACTIVE.equals(value.status) || STATUS_PENDING.equals(value.status))) {
                     violations.add(new Violation("status", "must be one of [\"active\", \"inactive\", \"pending\"], got " + value.status));
                 }
             }
@@ -811,8 +811,8 @@ public final class Showcase {
             if (value.debug != null) {
                 gen.writeBooleanField("debug", value.debug);
             }
-            if (value.legacyID != null) {
-                gen.writeStringField("legacyId", value.legacyID);
+            if (value.legacyIdJava != null) {
+                gen.writeStringField("legacyId", value.legacyIdJava);
             }
             if (value.middleName != null) {
                 gen.writeStringField("middleName", value.middleName);
@@ -970,7 +970,7 @@ public final class Showcase {
                     Long numberValue = SpecNumbers.specLong(field, "revision", violations);
                     if (numberValue != null) {
                         revision = numberValue;
-                        if (!(revision == REVISION)) {
+                        if (!(revision == REVISION_JAVA)) {
                             violations.add(new Violation("revision", "must equal 1"));
                         }
                     }
@@ -1006,7 +1006,7 @@ public final class Showcase {
                         violations.add(new Violation("status", "expected string"));
                     } else {
                         status = field.textValue();
-                        if (!(STATUS_ACTIVE.equals(status) || STATUS_INACTIVE.equals(status) || STATUS_PENDING.equals(status))) {
+                        if (!(ACTIVE_JAVA.equals(status) || STATUS_INACTIVE.equals(status) || STATUS_PENDING.equals(status))) {
                             violations.add(new Violation("status", "must be one of [\"active\", \"inactive\", \"pending\"], got " + status));
                         }
                     }
@@ -1339,7 +1339,7 @@ public final class Showcase {
                     }
                 }
             }
-            String legacyID = null;
+            String legacyIdJava = null;
             {
                 JsonNode field = node.get("legacyId");
                 if (field == null) {
@@ -1349,7 +1349,7 @@ public final class Showcase {
                     if (!field.isTextual()) {
                         violations.add(new Violation("legacyId", "expected string"));
                     } else {
-                        legacyID = field.textValue();
+                        legacyIdJava = field.textValue();
                     }
                 }
             }
@@ -1652,7 +1652,7 @@ public final class Showcase {
                     }
                 }
             }
-            Contact contact = null;
+            ContactJava contact = null;
             {
                 JsonNode field = node.get("contact");
                 if (field == null) {
@@ -1660,7 +1660,7 @@ public final class Showcase {
                     violations.add(new Violation("contact", "explicit null not allowed"));
                 } else {
                     try {
-                        contact = context.readTreeAsValue(field, Contact.class);
+                        contact = context.readTreeAsValue(field, ContactJava.class);
                     } catch (ValidationException nested) {
                         for (Violation violation : nested.getViolations()) {
                             violations.add(violation.withPathPrefix("contact"));
@@ -1673,7 +1673,7 @@ public final class Showcase {
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyID, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, shape, address, labels, settings, attributes, contact);
+            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, shape, address, labels, settings, attributes, contact);
         }
     }
 }

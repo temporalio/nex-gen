@@ -83,9 +83,12 @@ services:                       # map<service-name, service-def>
   ChatService:                  # service name — identifier key
     fqn: "example.v1.ChatService"   # optional wire name (arbitrary chars)
     description: A service for sending chat messages.
+    x-go-name: ChatApi          # optional per-language code identifier; one of
+                                # x-{go,ts,py,java}-name; verbatim, never fqn
     operations:                 # map<operation-name, operation-def> — REQUIRED, non-empty
       pollMessages:             # operation name — identifier key
         fqn: "poll-messages"        # optional wire name (arbitrary chars)
+        x-go-name: PollNewMessages  # optional per-language code identifier
         description: Poll for new messages.
         input:  { $ref: '#/$defs/PollMessagesInput' }
         output: { $ref: '#/$defs/PollMessagesOutput' }
@@ -109,6 +112,21 @@ services:                       # map<service-name, service-def>
   [Identifiers](#identifiers--naming)). The **`fqn`** is the wire name,
   pinned verbatim on the wire and never altered (P1/P3) — exactly the
   `properties` JSON-name-pinning relationship, one level up.
+- **`x-<lang>-name` (the code-identifier override).** A service or an
+  operation may carry an optional per-language override — one of
+  `x-go-name` / `x-ts-name` / `x-py-name` / `x-java-name` — that replaces
+  the *emitted code identifier* for **that one target**, **verbatim** (no
+  recasing, it is the Stage 4 escape hatch of the [[properties]]
+  algorithm). It is the third naming axis and is **orthogonal to both key
+  and `fqn`**: every other target still derives its identifier from the
+  key, and the wire name (`fqn` / `@Operation(name=…)` / the emitted
+  `name=`) is never affected. On an **operation** the override renames only
+  the emitted method/field identifier — the synthesized
+  `<Op>Input`/`<Op>Output` type names still derive from the operation
+  key's PascalCase canonical, **not** the override (so a `getShowcase`
+  with `x-go-name: FetchShowcase` emits a `FetchShowcase` method still
+  typed on `GetShowcaseInput`). An override value that is not a legal,
+  non-reserved identifier in its target → **load reject**.
 - **Operation default wire name = PascalCase canonical**, not the literal
   key: `sendMessage` → `"SendMessage"`. This matches the existing WIT
   generator's output (`get_user` → `Operation(name="GetUser")`), and
@@ -438,7 +456,8 @@ emission code rather than duplicate it:
 | `fqn` overrides on service and op | wire name = `fqn` verbatim |
 | Defaults applied | op without `fqn` → PascalCase wire; service without `fqn` → service name |
 | Acronym op name | `sendHTTPRequest` → field `SendHttpRequest`, type `SendHttpRequestInput` (folded; `x-*-name` to refine) |
-| `x-<lang>-name` on a service/op | identifier overridden; wire `fqn` independent |
+| `x-<lang>-name` on a service/op | code identifier overridden verbatim for that target; wire `fqn` independent |
+| `x-<lang>-name` on an operation | method/field renamed; synthesized `<Op>Input`/`Output` names still from the op key |
 
 ### Rejected at load time (negative)
 
@@ -454,6 +473,7 @@ emission code rather than duplicate it:
 | Service collides with a model | service `ChatService` + a `$defs/ChatService` model (same per-package identifier) |
 | `$ref` I/O unresolvable / non-`$defs` | `input: {$ref: '#/properties/x'}` — per [[ref]] |
 | Identifier invalid/reserved in an emitted lang (no override) | a service/op key mapping to a reserved word |
+| `x-<lang>-name` value not a legal identifier | `x-go-name: "2fa"` / a reserved word on a service or op |
 
 ### Runtime fixtures
 

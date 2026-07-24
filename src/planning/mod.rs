@@ -791,6 +791,7 @@ impl<'a> ApiPlanner<'a> {
 
         Ok(OperationSpec {
             name: operation.name.clone(),
+            code_name: operation.code_name.clone(),
             wire_name: operation.wire_name.clone(),
             experimental: operation.experimental,
             doc: operation.doc.clone(),
@@ -1832,6 +1833,7 @@ mod tests {
             support: SupportSpec::default(),
             services: vec![ServiceSpec {
                 name: "example-service".to_string(),
+                code_name: None,
                 wire_name: "ExampleService".to_string(),
                 doc: LanguageStringSpec::default(),
                 namespace: LanguageStringSpec::default(),
@@ -1841,6 +1843,7 @@ mod tests {
                 delay_load_temporalio_workflow: false,
                 operations: vec![OperationSpec {
                     name: "example-operation".to_string(),
+                    code_name: None,
                     wire_name: "ExampleOperation".to_string(),
                     experimental: false,
                     doc: LanguageStringSpec::default(),

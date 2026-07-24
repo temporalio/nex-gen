@@ -8,6 +8,8 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
+use crate::language::Language;
+use crate::parser::{ManifestModel, NameManifest, build_name_manifest};
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
@@ -1100,6 +1102,39 @@ fn is_java_union_schema(schema: &Schema) -> bool {
     })
 }
 
+/// The verbatim value-constant overrides (`x-java-const-name` /
+/// `x-java-enum-names`) carried by a closed-value (`const`/`enum`) property.
+/// Mirrors `go_value_constant_override` in `src/generator/json/go.rs` and
+/// `value_constant_override` in `src/parser/json_schema.rs`: a `const` gates on
+/// its single-value override, otherwise an enum member is looked up by the wire
+/// value's string form. Keep the three lookups identical.
+#[derive(Debug, Clone, Default)]
+struct ClosedNameOverrides {
+    is_const: bool,
+    const_name: Option<String>,
+    enum_names: Option<IndexMap<String, String>>,
+}
+
+impl ClosedNameOverrides {
+    fn from_property(schema: &Schema) -> Self {
+        Self {
+            is_const: schema.const_value.is_some(),
+            const_name: schema.x_java_const_name.clone(),
+            enum_names: schema.x_java_enum_names.clone(),
+        }
+    }
+
+    fn get(&self, value: &Value) -> Option<&str> {
+        if self.is_const {
+            self.const_name.as_deref()
+        } else if let (Some(map), Value::String(key)) = (&self.enum_names, value) {
+            map.get(key).map(String::as_str)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct FieldPlan {
     json_name: String,
@@ -1110,6 +1145,8 @@ struct FieldPlan {
     /// The closed value set for a `const` (one value) or `enum` (many); empty
     /// otherwise. Enforced by equality/membership in the collecting deserializer.
     closed_values: Vec<Value>,
+    /// The verbatim value-constant overrides for `closed_values`, if any.
+    closed_overrides: ClosedNameOverrides,
     default: Option<Value>,
     doc: Option<String>,
     deprecated: bool,
@@ -1169,6 +1206,42 @@ enum ModelKind {
         value: JavaType,
         max_properties: Option<usize>,
     },
+}
+
+/// Resolves the emitted Java identifier for every planned model through the
+/// shared [`NameManifest`], keyed by `full_name`. This is the single place type
+/// names (with any `x-java-name` override applied) are resolved, so the class
+/// declaration and every `$ref` target agree. The Java generator is driven by
+/// the parent `generator::java` module (which builds the `$ref` registry from
+/// the pre-override `model_name`), so the manifest is rebuilt here from the
+/// full model set rather than threaded through a backend `prepare`.
+fn build_java_name_manifest(
+    all_models: &BTreeMap<String, PlannedJsonType>,
+) -> Result<NameManifest> {
+    let models: Vec<ManifestModel> = all_models
+        .values()
+        .map(|json| {
+            let module_key = json
+                .module_path
+                .as_ref()
+                .map(ModulePath::as_module_key)
+                .unwrap_or_default();
+            let local_name = json
+                .full_name
+                .rsplit(['#', '/'])
+                .next()
+                .unwrap_or(&json.full_name)
+                .to_string();
+            ManifestModel {
+                full_name: json.full_name.clone(),
+                local_name,
+                model_name: json.model_name.clone(),
+                module_key,
+                schema: json.schema.clone(),
+            }
+        })
+        .collect();
+    build_name_manifest(Language::Java, &models, &[])
 }
 
 fn decode_schema(model: &PlannedJsonType) -> Result<Schema> {
@@ -1318,6 +1391,7 @@ fn resolve_model_kind(
                 required: required.contains(json_name),
                 nullable: allows_null(property),
                 closed_values,
+                closed_overrides: ClosedNameOverrides::from_property(property),
                 default: property.default.clone(),
                 doc: compose_doc(property.title.as_deref(), property.description.as_deref()),
                 deprecated: property.deprecated == Some(true),
@@ -1341,13 +1415,33 @@ pub(in crate::generator) fn render_model_file(
     all_models: &BTreeMap<String, PlannedJsonType>,
 ) -> Result<String> {
     let schema = decode_schema(model)?;
+    // Resolve every emitted type name (with any `x-java-name` override applied)
+    // through the shared manifest. The parent generator builds `registry` from
+    // the pre-override `model_name`, so patch each entry's class through the
+    // manifest — this makes a type override land at every `$ref` site, not just
+    // the class declaration.
+    let manifest = build_java_name_manifest(all_models)?;
+    let resolved_registry: BTreeMap<String, (String, String)> = registry
+        .iter()
+        .map(|(key, (package, class))| {
+            let class = manifest
+                .type_name(key)
+                .map(str::to_string)
+                .unwrap_or_else(|| class.clone());
+            (key.clone(), (package.clone(), class))
+        })
+        .collect();
     let context = JavaContext {
         base_package,
         module,
-        registry,
+        registry: &resolved_registry,
     };
     let package = context.current_package();
-    let class = &model.model_name;
+    let class_name = manifest
+        .type_name(&model.full_name)
+        .map(str::to_string)
+        .unwrap_or_else(|| model.model_name.clone());
+    let class = class_name.as_str();
 
     // A named `oneOf` union def is emitted as a sealed-by-convention interface.
     if is_java_union_schema(&schema)
@@ -1374,10 +1468,13 @@ pub(in crate::generator) fn render_model_file(
         let other_context = JavaContext {
             base_package,
             module,
-            registry,
+            registry: &resolved_registry,
         };
+        let other_interface = manifest
+            .type_name(&other.full_name)
+            .unwrap_or(&other.model_name);
         if let Some(union) = classify_java_union(
-            &other.model_name,
+            other_interface,
             false,
             &other_schema,
             all_models,
@@ -1387,7 +1484,7 @@ pub(in crate::generator) fn render_model_file(
             .iter()
             .any(|variant| variant.member_full_name.as_deref() == Some(model.full_name.as_str()))
         {
-            implements.push(other.model_name.clone());
+            implements.push(other_interface.to_string());
         }
     }
     implements.sort();
@@ -1845,7 +1942,12 @@ fn render_object_class(
             output.push_str(&format!(
                 "    public static final {} {} = {};\n",
                 java_closed_const_type(&field.ty),
-                java_const_name(&field.java_name, &field.closed_values, value),
+                java_const_name(
+                    &field.closed_overrides,
+                    &field.java_name,
+                    &field.closed_values,
+                    value
+                ),
                 java_closed_literal(&field.ty, value)
             ));
         }
@@ -2071,13 +2173,14 @@ fn render_java_serialize_closed_check(
     json: &str,
     field_java_name: &str,
     values: &[Value],
+    overrides: &ClosedNameOverrides,
     indent: &str,
 ) {
     let is_string = matches!(ty, JavaType::String);
     let matches = values
         .iter()
         .map(|value| {
-            let name = java_const_name(field_java_name, values, value);
+            let name = java_const_name(overrides, field_java_name, values, value);
             if is_string {
                 format!("{name}.equals({accessor})")
             } else {
@@ -2110,6 +2213,7 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
             &json,
             &field.java_name,
             &field.closed_values,
+            &field.closed_overrides,
             &inner,
         );
     } else {
@@ -2548,6 +2652,7 @@ fn render_field_deserialize(output: &mut String, field: &FieldPlan) {
             &json,
             &field.java_name,
             &field.closed_values,
+            &field.closed_overrides,
             &field.numeric,
             &field.string_length,
             &field.array,
@@ -2619,6 +2724,7 @@ fn render_parse_value(
     json: &str,
     field_java_name: &str,
     closed_values: &[Value],
+    closed_overrides: &ClosedNameOverrides,
     numeric: &NumericConstraints,
     string_length: &StringLengthConstraints,
     array: &ArrayConstraints,
@@ -2632,6 +2738,7 @@ fn render_parse_value(
             json,
             field_java_name,
             closed_values,
+            closed_overrides,
             indent,
         );
         return;
@@ -3228,7 +3335,15 @@ fn java_closed_token(value: &Value) -> String {
 /// uses the field name (`KIND`); an `enum` member appends the value token
 /// (`STATUS_ACTIVE`, `TIER_1`, `SCALE_1_5`), the field name supplying the
 /// leading letter so no `V_` digit-guard prefix is needed.
-fn java_const_name(field_java_name: &str, values: &[Value], value: &Value) -> String {
+fn java_const_name(
+    overrides: &ClosedNameOverrides,
+    field_java_name: &str,
+    values: &[Value],
+    value: &Value,
+) -> String {
+    if let Some(name) = overrides.get(value) {
+        return name.to_string();
+    }
     let field_upper = shouty(field_java_name);
     if values.len() == 1 {
         field_upper
@@ -3284,12 +3399,13 @@ fn render_java_closed_parse(
     json: &str,
     field_java_name: &str,
     values: &[Value],
+    overrides: &ClosedNameOverrides,
     indent: &str,
 ) {
     let is_string = matches!(ty, JavaType::String);
     let names = values
         .iter()
-        .map(|value| java_const_name(field_java_name, values, value))
+        .map(|value| java_const_name(overrides, field_java_name, values, value))
         .collect::<Vec<_>>();
     let matches = names
         .iter()

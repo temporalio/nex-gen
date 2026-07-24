@@ -97,9 +97,9 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
             assert!(all.contains("Retry budget"));
             // `x-java-name` override (Stage 4): the emitted field/getter use the
             // override while the wire name (`@JsonProperty`) stays `legacyId`.
-            assert!(all.contains("private final @Nullable String legacyID;"));
-            assert!(all.contains("public @Nullable String getLegacyID() {"));
-            assert!(all.contains("gen.writeStringField(\"legacyId\", value.legacyID);"));
+            assert!(all.contains("private final @Nullable String legacyIdJava;"));
+            assert!(all.contains("public @Nullable String getLegacyIdJava() {"));
+            assert!(all.contains("gen.writeStringField(\"legacyId\", value.legacyIdJava);"));
         }
         fs::remove_dir_all(temp_dir).unwrap();
     }

@@ -6,14 +6,17 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use crate::error::{Error, Result};
+use crate::generator::json_schema::build_json_name_manifest;
 use crate::generator::typescript::{
     RenderedExternalModelFragments, WireValueConversion, typescript_generated_field_name,
 };
 use crate::generator::{ExternalModelBackend, TsDateTimeTypes};
 use crate::json_schema::format::TemporalKind;
+use crate::language::Language;
+use crate::parser::NameManifest;
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
@@ -24,6 +27,14 @@ thread_local! {
     static TS_DATE_TIME_TYPES: Cell<TsDateTimeTypes> = const { Cell::new(TsDateTimeTypes::String) };
     static USES_TEMPORAL: Cell<bool> = const { Cell::new(false) };
     static USES_CONTENT_ENCODING: Cell<bool> = const { Cell::new(false) };
+    /// Resolved type identifiers keyed by both `full_name` and the `#/$defs/<full_name>`
+    /// `$ref` form, so `reference_model_name` follows the same name manifest as the
+    /// declaration (honoring `x-ts-name` overrides) instead of recasing the ref segment.
+    static REF_NAMES: RefCell<BTreeMap<String, String>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+fn set_ref_names(ref_names: &BTreeMap<String, String>) {
+    REF_NAMES.with(|cell| cell.borrow_mut().clone_from(ref_names));
 }
 
 fn set_temporal_context(repr: TsDateTimeTypes, uses_temporal: bool) {
@@ -915,6 +926,10 @@ pub(in crate::generator) struct ModelBackend {
     runtime_import_module: String,
     /// The `--date-time-types` selection for materialized temporal fields.
     pub(in crate::generator) ts_date_time_types: crate::generator::TsDateTimeTypes,
+    /// Resolved emitted identifiers (with `x-ts-name` overrides applied).
+    manifest: NameManifest,
+    /// Resolved type names keyed by `full_name` and the `#/$defs/<full_name>` ref form.
+    ref_names: BTreeMap<String, String>,
 }
 
 impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
@@ -928,6 +943,11 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         } else {
             "./definitions".to_string()
         };
+        // Resolve every emitted identifier once (overrides applied), then adopt the
+        // resolved type name as each model's `model_name` so every downstream
+        // derivation (interface/type decl, mapper class, `model_type_ref`) follows the
+        // same identifier. `$ref` targets are resolved via `ref_names` below.
+        self.manifest = build_json_name_manifest(Language::TypeScript, api_plan)?;
         self.json_models = api_plan
             .external_types()
             .map(|(_, binding)| binding)
@@ -935,11 +955,30 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
                 ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
                 _ => None,
             })
+            .map(|mut json_type| {
+                if let Some(resolved) = self.manifest.type_name(&json_type.full_name) {
+                    json_type.model_name = resolved.to_string();
+                }
+                json_type
+            })
             .collect();
+        self.ref_names.clear();
+        for model in &self.json_models {
+            // A resolved `$ref` is `#/$defs/<full_name>`; register that form (plus the
+            // bare `full_name`) so `reference_model_name` resolves through the manifest
+            // instead of recasing the ref segment (which would drop a type override).
+            self.ref_names
+                .insert(model.full_name.clone(), model.model_name.clone());
+            self.ref_names.insert(
+                format!("#/$defs/{}", model.full_name),
+                model.model_name.clone(),
+            );
+        }
         Ok(())
     }
 
     fn render_models(&self) -> Result<RenderedExternalModelFragments> {
+        set_ref_names(&self.ref_names);
         let json_models = self.json_models.iter().collect::<Vec<_>>();
         set_temporal_context(
             self.ts_date_time_types,
@@ -3197,6 +3236,9 @@ fn join_union(values: Vec<String>) -> String {
 }
 
 fn reference_model_name(reference: &str) -> String {
+    if let Some(resolved) = REF_NAMES.with(|cell| cell.borrow().get(reference).cloned()) {
+        return resolved;
+    }
     let name = reference
         .split('#')
         .next_back()

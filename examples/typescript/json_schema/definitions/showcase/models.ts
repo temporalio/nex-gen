@@ -64,9 +64,9 @@ export interface Circle {
 }
 
 /**
- * Contact details with a conditional requirement and a member-count bound: a shipping street requires a shipping zip (dependentRequired), and the object must carry 1 to 3 members (minProperties/maxProperties on a declared-property object).
+ * Contact details with a conditional requirement and a member-count bound: a shipping street requires a shipping zip (dependentRequired), and the object must carry 1 to 3 members (minProperties/maxProperties on a declared-property object). Also exercises the type-level `x-<lang>-name` override (the Stage 4 escape hatch): the emitted type is renamed to the derived name plus a per-language suffix (Go `ContactGo`, TS `ContactTs`, Python `ContactPy`, Java `ContactJava`) at its declaration and at every `$ref`, while the wire `$ref` name stays `Contact`.
  */
-export interface Contact {
+export interface ContactTs {
   email?: string;
   shippingStreet?: string;
   shippingZip?: string;
@@ -103,7 +103,7 @@ export interface Showcase {
    */
   readonly kind: "showcase";
   /**
-   * Integer const; always 1.
+   * Integer const; always 1. Also exercises the single-`const` value override: `x-go-const-name`/`x-java-const-name` rename the emitted constant to the derived name plus a per-language suffix (Go `RevisionGo`, Java `REVISION_JAVA`) while the wire value stays `1`. TS/Python are inert here (no const override keyword — the value is emitted as a plain literal type).
    */
   readonly revision: 1;
   /**
@@ -111,7 +111,7 @@ export interface Showcase {
    */
   readonly enabled: true;
   /**
-   * Closed string value set.
+   * Closed string value set. Also exercises the enum value-constant override: `x-go-enum-names`/`x-java-enum-names` rename the `active` value's emitted constant to the value name plus a per-language suffix (Go `ActiveGo`, Java `ACTIVE_JAVA`) while the wire value stays `active`. TS/Python are inert here (no enum override keyword).
    */
   status: "active" | "inactive" | "pending";
   /**
@@ -196,10 +196,10 @@ export interface Showcase {
    */
   debug?: boolean;
   /**
-   * Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702 @deprecated). Also exercises the per-language identifier override (`x-<lang>-name`, the Stage 4 escape hatch): the emitted code identifier is forced to the idiomatic initialism `LegacyID`/`legacyID` while the wire name stays `legacyId` (json tag / alias / @JsonProperty).
+   * Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702 @deprecated). Also exercises the property-level `x-<lang>-name` override (the Stage 4 escape hatch): the emitted member identifier is renamed to the derived name plus a per-language suffix (Go `LegacyIdGo`, TS `legacyIdTs`, Python `legacy_id_py`, Java `legacyIdJava`) while the wire name stays `legacyId` (json tag / alias / @JsonProperty).
    * @deprecated
    */
-  legacyID?: string;
+  legacyIdTs?: string;
   /**
    * Optional and nullable; may be absent or explicitly null.
    */
@@ -245,7 +245,7 @@ export interface Showcase {
   labels?: Labels;
   settings?: Settings;
   attributes?: Attributes;
-  contact?: Contact;
+  contact?: ContactTs;
 }
 
 export interface GetShowcaseInput {
@@ -513,10 +513,10 @@ export class CircleMapper {
   }
 }
 
-const CONTACT_DECLARED = new Set(["email", "shippingStreet", "shippingZip"]);
+const CONTACT_TS_DECLARED = new Set(["email", "shippingStreet", "shippingZip"]);
 
-export class ContactMapper {
-  public fromIntermediate(raw: unknown): Contact {
+export class ContactTsMapper {
+  public fromIntermediate(raw: unknown): ContactTs {
     const violations: __nexGenDefinitions.Violation[] = [];
     if (!__nexGenDefinitions.isPlainObject(raw)) {
       throw new __nexGenDefinitions.ValidationError([
@@ -559,7 +559,7 @@ export class ContactMapper {
 
     const additionalProperties: Record<string, unknown> = {};
     for (const key of Object.keys(raw)) {
-      if (!CONTACT_DECLARED.has(key)) {
+      if (!CONTACT_TS_DECLARED.has(key)) {
         additionalProperties[key] = raw[key];
       }
     }
@@ -587,7 +587,7 @@ export class ContactMapper {
     if (violations.length) {
       throw new __nexGenDefinitions.ValidationError(violations);
     }
-    const out: Contact = { additionalProperties };
+    const out: ContactTs = { additionalProperties };
     if (email !== undefined) {
       out.email = email;
     }
@@ -600,7 +600,7 @@ export class ContactMapper {
     return out;
   }
 
-  public toIntermediate(value: Contact): unknown {
+  public toIntermediate(value: ContactTs): unknown {
     const violations: __nexGenDefinitions.Violation[] = [];
     const out: Record<string, unknown> = {};
     if (value.email !== undefined) {
@@ -1194,14 +1194,14 @@ export class ShowcaseMapper {
       }
     }
 
-    let legacyID: string | undefined = undefined as unknown as string | undefined;
+    let legacyIdTs: string | undefined = undefined as unknown as string | undefined;
     if (raw.legacyId === null) {
       violations.push({ path: "legacyId", reason: "explicit null not allowed" });
     } else if (raw.legacyId !== undefined) {
       if (typeof raw.legacyId !== "string") {
         violations.push({ path: "legacyId", reason: "expected string" });
       } else {
-        legacyID = raw.legacyId;
+        legacyIdTs = raw.legacyId;
       }
     }
 
@@ -1495,12 +1495,12 @@ export class ShowcaseMapper {
       }
     }
 
-    let contact: Contact | undefined = undefined as unknown as Contact | undefined;
+    let contact: ContactTs | undefined = undefined as unknown as ContactTs | undefined;
     if (raw.contact === null) {
       violations.push({ path: "contact", reason: "explicit null not allowed" });
     } else if (raw.contact !== undefined) {
       try {
-        contact = new ContactMapper().fromIntermediate(raw.contact);
+        contact = new ContactTsMapper().fromIntermediate(raw.contact);
       } catch (error) {
         __nexGenDefinitions.collect(violations, "contact", error);
       }
@@ -1614,8 +1614,8 @@ export class ShowcaseMapper {
     if (debug !== undefined) {
       out.debug = debug;
     }
-    if (legacyID !== undefined) {
-      out.legacyID = legacyID;
+    if (legacyIdTs !== undefined) {
+      out.legacyIdTs = legacyIdTs;
     }
     if (middleName !== undefined) {
       out.middleName = middleName;
@@ -1828,8 +1828,8 @@ export class ShowcaseMapper {
     if (value.debug !== undefined) {
       out.debug = value.debug;
     }
-    if (value.legacyID !== undefined) {
-      out.legacyId = value.legacyID;
+    if (value.legacyIdTs !== undefined) {
+      out.legacyId = value.legacyIdTs;
     }
     if (value.middleName !== undefined) {
       out.middleName = value.middleName;
@@ -1945,7 +1945,7 @@ export class ShowcaseMapper {
       out.attributes = new AttributesMapper().toIntermediate(value.attributes);
     }
     if (value.contact !== undefined) {
-      out.contact = new ContactMapper().toIntermediate(value.contact);
+      out.contact = new ContactTsMapper().toIntermediate(value.contact);
     }
     if (violations.length) {
       throw new __nexGenDefinitions.ValidationError(violations);

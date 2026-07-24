@@ -11,7 +11,7 @@ from json_schema.definitions.showcase import (
     Address,
     Attributes,
     Circle,
-    Contact,
+    ContactPy,
     Labels,
     Settings,
     Showcase,
@@ -440,7 +440,7 @@ def test_object_constraints_roundtrip_and_reject() -> None:
         Attributes, roundtrip_fixture("attributes.json", Attributes)
     )
     assert attributes.model_extra == {"host": "a", "port": "8080"}
-    contact = typing.cast(Contact, roundtrip_fixture("contact.json", Contact))
+    contact = typing.cast(ContactPy, roundtrip_fixture("contact.json", ContactPy))
     assert contact.shipping_street == "1 Main St"
     assert contact.shipping_zip == "90210"
 
@@ -464,18 +464,18 @@ def test_object_constraints_roundtrip_and_reject() -> None:
 
     # dependentRequired — a shipping street present without a shipping zip.
     with pytest.raises(ValidationError) as excinfo:
-        _ = Contact.model_validate({"shippingStreet": "1 Main St"})
+        _ = ContactPy.model_validate({"shippingStreet": "1 Main St"})
     assert 'property "shippingZip" is required when "shippingStreet" is present' in str(
         excinfo.value
     )
 
     # minProperties:1 on a declared-property object — an empty object.
     with pytest.raises(ValidationError) as excinfo:
-        _ = Contact.model_validate({})
+        _ = ContactPy.model_validate({})
     assert "must have at least 1 properties, got 0" in str(excinfo.value)
 
     # A satisfied dependency validates.
-    ok = Contact.model_validate({"shippingStreet": "1 Main St", "shippingZip": "90210"})
+    ok = ContactPy.model_validate({"shippingStreet": "1 Main St", "shippingZip": "90210"})
     assert ok.shipping_zip == "90210"
 
 

@@ -308,7 +308,7 @@ fn python_json_example_generation_matches_checked_in_output() {
             assert!(all.contains("Retry budget"));
             // `x-py-name` override (Stage 4): the attribute uses the override
             // while the wire name is pinned by `Field(alias="legacyId")`.
-            assert!(all.contains("legacy_ident:"));
+            assert!(all.contains("legacy_id_py:"));
             assert!(all.contains("alias=\"legacyId\""));
         }
         fs::remove_dir_all(output_path).unwrap();

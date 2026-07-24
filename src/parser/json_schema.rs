@@ -34,6 +34,8 @@ struct Service {
     endpoint: Option<String>,
     #[serde(default)]
     operations: IndexMap<String, Operation>,
+    #[serde(flatten)]
+    extra: IndexMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -42,6 +44,8 @@ struct Operation {
     description: Option<String>,
     input: Option<Schema>,
     output: Option<Schema>,
+    #[serde(flatten)]
+    extra: IndexMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -534,6 +538,7 @@ fn api_spec_from_parsed_json_documents(
                 &parsed.models,
                 module_paths,
                 &mut external_types,
+                language,
             )?);
         }
     }
@@ -2260,8 +2265,9 @@ fn validate_const_enum(path: &Path, schema: &Schema, context: &str) -> Result<()
         }
         // Stage 3: the value must encode to a non-empty legal identifier token
         // (Go defined-type const / Java value-class constant). An empty token
-        // (e.g. the string `"-"`) is rejected.
-        if encode_value_identifier(value).is_none() {
+        // (e.g. the string `"-"`) is rejected — unless a value-constant override
+        // supplies the identifier verbatim.
+        if encode_value_identifier(value).is_none() && !value_has_constant_override(schema, value) {
             return reject(format!(
                 "{context}: `{source}` value {value} does not encode to a legal identifier (its token is empty); this value cannot name a Go/Java constant"
             ));
@@ -2304,9 +2310,15 @@ fn validate_const_enum(path: &Path, schema: &Schema, context: &str) -> Result<()
             }
         }
         // P15: two members whose identifier encodings collide (wire-distinct but
-        // fold to the same Go/Java constant name) → reject.
+        // fold to the same Go/Java constant name) → reject. A member that carries
+        // a value-constant override names its constant verbatim, so it does not
+        // participate in the shared-token fold (the per-language P15 pass guards
+        // the verbatim name instead).
         let mut seen: BTreeMap<String, Value> = BTreeMap::new();
         for value in members {
+            if value_has_constant_override(schema, value) {
+                continue;
+            }
             if let Some(token) = encode_value_identifier(value)
                 && let Some(previous) = seen.insert(token.clone(), value.clone())
                 && &previous != value
@@ -2998,6 +3010,7 @@ fn build_service(
     models: &BTreeMap<TypeKey, JsonModel>,
     module_paths: Option<&BTreeMap<PathBuf, ModulePath>>,
     external_types: &mut BTreeMap<String, ExternalTypeBindingSpec>,
+    language: Language,
 ) -> Result<ServiceSpec> {
     if !name_matches(service_key, true) {
         return Err(Error::InvalidJsonSchema {
@@ -3028,12 +3041,30 @@ fn build_service(
                 models,
                 module_paths,
                 external_types,
+                language,
             )
         })
         .collect::<Result<Vec<_>>>()?;
 
+    // A per-language `x-<lang>-name` on the service becomes the emitted code
+    // identifier, verbatim (no recasing). It never affects `wire_name`.
+    let code_name = if let Some(keyword) = lang_name_keyword(language)
+        && let Some(value) = service.extra.get(keyword)
+    {
+        validate_override(
+            language,
+            keyword,
+            value,
+            &format!("service `{service_key}`"),
+        )?;
+        value.as_str().map(str::to_string)
+    } else {
+        None
+    };
+
     Ok(ServiceSpec {
         name: service_name.clone(),
+        code_name,
         wire_name: service.fqn.clone().unwrap_or(service_name),
         doc: language_string(service.description.clone()),
         namespace: LanguageStringSpec::default(),
@@ -3057,6 +3088,7 @@ fn build_operation(
     models: &BTreeMap<TypeKey, JsonModel>,
     module_paths: Option<&BTreeMap<PathBuf, ModulePath>>,
     external_types: &mut BTreeMap<String, ExternalTypeBindingSpec>,
+    language: Language,
 ) -> Result<OperationSpec> {
     if !name_matches(operation_key, false) {
         return Err(Error::InvalidJsonSchema {
@@ -3104,8 +3136,25 @@ fn build_operation(
         })
         .transpose()?;
 
+    // A per-language `x-<lang>-name` on the operation becomes the emitted code
+    // identifier, verbatim (no recasing). It never affects `wire_name`.
+    let code_name = if let Some(keyword) = lang_name_keyword(language)
+        && let Some(value) = operation.extra.get(keyword)
+    {
+        validate_override(
+            language,
+            keyword,
+            value,
+            &format!("operation `{operation_key}`"),
+        )?;
+        value.as_str().map(str::to_string)
+    } else {
+        None
+    };
+
     Ok(OperationSpec {
         name: operation_name.clone(),
+        code_name,
         wire_name: operation.fqn.clone().unwrap_or(operation_name),
         experimental: false,
         doc: language_string(operation.description.clone()),
@@ -4685,13 +4734,14 @@ fn member_identifier(language: Language, json_name: &str, property: &Schema) -> 
         .unwrap_or_else(|| recase_member(language, json_name))
 }
 
-/// The emitted type identifier for a model. Type names are emitted from the
-/// derived `model_name` across all four targets (a type-level `x-<lang>-name`
-/// is validated at load but does not yet rewire type-name emission — only
-/// member overrides change the emitted identifier), so the collision key stays
-/// `model_name` to match generated output.
-fn type_identifier(_language: Language, model_name: &str, _schema: &Schema) -> String {
-    model_name.to_string()
+/// The emitted type identifier for a model: the type-level `x-<lang>-name`
+/// override used verbatim if present, otherwise the derived `model_name`. This
+/// is the single resolution point — the manifest, the collision key, and (via
+/// the manifest) the generators all agree on this identifier.
+fn type_identifier(language: Language, model_name: &str, schema: &Schema) -> String {
+    override_name(language, schema)
+        .map(str::to_string)
+        .unwrap_or_else(|| model_name.to_string())
 }
 
 /// Whether a property schema is a scalar closed value set (`const`/`enum`) that
@@ -4704,6 +4754,47 @@ fn schema_closed_values(schema: &Schema) -> Vec<Value> {
     } else {
         Vec::new()
     }
+}
+
+/// The verbatim value-constant override for a `const`/`enum` value, if the
+/// schema carries one: `x-<lang>-const-name` replaces the single `const`'s
+/// constant, and an `x-<lang>-enum-names` entry (keyed by the wire value's
+/// string form) replaces an enum member's constant. Mirrors
+/// `go_value_constant_override` in `src/generator/json/go.rs` so the P15
+/// collision pass and emission agree — keep the two lookups identical (const
+/// gates on `const`, else enum by string key).
+fn value_constant_override<'a>(
+    language: Language,
+    schema: &'a Schema,
+    value: &Value,
+) -> Option<&'a str> {
+    if schema.extra.contains_key("const") {
+        let keyword = lang_const_name_keyword(language)?;
+        schema.extra.get(keyword).and_then(Value::as_str)
+    } else if let (Some(keyword), Value::String(key)) = (lang_enum_names_keyword(language), value) {
+        schema
+            .extra
+            .get(keyword)
+            .and_then(Value::as_object)
+            .and_then(|map| map.get(key))
+            .and_then(Value::as_str)
+    } else {
+        None
+    }
+}
+
+/// Whether a `const`/`enum` value carries a value-constant override
+/// (`x-<lang>-const-name` / `x-<lang>-enum-names`) for any constant-synthesizing
+/// target (Go/Java). Such a value names its constant verbatim, so it bypasses
+/// the shared-token empty/collision checks in `validate_const_enum` — the
+/// verbatim name is the only way to admit a value whose encoding is empty (e.g.
+/// `"-"`) or folds onto another member's (e.g. `"user"`/`"USER"`), per the spec.
+/// The per-language P15 pass (`collect_synthesized_top_level`) then guards the
+/// verbatim names.
+fn value_has_constant_override(schema: &Schema, value: &Value) -> bool {
+    [Language::Go, Language::Java]
+        .into_iter()
+        .any(|language| value_constant_override(language, schema, value).is_some())
 }
 
 /// The Go value-constant suffix for a scalar value (mirrors `go_value_suffix`).
@@ -4825,49 +4916,117 @@ struct NsModel {
     schema: Schema,
 }
 
-/// The P15 per-target identifier collision pass + override validation over a
-/// fully-built spec. Runs once per emitted target (`language`).
-fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<()> {
-    if lang_name_keyword(language).is_none() {
-        return Ok(());
-    }
+/// Resolved emitted-name manifest for one target language. Built once by
+/// [`build_name_manifest`] and consumed by both the load-time collision pass
+/// and the generators, so every identifier that will be emitted is resolved in
+/// exactly one place — no drift between the collision check and emission.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct NameManifest {
+    /// Model full name (`Symbol::as_str` / `PlannedJsonType::full_name`) →
+    /// emitted type identifier. (Service identifiers are resolved onto
+    /// `ServiceSpec::code_name` at load and read from there; the manifest only
+    /// enters them into the collision pass, so it needs no service map.)
+    type_names: BTreeMap<String, String>,
+}
 
-    let mut models: Vec<NsModel> = Vec::new();
-    for (full_name, binding) in spec.external_types() {
-        let ExternalTypeSpec::Json(json) = &binding.external_type else {
-            continue;
-        };
-        let schema: Schema = serde_json::from_value(json.schema.clone()).map_err(|error| {
+impl NameManifest {
+    /// The emitted type identifier for a model, keyed by its full name (the
+    /// stable identity string that also appears in resolved `$ref`s). Returns
+    /// `None` for a target with no JSON identifier policy or an unknown model.
+    pub(crate) fn type_name(&self, full_name: &str) -> Option<&str> {
+        self.type_names.get(full_name).map(String::as_str)
+    }
+}
+
+/// One model handed to [`build_name_manifest`], adapted from either the authored
+/// [`ApiSpec`] (load path) or the planned spec (generator path).
+pub(crate) struct ManifestModel {
+    /// Resolution + generator lookup key (`Symbol::as_str`).
+    pub(crate) full_name: String,
+    /// Unqualified name, for collision diagnostics.
+    pub(crate) local_name: String,
+    /// The derived emitted identifier before any override is applied.
+    pub(crate) model_name: String,
+    /// The scope (package/module) the model lives in.
+    pub(crate) module_key: String,
+    /// The raw model schema (carries any `x-<lang>-*` overrides).
+    pub(crate) schema: Value,
+}
+
+/// One service handed to [`build_name_manifest`]. Services live in the root
+/// module scope of the file that declares them (the single-input scope).
+pub(crate) struct ManifestService {
+    pub(crate) name: String,
+    /// The verbatim per-language service code-identifier override
+    /// (`x-<lang>-name`), if the active target carries one. `None` derives from
+    /// `name`.
+    pub(crate) code_name: Option<String>,
+}
+
+impl ManifestService {
+    /// The emitted service code identifier for `language`: the verbatim override
+    /// when present, else the derived name.
+    fn code_ident(&self, language: Language) -> String {
+        self.code_name
+            .clone()
+            .unwrap_or_else(|| recase_type_name(language, &self.name))
+    }
+}
+
+/// Builds the [`NameManifest`] for `language`: runs the P15 per-scope collision
+/// pass (load reject on any coincidence, never mangling) and records the
+/// resolved identifier for every model and service. Runs once per emitted
+/// target. This is the single place emitted names are resolved — the load-time
+/// check and the generators both go through it.
+pub(crate) fn build_name_manifest(
+    language: Language,
+    models: &[ManifestModel],
+    services: &[ManifestService],
+) -> Result<NameManifest> {
+    let mut manifest = NameManifest::default();
+    // A target with no JSON identifier policy (Dotnet/Ruby) does not participate
+    // in the P15 collision pass, but still gets identity resolution so a
+    // generator can query the manifest uniformly.
+    let has_policy = lang_name_keyword(language).is_some();
+
+    let mut ns_models: Vec<NsModel> = Vec::with_capacity(models.len());
+    for model in models {
+        let schema: Schema = serde_json::from_value(model.schema.clone()).map_err(|error| {
             Error::InvalidJsonSchema {
                 path: PathBuf::from("<json-schema>"),
                 reason: format!(
-                    "failed to decode JSON model `{full_name}` for the P15 pass: {error}"
+                    "failed to decode JSON model `{}` for the name manifest: {error}",
+                    model.full_name
                 ),
             }
         })?;
-        let context = format!("`{}`", json.name.local_name());
-        validate_overrides_in_schema(language, &schema, &context)?;
-        let module_key = json
-            .name
-            .module_path()
-            .map(ModulePath::as_module_key)
-            .unwrap_or_default();
-        models.push(NsModel {
-            module_key,
-            full_name: json.name.local_name().to_string(),
-            type_ident: type_identifier(language, &json.model_name, &schema),
+        if has_policy {
+            validate_overrides_in_schema(language, &schema, &format!("`{}`", model.local_name))?;
+        }
+        let type_ident = type_identifier(language, &model.model_name, &schema);
+        manifest
+            .type_names
+            .insert(model.full_name.clone(), type_ident.clone());
+        ns_models.push(NsModel {
+            module_key: model.module_key.clone(),
+            full_name: model.local_name.clone(),
+            type_ident,
             schema,
         });
     }
 
+    if !has_policy {
+        return Ok(manifest);
+    }
+
     // Group modules → their own top-level namespace.
-    let module_keys: BTreeSet<String> = models
+    let module_keys: BTreeSet<String> = ns_models
         .iter()
         .map(|model| model.module_key.clone())
         .collect();
     for module_key in &module_keys {
         let mut top = Namespace::default();
-        for model in models
+        for model in ns_models
             .iter()
             .filter(|model| &model.module_key == module_key)
         {
@@ -4885,13 +5044,25 @@ fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<(
             )?;
             validate_member_scope(language, model.full_name.as_str(), &model.schema)?;
         }
+        // The fixed runtime boilerplate each generator emits into (or imports
+        // into) every module that carries models shares this top-level scope, so
+        // a user type/service named after one is a P15 clash — reject it at load
+        // rather than emit code that won't compile. Inserted after the user
+        // types so the diagnostic names the user identifier as the prior origin.
+        for ident in boilerplate_idents(language) {
+            top.insert(
+                language,
+                (*ident).to_string(),
+                format!("generated runtime identifier `{ident}`"),
+            )?;
+        }
         // Services and their derived bindings live in the root module scope of
         // the file that declares them (the single-input scope).
         if module_key.is_empty() {
-            for service in &spec.services {
+            for service in services {
                 top.insert(
                     language,
-                    recase_type_name(language, &service.name),
+                    service.code_ident(language),
                     format!("service `{}`", service.name),
                 )?;
             }
@@ -4899,10 +5070,89 @@ fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<(
         // TypeScript `DEFAULT_<FIELD>` constants share the module scope; make
         // them participate rather than silently coexist (P15).
         if language == Language::TypeScript {
-            collect_ts_default_constants(module_key, &models, &mut top)?;
+            collect_ts_default_constants(module_key, &ns_models, &mut top)?;
         }
     }
 
+    Ok(manifest)
+}
+
+/// The fixed (schema-independent) top-level identifiers a target's JSON runtime
+/// emits into — or imports into — every module that carries models, and which
+/// therefore share the user type/service namespace. Only identifiers in the
+/// same case-class as user identifiers (which are always `UpperCamelCase`) are
+/// listed: a target's lower-case/underscore helpers occupy an effectively
+/// separate namespace and can never coincide with a generated type.
+///
+/// - Go (`src/generator/json/go.rs`): the exported runtime types `Violation`
+///   and `ValidationError` live in the models' own package; every other runtime
+///   symbol is unexported (`addViolations`, `parseSpecInteger`, …) and cannot
+///   collide with an exported user type.
+/// - TypeScript (`src/generator/json/typescript.rs`): `Violation` (interface)
+///   and `ValidationError` (class) are imported into every model module; the
+///   helper functions (`isPlainObject`, `collect`, …) are `camelCase`.
+/// - Python (`src/generator/json/python.rs`): the `UpperCamelCase` runtime type
+///   aliases imported into model modules (`SpecInt`, the materialized temporal
+///   and base64 field aliases). There is no generated `Violation`/error class —
+///   aggregation uses `pydantic.ValidationError`. The other runtime helpers are
+///   `_`-prefixed.
+/// - Java (`src/generator/java.rs`): the root-package runtime classes
+///   `Violation`, `ValidationException`, and `SpecNumbers`, each emitted as its
+///   own always-present public file and imported into model files.
+///   (`TemporalSupport`/`Base64Support` are schema-dependent, so excluded.)
+fn boilerplate_idents(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::Go | Language::TypeScript => &["Violation", "ValidationError"],
+        Language::Python => &[
+            "SpecInt",
+            "DateTimeField",
+            "DateField",
+            "TimeField",
+            "DurationField",
+            "Base64Field",
+            "Base64UrlField",
+        ],
+        Language::Java => &["Violation", "ValidationException", "SpecNumbers"],
+        _ => &[],
+    }
+}
+
+/// Adapts an authored [`ApiSpec`] into [`build_name_manifest`] inputs.
+fn manifest_inputs_from_spec(spec: &ApiSpec) -> (Vec<ManifestModel>, Vec<ManifestService>) {
+    let mut models = Vec::new();
+    for (_full_name, binding) in spec.external_types() {
+        let ExternalTypeSpec::Json(json) = &binding.external_type else {
+            continue;
+        };
+        let module_key = json
+            .name
+            .module_path()
+            .map(ModulePath::as_module_key)
+            .unwrap_or_default();
+        models.push(ManifestModel {
+            full_name: json.name.as_str().to_string(),
+            local_name: json.name.local_name().to_string(),
+            model_name: json.model_name.clone(),
+            module_key,
+            schema: json.schema.clone(),
+        });
+    }
+    let services = spec
+        .services
+        .iter()
+        .map(|service| ManifestService {
+            name: service.name.clone(),
+            code_name: service.code_name.clone(),
+        })
+        .collect();
+    (models, services)
+}
+
+/// The load-time P15 collision check: builds the manifest and discards it,
+/// surfacing any collision as a load reject. Runs once per emitted target.
+fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<()> {
+    let (models, services) = manifest_inputs_from_spec(spec);
+    build_name_manifest(language, &models, &services)?;
     Ok(())
 }
 
@@ -4945,7 +5195,12 @@ fn collect_synthesized_top_level(
             format!("`{model_full_name}.{json_name}` closed-value type"),
         )?;
         for value in &values {
-            let const_ident = format!("{defined_type}{}", go_value_suffix_for(value));
+            // An `x-go-const-name` / `x-go-enum-names` override replaces the
+            // whole value-constant identifier verbatim (mirrors the generator).
+            let const_ident = match value_constant_override(language, property, value) {
+                Some(name) => name.to_string(),
+                None => format!("{defined_type}{}", go_value_suffix_for(value)),
+            };
             top.insert(
                 language,
                 const_ident,
@@ -7328,6 +7583,94 @@ properties:
     }
 
     #[test]
+    fn value_constant_collision_resolved_by_enum_names_override() {
+        // `"user-admin"` and `"user_admin"` both encode to the Go value constant
+        // `UserAdmin` — a value-constant collision that rejects by default.
+        let colliding = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  role:
+    type: string
+    enum: ["user-admin", "user_admin"]
+"#;
+        let error = reject_for(Language::Go, colliding);
+        assert!(
+            error.contains("UserAdmin") && error.contains("collision"),
+            "{error}"
+        );
+
+        // An `x-go-enum-names` override renames one member's constant verbatim,
+        // separating the two (per target — Python has no value constant, so the
+        // keyword is inert but the schema still loads).
+        let overridden = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  role:
+    type: string
+    enum: ["user-admin", "user_admin"]
+    x-go-enum-names: { "user_admin": "UserAdminAlt" }
+"#;
+        parse_for(Language::Go, overridden)
+            .expect("value-constant override resolves the Go collision");
+    }
+
+    #[test]
+    fn rejects_type_name_collision_between_defs() {
+        // Two `$defs` keys that recase to the same type identifier (`userProfile`
+        // and `user_profile` → both `UserProfile`) collide in the package scope.
+        let error = reject_for(
+            Language::Go,
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  a: { $ref: "#/$defs/userProfile" }
+  b: { $ref: "#/$defs/user_profile" }
+$defs:
+  userProfile:
+    type: object
+    properties: { x: { type: string } }
+  user_profile:
+    type: object
+    properties: { y: { type: string } }
+"##,
+        );
+        assert!(
+            error.contains("collision") && error.contains("UserProfile"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn type_collision_resolved_by_type_override() {
+        // A type-level `x-go-name` moves the emitted identifier and so resolves
+        // the same clash — per target (Python still collides).
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  a: { $ref: "#/$defs/userProfile" }
+  b: { $ref: "#/$defs/user_profile" }
+$defs:
+  userProfile:
+    type: object
+    x-go-name: UserProfileAlt
+    properties: { x: { type: string } }
+  user_profile:
+    type: object
+    properties: { y: { type: string } }
+"##;
+        parse_for(Language::Go, input).expect("type override resolves the Go collision");
+        let error = reject_for(Language::Python, input);
+        assert!(
+            error.contains("collision") && error.contains("UserProfile"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn rejects_invalid_and_reserved_overrides() {
         // A leading-digit override is not a legal identifier.
         let error = reject_for(
@@ -7977,5 +8320,158 @@ $defs:
     fn rejects_ref_target_file_not_in_input_set() {
         let error = numeric_reject("$ref: \"missing.yaml#/$defs/X\"");
         assert!(error.contains("not in the input set"), "{error}");
+    }
+
+    #[test]
+    fn service_name_override_resolves_service_vs_model_collision() {
+        // A service and a `$defs` model would both resolve to `Widget`. An
+        // `x-go-name` on the service renames its emitted identifier verbatim,
+        // clearing the collision for Go (and leaving the wire name untouched).
+        let input = r#"
+nexusrpc: "1.0.0"
+services:
+  Widget:
+    x-go-name: WidgetService
+    operations:
+      ping:
+        input:
+          type: object
+          properties: { a: { type: string } }
+$defs:
+  Widget:
+    type: object
+    properties: { b: { type: string } }
+"#;
+        // Go: the override resolves the collision.
+        let spec = parse_for(Language::Go, input).expect("override should clear the Go collision");
+        let service = &spec.services[0];
+        assert_eq!(service.code_name.as_deref(), Some("WidgetService"));
+        assert_eq!(service.name, "Widget");
+        assert_eq!(service.wire_name, "Widget");
+
+        // Python has no such override here, so the collision still rejects.
+        let error = reject_for(Language::Python, input);
+        assert!(
+            error.contains("collision") && error.contains("Widget"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_type_colliding_with_go_runtime_boilerplate() {
+        // Go emits the exported runtime type `ValidationError` into the models'
+        // own package, so a `$defs` type of that name is a package-scope clash.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  e: { $ref: "#/$defs/ValidationError" }
+$defs:
+  ValidationError:
+    type: object
+    properties: { a: { type: string } }
+"##;
+        let error = reject_for(Language::Go, input);
+        assert!(
+            error.contains("collision") && error.contains("ValidationError"),
+            "{error}"
+        );
+        // Python aggregates via `pydantic.ValidationError` (a qualified name), so
+        // it emits no top-level `ValidationError` and the same schema is accepted.
+        parse_for(Language::Python, input).expect("Python has no ValidationError boilerplate");
+    }
+
+    #[test]
+    fn rejects_type_colliding_with_typescript_runtime_boilerplate() {
+        // TypeScript imports the runtime `Violation` interface into every model
+        // module, so a `$defs` type named `Violation` clashes with the import.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  v: { $ref: "#/$defs/Violation" }
+$defs:
+  Violation:
+    type: object
+    properties: { a: { type: string } }
+"##;
+        let error = reject_for(Language::TypeScript, input);
+        assert!(
+            error.contains("collision") && error.contains("Violation"),
+            "{error}"
+        );
+        // Python has no `Violation` symbol, so it accepts the schema.
+        parse_for(Language::Python, input).expect("Python has no Violation boilerplate");
+    }
+
+    #[test]
+    fn rejects_type_colliding_with_java_runtime_boilerplate() {
+        // Java emits `ValidationException` as an always-present public runtime
+        // class in the root package, imported into model files.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  e: { $ref: "#/$defs/ValidationException" }
+$defs:
+  ValidationException:
+    type: object
+    properties: { a: { type: string } }
+"##;
+        let error = reject_for(Language::Java, input);
+        assert!(
+            error.contains("collision") && error.contains("ValidationException"),
+            "{error}"
+        );
+        // Go names its aggregate error `ValidationError`, not `ValidationException`,
+        // so the same schema is accepted for Go.
+        parse_for(Language::Go, input).expect("Go has no ValidationException boilerplate");
+    }
+
+    #[test]
+    fn rejects_type_colliding_with_java_violation_boilerplate() {
+        // Per the task: Java `$defs: { Violation: {...} }` rejects for Java (Java
+        // emits a public `Violation` record). `Violation` is boilerplate for Go,
+        // TypeScript and Java alike; only Python (which has no `Violation`)
+        // accepts it, so Python is the "not boilerplate" language here.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  v: { $ref: "#/$defs/Violation" }
+$defs:
+  Violation:
+    type: object
+    properties: { a: { type: string } }
+"##;
+        let error = reject_for(Language::Java, input);
+        assert!(
+            error.contains("collision") && error.contains("Violation"),
+            "{error}"
+        );
+        parse_for(Language::Python, input).expect("Python has no Violation boilerplate");
+    }
+
+    #[test]
+    fn rejects_type_colliding_with_python_runtime_boilerplate() {
+        // Python imports the runtime type alias `SpecInt` into model modules for
+        // any integer field, so a `$defs` type named `SpecInt` clashes.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  s: { $ref: "#/$defs/SpecInt" }
+$defs:
+  SpecInt:
+    type: object
+    properties: { a: { type: string } }
+"##;
+        let error = reject_for(Language::Python, input);
+        assert!(
+            error.contains("collision") && error.contains("SpecInt"),
+            "{error}"
+        );
+        // `SpecInt` is Python-specific runtime naming; Go has no such symbol.
+        parse_for(Language::Go, input).expect("Go has no SpecInt boilerplate");
     }
 }

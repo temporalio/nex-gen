@@ -445,7 +445,10 @@ impl<'a> ApiPlanner<'a> {
         Ok(RenderedOperation {
             name: operation.name.as_str(),
             wire_name: operation.wire_name.as_str(),
-            attr_name: typescript_ident(&operation.name.to_lower_camel_case()),
+            attr_name: operation
+                .code_name
+                .clone()
+                .unwrap_or_else(|| typescript_ident(&operation.name.to_lower_camel_case())),
             experimental: operation.experimental,
             doc: operation
                 .doc
@@ -1760,7 +1763,10 @@ fn generate_leaf(
 
             Ok(RenderedService {
                 name: service.name.as_str(),
-                attr_name: typescript_ident(&service.name.to_lower_camel_case()),
+                attr_name: service
+                    .code_name
+                    .clone()
+                    .unwrap_or_else(|| typescript_ident(&service.name.to_lower_camel_case())),
                 wire_name: service.wire_name.as_str(),
                 doc: service
                     .doc

@@ -170,10 +170,14 @@ class Circle(pydantic.BaseModel):
         return _emit_set_fields(self, handler)
 
 
-class Contact(pydantic.BaseModel):
+class ContactPy(pydantic.BaseModel):
     """Contact details with a conditional requirement and a member-count bound: a shipping
     street requires a shipping zip (dependentRequired), and the object must carry 1 to 3
-    members (minProperties/maxProperties on a declared-property object).
+    members (minProperties/maxProperties on a declared-property object). Also exercises
+    the type-level `x-<lang>-name` override (the Stage 4 escape hatch): the emitted type
+    is renamed to the derived name plus a per-language suffix (Go `ContactGo`, TS
+    `ContactTs`, Python `ContactPy`, Java `ContactJava`) at its declaration and at every
+    `$ref`, while the wire `$ref` name stays `Contact`.
     """
 
     model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
@@ -355,13 +359,23 @@ class Showcase(pydantic.BaseModel):
     """Discriminator; always "showcase"."""
 
     revision: typing.Literal[1] = pydantic.Field(default=1)
-    """Integer const; always 1."""
+    """Integer const; always 1. Also exercises the single-`const` value override:
+    `x-go-const-name`/`x-java-const-name` rename the emitted constant to the derived
+    name plus a per-language suffix (Go `RevisionGo`, Java `REVISION_JAVA`) while the
+    wire value stays `1`. TS/Python are inert here (no const override keyword — the
+    value is emitted as a plain literal type).
+    """
 
     enabled: typing.Literal[True] = pydantic.Field(default=True)
     """Boolean const; always true."""
 
     status: typing.Literal["active", "inactive", "pending"] = pydantic.Field()
-    """Closed string value set."""
+    """Closed string value set. Also exercises the enum value-constant override:
+    `x-go-enum-names`/`x-java-enum-names` rename the `active` value's emitted constant
+    to the value name plus a per-language suffix (Go `ActiveGo`, Java `ACTIVE_JAVA`)
+    while the wire value stays `active`. TS/Python are inert here (no enum override
+    keyword).
+    """
 
     tier: typing.Literal[1, 2, 3] = pydantic.Field()
     """Closed integer value set."""
@@ -526,7 +540,7 @@ class Showcase(pydantic.BaseModel):
     Optional boolean with a schema default.
     """
 
-    legacy_ident: (
+    legacy_id_py: (
         typing.Annotated[
             str,
             typing_extensions.deprecated("This field is deprecated.", category=None),
@@ -535,10 +549,11 @@ class Showcase(pydantic.BaseModel):
     ) = pydantic.Field(default=None, alias="legacyId")
     """Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation
     marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702
-    @deprecated). Also exercises the per-language identifier override (`x-<lang>-name`,
-    the Stage 4 escape hatch): the emitted code identifier is forced to the idiomatic
-    initialism `LegacyID`/`legacyID` while the wire name stays `legacyId` (json tag /
-    alias / @JsonProperty).
+    @deprecated). Also exercises the property-level `x-<lang>-name` override (the Stage
+    4 escape hatch): the emitted member identifier is renamed to the derived name plus a
+    per-language suffix (Go `LegacyIdGo`, TS `legacyIdTs`, Python `legacy_id_py`, Java
+    `legacyIdJava`) while the wire name stays `legacyId` (json tag / alias /
+    @JsonProperty).
     """
 
     middle_name: str | None = pydantic.Field(default=None, alias="middleName")
@@ -586,7 +601,7 @@ class Showcase(pydantic.BaseModel):
 
     attributes: Attributes | None = pydantic.Field(default=None)
 
-    contact: Contact | None = pydantic.Field(default=None)
+    contact: ContactPy | None = pydantic.Field(default=None)
 
     @pydantic.model_validator(mode="before")
     @classmethod
@@ -765,7 +780,7 @@ class Showcase(pydantic.BaseModel):
             "id_or_name",
             "labels",
             "legacyId",
-            "legacy_ident",
+            "legacy_id_py",
             "level",
             "nickname",
             "phrase",
