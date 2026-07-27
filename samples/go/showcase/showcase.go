@@ -11,7 +11,19 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/nexus-rpc/sdk-go/nexus"
 )
+
+// Fetch the showcase payload. Also exercises the service-level `x-<lang>-name` override: the emitted service code identifier is renamed to the derived name plus a per-language suffix (Go var `ShowcaseServiceGo`, TS const `showcaseServiceTs`, Python class `ShowcaseServicePy`, Java interface `ShowcaseServiceJava`) while the wire service name / `@Service` / `ServiceName` string stays `example.showcase.v1.ShowcaseService`.
+var ShowcaseServiceGo = struct {
+	ServiceName string
+	// Fetch a showcase by id. Also exercises the operation-level `x-<lang>-name` override: the emitted operation code identifier is renamed to the derived name plus a per-language suffix (Go `GetShowcaseGo`, TS `getShowcaseTs`, Python `get_showcase_py`, Java `getShowcaseJava`) while the wire operation name stays `GetShowcase` and the synthesized I/O type stays `GetShowcaseInput` (derived from the operation key, not the override).
+	GetShowcaseGo nexus.OperationReference[GetShowcaseInput, Showcase]
+}{
+	ServiceName:   "example.showcase.v1.ShowcaseService",
+	GetShowcaseGo: nexus.NewOperationReference[GetShowcaseInput, Showcase]("GetShowcase"),
+}
 
 // Violation is a single constraint failure. Path is the JSON member path
 // (dotted for nested members); Reason is a human-readable message.

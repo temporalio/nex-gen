@@ -594,10 +594,48 @@ fn go_json_generation_matches_checked_in_output() {
                     _ => unreachable!(),
                 }
             } else {
-                assert!(!generated.contains("Service = struct"));
+                // Definitions mode emits the Nexus service/operation reference
+                // struct (so callers drive the SDK's Nexus client directly)
+                // but never the workflow client — that surface is NativeApi
+                // only, hence no `ServiceClient` type and no workflow import.
                 assert!(!generated.contains("ServiceClient"));
-                assert!(!generated.contains("github.com/nexus-rpc/sdk-go/nexus"));
                 assert!(!generated.contains("go.temporal.io/sdk/workflow"));
+                match example_id {
+                    "chat" => {
+                        assert!(generated.contains("var ChatService = struct"));
+                        assert!(generated.contains("github.com/nexus-rpc/sdk-go/nexus"));
+                        assert!(generated.contains(
+                            "nexus.OperationReference[SendMessageInput, SendMessageOutput]"
+                        ));
+                        assert!(generated.contains("\"example.chat.v1.ChatService\""));
+                    }
+                    "kb" => {
+                        assert!(generated.contains("var KnowledgeBaseService = struct"));
+                        assert!(generated.contains("github.com/nexus-rpc/sdk-go/nexus"));
+                        assert!(generated.contains("nexus.OperationReference[GetPageInput, Page]"));
+                        assert!(
+                            generated.contains("nexus.OperationReference[Block, PutBlockOutput]")
+                        );
+                        assert!(generated.contains("\"example.kb.v1.KnowledgeBaseService\""));
+                    }
+                    "showcase" => {
+                        // The `x-go-name` overrides still rename the emitted
+                        // identifiers while the wire names stay pinned.
+                        assert!(generated.contains("var ShowcaseServiceGo = struct"));
+                        assert!(generated.contains("github.com/nexus-rpc/sdk-go/nexus"));
+                        assert!(
+                            generated
+                                .contains("nexus.OperationReference[GetShowcaseInput, Showcase]")
+                        );
+                        assert!(generated.contains("\"example.showcase.v1.ShowcaseService\""));
+                        assert!(generated.contains("(\"GetShowcase\")"));
+                    }
+                    "temporal" => {
+                        assert!(!generated.contains("Service = struct"));
+                        assert!(!generated.contains("github.com/nexus-rpc/sdk-go/nexus"));
+                    }
+                    _ => unreachable!(),
+                }
             }
 
             fs::remove_dir_all(temp_dir).unwrap();

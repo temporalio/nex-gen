@@ -8,7 +8,25 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/nexus-rpc/sdk-go/nexus"
 )
+
+// Send messages and look up rooms.
+var ChatService = struct {
+	ServiceName string
+	// Post a message to a room.
+	SendMessage nexus.OperationReference[SendMessageInput, SendMessageOutput]
+	// Look up a room by id.
+	GetRoom nexus.OperationReference[GetRoomInput, Room]
+	// Liveness probe.
+	Ping nexus.OperationReference[nexus.NoValue, nexus.NoValue]
+}{
+	ServiceName: "example.chat.v1.ChatService",
+	SendMessage: nexus.NewOperationReference[SendMessageInput, SendMessageOutput]("SendMessage"),
+	GetRoom:     nexus.NewOperationReference[GetRoomInput, Room]("GetRoom"),
+	Ping:        nexus.NewOperationReference[nexus.NoValue, nexus.NoValue]("Ping"),
+}
 
 // Violation is a single constraint failure. Path is the JSON member path
 // (dotted for nested members); Reason is a human-readable message.

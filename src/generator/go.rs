@@ -1122,8 +1122,10 @@ impl<'a> ApiPlanner<'a> {
         }
         let model_fragments = self.external_models.render_models()?;
         self.imports.extend(model_fragments.imports);
-        if self.mode == GenerationMode::NativeApi
-            && self.external_models.renders_operation_references()
+        // The Nexus service definition (operation references) is emitted in
+        // both modes, so the `nexus` import is needed whenever a spec has
+        // services — not just in NativeApi.
+        if self.external_models.renders_operation_references()
             && !self.api_plan.services.is_empty()
             && !self
                 .package
@@ -1146,13 +1148,9 @@ impl<'a> ApiPlanner<'a> {
             &self.imports,
             &external_imports,
             &model_fragments.body,
-            if self.mode == GenerationMode::NativeApi {
-                self.external_models
-                    .render_operation_references(self.api_plan, &self.package)?
-            } else {
-                None
-            }
-            .as_deref(),
+            self.external_models
+                .render_operation_references(self.api_plan, &self.package)?
+                .as_deref(),
             self.enums.values().collect::<Vec<_>>().as_slice(),
             self.flags.values().collect::<Vec<_>>().as_slice(),
             self.variants.values().collect::<Vec<_>>().as_slice(),

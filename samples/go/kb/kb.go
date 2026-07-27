@@ -3,7 +3,25 @@ package kb
 
 import (
 	"encoding/json"
+
+	"github.com/nexus-rpc/sdk-go/nexus"
 )
+
+// Fetch and update pages, blocks, and the category tree.
+var KnowledgeBaseService = struct {
+	ServiceName string
+	// Fetch a page by id.
+	GetPage nexus.OperationReference[GetPageInput, Page]
+	// Create or update a content block.
+	PutBlock nexus.OperationReference[Block, PutBlockOutput]
+	// Fetch the category tree rooted at a category.
+	GetCategoryTree nexus.OperationReference[GetCategoryTreeInput, Category]
+}{
+	ServiceName:     "example.kb.v1.KnowledgeBaseService",
+	GetPage:         nexus.NewOperationReference[GetPageInput, Page]("GetPage"),
+	PutBlock:        nexus.NewOperationReference[Block, PutBlockOutput]("PutBlock"),
+	GetCategoryTree: nexus.NewOperationReference[GetCategoryTreeInput, Category]("GetCategoryTree"),
+}
 
 // GetCategoryTreeInput is generated from the corresponding JSON Schema definition.
 type GetCategoryTreeInput struct {
