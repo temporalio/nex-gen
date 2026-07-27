@@ -12,15 +12,15 @@ mod tests {
     }
 
     fn sample_input_path(root: &Path) -> PathBuf {
-        root.join("examples/inputs/workflow-service.wit")
+        root.join("advanced/samples/inputs/workflow-service.wit")
     }
 
     fn descriptor_path(root: &Path) -> PathBuf {
-        root.join("examples/descriptors/temporal_api.bin")
+        root.join("advanced/samples/descriptors/temporal_api.bin")
     }
 
     fn linked_inputs_path(root: &Path) -> PathBuf {
-        root.join("examples/inputs/deps")
+        root.join("advanced/samples/inputs/deps")
     }
 
     fn unique_temp_dir(name: &str) -> PathBuf {

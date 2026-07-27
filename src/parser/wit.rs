@@ -3521,11 +3521,12 @@ mod tests {
     }
 
     fn descriptors() -> DescriptorIndex {
-        DescriptorIndex::load(&root().join("examples/descriptors/temporal_api.bin")).unwrap()
+        DescriptorIndex::load(&root().join("advanced/samples/descriptors/temporal_api.bin"))
+            .unwrap()
     }
 
     fn linked_inputs_path() -> PathBuf {
-        root().join("examples/inputs/deps")
+        root().join("advanced/samples/inputs/deps")
     }
 
     fn parse(language: Language, wit: &str) -> ApiSpec {

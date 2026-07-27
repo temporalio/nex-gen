@@ -771,7 +771,7 @@ mod tests {
     fn descriptors() -> DescriptorIndex {
         DescriptorIndex::load(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples/descriptors/temporal_api.bin"),
+                .join("advanced/samples/descriptors/temporal_api.bin"),
         )
         .unwrap()
     }
@@ -782,7 +782,7 @@ mod tests {
 
     fn parse(language: Language, wit: &str) -> ApiSpec {
         let temporal_types_input =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/inputs/deps");
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("advanced/samples/inputs/deps");
         crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
             language,
             wit,

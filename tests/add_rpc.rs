@@ -7,18 +7,18 @@ use nex_gen::add_rpc_to_string;
 use nex_gen::language::Language;
 use nex_gen::spec::{ApiSpec, TypeSpec};
 
-const PRIMARY_EXAMPLE_PATH: &str = "examples/inputs/workflow-service.wit";
+const PRIMARY_EXAMPLE_PATH: &str = "advanced/samples/inputs/workflow-service.wit";
 
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 fn descriptor_path(root: &std::path::Path) -> PathBuf {
-    root.join("examples/descriptors/temporal_api.bin")
+    root.join("advanced/samples/descriptors/temporal_api.bin")
 }
 
 fn linked_inputs_path(root: &std::path::Path) -> PathBuf {
-    root.join("examples/inputs/deps")
+    root.join("advanced/samples/inputs/deps")
 }
 
 fn linked_inputs(root: &std::path::Path) -> Vec<PathBuf> {

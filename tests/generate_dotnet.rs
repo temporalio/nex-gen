@@ -18,15 +18,15 @@ fn project_root() -> PathBuf {
 }
 
 fn descriptor_path(root: &Path) -> PathBuf {
-    root.join("examples/descriptors/temporal_api.bin")
+    root.join("advanced/samples/descriptors/temporal_api.bin")
 }
 
 fn linked_inputs_path(root: &Path) -> PathBuf {
-    root.join("examples/inputs/deps")
+    root.join("advanced/samples/inputs/deps")
 }
 
 fn dotnet_root(root: &Path) -> PathBuf {
-    root.join("examples/dotnet")
+    root.join("advanced/samples/dotnet")
 }
 
 fn dotnet_command() -> (MutexGuard<'static, ()>, Command) {
@@ -41,12 +41,12 @@ fn dotnet_command() -> (MutexGuard<'static, ()>, Command) {
 
 fn input_path(root: &Path, example_id: &str) -> PathBuf {
     let flat_path = root
-        .join("examples/inputs")
+        .join("advanced/samples/inputs")
         .join(format!("{example_id}.wit"));
     if flat_path.is_file() {
         flat_path
     } else {
-        root.join("examples/inputs")
+        root.join("advanced/samples/inputs")
             .join(example_id)
             .join("main.wit")
     }
@@ -62,7 +62,7 @@ fn dotnet_output_path(root: &Path, example_id: &str) -> PathBuf {
 
 fn dotnet_example_ids(root: &Path) -> Vec<String> {
     let dotnet_root = dotnet_root(root);
-    let mut ids = fs::read_dir(root.join("examples/inputs"))
+    let mut ids = fs::read_dir(root.join("advanced/samples/inputs"))
         .unwrap()
         .filter_map(|entry| {
             let entry = entry.ok()?;

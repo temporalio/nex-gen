@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
 /// Resolves a JSON-Schema example id (e.g. `chat`, `kb`, `showcase`) to its
-/// input path under `examples/json-schema-inputs`, trying both the bare
+/// input path under `samples/schemas`, trying both the bare
 /// filename and the `.nexusrpc` naming-convention infix used by files that
 /// declare a Nexus service/operation envelope.
 pub fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
-    let input_root = root.join("examples/json-schema-inputs");
+    let input_root = root.join("samples/schemas");
     let dir_path = input_root.join(example_id);
     if dir_path.is_dir() {
         return dir_path;

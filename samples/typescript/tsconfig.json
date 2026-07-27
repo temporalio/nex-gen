@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "esnext.temporal"],
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true
+  },
+  "include": [
+    "chat/**/*.ts",
+    "kb/**/*.ts",
+    "showcase/**/*.ts",
+    "temporal/**/*.ts",
+    "temporal-date/**/*.ts",
+    "temporal-temporal/**/*.ts",
+    "tests/**/*.ts"
+  ]
+}

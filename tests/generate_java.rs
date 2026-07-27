@@ -16,10 +16,17 @@ fn project_root() -> PathBuf {
 }
 
 /// The checked-in Java example root for a given generation mode and example.
+/// Definitions are the beginner-facing samples; native-api is snapshot-only in
+/// the advanced project.
 fn java_example_output_path(root: &Path, mode: &str, example_id: &str) -> PathBuf {
-    root.join("examples/java/src/main/java/json_schema")
-        .join(mode)
-        .join(example_id)
+    match mode {
+        "definitions" => root
+            .join("samples/java/src/main/java/json_schema/definitions")
+            .join(example_id),
+        _ => root
+            .join("advanced/samples/java/src/main/java/json_schema/api")
+            .join(example_id),
+    }
 }
 
 fn unique_output_path(label: &str) -> PathBuf {

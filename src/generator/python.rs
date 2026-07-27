@@ -6994,19 +6994,19 @@ mod tests {
     use crate::spec::{LanguageImportSpec, LanguageImportStyle};
 
     fn sample_input_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/inputs/workflow-service.wit")
+        root.join("advanced/samples/inputs/workflow-service.wit")
     }
 
     fn start_workflow_input_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/inputs/start-workflow.wit")
+        root.join("advanced/samples/inputs/start-workflow.wit")
     }
 
     fn type_roundtrip_input_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/inputs/type-roundtrip.wit")
+        root.join("advanced/samples/inputs/type-roundtrip.wit")
     }
 
     fn linked_inputs_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/inputs/deps")
+        root.join("advanced/samples/inputs/deps")
     }
 
     fn example_input_paths(root: &std::path::Path, input_path: PathBuf) -> Vec<PathBuf> {
@@ -7014,7 +7014,7 @@ mod tests {
     }
 
     fn sample_python_output_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/python/wit/workflow_service")
+        root.join("advanced/samples/python/wit/workflow_service")
     }
 
     #[test]
@@ -7161,7 +7161,7 @@ class Example(enum.Enum):
         fs::create_dir_all(&temp_dir).unwrap();
         write_package(&temp_dir, files);
         let status = Command::new("uv")
-            .current_dir(root.join("examples/python"))
+            .current_dir(root.join("advanced/samples/python"))
             .args([
                 "run",
                 "ruff",
@@ -7187,7 +7187,8 @@ class Example(enum.Enum):
         )
         .unwrap();
         let descriptors =
-            DescriptorIndex::load(&root.join("examples/descriptors/temporal_api.bin")).unwrap();
+            DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
+                .unwrap();
         let generated = generate_files(
             Language::Python,
             spec.clone(),
@@ -7211,7 +7212,8 @@ class Example(enum.Enum):
         )
         .unwrap();
         let descriptors =
-            DescriptorIndex::load(&root.join("examples/descriptors/temporal_api.bin")).unwrap();
+            DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
+                .unwrap();
         let output = generate_source(
             Language::Python,
             spec.clone(),
@@ -7445,7 +7447,7 @@ interface example-service {
         .unwrap();
         let descriptors = DescriptorIndex::load(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples/descriptors/temporal_api.bin"),
+                .join("advanced/samples/descriptors/temporal_api.bin"),
         )
         .unwrap();
         let output = generate_source(
@@ -7552,7 +7554,8 @@ interface example-service {
         )
         .unwrap();
         let descriptors =
-            DescriptorIndex::load(&root.join("examples/descriptors/temporal_api.bin")).unwrap();
+            DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
+                .unwrap();
         let output = generate_source(
             Language::Python,
             spec.clone(),
@@ -7664,7 +7667,8 @@ interface workflow-service {
         )
         .unwrap();
         let descriptors =
-            DescriptorIndex::load(&root.join("examples/descriptors/temporal_api.bin")).unwrap();
+            DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
+                .unwrap();
         let error = generate_source(
             Language::Python,
             spec.clone(),
@@ -7713,7 +7717,7 @@ interface example-service {
         .unwrap();
         let descriptors = DescriptorIndex::load(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples/descriptors/temporal_api.bin"),
+                .join("advanced/samples/descriptors/temporal_api.bin"),
         )
         .unwrap();
 

@@ -9,11 +9,11 @@ fn project_root() -> PathBuf {
 }
 
 fn sample_input_path(root: &Path) -> PathBuf {
-    root.join("examples/inputs/workflow-service.wit")
+    root.join("advanced/samples/inputs/workflow-service.wit")
 }
 
 fn linked_inputs_path(root: &Path) -> PathBuf {
-    root.join("examples/inputs/deps")
+    root.join("advanced/samples/inputs/deps")
 }
 
 fn unique_temp_dir(name: &str) -> PathBuf {
@@ -79,7 +79,7 @@ fn cli_debug_wit_dir_uses_only_the_given_inputs() {
         .args([
             "debug-wit-dir",
             "--input",
-            root.join("examples/inputs/user-service.wit")
+            root.join("advanced/samples/inputs/user-service.wit")
                 .to_str()
                 .unwrap(),
             "--output",

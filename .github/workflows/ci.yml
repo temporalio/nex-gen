@@ -38,20 +38,24 @@ jobs:
         uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
         with:
           enable-cache: true
-          working-directory: examples/python
+          working-directory: samples/python
 
       - name: Set up Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "26"
           cache: npm
-          cache-dependency-path: examples/typescript/package-lock.json
+          cache-dependency-path: |
+            samples/typescript/package-lock.json
+            advanced/samples/typescript/package-lock.json
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version-file: examples/go/go.mod
-          cache-dependency-path: examples/go/go.sum
+          go-version-file: advanced/samples/go/go.mod
+          cache-dependency-path: |
+            samples/go/go.sum
+            advanced/samples/go/go.sum
 
       - name: Set up Java
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
@@ -60,12 +64,20 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Install Python dependencies
-        working-directory: examples/python
+      - name: Install Python dependencies (samples)
+        working-directory: samples/python
         run: uv sync --locked
 
-      - name: Install TypeScript dependencies
-        working-directory: examples/typescript
+      - name: Install Python dependencies (advanced)
+        working-directory: advanced/samples/python
+        run: uv sync --locked
+
+      - name: Install TypeScript dependencies (samples)
+        working-directory: samples/typescript
+        run: npm ci
+
+      - name: Install TypeScript dependencies (advanced)
+        working-directory: advanced/samples/typescript
         run: npm ci
 
       - name: Check Rust formatting
@@ -74,32 +86,51 @@ jobs:
       - name: Run Rust tests
         run: cargo test
 
-      - name: Check Python formatting
-        working-directory: examples/python
+      - name: Check Python formatting (samples)
+        working-directory: samples/python
         run: uv run ruff format --check .
 
-      - name: Check TypeScript formatting
-        working-directory: examples/typescript
+      - name: Check Python formatting (advanced)
+        working-directory: advanced/samples/python
+        run: uv run ruff format --check .
+
+      - name: Check TypeScript formatting (samples)
+        working-directory: samples/typescript
+        run: npm exec -- prettier --check .
+
+      - name: Check TypeScript formatting (advanced)
+        working-directory: advanced/samples/typescript
         run: npm exec -- prettier --check .
 
       - name: Check Go formatting
-        working-directory: examples/go
         run: |
-          unformatted="$(gofmt -l .)"
+          unformatted="$(gofmt -l samples/go advanced/samples/go)"
           if [ -n "$unformatted" ]; then
             echo "gofmt required for:" >&2
             echo "$unformatted" >&2
             exit 1
           fi
 
-      - name: Run Go tests
-        working-directory: examples/go
+      - name: Run Go tests (samples)
+        working-directory: samples/go
         run: go test ./...
 
-      - name: Run Python tests
-        working-directory: examples/python
+      - name: Run Go tests (advanced)
+        working-directory: advanced/samples/go
+        run: go test ./...
+
+      - name: Run Python tests (samples)
+        working-directory: samples/python
         run: uv run pytest
 
-      - name: Run Java tests
-        working-directory: examples/java
+      - name: Run Python tests (advanced)
+        working-directory: advanced/samples/python
+        run: uv run pytest
+
+      - name: Run Java tests (samples)
+        working-directory: samples/java
+        run: ./gradlew build --no-daemon
+
+      - name: Run Java tests (advanced)
+        working-directory: advanced/samples/java
         run: ./gradlew build --no-daemon

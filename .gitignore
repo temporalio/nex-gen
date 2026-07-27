@@ -25,12 +25,16 @@ target
 __pycache__/
 *.pyc
 .pytest_cache/
-examples/python/.idea/
+.ruff_cache/
 
 # TypeScript validation app
-examples/typescript/node_modules/
-examples/typescript/*.tsbuildinfo
+node_modules/
+*.tsbuildinfo
 
 # .NET validation app
 **/bin/
 **/obj/
+
+# Java validation app
+.gradle/
+build/

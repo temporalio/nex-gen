@@ -120,7 +120,7 @@ pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
         }
 
         if language == Language::TypeScript {
-            ensure_typescript_dependencies(&repo_root)?;
+            ensure_typescript_dependencies(&advanced_language_root(&repo_root, language))?;
         }
 
         for example_id in example_ids {
@@ -152,7 +152,10 @@ pub fn build_json_examples(request: &BuildExamplesRequest) -> Result<()> {
             return Err(error::Error::UnsupportedLanguage { language });
         }
         if language == Language::TypeScript {
-            ensure_typescript_dependencies(&repo_root)?;
+            // Definitions land in samples/, native-api in advanced/; each needs
+            // its own node_modules for the prettier formatting pass.
+            ensure_typescript_dependencies(&samples_language_root(&repo_root, language))?;
+            ensure_typescript_dependencies(&advanced_language_root(&repo_root, language))?;
         }
 
         let example_ids = if request.example_ids.is_empty() {
@@ -478,9 +481,9 @@ fn infer_dotnet_namespace(contents: &str) -> Option<String> {
 }
 
 fn discover_example_ids(repo_root: &Path, language: Language) -> Result<Vec<String>> {
-    let mut ids = fs::read_dir(repo_root.join("examples/inputs"))
+    let mut ids = fs::read_dir(repo_root.join("advanced/samples/inputs"))
         .map_err(|source| error::Error::ReadFile {
-            path: repo_root.join("examples/inputs"),
+            path: repo_root.join("advanced/samples/inputs"),
             source,
         })?
         .filter_map(|entry| {
@@ -545,7 +548,7 @@ fn filter_available_example_ids(
 }
 
 fn discover_json_example_ids(repo_root: &Path) -> Result<Vec<String>> {
-    let input_root = repo_root.join("examples/json-schema-inputs");
+    let input_root = repo_root.join("samples/schemas");
     let mut ids = fs::read_dir(&input_root)
         .map_err(|source| error::Error::ReadFile {
             path: input_root.clone(),
@@ -611,26 +614,25 @@ fn validate_json_example_ids(
     Ok(example_ids.to_vec())
 }
 
-fn ensure_typescript_dependencies(repo_root: &Path) -> Result<()> {
-    let cwd = example_language_root(repo_root, Language::TypeScript);
+fn ensure_typescript_dependencies(cwd: &Path) -> Result<()> {
     if cwd.join("node_modules").exists() {
         return Ok(());
     }
 
     let command = "npm install --no-fund --no-audit".to_string();
     let status = Command::new("npm")
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .args(["install", "--no-fund", "--no-audit"])
         .status()
         .map_err(|source| error::Error::RunCommand {
-            cwd: cwd.clone(),
+            cwd: cwd.to_path_buf(),
             command: command.clone(),
             source,
         })?;
 
     if !status.success() {
         return Err(error::Error::CommandFailed {
-            cwd,
+            cwd: cwd.to_path_buf(),
             command,
             status,
         });
@@ -640,7 +642,7 @@ fn ensure_typescript_dependencies(repo_root: &Path) -> Result<()> {
 }
 
 fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Result<()> {
-    let descriptor_path = repo_root.join("examples/descriptors/temporal_api.bin");
+    let descriptor_path = repo_root.join("advanced/samples/descriptors/temporal_api.bin");
     let input_path = example_input_path(repo_root, example_id);
     let mut input_paths = vec![input_path];
     input_paths.extend(example_linked_input_paths(repo_root));
@@ -656,7 +658,11 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         generate_native_api: true,
         ts_date_time_types: Default::default(),
     })?;
-    format_example_output(repo_root, language, &output_path)?;
+    format_example_output(
+        &advanced_language_root(repo_root, language),
+        language,
+        &output_path,
+    )?;
 
     println!("Built {} with nex-gen", output_path.display());
     Ok(())
@@ -724,7 +730,11 @@ fn build_json_example_variant(
         generate_native_api: false,
         ts_date_time_types,
     })?;
-    format_example_output(repo_root, language, &definitions_output_path)?;
+    format_example_output(
+        &samples_language_root(repo_root, language),
+        language,
+        &definitions_output_path,
+    )?;
 
     println!("Built {} with nex-gen", definitions_output_path.display());
 
@@ -740,37 +750,46 @@ fn build_json_example_variant(
         generate_native_api: true,
         ts_date_time_types,
     })?;
-    format_example_output(repo_root, language, &api_output_path)?;
+    format_example_output(
+        &advanced_language_root(repo_root, language),
+        language,
+        &api_output_path,
+    )?;
 
     println!("Built {} with nex-gen", api_output_path.display());
 
     Ok(())
 }
 
-fn example_language_root(repo_root: &Path, language: Language) -> PathBuf {
-    match language {
-        Language::Python => repo_root.join("examples/python"),
-        Language::TypeScript => repo_root.join("examples/typescript"),
-        _ => repo_root.join("examples").join(language.as_str()),
-    }
+/// Root of the beginner-facing JSON-Schema sample project for a language,
+/// e.g. `samples/go`. Holds the definitions-mode outputs and their tests.
+fn samples_language_root(repo_root: &Path, language: Language) -> PathBuf {
+    repo_root.join("samples").join(language.as_str())
+}
+
+/// Root of the advanced sample project for a language, e.g. `advanced/samples/go`.
+/// Holds the WIT outputs, their tests, and the snapshot-only JSON-Schema
+/// native-api outputs.
+fn advanced_language_root(repo_root: &Path, language: Language) -> PathBuf {
+    repo_root.join("advanced/samples").join(language.as_str())
 }
 
 fn example_input_path(repo_root: &Path, example_id: &str) -> PathBuf {
     let flat_path = repo_root
-        .join("examples/inputs")
+        .join("advanced/samples/inputs")
         .join(format!("{example_id}.wit"));
     if flat_path.is_file() {
         flat_path
     } else {
         repo_root
-            .join("examples/inputs")
+            .join("advanced/samples/inputs")
             .join(example_id)
             .join("main.wit")
     }
 }
 
 fn json_example_input_path(repo_root: &Path, example_id: &str) -> PathBuf {
-    let input_root = repo_root.join("examples/json-schema-inputs");
+    let input_root = repo_root.join("samples/schemas");
     let dir_path = input_root.join(example_id);
     if dir_path.is_dir() {
         return dir_path;
@@ -787,7 +806,7 @@ fn json_example_input_path(repo_root: &Path, example_id: &str) -> PathBuf {
 }
 
 fn example_linked_input_paths(repo_root: &Path) -> Vec<PathBuf> {
-    let linked_inputs = repo_root.join("examples/inputs/deps");
+    let linked_inputs = repo_root.join("advanced/samples/inputs/deps");
     if linked_inputs.is_dir() {
         vec![linked_inputs]
     } else {
@@ -797,9 +816,9 @@ fn example_linked_input_paths(repo_root: &Path) -> Vec<PathBuf> {
 
 fn example_output_path(repo_root: &Path, language: Language, example_id: &str) -> PathBuf {
     match language {
-        Language::Go => example_language_root(repo_root, language)
+        Language::Go => advanced_language_root(repo_root, language)
             .join(example_directory_name(language, example_id)),
-        _ => example_language_root(repo_root, language)
+        _ => advanced_language_root(repo_root, language)
             .join("wit")
             .join(example_directory_name(language, example_id)),
     }
@@ -811,23 +830,34 @@ fn json_example_output_path(
     example_id: &str,
     generation_mode: GenerationMode,
 ) -> PathBuf {
-    let mode_directory = match generation_mode {
-        GenerationMode::NativeApi => "api",
-        GenerationMode::DefinitionsOnly => "definitions",
-    };
-    if language == Language::Java {
-        // Java lands under the Gradle source root so the derived package is
-        // `json_schema.<mode>.<example>`, giving the api/definitions x chat/kb
-        // variants distinct, non-colliding packages.
-        return example_language_root(repo_root, language)
-            .join("src/main/java/json_schema")
-            .join(mode_directory)
-            .join(example_directory_name(language, example_id));
+    let dir_name = example_directory_name(language, example_id);
+    match generation_mode {
+        // Definitions-mode outputs are the beginner-facing samples: they live
+        // directly under `samples/<lang>/<example>` (Java keeps its Gradle
+        // source root so the derived package stays `json_schema.definitions.*`).
+        GenerationMode::DefinitionsOnly => {
+            if language == Language::Java {
+                samples_language_root(repo_root, language)
+                    .join("src/main/java/json_schema/definitions")
+                    .join(dir_name)
+            } else {
+                samples_language_root(repo_root, language).join(dir_name)
+            }
+        }
+        // Native-api outputs are snapshot-only and live under the advanced
+        // project's `json_schema/api/<example>` (Java: `json_schema.api.*`).
+        GenerationMode::NativeApi => {
+            if language == Language::Java {
+                advanced_language_root(repo_root, language)
+                    .join("src/main/java/json_schema/api")
+                    .join(dir_name)
+            } else {
+                advanced_language_root(repo_root, language)
+                    .join("json_schema/api")
+                    .join(dir_name)
+            }
+        }
     }
-    example_language_root(repo_root, language)
-        .join("json_schema")
-        .join(mode_directory)
-        .join(example_directory_name(language, example_id))
 }
 
 fn example_directory_name(language: Language, example_id: &str) -> String {
@@ -842,17 +872,21 @@ fn python_example_package_name(example_id: &str) -> String {
     example_id.to_snake_case()
 }
 
-fn format_example_output(repo_root: &Path, language: Language, output_path: &Path) -> Result<()> {
+fn format_example_output(
+    language_root: &Path,
+    language: Language,
+    output_path: &Path,
+) -> Result<()> {
     let (cwd, program, args): (PathBuf, &str, Vec<String>) = match language {
         Language::Dotnet => return Ok(()),
         Language::Java => return Ok(()),
         Language::Go => (
-            example_language_root(repo_root, language),
+            language_root.to_path_buf(),
             "gofmt",
             vec!["-w".to_string(), output_path.to_string_lossy().into_owned()],
         ),
         Language::Python => (
-            example_language_root(repo_root, language),
+            language_root.to_path_buf(),
             "uv",
             vec![
                 "run".to_string(),
@@ -866,7 +900,7 @@ fn format_example_output(repo_root: &Path, language: Language, output_path: &Pat
             ],
         ),
         Language::TypeScript => (
-            example_language_root(repo_root, language),
+            language_root.to_path_buf(),
             "npm",
             vec![
                 "exec".to_string(),

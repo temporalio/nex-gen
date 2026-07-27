@@ -22,11 +22,11 @@ fn project_root() -> PathBuf {
 }
 
 fn descriptor_path(root: &Path) -> PathBuf {
-    root.join("examples/descriptors/temporal_api.bin")
+    root.join("advanced/samples/descriptors/temporal_api.bin")
 }
 
 fn linked_inputs_path(root: &Path) -> PathBuf {
-    root.join("examples/inputs/deps")
+    root.join("advanced/samples/inputs/deps")
 }
 
 fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
@@ -34,17 +34,17 @@ fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
 }
 
 fn typescript_root(root: &Path) -> PathBuf {
-    root.join("examples/typescript")
+    root.join("advanced/samples/typescript")
 }
 
 fn input_path(root: &Path, example_id: &str) -> PathBuf {
     let flat_path = root
-        .join("examples/inputs")
+        .join("advanced/samples/inputs")
         .join(format!("{example_id}.wit"));
     if flat_path.is_file() {
         flat_path
     } else {
-        root.join("examples/inputs")
+        root.join("advanced/samples/inputs")
             .join(example_id)
             .join("main.wit")
     }
@@ -54,11 +54,14 @@ fn typescript_output_path(root: &Path, example_id: &str) -> PathBuf {
     typescript_root(root).join("wit").join(example_id)
 }
 
+fn samples_typescript_root(root: &Path) -> PathBuf {
+    root.join("samples/typescript")
+}
+
 fn typescript_json_definitions_output_path(root: &Path, example_id: &str) -> PathBuf {
-    typescript_root(root)
-        .join("json_schema")
-        .join("definitions")
-        .join(example_id)
+    // Definitions are the beginner-facing samples, flattened directly under
+    // `samples/typescript/<example>`.
+    samples_typescript_root(root).join(example_id)
 }
 
 fn typescript_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
@@ -69,7 +72,7 @@ fn typescript_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
 }
 
 fn typescript_example_ids(root: &Path) -> Vec<String> {
-    let mut ids = fs::read_dir(root.join("examples/inputs"))
+    let mut ids = fs::read_dir(root.join("advanced/samples/inputs"))
         .unwrap()
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -92,14 +95,13 @@ fn typescript_example_ids(root: &Path) -> Vec<String> {
     ids
 }
 
-fn ensure_typescript_dependencies(root: &Path) {
-    let example_dir = typescript_root(root);
+fn ensure_typescript_dependencies(example_dir: &Path) {
     if example_dir.join("node_modules").exists() {
         return;
     }
 
     let install_status = Command::new("npm")
-        .current_dir(&example_dir)
+        .current_dir(example_dir)
         .args(["install", "--no-fund", "--no-audit"])
         .status()
         .unwrap();
@@ -162,7 +164,7 @@ fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[Pa
 }
 
 fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_path: &Path) {
-    ensure_typescript_dependencies(root);
+    ensure_typescript_dependencies(&typescript_root(root));
 
     let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
         .args([
@@ -223,7 +225,7 @@ fn generate_formatted_json_typescript_output_repr(
     generate_native_api: bool,
     repr: Option<&str>,
 ) {
-    ensure_typescript_dependencies(root);
+    ensure_typescript_dependencies(&typescript_root(root));
 
     let input_path = json_input_path(root, input_id);
     let mut args = vec![
@@ -429,22 +431,29 @@ fn typescript_rejects_support_namespace() {
 #[test]
 fn typescript_example_suite_typechecks_and_tests() {
     let root = project_root();
-    let example_dir = typescript_root(&root);
-    ensure_typescript_dependencies(&root);
+    // The advanced project holds the WIT examples + snapshot-only native-api
+    // output; the samples project holds the JSON-Schema definitions + their
+    // runtime tests. Typecheck and test both so neither tier loses coverage.
+    for example_dir in [samples_typescript_root(&root), typescript_root(&root)] {
+        ensure_typescript_dependencies(&example_dir);
 
-    let typecheck_status = Command::new("npm")
-        .current_dir(&example_dir)
-        .args(["run", "typecheck"])
-        .status()
-        .unwrap();
-    assert!(typecheck_status.success());
+        let typecheck_status = Command::new("npm")
+            .current_dir(&example_dir)
+            .args(["run", "typecheck"])
+            .status()
+            .unwrap();
+        assert!(
+            typecheck_status.success(),
+            "typecheck failed in {example_dir:?}"
+        );
 
-    let test_status = Command::new("npm")
-        .current_dir(&example_dir)
-        .args(["run", "test"])
-        .status()
-        .unwrap();
-    assert!(test_status.success());
+        let test_status = Command::new("npm")
+            .current_dir(&example_dir)
+            .args(["run", "test"])
+            .status()
+            .unwrap();
+        assert!(test_status.success(), "tests failed in {example_dir:?}");
+    }
 }
 
 #[test]

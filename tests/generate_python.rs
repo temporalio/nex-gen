@@ -23,11 +23,11 @@ fn project_root() -> PathBuf {
 }
 
 fn descriptor_path(root: &Path) -> PathBuf {
-    root.join("examples/descriptors/temporal_api.bin")
+    root.join("advanced/samples/descriptors/temporal_api.bin")
 }
 
 fn linked_inputs_path(root: &Path) -> PathBuf {
-    root.join("examples/inputs/deps")
+    root.join("advanced/samples/inputs/deps")
 }
 
 fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
@@ -35,17 +35,21 @@ fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
 }
 
 fn python_root(root: &Path) -> PathBuf {
-    root.join("examples/python")
+    root.join("advanced/samples/python")
+}
+
+fn samples_python_root(root: &Path) -> PathBuf {
+    root.join("samples/python")
 }
 
 fn input_path(root: &Path, example_id: &str) -> PathBuf {
     let flat_path = root
-        .join("examples/inputs")
+        .join("advanced/samples/inputs")
         .join(format!("{example_id}.wit"));
     if flat_path.is_file() {
         flat_path
     } else {
-        root.join("examples/inputs")
+        root.join("advanced/samples/inputs")
             .join(example_id)
             .join("main.wit")
     }
@@ -58,10 +62,8 @@ fn python_output_path(root: &Path, example_id: &str) -> PathBuf {
 }
 
 fn python_json_definitions_output_path(root: &Path, example_id: &str) -> PathBuf {
-    python_root(root)
-        .join("json_schema")
-        .join("definitions")
-        .join(example_id.to_snake_case())
+    // Definitions are the beginner-facing samples, flattened under samples/python/<snake>.
+    samples_python_root(root).join(example_id.to_snake_case())
 }
 
 fn python_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
@@ -72,7 +74,7 @@ fn python_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
 }
 
 fn python_example_ids(root: &Path) -> Vec<String> {
-    let mut ids = fs::read_dir(root.join("examples/inputs"))
+    let mut ids = fs::read_dir(root.join("advanced/samples/inputs"))
         .unwrap()
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -252,7 +254,7 @@ for path in sorted(root.rglob("*.py")):
 "#;
     let status = Command::new(
         project_root()
-            .join("examples/python/.venv/bin/python")
+            .join("advanced/samples/python/.venv/bin/python")
             .to_str()
             .unwrap(),
     )
@@ -457,21 +459,28 @@ fn cli_generates_python_support_file_from_parameter() {
 #[test]
 fn python_example_suite_type_checks_and_runs() {
     let root = project_root();
-    let example_dir = python_root(&root);
 
-    let typecheck_status = Command::new("uv")
-        .current_dir(&example_dir)
-        .args(["run", "basedpyright"])
-        .status()
-        .unwrap();
-    assert!(typecheck_status.success());
+    // The advanced project holds the WIT + proto-wire suites and the snapshot-only
+    // native-api outputs; the samples project holds the JSON-Schema definitions and
+    // their round-trip tests. Both must type-check and pass.
+    for example_dir in [python_root(&root), samples_python_root(&root)] {
+        let typecheck_status = Command::new("uv")
+            .current_dir(&example_dir)
+            .args(["run", "basedpyright"])
+            .status()
+            .unwrap();
+        assert!(
+            typecheck_status.success(),
+            "basedpyright failed in {example_dir:?}"
+        );
 
-    let pytest_status = Command::new("uv")
-        .current_dir(&example_dir)
-        .args(["run", "pytest"])
-        .status()
-        .unwrap();
-    assert!(pytest_status.success());
+        let pytest_status = Command::new("uv")
+            .current_dir(&example_dir)
+            .args(["run", "pytest"])
+            .status()
+            .unwrap();
+        assert!(pytest_status.success(), "pytest failed in {example_dir:?}");
+    }
 }
 
 #[test]

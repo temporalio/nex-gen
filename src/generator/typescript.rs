@@ -5646,15 +5646,15 @@ mod tests {
     use crate::spec::SupportFragmentSpec;
 
     fn sample_input_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/inputs/workflow-service.wit")
+        root.join("advanced/samples/inputs/workflow-service.wit")
     }
 
     fn type_roundtrip_input_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/inputs/type-roundtrip.wit")
+        root.join("advanced/samples/inputs/type-roundtrip.wit")
     }
 
     fn linked_inputs_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/inputs/deps")
+        root.join("advanced/samples/inputs/deps")
     }
 
     fn example_input_paths(root: &std::path::Path, input_path: PathBuf) -> Vec<PathBuf> {
@@ -5662,12 +5662,12 @@ mod tests {
     }
 
     fn sample_typescript_output_path(root: &std::path::Path) -> PathBuf {
-        root.join("examples/typescript/wit/workflow-service")
+        root.join("advanced/samples/typescript/wit/workflow-service")
     }
 
     fn sample_support_files(root: &std::path::Path) -> SupportFiles {
         let path = root.join(
-            "examples/inputs/deps/nexus-temporal-types/typescript/temporal_model_converters.ts",
+            "advanced/samples/inputs/deps/nexus-temporal-types/typescript/temporal_model_converters.ts",
         );
         SupportFiles {
             fragments: vec![SupportFragmentSpec {
@@ -5679,7 +5679,7 @@ mod tests {
     }
 
     fn ensure_typescript_dependencies(root: &std::path::Path) {
-        let example_dir = root.join("examples/typescript");
+        let example_dir = root.join("advanced/samples/typescript");
         if example_dir.join("node_modules").exists() {
             return;
         }
@@ -5725,7 +5725,8 @@ mod tests {
         )
         .unwrap();
         let descriptors =
-            DescriptorIndex::load(&root.join("examples/descriptors/temporal_api.bin")).unwrap();
+            DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
+                .unwrap();
         let support = sample_support_files(&root);
         let generated =
             generate_files(Language::TypeScript, spec.clone(), &descriptors, &support).unwrap();
@@ -5748,7 +5749,7 @@ mod tests {
             fs::write(path, contents).unwrap();
         }
         let status = Command::new("npm")
-            .current_dir(root.join("examples/typescript"))
+            .current_dir(root.join("advanced/samples/typescript"))
             .args([
                 "exec",
                 "--",
@@ -5777,7 +5778,8 @@ mod tests {
         )
         .unwrap();
         let descriptors =
-            DescriptorIndex::load(&root.join("examples/descriptors/temporal_api.bin")).unwrap();
+            DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
+                .unwrap();
         let support = sample_support_files(&root);
         let output =
             generate_source(Language::TypeScript, spec.clone(), &descriptors, &support).unwrap();
@@ -6007,7 +6009,7 @@ interface workflow-service {
         .unwrap();
         let descriptors = DescriptorIndex::load(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples/descriptors/temporal_api.bin"),
+                .join("advanced/samples/descriptors/temporal_api.bin"),
         )
         .unwrap();
         let output = generate_source(
@@ -6060,7 +6062,7 @@ interface example-service {
         .unwrap();
         let descriptors = DescriptorIndex::load(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples/descriptors/temporal_api.bin"),
+                .join("advanced/samples/descriptors/temporal_api.bin"),
         )
         .unwrap();
         let output = generate_source(
@@ -6112,7 +6114,7 @@ interface example-service {
         .unwrap();
         let descriptors = DescriptorIndex::load(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples/descriptors/temporal_api.bin"),
+                .join("advanced/samples/descriptors/temporal_api.bin"),
         )
         .unwrap();
 

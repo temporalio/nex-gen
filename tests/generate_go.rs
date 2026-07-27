@@ -47,11 +47,11 @@ fn project_root() -> PathBuf {
 }
 
 fn descriptor_path(root: &Path) -> PathBuf {
-    root.join("examples/descriptors/temporal_api.bin")
+    root.join("advanced/samples/descriptors/temporal_api.bin")
 }
 
 fn linked_inputs_path(root: &Path) -> PathBuf {
-    root.join("examples/inputs/deps")
+    root.join("advanced/samples/inputs/deps")
 }
 
 fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
@@ -59,17 +59,17 @@ fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
 }
 
 fn go_root(root: &Path) -> PathBuf {
-    root.join("examples/go")
+    root.join("advanced/samples/go")
 }
 
 fn input_path(root: &Path, example_id: &str) -> PathBuf {
     let flat_path = root
-        .join("examples/inputs")
+        .join("advanced/samples/inputs")
         .join(format!("{example_id}.wit"));
     if flat_path.is_file() {
         flat_path
     } else {
-        root.join("examples/inputs")
+        root.join("advanced/samples/inputs")
             .join(example_id)
             .join("main.wit")
     }
@@ -89,7 +89,7 @@ fn go_output_path(root: &Path, example_id: &str) -> PathBuf {
 
 fn go_example_ids(root: &Path) -> Vec<String> {
     let go_root = go_root(root);
-    let mut ids = fs::read_dir(root.join("examples/inputs"))
+    let mut ids = fs::read_dir(root.join("advanced/samples/inputs"))
         .unwrap()
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -1338,10 +1338,15 @@ fn go_rejects_reserved_generated_name_collision() {
 }
 
 fn go_json_output_path(root: &Path, mode: &str, example_id: &str) -> PathBuf {
-    go_root(root)
-        .join("json_schema")
-        .join(mode)
-        .join(go_package_name(example_id))
+    // Definitions are the beginner-facing samples (samples/go/<pkg>); native-api
+    // output is snapshot-only under the advanced project.
+    match mode {
+        "definitions" => root.join("samples/go").join(go_package_name(example_id)),
+        _ => go_root(root)
+            .join("json_schema")
+            .join(mode)
+            .join(go_package_name(example_id)),
+    }
 }
 
 fn generate_formatted_go_json_output(

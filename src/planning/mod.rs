@@ -1864,7 +1864,7 @@ mod tests {
         };
         let descriptors = DescriptorIndex::load(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples/descriptors/temporal_api.bin"),
+                .join("advanced/samples/descriptors/temporal_api.bin"),
         )
         .unwrap();
 

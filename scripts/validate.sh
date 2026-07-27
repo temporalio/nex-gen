@@ -17,15 +17,17 @@ run_in() {
   (cd "$dir" && "$@")
 }
 
-run_in examples/python uv sync --locked
-run_in examples/typescript npm ci
+for tier in samples advanced/samples; do
+  run_in "$tier/python" uv sync --locked
+  run_in "$tier/typescript" npm ci
+done
 
 run cargo fmt --check
 run cargo test
 
-run_in examples/python uv run ruff format --check .
-
-run_in examples/typescript npm exec -- prettier --check .
-
-run_in examples/go bash -c 'unformatted="$(gofmt -l .)"; if [ -n "$unformatted" ]; then echo "gofmt required for:" >&2; echo "$unformatted" >&2; exit 1; fi'
-run_in examples/go go test ./...
+for tier in samples advanced/samples; do
+  run_in "$tier/python" uv run ruff format --check .
+  run_in "$tier/typescript" npm exec -- prettier --check .
+  run_in "$tier/go" bash -c 'unformatted="$(gofmt -l .)"; if [ -n "$unformatted" ]; then echo "gofmt required for:" >&2; echo "$unformatted" >&2; exit 1; fi'
+  run_in "$tier/go" go test ./...
+done
