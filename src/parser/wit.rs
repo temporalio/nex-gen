@@ -2662,7 +2662,7 @@ fn build_service(
 
     Ok(ServiceSpec {
         name: service_name,
-        code_name: None,
+        code_name: LanguageStringSpec::default(),
         wire_name: wire_service_name,
         doc: LanguageStringSpec::default(),
         namespace,
@@ -2978,7 +2978,7 @@ fn build_operation(
 
     Ok(OperationSpec {
         name: operation_name,
-        code_name: None,
+        code_name: LanguageStringSpec::default(),
         wire_name: wire_operation_name,
         experimental,
         doc: directive(&directives, "doc", path, &context)?

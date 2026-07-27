@@ -3064,7 +3064,7 @@ fn build_service(
 
     Ok(ServiceSpec {
         name: service_name.clone(),
-        code_name,
+        code_name: language_string_override(language, code_name),
         wire_name: service.fqn.clone().unwrap_or(service_name),
         doc: language_string(service.description.clone()),
         namespace: LanguageStringSpec::default(),
@@ -3154,7 +3154,7 @@ fn build_operation(
 
     Ok(OperationSpec {
         name: operation_name.clone(),
-        code_name,
+        code_name: language_string_override(language, code_name),
         wire_name: operation.fqn.clone().unwrap_or(operation_name),
         experimental: false,
         doc: language_string(operation.description.clone()),
@@ -4403,6 +4403,18 @@ fn language_string(default: Option<String>) -> LanguageStringSpec {
     }
 }
 
+/// A per-language code-identifier override (`x-<lang>-name`) as a
+/// [`LanguageStringSpec`] carrying the value under `language` only. The
+/// JSON-schema load is per emitted target, so at most one language is ever
+/// populated; emitters read it back via `for_language(language)`.
+fn language_string_override(language: Language, value: Option<String>) -> LanguageStringSpec {
+    let mut spec = LanguageStringSpec::default();
+    if let Some(value) = value {
+        spec.by_language.insert(language, value);
+    }
+    spec
+}
+
 fn root_is_schema_shaped(root: &Schema) -> bool {
     root.reference.is_some()
         || root.ty.is_some()
@@ -5117,8 +5129,12 @@ fn boilerplate_idents(language: Language) -> &'static [&'static str] {
     }
 }
 
-/// Adapts an authored [`ApiSpec`] into [`build_name_manifest`] inputs.
-fn manifest_inputs_from_spec(spec: &ApiSpec) -> (Vec<ManifestModel>, Vec<ManifestService>) {
+/// Adapts an authored [`ApiSpec`] into [`build_name_manifest`] inputs for
+/// `language` (which selects each service's per-language `code_name` override).
+fn manifest_inputs_from_spec(
+    language: Language,
+    spec: &ApiSpec,
+) -> (Vec<ManifestModel>, Vec<ManifestService>) {
     let mut models = Vec::new();
     for (_full_name, binding) in spec.external_types() {
         let ExternalTypeSpec::Json(json) = &binding.external_type else {
@@ -5142,7 +5158,7 @@ fn manifest_inputs_from_spec(spec: &ApiSpec) -> (Vec<ManifestModel>, Vec<Manifes
         .iter()
         .map(|service| ManifestService {
             name: service.name.clone(),
-            code_name: service.code_name.clone(),
+            code_name: service.code_name.for_language(language).map(str::to_string),
         })
         .collect();
     (models, services)
@@ -5151,7 +5167,7 @@ fn manifest_inputs_from_spec(spec: &ApiSpec) -> (Vec<ManifestModel>, Vec<Manifes
 /// The load-time P15 collision check: builds the manifest and discards it,
 /// surfacing any collision as a load reject. Runs once per emitted target.
 fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<()> {
-    let (models, services) = manifest_inputs_from_spec(spec);
+    let (models, services) = manifest_inputs_from_spec(language, spec);
     build_name_manifest(language, &models, &services)?;
     Ok(())
 }
@@ -8345,7 +8361,10 @@ $defs:
         // Go: the override resolves the collision.
         let spec = parse_for(Language::Go, input).expect("override should clear the Go collision");
         let service = &spec.services[0];
-        assert_eq!(service.code_name.as_deref(), Some("WidgetService"));
+        assert_eq!(
+            service.code_name.for_language(Language::Go),
+            Some("WidgetService")
+        );
         assert_eq!(service.name, "Widget");
         assert_eq!(service.wire_name, "Widget");
 

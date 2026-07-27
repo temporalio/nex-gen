@@ -261,7 +261,8 @@ fn leaf_export_names(
             model_names.extend(plan.services.iter().map(|service| {
                 service
                     .code_name
-                    .clone()
+                    .for_language(Language::Python)
+                    .map(str::to_string)
                     .unwrap_or_else(|| service.name.clone())
             }));
             model_names
@@ -274,7 +275,10 @@ fn leaf_export_names(
                     .map(|service| {
                         format!(
                             "{}Client",
-                            service.code_name.as_deref().unwrap_or(&service.name)
+                            service
+                                .code_name
+                                .for_language(Language::Python)
+                                .unwrap_or(&service.name)
                         )
                     }),
             );
@@ -286,7 +290,8 @@ fn leaf_export_names(
                         service.operations.iter().map(|operation| {
                             operation
                                 .code_name
-                                .clone()
+                                .for_language(Language::Python)
+                                .map(str::to_string)
                                 .unwrap_or_else(|| python_ident(&operation.name.to_snake_case()))
                         })
                     }),
@@ -530,7 +535,10 @@ impl<'a> ApiPlanner<'a> {
                     .collect::<Result<Vec<_>>>()?;
 
                 Ok(RenderedService {
-                    name: service.code_name.as_deref().unwrap_or(&service.name),
+                    name: service
+                        .code_name
+                        .for_language(Language::Python)
+                        .unwrap_or(&service.name),
                     wire_name: &service.wire_name,
                     doc: service
                         .doc
@@ -1198,7 +1206,8 @@ impl<'a> ApiPlanner<'a> {
             wire_name: operation.wire_name.as_str(),
             attr_name: operation
                 .code_name
-                .clone()
+                .for_language(Language::Python)
+                .map(str::to_string)
                 .unwrap_or_else(|| python_ident(&operation.name.to_snake_case())),
             experimental: operation.experimental,
             doc: operation

@@ -447,7 +447,8 @@ impl<'a> ApiPlanner<'a> {
             wire_name: operation.wire_name.as_str(),
             attr_name: operation
                 .code_name
-                .clone()
+                .for_language(Language::TypeScript)
+                .map(str::to_string)
                 .unwrap_or_else(|| typescript_ident(&operation.name.to_lower_camel_case())),
             experimental: operation.experimental,
             doc: operation
@@ -1765,7 +1766,8 @@ fn generate_leaf(
                 name: service.name.as_str(),
                 attr_name: service
                     .code_name
-                    .clone()
+                    .for_language(Language::TypeScript)
+                    .map(str::to_string)
                     .unwrap_or_else(|| typescript_ident(&service.name.to_lower_camel_case())),
                 wire_name: service.wire_name.as_str(),
                 doc: service

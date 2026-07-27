@@ -1833,7 +1833,7 @@ mod tests {
             support: SupportSpec::default(),
             services: vec![ServiceSpec {
                 name: "example-service".to_string(),
-                code_name: None,
+                code_name: LanguageStringSpec::default(),
                 wire_name: "ExampleService".to_string(),
                 doc: LanguageStringSpec::default(),
                 namespace: LanguageStringSpec::default(),
@@ -1843,7 +1843,7 @@ mod tests {
                 delay_load_temporalio_workflow: false,
                 operations: vec![OperationSpec {
                     name: "example-operation".to_string(),
-                    code_name: None,
+                    code_name: LanguageStringSpec::default(),
                     wire_name: "ExampleOperation".to_string(),
                     experimental: false,
                     doc: LanguageStringSpec::default(),

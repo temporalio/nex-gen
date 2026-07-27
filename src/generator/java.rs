@@ -81,7 +81,10 @@ pub(crate) fn generate(
 
         for service in &leaf.spec.services {
             let contents = render_service_file(service, module, base_package)?;
-            let service_ident = service.code_name.as_deref().unwrap_or(&service.name);
+            let service_ident = service
+                .code_name
+                .for_language(crate::language::Language::Java)
+                .unwrap_or(&service.name);
             let path = module_dir.join(format!("{service_ident}.java"));
             insert_file(&mut files, path, contents)?;
         }
@@ -187,7 +190,10 @@ fn render_service_file(
     body.push_str(&format!(
         "@Service(name = {})\npublic interface {} {{\n",
         java_string_literal(&service.wire_name),
-        service.code_name.as_deref().unwrap_or(&service.name)
+        service
+            .code_name
+            .for_language(crate::language::Language::Java)
+            .unwrap_or(&service.name)
     ));
 
     for (index, operation) in service.operations.iter().enumerate() {
@@ -216,7 +222,8 @@ fn render_service_file(
         };
         let method = operation
             .code_name
-            .clone()
+            .for_language(crate::language::Language::Java)
+            .map(str::to_string)
             .unwrap_or_else(|| operation.name.to_lower_camel_case());
         match &input {
             Some((pkg, class)) => {

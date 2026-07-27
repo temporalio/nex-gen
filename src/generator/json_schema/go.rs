@@ -878,7 +878,8 @@ impl ModelBackend {
         for service in &api_plan.services {
             let service_var = service
                 .code_name
-                .clone()
+                .for_language(crate::language::Language::Go)
+                .map(str::to_string)
                 .unwrap_or_else(|| go_field_name(&service.name));
             render_go_doc_comment(
                 &mut output,
@@ -976,7 +977,8 @@ fn imports_alias(imports: &mut BTreeMap<String, String>, import_path: &str) -> S
 fn go_operation_field(operation: &crate::spec::OperationSpec<PlannedTypeFamily>) -> String {
     operation
         .code_name
-        .clone()
+        .for_language(crate::language::Language::Go)
+        .map(str::to_string)
         .unwrap_or_else(|| go_field_name(&operation.name))
 }
 
@@ -989,7 +991,8 @@ fn render_service_client(
 ) -> Result<()> {
     let service_var = service
         .code_name
-        .clone()
+        .for_language(crate::language::Language::Go)
+        .map(str::to_string)
         .unwrap_or_else(|| go_field_name(&service.name));
     let client_name = format!("{service_var}Client");
     render_go_doc_comment(

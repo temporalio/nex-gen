@@ -351,9 +351,10 @@ impl<F: TypeNameFamily> TypeDeclSpec<F> {
 pub struct ServiceSpec<F: TypeNameFamily = AuthoredNames> {
     pub name: String,
     /// A per-language verbatim override of the emitted service code identifier
-    /// (`x-<lang>-name` on a JSON-schema `services:` entry). `None` derives the
-    /// identifier as usual. Never affects `wire_name`.
-    pub code_name: Option<String>,
+    /// (`x-<lang>-name` on a JSON-schema `services:` entry). Empty for a language
+    /// with no override, in which case the identifier is derived as usual. Never
+    /// affects `wire_name`.
+    pub code_name: LanguageStringSpec,
     pub wire_name: String,
     pub doc: LanguageStringSpec,
     pub namespace: LanguageStringSpec,
@@ -433,9 +434,10 @@ pub struct SupportFragmentSpec {
 pub struct OperationSpec<F: TypeNameFamily = AuthoredNames> {
     pub name: String,
     /// A per-language verbatim override of the emitted operation code identifier
-    /// (`x-<lang>-name` on a JSON-schema `operations:` entry). `None` derives the
-    /// identifier as usual. Never affects `wire_name`.
-    pub code_name: Option<String>,
+    /// (`x-<lang>-name` on a JSON-schema `operations:` entry). Empty for a
+    /// language with no override, in which case the identifier is derived as
+    /// usual. Never affects `wire_name`.
+    pub code_name: LanguageStringSpec,
     pub wire_name: String,
     pub experimental: bool,
     pub doc: LanguageStringSpec,
