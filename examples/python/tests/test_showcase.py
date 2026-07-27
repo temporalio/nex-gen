@@ -475,7 +475,9 @@ def test_object_constraints_roundtrip_and_reject() -> None:
     assert "must have at least 1 properties, got 0" in str(excinfo.value)
 
     # A satisfied dependency validates.
-    ok = ContactPy.model_validate({"shippingStreet": "1 Main St", "shippingZip": "90210"})
+    ok = ContactPy.model_validate(
+        {"shippingStreet": "1 Main St", "shippingZip": "90210"}
+    )
     assert ok.shipping_zip == "90210"
 
 
