@@ -67,8 +67,7 @@ export class PageMapper {
       }
     }
 
-    let blocks: Block[] | undefined = undefined as unknown as
-      Block[] | undefined;
+    let blocks: Block[] | undefined = undefined as unknown as Block[] | undefined;
     if (raw.blocks === null) {
       violations.push({ path: "blocks", reason: "explicit null not allowed" });
     } else if (raw.blocks !== undefined) {
@@ -91,12 +90,7 @@ export class PageMapper {
     }
 
     for (const key of Object.keys(raw)) {
-      if (
-        key !== "pageId" &&
-        key !== "title" &&
-        key !== "meta" &&
-        key !== "blocks"
-      ) {
+      if (key !== "pageId" && key !== "title" && key !== "meta" && key !== "blocks") {
         violations.push({ path: key, reason: "unknown field" });
       }
     }
@@ -143,18 +137,11 @@ export class PageMetaMapper {
       }
     }
 
-    let wordCount: number | undefined = undefined as unknown as
-      number | undefined;
+    let wordCount: number | undefined = undefined as unknown as number | undefined;
     if (raw.wordCount === null) {
-      violations.push({
-        path: "wordCount",
-        reason: "explicit null not allowed",
-      });
+      violations.push({ path: "wordCount", reason: "explicit null not allowed" });
     } else if (raw.wordCount !== undefined) {
-      if (
-        typeof raw.wordCount !== "number" ||
-        !Number.isSafeInteger(raw.wordCount)
-      ) {
+      if (typeof raw.wordCount !== "number" || !Number.isSafeInteger(raw.wordCount)) {
         violations.push({ path: "wordCount", reason: "expected integer" });
       } else {
         wordCount = raw.wordCount;

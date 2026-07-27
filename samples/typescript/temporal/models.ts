@@ -130,13 +130,9 @@ export class TemporalMapper {
       }
     }
 
-    let updatedAt: string | undefined = undefined as unknown as
-      string | undefined;
+    let updatedAt: string | undefined = undefined as unknown as string | undefined;
     if (raw.updatedAt === null) {
-      violations.push({
-        path: "updatedAt",
-        reason: "explicit null not allowed",
-      });
+      violations.push({ path: "updatedAt", reason: "explicit null not allowed" });
     } else if (raw.updatedAt !== undefined) {
       if (typeof raw.updatedAt !== "string") {
         violations.push({ path: "updatedAt", reason: "expected string" });
@@ -152,13 +148,9 @@ export class TemporalMapper {
       }
     }
 
-    let expiresOn: string | undefined = undefined as unknown as
-      string | undefined;
+    let expiresOn: string | undefined = undefined as unknown as string | undefined;
     if (raw.expiresOn === null) {
-      violations.push({
-        path: "expiresOn",
-        reason: "explicit null not allowed",
-      });
+      violations.push({ path: "expiresOn", reason: "explicit null not allowed" });
     } else if (raw.expiresOn !== undefined) {
       if (typeof raw.expiresOn !== "string") {
         violations.push({ path: "expiresOn", reason: "expected string" });
@@ -174,13 +166,9 @@ export class TemporalMapper {
       }
     }
 
-    let reminder: string | undefined = undefined as unknown as
-      string | undefined;
+    let reminder: string | undefined = undefined as unknown as string | undefined;
     if (raw.reminder === null) {
-      violations.push({
-        path: "reminder",
-        reason: "explicit null not allowed",
-      });
+      violations.push({ path: "reminder", reason: "explicit null not allowed" });
     } else if (raw.reminder !== undefined) {
       if (typeof raw.reminder !== "string") {
         violations.push({ path: "reminder", reason: "expected string" });
@@ -196,13 +184,9 @@ export class TemporalMapper {
       }
     }
 
-    let retryDelay: string | undefined = undefined as unknown as
-      string | undefined;
+    let retryDelay: string | undefined = undefined as unknown as string | undefined;
     if (raw.retryDelay === null) {
-      violations.push({
-        path: "retryDelay",
-        reason: "explicit null not allowed",
-      });
+      violations.push({ path: "retryDelay", reason: "explicit null not allowed" });
     } else if (raw.retryDelay !== undefined) {
       if (typeof raw.retryDelay !== "string") {
         violations.push({ path: "retryDelay", reason: "expected string" });
@@ -219,7 +203,9 @@ export class TemporalMapper {
     }
 
     let deletedAt: string | null | undefined = undefined as unknown as
-      string | null | undefined;
+      | string
+      | null
+      | undefined;
     if (raw.deletedAt !== undefined) {
       if (raw.deletedAt === null) {
         deletedAt = null;
@@ -240,7 +226,9 @@ export class TemporalMapper {
     }
 
     let archivedOn: string | null | undefined = undefined as unknown as
-      string | null | undefined;
+      | string
+      | null
+      | undefined;
     if (raw.archivedOn !== undefined) {
       if (raw.archivedOn === null) {
         archivedOn = null;

@@ -58,10 +58,7 @@ export class BlockMapper {
       } else {
         order = raw.order;
         if (raw.order < 0) {
-          violations.push({
-            path: "order",
-            reason: `must be >= 0, got ${raw.order}`,
-          });
+          violations.push({ path: "order", reason: `must be >= 0, got ${raw.order}` });
         }
       }
     }
@@ -77,8 +74,7 @@ export class BlockMapper {
       }
     }
 
-    let style: BlockStyle | undefined = undefined as unknown as
-      BlockStyle | undefined;
+    let style: BlockStyle | undefined = undefined as unknown as BlockStyle | undefined;
     if (raw.style === null) {
       violations.push({ path: "style", reason: "explicit null not allowed" });
     } else if (raw.style !== undefined) {
@@ -89,8 +85,7 @@ export class BlockMapper {
       }
     }
 
-    let page: Page | null | undefined = undefined as unknown as
-      Page | null | undefined;
+    let page: Page | null | undefined = undefined as unknown as Page | null | undefined;
     if (raw.page !== undefined) {
       if (raw.page === null) {
         page = null;
@@ -136,10 +131,7 @@ export class BlockMapper {
     const out: Record<string, unknown> = {};
     out.blockId = value.blockId;
     if (value.order < 0) {
-      violations.push({
-        path: "order",
-        reason: `must be >= 0, got ${value.order}`,
-      });
+      violations.push({ path: "order", reason: `must be >= 0, got ${value.order}` });
     }
     out.order = value.order;
     if (value.text !== undefined) {
@@ -150,9 +142,7 @@ export class BlockMapper {
     }
     if (value.page !== undefined) {
       out.page =
-        value.page === null
-          ? null
-          : new PageMapper().toIntermediate(value.page);
+        value.page === null ? null : new PageMapper().toIntermediate(value.page);
     }
     if (violations.length) {
       throw new __nexGenDefinitions.ValidationError(violations);

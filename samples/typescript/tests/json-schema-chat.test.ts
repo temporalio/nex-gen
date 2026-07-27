@@ -39,10 +39,7 @@ function expectRoundTrip<T>(name: string, mapper: IntermediateMapper<T>): T {
 
 describe("json-schema chat generated definitions", () => {
   test("roundtrips canonical wire fixtures through the Temporal converter", () => {
-    const message = expectRoundTrip(
-      "message-minimal.json",
-      new MessageMapper(),
-    );
+    const message = expectRoundTrip("message-minimal.json", new MessageMapper());
     expect(message).toMatchObject<Message>({
       kind: "text",
       body: "hi",
@@ -50,10 +47,7 @@ describe("json-schema chat generated definitions", () => {
     expect(message.replyToId).toBeUndefined();
     expect(message.priority ?? DEFAULT_PRIORITY).toBe(0);
 
-    const fullMessage = expectRoundTrip(
-      "message-full.json",
-      new MessageMapper(),
-    );
+    const fullMessage = expectRoundTrip("message-full.json", new MessageMapper());
     expect(fullMessage.replyToId).toBeNull();
     expect(fullMessage.priority).toBe(7);
 

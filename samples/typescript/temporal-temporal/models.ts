@@ -77,8 +77,7 @@ export class TemporalMapper {
       }
     }
 
-    let birthday: Temporal.PlainDate =
-      undefined as unknown as Temporal.PlainDate;
+    let birthday: Temporal.PlainDate = undefined as unknown as Temporal.PlainDate;
     if (raw.birthday === undefined || raw.birthday === null) {
       violations.push({ path: "birthday", reason: "required" });
     } else {
@@ -133,12 +132,10 @@ export class TemporalMapper {
     }
 
     let updatedAt: Temporal.ZonedDateTime | undefined = undefined as unknown as
-      Temporal.ZonedDateTime | undefined;
+      | Temporal.ZonedDateTime
+      | undefined;
     if (raw.updatedAt === null) {
-      violations.push({
-        path: "updatedAt",
-        reason: "explicit null not allowed",
-      });
+      violations.push({ path: "updatedAt", reason: "explicit null not allowed" });
     } else if (raw.updatedAt !== undefined) {
       if (typeof raw.updatedAt !== "string") {
         violations.push({ path: "updatedAt", reason: "expected string" });
@@ -155,12 +152,10 @@ export class TemporalMapper {
     }
 
     let expiresOn: Temporal.PlainDate | undefined = undefined as unknown as
-      Temporal.PlainDate | undefined;
+      | Temporal.PlainDate
+      | undefined;
     if (raw.expiresOn === null) {
-      violations.push({
-        path: "expiresOn",
-        reason: "explicit null not allowed",
-      });
+      violations.push({ path: "expiresOn", reason: "explicit null not allowed" });
     } else if (raw.expiresOn !== undefined) {
       if (typeof raw.expiresOn !== "string") {
         violations.push({ path: "expiresOn", reason: "expected string" });
@@ -176,13 +171,9 @@ export class TemporalMapper {
       }
     }
 
-    let reminder: string | undefined = undefined as unknown as
-      string | undefined;
+    let reminder: string | undefined = undefined as unknown as string | undefined;
     if (raw.reminder === null) {
-      violations.push({
-        path: "reminder",
-        reason: "explicit null not allowed",
-      });
+      violations.push({ path: "reminder", reason: "explicit null not allowed" });
     } else if (raw.reminder !== undefined) {
       if (typeof raw.reminder !== "string") {
         violations.push({ path: "reminder", reason: "expected string" });
@@ -199,12 +190,10 @@ export class TemporalMapper {
     }
 
     let retryDelay: Temporal.Duration | undefined = undefined as unknown as
-      Temporal.Duration | undefined;
+      | Temporal.Duration
+      | undefined;
     if (raw.retryDelay === null) {
-      violations.push({
-        path: "retryDelay",
-        reason: "explicit null not allowed",
-      });
+      violations.push({ path: "retryDelay", reason: "explicit null not allowed" });
     } else if (raw.retryDelay !== undefined) {
       if (typeof raw.retryDelay !== "string") {
         violations.push({ path: "retryDelay", reason: "expected string" });
@@ -220,8 +209,10 @@ export class TemporalMapper {
       }
     }
 
-    let deletedAt: Temporal.ZonedDateTime | null | undefined =
-      undefined as unknown as Temporal.ZonedDateTime | null | undefined;
+    let deletedAt: Temporal.ZonedDateTime | null | undefined = undefined as unknown as
+      | Temporal.ZonedDateTime
+      | null
+      | undefined;
     if (raw.deletedAt !== undefined) {
       if (raw.deletedAt === null) {
         deletedAt = null;
@@ -241,8 +232,10 @@ export class TemporalMapper {
       }
     }
 
-    let archivedOn: Temporal.PlainDate | null | undefined =
-      undefined as unknown as Temporal.PlainDate | null | undefined;
+    let archivedOn: Temporal.PlainDate | null | undefined = undefined as unknown as
+      | Temporal.PlainDate
+      | null
+      | undefined;
     if (raw.archivedOn !== undefined) {
       if (raw.archivedOn === null) {
         archivedOn = null;
@@ -307,29 +300,21 @@ export class TemporalMapper {
   public toIntermediate(value: Temporal): unknown {
     const violations: __nexGenDefinitions.Violation[] = [];
     const out: Record<string, unknown> = {};
-    out.createdAt = __nexGenDefinitions.serializeTemporalDateTime(
-      value.createdAt,
-    );
+    out.createdAt = __nexGenDefinitions.serializeTemporalDateTime(value.createdAt);
     out.birthday = __nexGenDefinitions.serializeTemporalDate(value.birthday);
     out.alarm = value.alarm;
     out.timeout = __nexGenDefinitions.serializeTemporalDuration(value.timeout);
     if (value.updatedAt !== undefined) {
-      out.updatedAt = __nexGenDefinitions.serializeTemporalDateTime(
-        value.updatedAt,
-      );
+      out.updatedAt = __nexGenDefinitions.serializeTemporalDateTime(value.updatedAt);
     }
     if (value.expiresOn !== undefined) {
-      out.expiresOn = __nexGenDefinitions.serializeTemporalDate(
-        value.expiresOn,
-      );
+      out.expiresOn = __nexGenDefinitions.serializeTemporalDate(value.expiresOn);
     }
     if (value.reminder !== undefined) {
       out.reminder = value.reminder;
     }
     if (value.retryDelay !== undefined) {
-      out.retryDelay = __nexGenDefinitions.serializeTemporalDuration(
-        value.retryDelay,
-      );
+      out.retryDelay = __nexGenDefinitions.serializeTemporalDuration(value.retryDelay);
     }
     if (value.deletedAt !== undefined) {
       out.deletedAt =

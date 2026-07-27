@@ -119,10 +119,7 @@ export class PutBlockOutputMapper {
     if (raw.revision === undefined || raw.revision === null) {
       violations.push({ path: "revision", reason: "required" });
     } else {
-      if (
-        typeof raw.revision !== "number" ||
-        !Number.isSafeInteger(raw.revision)
-      ) {
+      if (typeof raw.revision !== "number" || !Number.isSafeInteger(raw.revision)) {
         violations.push({ path: "revision", reason: "expected integer" });
       } else {
         revision = raw.revision;

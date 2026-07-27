@@ -26,10 +26,7 @@ function jsonPayload(data: Uint8Array) {
  * the typed model. This proves the generated type hint (the mapper) drives
  * converter-based deserialization.
  */
-export function decodeFixture<T>(
-  mapper: IntermediateMapper<T>,
-  bytes: Uint8Array,
-): T {
+export function decodeFixture<T>(mapper: IntermediateMapper<T>, bytes: Uint8Array): T {
   const intermediate = defaultPayloadConverter.fromPayload(jsonPayload(bytes));
   return mapper.fromIntermediate(intermediate);
 }
@@ -38,13 +35,8 @@ export function decodeFixture<T>(
  * Serialize a model back through the Temporal data converter and return the
  * re-encoded JSON as a generic parsed value (for JSON-equality assertions).
  */
-export function encodeModel<T>(
-  mapper: IntermediateMapper<T>,
-  value: T,
-): unknown {
-  const payload = defaultPayloadConverter.toPayload(
-    mapper.toIntermediate(value),
-  );
+export function encodeModel<T>(mapper: IntermediateMapper<T>, value: T): unknown {
+  const payload = defaultPayloadConverter.toPayload(mapper.toIntermediate(value));
   if (payload?.data == null) {
     throw new Error("payload converter produced no data");
   }
