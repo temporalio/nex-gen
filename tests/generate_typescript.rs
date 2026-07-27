@@ -9,6 +9,9 @@ use nex_gen::generator::generate_files;
 use nex_gen::spec::SupportFragmentSpec;
 use nex_gen::{GenerateRequest, SupportFiles, generate_to_file};
 
+mod common;
+use common::json_input_path;
+
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const START_WORKFLOW_EXAMPLE_ID: &str = "start-workflow";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
@@ -63,21 +66,6 @@ fn typescript_json_api_output_path(root: &Path, example_id: &str) -> PathBuf {
         .join("json_schema")
         .join("api")
         .join(example_id)
-}
-
-fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
-    let input_root = root.join("examples/json-schema-inputs");
-    let dir_path = input_root.join(example_id);
-    if dir_path.is_dir() {
-        return dir_path;
-    }
-    for stem in [example_id.to_string(), format!("{example_id}.nexusrpc")] {
-        let path = input_root.join(format!("{stem}.yaml"));
-        if path.is_file() {
-            return path;
-        }
-    }
-    input_root.join(format!("{example_id}.yaml"))
 }
 
 fn typescript_example_ids(root: &Path) -> Vec<String> {

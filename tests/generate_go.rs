@@ -7,6 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use nex_gen::{GenerateRequest, generate_to_file};
 
+mod common;
+use common::json_input_path;
+
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn generate_to_string_with_inputs(
@@ -1315,23 +1318,6 @@ fn go_rejects_reserved_generated_name_collision() {
     assert!(error.contains("reserved module name"), "{error}");
     assert!(error.contains("definitions"), "{error}");
     fs::remove_dir_all(temp_dir).unwrap();
-}
-
-fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
-    let input_root = root.join("examples/json-schema-inputs");
-    let dir_path = input_root.join(example_id);
-    if dir_path.is_dir() {
-        return dir_path;
-    }
-    for extension in ["yaml", "yml", "json"] {
-        for stem in [example_id.to_string(), format!("{example_id}.nexusrpc")] {
-            let path = input_root.join(format!("{stem}.{extension}"));
-            if path.is_file() {
-                return path;
-            }
-        }
-    }
-    input_root.join(format!("{example_id}.yaml"))
 }
 
 fn go_json_output_path(root: &Path, mode: &str, example_id: &str) -> PathBuf {

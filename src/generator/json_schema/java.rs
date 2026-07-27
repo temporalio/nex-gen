@@ -696,7 +696,9 @@ impl JavaContext<'_> {
                     ".." => {
                         segments.pop();
                     }
-                    other => segments.push(strip_extension(other).to_string()),
+                    other => {
+                        segments.push(crate::parser::strip_json_schema_extension(other).to_string())
+                    }
                 }
             }
             segments
@@ -719,16 +721,6 @@ impl JavaContext<'_> {
             class,
         )
     }
-}
-
-fn strip_extension(name: &str) -> &str {
-    let without_extension = [".json", ".yaml", ".yml"]
-        .into_iter()
-        .find_map(|extension| name.strip_suffix(extension))
-        .unwrap_or(name);
-    without_extension
-        .strip_suffix(".nexusrpc")
-        .unwrap_or(without_extension)
 }
 
 #[derive(Debug, Clone)]

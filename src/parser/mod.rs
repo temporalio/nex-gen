@@ -8,6 +8,7 @@ use crate::language::Language;
 use crate::spec::ApiSpec;
 use crate::workspace::ApiSpecTree;
 
+pub(crate) use json_schema::strip_json_schema_extension;
 pub use json_schema::{
     load_api_spec_from_json_schema_for_language_with_inputs,
     load_api_spec_tree_from_json_schema_for_language_with_inputs,

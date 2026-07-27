@@ -382,7 +382,7 @@ fn module_path_from_relative_source(path: &Path) -> ModulePath {
 /// Strips a JSON-Schema input file's extension and, if present, the
 /// `.nexusrpc` naming-convention infix that marks the file as carrying a
 /// Nexus service/operation envelope (e.g. `chat.nexusrpc.yaml` -> `chat`).
-fn strip_json_schema_extension(name: &str) -> &str {
+pub(crate) fn strip_json_schema_extension(name: &str) -> &str {
     let without_extension = name
         .strip_suffix(".json")
         .or_else(|| name.strip_suffix(".yaml"))

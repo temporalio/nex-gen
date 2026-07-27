@@ -6,25 +6,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use nex_gen::{GenerateRequest, generate_to_file};
 
+mod common;
+use common::json_input_path;
+
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
-    let input_root = root.join("examples/json-schema-inputs");
-    let dir_path = input_root.join(example_id);
-    if dir_path.is_dir() {
-        return dir_path;
-    }
-    for stem in [example_id.to_string(), format!("{example_id}.nexusrpc")] {
-        let path = input_root.join(format!("{stem}.yaml"));
-        if path.is_file() {
-            return path;
-        }
-    }
-    input_root.join(format!("{example_id}.yaml"))
 }
 
 /// The checked-in Java example root for a given generation mode and example.

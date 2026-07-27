@@ -561,29 +561,12 @@ fn discover_json_example_ids(repo_root: &Path) -> Result<Vec<String>> {
             if !is_json_schema_input_path(&path) {
                 return None;
             }
-            Some(json_schema_input_stem(&path)?)
+            let file_name = path.file_name()?.to_str()?;
+            Some(crate::parser::strip_json_schema_extension(file_name).to_string())
         })
         .collect::<Vec<_>>();
     ids.sort();
     Ok(ids)
-}
-
-/// Derives an example id from a JSON-Schema input file name, stripping the
-/// real extension and, if present, the `.nexusrpc` naming-convention infix
-/// that marks a file as carrying a Nexus service/operation envelope (see
-/// `chat.nexusrpc.yaml`, `showcase.nexusrpc.yaml`).
-fn json_schema_input_stem(path: &Path) -> Option<String> {
-    let file_name = path.file_name()?.to_str()?;
-    let without_extension = file_name
-        .strip_suffix(".json")
-        .or_else(|| file_name.strip_suffix(".yaml"))
-        .or_else(|| file_name.strip_suffix(".yml"))?;
-    Some(
-        without_extension
-            .strip_suffix(".nexusrpc")
-            .unwrap_or(without_extension)
-            .to_string(),
-    )
 }
 
 fn directory_contains_input_file(path: &Path) -> bool {
