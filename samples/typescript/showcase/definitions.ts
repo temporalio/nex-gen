@@ -16,11 +16,17 @@ export class ValidationError extends Error {
   }
 }
 
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function collect(violations: Violation[], path: string, error: unknown): void {
+export function collect(
+  violations: Violation[],
+  path: string,
+  error: unknown,
+): void {
   if (error instanceof ValidationError) {
     for (const inner of error.violations) {
       violations.push({ path: `${path}.${inner.path}`, reason: inner.reason });
@@ -30,7 +36,8 @@ export function collect(violations: Violation[], path: string, error: unknown): 
   }
 }
 
-const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const BASE64_RE =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const BASE64URL_RE = /^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$/u;
 const BASE64_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -72,7 +79,11 @@ function decodeCanonical(value: string, table: Int16Array): Uint8Array {
   return out;
 }
 
-function encodeCanonical(bytes: Uint8Array, alphabet: string, pad: boolean): string {
+function encodeCanonical(
+  bytes: Uint8Array,
+  alphabet: string,
+  pad: boolean,
+): string {
   let out = "";
   let accumulator = 0;
   let bits = 0;

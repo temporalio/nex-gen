@@ -11,7 +11,10 @@ import {
   roundTripFixture,
 } from "./json-converter-helper.ts";
 
-const wireFixtureDir = new URL("../../wire/json_schema/temporal/", import.meta.url);
+const wireFixtureDir = new URL(
+  "../../wire/json_schema/temporal/",
+  import.meta.url,
+);
 
 function bytes(name: string): Uint8Array {
   return fixtureBytes(wireFixtureDir, name);
@@ -56,7 +59,11 @@ describe("json-schema temporal (--js-temporal-repr=string, default)", () => {
     for (const bad of [
       { createdAt: "2021-12-31T23:59:60Z", timeout: "PT0S" },
       { createdAt: "2021-06-15T12:30:45Z", timeout: "P1Y" },
-      { createdAt: "2021-06-15T12:30:45Z", birthday: "2021-02-29", timeout: "PT0S" },
+      {
+        createdAt: "2021-06-15T12:30:45Z",
+        birthday: "2021-02-29",
+        timeout: "PT0S",
+      },
       { createdAt: "2021-06-15T12:30:45", timeout: "PT0S" },
     ]) {
       const body = { birthday: "2000-01-01", alarm: "09:00:00", ...bad };
@@ -68,9 +75,14 @@ describe("json-schema temporal (--js-temporal-repr=string, default)", () => {
 // --- --js-temporal-repr=date: date-time -> Date (UTC ms fold); others string. ---
 describe("json-schema temporal (--js-temporal-repr=date)", () => {
   test("date-time materializes to a Date and folds to a UTC instant on re-serialize", () => {
-    const value = decodeFixture(new DateTemporalMapper(), bytes("temporal-full.json"));
+    const value = decodeFixture(
+      new DateTemporalMapper(),
+      bytes("temporal-full.json"),
+    );
     expect(value.createdAt).toBeInstanceOf(Date);
-    expect((value.createdAt as Date).toISOString()).toBe("2021-06-15T10:30:45.123Z");
+    expect((value.createdAt as Date).toISOString()).toBe(
+      "2021-06-15T10:30:45.123Z",
+    );
     expect(value.birthday).toBe("2021-06-15"); // stays string
     const serialized = encodeModel(new DateTemporalMapper(), value) as Record<
       string,

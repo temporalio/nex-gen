@@ -357,7 +357,9 @@ export class AddressMapper {
     if (value.zip !== undefined) {
       out.zip = value.zip;
     }
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     return out;
@@ -415,7 +417,9 @@ export class AttributesMapper {
   public toIntermediate(value: Attributes): unknown {
     const violations: __nexGenDefinitions.Violation[] = [];
     const out: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     const keys = Object.keys(out);
@@ -503,7 +507,9 @@ export class CircleMapper {
     }
     out.kind = value.kind;
     out.radius = value.radius;
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     if (violations.length) {
@@ -535,9 +541,13 @@ export class ContactTsMapper {
       }
     }
 
-    let shippingStreet: string | undefined = undefined as unknown as string | undefined;
+    let shippingStreet: string | undefined = undefined as unknown as
+      string | undefined;
     if (raw.shippingStreet === null) {
-      violations.push({ path: "shippingStreet", reason: "explicit null not allowed" });
+      violations.push({
+        path: "shippingStreet",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.shippingStreet !== undefined) {
       if (typeof raw.shippingStreet !== "string") {
         violations.push({ path: "shippingStreet", reason: "expected string" });
@@ -546,9 +556,13 @@ export class ContactTsMapper {
       }
     }
 
-    let shippingZip: string | undefined = undefined as unknown as string | undefined;
+    let shippingZip: string | undefined = undefined as unknown as
+      string | undefined;
     if (raw.shippingZip === null) {
-      violations.push({ path: "shippingZip", reason: "explicit null not allowed" });
+      violations.push({
+        path: "shippingZip",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.shippingZip !== undefined) {
       if (typeof raw.shippingZip !== "string") {
         violations.push({ path: "shippingZip", reason: "expected string" });
@@ -612,7 +626,9 @@ export class ContactTsMapper {
     if (value.shippingZip !== undefined) {
       out.shippingZip = value.shippingZip;
     }
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     if (Object.keys(out).length < 1) {
@@ -679,7 +695,9 @@ export class LabelsMapper {
   public toIntermediate(value: Labels): unknown {
     const violations: __nexGenDefinitions.Violation[] = [];
     const out: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     const keys = Object.keys(out);
@@ -716,11 +734,18 @@ export class SettingsMapper {
       }
     }
 
-    let fontSize: number | undefined = undefined as unknown as number | undefined;
+    let fontSize: number | undefined = undefined as unknown as
+      number | undefined;
     if (raw.fontSize === null) {
-      violations.push({ path: "fontSize", reason: "explicit null not allowed" });
+      violations.push({
+        path: "fontSize",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.fontSize !== undefined) {
-      if (typeof raw.fontSize !== "number" || !Number.isSafeInteger(raw.fontSize)) {
+      if (
+        typeof raw.fontSize !== "number" ||
+        !Number.isSafeInteger(raw.fontSize)
+      ) {
         violations.push({ path: "fontSize", reason: "expected integer" });
       } else {
         fontSize = raw.fontSize;
@@ -855,9 +880,7 @@ export class ShowcaseMapper {
     }
 
     let status: "active" | "inactive" | "pending" = undefined as unknown as
-      | "active"
-      | "inactive"
-      | "pending";
+      "active" | "inactive" | "pending";
     if (raw.status === undefined || raw.status === null) {
       violations.push({ path: "status", reason: "required" });
     } else {
@@ -954,9 +977,13 @@ export class ShowcaseMapper {
       }
     }
 
-    let nickname: string | undefined = undefined as unknown as string | undefined;
+    let nickname: string | undefined = undefined as unknown as
+      string | undefined;
     if (raw.nickname === null) {
-      violations.push({ path: "nickname", reason: "explicit null not allowed" });
+      violations.push({
+        path: "nickname",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.nickname !== undefined) {
       if (typeof raw.nickname !== "string") {
         violations.push({ path: "nickname", reason: "expected string" });
@@ -1028,9 +1055,13 @@ export class ShowcaseMapper {
       }
     }
 
-    let requestId: string | undefined = undefined as unknown as string | undefined;
+    let requestId: string | undefined = undefined as unknown as
+      string | undefined;
     if (raw.requestId === null) {
-      violations.push({ path: "requestId", reason: "explicit null not allowed" });
+      violations.push({
+        path: "requestId",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.requestId !== undefined) {
       if (typeof raw.requestId !== "string") {
         violations.push({ path: "requestId", reason: "expected string" });
@@ -1045,9 +1076,13 @@ export class ShowcaseMapper {
       }
     }
 
-    let contactEmail: string | undefined = undefined as unknown as string | undefined;
+    let contactEmail: string | undefined = undefined as unknown as
+      string | undefined;
     if (raw.contactEmail === null) {
-      violations.push({ path: "contactEmail", reason: "explicit null not allowed" });
+      violations.push({
+        path: "contactEmail",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.contactEmail !== undefined) {
       if (typeof raw.contactEmail !== "string") {
         violations.push({ path: "contactEmail", reason: "expected string" });
@@ -1073,7 +1108,10 @@ export class ShowcaseMapper {
         violations.push({ path: "host", reason: "expected string" });
       } else {
         host = raw.host;
-        if ([...raw.host].length > 253 || !PATTERN_BB674DB499542D4F.test(raw.host)) {
+        if (
+          [...raw.host].length > 253 ||
+          !PATTERN_BB674DB499542D4F.test(raw.host)
+        ) {
           violations.push({
             path: "host",
             reason: `must be a valid hostname, got ${JSON.stringify(raw.host)}`,
@@ -1082,9 +1120,13 @@ export class ShowcaseMapper {
       }
     }
 
-    let homepage: string | undefined = undefined as unknown as string | undefined;
+    let homepage: string | undefined = undefined as unknown as
+      string | undefined;
     if (raw.homepage === null) {
-      violations.push({ path: "homepage", reason: "explicit null not allowed" });
+      violations.push({
+        path: "homepage",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.homepage !== undefined) {
       if (typeof raw.homepage !== "string") {
         violations.push({ path: "homepage", reason: "expected string" });
@@ -1099,7 +1141,8 @@ export class ShowcaseMapper {
       }
     }
 
-    let gateway: string | undefined = undefined as unknown as string | undefined;
+    let gateway: string | undefined = undefined as unknown as
+      string | undefined;
     if (raw.gateway === null) {
       violations.push({ path: "gateway", reason: "explicit null not allowed" });
     } else if (raw.gateway !== undefined) {
@@ -1116,14 +1159,19 @@ export class ShowcaseMapper {
       }
     }
 
-    let blob: Uint8Array | undefined = undefined as unknown as Uint8Array | undefined;
+    let blob: Uint8Array | undefined = undefined as unknown as
+      Uint8Array | undefined;
     if (raw.blob === null) {
       violations.push({ path: "blob", reason: "explicit null not allowed" });
     } else if (raw.blob !== undefined) {
       if (typeof raw.blob !== "string") {
         violations.push({ path: "blob", reason: "expected string" });
       } else {
-        const parsed = __nexGenDefinitions.base64ToBytes(raw.blob, "blob", violations);
+        const parsed = __nexGenDefinitions.base64ToBytes(
+          raw.blob,
+          "blob",
+          violations,
+        );
         if (parsed !== undefined) {
           blob = parsed;
         }
@@ -1131,8 +1179,7 @@ export class ShowcaseMapper {
     }
 
     let urlBlob: Uint8Array | undefined = undefined as unknown as
-      | Uint8Array
-      | undefined;
+      Uint8Array | undefined;
     if (raw.urlBlob === null) {
       violations.push({ path: "urlBlob", reason: "explicit null not allowed" });
     } else if (raw.urlBlob !== undefined) {
@@ -1150,18 +1197,23 @@ export class ShowcaseMapper {
       }
     }
 
-    let retries: number | undefined = undefined as unknown as number | undefined;
+    let retries: number | undefined = undefined as unknown as
+      number | undefined;
     if (raw.retries === null) {
       violations.push({ path: "retries", reason: "explicit null not allowed" });
     } else if (raw.retries !== undefined) {
-      if (typeof raw.retries !== "number" || !Number.isSafeInteger(raw.retries)) {
+      if (
+        typeof raw.retries !== "number" ||
+        !Number.isSafeInteger(raw.retries)
+      ) {
         violations.push({ path: "retries", reason: "expected integer" });
       } else {
         retries = raw.retries;
       }
     }
 
-    let verbose: boolean | undefined = undefined as unknown as boolean | undefined;
+    let verbose: boolean | undefined = undefined as unknown as
+      boolean | undefined;
     if (raw.verbose === null) {
       violations.push({ path: "verbose", reason: "explicit null not allowed" });
     } else if (raw.verbose !== undefined) {
@@ -1172,9 +1224,13 @@ export class ShowcaseMapper {
       }
     }
 
-    let greeting: string | undefined = undefined as unknown as string | undefined;
+    let greeting: string | undefined = undefined as unknown as
+      string | undefined;
     if (raw.greeting === null) {
-      violations.push({ path: "greeting", reason: "explicit null not allowed" });
+      violations.push({
+        path: "greeting",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.greeting !== undefined) {
       if (typeof raw.greeting !== "string") {
         violations.push({ path: "greeting", reason: "expected string" });
@@ -1183,7 +1239,8 @@ export class ShowcaseMapper {
       }
     }
 
-    let debug: boolean | undefined = undefined as unknown as boolean | undefined;
+    let debug: boolean | undefined = undefined as unknown as
+      boolean | undefined;
     if (raw.debug === null) {
       violations.push({ path: "debug", reason: "explicit null not allowed" });
     } else if (raw.debug !== undefined) {
@@ -1194,9 +1251,13 @@ export class ShowcaseMapper {
       }
     }
 
-    let legacyIdTs: string | undefined = undefined as unknown as string | undefined;
+    let legacyIdTs: string | undefined = undefined as unknown as
+      string | undefined;
     if (raw.legacyId === null) {
-      violations.push({ path: "legacyId", reason: "explicit null not allowed" });
+      violations.push({
+        path: "legacyId",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.legacyId !== undefined) {
       if (typeof raw.legacyId !== "string") {
         violations.push({ path: "legacyId", reason: "expected string" });
@@ -1206,9 +1267,7 @@ export class ShowcaseMapper {
     }
 
     let middleName: string | null | undefined = undefined as unknown as
-      | string
-      | null
-      | undefined;
+      string | null | undefined;
     if (raw.middleName !== undefined) {
       if (raw.middleName === null) {
         middleName = null;
@@ -1236,11 +1295,18 @@ export class ShowcaseMapper {
       }
     }
 
-    let priority: number | undefined = undefined as unknown as number | undefined;
+    let priority: number | undefined = undefined as unknown as
+      number | undefined;
     if (raw.priority === null) {
-      violations.push({ path: "priority", reason: "explicit null not allowed" });
+      violations.push({
+        path: "priority",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.priority !== undefined) {
-      if (typeof raw.priority !== "number" || !Number.isSafeInteger(raw.priority)) {
+      if (
+        typeof raw.priority !== "number" ||
+        !Number.isSafeInteger(raw.priority)
+      ) {
         violations.push({ path: "priority", reason: "expected integer" });
       } else {
         priority = raw.priority;
@@ -1268,7 +1334,10 @@ export class ShowcaseMapper {
       } else {
         level = raw.level;
         if (raw.level <= 0) {
-          violations.push({ path: "level", reason: `must be > 0, got ${raw.level}` });
+          violations.push({
+            path: "level",
+            reason: `must be > 0, got ${raw.level}`,
+          });
         }
       }
     }
@@ -1282,7 +1351,10 @@ export class ShowcaseMapper {
       } else {
         ratio = raw.ratio;
         if (raw.ratio < 5) {
-          violations.push({ path: "ratio", reason: `must be >= 5, got ${raw.ratio}` });
+          violations.push({
+            path: "ratio",
+            reason: `must be >= 5, got ${raw.ratio}`,
+          });
         }
         if (raw.ratio % 5 !== 0) {
           violations.push({
@@ -1310,7 +1382,8 @@ export class ShowcaseMapper {
       }
     }
 
-    let tags: string[] | undefined = undefined as unknown as string[] | undefined;
+    let tags: string[] | undefined = undefined as unknown as
+      string[] | undefined;
     if (raw.tags === null) {
       violations.push({ path: "tags", reason: "explicit null not allowed" });
     } else if (raw.tags !== undefined) {
@@ -1321,7 +1394,10 @@ export class ShowcaseMapper {
         raw.tags.forEach((element: unknown, index: number) => {
           let item: string = undefined as unknown as string;
           if (typeof element !== "string") {
-            violations.push({ path: `tags[${index}]`, reason: "expected element" });
+            violations.push({
+              path: `tags[${index}]`,
+              reason: "expected element",
+            });
           } else {
             item = element;
           }
@@ -1344,7 +1420,8 @@ export class ShowcaseMapper {
       }
     }
 
-    let aliases: string[] | undefined = undefined as unknown as string[] | undefined;
+    let aliases: string[] | undefined = undefined as unknown as
+      string[] | undefined;
     if (raw.aliases === null) {
       violations.push({ path: "aliases", reason: "explicit null not allowed" });
     } else if (raw.aliases !== undefined) {
@@ -1355,7 +1432,10 @@ export class ShowcaseMapper {
         raw.aliases.forEach((element: unknown, index: number) => {
           let item: string = undefined as unknown as string;
           if (typeof element !== "string") {
-            violations.push({ path: `aliases[${index}]`, reason: "expected element" });
+            violations.push({
+              path: `aliases[${index}]`,
+              reason: "expected element",
+            });
           } else {
             item = element;
           }
@@ -1379,7 +1459,8 @@ export class ShowcaseMapper {
       }
     }
 
-    let roles: string[] | undefined = undefined as unknown as string[] | undefined;
+    let roles: string[] | undefined = undefined as unknown as
+      string[] | undefined;
     if (raw.roles === null) {
       violations.push({ path: "roles", reason: "explicit null not allowed" });
     } else if (raw.roles !== undefined) {
@@ -1390,7 +1471,10 @@ export class ShowcaseMapper {
         raw.roles.forEach((element: unknown, index: number) => {
           let item: string = undefined as unknown as string;
           if (typeof element !== "string") {
-            violations.push({ path: `roles[${index}]`, reason: "expected element" });
+            violations.push({
+              path: `roles[${index}]`,
+              reason: "expected element",
+            });
           } else {
             item = element;
           }
@@ -1399,7 +1483,9 @@ export class ShowcaseMapper {
           }
         });
         {
-          const matchCount = roles!.filter((element) => element === "admin").length;
+          const matchCount = roles!.filter(
+            (element) => element === "admin",
+          ).length;
           if (matchCount < 1) {
             violations.push({
               path: "roles",
@@ -1417,11 +1503,12 @@ export class ShowcaseMapper {
     }
 
     let idOrName: string | number | undefined = undefined as unknown as
-      | string
-      | number
-      | undefined;
+      string | number | undefined;
     if (raw.idOrName === null) {
-      violations.push({ path: "idOrName", reason: "explicit null not allowed" });
+      violations.push({
+        path: "idOrName",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.idOrName !== undefined) {
       if (typeof raw.idOrName === "string") {
         idOrName = raw.idOrName as string;
@@ -1449,7 +1536,8 @@ export class ShowcaseMapper {
       }
     }
 
-    let address: Address | undefined = undefined as unknown as Address | undefined;
+    let address: Address | undefined = undefined as unknown as
+      Address | undefined;
     if (raw.address === null) {
       violations.push({ path: "address", reason: "explicit null not allowed" });
     } else if (raw.address !== undefined) {
@@ -1471,9 +1559,13 @@ export class ShowcaseMapper {
       }
     }
 
-    let settings: Settings | undefined = undefined as unknown as Settings | undefined;
+    let settings: Settings | undefined = undefined as unknown as
+      Settings | undefined;
     if (raw.settings === null) {
-      violations.push({ path: "settings", reason: "explicit null not allowed" });
+      violations.push({
+        path: "settings",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.settings !== undefined) {
       try {
         settings = new SettingsMapper().fromIntermediate(raw.settings);
@@ -1483,10 +1575,12 @@ export class ShowcaseMapper {
     }
 
     let attributes: Attributes | undefined = undefined as unknown as
-      | Attributes
-      | undefined;
+      Attributes | undefined;
     if (raw.attributes === null) {
-      violations.push({ path: "attributes", reason: "explicit null not allowed" });
+      violations.push({
+        path: "attributes",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.attributes !== undefined) {
       try {
         attributes = new AttributesMapper().fromIntermediate(raw.attributes);
@@ -1495,7 +1589,8 @@ export class ShowcaseMapper {
       }
     }
 
-    let contact: ContactTs | undefined = undefined as unknown as ContactTs | undefined;
+    let contact: ContactTs | undefined = undefined as unknown as
+      ContactTs | undefined;
     if (raw.contact === null) {
       violations.push({ path: "contact", reason: "explicit null not allowed" });
     } else if (raw.contact !== undefined) {
@@ -1784,7 +1879,10 @@ export class ShowcaseMapper {
       out.contactEmail = value.contactEmail;
     }
     if (value.host !== undefined) {
-      if ([...value.host].length > 253 || !PATTERN_BB674DB499542D4F.test(value.host)) {
+      if (
+        [...value.host].length > 253 ||
+        !PATTERN_BB674DB499542D4F.test(value.host)
+      ) {
         violations.push({
           path: "host",
           reason: `must be a valid hostname, got ${JSON.stringify(value.host)}`,
@@ -1852,13 +1950,19 @@ export class ShowcaseMapper {
     }
     if (value.level !== undefined) {
       if (value.level <= 0) {
-        violations.push({ path: "level", reason: `must be > 0, got ${value.level}` });
+        violations.push({
+          path: "level",
+          reason: `must be > 0, got ${value.level}`,
+        });
       }
       out.level = value.level;
     }
     if (value.ratio !== undefined) {
       if (value.ratio < 5) {
-        violations.push({ path: "ratio", reason: `must be >= 5, got ${value.ratio}` });
+        violations.push({
+          path: "ratio",
+          reason: `must be >= 5, got ${value.ratio}`,
+        });
       }
       if (value.ratio % 5 !== 0) {
         violations.push({
@@ -1910,7 +2014,9 @@ export class ShowcaseMapper {
     }
     if (value.roles !== undefined) {
       {
-        const matchCount = value.roles.filter((element) => element === "admin").length;
+        const matchCount = value.roles.filter(
+          (element) => element === "admin",
+        ).length;
         if (matchCount < 1) {
           violations.push({
             path: "roles",
@@ -2051,7 +2157,9 @@ export class SquareMapper {
     }
     out.kind = value.kind;
     out.side = value.side;
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     if (violations.length) {
@@ -2114,10 +2222,16 @@ export class WidgetMapper {
       } else {
         size = raw.size;
         if (raw.size < 10) {
-          violations.push({ path: "size", reason: `must be >= 10, got ${raw.size}` });
+          violations.push({
+            path: "size",
+            reason: `must be >= 10, got ${raw.size}`,
+          });
         }
         if (raw.size > 20) {
-          violations.push({ path: "size", reason: `must be <= 20, got ${raw.size}` });
+          violations.push({
+            path: "size",
+            reason: `must be <= 20, got ${raw.size}`,
+          });
         }
       }
     }
@@ -2152,14 +2266,22 @@ export class WidgetMapper {
     out.name = value.name;
     if (value.size !== undefined) {
       if (value.size < 10) {
-        violations.push({ path: "size", reason: `must be >= 10, got ${value.size}` });
+        violations.push({
+          path: "size",
+          reason: `must be >= 10, got ${value.size}`,
+        });
       }
       if (value.size > 20) {
-        violations.push({ path: "size", reason: `must be <= 20, got ${value.size}` });
+        violations.push({
+          path: "size",
+          reason: `must be <= 20, got ${value.size}`,
+        });
       }
       out.size = value.size;
     }
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     if (violations.length) {
@@ -2225,7 +2347,9 @@ export class WidgetBaseMapper {
     if (value.kind !== undefined) {
       out.kind = value.kind;
     }
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     return out;

@@ -16,11 +16,17 @@ export class ValidationError extends Error {
   }
 }
 
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function collect(violations: Violation[], path: string, error: unknown): void {
+export function collect(
+  violations: Violation[],
+  path: string,
+  error: unknown,
+): void {
   if (error instanceof ValidationError) {
     for (const inner of error.violations) {
       violations.push({ path: `${path}.${inner.path}`, reason: inner.reason });
@@ -39,7 +45,8 @@ const TEMPORAL_DURATION_RE =
   /^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)$/u;
 const TEMPORAL_DATE_TIME_CAP =
   /^(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/u;
-const TEMPORAL_TIME_CAP = /^(\d{2}:\d{2}:\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?$/u;
+const TEMPORAL_TIME_CAP =
+  /^(\d{2}:\d{2}:\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?$/u;
 
 function daysInTemporalMonth(year: number, month: number): number {
   switch (month) {
@@ -83,7 +90,11 @@ function trimTemporalFraction(fraction: string | undefined): string {
 }
 
 function normalizeTemporalOffset(offset: string): string {
-  if (offset.toUpperCase() === "Z" || offset === "+00:00" || offset === "-00:00") {
+  if (
+    offset.toUpperCase() === "Z" ||
+    offset === "+00:00" ||
+    offset === "-00:00"
+  ) {
     return "Z";
   }
   return offset;
@@ -207,9 +218,13 @@ export function parseTemporalDuration(
   return Temporal.Duration.from({ seconds });
 }
 
-export function serializeTemporalDateTime(value: Temporal.ZonedDateTime): string {
+export function serializeTemporalDateTime(
+  value: Temporal.ZonedDateTime,
+): string {
   const s = value.toString({ timeZoneName: "never" });
-  return s.endsWith("+00:00") || s.endsWith("-00:00") ? s.slice(0, -6) + "Z" : s;
+  return s.endsWith("+00:00") || s.endsWith("-00:00")
+    ? s.slice(0, -6) + "Z"
+    : s;
 }
 
 export function serializeTemporalDate(value: Temporal.PlainDate): string {

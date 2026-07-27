@@ -139,7 +139,9 @@ export class LabelsMapper {
   public toIntermediate(value: Labels): unknown {
     const violations: __nexGenDefinitions.Violation[] = [];
     const out: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     const keys = Object.keys(out);
@@ -190,9 +192,7 @@ export class MessageMapper {
     }
 
     let replyToId: string | null | undefined = undefined as unknown as
-      | string
-      | null
-      | undefined;
+      string | null | undefined;
     if (raw.replyToId !== undefined) {
       if (raw.replyToId === null) {
         replyToId = null;
@@ -205,11 +205,18 @@ export class MessageMapper {
       }
     }
 
-    let priority: number | undefined = undefined as unknown as number | undefined;
+    let priority: number | undefined = undefined as unknown as
+      number | undefined;
     if (raw.priority === null) {
-      violations.push({ path: "priority", reason: "explicit null not allowed" });
+      violations.push({
+        path: "priority",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.priority !== undefined) {
-      if (typeof raw.priority !== "number" || !Number.isSafeInteger(raw.priority)) {
+      if (
+        typeof raw.priority !== "number" ||
+        !Number.isSafeInteger(raw.priority)
+      ) {
         violations.push({ path: "priority", reason: "expected integer" });
       } else {
         priority = raw.priority;
@@ -261,7 +268,13 @@ export class MessageMapper {
   }
 }
 
-const ROOM_DECLARED = new Set(["roomId", "displayName", "topic", "members", "labels"]);
+const ROOM_DECLARED = new Set([
+  "roomId",
+  "displayName",
+  "topic",
+  "members",
+  "labels",
+]);
 
 export class RoomMapper {
   public fromIntermediate(raw: unknown): Room {
@@ -309,7 +322,8 @@ export class RoomMapper {
       }
     }
 
-    let members: string[] | undefined = undefined as unknown as string[] | undefined;
+    let members: string[] | undefined = undefined as unknown as
+      string[] | undefined;
     if (raw.members === null) {
       violations.push({ path: "members", reason: "explicit null not allowed" });
     } else if (raw.members !== undefined) {
@@ -320,7 +334,10 @@ export class RoomMapper {
         raw.members.forEach((element: unknown, index: number) => {
           let item: string = undefined as unknown as string;
           if (typeof element !== "string") {
-            violations.push({ path: `members[${index}]`, reason: "expected element" });
+            violations.push({
+              path: `members[${index}]`,
+              reason: "expected element",
+            });
           } else {
             item = element;
           }
@@ -373,7 +390,9 @@ export class RoomMapper {
     if (value.labels !== undefined) {
       out.labels = new LabelsMapper().toIntermediate(value.labels);
     }
-    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+    for (const [key, entry] of Object.entries(
+      value.additionalProperties ?? {},
+    )) {
       out[key] = entry;
     }
     return out;

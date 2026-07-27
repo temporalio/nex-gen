@@ -11,14 +11,19 @@ import type { GetShowcaseInput, Showcase } from "./models";
  * service name / `@Service` / `ServiceName` string stays
  * `example.showcase.v1.ShowcaseService`.
  */
-export const showcaseServiceTs = nexus.service("example.showcase.v1.ShowcaseService", {
-  /**
-   * Fetch a showcase by id. Also exercises the operation-level `x-<lang>-name`
-   * override: the emitted operation code identifier is renamed to the derived name plus
-   * a per-language suffix (Go `GetShowcaseGo`, TS `getShowcaseTs`, Python
-   * `get_showcase_py`, Java `getShowcaseJava`) while the wire operation name stays
-   * `GetShowcase` and the synthesized I/O type stays `GetShowcaseInput` (derived from
-   * the operation key, not the override).
-   */
-  getShowcaseTs: nexus.operation<GetShowcaseInput, Showcase>({ name: "GetShowcase" }),
-});
+export const showcaseServiceTs = nexus.service(
+  "example.showcase.v1.ShowcaseService",
+  {
+    /**
+     * Fetch a showcase by id. Also exercises the operation-level `x-<lang>-name`
+     * override: the emitted operation code identifier is renamed to the derived name plus
+     * a per-language suffix (Go `GetShowcaseGo`, TS `getShowcaseTs`, Python
+     * `get_showcase_py`, Java `getShowcaseJava`) while the wire operation name stays
+     * `GetShowcase` and the synthesized I/O type stays `GetShowcaseInput` (derived from
+     * the operation key, not the override).
+     */
+    getShowcaseTs: nexus.operation<GetShowcaseInput, Showcase>({
+      name: "GetShowcase",
+    }),
+  },
+);

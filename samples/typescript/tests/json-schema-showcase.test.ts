@@ -22,7 +22,10 @@ import {
   type IntermediateMapper,
 } from "./json-converter-helper.ts";
 
-const wireFixtureDir = new URL("../../wire/json_schema/showcase/", import.meta.url);
+const wireFixtureDir = new URL(
+  "../../wire/json_schema/showcase/",
+  import.meta.url,
+);
 
 function loadFixture(name: string): unknown {
   return loadFixtureFrom(wireFixtureDir, name);
@@ -41,7 +44,10 @@ function expectRoundTrip<T>(name: string, mapper: IntermediateMapper<T>): T {
 
 describe("json-schema showcase generated definitions", () => {
   test("roundtrips canonical wire fixtures through the Temporal converter", () => {
-    const minimal = expectRoundTrip("showcase-minimal.json", new ShowcaseMapper());
+    const minimal = expectRoundTrip(
+      "showcase-minimal.json",
+      new ShowcaseMapper(),
+    );
     expect(minimal).toMatchObject<Partial<Showcase>>({
       kind: "showcase",
       revision: 1,
@@ -62,7 +68,10 @@ describe("json-schema showcase generated definitions", () => {
     expect(minimal.debug).toBeUndefined();
     expect(minimal.debug ?? DEFAULT_DEBUG).toBe(false);
     // Serialize side: an unset default-bearing field is OMITTED on the wire.
-    const minimalWire = loadFixture("showcase-minimal.json") as Record<string, unknown>;
+    const minimalWire = loadFixture("showcase-minimal.json") as Record<
+      string,
+      unknown
+    >;
     expect(minimalWire).not.toHaveProperty("greeting");
     expect(minimalWire).not.toHaveProperty("debug");
     expect(minimalWire).not.toHaveProperty("retries");
@@ -97,7 +106,10 @@ describe("json-schema showcase generated definitions", () => {
     expect(settings.theme).toBe("dark");
     expect(settings.fontSize).toBe(14);
 
-    const metrics = expectRoundTrip("showcase-metrics.json", new ShowcaseMapper());
+    const metrics = expectRoundTrip(
+      "showcase-metrics.json",
+      new ShowcaseMapper(),
+    );
     expect(metrics.priority).toBe(5);
     expect(metrics.level).toBe(2);
     expect(metrics.ratio).toBe(15);
@@ -105,7 +117,10 @@ describe("json-schema showcase generated definitions", () => {
 
     // The astral crux: "a😀b" is 3 code points but 6 UTF-8 bytes / 4 UTF-16
     // units; it must round-trip through code (maxLength:5) unchanged.
-    const strings = expectRoundTrip("showcase-strings.json", new ShowcaseMapper());
+    const strings = expectRoundTrip(
+      "showcase-strings.json",
+      new ShowcaseMapper(),
+    );
     expect(strings.code).toBe("a😀b");
     expect(strings.nickname).toBe("buddy");
   });
@@ -123,10 +138,18 @@ describe("json-schema showcase generated definitions", () => {
 
     // `size` carries a bound tightened from two allOf branches to [10, 20].
     expect(() =>
-      new WidgetMapper().fromIntermediate({ id: "w-1", name: "Widget One", size: 5 }),
+      new WidgetMapper().fromIntermediate({
+        id: "w-1",
+        name: "Widget One",
+        size: 5,
+      }),
     ).toThrow(/must be >= 10, got 5/);
     expect(() =>
-      new WidgetMapper().fromIntermediate({ id: "w-1", name: "Widget One", size: 25 }),
+      new WidgetMapper().fromIntermediate({
+        id: "w-1",
+        name: "Widget One",
+        size: 25,
+      }),
     ).toThrow(/must be <= 20, got 25/);
 
     // A missing required member contributed by the extension branch is rejected.
@@ -195,10 +218,12 @@ describe("json-schema showcase generated definitions", () => {
     // Closed value-set (enum/const) rejections with informative reasons.
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, status: "archived" }),
-    ).toThrow(/must be one of \["active", "inactive", "pending"\], got "archived"/);
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, tier: 9 })).toThrow(
-      /must be one of \[1, 2, 3\], got 9/,
+    ).toThrow(
+      /must be one of \["active", "inactive", "pending"\], got "archived"/,
     );
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, tier: 9 }),
+    ).toThrow(/must be one of \[1, 2, 3\], got 9/);
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, scale: 3.5 }),
     ).toThrow(/must be one of \[1.5, 2.5\], got 3.5/);
@@ -217,20 +242,20 @@ describe("json-schema showcase generated definitions", () => {
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, priority: 99 }),
     ).toThrow(/must be <= 10, got 99/);
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, level: 0 })).toThrow(
-      /must be > 0, got 0/,
-    );
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, step: 7 })).toThrow(
-      /must be a multiple of 3, got 7/,
-    );
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, ratio: 7 })).toThrow(
-      /must be a multiple of 5, got 7/,
-    );
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, level: 0 }),
+    ).toThrow(/must be > 0, got 0/);
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, step: 7 }),
+    ).toThrow(/must be a multiple of 3, got 7/);
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, ratio: 7 }),
+    ).toThrow(/must be a multiple of 5, got 7/);
 
     // String-length bounds fire at runtime, counted in code points.
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, code: "a" })).toThrow(
-      /must have length >= 2, got 1/,
-    );
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, code: "a" }),
+    ).toThrow(/must have length >= 2, got 1/);
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, code: "abcdef" }),
     ).toThrow(/must have length <= 5, got 6/);
@@ -240,15 +265,15 @@ describe("json-schema showcase generated definitions", () => {
     ).toThrow(/must have length <= 5, got 6/);
     // A multi-byte value within the code-point bound is accepted (byte count 6
     // would exceed maxLength:5 — proving code points, not bytes).
-    expect(new ShowcaseMapper().fromIntermediate({ ...base, code: "a😀b" }).code).toBe(
-      "a😀b",
-    );
+    expect(
+      new ShowcaseMapper().fromIntermediate({ ...base, code: "a😀b" }).code,
+    ).toBe("a😀b");
 
     // Array constraints fire at runtime with informative reasons.
     // Too few / too many items (minItems:1 / maxItems:5).
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, tags: [] })).toThrow(
-      /must have at least 1 items, got 0/,
-    );
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, tags: [] }),
+    ).toThrow(/must have at least 1 items, got 0/);
     expect(() =>
       new ShowcaseMapper().fromIntermediate({
         ...base,
@@ -282,7 +307,10 @@ describe("json-schema showcase generated definitions", () => {
 
   test("enforces pattern constraints with RE2-safe portable semantics", () => {
     // sku `^[A-Z]{2,4}$` and phrase `^\S+\s\S+$` round-trip.
-    const patterns = expectRoundTrip("showcase-patterns.json", new ShowcaseMapper());
+    const patterns = expectRoundTrip(
+      "showcase-patterns.json",
+      new ShowcaseMapper(),
+    );
     expect(patterns.sku).toBe("AB");
     expect(patterns.phrase).toBe("hello world");
 
@@ -300,9 +328,9 @@ describe("json-schema showcase generated definitions", () => {
     };
 
     // Lowercase / too-long sku.
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, sku: "ab" })).toThrow(
-      /must match pattern/,
-    );
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, sku: "ab" }),
+    ).toThrow(/must match pattern/);
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, sku: "ABCDE" }),
     ).toThrow(/must match pattern/);
@@ -324,7 +352,10 @@ describe("json-schema showcase generated definitions", () => {
     // end-of-input (no `\n` exception), matching the `\Z`/`\z` rewrite applied
     // for Python/Java.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, phrase: "hello world\n" }),
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        phrase: "hello world\n",
+      }),
     ).toThrow(/must match pattern/);
 
     // A valid ASCII-space phrase and sku are accepted.
@@ -339,7 +370,10 @@ describe("json-schema showcase generated definitions", () => {
 
   test("enforces asserted string formats with pinned, portable checks", () => {
     // uuid/email/hostname/uri/ipv4 round-trip (string-typed, no materialization).
-    const formats = expectRoundTrip("showcase-format.json", new ShowcaseMapper());
+    const formats = expectRoundTrip(
+      "showcase-format.json",
+      new ShowcaseMapper(),
+    );
     expect(formats.requestId).toBe("de305d54-75b4-431b-adb2-eb6b9e546013");
     expect(formats.contactEmail).toBe("user@example.com");
     expect(formats.host).toBe("api.example.com");
@@ -361,7 +395,10 @@ describe("json-schema showcase generated definitions", () => {
 
     // A malformed uuid.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, requestId: "not-a-uuid" }),
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        requestId: "not-a-uuid",
+      }),
     ).toThrow(/must be a valid uuid, got "not-a-uuid"/);
 
     // Single-label email domain (user@localhost) is rejected.
@@ -379,7 +416,10 @@ describe("json-schema showcase generated definitions", () => {
 
     // uri with a double-`::` IPv6 IP-literal host (spliced ipv6 grammar rejects).
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, homepage: "http://[1::2::3]" }),
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        homepage: "http://[1::2::3]",
+      }),
     ).toThrow(/must be a valid uri/);
 
     // An over-long hostname (> 253 code points) is rejected by the length guard.
@@ -391,8 +431,14 @@ describe("json-schema showcase generated definitions", () => {
 
   test("enforces object member-count, propertyNames, and dependentRequired", () => {
     // Valid map and object round-trip.
-    const attributes = expectRoundTrip("attributes.json", new AttributesMapper());
-    expect(attributes.additionalProperties).toEqual({ host: "a", port: "8080" });
+    const attributes = expectRoundTrip(
+      "attributes.json",
+      new AttributesMapper(),
+    );
+    expect(attributes.additionalProperties).toEqual({
+      host: "a",
+      port: "8080",
+    });
     const contact = expectRoundTrip("contact.json", new ContactTsMapper());
     expect(contact.shippingStreet).toBe("1 Main St");
     expect(contact.shippingZip).toBe("90210");
@@ -403,17 +449,26 @@ describe("json-schema showcase generated definitions", () => {
     );
     // maxProperties:3 on a map.
     expect(() =>
-      new AttributesMapper().fromIntermediate({ a: "1", b: "2", c: "3", d: "4" }),
+      new AttributesMapper().fromIntermediate({
+        a: "1",
+        b: "2",
+        c: "3",
+        d: "4",
+      }),
     ).toThrow(/must have at most 3 properties, got 4/);
     // propertyNames maxLength:8 — an over-long key.
-    expect(() => new AttributesMapper().fromIntermediate({ toolongkey: "1" })).toThrow(
+    expect(() =>
+      new AttributesMapper().fromIntermediate({ toolongkey: "1" }),
+    ).toThrow(
       /invalid property name "toolongkey": must have length <= 8, got 10/,
     );
 
     // dependentRequired — a shipping street present without a shipping zip.
     expect(() =>
       new ContactTsMapper().fromIntermediate({ shippingStreet: "1 Main St" }),
-    ).toThrow(/property "shippingZip" is required when "shippingStreet" is present/);
+    ).toThrow(
+      /property "shippingZip" is required when "shippingStreet" is present/,
+    );
     // minProperties:1 on a declared-property object — an empty object.
     expect(() => new ContactTsMapper().fromIntermediate({})).toThrow(
       /must have at least 1 properties, got 0/,
@@ -428,13 +483,22 @@ describe("json-schema showcase generated definitions", () => {
       new ShowcaseMapper(),
     );
     expect(asString.idOrName).toBe("abc");
-    const asInt = expectRoundTrip("showcase-union-int.json", new ShowcaseMapper());
+    const asInt = expectRoundTrip(
+      "showcase-union-int.json",
+      new ShowcaseMapper(),
+    );
     expect(asInt.idOrName).toBe(7);
 
     // Discriminated (tagged) union (Circle | Square) selected by `kind`.
-    const circle = expectRoundTrip("showcase-shape-circle.json", new ShowcaseMapper());
+    const circle = expectRoundTrip(
+      "showcase-shape-circle.json",
+      new ShowcaseMapper(),
+    );
     expect(circle.shape).toMatchObject({ kind: "circle", radius: 2.5 });
-    const square = expectRoundTrip("showcase-shape-square.json", new ShowcaseMapper());
+    const square = expectRoundTrip(
+      "showcase-shape-square.json",
+      new ShowcaseMapper(),
+    );
     expect(square.shape).toMatchObject({ kind: "square", side: 4 });
 
     const base = {
@@ -483,9 +547,9 @@ describe("json-schema showcase generated definitions", () => {
     ).toThrow(/must have length <= 5, got 6/);
 
     // Pattern: an in-memory off-pattern value fails to serialize.
-    expect(() => new ShowcaseMapper().toIntermediate({ ...full, sku: "xyz" })).toThrow(
-      /must match pattern/,
-    );
+    expect(() =>
+      new ShowcaseMapper().toIntermediate({ ...full, sku: "xyz" }),
+    ).toThrow(/must match pattern/);
 
     // Format: an in-memory malformed uuid fails to serialize.
     expect(() =>
@@ -503,7 +567,9 @@ describe("json-schema showcase generated definitions", () => {
         ...full,
         status: "archived" as (typeof full)["status"],
       }),
-    ).toThrow(/must be one of \["active", "inactive", "pending"\], got "archived"/);
+    ).toThrow(
+      /must be one of \["active", "inactive", "pending"\], got "archived"/,
+    );
 
     // const: a mutated integer const fails to serialize.
     expect(() =>
@@ -514,10 +580,12 @@ describe("json-schema showcase generated definitions", () => {
     ).toThrow(/must equal 1/);
 
     // allOf-merged bound: an in-memory `size` past the tightened maximum fails.
-    const widget = new WidgetMapper().fromIntermediate(loadFixture("widget.json"));
-    expect(() => new WidgetMapper().toIntermediate({ ...widget, size: 25 })).toThrow(
-      /must be <= 20, got 25/,
+    const widget = new WidgetMapper().fromIntermediate(
+      loadFixture("widget.json"),
     );
+    expect(() =>
+      new WidgetMapper().toIntermediate({ ...widget, size: 25 }),
+    ).toThrow(/must be <= 20, got 25/);
 
     // Object dependentRequired: a shipping street with no zip fails to serialize.
     expect(() =>
@@ -525,7 +593,9 @@ describe("json-schema showcase generated definitions", () => {
         shippingStreet: "1 Main St",
         additionalProperties: {},
       }),
-    ).toThrow(/property "shippingZip" is required when "shippingStreet" is present/);
+    ).toThrow(
+      /property "shippingZip" is required when "shippingStreet" is present/,
+    );
 
     // Object member-count: an empty map is below minProperties:1 on serialize.
     expect(() =>
@@ -536,7 +606,9 @@ describe("json-schema showcase generated definitions", () => {
       new AttributesMapper().toIntermediate({
         additionalProperties: { toolongkey: "1" },
       }),
-    ).toThrow(/invalid property name "toolongkey": must have length <= 8, got 10/);
+    ).toThrow(
+      /invalid property name "toolongkey": must have length <= 8, got 10/,
+    );
 
     // A valid model still serializes cleanly (no false rejection).
     expect(() => new ShowcaseMapper().toIntermediate(full)).not.toThrow();

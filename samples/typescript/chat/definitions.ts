@@ -16,11 +16,17 @@ export class ValidationError extends Error {
   }
 }
 
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function collect(violations: Violation[], path: string, error: unknown): void {
+export function collect(
+  violations: Violation[],
+  path: string,
+  error: unknown,
+): void {
   if (error instanceof ValidationError) {
     for (const inner of error.violations) {
       violations.push({ path: `${path}.${inner.path}`, reason: inner.reason });

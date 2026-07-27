@@ -53,10 +53,12 @@ export class CategoryMapper {
     }
 
     let children: Category[] | undefined = undefined as unknown as
-      | Category[]
-      | undefined;
+      Category[] | undefined;
     if (raw.children === null) {
-      violations.push({ path: "children", reason: "explicit null not allowed" });
+      violations.push({
+        path: "children",
+        reason: "explicit null not allowed",
+      });
     } else if (raw.children !== undefined) {
       if (!Array.isArray(raw.children)) {
         violations.push({ path: "children", reason: "expected array" });
@@ -67,7 +69,11 @@ export class CategoryMapper {
           try {
             item = new CategoryMapper().fromIntermediate(element);
           } catch (error) {
-            __nexGenDefinitions.collect(violations, `children[${index}]`, error);
+            __nexGenDefinitions.collect(
+              violations,
+              `children[${index}]`,
+              error,
+            );
           }
           if (item !== undefined) {
             children!.push(item);
@@ -123,7 +129,10 @@ export class PaletteMapper {
         raw.swatches.forEach((element: unknown, index: number) => {
           let item: string = undefined as unknown as string;
           if (typeof element !== "string") {
-            violations.push({ path: `swatches[${index}]`, reason: "expected element" });
+            violations.push({
+              path: `swatches[${index}]`,
+              reason: "expected element",
+            });
           } else {
             item = element;
           }

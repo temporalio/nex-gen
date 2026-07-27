@@ -46,10 +46,16 @@ describe("json-schema KB generated output", () => {
     expect(block.blockId).toBe("block-1");
     expect(block.page).toBeNull();
 
-    const category = expectRoundTrip("category-tree.json", new CategoryMapper());
+    const category = expectRoundTrip(
+      "category-tree.json",
+      new CategoryMapper(),
+    );
     expect(category.children?.[0]?.id).toBe("child");
 
-    const request = expectRoundTrip("get-page-input.json", new GetPageInputMapper());
+    const request = expectRoundTrip(
+      "get-page-input.json",
+      new GetPageInputMapper(),
+    );
     expect(request.pageId).toBe("page-1");
 
     const categoryRequest = expectRoundTrip(
