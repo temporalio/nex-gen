@@ -61,6 +61,7 @@ Options:
                                   temporal `format` fields (date-time/date/time/
                                   duration) — string | date | temporal [default: string]
   -h, --help                      Print help
+  -V, --version                   Print version
 ```
 
 Generate TypeScript bindings from one schema:

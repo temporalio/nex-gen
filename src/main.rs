@@ -14,6 +14,7 @@ use nex_gen::{GenerateRequest, generate_to_file};
 
 #[derive(Parser)]
 #[command(name = "nexgen")]
+#[command(version)]
 #[command(about = "Generate code from NexusRPC definition files containing services and types")]
 struct Cli {
     #[command(subcommand)]
