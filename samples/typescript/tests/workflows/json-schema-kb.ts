@@ -55,9 +55,7 @@ export async function jsonSchemaKbCaller(): Promise<{
       rootId: "root",
     }) as GetCategoryTreeInput,
   );
-  const category = new CategoryMapper().fromIntermediate(
-    await categoryHandle.result(),
-  );
+  const category = new CategoryMapper().fromIntermediate(await categoryHandle.result());
 
   return {
     blockId: putBlockOutput.blockId,
