@@ -5641,9 +5641,13 @@ mod tests {
 
     use crate::SupportFiles;
     use crate::descriptors::DescriptorIndex;
-    use crate::generator::{GeneratedOutputLayout, generate_files, generate_source};
+    use crate::generator::{
+        GenerateFilesOptions, GeneratedOutputLayout, GenerationMode,
+        generate_files_for_tree_with_mode_and_options, generate_source,
+    };
     use crate::language::Language;
     use crate::spec::SupportFragmentSpec;
+    use crate::workspace::ApiSpecTree;
 
     fn sample_input_path(root: &std::path::Path) -> PathBuf {
         root.join("advanced/samples/inputs/workflow-service.wit")
@@ -5728,8 +5732,15 @@ mod tests {
             DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
                 .unwrap();
         let support = sample_support_files(&root);
-        let generated =
-            generate_files(Language::TypeScript, spec.clone(), &descriptors, &support).unwrap();
+        let generated = generate_files_for_tree_with_mode_and_options(
+            Language::TypeScript,
+            ApiSpecTree::single(spec.clone()),
+            &descriptors,
+            &support,
+            GenerationMode::NativeApi,
+            GenerateFilesOptions::default(),
+        )
+        .unwrap();
         assert_eq!(generated.layout, GeneratedOutputLayout::Directory);
 
         ensure_typescript_dependencies(&root);

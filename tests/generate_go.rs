@@ -285,11 +285,9 @@ fn cli_rejects_go_output_directory_mismatched_with_namespace() {
         );
     fs::write(&temp_input_path, input).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
-            "generate",
             "go",
-            "--input",
             temp_input_path.to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
@@ -313,11 +311,9 @@ fn cli_rejects_output_at_filesystem_root() {
     // ever risking `fs::remove_dir_all` on the filesystem root. This check
     // is language-agnostic, exercised here via `generate go`.
     let root = project_root();
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
-            "generate",
             "go",
-            "--input",
             input_path(&root, "user-service").to_str().unwrap(),
             "--output",
             "/",

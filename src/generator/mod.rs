@@ -142,54 +142,6 @@ pub enum TsDateTimeTypes {
     Temporal,
 }
 
-pub fn generate_files(
-    language: Language,
-    spec: ApiSpec,
-    descriptors: &DescriptorIndex,
-    support: &SupportFiles,
-) -> Result<GeneratedFiles> {
-    generate_files_with_mode(
-        language,
-        spec,
-        descriptors,
-        support,
-        GenerationMode::NativeApi,
-    )
-}
-
-pub fn generate_files_with_mode(
-    language: Language,
-    spec: ApiSpec,
-    descriptors: &DescriptorIndex,
-    support: &SupportFiles,
-    mode: GenerationMode,
-) -> Result<GeneratedFiles> {
-    generate_files_for_tree_with_mode(
-        language,
-        ApiSpecTree::single(spec),
-        descriptors,
-        support,
-        mode,
-    )
-}
-
-pub fn generate_files_for_tree_with_mode(
-    language: Language,
-    tree: ApiSpecTree,
-    descriptors: &DescriptorIndex,
-    support: &SupportFiles,
-    mode: GenerationMode,
-) -> Result<GeneratedFiles> {
-    generate_files_for_tree_with_mode_and_options(
-        language,
-        tree,
-        descriptors,
-        support,
-        mode,
-        GenerateFilesOptions::default(),
-    )
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct GenerateFilesOptions {
     pub(crate) go_output_dir_name: String,
@@ -329,7 +281,14 @@ pub fn generate_source_with_mode(
     support: &SupportFiles,
     mode: GenerationMode,
 ) -> Result<String> {
-    let generated = generate_files_with_mode(language, spec, descriptors, support, mode)?;
+    let generated = generate_files_for_tree_with_mode_and_options(
+        language,
+        ApiSpecTree::single(spec),
+        descriptors,
+        support,
+        mode,
+        GenerateFilesOptions::default(),
+    )?;
     Ok(match generated.layout {
         GeneratedOutputLayout::SingleFile => generated
             .single_file_contents()
@@ -393,7 +352,10 @@ mod tests {
     use crate::descriptors::DescriptorIndex;
     use crate::language::Language;
 
-    use super::{GenerationMode, generate_files, generate_files_with_mode};
+    use super::{
+        GenerateFilesOptions, GenerationMode, generate_files_for_tree_with_mode_and_options,
+    };
+    use crate::workspace::ApiSpecTree;
 
     #[test]
     fn warns_when_resource_method_generates_as_stub() {
@@ -430,11 +392,13 @@ interface user-service {
         .unwrap();
         let descriptors =
             DescriptorIndex::from_descriptor_set(FileDescriptorSet { file: Vec::new() }).unwrap();
-        let generated = generate_files(
+        let generated = generate_files_for_tree_with_mode_and_options(
             Language::Python,
-            spec,
+            ApiSpecTree::single(spec),
             &descriptors,
             &SupportFiles::default(),
+            GenerationMode::NativeApi,
+            GenerateFilesOptions::default(),
         )
         .unwrap();
 
@@ -477,12 +441,13 @@ interface example-service {
         let descriptors =
             DescriptorIndex::from_descriptor_set(FileDescriptorSet { file: Vec::new() }).unwrap();
 
-        let generated = generate_files_with_mode(
+        let generated = generate_files_for_tree_with_mode_and_options(
             Language::Python,
-            spec,
+            ApiSpecTree::single(spec),
             &descriptors,
             &SupportFiles::default(),
             GenerationMode::DefinitionsOnly,
+            GenerateFilesOptions::default(),
         )
         .unwrap();
 

@@ -6989,9 +6989,13 @@ mod tests {
     use crate::SupportFiles;
     use crate::descriptors::DescriptorIndex;
     use crate::error::Error;
-    use crate::generator::{GeneratedOutputLayout, generate_files, generate_source};
+    use crate::generator::{
+        GenerateFilesOptions, GeneratedOutputLayout, GenerationMode,
+        generate_files_for_tree_with_mode_and_options, generate_source,
+    };
     use crate::language::Language;
     use crate::spec::{LanguageImportSpec, LanguageImportStyle};
+    use crate::workspace::ApiSpecTree;
 
     fn sample_input_path(root: &std::path::Path) -> PathBuf {
         root.join("advanced/samples/inputs/workflow-service.wit")
@@ -7189,11 +7193,13 @@ class Example(enum.Enum):
         let descriptors =
             DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
                 .unwrap();
-        let generated = generate_files(
+        let generated = generate_files_for_tree_with_mode_and_options(
             Language::Python,
-            spec.clone(),
+            ApiSpecTree::single(spec.clone()),
             &descriptors,
             &crate::SupportFiles::default(),
+            GenerationMode::NativeApi,
+            GenerateFilesOptions::default(),
         )
         .unwrap();
         assert_eq!(generated.layout, GeneratedOutputLayout::Directory);
@@ -7509,11 +7515,13 @@ interface example-service {
         let descriptors =
             DescriptorIndex::from_descriptor_set(prost_types::FileDescriptorSet::default())
                 .unwrap();
-        let generated = generate_files(
+        let generated = generate_files_for_tree_with_mode_and_options(
             Language::Python,
-            spec.clone(),
+            ApiSpecTree::single(spec.clone()),
             &descriptors,
             &crate::SupportFiles::default(),
+            GenerationMode::NativeApi,
+            GenerateFilesOptions::default(),
         )
         .unwrap();
 

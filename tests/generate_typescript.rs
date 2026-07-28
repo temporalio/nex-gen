@@ -9,7 +9,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nex_gen::generator::generate_files;
+use nex_gen::generator::generate_source;
 use nex_gen::spec::SupportFragmentSpec;
 use nex_gen::{GenerateRequest, SupportFiles, generate_to_file};
 
@@ -409,7 +409,7 @@ fn typescript_rejects_support_namespace() {
     )
     .unwrap();
     let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
-    let err = generate_files(
+    let err = generate_source(
         nex_gen::language::Language::TypeScript,
         spec.clone(),
         &descriptors,

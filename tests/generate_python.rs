@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use heck::ToSnakeCase;
 use nex_gen::SupportFiles;
-use nex_gen::generator::{GeneratedOutputLayout, generate_files};
+use nex_gen::generator::generate_source;
 use nex_gen::spec::SupportFragmentSpec;
 use nex_gen::{GenerateRequest, generate_to_file};
 
@@ -161,6 +161,28 @@ fn generate_python_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
     };
     fs::remove_dir_all(temp_dir).unwrap();
     rendered
+}
+
+fn generate_python_package_files(
+    input_paths: &[PathBuf],
+    descriptor_paths: &[PathBuf],
+) -> BTreeMap<PathBuf, String> {
+    let temp_dir = unique_output_path("python-package");
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        language: nex_gen::language::Language::Python,
+        input_paths: input_paths.to_vec(),
+        support_paths: Vec::new(),
+        descriptor_paths: descriptor_paths.to_vec(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: true,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let files = read_python_package_files(&output_path);
+    fs::remove_dir_all(temp_dir).unwrap();
+    files
 }
 
 fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: &Path) {
@@ -479,22 +501,11 @@ fn python_example_suite_type_checks_and_runs() {
 #[test]
 fn python_request_models_are_bidirectional_wire_models() {
     let root = project_root();
-    let spec = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
-        nex_gen::language::Language::Python,
+    let package = generate_python_package_files(
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
-    )
-    .unwrap();
-    let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
-    let generated = generate_files(
-        nex_gen::language::Language::Python,
-        spec.clone(),
-        &descriptors,
-        &nex_gen::SupportFiles::default(),
-    )
-    .unwrap();
-    assert_eq!(generated.layout, GeneratedOutputLayout::Directory);
-    let models = generated
-        .files
+        &[descriptor_path(&root)],
+    );
+    let models = package
         .get(&PathBuf::from("models.py"))
         .expect("Python package should include models.py");
     let rendered = generate_python_to_string(
@@ -644,7 +655,7 @@ fn python_rejects_support_namespace() {
     )
     .unwrap();
     let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
-    let err = generate_files(
+    let err = generate_source(
         nex_gen::language::Language::Python,
         spec.clone(),
         &descriptors,
