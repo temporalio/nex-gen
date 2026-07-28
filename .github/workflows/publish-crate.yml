@@ -23,6 +23,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    outputs:
+      tag: ${{ steps.crate.outputs.tag }}
 
     steps:
       - name: Require main branch
@@ -81,3 +83,12 @@ jobs:
             --draft \
             --title "$RELEASE_TITLE" \
             --generate-notes
+
+  attach-binaries:
+    name: Attach release binaries
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-binaries.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}
