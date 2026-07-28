@@ -31,6 +31,7 @@ fn generate_to_string_with_inputs(
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
+        java_package_name: None,
         ts_date_time_types: Default::default(),
     })?;
     let rendered = if output_path.is_file() {
@@ -720,6 +721,7 @@ fn go_json_package_name_derives_from_output_directory_name() {
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
+        java_package_name: None,
         ts_date_time_types: Default::default(),
     })
     .unwrap();
@@ -1413,6 +1415,7 @@ fn go_rejects_inputs_flattening_to_the_same_module_file() {
         output_path,
         format: false,
         generate_native_api: false,
+        java_package_name: None,
         ts_date_time_types: Default::default(),
     });
 
@@ -1450,6 +1453,7 @@ fn go_rejects_reserved_generated_name_collision() {
         output_path,
         format: false,
         generate_native_api: false,
+        java_package_name: None,
         ts_date_time_types: Default::default(),
     });
 

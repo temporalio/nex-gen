@@ -28,7 +28,7 @@ enum Commands {
     #[command(about = "Generate Go bindings")]
     Go(GenerateArgs),
     #[command(about = "Generate Java bindings")]
-    Java(GenerateArgs),
+    Java(JavaGenerateArgs),
     #[command(about = "Generate Python bindings")]
     Python(GenerateArgs),
     #[command(alias = "ts", about = "Generate TypeScript bindings (alias: ts)")]
@@ -67,6 +67,16 @@ struct GenerateArgs {
     #[cfg(feature = "advanced")]
     #[arg(long = "native-api")]
     generate_native_api: bool,
+}
+
+#[derive(Args)]
+struct JavaGenerateArgs {
+    #[command(flatten)]
+    common: GenerateArgs,
+    /// The base package for generated Java types. Its last dot-separated
+    /// segment must match the `--output` directory's name.
+    #[arg(long = "package-name")]
+    package_name: String,
 }
 
 #[derive(Args)]
@@ -159,22 +169,31 @@ fn main() -> ExitCode {
             Language::Dotnet,
             args,
             Default::default(),
+            None,
         )),
-        Commands::Go(args) => {
-            generate_to_file(&generate_request(Language::Go, args, Default::default()))
-        }
-        Commands::Java(args) => {
-            generate_to_file(&generate_request(Language::Java, args, Default::default()))
-        }
+        Commands::Go(args) => generate_to_file(&generate_request(
+            Language::Go,
+            args,
+            Default::default(),
+            None,
+        )),
+        Commands::Java(args) => generate_to_file(&generate_request(
+            Language::Java,
+            args.common,
+            Default::default(),
+            Some(args.package_name),
+        )),
         Commands::Python(args) => generate_to_file(&generate_request(
             Language::Python,
             args,
             Default::default(),
+            None,
         )),
         Commands::Typescript(args) => generate_to_file(&generate_request(
             Language::TypeScript,
             args.common,
             args.ts_date_time_types.into(),
+            None,
         )),
         #[cfg(feature = "advanced")]
         Commands::BuildExamples(args) => build_examples(&BuildExamplesRequest {
@@ -210,6 +229,7 @@ fn generate_request(
     language: Language,
     args: GenerateArgs,
     ts_date_time_types: TsDateTimeTypes,
+    java_package_name: Option<String>,
 ) -> GenerateRequest {
     GenerateRequest {
         language,
@@ -231,6 +251,7 @@ fn generate_request(
         generate_native_api: args.generate_native_api,
         #[cfg(not(feature = "advanced"))]
         generate_native_api: false,
+        java_package_name,
         ts_date_time_types,
     }
 }

@@ -151,6 +151,7 @@ fn generate_python_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
+        java_package_name: None,
         ts_date_time_types: Default::default(),
     })
     .unwrap();

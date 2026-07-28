@@ -284,6 +284,18 @@ pub enum Error {
     )]
     GoPackageNameEmpty { output_dir_name: String },
 
+    #[error("Java code generation requires `--package-name`")]
+    JavaPackageNameMissing,
+
+    #[error(
+        "`--package-name {package_name}` must end with the output directory name `{output_dir_name}`, but its last segment is `{last_segment}`; point `--output` at a directory named `{last_segment}` or change the package's last segment to `{output_dir_name}`"
+    )]
+    JavaPackageNameMismatch {
+        package_name: String,
+        last_segment: String,
+        output_dir_name: String,
+    },
+
     #[error("type override `{type_name}` cannot use `{property}`")]
     UnsupportedTypeOverrideProperty {
         type_name: String,

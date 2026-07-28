@@ -68,11 +68,9 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
     let root = project_root();
     for example_id in ["chat", "kb", "showcase", "temporal"] {
         let temp_dir = unique_output_path(&format!("java-json-{mode}-{example_id}"));
-        // Mirror the checked-in layout: <root>/src/main/java/json_schema/<mode>/<example>
-        let output_path = temp_dir
-            .join("src/main/java/json_schema")
-            .join(mode)
-            .join(example_id);
+        // The output directory's base name must equal the package's last
+        // segment; the checked-in package is `json_schema.<mode>.<example>`.
+        let output_path = temp_dir.join(example_id);
 
         generate_to_file(&GenerateRequest {
             language: nex_gen::language::Language::Java,
@@ -82,6 +80,7 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
             output_path: output_path.clone(),
             format: false,
             generate_native_api,
+            java_package_name: Some(format!("json_schema.{mode}.{example_id}")),
             ts_date_time_types: Default::default(),
         })
         .unwrap();

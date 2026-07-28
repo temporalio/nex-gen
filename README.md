@@ -53,6 +53,10 @@ Arguments:
 
 Options:
       --output <DIR>              Directory to write generated code into
+      --package-name <PKG>        Java only (required): base package for the
+                                  generated types, e.g. com.example.chat. Its last
+                                  dot-separated segment must match the --output
+                                  directory's name.
       --date-time-types <REPR>    TypeScript only: in-memory type for materialized
                                   temporal `format` fields (date-time/date/time/
                                   duration) — string | date | temporal [default: string]
@@ -65,12 +69,20 @@ Generate TypeScript bindings from one schema:
 nexgen ts samples/schemas/showcase.nexusrpc.yaml --output ./gen
 ```
 
-Generate all four languages:
+Generate Go, TypeScript, and Python:
 
 ```bash
-for lang in go typescript python java; do
+for lang in go typescript python; do
   nexgen "$lang" samples/schemas/showcase.nexusrpc.yaml --output "./gen/$lang"
 done
+```
+
+Java requires `--package-name`, whose last dot-separated segment must match the
+`--output` directory's name (here both end in `showcase`):
+
+```bash
+nexgen java samples/schemas/showcase.nexusrpc.yaml \
+  --output ./gen/com/example/showcase --package-name com.example.showcase
 ```
 
 Choose how TypeScript represents temporal `format` fields (date-time, date, time,

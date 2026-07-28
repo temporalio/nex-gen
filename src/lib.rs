@@ -40,6 +40,10 @@ pub struct GenerateRequest {
     pub output_path: PathBuf,
     pub format: bool,
     pub generate_native_api: bool,
+    /// Java-only: the base package for generated types. Its last
+    /// dot-separated segment must match the output directory's name. Ignored
+    /// for other languages.
+    pub java_package_name: Option<String>,
     /// TypeScript-only: the in-memory representation for materialized temporal
     /// `format` fields. `Default` is `TsDateTimeTypes::String`.
     pub ts_date_time_types: generator::TsDateTimeTypes,
@@ -77,7 +81,7 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
             String::new()
         },
         java_package_root: if request.language == Language::Java {
-            Some(infer_java_package_root(&request.output_path)?)
+            Some(resolve_java_package(request)?)
         } else {
             None
         },
@@ -244,47 +248,25 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized.into_iter().collect()
 }
 
-/// Derives the Java base package from the output directory. The package is
-/// the path components from a `src/main/java` (or `src/test/java`)
-/// source-root ancestor down to the output directory, joined with '.'. When
-/// no such ancestor exists, falls back to the output directory's basename as
-/// a single-segment package.
-fn infer_java_package_root(output_path: &Path) -> Result<String> {
-    let output_path = absolute_output_path(output_path)?;
-
-    for ancestor in output_path.ancestors() {
-        let is_source_root = ancestor.file_name().and_then(|name| name.to_str()) == Some("java")
-            && ancestor
-                .parent()
-                .and_then(Path::file_name)
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| matches!(name, "main" | "test"))
-            && ancestor
-                .parent()
-                .and_then(Path::parent)
-                .and_then(Path::file_name)
-                .and_then(|name| name.to_str())
-                == Some("src");
-        if !is_source_root {
-            continue;
-        }
-        let relative = output_path.strip_prefix(ancestor).unwrap_or(Path::new(""));
-        let segments = relative
-            .components()
-            .map(|component| component.as_os_str().to_string_lossy().into_owned())
-            .filter(|component| !component.is_empty())
-            .collect::<Vec<_>>();
-        if !segments.is_empty() {
-            return Ok(segments.join("."));
-        }
+/// Resolves the Java base package from the request's `--package-name`,
+/// enforcing that its last dot-separated segment matches the output
+/// directory's name — the Java convention that a package's leaf segment is
+/// its directory. `--package-name` is required for Java.
+fn resolve_java_package(request: &GenerateRequest) -> Result<String> {
+    let package_name = request
+        .java_package_name
+        .as_deref()
+        .ok_or(error::Error::JavaPackageNameMissing)?;
+    let output_dir_name = output_dir_name(&request.output_path)?;
+    let last_segment = package_name.rsplit('.').next().unwrap_or(package_name);
+    if last_segment != output_dir_name {
+        return Err(error::Error::JavaPackageNameMismatch {
+            package_name: package_name.to_string(),
+            last_segment: last_segment.to_string(),
+            output_dir_name,
+        });
     }
-
-    let basename = output_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("generated")
-        .to_string();
-    Ok(basename)
+    Ok(package_name.to_string())
 }
 
 fn format_generated_file(language: Language, output_path: &Path) -> Result<()> {
@@ -668,6 +650,8 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         output_path: output_path.clone(),
         format: false,
         generate_native_api: true,
+        java_package_name: (language == Language::Java)
+            .then(|| example_directory_name(language, example_id)),
         ts_date_time_types: Default::default(),
     })?;
     format_example_output(
@@ -725,6 +709,7 @@ fn build_json_example_variant(
     ts_date_time_types: generator::TsDateTimeTypes,
 ) -> Result<()> {
     let input_path = json_example_input_path(repo_root, input_id);
+    let dir_name = example_directory_name(language, output_id);
     let definitions_output_path = json_example_output_path(
         repo_root,
         language,
@@ -740,6 +725,8 @@ fn build_json_example_variant(
         output_path: definitions_output_path.clone(),
         format: false,
         generate_native_api: false,
+        java_package_name: (language == Language::Java)
+            .then(|| json_example_java_package(&dir_name, GenerationMode::DefinitionsOnly)),
         ts_date_time_types,
     })?;
     format_example_output(
@@ -760,6 +747,8 @@ fn build_json_example_variant(
         output_path: api_output_path.clone(),
         format: false,
         generate_native_api: true,
+        java_package_name: (language == Language::Java)
+            .then(|| json_example_java_package(&dir_name, GenerationMode::NativeApi)),
         ts_date_time_types,
     })?;
     format_example_output(
@@ -872,6 +861,18 @@ fn json_example_output_path(
     }
 }
 
+/// The Java base package for a JSON example, mirroring the `src/main/java`
+/// directory layout that `json_example_output_path` writes into
+/// (`json_schema.definitions.*` / `json_schema.api.*`). Its last segment is
+/// `dir_name`, matching the output directory `resolve_java_package` checks.
+fn json_example_java_package(dir_name: &str, generation_mode: GenerationMode) -> String {
+    let group = match generation_mode {
+        GenerationMode::DefinitionsOnly => "definitions",
+        GenerationMode::NativeApi => "api",
+    };
+    format!("json_schema.{group}.{dir_name}")
+}
+
 fn example_directory_name(language: Language, example_id: &str) -> String {
     match language {
         Language::Go => go::go_package_name(example_id),
@@ -959,10 +960,27 @@ fn format_command(program: &str, args: &[String]) -> String {
 mod tests {
     use std::path::Path;
 
+    use std::path::PathBuf;
+
     use super::{
-        format_formatter_command, formatter_command, infer_dotnet_namespace, output_dir_name,
+        GenerateRequest, format_formatter_command, formatter_command, infer_dotnet_namespace,
+        output_dir_name, resolve_java_package,
     };
     use crate::language::Language;
+
+    fn java_request(output_path: &str, java_package_name: Option<&str>) -> GenerateRequest {
+        GenerateRequest {
+            language: Language::Java,
+            input_paths: Vec::new(),
+            support_paths: Vec::new(),
+            descriptor_paths: Vec::new(),
+            output_path: PathBuf::from(output_path),
+            format: false,
+            generate_native_api: false,
+            java_package_name: java_package_name.map(str::to_string),
+            ts_date_time_types: Default::default(),
+        }
+    }
 
     #[test]
     fn chooses_python_formatter_command() {
@@ -1049,5 +1067,44 @@ namespace NexGen.Support
                 .as_deref(),
             Some("NexGen.Support")
         );
+    }
+
+    #[test]
+    fn resolve_java_package_accepts_matching_last_segment() {
+        let request = java_request("/tmp/foo/chat", Some("json_schema.definitions.chat"));
+        assert_eq!(
+            resolve_java_package(&request).unwrap(),
+            "json_schema.definitions.chat"
+        );
+    }
+
+    #[test]
+    fn resolve_java_package_accepts_single_segment_matching_directory() {
+        let request = java_request("/tmp/foo/chat", Some("chat"));
+        assert_eq!(resolve_java_package(&request).unwrap(), "chat");
+    }
+
+    #[test]
+    fn resolve_java_package_rejects_mismatched_last_segment() {
+        let request = java_request("/tmp/foo/chat", Some("com.example.wrong"));
+        assert!(matches!(
+            resolve_java_package(&request).unwrap_err(),
+            crate::error::Error::JavaPackageNameMismatch {
+                package_name,
+                last_segment,
+                output_dir_name,
+            } if package_name == "com.example.wrong"
+                && last_segment == "wrong"
+                && output_dir_name == "chat"
+        ));
+    }
+
+    #[test]
+    fn resolve_java_package_requires_package_name() {
+        let request = java_request("/tmp/foo/chat", None);
+        assert!(matches!(
+            resolve_java_package(&request).unwrap_err(),
+            crate::error::Error::JavaPackageNameMissing
+        ));
     }
 }
