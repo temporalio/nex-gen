@@ -40,9 +40,7 @@ class KnowledgeBaseServiceHandler:
         self.calls: list[tuple[str, object]] = []
 
     @sync_operation
-    async def get_page(
-        self, _ctx: StartOperationContext, input: GetPageInput
-    ) -> Page:
+    async def get_page(self, _ctx: StartOperationContext, input: GetPageInput) -> Page:
         self.calls.append(("GetPage", input))
         assert input.page_id == "page-1"
         return Page.model_validate(load_fixture("page.json"))
