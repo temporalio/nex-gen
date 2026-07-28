@@ -144,13 +144,11 @@ fn read_go_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
 }
 
 fn generate_formatted_go_output(root: &Path, example_id: &str, output_path: &Path) {
-    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "go",
-            "--input",
             input_path(root, example_id).to_str().unwrap(),
-            "--input",
             linked_inputs_path(root).to_str().unwrap(),
             "--descriptors",
             descriptor_path(root).to_str().unwrap(),
@@ -191,11 +189,10 @@ fn cli_generates_go_support_file_from_parameter() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "go",
-            "--input",
             input_path(&root, "user-service").to_str().unwrap(),
             "--support-file",
             support_path.to_str().unwrap(),
@@ -236,11 +233,10 @@ fn cli_generates_go_with_package_self_imports_removed() {
         );
     fs::write(&temp_input_path, input).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "go",
-            "--input",
             temp_input_path.to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
@@ -1393,11 +1389,10 @@ fn generate_formatted_go_json_output(
     output_path: &Path,
     native_api: bool,
 ) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_nex-gen"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nexgen"));
     command.args([
         "generate",
         "go",
-        "--input",
         json_input_path(root, example_id).to_str().unwrap(),
         "--output",
         output_path.to_str().unwrap(),

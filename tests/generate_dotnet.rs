@@ -141,13 +141,11 @@ fn generate_dotnet_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
 }
 
 fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
-    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "dotnet",
-            "--input",
             input_path(root, example_id).to_str().unwrap(),
-            "--input",
             linked_inputs_path(root).to_str().unwrap(),
             "--descriptors",
             descriptor_path(root).to_str().unwrap(),
@@ -203,11 +201,10 @@ fn cli_generates_dotnet_support_file_from_parameter() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "dotnet",
-            "--input",
             input_path(&root, "user-service").to_str().unwrap(),
             "--support-file",
             support_path.to_str().unwrap(),

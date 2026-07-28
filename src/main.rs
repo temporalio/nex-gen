@@ -12,8 +12,8 @@ use nex_gen::{
 };
 
 #[derive(Parser)]
-#[command(name = "nex-gen")]
-#[command(about = "Generate language-specific Nexus operation bindings from WIT")]
+#[command(name = "nexgen")]
+#[command(about = "Generate code from NexusRPC definition files containing services and types")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -39,7 +39,7 @@ enum Commands {
 
 #[derive(Args)]
 struct GenerateArgs {
-    #[arg(long = "input", required = true)]
+    #[arg(value_name = "INPUT", required = true)]
     inputs: Vec<PathBuf>,
     #[arg(long = "support-file")]
     support_paths: Vec<PathBuf>,

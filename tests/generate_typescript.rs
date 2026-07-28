@@ -166,13 +166,11 @@ fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[Pa
 fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_path: &Path) {
     ensure_typescript_dependencies(&typescript_root(root));
 
-    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "typescript",
-            "--input",
             input_path(root, example_id).to_str().unwrap(),
-            "--input",
             linked_inputs_path(root).to_str().unwrap(),
             "--descriptors",
             descriptor_path(root).to_str().unwrap(),
@@ -231,7 +229,6 @@ fn generate_formatted_json_typescript_output_repr(
     let mut args = vec![
         "generate",
         "typescript",
-        "--input",
         input_path.to_str().unwrap(),
         "--output",
         output_path.to_str().unwrap(),
@@ -244,7 +241,7 @@ fn generate_formatted_json_typescript_output_repr(
         args.push("--native-api");
     }
 
-    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args(args)
         .status()
         .unwrap();
@@ -376,11 +373,10 @@ fn cli_generates_typescript_support_file_from_parameter() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "typescript",
-            "--input",
             input_path(&root, "user-service").to_str().unwrap(),
             "--support-file",
             support_path.to_str().unwrap(),

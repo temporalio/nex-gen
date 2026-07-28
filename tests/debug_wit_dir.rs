@@ -29,7 +29,7 @@ fn cli_debug_wit_dir_writes_prepared_workspace() {
     let root = project_root();
     let output_dir = unique_temp_dir("debug-wit-dir");
 
-    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "debug-wit-dir",
             "--input",
@@ -75,7 +75,7 @@ fn cli_debug_wit_dir_uses_only_the_given_inputs() {
     let root = project_root();
     let output_dir = unique_temp_dir("debug-wit-dir-no-defaults");
 
-    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "debug-wit-dir",
             "--input",
@@ -100,7 +100,7 @@ fn cli_debug_wit_dir_refuses_to_overwrite_existing_path() {
     let output_dir = unique_temp_dir("debug-wit-dir-existing");
     fs::create_dir_all(&output_dir).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "debug-wit-dir",
             "--input",

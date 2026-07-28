@@ -160,13 +160,11 @@ fn generate_python_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
 }
 
 fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: &Path) {
-    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "python",
-            "--input",
             input_path(root, example_id).to_str().unwrap(),
-            "--input",
             linked_inputs_path(root).to_str().unwrap(),
             "--descriptors",
             descriptor_path(root).to_str().unwrap(),
@@ -205,7 +203,6 @@ fn generate_formatted_json_python_output(
     let mut args = vec![
         "generate",
         "python",
-        "--input",
         input_path.to_str().unwrap(),
         "--output",
         output_path.to_str().unwrap(),
@@ -214,7 +211,7 @@ fn generate_formatted_json_python_output(
         args.push("--native-api");
     }
 
-    let status = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args(args)
         .status()
         .unwrap();
@@ -335,11 +332,10 @@ fn python_json_api_example_generation_matches_checked_in_output() {
 fn cli_generates_wit_direct_example_without_descriptors() {
     let root = project_root();
     let output_path = unique_output_path("python-user-service-no-descriptors");
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "python",
-            "--input",
             input_path(&root, "user-service").to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
@@ -387,11 +383,10 @@ interface example-service {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "python",
-            "--input",
             input_path.to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
@@ -425,11 +420,10 @@ fn cli_generates_python_support_file_from_parameter() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nex-gen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
             "generate",
             "python",
-            "--input",
             input_path(&root, "user-service").to_str().unwrap(),
             "--support-file",
             support_path.to_str().unwrap(),
