@@ -84,7 +84,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Run Rust tests
-        run: cargo test
+        run: cargo test --features advanced
 
       - name: Check Python formatting (samples)
         working-directory: samples/python

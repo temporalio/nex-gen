@@ -1,2 +1,5 @@
 [alias]
-build-examples = "run --quiet -- build-examples"
+# The example-regeneration commands live behind the `advanced` feature (see
+# Cargo.toml); enable it so these aliases keep working.
+build-examples = "run --quiet --features advanced -- build-examples"
+build-json-examples = "run --quiet --features advanced -- build-json-examples"

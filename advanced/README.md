@@ -17,6 +17,16 @@ The generator picks its input format from the file extension, so the same
 `generate <lang>` command accepts either WIT (`.wit`) or JSON Schema
 (`.json`/`.yaml`/`.yml`) inputs.
 
+> [!IMPORTANT]
+> Everything on this page — the `dotnet` target, the `--support-file`,
+> `--descriptors`, `--format`, and `--native-api` flags, and the `add-rpc`,
+> `debug-wit-dir`, `build-examples`, and `build-json-examples` subcommands — is
+> gated behind the `advanced` Cargo feature, which is off by default. Build or
+> run with `--features advanced` (as every command below does), or produce a
+> binary that includes it with `cargo build --release --features advanced`. The
+> `cargo build-examples` / `cargo build-json-examples` aliases enable the feature
+> for you.
+
 ## Contents
 
 - [Examples](#examples)
@@ -66,7 +76,7 @@ Run the same validations as the CI pipeline:
 Write the prepared WIT workspace the loader actually parses:
 
 ```bash
-cargo run -- debug-wit-dir \
+cargo run --features advanced -- debug-wit-dir \
   --input advanced/samples/inputs/user-service.wit \
   --output /tmp/user-service-wit
 ```
@@ -109,7 +119,7 @@ interface user-service {
 Generate Python:
 
 ```bash
-cargo run -- python \
+cargo run --features advanced -- python \
   advanced/samples/inputs/user-service.wit \
   --output /tmp/user_service
 ```
@@ -119,7 +129,7 @@ Generate TypeScript:
 (`ts` is an alias for `typescript`.)
 
 ```bash
-cargo run -- typescript \
+cargo run --features advanced -- typescript \
   advanced/samples/inputs/user-service.wit \
   --output /tmp/user-service
 ```
@@ -127,7 +137,7 @@ cargo run -- typescript \
 Generate Go:
 
 ```bash
-cargo run -- go \
+cargo run --features advanced -- go \
   advanced/samples/inputs/user-service.wit \
   --output /tmp/userservice
 ```
@@ -135,7 +145,7 @@ cargo run -- go \
 Generate .NET:
 
 ```bash
-cargo run -- dotnet \
+cargo run --features advanced -- dotnet \
   advanced/samples/inputs/user-service.wit \
   --output /tmp/user-service-dotnet
 ```
@@ -185,7 +195,7 @@ layout as `@nexus.support` fragments. .NET support files infer their support
 namespace from the C# `namespace` declaration in the file:
 
 ```bash
-cargo run -- python \
+cargo run --features advanced -- python \
   advanced/samples/inputs/user-service.wit \
   --support-file /path/to/custom_support.py \
   --output /tmp/user_service
@@ -247,7 +257,7 @@ interface workflow-service {
 Generate a proto-backed example:
 
 ```bash
-cargo run -- python \
+cargo run --features advanced -- python \
   advanced/samples/inputs/workflow-service.wit \
   advanced/samples/inputs/deps \
   --descriptors advanced/samples/descriptors/temporal_api.bin \
@@ -272,7 +282,7 @@ directories, so `advanced/samples/inputs/deps` links every package under it.
 Generate WIT for a proto RPC from a descriptor set:
 
 ```bash
-cargo run -- add-rpc \
+cargo run --features advanced -- add-rpc \
   --descriptors advanced/samples/descriptors/temporal_api.bin \
   --rpc SignalWithStartExecution \
   --input advanced/samples/inputs/deps
@@ -281,7 +291,7 @@ cargo run -- add-rpc \
 Write the standalone WIT scaffold to a file instead of stdout:
 
 ```bash
-cargo run -- add-rpc \
+cargo run --features advanced -- add-rpc \
   --descriptors advanced/samples/descriptors/temporal_api.bin \
   --rpc temporal.api.workflowservice.v1.WorkflowService.SignalWithStartWorkflowExecution \
   --input advanced/samples/inputs/deps \
@@ -291,7 +301,7 @@ cargo run -- add-rpc \
 Extend an existing WIT file with a new RPC:
 
 ```bash
-cargo run -- add-rpc \
+cargo run --features advanced -- add-rpc \
   --descriptors advanced/samples/descriptors/temporal_api.bin \
   --rpc SignalWorkflowExecution \
   --input advanced/samples/inputs/workflow-service.wit \
@@ -301,7 +311,7 @@ cargo run -- add-rpc \
 Rewrite the existing WIT file in place by pointing `--output` at the same path:
 
 ```bash
-cargo run -- add-rpc \
+cargo run --features advanced -- add-rpc \
   --descriptors advanced/samples/descriptors/temporal_api.bin \
   --rpc SignalWorkflowExecution \
   --input advanced/samples/inputs/workflow-service.wit \

@@ -1,3 +1,6 @@
+// The `add-rpc` CLI surface lives behind the `advanced` feature.
+#![cfg(feature = "advanced")]
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

@@ -1,5 +1,7 @@
-#[cfg(unix)]
-mod tests {
+// The `--format`/`--descriptors` CLI surface lives behind the `advanced`
+// feature; the option-rejection checks are feature-agnostic.
+#[cfg(all(unix, feature = "advanced"))]
+mod format_tests {
     use std::env;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -109,6 +111,11 @@ mod tests {
 
         let _ = fs::remove_dir_all(temp_dir);
     }
+}
+
+#[cfg(unix)]
+mod reject_tests {
+    use std::process::Command;
 
     #[test]
     fn cli_rejects_legacy_and_target_specific_options() {
@@ -116,21 +123,21 @@ mod tests {
 
         assert!(
             !Command::new(binary)
-                .args(["generate", "--lang", "python"])
+                .args(["--lang", "python"])
                 .status()
                 .unwrap()
                 .success()
         );
         assert!(
             !Command::new(binary)
-                .args(["generate", "python", "--date-time-types", "date"])
+                .args(["python", "--date-time-types", "date"])
                 .status()
                 .unwrap()
                 .success()
         );
         assert!(
             !Command::new(binary)
-                .args(["generate", "python", "--no-native-api"])
+                .args(["python", "--no-native-api"])
                 .status()
                 .unwrap()
                 .success()

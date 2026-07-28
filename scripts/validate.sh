@@ -23,7 +23,9 @@ for tier in samples advanced/samples; do
 done
 
 run cargo fmt --check
-run cargo test
+# The `advanced` feature exposes the WIT/proto CLI surface the integration tests
+# exercise; enable it so the full suite runs.
+run cargo test --features advanced
 
 for tier in samples advanced/samples; do
   run_in "$tier/python" uv run ruff format --check .

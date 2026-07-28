@@ -1,15 +1,16 @@
-use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use nex_gen::generator::TsDateTimeTypes;
 use nex_gen::language::Language;
+#[cfg(feature = "advanced")]
 use nex_gen::parser::write_prepared_wit_directory;
+#[cfg(feature = "advanced")]
 use nex_gen::{
-    AddRpcRequest, BuildExamplesRequest, GenerateRequest, add_rpc_to_file, build_examples,
-    build_json_examples, generate_to_file,
+    AddRpcRequest, BuildExamplesRequest, add_rpc_to_file, build_examples, build_json_examples,
 };
+use nex_gen::{GenerateRequest, generate_to_file};
 
 #[derive(Parser)]
 #[command(name = "nexgen")]
@@ -21,18 +22,29 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Generate {
-        #[command(subcommand)]
-        language: GenerateLanguage,
-    },
+    #[cfg(feature = "advanced")]
+    #[command(about = "Generate C# / .NET bindings")]
+    Dotnet(GenerateArgs),
+    #[command(about = "Generate Go bindings")]
+    Go(GenerateArgs),
+    #[command(about = "Generate Java bindings")]
+    Java(GenerateArgs),
+    #[command(about = "Generate Python bindings")]
+    Python(GenerateArgs),
+    #[command(alias = "ts", about = "Generate TypeScript bindings (alias: ts)")]
+    Typescript(TypescriptGenerateArgs),
+    #[cfg(feature = "advanced")]
     #[command(about = "Rebuild the checked-in WIT example outputs")]
     BuildExamples(BuildExamplesArgs),
+    #[cfg(feature = "advanced")]
     #[command(about = "Rebuild the checked-in JSON schema example outputs")]
     BuildJsonExamples(BuildExamplesArgs),
+    #[cfg(feature = "advanced")]
     #[command(
         about = "Add an RPC scaffold to an existing WIT file, or generate standalone WIT for one RPC"
     )]
     AddRpc(AddRpcArgs),
+    #[cfg(feature = "advanced")]
     #[command(about = "Write the prepared WIT workspace used for parsing to a directory")]
     DebugWitDir(DebugWitDirArgs),
 }
@@ -41,26 +53,20 @@ enum Commands {
 struct GenerateArgs {
     #[arg(value_name = "INPUT", required = true)]
     inputs: Vec<PathBuf>,
+    #[cfg(feature = "advanced")]
     #[arg(long = "support-file")]
     support_paths: Vec<PathBuf>,
+    #[cfg(feature = "advanced")]
     #[arg(long)]
     descriptors: Vec<PathBuf>,
     #[arg(long)]
     output: PathBuf,
+    #[cfg(feature = "advanced")]
     #[arg(long)]
     format: bool,
+    #[cfg(feature = "advanced")]
     #[arg(long = "native-api")]
     generate_native_api: bool,
-}
-
-#[derive(Subcommand)]
-enum GenerateLanguage {
-    Dotnet(GenerateArgs),
-    Go(GenerateArgs),
-    Java(GenerateArgs),
-    Python(GenerateArgs),
-    #[command(alias = "ts")]
-    Typescript(TypescriptGenerateArgs),
 }
 
 #[derive(Args)]
@@ -90,6 +96,7 @@ impl From<CliTsDateTimeTypes> for TsDateTimeTypes {
     }
 }
 
+#[cfg(feature = "advanced")]
 #[derive(Args)]
 struct BuildExamplesArgs {
     #[arg(long = "lang", value_enum)]
@@ -98,6 +105,7 @@ struct BuildExamplesArgs {
     example_ids: Vec<String>,
 }
 
+#[cfg(feature = "advanced")]
 #[derive(Args)]
 struct AddRpcArgs {
     #[arg(long, required = true)]
@@ -110,6 +118,7 @@ struct AddRpcArgs {
     output: Option<PathBuf>,
 }
 
+#[cfg(feature = "advanced")]
 #[derive(Args)]
 struct DebugWitDirArgs {
     #[arg(long = "input", required = true)]
@@ -118,6 +127,7 @@ struct DebugWitDirArgs {
     output: PathBuf,
 }
 
+#[cfg(feature = "advanced")]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum ExampleCliLanguage {
     Dotnet,
@@ -127,6 +137,7 @@ enum ExampleCliLanguage {
     Typescript,
 }
 
+#[cfg(feature = "advanced")]
 impl From<ExampleCliLanguage> for Language {
     fn from(value: ExampleCliLanguage) -> Self {
         match value {
@@ -140,24 +151,49 @@ impl From<ExampleCliLanguage> for Language {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse_from(normalize_cli_args(std::env::args_os().collect()));
+    let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Generate { language } => generate_to_file(&language.into()),
+        #[cfg(feature = "advanced")]
+        Commands::Dotnet(args) => generate_to_file(&generate_request(
+            Language::Dotnet,
+            args,
+            Default::default(),
+        )),
+        Commands::Go(args) => {
+            generate_to_file(&generate_request(Language::Go, args, Default::default()))
+        }
+        Commands::Java(args) => {
+            generate_to_file(&generate_request(Language::Java, args, Default::default()))
+        }
+        Commands::Python(args) => generate_to_file(&generate_request(
+            Language::Python,
+            args,
+            Default::default(),
+        )),
+        Commands::Typescript(args) => generate_to_file(&generate_request(
+            Language::TypeScript,
+            args.common,
+            args.ts_date_time_types.into(),
+        )),
+        #[cfg(feature = "advanced")]
         Commands::BuildExamples(args) => build_examples(&BuildExamplesRequest {
             languages: args.langs.into_iter().map(Language::from).collect(),
             example_ids: args.example_ids,
         }),
+        #[cfg(feature = "advanced")]
         Commands::BuildJsonExamples(args) => build_json_examples(&BuildExamplesRequest {
             languages: args.langs.into_iter().map(Language::from).collect(),
             example_ids: args.example_ids,
         }),
+        #[cfg(feature = "advanced")]
         Commands::AddRpc(args) => add_rpc_to_file(&AddRpcRequest {
             descriptor_paths: args.descriptors,
             rpc_name: args.rpc,
             input_paths: args.inputs,
             output_path: args.output,
         }),
+        #[cfg(feature = "advanced")]
         Commands::DebugWitDir(args) => write_prepared_wit_directory(&args.inputs, &args.output),
     };
 
@@ -170,47 +206,31 @@ fn main() -> ExitCode {
     }
 }
 
-fn normalize_cli_args(mut args: Vec<OsString>) -> Vec<OsString> {
-    if args
-        .get(1)
-        .and_then(|arg| arg.to_str())
-        .is_some_and(is_generate_subcommand)
-    {
-        args.insert(1, "generate".into());
-    }
-    args
-}
-
-fn is_generate_subcommand(name: &str) -> bool {
-    GenerateLanguage::augment_subcommands(clap::Command::new("generate"))
-        .get_subcommands()
-        .any(|command| {
-            command.get_name() == name || command.get_all_aliases().any(|alias| alias == name)
-        })
-}
-
-impl From<GenerateLanguage> for GenerateRequest {
-    fn from(value: GenerateLanguage) -> Self {
-        let (language, args, ts_date_time_types) = match value {
-            GenerateLanguage::Dotnet(args) => (Language::Dotnet, args, Default::default()),
-            GenerateLanguage::Go(args) => (Language::Go, args, Default::default()),
-            GenerateLanguage::Java(args) => (Language::Java, args, Default::default()),
-            GenerateLanguage::Python(args) => (Language::Python, args, Default::default()),
-            GenerateLanguage::Typescript(args) => (
-                Language::TypeScript,
-                args.common,
-                args.ts_date_time_types.into(),
-            ),
-        };
-        Self {
-            language,
-            input_paths: args.inputs,
-            support_paths: args.support_paths,
-            descriptor_paths: args.descriptors,
-            output_path: args.output,
-            format: args.format,
-            generate_native_api: args.generate_native_api,
-            ts_date_time_types,
-        }
+fn generate_request(
+    language: Language,
+    args: GenerateArgs,
+    ts_date_time_types: TsDateTimeTypes,
+) -> GenerateRequest {
+    GenerateRequest {
+        language,
+        input_paths: args.inputs,
+        #[cfg(feature = "advanced")]
+        support_paths: args.support_paths,
+        #[cfg(not(feature = "advanced"))]
+        support_paths: Vec::new(),
+        #[cfg(feature = "advanced")]
+        descriptor_paths: args.descriptors,
+        #[cfg(not(feature = "advanced"))]
+        descriptor_paths: Vec::new(),
+        output_path: args.output,
+        #[cfg(feature = "advanced")]
+        format: args.format,
+        #[cfg(not(feature = "advanced"))]
+        format: false,
+        #[cfg(feature = "advanced")]
+        generate_native_api: args.generate_native_api,
+        #[cfg(not(feature = "advanced"))]
+        generate_native_api: false,
+        ts_date_time_types,
     }
 }

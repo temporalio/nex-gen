@@ -1,3 +1,6 @@
+// The `debug-wit-dir` CLI surface lives behind the `advanced` feature.
+#![cfg(feature = "advanced")]
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

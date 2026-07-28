@@ -1,3 +1,6 @@
+// The `dotnet` generate target lives behind the `advanced` feature.
+#![cfg(feature = "advanced")]
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -143,7 +146,6 @@ fn generate_dotnet_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
 fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
     let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
-            "generate",
             "dotnet",
             input_path(root, example_id).to_str().unwrap(),
             linked_inputs_path(root).to_str().unwrap(),
@@ -203,7 +205,6 @@ fn cli_generates_dotnet_support_file_from_parameter() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
         .args([
-            "generate",
             "dotnet",
             input_path(&root, "user-service").to_str().unwrap(),
             "--support-file",
