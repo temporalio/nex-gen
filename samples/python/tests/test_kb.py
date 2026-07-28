@@ -9,8 +9,10 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 
 from kb import Block
 from kb import Category
+from kb import GetCategoryTreeInput
+from kb import GetPageInput
 from kb import Page
-from kb.kb import models as kb_models
+from kb import PutBlockOutput
 
 WIRE_FIXTURE_DIR = Path(__file__).resolve().parents[2] / "wire" / "json_schema" / "kb"
 
@@ -60,21 +62,19 @@ def test_kb_wire_fixtures_roundtrip_through_pydantic_converter() -> None:
     assert category.children[0].id == "child"
 
     request = typing.cast(
-        kb_models.GetPageInput,
-        roundtrip_fixture("get-page-input.json", kb_models.GetPageInput),
+        GetPageInput,
+        roundtrip_fixture("get-page-input.json", GetPageInput),
     )
     assert request.page_id == "page-1"
 
     category_request = typing.cast(
-        kb_models.GetCategoryTreeInput,
-        roundtrip_fixture(
-            "get-category-tree-input.json", kb_models.GetCategoryTreeInput
-        ),
+        GetCategoryTreeInput,
+        roundtrip_fixture("get-category-tree-input.json", GetCategoryTreeInput),
     )
     assert category_request.root_id == "root"
 
     response = typing.cast(
-        kb_models.PutBlockOutput,
-        roundtrip_fixture("put-block-output.json", kb_models.PutBlockOutput),
+        PutBlockOutput,
+        roundtrip_fixture("put-block-output.json", PutBlockOutput),
     )
     assert response.revision == 7

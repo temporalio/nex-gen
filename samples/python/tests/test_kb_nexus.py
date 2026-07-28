@@ -22,9 +22,15 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-from kb import Block, Category, Page
-from kb.kb.models import GetCategoryTreeInput, GetPageInput, PutBlockOutput
-from kb.kb.services import KnowledgeBaseService
+from kb import (
+    Block,
+    Category,
+    GetCategoryTreeInput,
+    GetPageInput,
+    KnowledgeBaseService,
+    Page,
+    PutBlockOutput,
+)
 
 WIRE_FIXTURE_DIR = Path(__file__).resolve().parents[2] / "wire" / "json_schema" / "kb"
 ENDPOINT = "knowledge-base"
