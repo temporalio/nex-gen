@@ -209,7 +209,9 @@ fn generated_wire_conversion(
     if let Some(model_name) = generated_message_model_name(model_type, planned_model) {
         return Some(WireValueConversion {
             annotation: model_name.clone(),
-            from_wire: format!("_{model_name}TransferTypeConverter().from_transfer_type({{wire}})"),
+            from_wire: format!(
+                "_{model_name}TransferTypeConverter().from_transfer_type({{wire}}, {model_name})"
+            ),
             to_wire: format!("_{model_name}TransferTypeConverter().to_transfer_type({{value}})"),
             imports: PythonImports::default(),
             supports_unpacked_input: true,
@@ -659,11 +661,13 @@ fn render_record_wire_block(
         output.push_str("        value: ");
         output.push_str(&proto_ref.type_ref);
         output.push_str(",\n");
+        output.push_str("        type_hint: type[\"");
+        output.push_str(&model.name);
+        output.push_str("\"],\n");
         output.push_str("    ) -> \"");
         output.push_str(&model.name);
         output.push_str("\":\n");
         if model.fields.is_empty() {
-            output.push_str("        del value\n");
             output.push_str("        return ");
             output.push_str(&model.name);
             output.push_str("()\n");
@@ -744,9 +748,6 @@ fn render_record_wire_block(
         output.push_str("        message = ");
         output.push_str(&proto_ref.type_ref);
         output.push_str("()\n");
-        if model.fields.is_empty() {
-            output.push_str("        del value\n");
-        }
         for ((field_name, planned_field), rendered_field) in planned_model
             .fields
             .iter()

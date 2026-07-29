@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import typing
 import uuid
 
 from nexusrpc import Operation
@@ -10,15 +9,14 @@ import pytest
 from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
-
-APP_ROOT = Path(__file__).resolve().parent
-OUTPUT_PATH = APP_ROOT.parent / "wit" / "start_workflow"
-TASK_QUEUE = "demo-task-queue"
-
 import wit.start_workflow as start_workflow
 import wit.start_workflow.models as start_workflow_models
 import wit.start_workflow.services as start_workflow_services
 from wit.start_workflow._resources import StartedWorkflow
+
+APP_ROOT = Path(__file__).resolve().parent
+OUTPUT_PATH = APP_ROOT.parent / "wit" / "start_workflow"
+TASK_QUEUE = "demo-task-queue"
 
 START_WORKFLOW_OPERATION_INFO = start_workflow.__nexus_operation_registry__[
     ("StartWorkflowService", "StartWorkflow")
@@ -32,13 +30,6 @@ CANCEL_WORKFLOW_OPERATION_INFO = start_workflow.__nexus_operation_registry__[
     ("StartWorkflowService", "CancelWorkflow")
 ]
 CANCEL_WORKFLOW_OPERATION = CANCEL_WORKFLOW_OPERATION_INFO.operation
-
-
-@workflow.defn
-class ExampleWorkflow:
-    @workflow.run
-    async def run(self, customer_id: str) -> str:
-        return customer_id
 
 
 @service_handler(service=start_workflow_services.StartWorkflowService)
@@ -57,7 +48,6 @@ class StartWorkflowServiceHandler:
         assert input.workflow_id == "workflow-id"
         assert input.workflow == "ExampleWorkflow"
         assert input.task_queue == TASK_QUEUE
-        assert input.args == ["customer-123"]
 
         return start_workflow_models.StartWorkflowResult(run_id="run-123")
 
@@ -72,7 +62,6 @@ class StartWorkflowServiceHandler:
         assert input.workflow_id == "workflow-id"
         assert input.workflow == "ExampleWorkflow"
         assert input.task_queue == TASK_QUEUE
-        assert input.args is None
 
         return start_workflow_models.RestartWorkflowResult(run_id="run-456")
 
@@ -94,14 +83,13 @@ class StartWorkflowCallerWorkflow:
     @workflow.run
     async def run(self) -> tuple[str, str, str | None, str | None]:
         handle = await start_workflow.start_workflow(
-            ExampleWorkflow.run,
-            "customer-123",
+            workflow="ExampleWorkflow",
             workflow_id="workflow-id",
             task_queue=TASK_QUEUE,
         )
         await handle.cancel()
         restarted_handle = await handle.restart_workflow(
-            workflow=ExampleWorkflow.run,
+            workflow="ExampleWorkflow",
             task_queue=TASK_QUEUE,
         )
         try:
@@ -129,16 +117,33 @@ def test_generated_metadata() -> None:
 
     assert isinstance(start_operation, Operation)
     assert start_operation.name == "StartWorkflow"
-    assert registry[("StartWorkflowService", "StartWorkflow")].operation is start_operation
-    assert registry[("StartWorkflowService", "StartWorkflow")].serialization_context is None
+    assert (
+        registry[("StartWorkflowService", "StartWorkflow")].operation is start_operation
+    )
+    assert (
+        registry[("StartWorkflowService", "StartWorkflow")].serialization_context
+        is None
+    )
     assert isinstance(cancel_operation, Operation)
     assert cancel_operation.name == "CancelWorkflow"
-    assert registry[("StartWorkflowService", "CancelWorkflow")].operation is cancel_operation
-    assert registry[("StartWorkflowService", "CancelWorkflow")].serialization_context is None
+    assert (
+        registry[("StartWorkflowService", "CancelWorkflow")].operation
+        is cancel_operation
+    )
+    assert (
+        registry[("StartWorkflowService", "CancelWorkflow")].serialization_context
+        is None
+    )
     assert isinstance(restart_operation, Operation)
     assert restart_operation.name == "RestartWorkflow"
-    assert registry[("StartWorkflowService", "RestartWorkflow")].operation is restart_operation
-    assert registry[("StartWorkflowService", "RestartWorkflow")].serialization_context is None
+    assert (
+        registry[("StartWorkflowService", "RestartWorkflow")].operation
+        is restart_operation
+    )
+    assert (
+        registry[("StartWorkflowService", "RestartWorkflow")].serialization_context
+        is None
+    )
     assert not hasattr(start_workflow, "WorkflowService")
     assert not hasattr(start_workflow, "StartWorkflowExecutionRequest")
     assert not hasattr(start_workflow, "StartedWorkflow")
@@ -200,50 +205,4 @@ async def test_start_workflow_returns_wrapper_handle(
     assert (
         result_error.value.args[0]
         == "started-workflow.get_result is not yet implemented"
-    )
-
-
-if typing.TYPE_CHECKING:
-    _ = start_workflow.start_workflow(
-        ExampleWorkflow.run,
-        "customer-123",
-        workflow_id="typed-positional-workflow-input",
-        task_queue=TASK_QUEUE,
-    )
-
-    _ = start_workflow.start_workflow(
-        workflow=ExampleWorkflow.run,
-        args=["customer-123"],
-        workflow_id="typed-list-workflow-input",
-        task_queue=TASK_QUEUE,
-    )
-
-    start_workflow.start_workflow(  # pyright: ignore[reportCallIssue]
-        ExampleWorkflow.run,
-        "customer-123",
-        args=["customer-456"],
-        workflow_id="conflicting-typed-workflow-input",
-        task_queue=TASK_QUEUE,
-    )
-
-    _ = start_workflow.start_workflow(
-        workflow=ExampleWorkflow.run,
-        args=["customer-123"],
-        workflow_id="typed-list-workflow-input-fallback",
-        task_queue=TASK_QUEUE,
-    )
-
-    start_workflow.start_workflow(  # pyright: ignore[reportCallIssue]
-        "ExampleWorkflow",
-        "customer-123",
-        args=["customer-456"],
-        workflow_id="conflicting-string-workflow-input",
-        task_queue=TASK_QUEUE,
-    )
-
-    start_workflow.start_workflow(  # pyright: ignore[reportCallIssue]
-        workflow=ExampleWorkflow.run,
-        args="customer-123",  # pyright: ignore[reportArgumentType]
-        workflow_id="typed-scalar-keyword-workflow-input",
-        task_queue=TASK_QUEUE,
     )

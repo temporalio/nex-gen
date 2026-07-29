@@ -4,7 +4,7 @@ world system {
   export workflow-service;
 }
 
-/// @nexus.endpoint "temporal-system"
+/// @nexus.endpoint "__temporal_system"
 /// @nexus.service-name "temporal.api.workflowservice.v1.WorkflowService"
 /// @nexus.namespace dotnet="Temporalio.Workflows"
 /// @nexus.delay-load-temporalio-workflow
@@ -64,8 +64,8 @@ interface workflow-service {
     task-timeout: option<duration>,
     /// @nexus.omit
     identity: placeholder,
-    /// @nexus.doc "Request ID used to deduplicate workflow start requests."
-    request-id: option<string>,
+    /// @nexus.omit
+    request-id: placeholder,
     /// @nexus.doc "Behavior when a closed workflow with the same ID exists. Default is allow-duplicate."
     /// @nexus.proto-field "workflow_id_reuse_policy"
     /// @nexus.default "allow-duplicate"

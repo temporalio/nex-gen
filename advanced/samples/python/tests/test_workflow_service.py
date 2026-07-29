@@ -8,7 +8,6 @@ import typing
 import uuid
 
 from nexusrpc import Operation
-from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
 import temporalio.common
 import temporalio.converter
 from temporalio import workflow
@@ -18,7 +17,6 @@ from typing_extensions import assert_type
 import pytest
 import wit.workflow_service as workflow_service
 import wit.workflow_service.models as workflow_service_models
-import wit.workflow_service.services as workflow_service_services
 
 APP_ROOT = Path(__file__).resolve().parent
 OUTPUT_PATH = APP_ROOT.parent / "wit" / "workflow_service"
@@ -32,7 +30,6 @@ SIGNAL_WITH_START_OPERATION_INFO = workflow_service.__nexus_operation_registry__
 SIGNAL_WITH_START_OPERATION = SIGNAL_WITH_START_OPERATION_INFO.operation
 
 TASK_QUEUE = "demo-task-queue"
-REQUEST_ID = "example-request"
 CRON_SCHEDULE = ""
 
 REQUEST_WORKFLOW_ID = "workflow-request"
@@ -60,17 +57,21 @@ HIGH_ARITY_SIGNAL_INPUT = [
 
 @workflow.defn
 class ExampleWorkflow:
+    def __init__(self) -> None:
+        self.signal_result: str | None = None
+
     @workflow.run
-    async def run(self, attempt: int, name: str) -> str:
-        return f"{attempt}:{name}"
+    async def run(self, attempt: int = 0, name: str = "default") -> str:
+        await workflow.wait_condition(lambda: self.signal_result is not None)
+        return f"example:{attempt}:{name}:{self.signal_result}"
 
     @workflow.signal
-    def wake_up(self, reason: str) -> None:
-        _ = reason
+    def wake_up(self, reason: str | None = None) -> None:
+        self.signal_result = f"wake_up:{reason}"
 
     @workflow.signal
     def wake_up_list(self, values: list[str]) -> None:
-        _ = values
+        self.signal_result = f"wake_up_list:{','.join(values)}"
 
     @workflow.signal
     def wake_up_many(
@@ -83,14 +84,35 @@ class ExampleWorkflow:
         sixth: str,
         seventh: str,
     ) -> None:
-        _ = (first, second, third, fourth, fifth, sixth, seventh)
+        self.signal_result = "wake_up_many:" + ",".join(
+            [first, second, third, fourth, fifth, sixth, seventh]
+        )
 
 
 @workflow.defn
 class SingleArgWorkflow:
+    def __init__(self) -> None:
+        self.signal_result: str | None = None
+
     @workflow.run
     async def run(self, value: str) -> str:
-        return value
+        await workflow.wait_condition(lambda: self.signal_result is not None)
+        return f"single:{value}:{self.signal_result}"
+
+    @workflow.signal
+    def wake_up(self, reason: str | None = None) -> None:
+        self.signal_result = f"wake_up:{reason}"
+
+
+@workflow.defn
+class StrictExampleWorkflow:
+    @workflow.run
+    async def run(self, attempt: int, name: str) -> str:
+        return f"{attempt}:{name}"
+
+    @workflow.signal
+    def wake_up(self, reason: str) -> None:
+        _ = reason
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,10 +121,6 @@ class ExampleData:
     priority: temporalio.common.Priority
     versioning_override: temporalio.common.VersioningOverride
     typed_search_attributes: temporalio.common.TypedSearchAttributes
-
-
-def expected_run_id(workflow_id: str) -> str:
-    return f"run-for-{workflow_id}"
 
 
 def assert_common_signal_request(
@@ -236,7 +254,6 @@ def build_full_signal_request(
         signal=signal,
         args=FULL_WORKFLOW_INPUT,
         execution_timeout=datetime.timedelta(seconds=30),
-        request_id=REQUEST_ID,
         retry_policy=example_data.retry_policy,
         id_reuse_policy=temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
         id_conflict_policy=temporalio.common.WorkflowIDConflictPolicy.TERMINATE_EXISTING,
@@ -252,55 +269,33 @@ def build_full_signal_request(
     )
 
 
-@service_handler(service=workflow_service_services.WorkflowService)
-class WorkflowServiceHandler:
-    def __init__(self) -> None:
-        self.calls: list[workflow_service_models.SignalWithStartWorkflowRequest] = []
-
-    @sync_operation
-    async def signal_with_start_workflow(
-        self,
-        _ctx: StartOperationContext,
-        input: workflow_service_models.SignalWithStartWorkflowRequest,
-    ) -> workflow_service_models.SignalWithStartWorkflowResponse:
-        self.calls.append(input)
-        return workflow_service_models.SignalWithStartWorkflowResponse(
-            run_id=expected_run_id(input.id),
-            started=True,
-        )
-
-
 @workflow.defn
 class WorkflowServiceCallerWorkflow:
     @workflow.run
-    async def run(self) -> list[tuple[str, str | None]]:
+    async def run(self, task_queue: str) -> list[tuple[str, str | None]]:
         example_data = build_example_data()
 
         request_handle = await workflow_service.signal_with_start_workflow(
             workflow="ExampleWorkflow",
             id=ARGS_WORKFLOW_ID,
-            task_queue=TASK_QUEUE,
+            task_queue=task_queue,
             signal="wake_up",
             args=list(FULL_WORKFLOW_INPUT),
             signal_args=["wake-up"],
             execution_timeout=datetime.timedelta(seconds=30),
-            request_id=REQUEST_ID,
             retry_policy=example_data.retry_policy,
             id_reuse_policy=temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
             id_conflict_policy=temporalio.common.WorkflowIDConflictPolicy.TERMINATE_EXISTING,
             cron_schedule=CRON_SCHEDULE,
-            search_attributes=example_data.typed_search_attributes,
             static_summary="Nightly sync",
             static_details="Processes 42 records",
             priority=example_data.priority,
-            versioning_override=example_data.versioning_override,
         )
         positional_handle = await workflow_service.signal_with_start_workflow(
             SingleArgWorkflow.run,
             "positional",
             id=POSITIONAL_WORKFLOW_ID,
-            task_queue=TASK_QUEUE,
-            request_id=REQUEST_ID,
+            task_queue=task_queue,
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
@@ -308,16 +303,14 @@ class WorkflowServiceCallerWorkflow:
             SingleArgWorkflow.run,
             args=["tuple-one"],
             id=TUPLE_ONE_WORKFLOW_ID,
-            task_queue=TASK_QUEUE,
-            request_id=REQUEST_ID,
+            task_queue=task_queue,
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
         minimal_handle = await workflow_service.signal_with_start_workflow(
             workflow="ExampleWorkflow",
             id=MINIMAL_WORKFLOW_ID,
-            task_queue=TASK_QUEUE,
-            request_id=REQUEST_ID,
+            task_queue=task_queue,
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
@@ -336,17 +329,15 @@ class WorkflowServiceCallerWorkflow:
         list_signal_separate_handle = await workflow_service.signal_with_start_workflow(
             workflow="ExampleWorkflow",
             id=LIST_SIGNAL_SEPARATE_WORKFLOW_ID,
-            task_queue=TASK_QUEUE,
-            request_id=REQUEST_ID,
-            signal=ExampleWorkflow.wake_up_list,
-            signal_args=LIST_SIGNAL_INPUT,
+            task_queue=task_queue,
+            signal=ExampleWorkflow.wake_up_many,
+            signal_args=HIGH_ARITY_SIGNAL_INPUT,
             cron_schedule=CRON_SCHEDULE,
         )
         list_signal_wrapped_handle = await workflow_service.signal_with_start_workflow(
             workflow="ExampleWorkflow",
             id=LIST_SIGNAL_WRAPPED_WORKFLOW_ID,
-            task_queue=TASK_QUEUE,
-            request_id=REQUEST_ID,
+            task_queue=task_queue,
             signal=ExampleWorkflow.wake_up_list,
             signal_args=[LIST_SIGNAL_INPUT],
             cron_schedule=CRON_SCHEDULE,
@@ -370,7 +361,7 @@ def assert_handle_matches(
         workflow.ExternalWorkflowHandle[typing.Any],
     )
     assert handle.id == workflow_id
-    assert handle.run_id == expected_run_id(workflow_id)
+    assert handle.run_id is not None
 
 
 def test_generated_metadata() -> None:
@@ -410,67 +401,53 @@ async def test_signal_with_start_uses_real_nexus_client(
     env: WorkflowEnvironment,
 ) -> None:
     task_queue = str(uuid.uuid4())
-    service_handler = WorkflowServiceHandler()
 
     async with Worker(
         env.client,
         task_queue=task_queue,
-        workflows=[WorkflowServiceCallerWorkflow, SingleArgWorkflow],
-        nexus_service_handlers=[service_handler],
+        workflows=[WorkflowServiceCallerWorkflow, ExampleWorkflow, SingleArgWorkflow],
         workflow_runner=UnsandboxedWorkflowRunner(),
     ):
-        endpoint = await env.create_nexus_endpoint("temporal-system", task_queue)
-        try:
-            handles = await env.client.execute_workflow(
-                WorkflowServiceCallerWorkflow.run,
-                id=str(uuid.uuid4()),
-                task_queue=task_queue,
-            )
-        finally:
-            await env.delete_nexus_endpoint(endpoint)
+        handles = await env.client.execute_workflow(
+            WorkflowServiceCallerWorkflow.run,
+            args=[task_queue],
+            id=str(uuid.uuid4()),
+            task_queue=task_queue,
+        )
 
-    assert handles == [
-        (ARGS_WORKFLOW_ID, expected_run_id(ARGS_WORKFLOW_ID)),
-        (POSITIONAL_WORKFLOW_ID, expected_run_id(POSITIONAL_WORKFLOW_ID)),
-        (TUPLE_ONE_WORKFLOW_ID, expected_run_id(TUPLE_ONE_WORKFLOW_ID)),
-        (MINIMAL_WORKFLOW_ID, expected_run_id(MINIMAL_WORKFLOW_ID)),
-        (
+        assert [workflow_id for workflow_id, _ in handles] == [
+            ARGS_WORKFLOW_ID,
+            POSITIONAL_WORKFLOW_ID,
+            TUPLE_ONE_WORKFLOW_ID,
+            MINIMAL_WORKFLOW_ID,
             LIST_SIGNAL_SEPARATE_WORKFLOW_ID,
-            expected_run_id(LIST_SIGNAL_SEPARATE_WORKFLOW_ID),
-        ),
-        (
             LIST_SIGNAL_WRAPPED_WORKFLOW_ID,
-            expected_run_id(LIST_SIGNAL_WRAPPED_WORKFLOW_ID),
-        ),
-    ]
-    assert len(service_handler.calls) == 6
-    assert_full_signal_request(
-        service_handler.calls[0],
-        workflow_id=ARGS_WORKFLOW_ID,
-        signal="wake_up",
-        signal_input=ARGS_SIGNAL_INPUT,
-    )
-    assert_single_arg_signal_request(
-        service_handler.calls[1],
-        workflow_id=POSITIONAL_WORKFLOW_ID,
-    )
-    assert_single_arg_signal_request(
-        service_handler.calls[2],
-        workflow_id=TUPLE_ONE_WORKFLOW_ID,
-    )
-    assert_minimal_signal_request(service_handler.calls[3])
-    assert_common_signal_request(
-        service_handler.calls[4],
-        workflow_id=LIST_SIGNAL_SEPARATE_WORKFLOW_ID,
-        signal="wake_up_list",
-    )
-    assert service_handler.calls[4].signal_args == LIST_SIGNAL_INPUT
-    assert_common_signal_request(
-        service_handler.calls[5],
-        workflow_id=LIST_SIGNAL_WRAPPED_WORKFLOW_ID,
-        signal="wake_up_list",
-    )
-    assert service_handler.calls[5].signal_args == [LIST_SIGNAL_INPUT]
+        ]
+        assert all(run_id is not None for _, run_id in handles)
+        assert await env.client.get_workflow_handle(ARGS_WORKFLOW_ID).result() == (
+            "example:7:nexus:wake_up:wake-up"
+        )
+        assert await env.client.get_workflow_handle(
+            POSITIONAL_WORKFLOW_ID
+        ).result() == ("single:positional:wake_up:None")
+        assert await env.client.get_workflow_handle(TUPLE_ONE_WORKFLOW_ID).result() == (
+            "single:tuple-one:wake_up:None"
+        )
+        assert await env.client.get_workflow_handle(MINIMAL_WORKFLOW_ID).result() == (
+            "example:0:default:wake_up:None"
+        )
+        assert (
+            await env.client.get_workflow_handle(
+                LIST_SIGNAL_SEPARATE_WORKFLOW_ID
+            ).result()
+            == "example:0:default:wake_up_many:one,two,three,four,five,six,seven"
+        )
+        assert (
+            await env.client.get_workflow_handle(
+                LIST_SIGNAL_WRAPPED_WORKFLOW_ID
+            ).result()
+            == "example:0:default:wake_up_list:one,two"
+        )
 
 
 async def test_signal_with_start_rejects_positional_args_and_args() -> None:
@@ -483,7 +460,6 @@ async def test_signal_with_start_rejects_positional_args_and_args() -> None:
             args=["tuple-one"],
             id="workflow-conflicting-args",
             task_queue=TASK_QUEUE,
-            request_id=REQUEST_ID,
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
@@ -497,7 +473,6 @@ if typing.TYPE_CHECKING:
             "positional",
             id="typed-return-positional-workflow-input",
             task_queue=TASK_QUEUE,
-            request_id=REQUEST_ID,
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
@@ -510,7 +485,6 @@ if typing.TYPE_CHECKING:
             args=[7, "nexus"],
             id="typed-return-list-workflow-input",
             task_queue=TASK_QUEUE,
-            request_id=REQUEST_ID,
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
@@ -522,7 +496,6 @@ if typing.TYPE_CHECKING:
             workflow="ExampleWorkflow",
             id="string-workflow-return",
             task_queue=TASK_QUEUE,
-            request_id=REQUEST_ID,
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
@@ -538,7 +511,6 @@ if typing.TYPE_CHECKING:
         "positional",
         id="single-positional-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
@@ -548,7 +520,6 @@ if typing.TYPE_CHECKING:
         args=["tuple-one"],
         id="single-list-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
@@ -558,7 +529,6 @@ if typing.TYPE_CHECKING:
         args=FULL_WORKFLOW_INPUT,
         id="multi-list-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
@@ -567,7 +537,6 @@ if typing.TYPE_CHECKING:
         workflow="ExampleWorkflow",
         id="typed-signal-scalar-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal=ExampleWorkflow.wake_up,
         signal_args="wake-up",
         cron_schedule=CRON_SCHEDULE,
@@ -577,7 +546,6 @@ if typing.TYPE_CHECKING:
         workflow="ExampleWorkflow",
         id="typed-signal-list-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal=ExampleWorkflow.wake_up,
         signal_args=["wake-up"],
         cron_schedule=CRON_SCHEDULE,
@@ -587,7 +555,6 @@ if typing.TYPE_CHECKING:
         workflow="ExampleWorkflow",
         id="high-arity-signal-tuple-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up_many",
         signal_args=HIGH_ARITY_SIGNAL_INPUT,
         cron_schedule=CRON_SCHEDULE,
@@ -598,7 +565,6 @@ if typing.TYPE_CHECKING:
         args=[7, "nexus"],
         id="typed-list-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
@@ -609,7 +575,6 @@ if typing.TYPE_CHECKING:
         args=["keyword"],
         id="conflicting-string-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
@@ -620,7 +585,6 @@ if typing.TYPE_CHECKING:
         args=["tuple-one"],
         id="conflicting-typed-callable-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
@@ -630,7 +594,6 @@ if typing.TYPE_CHECKING:
         args="im a sequence here's my spout",  # pyright: ignore[reportArgumentType]
         id="typed-scalar-keyword-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
@@ -641,27 +604,24 @@ if typing.TYPE_CHECKING:
         "extra",
         id="too-many-positional-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
 
     workflow_service.signal_with_start_workflow(  # pyright: ignore[reportArgumentType, reportCallIssue]
-        workflow=ExampleWorkflow.run,
+        workflow=StrictExampleWorkflow.run,
         id="missing-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
 
     workflow_service.signal_with_start_workflow(  # pyright: ignore[reportArgumentType, reportCallIssue]
-        ExampleWorkflow.run,
+        StrictExampleWorkflow.run,
         3,
         4,
         id="bad-workflow-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
         signal="wake_up",
         cron_schedule=CRON_SCHEDULE,
     )
@@ -670,8 +630,7 @@ if typing.TYPE_CHECKING:
         workflow="ExampleWorkflow",
         id="missing-signal-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
-        signal=ExampleWorkflow.wake_up,  # pyright: ignore[reportArgumentType]
+        signal=StrictExampleWorkflow.wake_up,  # pyright: ignore[reportArgumentType]
         cron_schedule=CRON_SCHEDULE,
     )
 
@@ -679,8 +638,7 @@ if typing.TYPE_CHECKING:
         workflow="ExampleWorkflow",
         id="bad-signal-input",
         task_queue=TASK_QUEUE,
-        request_id=REQUEST_ID,
-        signal=ExampleWorkflow.wake_up,
+        signal=StrictExampleWorkflow.wake_up,
         signal_args=7,  # pyright: ignore[reportArgumentType]
         cron_schedule=CRON_SCHEDULE,
     )

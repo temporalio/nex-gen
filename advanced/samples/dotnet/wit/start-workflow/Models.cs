@@ -127,10 +127,6 @@ namespace NexGen.StartWorkflowService
         }
 
         public string Workflow { get; }
-        /// <summary>
-        /// Arguments for the workflow.
-        /// </summary>
-        public IReadOnlyCollection<object?>? Args { get; init; }
         public string WorkflowId { get; }
         public string TaskQueue { get; }
         public System.TimeSpan? WorkflowStartDelay { get; init; }
@@ -145,7 +141,6 @@ namespace NexGen.StartWorkflowService
         {
             return new StartWorkflowRequest(NexGen.Support.ProtoExtensions.FromWorkflowTypeProto(wire.WorkflowType, payloadConverter), wire.WorkflowId, NexGen.Support.ProtoExtensions.FromTaskQueueProto(wire.TaskQueue, payloadConverter))
             {
-                Args = wire.Input == null ? null : NexGen.Support.ProtoExtensions.FromPayloads(wire.Input, payloadConverter),
                 WorkflowStartDelay = wire.WorkflowStartDelay == null ? null : NexGen.Support.ProtoExtensions.FromDurationProto(wire.WorkflowStartDelay, payloadConverter),
             };
         }
@@ -155,10 +150,6 @@ namespace NexGen.StartWorkflowService
             var proto = new Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionRequest();
             proto.Namespace = Namespace;
             proto.WorkflowType = NexGen.Support.ProtoExtensions.ToWorkflowTypeProto(Workflow, payloadConverter);
-            if (Args is { } args)
-            {
-                proto.Input = NexGen.Support.ProtoExtensions.ToPayloads(args, payloadConverter);
-            }
             proto.WorkflowId = WorkflowId;
             proto.TaskQueue = NexGen.Support.ProtoExtensions.ToTaskQueueProto(TaskQueue, payloadConverter);
             if (WorkflowStartDelay is { } workflowStartDelay)

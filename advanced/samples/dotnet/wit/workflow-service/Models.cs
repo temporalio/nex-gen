@@ -100,10 +100,6 @@ namespace Temporalio.Workflows
         /// </summary>
         public System.TimeSpan? TaskTimeout { get; init; }
         /// <summary>
-        /// Request ID used to deduplicate workflow start requests.
-        /// </summary>
-        public string? RequestId { get; init; }
-        /// <summary>
         /// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
         /// </summary>
         public Temporalio.Api.Enums.V1.WorkflowIdReusePolicy? IdReusePolicy { get; init; }
@@ -156,7 +152,6 @@ namespace Temporalio.Workflows
                 ExecutionTimeout = wire.WorkflowExecutionTimeout == null ? null : NexGen.Support.ProtoExtensions.FromDurationProto(wire.WorkflowExecutionTimeout, payloadConverter),
                 RunTimeout = wire.WorkflowRunTimeout == null ? null : NexGen.Support.ProtoExtensions.FromDurationProto(wire.WorkflowRunTimeout, payloadConverter),
                 TaskTimeout = wire.WorkflowTaskTimeout == null ? null : NexGen.Support.ProtoExtensions.FromDurationProto(wire.WorkflowTaskTimeout, payloadConverter),
-                RequestId = string.IsNullOrEmpty(wire.RequestId) ? null : wire.RequestId,
                 IdReusePolicy = (int)wire.WorkflowIdReusePolicy == 0 ? null : wire.WorkflowIdReusePolicy,
                 IdConflictPolicy = (int)wire.WorkflowIdConflictPolicy == 0 ? null : wire.WorkflowIdConflictPolicy,
                 RetryPolicy = wire.RetryPolicy == null ? null : NexGen.Support.ProtoExtensions.FromRetryPolicyProto(wire.RetryPolicy, payloadConverter),
@@ -197,10 +192,6 @@ namespace Temporalio.Workflows
             if (TaskTimeout is { } taskTimeout)
             {
                 proto.WorkflowTaskTimeout = taskTimeout.ToProto();
-            }
-            if (RequestId is { } requestId)
-            {
-                proto.RequestId = requestId;
             }
             if (IdReusePolicy is { } idReusePolicy)
             {

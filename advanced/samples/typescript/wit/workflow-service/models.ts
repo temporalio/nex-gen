@@ -138,10 +138,6 @@ export type SignalWithStartWorkflowRequest<
      */
     taskTimeout?: common.Duration;
     /**
-     * Request ID used to deduplicate workflow start requests.
-     */
-    requestId?: string;
-    /**
      * Behavior when a closed workflow with the same ID exists. Default is
      * allow-duplicate.
      */
@@ -301,7 +297,6 @@ export function signalWithStartWorkflowRequestToProto<
       model.runTimeout == null ? undefined : durationToProto(model.runTimeout),
     workflowTaskTimeout:
       model.taskTimeout == null ? undefined : durationToProto(model.taskTimeout),
-    requestId: model.requestId,
     workflowIdReusePolicy: workflowIdReusePolicyToProto(
       model.idReusePolicy == null
         ? common.WorkflowIdReusePolicy.ALLOW_DUPLICATE

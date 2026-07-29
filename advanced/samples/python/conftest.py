@@ -9,6 +9,13 @@ from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 
 
+DEV_SERVER_DOWNLOAD_VERSION = "v1.7.1-system-nexus-operations"
+DEV_SERVER_EXTRA_ARGS = [
+    "--dynamic-config-value",
+    "history.enableSignalWithStartFromWorkflow=true",
+]
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "-E",
@@ -32,7 +39,10 @@ def env_type(request: pytest.FixtureRequest) -> str:
 @pytest_asyncio.fixture(scope="session")
 async def env(env_type: str) -> AsyncIterator[WorkflowEnvironment]:
     if env_type == "local":
-        workflow_environment = await WorkflowEnvironment.start_local()
+        workflow_environment = await WorkflowEnvironment.start_local(
+            dev_server_download_version=DEV_SERVER_DOWNLOAD_VERSION,
+            dev_server_extra_args=DEV_SERVER_EXTRA_ARGS,
+        )
     else:
         workflow_environment = WorkflowEnvironment.from_client(
             await Client.connect(env_type)

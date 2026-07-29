@@ -9,11 +9,9 @@ import { StartedWorkflow } from "../resources";
 /**
  * @param request - Request for the operation.
  */
-export async function restartWorkflow<
-  WorkflowFn extends (...args: any[]) => Promise<any> = (
-    ...args: any[]
-  ) => Promise<any>,
->(request: StartWorkflowRequest<WorkflowFn>): Promise<StartedWorkflow> {
+export async function restartWorkflow(
+  request: StartWorkflowRequest,
+): Promise<StartedWorkflow> {
   const client = workflow.createNexusServiceClient({
     service: startWorkflowService,
     endpoint: "temporal-system",

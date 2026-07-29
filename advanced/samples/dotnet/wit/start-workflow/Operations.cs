@@ -20,12 +20,14 @@ namespace NexGen.StartWorkflowService
     [GeneratedCode("nex-gen", null)]
     public class StartWorkflowOptions
     {
-        public StartWorkflowOptions(string workflowId, string taskQueue)
+        public StartWorkflowOptions(string workflow, string workflowId, string taskQueue)
         {
+            Workflow = workflow;
             WorkflowId = workflowId;
             TaskQueue = taskQueue;
         }
 
+        public string Workflow { get; set; }
         public string WorkflowId { get; set; }
         public string TaskQueue { get; set; }
         public System.TimeSpan? WorkflowStartDelay { get; set; }
@@ -34,12 +36,14 @@ namespace NexGen.StartWorkflowService
     [GeneratedCode("nex-gen", null)]
     public class RestartWorkflowOptions
     {
-        public RestartWorkflowOptions(string workflowId, string taskQueue)
+        public RestartWorkflowOptions(string workflow, string workflowId, string taskQueue)
         {
+            Workflow = workflow;
             WorkflowId = workflowId;
             TaskQueue = taskQueue;
         }
 
+        public string Workflow { get; set; }
         public string WorkflowId { get; set; }
         public string TaskQueue { get; set; }
         public System.TimeSpan? WorkflowStartDelay { get; set; }
@@ -71,29 +75,12 @@ namespace NexGen.StartWorkflowService
             return new StartedWorkflow(request.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
         }
 
-        /// <param name="workflow">The workflow value.</param>
-        /// <param name="args">Arguments for the workflow.</param>
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nex-gen", null)]
-        public static Task<StartedWorkflow> StartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, StartWorkflowOptions options)
+        public static Task<StartedWorkflow> StartWorkflowAsync(StartWorkflowOptions options)
         {
-            var request = new StartWorkflowRequest(workflow, options.WorkflowId, options.TaskQueue)
+            var request = new StartWorkflowRequest(options.Workflow, options.WorkflowId, options.TaskQueue)
             {
-                Args = args,
-                WorkflowStartDelay = options.WorkflowStartDelay,
-            };
-            return StartWorkflowAsync(request);
-        }
-
-        /// <param name="workflow">The workflow value.</param>
-        /// <param name="options">Options for the operation.</param>
-        [GeneratedCode("nex-gen", null)]
-        public static Task<StartedWorkflow> StartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, StartWorkflowOptions options)
-        {
-            var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);
-            var request = new StartWorkflowRequest(NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.WorkflowId, options.TaskQueue)
-            {
-                Args = workflowArgs,
                 WorkflowStartDelay = options.WorkflowStartDelay,
             };
             return StartWorkflowAsync(request);
@@ -107,29 +94,12 @@ namespace NexGen.StartWorkflowService
             return new StartedWorkflow(request.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
         }
 
-        /// <param name="workflow">The workflow value.</param>
-        /// <param name="args">Arguments for the workflow.</param>
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nex-gen", null)]
-        public static Task<StartedWorkflow> RestartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, RestartWorkflowOptions options)
+        public static Task<StartedWorkflow> RestartWorkflowAsync(RestartWorkflowOptions options)
         {
-            var request = new StartWorkflowRequest(workflow, options.WorkflowId, options.TaskQueue)
+            var request = new StartWorkflowRequest(options.Workflow, options.WorkflowId, options.TaskQueue)
             {
-                Args = args,
-                WorkflowStartDelay = options.WorkflowStartDelay,
-            };
-            return RestartWorkflowAsync(request);
-        }
-
-        /// <param name="workflow">The workflow value.</param>
-        /// <param name="options">Options for the operation.</param>
-        [GeneratedCode("nex-gen", null)]
-        public static Task<StartedWorkflow> RestartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, RestartWorkflowOptions options)
-        {
-            var (workflowMethod, workflowArgs) = NexGen.Support.TemporalFunctionNames.ExtractCall(workflow);
-            var request = new StartWorkflowRequest(NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.WorkflowId, options.TaskQueue)
-            {
-                Args = workflowArgs,
                 WorkflowStartDelay = options.WorkflowStartDelay,
             };
             return RestartWorkflowAsync(request);

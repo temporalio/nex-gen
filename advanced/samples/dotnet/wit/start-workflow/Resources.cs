@@ -36,11 +36,12 @@ namespace NexGen.StartWorkflowService
         [GeneratedCode("nex-gen", null)]
         public Task<StartedWorkflow> RestartWorkflowAsync(string workflow, string taskQueue)
         {
-            return Operations.RestartWorkflowAsync(workflow, null, new RestartWorkflowOptions(WorkflowId, taskQueue));
+            var request = new RestartWorkflowOptions(WorkflowId, workflow, taskQueue);
+            return Operations.RestartWorkflowAsync(request);
         }
 
         [GeneratedCode("nex-gen", null)]
-        public Task<IReadOnlyCollection<object?>> GetResultAsync() => throw new NotSupportedException("Resource method is not bound to a Nexus operation.");
+        public Task<string> GetResultAsync() => throw new NotSupportedException("Resource method is not bound to a Nexus operation.");
 
     }
 

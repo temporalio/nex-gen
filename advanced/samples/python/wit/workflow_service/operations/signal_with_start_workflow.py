@@ -34,7 +34,7 @@ async def _signal_with_start_workflow(
 
     nexus_client = create_nexus_client(
         service="temporal.api.workflowservice.v1.WorkflowService",
-        endpoint="temporal-system",
+        endpoint="__temporal_system",
     )
     handle = await nexus_client.start_operation(
         operation="SignalWithStartWorkflowExecution",
@@ -59,7 +59,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -89,7 +88,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -120,7 +118,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -149,7 +146,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -179,7 +175,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -210,7 +205,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -242,7 +236,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -272,7 +265,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -304,7 +296,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -337,7 +328,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -371,7 +361,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -403,7 +392,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -436,7 +424,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -470,7 +457,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -505,7 +491,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -538,7 +523,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = ...,
     run_timeout: datetime.timedelta | None = ...,
     task_timeout: datetime.timedelta | None = ...,
-    request_id: str | None = ...,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = ...,
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = ...,
     retry_policy: temporalio.common.RetryPolicy | None = ...,
@@ -564,7 +548,6 @@ async def signal_with_start_workflow(
     execution_timeout: datetime.timedelta | None = None,
     run_timeout: datetime.timedelta | None = None,
     task_timeout: datetime.timedelta | None = None,
-    request_id: str | None = None,
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (
         temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
     ),
@@ -603,7 +586,6 @@ async def signal_with_start_workflow(
             continue-as-new.
         run_timeout: Timeout of a single workflow run.
         task_timeout: Timeout of a single workflow task.
-        request_id: Request ID used to deduplicate workflow start requests.
         id_reuse_policy: Behavior when a closed workflow with the same ID exists.
             Default is allow-duplicate.
         id_conflict_policy: Behavior when a workflow is currently running with the same
@@ -657,7 +639,6 @@ async def signal_with_start_workflow(
         execution_timeout=execution_timeout,
         run_timeout=run_timeout,
         task_timeout=task_timeout,
-        request_id=request_id,
         id_reuse_policy=id_reuse_policy,
         id_conflict_policy=id_conflict_policy,
         retry_policy=retry_policy,

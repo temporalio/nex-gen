@@ -6,7 +6,7 @@ world system {
 
 /// @nexus.endpoint "temporal-system"
 interface start-workflow-service {
-  use nexus:temporal-types/model@1.0.0.{duration, payloads, placeholder, task-queue, workflow-function};
+  use nexus:temporal-types/model@1.0.0.{duration, placeholder, task-queue, workflow-type};
 
   /// @nexus.proto "temporal.api.common.v1.WorkflowExecution" typescript-import="@temporalio/proto"
   record workflow-execution {
@@ -20,16 +20,18 @@ interface start-workflow-service {
     /// @nexus.operation "cancel-workflow"
     cancel: func(reason: option<string>);
     restart-workflow: func(
-      workflow: workflow-function,
+      workflow: workflow-type,
       task-queue: task-queue,
     ) -> start-workflow-result;
-    get-result: func() -> payloads;
+    get-result: func() -> string;
   }
 
   /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionRequest" typescript-import="@temporalio/proto"
   record start-workflow-request {
     /// @nexus.proto-field "workflow_type"
-    workflow: workflow-function,
+    workflow: workflow-type,
+    /// @nexus.omit
+    input: placeholder,
     workflow-id: string,
     task-queue: task-queue,
     workflow-start-delay: option<duration>,

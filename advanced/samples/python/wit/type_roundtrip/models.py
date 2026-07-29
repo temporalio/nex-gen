@@ -34,6 +34,7 @@ class _ActivityOptionsTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.activity.v1.message_pb2.ActivityOptions,
+        type_hint: type["ActivityOptions"],
     ) -> "ActivityOptions":
         proto = value
         if not proto.HasField("retry_policy"):

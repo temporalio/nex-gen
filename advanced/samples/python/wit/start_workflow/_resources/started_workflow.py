@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import collections.abc
 import dataclasses
-import typing
-import typing_extensions
 import datetime
 import temporalio.workflow
 
@@ -16,10 +13,6 @@ from ..models import (
     StartWorkflowRequest,
     WorkflowExecution,
 )
-
-
-SelfType = typing.TypeVar("SelfType")
-WorkflowArgs = typing_extensions.TypeVarTuple("WorkflowArgs")
 
 
 @dataclasses.dataclass
@@ -43,8 +36,7 @@ class StartedWorkflow:
 
     async def restart_workflow(
         self,
-        workflow: str
-        | collections.abc.Callable[..., collections.abc.Awaitable[object]],
+        workflow: str,
         task_queue: str,
     ) -> StartedWorkflow:
         request = StartWorkflowRequest(
@@ -56,7 +48,7 @@ class StartedWorkflow:
 
     async def get_result(
         self,
-    ) -> collections.abc.Sequence[typing.Any]:
+    ) -> str:
         raise NotImplementedError("started-workflow.get_result is not yet implemented")
 
 
@@ -106,83 +98,15 @@ async def _restart_workflow(
     )
 
 
-# Overload case:
-# - workflow name with positional workflow arguments
-@typing.overload
 async def restart_workflow(
-    workflow: str,
-    *args: object,
-    workflow_id: str,
-    task_queue: str,
-    workflow_start_delay: datetime.timedelta | None = ...,
-) -> StartedWorkflow: ...
-
-
-# Overload case:
-# - workflow name with optional list-form workflow arguments
-@typing.overload
-async def restart_workflow(
-    workflow: str,
     *,
-    args: list[typing.Any] | None = ...,
-    workflow_id: str,
-    task_queue: str,
-    workflow_start_delay: datetime.timedelta | None = ...,
-) -> StartedWorkflow: ...
-
-
-# Overload case:
-# - workflow method callable with typed positional workflow arguments
-@typing.overload
-async def restart_workflow(
-    workflow: collections.abc.Callable[
-        [SelfType, typing_extensions.Unpack[WorkflowArgs]],
-        collections.abc.Awaitable[object],
-    ],
-    *args: typing_extensions.Unpack[WorkflowArgs],
-    workflow_id: str,
-    task_queue: str,
-    workflow_start_delay: datetime.timedelta | None = ...,
-) -> StartedWorkflow: ...
-
-
-# Overload case:
-# - workflow callable with list-form workflow arguments
-@typing.overload
-async def restart_workflow(
-    workflow: collections.abc.Callable[..., collections.abc.Awaitable[object]],
-    *,
-    args: list[typing.Any],
-    workflow_id: str,
-    task_queue: str,
-    workflow_start_delay: datetime.timedelta | None = ...,
-) -> StartedWorkflow: ...
-
-
-async def restart_workflow(
-    workflow: str | collections.abc.Callable[..., collections.abc.Awaitable[object]],
-    *positional_args: object,
-    args: list[typing.Any] | None = None,
+    workflow: str,
     workflow_id: str,
     task_queue: str,
     workflow_start_delay: datetime.timedelta | None = None,
 ) -> StartedWorkflow:
-    """
-    Args:
-        positional_args: Positional arguments for workflow. Cannot be set if args is
-            set.
-        args: List-form arguments for workflow. Cannot be set if positional_args are
-            set. For typed workflow callables, list contents are not statically
-            typechecked; pass workflow arguments positionally for precise typechecking.
-    """
-    if positional_args and args is not None:
-        raise TypeError("cannot specify both positional arguments and args")
-    normalized_args: list[typing.Any] | None = (
-        list(positional_args) if positional_args else args
-    )
     request = StartWorkflowRequest(
         workflow=workflow,
-        args=normalized_args,
         workflow_id=workflow_id,
         task_queue=task_queue,
         workflow_start_delay=workflow_start_delay,

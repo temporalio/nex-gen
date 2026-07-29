@@ -2,9 +2,6 @@
 package startworkflow
 
 import (
-	"reflect"
-	"runtime"
-	"strings"
 	"time"
 
 	common "go.temporal.io/api/common/v1"
@@ -16,7 +13,6 @@ import (
 
 type startWorkflowRequest struct {
 	Workflow           string
-	Args               []any
 	WorkflowId         string
 	TaskQueue          string
 	WorkflowStartDelay *time.Duration
@@ -30,13 +26,6 @@ func (m startWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.St
 			return nil, err
 		}
 		message.WorkflowType = converted
-	}
-	{
-		converted, err := payloadsToProto(ctx, m.Args)
-		if err != nil {
-			return nil, err
-		}
-		message.Input = converted
 	}
 	message.WorkflowId = m.WorkflowId
 	{
@@ -109,22 +98,8 @@ func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) workflow.F
 	return cancelWorkflow(ctx, cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowId: u.WorkflowId, RunId: u.RunId}, Reason: reasonPtr})
 }
 
-func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) workflow.Future {
-	workflowName := ""
-	{
-		switch rv := reflect.ValueOf(workflow); rv.Kind() {
-		case reflect.String:
-			workflowName = rv.String()
-		case reflect.Func:
-			fullName := runtime.FuncForPC(rv.Pointer()).Name()
-			elements := strings.Split(fullName, ".")
-			shortName := elements[len(elements)-1]
-			workflowName = strings.TrimSuffix(shortName, "-fm")
-		default:
-			panic("nex-gen function name requires string or function")
-		}
-	}
-	return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})
+func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string, taskQueue string) workflow.Future {
+	return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflow, TaskQueue: taskQueue})
 }
 
 func (u *StartedWorkflow) GetResult(ctx workflow.Context) workflow.Future {
@@ -246,6 +221,8 @@ func cancelWorkflowResponseFromProto(ctx workflow.Context, proto *workflowservic
 
 type StartWorkflowOptions struct {
 	// Required.
+	Workflow string
+	// Required.
 	WorkflowId string
 	// Required.
 	TaskQueue string
@@ -253,62 +230,13 @@ type StartWorkflowOptions struct {
 	WorkflowStartDelay time.Duration
 }
 
-// Input args: Arguments for the workflow.
-func StartWorkflow(
-	ctx workflow.Context,
-	opts StartWorkflowOptions,
-	workflow any,
-	args ...any,
-) workflow.Future {
+func StartWorkflow(ctx workflow.Context, opts StartWorkflowOptions) workflow.Future {
 	var workflowStartDelay *time.Duration
 	if opts.WorkflowStartDelay != 0 {
 		workflowStartDelay = &opts.WorkflowStartDelay
 	}
-	workflowName := ""
-	{
-		switch rv := reflect.ValueOf(workflow); rv.Kind() {
-		case reflect.String:
-			workflowName = rv.String()
-		case reflect.Func:
-			fullName := runtime.FuncForPC(rv.Pointer()).Name()
-			elements := strings.Split(fullName, ".")
-			shortName := elements[len(elements)-1]
-			workflowName = strings.TrimSuffix(shortName, "-fm")
-		default:
-			panic("nex-gen function name requires string or function")
-		}
-	}
 	return startWorkflow(ctx, startWorkflowRequest{
-		Workflow:           workflowName,
-		Args:               args,
-		WorkflowId:         opts.WorkflowId,
-		TaskQueue:          opts.TaskQueue,
-		WorkflowStartDelay: workflowStartDelay,
-	})
-}
-
-// Input args: Arguments for the workflow.
-func StartWorkflowTyped[WorkflowArg any, WorkflowResult any](
-	ctx workflow.Context,
-	opts StartWorkflowOptions,
-	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
-	arg WorkflowArg,
-) workflow.Future {
-	var workflowStartDelay *time.Duration
-	if opts.WorkflowStartDelay != 0 {
-		workflowStartDelay = &opts.WorkflowStartDelay
-	}
-	workflowName := ""
-	{
-		rv := reflect.ValueOf(workflow)
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	}
-	return startWorkflow(ctx, startWorkflowRequest{
-		Workflow:           workflowName,
-		Args:               []any{arg},
+		Workflow:           opts.Workflow,
 		WorkflowId:         opts.WorkflowId,
 		TaskQueue:          opts.TaskQueue,
 		WorkflowStartDelay: workflowStartDelay,
@@ -317,6 +245,8 @@ func StartWorkflowTyped[WorkflowArg any, WorkflowResult any](
 
 type RestartWorkflowOptions struct {
 	// Required.
+	Workflow string
+	// Required.
 	WorkflowId string
 	// Required.
 	TaskQueue string
@@ -324,62 +254,13 @@ type RestartWorkflowOptions struct {
 	WorkflowStartDelay time.Duration
 }
 
-// Input args: Arguments for the workflow.
-func RestartWorkflow(
-	ctx workflow.Context,
-	opts RestartWorkflowOptions,
-	workflow any,
-	args ...any,
-) workflow.Future {
+func RestartWorkflow(ctx workflow.Context, opts RestartWorkflowOptions) workflow.Future {
 	var workflowStartDelay *time.Duration
 	if opts.WorkflowStartDelay != 0 {
 		workflowStartDelay = &opts.WorkflowStartDelay
 	}
-	workflowName := ""
-	{
-		switch rv := reflect.ValueOf(workflow); rv.Kind() {
-		case reflect.String:
-			workflowName = rv.String()
-		case reflect.Func:
-			fullName := runtime.FuncForPC(rv.Pointer()).Name()
-			elements := strings.Split(fullName, ".")
-			shortName := elements[len(elements)-1]
-			workflowName = strings.TrimSuffix(shortName, "-fm")
-		default:
-			panic("nex-gen function name requires string or function")
-		}
-	}
 	return restartWorkflow(ctx, startWorkflowRequest{
-		Workflow:           workflowName,
-		Args:               args,
-		WorkflowId:         opts.WorkflowId,
-		TaskQueue:          opts.TaskQueue,
-		WorkflowStartDelay: workflowStartDelay,
-	})
-}
-
-// Input args: Arguments for the workflow.
-func RestartWorkflowTyped[WorkflowArg any, WorkflowResult any](
-	ctx workflow.Context,
-	opts RestartWorkflowOptions,
-	workflow func(workflow.Context, WorkflowArg) WorkflowResult,
-	arg WorkflowArg,
-) workflow.Future {
-	var workflowStartDelay *time.Duration
-	if opts.WorkflowStartDelay != 0 {
-		workflowStartDelay = &opts.WorkflowStartDelay
-	}
-	workflowName := ""
-	{
-		rv := reflect.ValueOf(workflow)
-		fullName := runtime.FuncForPC(rv.Pointer()).Name()
-		elements := strings.Split(fullName, ".")
-		shortName := elements[len(elements)-1]
-		workflowName = strings.TrimSuffix(shortName, "-fm")
-	}
-	return restartWorkflow(ctx, startWorkflowRequest{
-		Workflow:           workflowName,
-		Args:               []any{arg},
+		Workflow:           opts.Workflow,
 		WorkflowId:         opts.WorkflowId,
 		TaskQueue:          opts.TaskQueue,
 		WorkflowStartDelay: workflowStartDelay,

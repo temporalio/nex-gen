@@ -632,8 +632,8 @@ fn python_request_models_are_bidirectional_wire_models() {
     assert!(rendered.contains("signal_args=normalized_signal_args,"));
     assert!(rendered.contains("user_metadata=user_metadata,"));
     assert!(rendered.contains("return await _signal_with_start_workflow(request)"));
-    assert!(rendered.contains("payloads_to_proto(self.args)"));
-    assert!(models.contains("def _temporal_from_transfer_type("));
+    assert!(models.contains("payloads_to_proto(value.args)"));
+    assert!(models.contains("def from_transfer_type("));
     assert!(models.contains("@temporalio.converter.transfer_type_convertible("));
     assert!(!models.contains("def from_proto("));
     assert!(models.contains("from ._support import ("));

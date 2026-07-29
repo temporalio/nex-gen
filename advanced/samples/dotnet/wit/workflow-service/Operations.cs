@@ -51,10 +51,6 @@ namespace Temporalio.Workflows
         /// </summary>
         public System.TimeSpan? TaskTimeout { get; set; }
         /// <summary>
-        /// Request ID used to deduplicate workflow start requests.
-        /// </summary>
-        public string? RequestId { get; set; }
-        /// <summary>
         /// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
         /// </summary>
         public Temporalio.Api.Enums.V1.WorkflowIdReusePolicy? IdReusePolicy { get; set; }
@@ -104,7 +100,7 @@ namespace Temporalio.Workflows
     public static class Operations
     {
         [GeneratedCode("nex-gen", null)]
-        private const string WorkflowServiceEndpoint = "temporal-system";
+        private const string WorkflowServiceEndpoint = "__temporal_system";
 
         /// <summary>
         /// Signal a workflow, starting it first if needed.
@@ -140,7 +136,6 @@ namespace Temporalio.Workflows
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
-                RequestId = options.RequestId,
                 IdReusePolicy = options.IdReusePolicy,
                 IdConflictPolicy = options.IdConflictPolicy,
                 RetryPolicy = options.RetryPolicy,
@@ -175,7 +170,6 @@ namespace Temporalio.Workflows
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
-                RequestId = options.RequestId,
                 IdReusePolicy = options.IdReusePolicy,
                 IdConflictPolicy = options.IdConflictPolicy,
                 RetryPolicy = options.RetryPolicy,
@@ -210,7 +204,6 @@ namespace Temporalio.Workflows
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
-                RequestId = options.RequestId,
                 IdReusePolicy = options.IdReusePolicy,
                 IdConflictPolicy = options.IdConflictPolicy,
                 RetryPolicy = options.RetryPolicy,
@@ -245,7 +238,6 @@ namespace Temporalio.Workflows
                 ExecutionTimeout = options.ExecutionTimeout,
                 RunTimeout = options.RunTimeout,
                 TaskTimeout = options.TaskTimeout,
-                RequestId = options.RequestId,
                 IdReusePolicy = options.IdReusePolicy,
                 IdConflictPolicy = options.IdConflictPolicy,
                 RetryPolicy = options.RetryPolicy,

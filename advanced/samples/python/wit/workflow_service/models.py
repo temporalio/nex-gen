@@ -59,6 +59,7 @@ class _SignalWithStartWorkflowRequestTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionRequest,
+        type_hint: type["SignalWithStartWorkflowRequest"],
     ) -> "SignalWithStartWorkflowRequest":
         proto = value
         if not proto.HasField("workflow_type"):
@@ -97,7 +98,6 @@ class _SignalWithStartWorkflowRequestTransferTypeConverter(
             task_timeout=duration_from_proto(proto.workflow_task_timeout)
             if proto.HasField("workflow_task_timeout")
             else None,
-            request_id=proto.request_id if bool(proto.request_id) else None,
             id_reuse_policy=workflow_id_reuse_policy_from_proto(
                 proto.workflow_id_reuse_policy
             ),
@@ -126,7 +126,7 @@ class _SignalWithStartWorkflowRequestTransferTypeConverter(
             if proto.HasField("workflow_start_delay")
             else None,
             user_metadata=_UserMetadataTransferTypeConverter().from_transfer_type(
-                proto.user_metadata
+                proto.user_metadata, UserMetadata
             )
             if proto.HasField("user_metadata")
             else None,
@@ -157,8 +157,6 @@ class _SignalWithStartWorkflowRequestTransferTypeConverter(
             message.workflow_task_timeout.CopyFrom(
                 duration_to_proto(value.task_timeout)
             )
-        if value.request_id is not None:
-            message.request_id = value.request_id
         message.workflow_id_reuse_policy = workflow_id_reuse_policy_to_proto(
             value.id_reuse_policy
         )
@@ -213,7 +211,6 @@ class SignalWithStartWorkflowRequest:
     execution_timeout: datetime.timedelta | None = None
     run_timeout: datetime.timedelta | None = None
     task_timeout: datetime.timedelta | None = None
-    request_id: str | None = None
     id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (
         temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
     )
@@ -242,6 +239,7 @@ class _UserMetadataTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.sdk.v1.user_metadata_pb2.UserMetadata,
+        type_hint: type["UserMetadata"],
     ) -> "UserMetadata":
         proto = value
         return UserMetadata(
@@ -290,6 +288,7 @@ class _SignalWithStartWorkflowResponseTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.workflowservice.v1.request_response_pb2.SignalWithStartWorkflowExecutionResponse,
+        type_hint: type["SignalWithStartWorkflowResponse"],
     ) -> "SignalWithStartWorkflowResponse":
         proto = value
         return SignalWithStartWorkflowResponse(

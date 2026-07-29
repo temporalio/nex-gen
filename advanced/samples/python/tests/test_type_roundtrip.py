@@ -118,8 +118,9 @@ def test_activity_options_round_trip() -> None:
     assert activity_proto.task_queue.name == TASK_QUEUE
     assert activity_proto.schedule_to_close_timeout.seconds == 7
     assert activity_proto.priority.priority_key == 4
-    round_tripped_activity = (
-        converter.from_transfer_type(activity_proto)
+    round_tripped_activity = converter.from_transfer_type(
+        activity_proto,
+        type_roundtrip_models.ActivityOptions,
     )
     assert isinstance(
         round_tripped_activity.retry_policy, temporalio.common.RetryPolicy
