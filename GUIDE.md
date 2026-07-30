@@ -1177,6 +1177,26 @@ Here the WIT field `workflow` maps to proto field `workflow_type`.
 
 ---
 
+### @nexus.name
+
+**Placement:** Record field
+**Syntax:** `@nexus.name go="<name>" python="<name>" typescript="<name>" dotnet="<name>"`
+
+Overrides the generated field name for individual target languages. Languages
+without an override continue to use the WIT field name.
+
+```wit
+record signal-with-start-workflow-request {
+  /// @nexus.name go="WorkflowExecutionTimeout"
+  execution-timeout: option<duration>,
+}
+```
+
+This emits `WorkflowExecutionTimeout` in Go while retaining the normal
+`execution-timeout` mapping in other languages.
+
+---
+
 ### @nexus.type
 
 **Placement:** Type alias, enum, or record field

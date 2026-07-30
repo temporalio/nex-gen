@@ -1294,6 +1294,10 @@ fn build_fields_from_record(
     for field in &record.fields {
         let field_context = format!("{context} field `{}`", field.name);
         let directives = parse_directives(field.docs.contents.as_deref(), path, &field_context)?;
+        let generated_field_name = directive(&directives, "name", path, &field_context)?
+            .and_then(|directive| directive_language_value(directive, language))
+            .unwrap_or(&field.name)
+            .to_string();
         let omit_directive = directive(&directives, "omit", path, &field_context)?;
         let proto_field_name =
             directive_value(&directives, "proto-field", path, &field_context, "value")?
@@ -1353,7 +1357,7 @@ fn build_fields_from_record(
             fields.insert(
                 proto_field_name,
                 RecordFieldSpec {
-                    name: field.name.clone(),
+                    name: generated_field_name.clone(),
                     doc: None,
                     annotation: None,
                     flattened_annotation: None,
@@ -1398,7 +1402,7 @@ fn build_fields_from_record(
         fields.insert(
             proto_field_name.clone(),
             RecordFieldSpec {
-                name: field.name.clone(),
+                name: generated_field_name,
                 doc: field_doc,
                 annotation,
                 flattened_annotation,
@@ -3741,6 +3745,8 @@ interface workflow-service {
     task-queue: string,
     /// @nexus.proto-field "signal_name"
     signal: signal-function,
+    /// @nexus.name go="WorkflowExecutionTimeout"
+    workflow-execution-timeout: placeholder,
     /// @nexus.source "workflow_namespace"
     namespace: option<string>,
     /// @nexus.omit
@@ -3772,6 +3778,7 @@ interface workflow-service {
         let python = parse(Language::Python, wit);
         let typescript = parse(Language::TypeScript, wit);
         let dotnet = parse(Language::Dotnet, wit);
+        let go = parse(Language::Go, wit);
         assert_eq!(python.services[0].name, "WorkflowService");
         assert_eq!(
             python.services[0].wire_name,
@@ -3852,6 +3859,18 @@ interface workflow-service {
         let model = request;
         assert!(model.field_source("header").is_none());
         assert_eq!(model.field_name_override("workflow_type"), Some("workflow"));
+        assert_eq!(
+            model.field_name_override("workflow_execution_timeout"),
+            Some("workflow-execution-timeout")
+        );
+        assert_eq!(
+            go.record_for_proto(
+                "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest",
+            )
+            .unwrap()
+            .field_name_override("workflow_execution_timeout"),
+            Some("WorkflowExecutionTimeout")
+        );
         assert_eq!(model.field_name_override("input"), Some("args"));
         assert_eq!(
             model.field_name_override("workflow_id"),

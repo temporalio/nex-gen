@@ -70,17 +70,17 @@ func (s *WorkflowServiceIntegrationSuite) TestSignalWithStartWorkflowCallForms()
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
 		priority := temporal.Priority{PriorityKey: 7}
 		opts := ws.SignalWithStartWorkflowOptions{
-			Id:               "workflow-id",
-			TaskQueue:        "my-task-queue",
-			ExecutionTimeout: 3 * time.Hour,
-			RunTimeout:       2 * time.Hour,
-			TaskTimeout:      time.Minute,
-			IdReusePolicy:    enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
-			RetryPolicy:      retryPolicy,
-			CronSchedule:     "0 * * * *",
-			Memo:             map[string]any{"memo-key": "memo-value"},
-			SearchAttributes: searchAttributes,
-			Priority:         &priority,
+			Id:                       "workflow-id",
+			TaskQueue:                "my-task-queue",
+			WorkflowExecutionTimeout: 3 * time.Hour,
+			RunTimeout:               2 * time.Hour,
+			TaskTimeout:              time.Minute,
+			IdReusePolicy:            enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+			RetryPolicy:              retryPolicy,
+			CronSchedule:             "0 * * * *",
+			Memo:                     map[string]any{"memo-key": "memo-value"},
+			SearchAttributes:         searchAttributes,
+			Priority:                 &priority,
 		}
 		var typedResult ws.SignalWithStartWorkflowResponse
 		typedFuture := ws.SignalWithStartWorkflowTyped(

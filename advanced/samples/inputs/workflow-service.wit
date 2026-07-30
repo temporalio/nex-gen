@@ -52,12 +52,15 @@ interface workflow-service {
     signal: signal-function,
     /// @nexus.doc "Total workflow execution timeout, including retries and continue-as-new."
     /// @nexus.proto-field "workflow_execution_timeout"
+    /// @nexus.name go="WorkflowExecutionTimeout"
     execution-timeout: option<duration>,
     /// @nexus.doc "Timeout of a single workflow run."
     /// @nexus.proto-field "workflow_run_timeout"
+    /// @nexus.name go="WorkflowRunTimeout"
     run-timeout: option<duration>,
     /// @nexus.doc "Timeout of a single workflow task."
     /// @nexus.proto-field "workflow_task_timeout"
+    /// @nexus.name go="WorkflowTaskTimeout"
     task-timeout: option<duration>,
     /// @nexus.omit
     identity: placeholder,
@@ -66,9 +69,11 @@ interface workflow-service {
     /// @nexus.doc "Behavior when a closed workflow with the same ID exists. Default is allow-duplicate."
     /// @nexus.proto-field "workflow_id_reuse_policy"
     /// @nexus.default "allow-duplicate"
+    /// @nexus.name go="WorkflowIDReusePolicy"
     id-reuse-policy: workflow-id-reuse-policy,
     /// @nexus.doc "Behavior when a workflow is currently running with the same ID. Set to use-existing for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is terminate-if-running."
     /// @nexus.proto-field "workflow_id_conflict_policy"
+    /// @nexus.name go="WorkflowIDConflictPolicy"
     id-conflict-policy: option<workflow-id-conflict-policy>,
     /// @nexus.doc "Retry policy for the workflow."
     retry-policy: option<retry-policy>,
@@ -77,6 +82,7 @@ interface workflow-service {
     /// @nexus.doc "Memo for the workflow."
     memo: option<memo>,
     /// @nexus.doc "Typed search attributes for the workflow."
+    /// @nexus.name go="TypedSearchAttributes"
     search-attributes: option<search-attributes>,
     /// @nexus.doc "Priority of the workflow execution."
     priority: option<priority>,
