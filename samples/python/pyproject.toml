@@ -25,7 +25,6 @@ target-version = "py310"
 
 [tool.basedpyright]
 exclude = [".venv"]
-stubPath = "typings"
 reportAny = false
 reportExplicitAny = false
 reportPrivateUsage = false
