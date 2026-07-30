@@ -24,7 +24,7 @@ export async function signalWithStartWorkflow<
 ): Promise<workflow.ExternalWorkflowHandle> {
   const client = workflow.createNexusServiceClient({
     service: workflowService,
-    endpoint: "__temporal_system",
+    endpoint: "temporal-system",
   });
   const requestProto = signalWithStartWorkflowRequestToProto(request) ?? {};
   const handle = await client.startOperation(

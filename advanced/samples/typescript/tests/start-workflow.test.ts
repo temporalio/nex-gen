@@ -72,7 +72,7 @@ describe("start-workflow generated output", () => {
       expect(startRequest?.workflowId).toBe("workflow-id");
       expect(startRequest?.workflowType?.name).toBe("exampleWorkflow");
       expect(startRequest?.taskQueue?.name).toBe("demo-task-queue");
-      expect(startRequest?.input?.payloads).toHaveLength(1);
+      expect(startRequest?.input).toBeUndefined();
 
       const restartRequest = calls[1]?.[1] as
         | temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest

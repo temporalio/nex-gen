@@ -1208,22 +1208,22 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
     ));
     assert!(rendered.contains("func StartWorkflow("));
     assert!(rendered.contains(
-        "type StartWorkflowOptions struct {\n\t// Required.\n\tWorkflowId string\n\t// Required.\n\tTaskQueue string\n\t// Optional.\n\tWorkflowStartDelay time.Duration\n}"
+        "type StartWorkflowOptions struct {\n\t// Required.\n\tWorkflow string\n\t// Required.\n\tWorkflowId string\n\t// Required.\n\tTaskQueue string\n\t// Optional.\n\tWorkflowStartDelay time.Duration\n}"
     ));
     assert!(rendered.contains(
-        "func StartWorkflow(\n\tctx workflow.Context,\n\topts StartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
+        "func StartWorkflow(ctx workflow.Context, opts StartWorkflowOptions) workflow.Future"
     ));
     assert!(rendered.contains("func RestartWorkflow("));
     assert!(rendered.contains(
-        "func RestartWorkflow(\n\tctx workflow.Context,\n\topts RestartWorkflowOptions,\n\tworkflow any,\n\targs ...any,\n)"
+        "func RestartWorkflow(ctx workflow.Context, opts RestartWorkflowOptions) workflow.Future"
     ));
     assert!(rendered.contains(
-        "func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, taskQueue string, workflow any, args ...any) workflow.Future"
+        "func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string, taskQueue string) workflow.Future"
     ));
     assert!(rendered.contains(
-        "return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflowName, TaskQueue: taskQueue, Args: args})"
+        "return restartWorkflow(ctx, startWorkflowRequest{WorkflowId: u.WorkflowId, Workflow: workflow, TaskQueue: taskQueue})"
     ));
-    assert!(rendered.contains("\t\tArgs: args,\n"));
+    assert!(rendered.contains("Workflow: opts.Workflow"));
     assert!(!rendered.contains("opts.Args"));
 }
 

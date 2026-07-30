@@ -35,7 +35,7 @@ describe("workflow-service generated output", () => {
     );
   });
 
-  test("serializes signal-with-start requests through a real Nexus client", async () => {
+  test("serializes signal-with-start requests through a Nexus client", async () => {
     await withWorkflowEnvironment(async (env) => {
       const calls: Array<[string, unknown]> = [];
       const handler = nexus.serviceHandler(workflowService, {
@@ -71,7 +71,6 @@ describe("workflow-service generated output", () => {
       expect(request?.workflowType?.name).toBe("exampleWorkflow");
       expect(request?.workflowId).toBe("workflow-id");
       expect(request?.taskQueue?.name).toBe("demo-task-queue");
-      expect(request?.requestId).toBe("example-request");
       expect(request?.signalName).toBe("wake-up");
       expect(request?.cronSchedule).toBe("");
       expect(request?.input?.payloads).toHaveLength(2);
@@ -90,7 +89,6 @@ if (false) {
   }
 
   const taskQueue = "demo-task-queue";
-  const requestId = "example-request";
   const cronSchedule = "";
   const wakeUpSignal = workflow.defineSignal<[number, string]>("wake-up");
 
@@ -102,7 +100,6 @@ if (false) {
     args: [3, "nexus"],
     id: "workflow-id",
     taskQueue,
-    requestId,
     signal: wakeUpSignal,
     signalArgs: [7, "hello"],
     cronSchedule,
@@ -121,7 +118,6 @@ if (false) {
     workflow: exampleWorkflow,
     id: "missing-workflow-input",
     taskQueue,
-    requestId,
     signal: "wake-up",
     cronSchedule,
   });
@@ -132,7 +128,6 @@ if (false) {
     args: [3, 4],
     id: "bad-workflow-input",
     taskQueue,
-    requestId,
     signal: "wake-up",
     cronSchedule,
   });
@@ -142,7 +137,6 @@ if (false) {
     workflow: "ExampleWorkflow",
     id: "missing-signal-input",
     taskQueue,
-    requestId,
     signal: wakeUpSignal,
     cronSchedule,
   });
@@ -152,7 +146,6 @@ if (false) {
     workflow: "ExampleWorkflow",
     id: "bad-signal-input",
     taskQueue,
-    requestId,
     signal: wakeUpSignal,
     signalArgs: ["wrong", 7],
     cronSchedule,

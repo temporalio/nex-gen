@@ -2627,7 +2627,7 @@ fn build_service(
     let interface_name = interface_export_name(key, interface);
     let context = format!("interface `{interface_name}`");
     let directives = parse_directives(interface.docs.contents.as_deref(), path, &context)?;
-    let endpoint = directive_value(&directives, "endpoint", path, &context, "value")?;
+    let endpoint = directive_value_for_language(&directives, "endpoint", path, &context, language)?;
     let service_name = interface_name.to_upper_camel_case();
     let wire_service_name = build_wire_service_name(&directives, path, &context, &service_name)?;
     let namespace = directive(&directives, "namespace", path, &context)?

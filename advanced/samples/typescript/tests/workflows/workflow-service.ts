@@ -17,7 +17,6 @@ export async function workflowServiceCaller(): Promise<{
     args: [3, "nexus"],
     id: "workflow-id",
     taskQueue: "demo-task-queue",
-    requestId: "example-request",
     signal: wakeUpSignal,
     signalArgs: [7, "hello"],
     cronSchedule: "",

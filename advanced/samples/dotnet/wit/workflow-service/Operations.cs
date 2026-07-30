@@ -100,7 +100,7 @@ namespace Temporalio.Workflows
     public static class Operations
     {
         [GeneratedCode("nex-gen", null)]
-        private const string WorkflowServiceEndpoint = "__temporal_system";
+        private const string WorkflowServiceEndpoint = "temporal-system";
 
         /// <summary>
         /// Signal a workflow, starting it first if needed.

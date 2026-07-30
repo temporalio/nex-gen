@@ -174,10 +174,7 @@ def test_generated_metadata() -> None:
     assert registry[("TypeShowcase", "GetUser")].serialization_context is None
     assert isinstance(UPDATE_EMAIL_OPERATION, Operation)
     assert UPDATE_EMAIL_OPERATION.name == "UpdateEmail"
-    assert (
-        registry[("TypeShowcase", "UpdateEmail")].operation
-        is UPDATE_EMAIL_OPERATION
-    )
+    assert registry[("TypeShowcase", "UpdateEmail")].operation is UPDATE_EMAIL_OPERATION
     assert registry[("TypeShowcase", "UpdateEmail")].serialization_context is None
     assert isinstance(RENAME_OPERATION, Operation)
     assert RENAME_OPERATION.name == "Rename"
@@ -193,9 +190,7 @@ def test_generated_metadata() -> None:
     assert registry[("TypeShowcase", "SetProfile")].serialization_context is None
     assert isinstance(DEACTIVATE_OPERATION, Operation)
     assert DEACTIVATE_OPERATION.name == "Deactivate"
-    assert (
-        registry[("TypeShowcase", "Deactivate")].operation is DEACTIVATE_OPERATION
-    )
+    assert registry[("TypeShowcase", "Deactivate")].operation is DEACTIVATE_OPERATION
     assert registry[("TypeShowcase", "Deactivate")].serialization_context is None
     assert not hasattr(type_showcase, "TypeShowcase")
     assert not hasattr(type_showcase, "User")

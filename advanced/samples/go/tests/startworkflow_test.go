@@ -16,10 +16,6 @@ import (
 
 const startWorkflowServiceName = "StartWorkflowService"
 
-func startWorkflowTestFunction(ctx workflow.Context, input string) string {
-	return input
-}
-
 type StartWorkflowIntegrationSuite struct {
 	suite.Suite
 	testsuite.WorkflowTestSuite
@@ -59,33 +55,29 @@ func TestStartWorkflowIntegrationSuite(t *testing.T) {
 func (s *StartWorkflowIntegrationSuite) TestPublicOperationsAndResourceMethods() {
 	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
 		var start sw.StartedWorkflow
-		// Like client.Client.ExecuteWorkflow, the generated wrapper takes start
-		// options, a workflow function, and its argument. Get resolves to a
-		// StartedWorkflow resource rather than a client.WorkflowRun.
+		// Get resolves to a StartedWorkflow resource rather than a client.WorkflowRun.
 		future := sw.StartWorkflow(
 			ctx,
-			sw.StartWorkflowOptions{WorkflowId: "start-id", TaskQueue: "start-queue", WorkflowStartDelay: time.Second},
-			startWorkflowTestFunction,
-			"typed-input",
+			sw.StartWorkflowOptions{Workflow: "typed-workflow", WorkflowId: "start-id", TaskQueue: "start-queue", WorkflowStartDelay: time.Second},
 		)
 		if err := future.Get(ctx, &start); err != nil {
 			return err
 		}
 		var startWithArgs sw.StartedWorkflow
 		if err := sw.StartWorkflow(
-			ctx, sw.StartWorkflowOptions{WorkflowId: "start-args-id", TaskQueue: "start-args-queue"}, "named-workflow", "one", "two",
+			ctx, sw.StartWorkflowOptions{Workflow: "named-workflow", WorkflowId: "start-args-id", TaskQueue: "start-args-queue"},
 		).Get(ctx, &startWithArgs); err != nil {
 			return err
 		}
 		var restart sw.StartedWorkflow
 		if err := sw.RestartWorkflow(
-			ctx, sw.RestartWorkflowOptions{WorkflowId: "restart-id", TaskQueue: "restart-queue"}, startWorkflowTestFunction, "typed-input",
+			ctx, sw.RestartWorkflowOptions{Workflow: "typed-restart", WorkflowId: "restart-id", TaskQueue: "restart-queue"},
 		).Get(ctx, &restart); err != nil {
 			return err
 		}
 		var restartWithArgs sw.StartedWorkflow
 		if err := sw.RestartWorkflow(
-			ctx, sw.RestartWorkflowOptions{WorkflowId: "restart-args-id", TaskQueue: "restart-args-queue"}, "named-restart", "one", "two",
+			ctx, sw.RestartWorkflowOptions{Workflow: "named-restart", WorkflowId: "restart-args-id", TaskQueue: "restart-args-queue"},
 		).Get(ctx, &restartWithArgs); err != nil {
 			return err
 		}
@@ -98,7 +90,7 @@ func (s *StartWorkflowIntegrationSuite) TestPublicOperationsAndResourceMethods()
 		// StartedWorkflow retains namespace, workflow ID, and run ID, so its
 		// methods require only the values specific to the next operation.
 		var resourceRestart sw.StartedWorkflow
-		if err := start.RestartWorkflow(ctx, "resource-queue", "resource-workflow", "resource-input").Get(ctx, &resourceRestart); err != nil {
+		if err := start.RestartWorkflow(ctx, "resource-workflow", "resource-queue").Get(ctx, &resourceRestart); err != nil {
 			return err
 		}
 		var resourceCancel sw.CancelWorkflowResponse
@@ -112,18 +104,22 @@ func (s *StartWorkflowIntegrationSuite) TestPublicOperationsAndResourceMethods()
 	startRequest := s.calls[0].Input.(*workflowservicepb.StartWorkflowExecutionRequest)
 	s.Equal("StartWorkflow", s.calls[0].Operation)
 	s.Equal("start-id", startRequest.GetWorkflowId())
+	s.Equal("typed-workflow", startRequest.GetWorkflowType().GetName())
 	s.Equal("start-queue", startRequest.GetTaskQueue().GetName())
 	s.Equal(time.Second, startRequest.GetWorkflowStartDelay().AsDuration())
-	s.Len(startRequest.GetInput().GetPayloads(), 1)
+	s.Nil(startRequest.GetInput())
 
 	startWithArgs := s.calls[1].Input.(*workflowservicepb.StartWorkflowExecutionRequest)
 	s.Equal("named-workflow", startWithArgs.GetWorkflowType().GetName())
-	s.Len(startWithArgs.GetInput().GetPayloads(), 2)
+	s.Nil(startWithArgs.GetInput())
 
 	s.Equal("RestartWorkflow", s.calls[2].Operation)
+	restartRequest := s.calls[2].Input.(*workflowservicepb.StartWorkflowExecutionRequest)
+	s.Equal("typed-restart", restartRequest.GetWorkflowType().GetName())
+	s.Nil(restartRequest.GetInput())
 	restartWithArgs := s.calls[3].Input.(*workflowservicepb.StartWorkflowExecutionRequest)
 	s.Equal("named-restart", restartWithArgs.GetWorkflowType().GetName())
-	s.Len(restartWithArgs.GetInput().GetPayloads(), 2)
+	s.Nil(restartWithArgs.GetInput())
 
 	cancelRequest := s.calls[4].Input.(*workflowservicepb.RequestCancelWorkflowExecutionRequest)
 	s.Equal("CancelWorkflow", s.calls[4].Operation)

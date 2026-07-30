@@ -11,13 +11,12 @@ export async function startWorkflowCaller(): Promise<{
   workflowId: string;
 }> {
   const handle = await startWorkflow({
-    workflow: exampleWorkflow,
-    args: ["customer-123"],
+    workflow: "exampleWorkflow",
     workflowId: "workflow-id",
     taskQueue: "demo-task-queue",
   });
   const restartedHandle = await handle.restartWorkflow(
-    exampleWorkflow,
+    "exampleWorkflow",
     "demo-task-queue",
   );
   await handle.cancel();
