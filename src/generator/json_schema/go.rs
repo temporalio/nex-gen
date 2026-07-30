@@ -1644,7 +1644,7 @@ fn render_external_models(
 pub(in crate::generator) fn render_definitions_file(package_name: &str) -> String {
     let mut output = String::new();
     output.push_str(crate::generator::go::GENERATED_HEADER);
-    output.push('\n');
+    output.push_str("\n\n");
     output.push_str("package ");
     output.push_str(package_name);
     output.push_str("\n\n");
