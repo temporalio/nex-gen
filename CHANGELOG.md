@@ -9,8 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- WIT: Added `@nexus.name` directive for customizing generated field names.
+### Changed
 
+### Deprecated
+
+### Breaking Changes
+
+### Fixed
+
+### Security
+
+## [0.2.1] - 2026-07-31
+
+### Added
+
+- WIT: Added `@nexus.name` directive for customizing generated field names.
 
 ## [0.2.0] - 2026-07-28
 
