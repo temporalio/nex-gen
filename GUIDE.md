@@ -1312,6 +1312,42 @@ signal-with-start-workflow: func(...) -> ...;
 
 ---
 
+### @nexus.serialization-context
+
+**Placement:** Operation (function)
+**Syntax:** `@nexus.serialization-context python="<support-helper>"`
+
+Supplies a support helper that returns the serialization context to use when
+encoding operation inputs. Use this when the generated operation request
+contains user payloads that should be serialized for a context other than the
+Nexus operation itself, such as signal-with-start payloads that will be received
+by the target workflow.
+
+The helper is invoked with the generated operation request model. In Python it
+must return a `temporalio.converter.SerializationContext`.
+
+```wit
+/// @nexus.operation name="SignalWithStartWorkflowExecution"
+/// @nexus.serialization-context python="signal_with_start_workflow_serialization_context"
+signal-with-start-workflow: func(
+  request: signal-with-start-workflow-request,
+) -> signal-with-start-workflow-response;
+```
+
+```python
+def signal_with_start_workflow_serialization_context(
+    request: SignalWithStartWorkflowModelRequest,
+) -> temporalio.converter.WorkflowSerializationContext:
+    return temporalio.converter.WorkflowSerializationContext(
+        namespace=request.namespace,
+        workflow_id=request.id,
+    )
+```
+
+The referenced helper must be provided through `@nexus.support`.
+
+---
+
 ### @nexus.output-transform
 
 **Placement:** Operation (function)
