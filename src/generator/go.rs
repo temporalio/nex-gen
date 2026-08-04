@@ -94,6 +94,7 @@ struct PlannedFlag {
 struct PlannedVariant {
     info: PlannedTypeInfo,
     name: String,
+    type_parameters: Vec<crate::spec::TypeParameterUsage>,
     cases: Vec<PlannedVariantCase>,
 }
 
@@ -134,6 +135,7 @@ pub(in crate::generator) enum PlannedFieldKind {
 
 #[derive(Debug, Clone)]
 pub(in crate::generator) enum PlannedValueType {
+    TypeParameter(String),
     Scalar(PlannedScalarType),
     Enum(PlannedEnumType),
     Flags(PlannedFlagsType),
@@ -384,6 +386,7 @@ fn planned_variant(variant: &VariantSpec<PlannedTypeFamily>, spec: &PlannedSpec)
     PlannedVariant {
         info: local_type_info(&variant.full_name),
         name: variant.name.clone(),
+        type_parameters: spec.variant_type_parameters(&variant.full_name, Language::Go),
         cases: variant
             .cases
             .iter()
@@ -422,6 +425,9 @@ fn planned_value_type(value_type: &PlannedType, spec: &PlannedSpec) -> PlannedVa
         TypeSpec::Float => PlannedValueType::Scalar(PlannedScalarType::Float),
         TypeSpec::String => PlannedValueType::Scalar(PlannedScalarType::String),
         TypeSpec::Bytes => PlannedValueType::Scalar(PlannedScalarType::Bytes),
+        TypeSpec::TypeParameter(parameter) => {
+            PlannedValueType::TypeParameter(parameter.name.clone())
+        }
         TypeSpec::Record(_) => planned_message_type(value_type, spec)
             .map(PlannedValueType::Message)
             .unwrap_or(PlannedValueType::Unknown),
@@ -1133,7 +1139,17 @@ impl<'a> ApiPlanner<'a> {
             })?;
         let output = operation_output(operation, self.api_plan);
         self.resolve_message_types(&input)?;
-        let input_type = resolve_message_go_type(&input, &self.external_models);
+        let model_type_parameters = record_for_message(self.api_plan, &input)
+            .map(|record| {
+                self.api_plan
+                    .record_type_parameters(&record.full_name, Language::Go)
+            })
+            .unwrap_or_default();
+        let input_type = go_generic_reference(
+            &resolve_message_go_type(&input, &self.external_models),
+            &model_type_parameters,
+            false,
+        );
         let go_output_transform = operation.output_transform.as_ref().and_then(|transform| {
             Some((
                 transform.type_name.for_language(Language::Go)?,
@@ -1252,6 +1268,7 @@ impl<'a> ApiPlanner<'a> {
             return_doc: operation.return_doc.for_language(Language::Go),
             func_name: go_unexported_name(&operation.name),
             input_type,
+            model_type_parameters,
             output_type,
             raw_output_type,
             output_transform_expr: go_output_transform.map(|(_, expr)| expr),
@@ -1303,6 +1320,9 @@ impl<'a> ApiPlanner<'a> {
         value_type: &PlannedValueType,
     ) -> Result<ResolvedGoType> {
         match value_type {
+            PlannedValueType::TypeParameter(name) => Ok(ResolvedGoType {
+                type_expr: name.clone(),
+            }),
             PlannedValueType::Scalar(PlannedScalarType::Float) => Ok(ResolvedGoType {
                 type_expr: "float64".to_string(),
             }),
@@ -1357,7 +1377,13 @@ impl<'a> ApiPlanner<'a> {
                 }
                 // Interfaces have nil zero value, so no pointer needed for optional fields.
                 Ok(ResolvedGoType {
-                    type_expr: variant_type.name.clone(),
+                    type_expr: go_generic_reference(
+                        &variant_type.name,
+                        &self
+                            .api_plan
+                            .variant_type_parameters(&variant_type.info.full_name, Language::Go),
+                        false,
+                    ),
                 })
             }
             PlannedValueType::Message(message_type) => {
@@ -1369,12 +1395,22 @@ impl<'a> ApiPlanner<'a> {
                     });
                 }
                 self.ensure_rendered_model(message_type)?;
-                Ok(ResolvedGoType {
-                    type_expr: self
-                        .external_models
-                        .model_type_annotation(value_type)
-                        .unwrap_or_else(|| message_type.model_name.clone()),
-                })
+                let base = self
+                    .external_models
+                    .model_type_annotation(value_type)
+                    .unwrap_or_else(|| message_type.model_name.clone());
+                let type_expr = record_for_message(self.api_plan, message_type)
+                    .map(|record| {
+                        go_generic_reference(
+                            &base,
+                            &self
+                                .api_plan
+                                .record_type_parameters(&record.full_name, Language::Go),
+                            false,
+                        )
+                    })
+                    .unwrap_or(base);
+                Ok(ResolvedGoType { type_expr })
             }
             // Tuples and results inside containers (lists, maps, variant payloads,
             // resource fields) instantiate shared generic helper types; direct
@@ -1482,6 +1518,7 @@ impl<'a> ApiPlanner<'a> {
             planned_variant.info.full_name.clone(),
             RenderedVariant {
                 name: variant_name.clone(),
+                type_parameters: planned_variant.type_parameters.clone(),
                 marker_method: format!("is{variant_name}"),
                 cases,
             },
@@ -1490,15 +1527,18 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn ensure_rendered_model(&mut self, message: &PlannedMessageType) -> Result<()> {
-        let Some((model_name, planned_fields)) =
+        let Some((model_name, model_parameters, planned_fields)) =
             record_for_message(self.api_plan, message).map(|planned_model| {
+                let parameters = self
+                    .api_plan
+                    .record_type_parameters(&planned_model.full_name, Language::Go);
                 let planned_fields = planned_model
                     .public_fields()
                     .map(|(field_name, field)| {
                         planned_field(planned_model, field_name, field, self.api_plan)
                     })
                     .collect::<Vec<_>>();
-                (planned_model.name.clone(), planned_fields)
+                (planned_model.name.clone(), parameters, planned_fields)
             })
         else {
             // The planner may skip models for output types with transforms or
@@ -1525,7 +1565,7 @@ impl<'a> ApiPlanner<'a> {
         self.models.insert(
             message.info.full_name.clone(),
             RenderedModel {
-                name: model_name,
+                name: go_generic_declaration_name(&model_name, &model_parameters),
                 fields: Vec::new(),
             },
         );
@@ -1811,6 +1851,8 @@ pub(in crate::generator) struct RenderedOperation<'a> {
     pub(in crate::generator) func_name: String,
     /// Go type for the request parameter (e.g. `"GetUserRequest"`).
     pub(in crate::generator) input_type: String,
+    /// Model-derived parameters inferred from the request.
+    model_type_parameters: Vec<crate::spec::TypeParameterUsage>,
     /// Go type for the result, or `None` for void operations.
     /// For resource-returning operations this is the resource type name
     /// (e.g. `"User"`).
@@ -1913,6 +1955,8 @@ struct RenderedFlag {
 struct RenderedVariant {
     /// Go interface type name (e.g. `"NotificationTarget"`).
     name: String,
+    /// Enclosing generic parameters, carried by every case.
+    type_parameters: Vec<crate::spec::TypeParameterUsage>,
     /// Unexported marker method name (e.g. `"isNotificationTarget"`).
     marker_method: String,
     /// Ordered variant cases.
@@ -2229,7 +2273,9 @@ impl GoVisibilityMarker<'_> {
 
     fn mark_value_type(&mut self, value: &PlannedValueType) {
         match value {
-            PlannedValueType::Scalar(_) | PlannedValueType::Unknown => {}
+            PlannedValueType::TypeParameter(_)
+            | PlannedValueType::Scalar(_)
+            | PlannedValueType::Unknown => {}
             PlannedValueType::External {
                 type_name,
                 fallback,
@@ -2409,7 +2455,8 @@ fn public_default_punning_zero_for_value(
         PlannedValueType::External { .. } => {
             public_default_punning_zero_for_go_type(public_go_type).map(str::to_string)
         }
-        PlannedValueType::Variant(_)
+        PlannedValueType::TypeParameter(_)
+        | PlannedValueType::Variant(_)
         | PlannedValueType::Message(_)
         | PlannedValueType::Tuple(_)
         | PlannedValueType::Result { .. }
@@ -2461,6 +2508,7 @@ pub(in crate::generator) fn go_authored_type_annotation(wit_type: &PlannedType) 
         TypeSpec::Float => "float64".to_string(),
         TypeSpec::String => "string".to_string(),
         TypeSpec::Bytes => "[]byte".to_string(),
+        TypeSpec::TypeParameter(parameter) => parameter.name.clone(),
         TypeSpec::Option(inner) => format!("*{}", go_authored_type_annotation(inner)),
         TypeSpec::List(inner) => format!("[]{}", go_authored_type_annotation(inner)),
         TypeSpec::Tuple(_) => "any".to_string(),
@@ -2489,6 +2537,76 @@ pub(in crate::generator) fn go_authored_type_annotation(wit_type: &PlannedType) 
         TypeSpec::Variant(variant) => variant.name.clone(),
         TypeSpec::Resource(resource) => resource.type_name.clone(),
     }
+}
+
+fn go_generic_declaration_name(
+    model_name: &str,
+    parameters: &[crate::spec::TypeParameterUsage],
+) -> String {
+    if parameters.is_empty() {
+        return model_name.to_string();
+    }
+    let declarations = parameters
+        .iter()
+        .map(|usage| {
+            format!(
+                "{} {}",
+                usage.parameter.name,
+                if usage.requires_comparable {
+                    "comparable"
+                } else {
+                    "any"
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{model_name}[{declarations}]")
+}
+
+fn render_go_model_type_parameter_declaration(
+    output: &mut String,
+    parameters: &[crate::spec::TypeParameterUsage],
+) {
+    if parameters.is_empty() {
+        return;
+    }
+    output.push('[');
+    for (index, usage) in parameters.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
+        }
+        output.push_str(&usage.parameter.name);
+        output.push(' ');
+        output.push_str(if usage.requires_comparable {
+            "comparable"
+        } else {
+            "any"
+        });
+    }
+    output.push(']');
+}
+
+fn go_generic_reference(
+    model_name: &str,
+    parameters: &[crate::spec::TypeParameterUsage],
+    erase: bool,
+) -> String {
+    if parameters.is_empty() {
+        return model_name.to_string();
+    }
+    let arguments = parameters
+        .iter()
+        .map(|usage| {
+            if erase {
+                "any"
+            } else {
+                usage.parameter.name.as_str()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{model_name}[{arguments}]")
 }
 
 /// Returns `true` when an optional singular field of this value type must be
@@ -2819,6 +2937,7 @@ fn collect_imports_from_value_type(kind: &PlannedFieldKind, imports: &mut BTreeS
 /// Recursively collects Go imports from a planned value type.
 fn collect_imports_from_planned_value(value: &PlannedValueType, imports: &mut BTreeSet<String>) {
     match value {
+        PlannedValueType::TypeParameter(_) => {}
         PlannedValueType::External {
             type_name,
             fallback,
@@ -3371,17 +3490,32 @@ fn render_flags(output: &mut String, flags: &RenderedFlags) {
 /// ```
 fn render_variant(output: &mut String, variant: &RenderedVariant) {
     output.push_str("type ");
-    output.push_str(&variant.name);
+    output.push_str(&go_generic_declaration_name(
+        &variant.name,
+        &variant.type_parameters,
+    ));
     output.push_str(" interface {\n");
     output.push('\t');
     output.push_str(&variant.marker_method);
-    output.push_str("()\n");
+    output.push('(');
+    output.push_str(
+        &variant
+            .type_parameters
+            .iter()
+            .map(|usage| usage.parameter.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    output.push_str(")\n");
     output.push_str("}\n");
 
     for case in &variant.cases {
         output.push('\n');
         output.push_str("type ");
-        output.push_str(&case.struct_name);
+        output.push_str(&go_generic_declaration_name(
+            &case.struct_name,
+            &variant.type_parameters,
+        ));
         if let Some(payload_type) = &case.payload_type {
             output.push_str(" struct {\n");
             output.push_str("\tValue ");
@@ -3393,10 +3527,23 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
         }
         output.push('\n');
         output.push_str("func (");
-        output.push_str(&case.struct_name);
+        output.push_str(&go_generic_reference(
+            &case.struct_name,
+            &variant.type_parameters,
+            false,
+        ));
         output.push_str(") ");
         output.push_str(&variant.marker_method);
-        output.push_str("() {}\n");
+        output.push('(');
+        output.push_str(
+            &variant
+                .type_parameters
+                .iter()
+                .map(|usage| usage.parameter.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        output.push_str(") {}\n");
     }
 }
 
@@ -3612,6 +3759,7 @@ fn resolve_resource_value_type_with_struct_flag(
     package: &GoPackageContext,
 ) -> (String, bool) {
     match value {
+        PlannedValueType::TypeParameter(name) => (name.clone(), false),
         PlannedValueType::Scalar(PlannedScalarType::Float) => ("float64".to_string(), false),
         PlannedValueType::Scalar(PlannedScalarType::Int32) => ("int32".to_string(), false),
         PlannedValueType::Scalar(PlannedScalarType::Int64) => ("int64".to_string(), false),
@@ -3993,6 +4141,7 @@ fn render_operation_function(
 
     output.push_str("func ");
     output.push_str(&operation.func_name);
+    render_go_model_type_parameter_declaration(output, &operation.model_type_parameters);
     output.push_str("(ctx ");
     output.push_str(&package.workflow_context_type());
     output.push_str(", request ");
@@ -4055,7 +4204,9 @@ fn render_options_struct(
 ) {
     output.push_str("type ");
     output.push_str(&go_field_name(operation.name));
-    output.push_str("Options struct {\n");
+    output.push_str("Options");
+    render_go_model_type_parameter_declaration(output, &operation.model_type_parameters);
+    output.push_str(" struct {\n");
     for param in params.iter().filter(|p| param_belongs_in_options(p)) {
         if param.required {
             render_field_doc_comment(output, "\t", param.doc.as_deref(), true);
@@ -4081,7 +4232,9 @@ fn render_options_struct(
 fn render_empty_options_struct(output: &mut String, operation: &RenderedOperation<'_>) {
     output.push_str("type ");
     output.push_str(&go_field_name(operation.name));
-    output.push_str("Options struct {\n}\n");
+    output.push_str("Options");
+    render_go_model_type_parameter_declaration(output, &operation.model_type_parameters);
+    output.push_str(" struct {\n}\n");
 }
 
 fn param_belongs_in_options(param: &RenderedUnpackedParam) -> bool {
@@ -4483,14 +4636,36 @@ fn render_convenience_wrapper(
     visibility: &GoVisibility,
 ) {
     let exported_name = go_field_name(operation.name);
-    let type_params = required_function_type_parameters(params, package, visibility);
+    let mut type_params = operation
+        .model_type_parameters
+        .iter()
+        .map(|usage| {
+            (
+                usage.parameter.name.clone(),
+                if usage.requires_comparable {
+                    "comparable".to_string()
+                } else {
+                    "any".to_string()
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    type_params.extend(required_function_type_parameters(
+        params, package, visibility,
+    ));
 
     let positional_params = ordered_positional_params(params);
     let input_docs = wrapper_input_docs(positional_params.iter().copied());
     render_operation_doc_comment(output, operation, &input_docs);
 
-    let mut signature_params: Vec<(String, String)> =
-        vec![("opts".to_string(), format!("{exported_name}Options"))];
+    let mut signature_params: Vec<(String, String)> = vec![(
+        "opts".to_string(),
+        go_generic_reference(
+            &format!("{exported_name}Options"),
+            &operation.model_type_parameters,
+            false,
+        ),
+    )];
     signature_params.extend(positional_params.iter().copied().map(|p| {
         let (name, ty) = if is_go_signal_param(p) {
             (p.param_name.clone(), "string".to_string())

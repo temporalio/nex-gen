@@ -21,8 +21,8 @@ use crate::resources::{RequestPlan, ResolvedResourceBindingSource, render_reques
 use crate::spec::{
     EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec,
     LanguageImportSpec, LanguageImportStyle, LanguageStringSpec, ModulePath, OperationSpec,
-    RecordFieldSpec, RecordFieldVisibility, RecordSpec, SupportFragmentSpec, TypeReplacementSpec,
-    TypeSpec, VariantSpec,
+    PythonVariantStyle, RecordFieldSpec, RecordFieldVisibility, RecordSpec, SupportFragmentSpec,
+    TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::workspace::{ApiSpecBranch, ApiSpecNode};
 
@@ -1029,6 +1029,7 @@ impl<'a> ApiPlanner<'a> {
             PlannedType::Bool => "bool".to_string(),
             PlannedType::String => "str".to_string(),
             PlannedType::Bytes => "bytes".to_string(),
+            PlannedType::TypeParameter(parameter) => parameter.name.clone(),
             PlannedType::Enum(enum_type) => enum_type.name.clone(),
             PlannedType::External(ExternalTypeSpec::Proto(_))
             | PlannedType::External(ExternalTypeSpec::Json(_)) => self
@@ -1110,10 +1111,28 @@ impl<'a> ApiPlanner<'a> {
                 self.external_models
                     .service_model_ref(input, "models", self.api_plan);
             let input_conversion = self.resolve_message_value_conversion(input);
+            let annotation = if let PlannedType::Record(record) = input {
+                let parameters = self
+                    .api_plan
+                    .record_type_parameters(&record.full_name, Language::Python);
+                python_generic_record_annotation(&input_conversion.annotation, &parameters)
+            } else {
+                input_conversion.annotation.clone()
+            };
             RenderedOperationInput {
+                descriptor_type_ref: if let PlannedType::Record(record) = input {
+                    python_erased_generic_record_annotation(
+                        &type_ref,
+                        &self
+                            .api_plan
+                            .record_type_parameters(&record.full_name, Language::Python),
+                    )
+                } else {
+                    type_ref.clone()
+                },
                 type_ref,
                 module_path,
-                annotation: input_conversion.annotation.clone(),
+                annotation,
                 supports_unpacked: input_conversion.supports_unpacked_input(),
             }
         });
@@ -1165,6 +1184,26 @@ impl<'a> ApiPlanner<'a> {
                 panic!("planned operation output should be proto, record, resource, or none")
             }
         };
+        let model_input_parameters = input
+            .map(|input| self.api_plan.type_parameters(input, Language::Python))
+            .unwrap_or_default();
+        let model_input_identities = model_input_parameters
+            .iter()
+            .map(|usage| usage.parameter.full_name.as_str())
+            .collect::<BTreeSet<_>>();
+        let model_output_parameters = operation
+            .output_type()
+            .map(|output| self.api_plan.type_parameters(output, Language::Python))
+            .unwrap_or_default();
+        let generic_model_types =
+            !model_input_parameters.is_empty() || !model_output_parameters.is_empty();
+        let model_output_only_parameters = model_output_parameters
+            .into_iter()
+            .filter(|usage| !model_input_identities.contains(usage.parameter.full_name.as_str()))
+            .map(|usage| usage.parameter.name)
+            .collect::<BTreeSet<_>>();
+        let output_annotation_default =
+            erase_python_type_parameters(&output_annotation_default, &model_output_only_parameters);
         let overload_output_annotation = output_transform
             .and_then(|transform| {
                 transform
@@ -1202,6 +1241,15 @@ impl<'a> ApiPlanner<'a> {
             &local_python_model_type_expr(&output_ref),
             &output_type_parameters,
         );
+        let descriptor_output_ref = match operation.output_type() {
+            Some(PlannedType::Record(record)) => python_erased_generic_record_annotation(
+                &output_ref,
+                &self
+                    .api_plan
+                    .record_type_parameters(&record.full_name, Language::Python),
+            ),
+            _ => output_ref.clone(),
+        };
         Ok(RenderedOperation {
             name: operation.name.as_str(),
             wire_name: operation.wire_name.as_str(),
@@ -1221,6 +1269,7 @@ impl<'a> ApiPlanner<'a> {
                 .map(str::to_string),
             input: rendered_input,
             output_ref,
+            descriptor_output_ref,
             output_module_path,
             output_annotation,
             overload_output_annotation,
@@ -1240,6 +1289,11 @@ impl<'a> ApiPlanner<'a> {
             output_direct_result,
             output_none: operation.output_type().is_none(),
             unpacked_input,
+            model_input_type_parameters: model_input_parameters
+                .into_iter()
+                .map(|usage| usage.parameter.name)
+                .collect(),
+            generic_model_types,
         })
     }
 
@@ -1250,9 +1304,14 @@ impl<'a> ApiPlanner<'a> {
                 .external_models
                 .model_type_annotation(model_type)
                 .expect("external model annotation should exist"),
-            PlannedType::Record(_) => {
+            PlannedType::Record(record) => {
                 let conversion = self.resolve_message_value_conversion(model_type);
-                conversion.annotation
+                python_generic_record_annotation(
+                    &conversion.annotation,
+                    &self
+                        .api_plan
+                        .record_type_parameters(&record.full_name, Language::Python),
+                )
             }
             _ => panic!("operation output annotation should be model-shaped"),
         }
@@ -1469,6 +1528,11 @@ impl<'a> ApiPlanner<'a> {
             RenderedModel {
                 full_name: full_name.to_string(),
                 name: planned_model.name.clone(),
+                type_parameters: api_plan
+                    .record_type_parameters(full_name, Language::Python)
+                    .into_iter()
+                    .map(|usage| usage.parameter.name)
+                    .collect(),
                 capabilities: planned_model.data.capabilities,
                 experimental: planned_model.experimental,
                 fields: Vec::new(),
@@ -1546,6 +1610,13 @@ impl<'a> ApiPlanner<'a> {
             variant_spec.full_name.clone(),
             RenderedVariant {
                 name: variant_spec.name.clone(),
+                type_parameters: self
+                    .api_plan
+                    .variant_type_parameters(&variant_spec.full_name, Language::Python)
+                    .into_iter()
+                    .map(|usage| usage.parameter.name)
+                    .collect(),
+                payload_union: variant_spec.python_style == Some(PythonVariantStyle::PayloadUnion),
                 cases,
             },
         );
@@ -1670,6 +1741,12 @@ impl<'a> ApiPlanner<'a> {
     fn resolve_planned_value_type(&mut self, value_type: &PlannedType) -> ResolvedFieldType {
         let api_plan = self.api_plan;
         match value_type {
+            PlannedType::TypeParameter(parameter) => ResolvedFieldType {
+                annotation: parameter.name.clone(),
+                imports: PythonImports::default(),
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            },
             PlannedType::Float => ResolvedFieldType {
                 annotation: "float".to_string(),
                 imports: PythonImports::default(),
@@ -1733,7 +1810,11 @@ impl<'a> ApiPlanner<'a> {
                     self.ensure_rendered_variant(variant_spec);
                 }
                 ResolvedFieldType {
-                    annotation: variant_type.name.clone(),
+                    annotation: python_generic_record_annotation(
+                        &variant_type.name,
+                        &api_plan
+                            .variant_type_parameters(&variant_type.full_name, Language::Python),
+                    ),
                     imports: PythonImports::default(),
                     kind: ResolvedFieldKind::Scalar,
                     wire_conversion: None,
@@ -1744,8 +1825,16 @@ impl<'a> ApiPlanner<'a> {
             ))
             | PlannedType::Record(_)) => {
                 let conversion = self.resolve_message_value_conversion(message_type);
+                let annotation = if let PlannedType::Record(record) = message_type {
+                    python_generic_record_annotation(
+                        &conversion.annotation,
+                        &api_plan.record_type_parameters(&record.full_name, Language::Python),
+                    )
+                } else {
+                    conversion.annotation.clone()
+                };
                 ResolvedFieldType {
-                    annotation: conversion.annotation.clone(),
+                    annotation,
                     imports: conversion.imports.clone(),
                     kind: ResolvedFieldKind::Message,
                     wire_conversion: Some(conversion),
@@ -1918,6 +2007,20 @@ fn render_record_models(
     external_models: &PythonExternalModels,
 ) -> RenderedModelFragments {
     let mut body = String::new();
+    let type_parameters = models
+        .iter()
+        .flat_map(|model| model.type_parameters.iter())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for parameter in &type_parameters {
+        body.push_str(parameter);
+        body.push_str(" = typing.TypeVar(");
+        body.push_str(&python_string_literal(parameter));
+        body.push_str(")\n");
+    }
+    if !type_parameters.is_empty() && !models.is_empty() {
+        body.push_str("\n\n");
+    }
     let mut wire_blocks = BTreeMap::new();
     for (index, model) in models.iter().enumerate() {
         let planned_model = api_plan
@@ -1979,6 +2082,11 @@ fn render_record_model(
     }
     output.push_str("class ");
     output.push_str(&model.name);
+    if !model.type_parameters.is_empty() {
+        output.push_str("(typing.Generic[");
+        output.push_str(&model.type_parameters.join(", "));
+        output.push_str("])");
+    }
     output.push_str(":\n");
     render_python_docstring(output, "    ", None, &[], None, model.experimental);
 
@@ -2066,7 +2174,7 @@ fn collect_type_replacement_imports(
 
 fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<LanguageImportSpec>) {
     match value {
-        PlannedType::Enum(_) => {}
+        PlannedType::Enum(_) | PlannedType::TypeParameter(_) => {}
         PlannedType::Flags(_) | PlannedType::Variant(_) => {}
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enumeration))) => {
             collect_proto_type_imports(&enumeration.proto, imports);
@@ -2179,7 +2287,8 @@ fn collect_authored_type_imports(
             collect_python_import(type_name, imports);
             collect_authored_type_imports(target, imports);
         }
-        TypeSpec::Bool
+        TypeSpec::TypeParameter(_)
+        | TypeSpec::Bool
         | TypeSpec::Int(_)
         | TypeSpec::Float
         | TypeSpec::String
@@ -2322,6 +2431,7 @@ struct RenderedOperation<'a> {
     return_doc: Option<String>,
     input: Option<RenderedOperationInput>,
     output_ref: String,
+    descriptor_output_ref: String,
     output_module_path: Option<String>,
     output_annotation: String,
     overload_output_annotation: String,
@@ -2333,11 +2443,14 @@ struct RenderedOperation<'a> {
     output_direct_result: bool,
     output_none: bool,
     unpacked_input: Option<RenderedUnpackedInput>,
+    model_input_type_parameters: Vec<String>,
+    generic_model_types: bool,
 }
 
 #[derive(Debug)]
 struct RenderedOperationInput {
     type_ref: String,
+    descriptor_type_ref: String,
     module_path: Option<String>,
     annotation: String,
     supports_unpacked: bool,
@@ -2375,6 +2488,8 @@ struct RenderedFlag {
 #[derive(Debug)]
 struct RenderedVariant {
     name: String,
+    type_parameters: Vec<String>,
+    payload_union: bool,
     cases: Vec<RenderedVariantCase>,
 }
 
@@ -2388,6 +2503,7 @@ struct RenderedVariantCase {
 pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) full_name: String,
     pub(in crate::generator) name: String,
+    pub(in crate::generator) type_parameters: Vec<String>,
     pub(in crate::generator) capabilities: ModelWireCapabilities,
     pub(in crate::generator) experimental: bool,
     pub(in crate::generator) fields: Vec<RenderedField>,
@@ -2672,6 +2788,7 @@ pub(in crate::generator) fn python_authored_type_annotation(authored_type: &Plan
         TypeSpec::Float => "float".to_string(),
         TypeSpec::String => "str".to_string(),
         TypeSpec::Bytes => "bytes".to_string(),
+        TypeSpec::TypeParameter(parameter) => parameter.name.clone(),
         TypeSpec::Option(inner) => {
             format!("{} | None", python_authored_type_annotation(inner))
         }
@@ -2748,6 +2865,42 @@ pub(in crate::generator) fn python_authored_type_annotation(authored_type: &Plan
             .next()
             .unwrap_or(&name.type_name)
             .to_upper_camel_case(),
+    }
+}
+
+fn python_generic_record_annotation(
+    model_name: &str,
+    parameters: &[crate::spec::TypeParameterUsage],
+) -> String {
+    if parameters.is_empty() {
+        model_name.to_string()
+    } else {
+        format!(
+            "{}[{}]",
+            model_name,
+            parameters
+                .iter()
+                .map(|usage| usage.parameter.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+fn python_erased_generic_record_annotation(
+    model_name: &str,
+    parameters: &[crate::spec::TypeParameterUsage],
+) -> String {
+    if parameters.is_empty() {
+        model_name.to_string()
+    } else {
+        format!(
+            "{}[{}]",
+            model_name,
+            std::iter::repeat_n("typing.Any", parameters.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 
@@ -3540,6 +3693,26 @@ fn render_models_module(
         if !body.is_empty() {
             body.push_str("\n\n");
         }
+        let record_type_parameters = model_fragments
+            .body
+            .lines()
+            .filter_map(|line| line.split_once(" = typing.TypeVar(").map(|(name, _)| name))
+            .collect::<BTreeSet<_>>();
+        let variant_only_type_parameters = variants
+            .iter()
+            .flat_map(|variant| variant.type_parameters.iter())
+            .filter(|parameter| !record_type_parameters.contains(parameter.as_str()))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for parameter in &variant_only_type_parameters {
+            body.push_str(parameter);
+            body.push_str(" = typing.TypeVar(");
+            body.push_str(&python_string_literal(parameter));
+            body.push_str(")\n");
+        }
+        if !variant_only_type_parameters.is_empty() {
+            body.push_str("\n\n");
+        }
         for (index, variant) in variants.iter().enumerate() {
             render_variant(&mut body, variant);
             if index + 1 != variants.len() {
@@ -3805,8 +3978,11 @@ fn render_service_module(
         .iter()
         .flat_map(|service| service.operations.iter())
         .any(|operation| {
-            operation_input_type_ref(operation).contains("typing.")
-                || operation.output_ref.contains("typing.")
+            operation
+                .input
+                .as_ref()
+                .is_some_and(|input| input.descriptor_type_ref.contains("typing."))
+                || operation.descriptor_output_ref.contains("typing.")
         });
     if uses_typing || endpoint_client_body.contains("typing.") || needs_type_checking_imports {
         output.push_str("import typing\n");
@@ -3933,6 +4109,15 @@ fn render_operation_module(
     }
 
     let mut body = String::new();
+    for parameter in &operation.model_input_type_parameters {
+        body.push_str(parameter);
+        body.push_str(" = typing.TypeVar(");
+        body.push_str(&python_string_literal(parameter));
+        body.push_str(")\n");
+    }
+    if !operation.model_input_type_parameters.is_empty() {
+        body.push_str("\n\n");
+    }
     if let Some(unpacked_input) = &operation.unpacked_input
         && !unpacked_input.functions.is_empty()
     {
@@ -4608,10 +4793,16 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
         output.push_str(&operation.attr_name);
         output.push_str(": Operation[\n");
         output.push_str("        ");
-        output.push_str(&service_type_ref(operation_input_type_ref(operation)));
+        output.push_str(&service_type_ref(
+            operation
+                .input
+                .as_ref()
+                .map(|input| input.descriptor_type_ref.as_str())
+                .unwrap_or("None"),
+        ));
         output.push_str(",\n");
         output.push_str("        ");
-        output.push_str(&service_type_ref(&operation.output_ref));
+        output.push_str(&service_type_ref(&operation.descriptor_output_ref));
         output.push_str(",\n");
         output.push_str("    ] = Operation(name=");
         output.push_str(&python_string_literal(operation.wire_name));
@@ -4690,7 +4881,11 @@ fn render_flags(output: &mut String, flags: &RenderedFlags) {
 
 fn render_variant(output: &mut String, variant: &RenderedVariant) {
     output.push_str(variant.name.as_str());
-    output.push_str(" = ");
+    output.push_str(if variant.payload_union {
+        ": typing.TypeAlias = "
+    } else {
+        " = "
+    });
     if variant.cases.is_empty() {
         output.push_str("typing.Never\n");
         return;
@@ -4702,14 +4897,22 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
         if index > 0 {
             output.push_str("\n    | ");
         }
-        output.push_str("tuple[typing.Literal[");
-        output.push_str(&python_string_literal(&case.name));
-        output.push(']');
-        if let Some(payload_annotation) = &case.payload_annotation {
-            output.push_str(", ");
-            output.push_str(payload_annotation);
+        if variant.payload_union {
+            output.push_str(
+                case.payload_annotation
+                    .as_deref()
+                    .expect("payload-union variants are validated to have payloads"),
+            );
+        } else {
+            output.push_str("tuple[typing.Literal[");
+            output.push_str(&python_string_literal(&case.name));
+            output.push(']');
+            if let Some(payload_annotation) = &case.payload_annotation {
+                output.push_str(", ");
+                output.push_str(payload_annotation);
+            }
+            output.push(']');
         }
-        output.push(']');
     }
     if variant.cases.len() > 1 {
         output.push_str("\n)");
@@ -6138,20 +6341,53 @@ fn render_request_only_operation_function(
             "    ",
         );
         render_inline_nexus_client(output, service, "    ");
-        output.push_str("    return await nexus_client.start_operation(\n");
+        if operation.generic_model_types {
+            output.push_str("    return typing.cast(\n");
+            output.push_str("        ");
+            output.push_str(&temporalio_workflow_type_ref(
+                service,
+                "NexusOperationHandle",
+            ));
+            output.push_str("[\n");
+            output.push_str("            ");
+            output.push_str(&temporalio_workflow_type_annotation(
+                service,
+                &operation.output_annotation,
+            ));
+            output.push_str(",\n");
+            output.push_str("        ],\n");
+            output.push_str("        await nexus_client.start_operation(\n");
+        } else {
+            output.push_str("    return await nexus_client.start_operation(\n");
+        }
         output.push_str("        operation=");
+        if operation.generic_model_types {
+            output.push_str("    ");
+        }
         output.push_str(&python_string_literal(operation.wire_name));
         output.push_str(",\n");
         output.push_str("        ");
+        if operation.generic_model_types {
+            output.push_str("    ");
+        }
         output.push_str("input=");
         output.push_str(operation_input_wire_expr(operation));
         output.push_str(",\n");
         if !operation.output_none {
-            output.push_str("        output_type=");
+            output.push_str("        ");
+            if operation.generic_model_types {
+                output.push_str("    ");
+            }
+            output.push_str("output_type=");
             output.push_str(&operation.output_type_expr);
             output.push_str(",\n");
         }
-        output.push_str("    )\n");
+        if operation.generic_model_types {
+            output.push_str("        ),\n");
+            output.push_str("    )\n");
+        } else {
+            output.push_str("    )\n");
+        }
         return;
     }
 

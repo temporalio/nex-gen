@@ -1,0 +1,52 @@
+package temporal:nexus@1.0.0;
+
+world system {
+  export generic-model-service;
+}
+
+/// @nexus.endpoint "generic-models"
+interface generic-model-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.type-parameter
+  type context-t = placeholder;
+
+  /// @nexus.type-parameter
+  type output-t = placeholder;
+
+  /// @nexus.type-parameter
+  type metadata-t = placeholder;
+
+  record inner {
+    value: context-t,
+  }
+
+  record generic-request {
+    context: context-t,
+    contexts: list<context-t>,
+    by-name: map<string, context-t>,
+    nested: inner,
+  }
+
+  record operation-completion-success {
+    output: output-t,
+  }
+
+  record operation-completion-failure {
+    message: string,
+  }
+
+  /// @nexus.variant-style python="payload-union"
+  variant operation-completion-result {
+    success(operation-completion-success),
+    failure(operation-completion-failure),
+  }
+
+  record generic-response {
+    context: context-t,
+    completion: operation-completion-result,
+    metadata: option<metadata-t>,
+  }
+
+  complete: func(request: generic-request) -> generic-response;
+}

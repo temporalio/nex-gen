@@ -208,12 +208,18 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(&csharp_string_literal(&operation.wire_name));
         output.push_str(")]\n");
         output.push_str("    ");
-        output.push_str(&self.operation_raw_return_type(operation));
+        let service_return_type = match operation.output_type() {
+            Some(output_type @ PlannedType::Record(_)) => {
+                self.dotnet_erased_model_type(output_type)
+            }
+            _ => self.operation_raw_return_type(operation),
+        };
+        output.push_str(&service_return_type);
         output.push(' ');
         output.push_str(&csharp_type_name(&operation.name));
         output.push('(');
         if self.operation_has_input(operation) {
-            output.push_str(&self.operation_input_type(operation.input_model()));
+            output.push_str(&self.dotnet_erased_model_type(operation.input_model()));
             output.push_str(" request");
         }
         output.push_str(");\n\n");
@@ -437,10 +443,23 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn render_variant(&self, output: &mut String, variant: &PlannedVariant) {
+        let type_parameters = self
+            .api_plan
+            .variant_type_parameters(&variant.full_name, Language::Dotnet);
+        let type_arguments = type_parameters
+            .iter()
+            .map(|usage| usage.parameter.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("public abstract record ");
         output.push_str(&csharp_type_name(&variant.name));
+        if !type_parameters.is_empty() {
+            output.push('<');
+            output.push_str(&type_arguments);
+            output.push('>');
+        }
         output.push_str("\n{\n");
         output.push_str("    private ");
         output.push_str(&csharp_type_name(&variant.name));
@@ -461,6 +480,11 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str(" : ");
             }
             output.push_str(&csharp_type_name(&variant.name));
+            if !type_parameters.is_empty() {
+                output.push('<');
+                output.push_str(&type_arguments);
+                output.push('>');
+            }
             output.push_str(";\n");
             if index + 1 < variant.cases.len() {
                 output.push('\n');
@@ -478,6 +502,20 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(" class ");
         let type_name = csharp_type_name(&model.name);
         output.push_str(&type_name);
+        let type_parameters = self
+            .api_plan
+            .record_type_parameters(&model.full_name, Language::Dotnet);
+        if !type_parameters.is_empty() {
+            output.push('<');
+            output.push_str(
+                &type_parameters
+                    .iter()
+                    .map(|usage| usage.parameter.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            output.push('>');
+        }
         if let Some(wire_interface) = self
             .external_models
             .model_wire_interface(model, self.support_namespace)
@@ -706,6 +744,7 @@ impl<'a> ApiPlanner<'a> {
             output.push_str("> ");
         }
         output.push_str(method_name);
+        self.render_operation_model_type_parameters(output, operation);
         output.push('(');
         if has_input {
             output.push_str(input_type);
@@ -723,6 +762,37 @@ impl<'a> ApiPlanner<'a> {
         has_input: bool,
         raw_return: &str,
     ) {
+        if !self.operation_model_parameters(operation).is_empty() {
+            let service_name = self
+                .api_plan
+                .services
+                .iter()
+                .find(|service| service.operation(&operation.name).is_some())
+                .map(|service| service.wire_name.as_str())
+                .unwrap_or_default();
+            output.push_str("        var client = Workflow.CreateNexusWorkflowClient(");
+            output.push_str(&csharp_string_literal(service_name));
+            output.push_str(", _client.Options);\n");
+            if raw_return == "void" {
+                output.push_str("        await client.ExecuteNexusOperationAsync(");
+            } else {
+                output.push_str("        var result = await client.ExecuteNexusOperationAsync<");
+                output.push_str(raw_return);
+                output.push_str(">(");
+            }
+            output.push_str(&csharp_string_literal(&operation.wire_name));
+            output.push_str(", ");
+            if has_input {
+                output.push_str("request");
+            } else {
+                output.push_str("null");
+            }
+            output.push_str(").ConfigureAwait(true);\n");
+            if raw_return != "void" {
+                output.push_str("        return result;\n");
+            }
+            return;
+        }
         if raw_return == "void" {
             output.push_str("        await _client.ExecuteNexusOperationAsync(svc => svc.");
         } else {
@@ -836,6 +906,7 @@ impl<'a> ApiPlanner<'a> {
             output.push_str("> ");
         }
         output.push_str(method_name);
+        self.render_operation_model_type_parameters(output, operation);
         output.push('(');
         let mut has_parameters = false;
         if endpoint_parameter {
@@ -848,6 +919,44 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(" request");
         }
         output.push_str(")\n    {\n");
+        if !self.operation_model_parameters(operation).is_empty() {
+            let service_name = self
+                .api_plan
+                .services
+                .iter()
+                .find(|service| service.operation(&operation.name).is_some())
+                .map(|service| service.wire_name.as_str())
+                .unwrap_or_default();
+            output.push_str("        var client = Workflow.CreateNexusWorkflowClient(");
+            output.push_str(&csharp_string_literal(service_name));
+            output.push_str(", ");
+            if endpoint_parameter {
+                output.push_str("endpoint");
+            } else {
+                output.push_str(endpoint_constant_name);
+            }
+            output.push_str(");\n");
+            if raw_return == "void" {
+                output.push_str("        await client.ExecuteNexusOperationAsync(");
+            } else {
+                output.push_str("        var result = await client.ExecuteNexusOperationAsync<");
+                output.push_str(raw_return);
+                output.push_str(">(");
+            }
+            output.push_str(&csharp_string_literal(&operation.wire_name));
+            output.push_str(", ");
+            if has_input {
+                output.push_str("request");
+            } else {
+                output.push_str("null");
+            }
+            output.push_str(").ConfigureAwait(true);\n");
+            if raw_return != "void" {
+                output.push_str("        return result;\n");
+            }
+            output.push_str("    }\n\n");
+            return;
+        }
         output.push_str("        var client = Workflow.CreateNexusWorkflowClient<");
         output.push_str(service_type);
         output.push_str(">(");
@@ -1010,7 +1119,12 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn model_access(&self, model: &PlannedModel) -> &'static str {
-        if self.public_model_names().contains(&model.full_name) {
+        if !self
+            .api_plan
+            .record_type_parameters(&model.full_name, Language::Dotnet)
+            .is_empty()
+            || self.public_model_names().contains(&model.full_name)
+        {
             "public"
         } else {
             "internal"
@@ -1019,6 +1133,13 @@ impl<'a> ApiPlanner<'a> {
 
     fn public_model_names(&self) -> HashSet<String> {
         let mut names = HashSet::new();
+        names.extend(self.api_plan.records().filter_map(|(_, record)| {
+            (!self
+                .api_plan
+                .record_type_parameters(&record.full_name, Language::Dotnet)
+                .is_empty())
+            .then(|| record.full_name.clone())
+        }));
         for service in &self.api_plan.services {
             for operation in &service.operations {
                 self.collect_public_operation_models(&mut names, operation);
@@ -1123,6 +1244,54 @@ impl<'a> ApiPlanner<'a> {
             .public_model_type(model_type, self.api_plan)
     }
 
+    fn operation_model_parameters(
+        &self,
+        operation: &PlannedOperation,
+    ) -> Vec<crate::spec::TypeParameterUsage> {
+        operation
+            .input_type()
+            .map(|input| self.api_plan.type_parameters(input, Language::Dotnet))
+            .unwrap_or_default()
+    }
+
+    fn render_operation_model_type_parameters(
+        &self,
+        output: &mut String,
+        operation: &PlannedOperation,
+    ) {
+        let parameters = self.operation_model_parameters(operation);
+        if !parameters.is_empty() {
+            output.push('<');
+            output.push_str(
+                &parameters
+                    .iter()
+                    .map(|usage| usage.parameter.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            output.push('>');
+        }
+    }
+
+    fn dotnet_erased_model_type(&self, model_type: &PlannedType) -> String {
+        if let PlannedType::Record(record) = model_type {
+            let base = csharp_type_name(&record.model_name);
+            let parameters = self
+                .api_plan
+                .record_type_parameters(&record.full_name, Language::Dotnet);
+            if !parameters.is_empty() {
+                return format!(
+                    "{}<{}>",
+                    base,
+                    std::iter::repeat_n("object", parameters.len())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+        }
+        self.operation_input_type(model_type)
+    }
+
     fn operation_return_type(&self, operation: &PlannedOperation) -> String {
         if let Some(transform) = &operation.output_transform
             && let Some(type_name) = transform.type_name.for_language(Language::Dotnet)
@@ -1136,6 +1305,14 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn operation_raw_input_type(&self, model_type: &PlannedType) -> String {
+        if let PlannedType::Record(record) = model_type
+            && !self
+                .api_plan
+                .record_type_parameters(&record.full_name, Language::Dotnet)
+                .is_empty()
+        {
+            return self.operation_input_type(model_type);
+        }
         self.external_models
             .wire_model_type(model_type, self.api_plan)
     }
@@ -1145,6 +1322,29 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn operation_output_type(&self, operation: &PlannedOperation) -> String {
+        if let Some(PlannedType::Record(record)) = operation.output_type() {
+            let parameters = self
+                .api_plan
+                .record_type_parameters(&record.full_name, Language::Dotnet);
+            if !parameters.is_empty() {
+                let input_parameters = self
+                    .operation_model_parameters(operation)
+                    .into_iter()
+                    .map(|usage| (usage.parameter.full_name, usage.parameter.name))
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                let arguments = parameters
+                    .iter()
+                    .map(|usage| {
+                        input_parameters
+                            .get(&usage.parameter.full_name)
+                            .map(String::as_str)
+                            .unwrap_or("object")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return format!("{}<{arguments}>", csharp_type_name(&record.model_name));
+            }
+        }
         match &operation.output {
             Some(
                 model_type @ (PlannedType::External(ExternalTypeSpec::Proto(
@@ -1289,6 +1489,7 @@ impl<'a> ApiPlanner<'a> {
             PlannedType::Bool => "bool".to_string(),
             PlannedType::String => "string".to_string(),
             PlannedType::Bytes => "byte[]".to_string(),
+            PlannedType::TypeParameter(parameter) => parameter.name.clone(),
             PlannedType::Enum(enumeration) => csharp_type_name(&enumeration.name),
             proto_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(
                 _,
@@ -1297,7 +1498,25 @@ impl<'a> ApiPlanner<'a> {
                 .model_type_annotation(proto_type)
                 .expect("proto enum should have a .NET type annotation"),
             PlannedType::Flags(flags) => csharp_type_name(&flags.name),
-            PlannedType::Variant(variant) => csharp_type_name(&variant.name),
+            PlannedType::Variant(variant) => {
+                let base = csharp_type_name(&variant.name);
+                let parameters = self
+                    .api_plan
+                    .variant_type_parameters(&variant.full_name, Language::Dotnet);
+                if parameters.is_empty() {
+                    base
+                } else {
+                    format!(
+                        "{}<{}>",
+                        base,
+                        parameters
+                            .iter()
+                            .map(|usage| usage.parameter.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            }
             model_type @ (PlannedType::External(ExternalTypeSpec::Proto(
                 PlannedProtoType::Message(_),
             ))
@@ -1312,7 +1531,25 @@ impl<'a> ApiPlanner<'a> {
                     PlannedType::External(ExternalTypeSpec::Json(json)) => {
                         csharp_type_name(&json.model_name)
                     }
-                    PlannedType::Record(record) => csharp_type_name(&record.model_name),
+                    PlannedType::Record(record) => {
+                        let base = csharp_type_name(&record.model_name);
+                        let parameters = self
+                            .api_plan
+                            .record_type_parameters(&record.full_name, Language::Dotnet);
+                        if parameters.is_empty() {
+                            base
+                        } else {
+                            format!(
+                                "{}<{}>",
+                                base,
+                                parameters
+                                    .iter()
+                                    .map(|usage| usage.parameter.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        }
+                    }
                     _ => unreachable!("model type pattern checked"),
                 }),
             PlannedType::Resource(resource) => csharp_type_name(&resource.type_name),
@@ -1426,6 +1663,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("public class ");
         let options_type_name = operation_options_type_name(operation);
         output.push_str(&options_type_name);
+        self.render_operation_model_type_parameters(output, operation);
         output.push_str("\n{\n");
         let mut option_fields = Vec::<(&RecordFieldSpec<PlannedTypeFamily>, String, bool)>::new();
         for (field_name, field) in model.public_fields() {
@@ -1573,7 +1811,7 @@ impl<'a> ApiPlanner<'a> {
             output.push_str("> ");
         }
         output.push_str(method_name);
-        render_flattened_generic_parameters(output, model, overload);
+        render_flattened_generic_parameters(output, model, overload, self.api_plan);
         output.push('(');
         let mut has_parameters = false;
         if endpoint_parameter {
@@ -1584,6 +1822,7 @@ impl<'a> ApiPlanner<'a> {
         if model_has_options_fields(model, self.api_plan) {
             render_parameter_separator(output, &mut has_parameters);
             output.push_str(&operation_options_type_name(operation));
+            self.render_operation_model_type_parameters(output, operation);
             if model_options_required(model, self.api_plan) {
                 output.push_str(" options");
             } else {
@@ -1737,7 +1976,21 @@ impl DotNetExternalModels {
         if let PlannedType::Record(record) = model_type
             && api_plan.record(&record.full_name).is_some()
         {
-            return csharp_type_name(&record.model_name);
+            let base = csharp_type_name(&record.model_name);
+            let parameters = api_plan.record_type_parameters(&record.full_name, Language::Dotnet);
+            return if parameters.is_empty() {
+                base
+            } else {
+                format!(
+                    "{}<{}>",
+                    base,
+                    parameters
+                        .iter()
+                        .map(|usage| usage.parameter.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
         }
         self.model_type_annotation(model_type).unwrap_or_else(|| {
             csharp_type_name(match model_type {
@@ -2550,20 +2803,30 @@ fn render_flattened_generic_parameters(
     output: &mut String,
     model: &PlannedModel,
     overload: &FlattenedOverload,
+    api_plan: &PlannedSpec,
 ) {
-    if !overload.has_expression_functions() {
+    let mut generics = api_plan
+        .record_type_parameters(&model.full_name, Language::Dotnet)
+        .into_iter()
+        .map(|usage| usage.parameter.name)
+        .collect::<Vec<_>>();
+    if !overload.has_expression_functions() && generics.is_empty() {
         return;
     }
-    let mut generics = vec!["TWorkflow".to_string()];
-    if model.public_fields().any(|(field_name, field)| {
-        matches!(
-            overload.function_mode(field_name),
-            FlattenedFunctionMode::Expression
-        ) && field
-            .function
-            .as_ref()
-            .is_some_and(function_has_result_type_parameter)
-    }) {
+    if overload.has_expression_functions() {
+        generics.push("TWorkflow".to_string());
+    }
+    if overload.has_expression_functions()
+        && model.public_fields().any(|(field_name, field)| {
+            matches!(
+                overload.function_mode(field_name),
+                FlattenedFunctionMode::Expression
+            ) && field
+                .function
+                .as_ref()
+                .is_some_and(function_has_result_type_parameter)
+        })
+    {
         generics.push("TResult".to_string());
     }
     output.push('<');
@@ -2608,6 +2871,18 @@ fn render_flattened_method_body(
     }
     output.push_str("        var request = new ");
     output.push_str(&csharp_type_name(&model.name));
+    let model_parameters = api_plan.record_type_parameters(&model.full_name, Language::Dotnet);
+    if !model_parameters.is_empty() {
+        output.push('<');
+        output.push_str(
+            &model_parameters
+                .iter()
+                .map(|usage| usage.parameter.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        output.push('>');
+    }
     let field_exprs = model
         .public_fields()
         .map(|(field_name, field)| {
@@ -3057,23 +3332,57 @@ fn collect_public_value_models(
     value: &PlannedType,
     api_plan: &PlannedSpec,
 ) {
+    collect_public_value_models_inner(names, value, api_plan, &mut HashSet::new());
+}
+
+fn collect_public_value_models_inner(
+    names: &mut HashSet<String>,
+    value: &PlannedType,
+    api_plan: &PlannedSpec,
+    visiting_variants: &mut HashSet<String>,
+) {
     match value {
+        PlannedType::Option(inner) | PlannedType::List(inner) => {
+            collect_public_value_models_inner(names, inner, api_plan, visiting_variants);
+        }
+        PlannedType::Map(key, value) => {
+            collect_public_value_models_inner(names, key, api_plan, visiting_variants);
+            collect_public_value_models_inner(names, value, api_plan, visiting_variants);
+        }
         model_type @ (PlannedType::External(ExternalTypeSpec::Proto(
             PlannedProtoType::Message(_),
         ))
         | PlannedType::Record(_)) => collect_public_message_models(names, model_type, api_plan),
         PlannedType::Resource(_) => {}
+        PlannedType::Variant(variant) => {
+            if !visiting_variants.insert(variant.full_name.clone()) {
+                return;
+            }
+            if let Some(declaration) = api_plan.variant(&variant.full_name) {
+                for case in &declaration.cases {
+                    if let Some(payload) = &case.payload {
+                        collect_public_value_models_inner(
+                            names,
+                            payload,
+                            api_plan,
+                            visiting_variants,
+                        );
+                    }
+                }
+            }
+            visiting_variants.remove(&variant.full_name);
+        }
         PlannedType::Tuple(items) => {
             for item in items {
-                collect_public_value_models(names, item, api_plan);
+                collect_public_value_models_inner(names, item, api_plan, visiting_variants);
             }
         }
         PlannedType::Result { ok, err } => {
             if let Some(ok) = ok {
-                collect_public_value_models(names, ok, api_plan);
+                collect_public_value_models_inner(names, ok, api_plan, visiting_variants);
             }
             if let Some(err) = err {
-                collect_public_value_models(names, err, api_plan);
+                collect_public_value_models_inner(names, err, api_plan, visiting_variants);
             }
         }
         PlannedType::External(ExternalTypeSpec::Alias {
@@ -3082,7 +3391,7 @@ fn collect_public_value_models(
             ..
         }) => {
             if type_name.for_language(Language::Dotnet).is_none() {
-                collect_public_value_models(names, fallback, api_plan);
+                collect_public_value_models_inner(names, fallback, api_plan, visiting_variants);
             }
         }
         _ => {}
@@ -3531,6 +3840,7 @@ fn dotnet_authored_type(wit_type: &PlannedType) -> String {
         TypeSpec::Float => "double".to_string(),
         TypeSpec::String => "string".to_string(),
         TypeSpec::Bytes => "byte[]".to_string(),
+        TypeSpec::TypeParameter(parameter) => parameter.name.clone(),
         TypeSpec::Option(inner) => nullable_type(&dotnet_authored_type(inner)),
         TypeSpec::List(inner) => {
             format!("IReadOnlyList<{}>", dotnet_authored_type(inner))

@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use heck::{ToSnakeCase, ToUpperCamelCase};
+use heck::{ToLowerCamelCase, ToSnakeCase, ToUpperCamelCase};
 use tempfile::TempDir;
 use wit_parser_crate::{
     Function, FunctionKind, Handle, Interface, PackageId, PackageSourceMap, Record, Resolve, Type,
@@ -101,7 +101,7 @@ fn api_spec_from_wit(
         services.push(build_service(resolve, key, interface, &path, language)?);
     }
 
-    Ok(ApiSpec {
+    let spec = ApiSpec {
         module_path: crate::spec::ModulePath::default(),
         data: (),
         version: package
@@ -113,7 +113,9 @@ fn api_spec_from_wit(
         support,
         services,
         types,
-    })
+    };
+    validate_generic_model_semantics(&spec, &path, language)?;
+    Ok(spec)
 }
 
 pub fn write_prepared_wit_directory(input_paths: &[PathBuf], output_path: &Path) -> Result<()> {
@@ -340,13 +342,95 @@ fn prepare_wit_workspace(
             source,
         })?;
     }
-    fs::write(&target_path, input).map_err(|source| Error::WriteFile {
+    let prepared_input = prepare_generic_map_key_aliases(input);
+    fs::write(&target_path, prepared_input).map_err(|source| Error::WriteFile {
         path: target_path,
         source,
     })?;
 
     copy_linked_inputs(&package_root, linked_input_paths)?;
 
+    Ok(PreparedWitWorkspace {
+        temp_dir,
+        package_root,
+    })
+}
+
+/// `wit-parser` intentionally rejects aliases as map keys even when their
+/// target is a legal scalar. Type-parameter aliases are semantically opaque,
+/// so temporarily lower them to `string` for WIT parsing and attach private
+/// metadata that restores the alias identity in the authored type graph.
+fn prepare_generic_map_key_aliases(input: &str) -> String {
+    let lines = input.lines().collect::<Vec<_>>();
+    let mut parameter_aliases = BTreeSet::new();
+    let mut previous_was_parameter = false;
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed == "/// @nexus.type-parameter" {
+            previous_was_parameter = true;
+            continue;
+        }
+        if previous_was_parameter {
+            if let Some(rest) = trimmed.strip_prefix("type ")
+                && let Some((name, _)) = rest.split_once('=')
+            {
+                parameter_aliases.insert(name.trim().to_string());
+            }
+            previous_was_parameter = false;
+        }
+    }
+    if parameter_aliases.is_empty() {
+        return input.to_string();
+    }
+
+    let mut output = String::with_capacity(input.len());
+    for line in lines {
+        let mut rewritten = line.to_string();
+        let mut map_key_parameter = None;
+        for alias in &parameter_aliases {
+            let pattern = format!("map<{alias},");
+            if rewritten.contains(&pattern) {
+                rewritten = rewritten.replace(&pattern, "map<string,");
+                map_key_parameter = Some(alias.as_str());
+                break;
+            }
+        }
+        if let Some(alias) = map_key_parameter {
+            let indent = line
+                .chars()
+                .take_while(|character| character.is_whitespace())
+                .collect::<String>();
+            output.push_str(&indent);
+            output.push_str("/// @nexus.type-parameter-map-key \"");
+            output.push_str(alias);
+            output.push_str("\"\n");
+        }
+        output.push_str(&rewritten);
+        output.push('\n');
+    }
+    output
+}
+
+fn prepare_linked_metadata_workspace(input_paths: &[PathBuf]) -> Result<PreparedWitWorkspace> {
+    let temp_dir = tempfile::tempdir().map_err(|source| Error::WriteFile {
+        path: PathBuf::from("<tempdir>"),
+        source,
+    })?;
+    let package_root = temp_dir.path().join("main");
+    fs::create_dir_all(&package_root).map_err(|source| Error::WriteFile {
+        path: package_root.clone(),
+        source,
+    })?;
+    let stub_path = package_root.join("main.wit");
+    fs::write(
+        &stub_path,
+        "package temporary:root@0.0.0;\n\nworld system {\n}\n",
+    )
+    .map_err(|source| Error::WriteFile {
+        path: stub_path,
+        source,
+    })?;
+    copy_linked_inputs(&package_root, input_paths)?;
     Ok(PreparedWitWorkspace {
         temp_dir,
         package_root,
@@ -763,6 +847,7 @@ fn collect_interface_types(
         .to_string();
     for type_id in interface.types.values() {
         let type_def = &resolve.types[*type_id];
+        validate_type_parameter_directive(resolve, *type_id, type_def, path)?;
         if let Some(record) =
             build_wit_record_spec(resolve, *type_id, type_def, path, &interface_name, language)?
         {
@@ -844,6 +929,244 @@ fn collect_interface_types(
     Ok(())
 }
 
+fn validate_type_parameter_directive(
+    resolve: &Resolve,
+    type_id: TypeId,
+    type_def: &TypeDef,
+    path: &Path,
+) -> Result<()> {
+    let context = format!("type `{}`", wit_type_full_name(resolve, type_id));
+    let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+    if directive(&directives, "variant-style", path, &context)?.is_some()
+        && !matches!(type_def.kind, TypeDefKind::Variant(_))
+    {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.variant-style".to_string(),
+            reason: "is only supported on WIT variants".to_string(),
+        });
+    }
+    let Some(parameter) = directive(&directives, "type-parameter", path, &context)? else {
+        return Ok(());
+    };
+    if !parameter.args.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.type-parameter".to_string(),
+            reason: "does not take arguments".to_string(),
+        });
+    }
+    if !matches!(type_def.kind, TypeDefKind::Type(_)) {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.type-parameter".to_string(),
+            reason: "is only supported on WIT type aliases".to_string(),
+        });
+    }
+    for conflict in ["proto", "type", "function", "flatten-in-api", "omit"] {
+        if directive(&directives, conflict, path, &context)?.is_some() {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context,
+                directive: "@nexus.type-parameter".to_string(),
+                reason: format!("cannot be combined with `@nexus.{conflict}`"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_generic_model_semantics(spec: &ApiSpec, path: &Path, language: Language) -> Result<()> {
+    let invalid = |reason: String| Error::InvalidWit {
+        path: path.to_path_buf(),
+        reason,
+    };
+    for (_, record) in spec.records() {
+        let parameters = spec.record_type_parameters(&record.full_name, language);
+        let mut generated_names = BTreeMap::<String, String>::new();
+        for usage in &parameters {
+            if let Some(previous) = generated_names.insert(
+                usage.parameter.name.clone(),
+                usage.parameter.full_name.clone(),
+            ) && previous != usage.parameter.full_name
+            {
+                return Err(invalid(format!(
+                    "type parameters `{previous}` and `{}` both generate the name `{}`",
+                    usage.parameter.full_name, usage.parameter.name
+                )));
+            }
+        }
+        let function_parameter_names = generated_function_type_parameter_names(record, language);
+        if let Some(collision) = parameters
+            .iter()
+            .find(|usage| function_parameter_names.contains(usage.parameter.name.as_str()))
+        {
+            return Err(invalid(format!(
+                "record `{}` model type parameter `{}` conflicts with a generated function type parameter",
+                record.full_name, collision.parameter.name
+            )));
+        }
+        if record.source_type.is_some() && !parameters.is_empty() {
+            return Err(invalid(format!(
+                "proto-backed record `{}` cannot contain generic type parameters",
+                record.full_name
+            )));
+        }
+        for (field_name, function) in record.functions() {
+            let uses_parameter = match &function.result {
+                FunctionResultSpec::Authored(result) => {
+                    !spec.type_parameters(result, language).is_empty()
+                }
+                FunctionResultSpec::Annotation(_) => false,
+            } || match &function.args {
+                FunctionArgsSpec::Varargs { prefix, .. } | FunctionArgsSpec::Fixed(prefix) => {
+                    prefix
+                        .iter()
+                        .any(|arg| !spec.type_parameters(&arg.field_type, language).is_empty())
+                }
+            } || function
+                .alternate_type
+                .as_ref()
+                .is_some_and(|alternate| !spec.type_parameters(alternate, language).is_empty());
+            if uses_parameter {
+                return Err(invalid(format!(
+                    "record `{}` field `{field_name}` uses a type parameter in function-signature metadata, which is not supported",
+                    record.full_name
+                )));
+            }
+        }
+    }
+
+    for (_, variant) in spec.variants() {
+        let parameters = spec.variant_type_parameters(&variant.full_name, language);
+        let mut generated_names = BTreeMap::<String, String>::new();
+        for usage in parameters {
+            if let Some(previous) = generated_names.insert(
+                usage.parameter.name.clone(),
+                usage.parameter.full_name.clone(),
+            ) && previous != usage.parameter.full_name
+            {
+                return Err(invalid(format!(
+                    "variant `{}` uses type parameters `{previous}` and `{}` that both generate the name `{}`",
+                    variant.full_name, usage.parameter.full_name, usage.parameter.name
+                )));
+            }
+        }
+    }
+
+    for service in &spec.services {
+        for operation in &service.operations {
+            let mut generated_names = BTreeMap::<String, String>::new();
+            let operation_parameters = operation
+                .input_type()
+                .into_iter()
+                .chain(operation.output_type())
+                .flat_map(|value| spec.type_parameters(value, language));
+            for usage in operation_parameters {
+                if let Some(previous) = generated_names.insert(
+                    usage.parameter.name.clone(),
+                    usage.parameter.full_name.clone(),
+                ) && previous != usage.parameter.full_name
+                {
+                    return Err(invalid(format!(
+                        "operation `{}` uses type parameters `{previous}` and `{}` that both generate the name `{}`",
+                        operation.name, usage.parameter.full_name, usage.parameter.name
+                    )));
+                }
+            }
+        }
+        for resource in &service.resources {
+            let resource_is_generic =
+                resource
+                    .fields
+                    .iter()
+                    .any(|field| !spec.type_parameters(&field.field_type, language).is_empty())
+                    || resource.methods.iter().any(|method| {
+                        method.params.iter().any(|param| {
+                            !spec.type_parameters(&param.field_type, language).is_empty()
+                        }) || method.result.as_ref().is_some_and(|result| {
+                            !spec
+                                .type_parameters(&result.result_type, language)
+                                .is_empty()
+                        })
+                    });
+            if resource_is_generic {
+                return Err(invalid(format!(
+                    "resource `{}` cannot contain generic type parameters",
+                    resource.name
+                )));
+            }
+
+            for method in &resource.methods {
+                let Some(operation_name) = &method.operation_name else {
+                    continue;
+                };
+                let Some(operation) = service.operation(operation_name) else {
+                    continue;
+                };
+                let operation_is_generic = operation
+                    .input_type()
+                    .is_some_and(|input| !spec.type_parameters(input, language).is_empty())
+                    || operation
+                        .output_type()
+                        .is_some_and(|output| !spec.type_parameters(output, language).is_empty());
+                if operation_is_generic {
+                    return Err(invalid(format!(
+                        "resource-bound operation `{operation_name}` cannot use generic type parameters"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn generated_function_type_parameter_names(
+    record: &RecordSpec,
+    language: Language,
+) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for (field_name, function) in record.functions() {
+        let generated_name = record.field_name_override(field_name).unwrap_or(field_name);
+        match language {
+            Language::TypeScript => {
+                let field_name = generated_name.to_lower_camel_case();
+                let stem = field_name
+                    .strip_suffix("Type")
+                    .or_else(|| field_name.strip_suffix("Name"))
+                    .unwrap_or(&field_name)
+                    .to_upper_camel_case();
+                names.insert(format!("{stem}Fn"));
+                names.insert(format!("{stem}Value"));
+                names.insert(format!("{stem}Args"));
+            }
+            Language::Go => {
+                names.insert(format!("{}F", generated_name.to_upper_camel_case()));
+            }
+            Language::Dotnet => {
+                names.insert("TWorkflow".to_string());
+                if function.result_type_parameter.is_some() {
+                    names.insert("TResult".to_string());
+                }
+            }
+            Language::Python => {
+                let prefix = generated_name.to_snake_case().to_upper_camel_case();
+                names.insert(format!("{prefix}Arg"));
+                names.insert(format!("{prefix}Args"));
+                names.insert("SelfType".to_string());
+                if let Some(result) = &function.result_type_parameter {
+                    names.insert(result.clone());
+                }
+            }
+            Language::Java | Language::Ruby => {}
+        }
+    }
+    names
+}
+
 fn build_wit_enum_spec(resolve: &Resolve, type_id: TypeId, type_def: &TypeDef) -> Option<EnumSpec> {
     let TypeDefKind::Enum(enumeration) = &type_def.kind else {
         return None;
@@ -904,34 +1227,126 @@ fn build_wit_variant_spec(
 
     let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
     let context = format!("type `{}`", wit_type_full_name(resolve, type_id));
+    let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+    let python_style = build_python_variant_style(&directives, path, &context)?;
+    let mut payload_records = BTreeSet::new();
+    let cases = variant
+        .cases
+        .iter()
+        .map(|case| {
+            let case_context = format!("{context} case `{}`", case.name);
+            let case_directives =
+                parse_directives(case.docs.contents.as_deref(), path, &case_context)?;
+            reject_misplaced_variant_style(&case_directives, path, &case_context)?;
+            let mut payload = case
+                .ty
+                .as_ref()
+                .map(|ty| {
+                    resolve_authored_field_type_spec(resolve, ty, path, &case_context).map(
+                        |field_type| authored_field_type_for_language(field_type, language),
+                    )
+                })
+                .transpose()?;
+            if let Some(alias_name) = directive_value(
+                &case_directives,
+                "type-parameter-map-key",
+                path,
+                &case_context,
+                "value",
+            )? {
+                let Some(TypeSpec::Map(_, value)) = payload else {
+                    return Err(Error::InvalidWit {
+                        path: path.to_path_buf(),
+                        reason: format!("{case_context} has invalid generic map-key metadata"),
+                    });
+                };
+                let key = resolve_named_wit_type(
+                    resolve,
+                    type_def.owner,
+                    &alias_name,
+                    path,
+                    &case_context,
+                    "@nexus.type-parameter-map-key",
+                )?;
+                payload = Some(TypeSpec::Map(Box::new(key), value));
+            }
+            if python_style == Some(PythonVariantStyle::PayloadUnion) {
+                let direct_record_name = case.ty.as_ref().and_then(|ty| match ty {
+                    Type::Id(id) if matches!(resolve.types[*id].kind, TypeDefKind::Record(_)) => {
+                        Some(wit_type_full_name(resolve, *id))
+                    }
+                    _ => None,
+                });
+                let (Some(TypeSpec::Record(_)), Some(record_name)) =
+                    (payload.as_ref(), direct_record_name)
+                else {
+                    return Err(Error::InvalidWitDirective {
+                        path: path.to_path_buf(),
+                        context: context.clone(),
+                        directive: "@nexus.variant-style".to_string(),
+                        reason: format!(
+                            "Python `payload-union` requires case `{}` to have a direct WIT record payload",
+                            case.name
+                        ),
+                    });
+                };
+                if !payload_records.insert(record_name.clone()) {
+                    return Err(Error::InvalidWitDirective {
+                        path: path.to_path_buf(),
+                        context: context.clone(),
+                        directive: "@nexus.variant-style".to_string(),
+                        reason: format!(
+                            "Python `payload-union` requires distinct payload records; `{}` is used more than once",
+                            record_name
+                        ),
+                    });
+                }
+            }
+            Ok(VariantCaseSpec {
+                name: case.name.clone(),
+                payload,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(Some(VariantSpec {
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
-        cases: variant
-            .cases
-            .iter()
-            .map(|case| {
-                Ok(VariantCaseSpec {
-                    name: case.name.clone(),
-                    payload: case
-                        .ty
-                        .as_ref()
-                        .map(|ty| {
-                            resolve_authored_field_type_spec(
-                                resolve,
-                                ty,
-                                path,
-                                &format!("{context} case `{}`", case.name),
-                            )
-                            .map(|field_type| {
-                                authored_field_type_for_language(field_type, language)
-                            })
-                        })
-                        .transpose()?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?,
+        python_style,
+        cases,
     }))
+}
+
+fn build_python_variant_style(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<PythonVariantStyle>> {
+    let Some(directive) = directive(directives, "variant-style", path, context)? else {
+        return Ok(None);
+    };
+    if directive.args.keys().any(|key| key != "python") {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.variant-style".to_string(),
+            reason: "only the `python` argument is supported".to_string(),
+        });
+    }
+    match directive.value("python") {
+        Some("payload-union") => Ok(Some(PythonVariantStyle::PayloadUnion)),
+        Some(value) => Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.variant-style".to_string(),
+            reason: format!("unsupported Python variant style `{value}`; expected `payload-union`"),
+        }),
+        None => Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.variant-style".to_string(),
+            reason: "missing required `python` argument".to_string(),
+        }),
+    }
 }
 
 fn build_wit_record_spec(
@@ -1096,6 +1511,8 @@ fn build_fields_from_record(
     for field in &record.fields {
         let field_context = format!("{context} field `{}`", field.name);
         let directives = parse_directives(field.docs.contents.as_deref(), path, &field_context)?;
+        reject_misplaced_type_parameter(&directives, path, &field_context)?;
+        reject_misplaced_variant_style(&directives, path, &field_context)?;
         let generated_field_name = directive(&directives, "name", path, &field_context)?
             .and_then(|directive| directive_language_value(directive, language))
             .unwrap_or(&field.name)
@@ -1177,10 +1594,33 @@ fn build_fields_from_record(
         let field_doc = directive(&directives, "doc", path, &field_context)?
             .map(directive_language_string)
             .filter(|doc| !doc.is_empty());
-        let field_type = authored_field_type_for_language(
+        let mut field_type = authored_field_type_for_language(
             resolve_authored_field_type_spec(resolve, &field.ty, path, &field_context)?,
             language,
         );
+        if let Some(alias_name) = directive_value(
+            &directives,
+            "type-parameter-map-key",
+            path,
+            &field_context,
+            "value",
+        )? {
+            let TypeSpec::Map(_, value) = field_type else {
+                return Err(Error::InvalidWit {
+                    path: path.to_path_buf(),
+                    reason: format!("{field_context} has invalid generic map-key metadata"),
+                });
+            };
+            let key = resolve_named_wit_type(
+                resolve,
+                owner,
+                &alias_name,
+                path,
+                &field_context,
+                "@nexus.type-parameter-map-key",
+            )?;
+            field_type = TypeSpec::Map(Box::new(key), value);
+        }
         let field_default =
             build_field_default(resolve, &field.ty, default_directive, path, &field_context)?;
         let required = !is_optional_type(resolve, &field.ty) && field_default.is_none();
@@ -1348,6 +1788,12 @@ fn resolve_authored_field_type_spec(
             let type_context = format!("{context} type `{type_name}`");
             let directives =
                 parse_directives(type_def.docs.contents.as_deref(), path, &type_context)?;
+            if directive(&directives, "type-parameter", path, &type_context)?.is_some() {
+                return Ok(TypeSpec::TypeParameter(TypeParameterSpec {
+                    name: type_name.to_upper_camel_case(),
+                    full_name: wit_type_full_name(resolve, *id),
+                }));
+            }
             if let Some(proto_name) = find_proto_name_for_type_def(type_def, path, &type_context)? {
                 if let Some(resource_name) =
                     find_owned_resource_name_for_type_def(resolve, type_def)
@@ -1384,20 +1830,35 @@ fn resolve_authored_field_type_spec(
                         })
                         .collect::<Result<Vec<_>>>()?,
                 )),
-                TypeDefKind::Map(key, value) => Ok(TypeSpec::Map(
-                    Box::new(resolve_authored_field_type_spec(
-                        resolve,
-                        key,
+                TypeDefKind::Map(key, value) => {
+                    let key = if let Some(alias_name) = directive_value(
+                        &directives,
+                        "type-parameter-map-key",
                         path,
                         &type_context,
-                    )?),
-                    Box::new(resolve_authored_field_type_spec(
-                        resolve,
-                        value,
-                        path,
-                        &type_context,
-                    )?),
-                )),
+                        "value",
+                    )? {
+                        resolve_named_wit_type(
+                            resolve,
+                            type_def.owner,
+                            &alias_name,
+                            path,
+                            &type_context,
+                            "@nexus.type-parameter-map-key",
+                        )?
+                    } else {
+                        resolve_authored_field_type_spec(resolve, key, path, &type_context)?
+                    };
+                    Ok(TypeSpec::Map(
+                        Box::new(key),
+                        Box::new(resolve_authored_field_type_spec(
+                            resolve,
+                            value,
+                            path,
+                            &type_context,
+                        )?),
+                    ))
+                }
                 TypeDefKind::Result(result) => Ok(TypeSpec::Result {
                     ok: result
                         .ok
@@ -2429,6 +2890,8 @@ fn build_service(
     let interface_name = interface_export_name(key, interface);
     let context = format!("interface `{interface_name}`");
     let directives = parse_directives(interface.docs.contents.as_deref(), path, &context)?;
+    reject_misplaced_type_parameter(&directives, path, &context)?;
+    reject_misplaced_variant_style(&directives, path, &context)?;
     let endpoint = directive_value_for_language(&directives, "endpoint", path, &context, language)?;
     let service_name = interface_name.to_upper_camel_case();
     let wire_service_name = build_wire_service_name(&directives, path, &context, &service_name)?;
@@ -2555,6 +3018,16 @@ fn build_resource(
     let constructor = interface.functions.values().find(
         |function| matches!(function.kind, FunctionKind::Constructor(id) if id == resource_id),
     );
+    if let Some(constructor) = constructor {
+        let constructor_context = format!("{context} constructor");
+        let directives = parse_directives(
+            constructor.docs.contents.as_deref(),
+            path,
+            &constructor_context,
+        )?;
+        reject_misplaced_type_parameter(&directives, path, &constructor_context)?;
+        reject_misplaced_variant_style(&directives, path, &constructor_context)?;
+    }
     let fields = match constructor {
         Some(constructor) => constructor
             .params
@@ -2627,6 +3100,8 @@ fn build_resource_method(
         method_name.to_upper_camel_case()
     );
     let directives = parse_directives(function.docs.contents.as_deref(), path, &context)?;
+    reject_misplaced_type_parameter(&directives, path, &context)?;
+    reject_misplaced_variant_style(&directives, path, &context)?;
     let params = function
         .params
         .iter()
@@ -2732,6 +3207,8 @@ fn build_operation(
     let operation_name = function.name.to_upper_camel_case();
     let context = format!("{service_context} operation `{operation_name}`");
     let directives = parse_directives(function.docs.contents.as_deref(), path, &context)?;
+    reject_misplaced_type_parameter(&directives, path, &context)?;
+    reject_misplaced_variant_style(&directives, path, &context)?;
     let wire_operation_name =
         build_wire_operation_name(&directives, path, &context, &operation_name)?;
     let experimental = experimental_directive(&directives, path, &context)?;
@@ -3170,6 +3647,38 @@ pub(crate) fn directive<'a>(
     Ok(first)
 }
 
+fn reject_misplaced_type_parameter(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<()> {
+    if directive(directives, "type-parameter", path, context)?.is_some() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.type-parameter".to_string(),
+            reason: "is only supported on WIT type aliases".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn reject_misplaced_variant_style(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<()> {
+    if directive(directives, "variant-style", path, context)?.is_some() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.variant-style".to_string(),
+            reason: "is only supported on WIT variants".to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn directive_language_value<'a>(directive: &'a Directive, language: Language) -> Option<&'a str> {
     directive.value(language_key(language))
 }
@@ -3387,6 +3896,15 @@ mod tests {
         .unwrap()
     }
 
+    fn parse_result(language: Language, wit: &str) -> Result<ApiSpec, Error> {
+        crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
+            language,
+            wit,
+            PathBuf::from("inline.wit"),
+            &[linked_inputs_path()],
+        )
+    }
+
     fn validate(language: Language, wit: &str) -> Result<(), Error> {
         let spec = parse(language, wit);
         let descriptors = descriptors();
@@ -3399,6 +3917,350 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("nex-gen-{label}-{unique}"))
+    }
+
+    const GENERIC_WIT: &str = r#"
+package temporal:nexus@1.0.0;
+
+world system { export generic-service; }
+
+interface generic-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.type-parameter
+  type context-t = placeholder;
+
+  /// @nexus.type-parameter
+  type output-t = placeholder;
+
+  record inner { value: context-t, }
+
+  record request {
+    nested: inner,
+    values: list<context-t>,
+  }
+
+  record response {
+    context: context-t,
+    output: output-t,
+  }
+
+  complete: func(request: request) -> response;
+}
+"#;
+
+    #[test]
+    fn parses_and_inferrs_generic_record_parameters_by_alias_identity() {
+        let spec = parse(Language::TypeScript, GENERIC_WIT);
+        let request = spec.record("generic-service.request").unwrap();
+        let request_parameters =
+            spec.record_type_parameters(&request.full_name, Language::TypeScript);
+        assert_eq!(request_parameters.len(), 1);
+        assert_eq!(request_parameters[0].parameter.name, "ContextT");
+        assert_eq!(
+            request_parameters[0].parameter.full_name,
+            "generic-service.context-t"
+        );
+
+        let response = spec.record("generic-service.response").unwrap();
+        let response_parameters =
+            spec.record_type_parameters(&response.full_name, Language::TypeScript);
+        assert_eq!(
+            response_parameters
+                .iter()
+                .map(|usage| usage.parameter.name.as_str())
+                .collect::<Vec<_>>(),
+            ["ContextT", "OutputT"]
+        );
+    }
+
+    #[test]
+    fn rejects_type_parameter_directive_on_records_and_fields() {
+        let record = GENERIC_WIT.replace(
+            "record inner { value: context-t, }",
+            "/// @nexus.type-parameter\n  record inner { value: context-t, }",
+        );
+        assert!(parse_result(Language::Python, &record).is_err());
+
+        let field = GENERIC_WIT.replace(
+            "nested: inner,",
+            "/// @nexus.type-parameter\n    nested: inner,",
+        );
+        assert!(parse_result(Language::Python, &field).is_err());
+    }
+
+    #[test]
+    fn infers_comparable_constraint_for_map_key_parameters() {
+        let wit = GENERIC_WIT.replace(
+            "/// @nexus.type-parameter\n  type output-t = placeholder;",
+            "/// @nexus.type-parameter\n  type output-t = placeholder;\n\n  /// @nexus.type-parameter\n  type key-t = string;\n\n  type keyed-values = map<key-t, string>;",
+        ).replace(
+            "values: list<context-t>,",
+            "values: list<context-t>,\n    by-key: keyed-values,",
+        );
+        let spec = parse(Language::Go, &wit);
+        let parameters = spec.record_type_parameters("generic-service.request", Language::Go);
+        assert_eq!(parameters.len(), 2);
+        assert_eq!(parameters[1].parameter.name, "KeyT");
+        assert!(parameters[1].requires_comparable);
+    }
+
+    #[test]
+    fn language_type_overrides_and_omitted_fields_do_not_infer_parameters() {
+        let wit = GENERIC_WIT.replace(
+            "record inner { value: context-t, }",
+            r#"record inner { value: context-t, }
+
+  record overridden {
+    /// @nexus.type typescript="string"
+    value: context-t,
+    /// @nexus.omit
+    hidden: output-t,
+  }"#,
+        );
+        let typescript = parse(Language::TypeScript, &wit);
+        assert!(
+            typescript
+                .record_type_parameters("generic-service.overridden", Language::TypeScript)
+                .is_empty()
+        );
+
+        let python = parse(Language::Python, &wit);
+        let parameters =
+            python.record_type_parameters("generic-service.overridden", Language::Python);
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0].parameter.name, "ContextT");
+    }
+
+    #[test]
+    fn infers_type_parameters_through_nested_variants_and_rejects_resources() {
+        let variant = GENERIC_WIT
+            .replace(
+                "/// @nexus.type-parameter\n  type output-t = placeholder;",
+                "/// @nexus.type-parameter\n  type output-t = placeholder;\n\n  /// @nexus.type-parameter\n  type key-t = string;",
+            )
+            .replace(
+                "record inner { value: context-t, }",
+                "variant inner-result { value(context-t), }\n\n  variant outer-result {\n    nested(inner-result),\n    keyed(map<key-t, string>),\n    output(output-t),\n  }\n\n  record inner { value: context-t, }",
+            )
+            .replace(
+                "context: context-t,\n    output: output-t,",
+                "result-value: outer-result,\n    repeated: context-t,",
+            );
+        let spec = parse(Language::Go, &variant);
+        let inner = spec.variant_type_parameters("generic-service.inner-result", Language::Go);
+        assert_eq!(inner[0].parameter.name, "ContextT");
+        let outer = spec.variant_type_parameters("generic-service.outer-result", Language::Go);
+        assert_eq!(
+            outer
+                .iter()
+                .map(|usage| usage.parameter.name.as_str())
+                .collect::<Vec<_>>(),
+            ["ContextT", "KeyT", "OutputT"]
+        );
+        assert!(outer[1].requires_comparable);
+        let response = spec.record_type_parameters("generic-service.response", Language::Go);
+        assert_eq!(
+            response
+                .iter()
+                .map(|usage| usage.parameter.name.as_str())
+                .collect::<Vec<_>>(),
+            ["ContextT", "KeyT", "OutputT"]
+        );
+
+        let resource = GENERIC_WIT.replace(
+            "record inner { value: context-t, }",
+            "resource holder { constructor(value: context-t); }\n\n  record inner { value: context-t, }",
+        );
+        let error = parse_result(Language::Dotnet, &resource).unwrap_err();
+        assert!(error.to_string().contains("resource"));
+    }
+
+    #[test]
+    fn validates_python_payload_union_variant_style() {
+        let styled = GENERIC_WIT.replace(
+            "record inner { value: context-t, }",
+            r#"record success { value: context-t, }
+  record failure { message: string, }
+
+  /// @nexus.variant-style python="payload-union"
+  variant completion { success(success), failure(failure), }
+
+  record inner { value: context-t, }"#,
+        );
+        let spec = parse(Language::Python, &styled);
+        let completion = spec.variant("generic-service.completion").unwrap();
+        assert_eq!(
+            completion.python_style,
+            Some(crate::spec::PythonVariantStyle::PayloadUnion)
+        );
+
+        for (label, replacement) in [
+            (
+                "missing payload",
+                "variant completion { success, failure(failure), }",
+            ),
+            (
+                "scalar payload",
+                "variant completion { success(context-t), failure(failure), }",
+            ),
+            (
+                "repeated record",
+                "variant completion { success(success), failure(success), }",
+            ),
+        ] {
+            let invalid = styled.replace(
+                "variant completion { success(success), failure(failure), }",
+                replacement,
+            );
+            assert!(
+                parse_result(Language::Python, &invalid).is_err(),
+                "expected {label} to fail"
+            );
+        }
+
+        let aliased_payload = styled.replace(
+            "variant completion { success(success), failure(failure), }",
+            "type success-alias = success;\n  variant completion { success(success-alias), failure(failure), }",
+        );
+        assert!(parse_result(Language::Python, &aliased_payload).is_err());
+
+        let container_payload = styled.replace(
+            "variant completion { success(success), failure(failure), }",
+            "variant completion { success(list<success>), failure(failure), }",
+        );
+        assert!(parse_result(Language::Python, &container_payload).is_err());
+
+        for directive in [
+            "@nexus.variant-style python=\"tagged\"",
+            "@nexus.variant-style typescript=\"payload-union\"",
+            "@nexus.variant-style",
+        ] {
+            let invalid =
+                styled.replace("@nexus.variant-style python=\"payload-union\"", directive);
+            assert!(parse_result(Language::Python, &invalid).is_err());
+        }
+
+        let misplaced = GENERIC_WIT.replace(
+            "record inner { value: context-t, }",
+            "/// @nexus.variant-style python=\"payload-union\"\n  record inner { value: context-t, }",
+        );
+        assert!(parse_result(Language::Python, &misplaced).is_err());
+    }
+
+    #[test]
+    fn rejects_model_and_function_type_parameter_name_collisions() {
+        let wit = r#"
+package temporal:nexus@1.0.0;
+
+world system { export generic-service; }
+
+interface functions {
+  type placeholder = string;
+
+  function-call: func(value: string) -> string;
+
+  /// @nexus.function signature="function-call"
+  type executable-function = placeholder;
+}
+
+interface generic-service {
+  use functions.{executable-function};
+
+  /// @nexus.type-parameter
+  type function-fn = string;
+
+  record request {
+    generic: function-fn,
+    function: executable-function,
+  }
+
+  record response { value: string, }
+  execute: func(request: request) -> response;
+}
+"#;
+        let error = parse_result(Language::TypeScript, wit).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("generated function type parameter"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_generated_parameter_name_collisions_in_variants_and_operations() {
+        let base = r#"
+package temporal:nexus@1.0.0;
+
+world system { export generic-service; }
+
+interface left {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+  /// @nexus.type-parameter
+  type value-t = placeholder;
+  record payload { value: value-t, }
+}
+
+interface right {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+  /// @nexus.type-parameter
+  type value-t = placeholder;
+  record payload { value: value-t, }
+}
+
+interface generic-service {
+  use left.{payload as left-payload};
+  use right.{payload as right-payload};
+  record request { value: left-payload, }
+  record response { value: right-payload, }
+  execute: func(request: request) -> response;
+}
+"#;
+        let operation_error = parse_result(Language::TypeScript, base).unwrap_err();
+        assert!(operation_error.to_string().contains("operation `Execute`"));
+
+        let variant = base.replace(
+            "record request { value: left-payload, }",
+            "variant collision { left(left-payload), right(right-payload), }\n  record request { value: left-payload, }",
+        );
+        let variant_error = parse_result(Language::TypeScript, &variant).unwrap_err();
+        assert!(
+            variant_error
+                .to_string()
+                .contains("variant `generic-service.collision`")
+        );
+    }
+
+    #[test]
+    fn rejects_type_parameter_arguments_and_conflicting_directives() {
+        let arguments = GENERIC_WIT.replace(
+            "@nexus.type-parameter\n  type context-t",
+            "@nexus.type-parameter name=\"T\"\n  type context-t",
+        );
+        assert!(parse_result(Language::Go, &arguments).is_err());
+
+        let conflict = GENERIC_WIT.replace(
+            "@nexus.type-parameter\n  type context-t",
+            "@nexus.type-parameter\n  /// @nexus.type typescript=\"string\"\n  type context-t",
+        );
+        assert!(parse_result(Language::TypeScript, &conflict).is_err());
+    }
+
+    #[test]
+    fn rejects_generic_proto_backed_records_transitively() {
+        let wit = GENERIC_WIT
+            .replace(
+                "record inner { value: context-t, }",
+                "record inner { value: context-t, }\n\n  variant wrapped { inner(inner), }",
+            )
+            .replace("nested: inner,", "nested: wrapped,")
+            .replace(
+                "record request {",
+                "/// @nexus.proto \"example.GenericRequest\"\n  record request {",
+            );
+        let error = parse_result(Language::Dotnet, &wit).unwrap_err();
+        assert!(error.to_string().contains("proto-backed record"));
     }
 
     #[test]
