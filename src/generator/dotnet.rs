@@ -1880,13 +1880,21 @@ pub(crate) fn generate(
     support: &crate::SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
-    match &tree.root {
+    let mut generated = match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
             generate_leaf(&leaf.spec, &support_fragments, mode)
         }
         ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode),
+    }?;
+    // The shared JSON-Schema runtime, once per package at the root. Absent for
+    // WIT/proto inputs, which carry their own support files and no validator.
+    if let Some((path, contents)) =
+        crate::generator::json_schema::dotnet_definitions::render_definitions_file(tree)
+    {
+        insert_generated_file(&mut generated.files, path, contents)?;
     }
+    Ok(generated)
 }
 
 fn generate_leaf(
@@ -3628,7 +3636,7 @@ fn support_fragment_path(fragment: &SupportFragmentSpec) -> Result<PathBuf> {
     Ok(PathBuf::from("Support").join(file_name))
 }
 
-fn dotnet_namespace(api_plan: &PlannedSpec) -> String {
+pub(in crate::generator) fn dotnet_namespace(api_plan: &PlannedSpec) -> String {
     if !api_plan.module_path.is_root() {
         return dotnet_module_namespace(&api_plan.module_path);
     }

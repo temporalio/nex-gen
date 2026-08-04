@@ -7,7 +7,7 @@ collisions are handled at the file level. Driven by **P14** (one module
 per input file; merge recursion, not files) and local-file-only external
 refs; the reference semantics that feed it live in [[ref]].
 
-## Output mirrors the input directory tree (Python / TypeScript / Java)
+## Output mirrors the input directory tree (Python / TypeScript / Java / .NET)
 
 Each input schema file `<subpath>/<name>.<ext>` becomes a **per-input
 module directory** `<subpath>/<name>/` under the output package root,
@@ -82,6 +82,7 @@ Per input file `<subpath>/<name>`:
 | **TypeScript** | `<subpath>/<name>/models.ts` (+ `services.ts`) | `definitions.ts` (package root) | — | `index.ts` per directory (barrels chain upward) |
 | **Go** | `<module>.go` in the one flat package (`<module>` = flattened path) | `definitions.go` (same package) | — | — (capitalized = exported) |
 | **Java** | one `<ClassName>.java` per exported class, in a package mirroring `<subpath>/<name>/` | each runtime class its own file in the root package (`ValidationException.java`, `Violation.java`, `SpecNumbers.java`, …) | — | — (`public` = exported) |
+| **.NET** | `<Subpath>/<Name>/Models.cs` (+ `Services.cs`) | `Definitions.cs` (package root) | — | — (`public` = exported) |
 
 **`_recursive` is Python-only and is a single file at the package root**
 (`<package>/_recursive.py`), **never** per-input. It holds every hoisted
@@ -98,14 +99,21 @@ All output lands at the package root (no per-input subdirectory, no
 | **TypeScript** | `models.ts` (+ `services.ts`), `definitions.ts`, `index.ts` |
 | **Go** | one `<package>.go` (types and services) + the shared `definitions.go` |
 | **Java** | one `.java` per public class + the runtime classes; nothing to aggregate |
+| **.NET** | `Models.cs` (+ `Services.cs`), `Definitions.cs`; nothing to aggregate |
 
 ## The shared `definitions` file
 
 Holds the schema-independent runtime, defined once per package (`definitions.py`
-/ `definitions.ts` / `definitions.go`; Java splits it into one class file each). For
-Python/TypeScript/Java it sits at the package root; for Go it sits in the
-one flat package, always as its own `definitions.go` file regardless of how
-many input files that package aggregates.
+/ `definitions.ts` / `definitions.go` / `Definitions.cs`; Java splits it into one
+class file each). For Python/TypeScript/Java/.NET it sits at the package root; for
+Go it sits in the one flat package, always as its own `definitions.go` file
+regardless of how many input files that package aggregates.
+
+.NET declares the runtime in the **longest namespace prefix common to every
+emitted model namespace** — the input's own namespace for a single-input package,
+the shared root for a multi-input one (e.g. `NexGen.Generated` for `kb`, whose
+leaves span `NexGen.Generated.Kb` and `NexGen.Generated.Content.Block`), which C#
+resolves implicitly from any descendant namespace.
 
 - Error types — a **single aggregating error holding a list of
   `Violation { path, reason }`**, identical in spirit across all four
@@ -114,8 +122,10 @@ many input files that package aggregates.
   (its `Error()` surfaces every violation — *not* `errors.Join`); TS a
   `ValidationError` class extending `Error` over `Violation[]` (*not* a
   built-in `AggregateError`); Java `ValidationException extends
-  JsonMappingException` holding `List<Violation>`. One error type, every
-  violation surfaced in one shot (P11).
+  JsonMappingException` holding `List<Violation>`; .NET a
+  `ValidationException : JsonException` over `IReadOnlyList<Violation>` (*not* an
+  `AggregateException`), whose message matches Go's `ValidationError.Error()`
+  verbatim. One error type, every violation surfaced in one shot (P11).
 - Spec-number helpers — `parseSpecInteger` (Go), `SpecInt` /
   `_parse_spec_integer` (Python), `SpecNumbers.specLong` (Java), TS's
   safe-integer check.
