@@ -41,10 +41,10 @@ namespace NexGen.Generated.Content.Page
         [JsonIgnore]
         public IReadOnlyList<global::NexGen.Generated.Content.Block.Block>? Blocks
         {
-            get => ReadOptionalValue<List<global::NexGen.Generated.Content.Block.Block>?>("blocks");
+            get => JsonRuntime.ReadOptionalValue<List<global::NexGen.Generated.Content.Block.Block>?>(AdditionalProperties, "blocks");
             init
             {
-                RejectNull("blocks", value);
+                JsonRuntime.RejectNull("blocks", value);
                 AdditionalProperties["blocks"] = value;
             }
         }
@@ -63,85 +63,8 @@ namespace NexGen.Generated.Content.Page
             }
             if (AdditionalProperties.TryGetValue("blocks", out var blocksValue))
             {
-                RejectNull("blocks", blocksValue);
-                _ = ReadJsonValue<List<global::NexGen.Generated.Content.Block.Block>?>(blocksValue);
-            }
-        }
-
-        private T? ReadOptionalValue<T>(string name, T? defaultValue = default)
-        {
-            if (!AdditionalProperties.TryGetValue(name, out var value))
-            {
-                return defaultValue;
-            }
-            return ReadJsonValue<T>(value);
-        }
-
-        private static T? ReadJsonValue<T>(object? value)
-        {
-            if (value is null)
-            {
-                return default;
-            }
-            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
-            {
-                return (T?)(object?)ReadJsonInteger(value);
-            }
-            if (value is JsonElement json)
-            {
-                return json.Deserialize<T>();
-            }
-            if (value is T typed)
-            {
-                return typed;
-            }
-            return (T)value;
-        }
-
-        private static long? ReadJsonInteger(object? value)
-        {
-            const double maxSafeInteger = 9007199254740991d;
-            if (value is null)
-            {
-                return default;
-            }
-            double number;
-            if (value is JsonElement json)
-            {
-                if (json.ValueKind == JsonValueKind.Null)
-                {
-                    return default;
-                }
-                if (json.ValueKind != JsonValueKind.Number)
-                {
-                    throw new JsonException("expected integer");
-                }
-                number = json.GetDouble();
-            }
-            else if (value is long longValue)
-            {
-                number = longValue;
-            }
-            else if (value is int intValue)
-            {
-                number = intValue;
-            }
-            else
-            {
-                throw new JsonException("expected integer");
-            }
-            if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)
-            {
-                throw new JsonException("expected integer");
-            }
-            return (long)number;
-        }
-
-        private static void RejectNull(string name, object? value)
-        {
-            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
-            {
-                throw new JsonException($"{name}: explicit null not allowed");
+                JsonRuntime.RejectNull("blocks", blocksValue);
+                _ = JsonRuntime.ReadJsonValue<List<global::NexGen.Generated.Content.Block.Block>?>(blocksValue);
             }
         }
     }
@@ -164,10 +87,10 @@ namespace NexGen.Generated.Content.Page
         [JsonIgnore]
         public long? WordCount
         {
-            get => ReadOptionalValue<long?>("wordCount");
+            get => JsonRuntime.ReadOptionalValue<long?>(AdditionalProperties, "wordCount");
             init
             {
-                RejectNull("wordCount", value);
+                JsonRuntime.RejectNull("wordCount", value);
                 AdditionalProperties["wordCount"] = value;
             }
         }
@@ -186,85 +109,8 @@ namespace NexGen.Generated.Content.Page
             }
             if (AdditionalProperties.TryGetValue("wordCount", out var wordCountValue))
             {
-                RejectNull("wordCount", wordCountValue);
-                _ = ReadJsonValue<long?>(wordCountValue);
-            }
-        }
-
-        private T? ReadOptionalValue<T>(string name, T? defaultValue = default)
-        {
-            if (!AdditionalProperties.TryGetValue(name, out var value))
-            {
-                return defaultValue;
-            }
-            return ReadJsonValue<T>(value);
-        }
-
-        private static T? ReadJsonValue<T>(object? value)
-        {
-            if (value is null)
-            {
-                return default;
-            }
-            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
-            {
-                return (T?)(object?)ReadJsonInteger(value);
-            }
-            if (value is JsonElement json)
-            {
-                return json.Deserialize<T>();
-            }
-            if (value is T typed)
-            {
-                return typed;
-            }
-            return (T)value;
-        }
-
-        private static long? ReadJsonInteger(object? value)
-        {
-            const double maxSafeInteger = 9007199254740991d;
-            if (value is null)
-            {
-                return default;
-            }
-            double number;
-            if (value is JsonElement json)
-            {
-                if (json.ValueKind == JsonValueKind.Null)
-                {
-                    return default;
-                }
-                if (json.ValueKind != JsonValueKind.Number)
-                {
-                    throw new JsonException("expected integer");
-                }
-                number = json.GetDouble();
-            }
-            else if (value is long longValue)
-            {
-                number = longValue;
-            }
-            else if (value is int intValue)
-            {
-                number = intValue;
-            }
-            else
-            {
-                throw new JsonException("expected integer");
-            }
-            if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)
-            {
-                throw new JsonException("expected integer");
-            }
-            return (long)number;
-        }
-
-        private static void RejectNull(string name, object? value)
-        {
-            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
-            {
-                throw new JsonException($"{name}: explicit null not allowed");
+                JsonRuntime.RejectNull("wordCount", wordCountValue);
+                _ = JsonRuntime.ReadJsonValue<long?>(wordCountValue);
             }
         }
     }

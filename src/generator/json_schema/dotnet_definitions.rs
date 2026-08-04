@@ -110,6 +110,7 @@ fn render(namespace: &str) -> String {
 #nullable enable
 #pragma warning disable CS1591
 
+using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Text.Json;
@@ -169,6 +170,115 @@ namespace {namespace}
                 parts[index] = violations[index].ToString();
             }}
             return $"{{violations.Count}} validation error(s): {{string.Join("; ", parts)}}";
+        }}
+    }}
+
+    /// <summary>
+    /// Read helpers shared by every generated model. Internal because they are an
+    /// implementation detail of the generated (de)serialization path rather than
+    /// part of the contract surface.
+    /// </summary>
+    [GeneratedCode("nex-gen", null)]
+    internal static class JsonRuntime
+    {{
+        /// <summary>
+        /// The largest integer a JSON number carries losslessly (2^53-1) — the
+        /// same cap every other target enforces.
+        /// </summary>
+        private const double MaxSafeInteger = 9007199254740991d;
+
+        /// <summary>
+        /// Reads an optional member out of the extension-data bag, falling back to
+        /// <paramref name="defaultValue"/> when absent.
+        /// </summary>
+        internal static T? ReadOptionalValue<T>(
+            IDictionary<string, object?> members,
+            string name,
+            T? defaultValue = default)
+        {{
+            if (!members.TryGetValue(name, out var value))
+            {{
+                return defaultValue;
+            }}
+            return ReadJsonValue<T>(value);
+        }}
+
+        internal static T? ReadJsonValue<T>(object? value)
+        {{
+            if (value is null)
+            {{
+                return default;
+            }}
+            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
+            {{
+                return (T?)(object?)ReadJsonInteger(value);
+            }}
+            if (value is JsonElement json)
+            {{
+                return json.Deserialize<T>();
+            }}
+            if (value is T typed)
+            {{
+                return typed;
+            }}
+            return (T)value;
+        }}
+
+        /// <summary>
+        /// Reads a JSON number as an integer, rejecting non-integral values and
+        /// anything beyond the lossless integer range.
+        /// </summary>
+        internal static long? ReadJsonInteger(object? value)
+        {{
+            if (value is null)
+            {{
+                return default;
+            }}
+            double number;
+            if (value is JsonElement json)
+            {{
+                if (json.ValueKind == JsonValueKind.Null)
+                {{
+                    return default;
+                }}
+                if (json.ValueKind != JsonValueKind.Number)
+                {{
+                    throw new JsonException("expected integer");
+                }}
+                number = json.GetDouble();
+            }}
+            else if (value is long longValue)
+            {{
+                number = longValue;
+            }}
+            else if (value is int intValue)
+            {{
+                number = intValue;
+            }}
+            else
+            {{
+                throw new JsonException("expected integer");
+            }}
+            if (double.IsNaN(number)
+                || double.IsInfinity(number)
+                || Math.Truncate(number) != number
+                || Math.Abs(number) > MaxSafeInteger)
+            {{
+                throw new JsonException("expected integer");
+            }}
+            return (long)number;
+        }}
+
+        /// <summary>
+        /// Rejects an explicit JSON <c>null</c> for a member the contract declares
+        /// non-nullable.
+        /// </summary>
+        internal static void RejectNull(string name, object? value)
+        {{
+            if (value is null || value is JsonElement {{ ValueKind: JsonValueKind.Null }})
+            {{
+                throw new JsonException($"{{name}}: explicit null not allowed");
+            }}
         }}
     }}
 

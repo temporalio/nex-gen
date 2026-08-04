@@ -36,10 +36,10 @@ namespace NexGen.Generated.Tree.Category
         [JsonIgnore]
         public IReadOnlyList<global::NexGen.Generated.Tree.Category.Category>? Children
         {
-            get => ReadOptionalValue<List<global::NexGen.Generated.Tree.Category.Category>?>("children");
+            get => JsonRuntime.ReadOptionalValue<List<global::NexGen.Generated.Tree.Category.Category>?>(AdditionalProperties, "children");
             init
             {
-                RejectNull("children", value);
+                JsonRuntime.RejectNull("children", value);
                 AdditionalProperties["children"] = value;
             }
         }
@@ -58,85 +58,8 @@ namespace NexGen.Generated.Tree.Category
             }
             if (AdditionalProperties.TryGetValue("children", out var childrenValue))
             {
-                RejectNull("children", childrenValue);
-                _ = ReadJsonValue<List<global::NexGen.Generated.Tree.Category.Category>?>(childrenValue);
-            }
-        }
-
-        private T? ReadOptionalValue<T>(string name, T? defaultValue = default)
-        {
-            if (!AdditionalProperties.TryGetValue(name, out var value))
-            {
-                return defaultValue;
-            }
-            return ReadJsonValue<T>(value);
-        }
-
-        private static T? ReadJsonValue<T>(object? value)
-        {
-            if (value is null)
-            {
-                return default;
-            }
-            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
-            {
-                return (T?)(object?)ReadJsonInteger(value);
-            }
-            if (value is JsonElement json)
-            {
-                return json.Deserialize<T>();
-            }
-            if (value is T typed)
-            {
-                return typed;
-            }
-            return (T)value;
-        }
-
-        private static long? ReadJsonInteger(object? value)
-        {
-            const double maxSafeInteger = 9007199254740991d;
-            if (value is null)
-            {
-                return default;
-            }
-            double number;
-            if (value is JsonElement json)
-            {
-                if (json.ValueKind == JsonValueKind.Null)
-                {
-                    return default;
-                }
-                if (json.ValueKind != JsonValueKind.Number)
-                {
-                    throw new JsonException("expected integer");
-                }
-                number = json.GetDouble();
-            }
-            else if (value is long longValue)
-            {
-                number = longValue;
-            }
-            else if (value is int intValue)
-            {
-                number = intValue;
-            }
-            else
-            {
-                throw new JsonException("expected integer");
-            }
-            if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)
-            {
-                throw new JsonException("expected integer");
-            }
-            return (long)number;
-        }
-
-        private static void RejectNull(string name, object? value)
-        {
-            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
-            {
-                throw new JsonException($"{name}: explicit null not allowed");
+                JsonRuntime.RejectNull("children", childrenValue);
+                _ = JsonRuntime.ReadJsonValue<List<global::NexGen.Generated.Tree.Category.Category>?>(childrenValue);
             }
         }
     }

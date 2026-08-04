@@ -133,7 +133,6 @@ fn render_model(output: &mut String, model: &PlannedJsonType) -> Result<()> {
     }
     render_extension_data_property(output, &schema)?;
     render_model_validation(output, &schema)?;
-    render_optional_helpers(output, &schema)?;
 
     output.push_str("}\n\n");
     Ok(())
@@ -220,9 +219,9 @@ fn render_optional_property(output: &mut String, json_name: &str, property: &Sch
     output.push(' ');
     output.push_str(&csharp_type_name(json_name));
     output.push_str("\n    {\n");
-    output.push_str("        get => ReadOptionalValue<");
+    output.push_str("        get => JsonRuntime.ReadOptionalValue<");
     output.push_str(&optional_read_type(property, &property_type)?);
-    output.push_str(">(");
+    output.push_str(">(AdditionalProperties, ");
     output.push_str(&csharp_string_literal(json_name));
     if let Some(default_value) = property.default.as_ref().and_then(csharp_value_literal) {
         output.push_str(", ");
@@ -231,7 +230,7 @@ fn render_optional_property(output: &mut String, json_name: &str, property: &Sch
     output.push_str(");\n");
     output.push_str("        init\n        {\n");
     if !allows_null(property) {
-        output.push_str("            RejectNull(");
+        output.push_str("            JsonRuntime.RejectNull(");
         output.push_str(&csharp_string_literal(json_name));
         output.push_str(", value);\n");
     }
@@ -368,7 +367,7 @@ fn render_model_validation(output: &mut String, schema: &Schema) -> Result<()> {
             output.push_str(&value_name);
             output.push_str("))\n        {\n");
             if !allows_null(property) {
-                output.push_str("            RejectNull(");
+                output.push_str("            JsonRuntime.RejectNull(");
                 output.push_str(&csharp_string_literal(json_name));
                 output.push_str(", ");
                 output.push_str(&value_name);
@@ -435,13 +434,13 @@ fn render_extension_value_validation(
         }
         Some("integer") => {
             output.push_str(&indent);
-            output.push_str("_ = ReadJsonValue<long?>(");
+            output.push_str("_ = JsonRuntime.ReadJsonValue<long?>(");
             output.push_str(value_expr);
             output.push_str(");\n");
         }
         Some("array") => {
             output.push_str(&indent);
-            output.push_str("_ = ReadJsonValue<");
+            output.push_str("_ = JsonRuntime.ReadJsonValue<");
             output.push_str(&optional_read_type(schema, &schema_type(schema, true)?)?);
             output.push_str(">(");
             output.push_str(value_expr);
@@ -449,7 +448,7 @@ fn render_extension_value_validation(
         }
         _ if schema.reference.is_some() => {
             output.push_str(&indent);
-            output.push_str("_ = ReadJsonValue<");
+            output.push_str("_ = JsonRuntime.ReadJsonValue<");
             output.push_str(&optional_read_type(schema, &schema_type(schema, true)?)?);
             output.push_str(">(");
             output.push_str(value_expr);
@@ -457,72 +456,6 @@ fn render_extension_value_validation(
         }
         _ => {}
     }
-    Ok(())
-}
-
-fn render_optional_helpers(output: &mut String, schema: &Schema) -> Result<()> {
-    if !model_needs_extension_data(schema)? {
-        return Ok(());
-    }
-    output.push('\n');
-    output.push_str(
-        "    private T? ReadOptionalValue<T>(string name, T? defaultValue = default)\n    {\n",
-    );
-    output.push_str(
-        "        if (!AdditionalProperties.TryGetValue(name, out var value))\n        {\n",
-    );
-    output.push_str("            return defaultValue;\n        }\n");
-    output.push_str("        return ReadJsonValue<T>(value);\n");
-    output.push_str("    }\n\n");
-    output.push_str("    private static T? ReadJsonValue<T>(object? value)\n    {\n");
-    output.push_str("        if (value is null)\n        {\n");
-    output.push_str("            return default;\n        }\n");
-    output.push_str(
-        "        if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))\n        {\n",
-    );
-    output.push_str("            return (T?)(object?)ReadJsonInteger(value);\n");
-    output.push_str("        }\n");
-    output.push_str("        if (value is JsonElement json)\n        {\n");
-    output.push_str("            return json.Deserialize<T>();\n");
-    output.push_str("        }\n");
-    output.push_str("        if (value is T typed)\n        {\n");
-    output.push_str("            return typed;\n        }\n");
-    output.push_str("        return (T)value;\n");
-    output.push_str("    }\n\n");
-    output.push_str("    private static long? ReadJsonInteger(object? value)\n    {\n");
-    output.push_str("        const double maxSafeInteger = 9007199254740991d;\n");
-    output.push_str("        if (value is null)\n        {\n");
-    output.push_str("            return default;\n        }\n");
-    output.push_str("        double number;\n");
-    output.push_str("        if (value is JsonElement json)\n        {\n");
-    output.push_str("            if (json.ValueKind == JsonValueKind.Null)\n            {\n");
-    output.push_str("                return default;\n");
-    output.push_str("            }\n");
-    output.push_str("            if (json.ValueKind != JsonValueKind.Number)\n            {\n");
-    output.push_str("                throw new JsonException(\"expected integer\");\n");
-    output.push_str("            }\n");
-    output.push_str("            number = json.GetDouble();\n");
-    output.push_str("        }\n");
-    output.push_str("        else if (value is long longValue)\n        {\n");
-    output.push_str("            number = longValue;\n");
-    output.push_str("        }\n");
-    output.push_str("        else if (value is int intValue)\n        {\n");
-    output.push_str("            number = intValue;\n");
-    output.push_str("        }\n");
-    output.push_str("        else\n        {\n");
-    output.push_str("            throw new JsonException(\"expected integer\");\n");
-    output.push_str("        }\n");
-    output.push_str("        if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)\n        {\n");
-    output.push_str("            throw new JsonException(\"expected integer\");\n");
-    output.push_str("        }\n");
-    output.push_str("        return (long)number;\n");
-    output.push_str("    }\n\n");
-    output.push_str("    private static void RejectNull(string name, object? value)\n    {\n");
-    output.push_str("        if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })\n        {\n");
-    output
-        .push_str("            throw new JsonException($\"{name}: explicit null not allowed\");\n");
-    output.push_str("        }\n");
-    output.push_str("    }\n");
     Ok(())
 }
 

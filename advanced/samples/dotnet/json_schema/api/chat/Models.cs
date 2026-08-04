@@ -54,83 +54,6 @@ namespace NexGen.ChatService
                 }
             }
         }
-
-        private T? ReadOptionalValue<T>(string name, T? defaultValue = default)
-        {
-            if (!AdditionalProperties.TryGetValue(name, out var value))
-            {
-                return defaultValue;
-            }
-            return ReadJsonValue<T>(value);
-        }
-
-        private static T? ReadJsonValue<T>(object? value)
-        {
-            if (value is null)
-            {
-                return default;
-            }
-            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
-            {
-                return (T?)(object?)ReadJsonInteger(value);
-            }
-            if (value is JsonElement json)
-            {
-                return json.Deserialize<T>();
-            }
-            if (value is T typed)
-            {
-                return typed;
-            }
-            return (T)value;
-        }
-
-        private static long? ReadJsonInteger(object? value)
-        {
-            const double maxSafeInteger = 9007199254740991d;
-            if (value is null)
-            {
-                return default;
-            }
-            double number;
-            if (value is JsonElement json)
-            {
-                if (json.ValueKind == JsonValueKind.Null)
-                {
-                    return default;
-                }
-                if (json.ValueKind != JsonValueKind.Number)
-                {
-                    throw new JsonException("expected integer");
-                }
-                number = json.GetDouble();
-            }
-            else if (value is long longValue)
-            {
-                number = longValue;
-            }
-            else if (value is int intValue)
-            {
-                number = intValue;
-            }
-            else
-            {
-                throw new JsonException("expected integer");
-            }
-            if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)
-            {
-                throw new JsonException("expected integer");
-            }
-            return (long)number;
-        }
-
-        private static void RejectNull(string name, object? value)
-        {
-            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
-            {
-                throw new JsonException($"{name}: explicit null not allowed");
-            }
-        }
     }
 
 
@@ -173,7 +96,7 @@ namespace NexGen.ChatService
         [JsonIgnore]
         public string? ReplyToId
         {
-            get => ReadOptionalValue<string?>("replyToId");
+            get => JsonRuntime.ReadOptionalValue<string?>(AdditionalProperties, "replyToId");
             init
             {
                 AdditionalProperties["replyToId"] = value;
@@ -185,10 +108,10 @@ namespace NexGen.ChatService
         [JsonIgnore]
         public long? Priority
         {
-            get => ReadOptionalValue<long?>("priority", 0);
+            get => JsonRuntime.ReadOptionalValue<long?>(AdditionalProperties, "priority", 0);
             init
             {
-                RejectNull("priority", value);
+                JsonRuntime.RejectNull("priority", value);
                 AdditionalProperties["priority"] = value;
             }
         }
@@ -210,85 +133,8 @@ namespace NexGen.ChatService
             }
             if (AdditionalProperties.TryGetValue("priority", out var priorityValue))
             {
-                RejectNull("priority", priorityValue);
-                _ = ReadJsonValue<long?>(priorityValue);
-            }
-        }
-
-        private T? ReadOptionalValue<T>(string name, T? defaultValue = default)
-        {
-            if (!AdditionalProperties.TryGetValue(name, out var value))
-            {
-                return defaultValue;
-            }
-            return ReadJsonValue<T>(value);
-        }
-
-        private static T? ReadJsonValue<T>(object? value)
-        {
-            if (value is null)
-            {
-                return default;
-            }
-            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
-            {
-                return (T?)(object?)ReadJsonInteger(value);
-            }
-            if (value is JsonElement json)
-            {
-                return json.Deserialize<T>();
-            }
-            if (value is T typed)
-            {
-                return typed;
-            }
-            return (T)value;
-        }
-
-        private static long? ReadJsonInteger(object? value)
-        {
-            const double maxSafeInteger = 9007199254740991d;
-            if (value is null)
-            {
-                return default;
-            }
-            double number;
-            if (value is JsonElement json)
-            {
-                if (json.ValueKind == JsonValueKind.Null)
-                {
-                    return default;
-                }
-                if (json.ValueKind != JsonValueKind.Number)
-                {
-                    throw new JsonException("expected integer");
-                }
-                number = json.GetDouble();
-            }
-            else if (value is long longValue)
-            {
-                number = longValue;
-            }
-            else if (value is int intValue)
-            {
-                number = intValue;
-            }
-            else
-            {
-                throw new JsonException("expected integer");
-            }
-            if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)
-            {
-                throw new JsonException("expected integer");
-            }
-            return (long)number;
-        }
-
-        private static void RejectNull(string name, object? value)
-        {
-            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
-            {
-                throw new JsonException($"{name}: explicit null not allowed");
+                JsonRuntime.RejectNull("priority", priorityValue);
+                _ = JsonRuntime.ReadJsonValue<long?>(priorityValue);
             }
         }
     }
@@ -322,20 +168,20 @@ namespace NexGen.ChatService
         [JsonIgnore]
         public IReadOnlyList<string>? Members
         {
-            get => ReadOptionalValue<List<string>?>("members");
+            get => JsonRuntime.ReadOptionalValue<List<string>?>(AdditionalProperties, "members");
             init
             {
-                RejectNull("members", value);
+                JsonRuntime.RejectNull("members", value);
                 AdditionalProperties["members"] = value;
             }
         }
         [JsonIgnore]
         public Labels? Labels
         {
-            get => ReadOptionalValue<Labels?>("labels");
+            get => JsonRuntime.ReadOptionalValue<Labels?>(AdditionalProperties, "labels");
             init
             {
-                RejectNull("labels", value);
+                JsonRuntime.RejectNull("labels", value);
                 AdditionalProperties["labels"] = value;
             }
         }
@@ -347,90 +193,13 @@ namespace NexGen.ChatService
         {
             if (AdditionalProperties.TryGetValue("members", out var membersValue))
             {
-                RejectNull("members", membersValue);
-                _ = ReadJsonValue<List<string>?>(membersValue);
+                JsonRuntime.RejectNull("members", membersValue);
+                _ = JsonRuntime.ReadJsonValue<List<string>?>(membersValue);
             }
             if (AdditionalProperties.TryGetValue("labels", out var labelsValue))
             {
-                RejectNull("labels", labelsValue);
-                _ = ReadJsonValue<Labels?>(labelsValue);
-            }
-        }
-
-        private T? ReadOptionalValue<T>(string name, T? defaultValue = default)
-        {
-            if (!AdditionalProperties.TryGetValue(name, out var value))
-            {
-                return defaultValue;
-            }
-            return ReadJsonValue<T>(value);
-        }
-
-        private static T? ReadJsonValue<T>(object? value)
-        {
-            if (value is null)
-            {
-                return default;
-            }
-            if (typeof(T) == typeof(long?) || typeof(T) == typeof(long))
-            {
-                return (T?)(object?)ReadJsonInteger(value);
-            }
-            if (value is JsonElement json)
-            {
-                return json.Deserialize<T>();
-            }
-            if (value is T typed)
-            {
-                return typed;
-            }
-            return (T)value;
-        }
-
-        private static long? ReadJsonInteger(object? value)
-        {
-            const double maxSafeInteger = 9007199254740991d;
-            if (value is null)
-            {
-                return default;
-            }
-            double number;
-            if (value is JsonElement json)
-            {
-                if (json.ValueKind == JsonValueKind.Null)
-                {
-                    return default;
-                }
-                if (json.ValueKind != JsonValueKind.Number)
-                {
-                    throw new JsonException("expected integer");
-                }
-                number = json.GetDouble();
-            }
-            else if (value is long longValue)
-            {
-                number = longValue;
-            }
-            else if (value is int intValue)
-            {
-                number = intValue;
-            }
-            else
-            {
-                throw new JsonException("expected integer");
-            }
-            if (double.IsNaN(number) || double.IsInfinity(number) || Math.Truncate(number) != number || Math.Abs(number) > maxSafeInteger)
-            {
-                throw new JsonException("expected integer");
-            }
-            return (long)number;
-        }
-
-        private static void RejectNull(string name, object? value)
-        {
-            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
-            {
-                throw new JsonException($"{name}: explicit null not allowed");
+                JsonRuntime.RejectNull("labels", labelsValue);
+                _ = JsonRuntime.ReadJsonValue<Labels?>(labelsValue);
             }
         }
     }

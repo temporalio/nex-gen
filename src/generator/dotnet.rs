@@ -46,10 +46,17 @@ struct ApiPlanner<'a> {
     external_models: DotNetExternalModels,
     external_model_fragments: DotNetExternalModelFragments,
     support_namespace: Option<&'a str>,
+    /// Namespace holding the shared `Definitions.cs` runtime, when this run emits
+    /// one. `None` for WIT/proto input.
+    runtime_namespace: Option<&'a str>,
 }
 
 impl<'a> ApiPlanner<'a> {
-    fn new(api_plan: &'a PlannedSpec, support_namespace: Option<&'a str>) -> Result<Self> {
+    fn new(
+        api_plan: &'a PlannedSpec,
+        support_namespace: Option<&'a str>,
+        runtime_namespace: Option<&'a str>,
+    ) -> Result<Self> {
         let external_models = DotNetExternalModels::new(api_plan)?;
         let external_model_fragments = external_models.render_models()?;
         Ok(Self {
@@ -57,6 +64,7 @@ impl<'a> ApiPlanner<'a> {
             external_models,
             external_model_fragments,
             support_namespace,
+            runtime_namespace,
         })
     }
 
@@ -79,6 +87,15 @@ impl<'a> ApiPlanner<'a> {
         if self.external_model_fragments.has_models() {
             imports.push("System.Text.Json");
             imports.push("System.Text.Json.Serialization");
+        }
+        // The shared runtime resolves implicitly when it sits in this namespace or
+        // an enclosing one; an explicit import covers the case where divergent
+        // `@nexus.namespace` overrides leave it somewhere unrelated.
+        if let Some(runtime_namespace) = self.runtime_namespace
+            && runtime_namespace != namespace
+            && !namespace.starts_with(&format!("{runtime_namespace}."))
+        {
+            imports.push(runtime_namespace);
         }
         if models.iter().any(|model| {
             self.external_models
@@ -1880,18 +1897,28 @@ pub(crate) fn generate(
     support: &crate::SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
+    // The shared JSON-Schema runtime, once per package at the root. Absent for
+    // WIT/proto inputs, which carry their own support files and no validator.
+    let definitions =
+        crate::generator::json_schema::dotnet_definitions::render_definitions_file(tree);
+    let runtime_namespace = definitions
+        .is_some()
+        .then(|| crate::generator::json_schema::dotnet_definitions::runtime_namespace(tree));
     let mut generated = match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            generate_leaf(&leaf.spec, &support_fragments, mode)
+            generate_leaf(
+                &leaf.spec,
+                &support_fragments,
+                mode,
+                runtime_namespace.as_deref(),
+            )
         }
-        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode),
+        ApiSpecNode::Branch(branch) => {
+            generate_tree(branch, support, mode, runtime_namespace.as_deref())
+        }
     }?;
-    // The shared JSON-Schema runtime, once per package at the root. Absent for
-    // WIT/proto inputs, which carry their own support files and no validator.
-    if let Some((path, contents)) =
-        crate::generator::json_schema::dotnet_definitions::render_definitions_file(tree)
-    {
+    if let Some((path, contents)) = definitions {
         insert_generated_file(&mut generated.files, path, contents)?;
     }
     Ok(generated)
@@ -1901,9 +1928,10 @@ fn generate_leaf(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
     mode: GenerationMode,
+    runtime_namespace: Option<&str>,
 ) -> Result<GeneratedFiles> {
     let support_namespace = dotnet_support_namespace(support_fragments)?;
-    let generator = ApiPlanner::new(api_plan, support_namespace.as_deref())?;
+    let generator = ApiPlanner::new(api_plan, support_namespace.as_deref(), runtime_namespace)?;
     validate_dotnet_support_references(
         api_plan,
         &generator.external_models,
@@ -1952,11 +1980,19 @@ fn generate_tree(
     branch: &ApiSpecBranch<PlannedTypeFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
+    runtime_namespace: Option<&str>,
 ) -> Result<GeneratedFiles> {
     let mut files = BTreeMap::new();
     let mut warnings = Vec::new();
     for node in branch.children.values() {
-        generate_tree_node(node, support, mode, &mut files, &mut warnings)?;
+        generate_tree_node(
+            node,
+            support,
+            mode,
+            runtime_namespace,
+            &mut files,
+            &mut warnings,
+        )?;
     }
     Ok(GeneratedFiles {
         layout: crate::generator::GeneratedOutputLayout::Directory,
@@ -1969,13 +2005,14 @@ fn generate_tree_node(
     node: &ApiSpecNode<PlannedTypeFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
+    runtime_namespace: Option<&str>,
     files: &mut BTreeMap<PathBuf, String>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            let generated = generate_leaf(&leaf.spec, &support_fragments, mode)?;
+            let generated = generate_leaf(&leaf.spec, &support_fragments, mode, runtime_namespace)?;
             warnings.extend(generated.warnings);
             let prefix = leaf.module_path.to_path_buf();
             for (path, contents) in generated.files {
@@ -1985,7 +2022,7 @@ fn generate_tree_node(
         }
         ApiSpecNode::Branch(branch) => {
             for node in branch.children.values() {
-                generate_tree_node(node, support, mode, files, warnings)?;
+                generate_tree_node(node, support, mode, runtime_namespace, files, warnings)?;
             }
             Ok(())
         }
