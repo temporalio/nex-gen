@@ -70,6 +70,29 @@ namespace NexGen.Generated.Content.Block
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            if (Order < 0)
+            {
+                violations.Add(new Violation(JsonRuntime.JoinPath(path, "order"), "must be >= 0, got " + JsonRuntime.FormatNumber(Order)));
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
             foreach (var key in AdditionalProperties.Keys)
@@ -99,6 +122,7 @@ namespace NexGen.Generated.Content.Block
             if (AdditionalProperties.TryGetValue("page", out var pageValue))
             {
             }
+            Validate();
         }
     }
 
@@ -133,6 +157,32 @@ namespace NexGen.Generated.Content.Block
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            if (Indent is long indentValue)
+            {
+                if (indentValue < 0)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "indent"), "must be >= 0, got " + JsonRuntime.FormatNumber(indentValue)));
+                }
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
             foreach (var key in AdditionalProperties.Keys)
@@ -151,6 +201,7 @@ namespace NexGen.Generated.Content.Block
                 JsonRuntime.RejectNull("indent", indentValue);
                 _ = JsonRuntime.ReadJsonValue<long?>(indentValue);
             }
+            Validate();
         }
     }
 

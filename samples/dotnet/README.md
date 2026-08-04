@@ -12,36 +12,53 @@ without the native-api operation/client scaffolding.
 > [!WARNING]
 > **.NET is not yet a supported JSON-Schema target.** The `dotnet` generate
 > target is gated behind the `advanced` Cargo feature and is absent from the
-> [root README](../../README.md)'s language list. Generation, compilation and
-> round-tripping all work, but the **constraint validator that every other
-> target emits is not implemented for .NET**. See Known gaps below.
+> [root README](../../README.md)'s language list, and the constraint validator is
+> only **partially** implemented. See Known gaps below.
+
+## Validation
+
+Generated models validate in both wire directions:
+
+- **Deserialize** — `IJsonOnDeserialized.OnDeserialized` calls `Validate()`, so an
+  inbound payload cannot enter the process in a shape the contract forbids.
+- **Serialize** — `Validate()` is public, so a value built in code is checked
+  before it goes on the wire.
+
+Failures aggregate into one `ValidationException` carrying every `Violation
+{ Path, Reason }`, never a partial first-failure. The message format matches Go's
+`ValidationError.Error()` verbatim, so the same payload reads the same on every
+target. `ValidationException` derives from `JsonException`, so a handler already
+catching `System.Text.Json` failures keeps working.
 
 ## Known gaps
 
-The models here are structurally faithful — required/optional members,
-nullability, open vs. closed objects, typed maps and `$ref` cycles all match the
-contract. What is missing is *assertion*: constraint keywords are parsed,
-planned, and then dropped without enforcement or diagnostic.
+The models are structurally faithful — required/optional members, nullability,
+open vs. closed objects, typed maps and `$ref` cycles all match the contract. What
+is still incomplete is *assertion*: the keywords below are parsed, planned, and
+then dropped. Generation reports each one as a `warning: dotnet: ...` naming the
+affected members, so nothing is dropped silently.
 
 | Feature | Go / Java / Python / TS | .NET |
 |---|---|---|
-| Aggregated `ValidationError` over `Violation[]` | ✅ shared `definitions` runtime | ❌ per-class `JsonException`, first failure only |
-| `minimum` / `maximum` / `multipleOf` | ✅ | ❌ dropped |
+| Aggregated `ValidationError` over `Violation[]` | ✅ shared `definitions` runtime | ✅ `Definitions.cs` |
+| `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` / `multipleOf` | ✅ | ✅ |
+| `maxProperties` | ✅ | ✅ |
 | `minLength` / `maxLength` / `pattern` | ✅ | ❌ dropped |
-| `minItems` / `maxItems` / `uniqueItems` | ✅ | ❌ dropped |
+| `minItems` / `maxItems` / `uniqueItems` / `contains` | ✅ | ❌ dropped |
+| `minProperties` / `dependentRequired` / `propertyNames` | ✅ | ❌ dropped |
 | `enum` closed value sets | ✅ | ❌ emitted as bare `string` / `long` |
 | `oneOf` discriminated unions | ✅ | ❌ emitted as an empty class — branches lost |
 | `format` temporal materialization | ✅ native types | ❌ left as `string` |
 | `contentEncoding: base64` | ✅ native bytes | ❌ left as `string` |
-| `maxProperties` | ✅ | ✅ |
 
-Concretely, `order` in [`../schemas/kb/content/block.json`](../schemas/kb/content/block.json)
-declares `minimum: 0`. Go emits a bounds check; .NET emits a bare `long`. So
-`{"blockId":"b","order":-5}` is rejected by every other target and accepted here.
+One known diagnostic divergence within the covered set: Go reports an
+out-of-range integer as an aggregated `Violation` reading
+`exceeds ±(2^53-1) integer cap`, while .NET throws a non-aggregated
+`JsonException("expected integer")` with no member path.
 
-The fixtures in `../wire/json_schema/` contain only valid payloads, so these
-suites round-trip green despite the gaps — they test serialization, never
-rejection.
+The wire fixtures in `../wire/json_schema/` hold only valid payloads, so they
+exercise serialization but never rejection; `tests/ConstraintValidationChecks.cs`
+covers the rejection side.
 
 ## Regenerating
 

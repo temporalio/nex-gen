@@ -6,6 +6,7 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json;
 
 namespace NexGen.Generated
@@ -161,6 +162,25 @@ namespace NexGen.Generated
             }
             return (long)number;
         }
+
+        /// <summary>
+        /// Joins a violation path prefix to a member name, so a nested model
+        /// reports <c>page.blocks.order</c> rather than a bare <c>order</c>.
+        /// </summary>
+        internal static string JoinPath(string prefix, string name) =>
+            prefix.Length == 0 ? name : prefix + "." + name;
+
+        /// <summary>
+        /// Renders a number for a violation reason using the invariant culture, so
+        /// the message never picks up a locale's decimal separator and stays
+        /// byte-identical to the other targets' diagnostics.
+        /// </summary>
+        internal static string FormatNumber(double value) =>
+            value.ToString(CultureInfo.InvariantCulture);
+
+        /// <inheritdoc cref="FormatNumber(double)"/>
+        internal static string FormatNumber(long value) =>
+            value.ToString(CultureInfo.InvariantCulture);
 
         /// <summary>
         /// Rejects an explicit JSON <c>null</c> for a member the contract declares

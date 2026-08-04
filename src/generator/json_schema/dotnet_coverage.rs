@@ -1,14 +1,14 @@
 //! Coverage diagnostics for the .NET JSON-Schema backend.
 //!
-//! Unlike the Go / Java / Python / TypeScript backends, `json_schema::dotnet`
-//! emits no constraint validator: assertion keywords survive parsing and
-//! planning and are then dropped when the model is rendered. A payload the
-//! other four targets reject is therefore accepted by the generated C#.
+//! `json_schema::dotnet` does not yet enforce the whole assertion vocabulary the
+//! Go / Java / Python / TypeScript backends do. A keyword it does not handle
+//! survives parsing and planning and is then dropped when the model is rendered,
+//! so a payload the other four targets reject is accepted by the generated C#.
 //!
 //! `PRINCIPLES.md` says the generator would rather reject loudly than emit
-//! something subtly wrong. Until the validator lands, this module supplies the
-//! "loudly" half: every dropped keyword is reported as a generation warning
-//! naming the keyword and the members carrying it, so a silent divergence
+//! something subtly wrong. Until every keyword is covered, this module supplies
+//! the "loudly" half: each still-unenforced keyword is reported as a generation
+//! warning naming the keyword and the members carrying it, so a silent divergence
 //! becomes a visible one.
 //!
 //! Each entry here is a standing TODO. When a keyword gains real enforcement in
@@ -30,12 +30,7 @@ use crate::workspace::{ApiSpecNode, ApiSpecTree};
 /// `const`, `default`, `$ref`, `items`, `description`. `allOf` is excluded
 /// because the loader merges it away before any backend sees it.
 const UNENFORCED_KEYWORDS: &[&str] = &[
-    // Numeric bounds.
-    "minimum",
-    "maximum",
-    "exclusiveMinimum",
-    "exclusiveMaximum",
-    "multipleOf",
+    // Numeric bounds are enforced; see `render_constraint_validator`.
     // String assertions.
     "minLength",
     "maxLength",
@@ -214,15 +209,29 @@ mod tests {
     }
 
     #[test]
-    fn reports_numeric_bound_on_a_member() {
+    fn reports_an_unenforced_constraint_on_a_member() {
         let warnings = findings_for(json!({
             "type": "object",
-            "properties": { "order": { "type": "integer", "minimum": 0 } },
+            "properties": { "name": { "type": "string", "minLength": 2 } },
         }));
 
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("`minimum`"), "{:?}", warnings);
-        assert!(warnings[0].contains("Model.order"), "{:?}", warnings);
+        assert!(warnings[0].contains("`minLength`"), "{:?}", warnings);
+        assert!(warnings[0].contains("Model.name"), "{:?}", warnings);
+    }
+
+    #[test]
+    fn does_not_report_enforced_numeric_bounds() {
+        let warnings = findings_for(json!({
+            "type": "object",
+            "properties": {
+                "order": { "type": "integer", "minimum": 0, "maximum": 10 },
+                "level": { "type": "integer", "exclusiveMinimum": 0 },
+                "ratio": { "type": "number", "multipleOf": 5 },
+            },
+        }));
+
+        assert!(warnings.is_empty(), "{:?}", warnings);
     }
 
     #[test]
@@ -299,12 +308,12 @@ mod tests {
         let warnings = findings_for(json!({
             "type": "object",
             "properties": {
-                "a": { "type": "integer", "minimum": 0 },
-                "b": { "type": "integer", "minimum": 0 },
-                "c": { "type": "integer", "minimum": 0 },
-                "d": { "type": "integer", "minimum": 0 },
-                "e": { "type": "integer", "minimum": 0 },
-                "f": { "type": "integer", "minimum": 0 },
+                "a": { "type": "string", "minLength": 1 },
+                "b": { "type": "string", "minLength": 1 },
+                "c": { "type": "string", "minLength": 1 },
+                "d": { "type": "string", "minLength": 1 },
+                "e": { "type": "string", "minLength": 1 },
+                "f": { "type": "string", "minLength": 1 },
             },
         }));
 

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use heck::ToUpperCamelCase;
 use indexmap::IndexMap;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Number, Value};
 
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
@@ -35,6 +35,86 @@ struct Schema {
     const_value: Option<Value>,
     #[serde(rename = "maxProperties")]
     max_properties: Option<usize>,
+    // Numeric bounds. Kept as `serde_json::Number` so an integral bound renders
+    // without a spurious `.0` and a fractional one keeps its precision, matching
+    // how Go's `%v` prints the same bound.
+    minimum: Option<Number>,
+    maximum: Option<Number>,
+    #[serde(rename = "exclusiveMinimum")]
+    exclusive_minimum: Option<Number>,
+    #[serde(rename = "exclusiveMaximum")]
+    exclusive_maximum: Option<Number>,
+    #[serde(rename = "multipleOf")]
+    multiple_of: Option<Number>,
+}
+
+impl Schema {
+    /// The numeric bounds declared on this schema, in the order Go emits them so
+    /// a multi-violation payload lists them identically across targets.
+    fn numeric_bounds(&self) -> Vec<NumericBound<'_>> {
+        [
+            (NumericBoundKind::Minimum, self.minimum.as_ref()),
+            (NumericBoundKind::Maximum, self.maximum.as_ref()),
+            (
+                NumericBoundKind::ExclusiveMinimum,
+                self.exclusive_minimum.as_ref(),
+            ),
+            (
+                NumericBoundKind::ExclusiveMaximum,
+                self.exclusive_maximum.as_ref(),
+            ),
+            (NumericBoundKind::MultipleOf, self.multiple_of.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(kind, bound)| bound.map(|bound| NumericBound { kind, bound }))
+        .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NumericBoundKind {
+    Minimum,
+    Maximum,
+    ExclusiveMinimum,
+    ExclusiveMaximum,
+    MultipleOf,
+}
+
+#[derive(Debug)]
+struct NumericBound<'a> {
+    kind: NumericBoundKind,
+    bound: &'a Number,
+}
+
+impl NumericBound<'_> {
+    /// The C# boolean expression that is true when `value_expr` **violates** the
+    /// bound.
+    fn violation_condition(&self, value_expr: &str) -> String {
+        let bound = self.bound;
+        match self.kind {
+            NumericBoundKind::Minimum => format!("{value_expr} < {bound}"),
+            NumericBoundKind::Maximum => format!("{value_expr} > {bound}"),
+            NumericBoundKind::ExclusiveMinimum => format!("{value_expr} <= {bound}"),
+            NumericBoundKind::ExclusiveMaximum => format!("{value_expr} >= {bound}"),
+            // `%` on a double is exact for the values the spec-number cap admits,
+            // and `multipleOf` bounds are themselves exact in binary far more
+            // often than not; a remainder test matches Go's `math.Mod` check.
+            NumericBoundKind::MultipleOf => format!("{value_expr} % {bound} != 0"),
+        }
+    }
+
+    /// The violation reason, worded exactly as Go's equivalent so the same
+    /// payload produces the same diagnostic text on every target.
+    fn reason_format(&self) -> String {
+        let bound = self.bound;
+        match self.kind {
+            NumericBoundKind::Minimum => format!("must be >= {bound}, got "),
+            NumericBoundKind::Maximum => format!("must be <= {bound}, got "),
+            NumericBoundKind::ExclusiveMinimum => format!("must be > {bound}, got "),
+            NumericBoundKind::ExclusiveMaximum => format!("must be < {bound}, got "),
+            NumericBoundKind::MultipleOf => format!("must be a multiple of {bound}, got "),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -132,10 +212,142 @@ fn render_model(output: &mut String, model: &PlannedJsonType) -> Result<()> {
         render_model_properties(output, &schema)?;
     }
     render_extension_data_property(output, &schema)?;
+    render_constraint_validator(output, &schema)?;
     render_model_validation(output, &schema)?;
 
     output.push_str("}\n\n");
     Ok(())
+}
+
+/// Emits the constraint validator: a public `Validate()` that aggregates every
+/// violation into one [`ValidationException`], plus the `CollectViolations` worker
+/// it and any containing model share.
+///
+/// Two entry points because the contract has to hold in both wire directions.
+/// `OnDeserialized` calls `Validate()` so an inbound payload can never enter the
+/// process in a shape the contract forbids; `Validate()` is public so the service
+/// binding can call it before serializing an outbound value. `CollectViolations`
+/// takes a path prefix so a nested model reports `page.blocks.order` rather than
+/// a bare `order`.
+fn render_constraint_validator(output: &mut String, schema: &Schema) -> Result<()> {
+    let constrained = constrained_members(schema);
+    if constrained.is_empty() {
+        return Ok(());
+    }
+
+    output.push('\n');
+    output.push_str("    /// <summary>\n");
+    output.push_str(
+        "    /// Validates every constraint the contract declares on this type, throwing a\n",
+    );
+    output.push_str(
+        "    /// single <see cref=\"ValidationException\"/> carrying all violations rather\n",
+    );
+    output.push_str("    /// than stopping at the first.\n");
+    output.push_str("    /// </summary>\n");
+    output.push_str("    public void Validate()\n    {\n");
+    output.push_str("        var violations = new List<Violation>();\n");
+    output.push_str("        CollectViolations(violations, string.Empty);\n");
+    output.push_str("        if (violations.Count > 0)\n        {\n");
+    output.push_str("            throw new ValidationException(violations);\n");
+    output.push_str("        }\n");
+    output.push_str("    }\n\n");
+
+    output.push_str(
+        "    internal void CollectViolations(List<Violation> violations, string path)\n    {\n",
+    );
+    for member in &constrained {
+        render_member_constraints(output, member);
+    }
+    output.push_str("    }\n");
+    Ok(())
+}
+
+/// A member carrying at least one enforceable constraint, paired with how its
+/// value is reached in C#.
+struct ConstrainedMember<'a> {
+    json_name: &'a str,
+    /// The C# expression for the member's value inside `CollectViolations`.
+    accessor: String,
+    /// True when the member is optional or nullable, so the check has to be
+    /// guarded against the absent case.
+    needs_null_guard: bool,
+    numeric_type: &'static str,
+    bounds: Vec<NumericBound<'a>>,
+}
+
+fn constrained_members(schema: &Schema) -> Vec<ConstrainedMember<'_>> {
+    let required = required_fields(schema);
+    let Some(properties) = &schema.properties else {
+        return Vec::new();
+    };
+    properties
+        .iter()
+        .filter_map(|(json_name, property)| {
+            let bounds = property.numeric_bounds();
+            if bounds.is_empty() {
+                return None;
+            }
+            let is_required = required.contains(json_name.as_str());
+            Some(ConstrainedMember {
+                json_name,
+                accessor: csharp_type_name(json_name),
+                needs_null_guard: !is_required || allows_null(property),
+                numeric_type: numeric_clr_type(property),
+                bounds,
+            })
+        })
+        .collect()
+}
+
+/// The CLR type a numeric member's value binds to when unwrapped from its
+/// nullable form — `long` for `type: integer`, `double` otherwise.
+fn numeric_clr_type(schema: &Schema) -> &'static str {
+    match schema.ty.as_ref().and_then(Value::as_str) {
+        Some("integer") => "long",
+        _ => "double",
+    }
+}
+
+fn render_member_constraints(output: &mut String, member: &ConstrainedMember<'_>) {
+    // An optional member is `long?`/`double?`; bind it once so each bound reads
+    // the unwrapped value, and skip every check when it is absent.
+    let (indent, value_expr) = if member.needs_null_guard {
+        let local = csharp_parameter_name(&format!("{}-value", member.json_name));
+        output.push_str("        if (");
+        output.push_str(&member.accessor);
+        output.push_str(" is ");
+        output.push_str(member.numeric_type);
+        output.push(' ');
+        output.push_str(&local);
+        output.push_str(")\n        {\n");
+        ("            ", local)
+    } else {
+        ("        ", member.accessor.clone())
+    };
+
+    for bound in &member.bounds {
+        output.push_str(indent);
+        output.push_str("if (");
+        output.push_str(&bound.violation_condition(&value_expr));
+        output.push_str(")\n");
+        output.push_str(indent);
+        output.push_str("{\n");
+        output.push_str(indent);
+        output.push_str("    violations.Add(new Violation(JsonRuntime.JoinPath(path, ");
+        output.push_str(&csharp_string_literal(member.json_name));
+        output.push_str("), ");
+        output.push_str(&csharp_string_literal(&bound.reason_format()));
+        output.push_str(" + JsonRuntime.FormatNumber(");
+        output.push_str(&value_expr);
+        output.push_str(")));\n");
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
+
+    if member.needs_null_guard {
+        output.push_str("        }\n");
+    }
 }
 
 fn render_model_constructor(
@@ -383,6 +595,12 @@ fn render_model_validation(output: &mut String, schema: &Schema) -> Result<()> {
             output.push_str("        }\n");
         }
     }
+    // Structural checks above reject a malformed payload outright; the contract
+    // constraints then run so an inbound value cannot enter the process in a shape
+    // the contract forbids.
+    if !constrained_members(schema).is_empty() {
+        output.push_str("        Validate();\n");
+    }
     output.push_str("    }\n");
     Ok(())
 }
@@ -501,7 +719,10 @@ fn model_needs_extension_data(schema: &Schema) -> Result<bool> {
 }
 
 fn model_needs_on_deserialized(schema: &Schema) -> Result<bool> {
-    Ok(typed_map_value_schema(schema)?.is_some()
+    // A model whose only validation is constraint checking still needs the hook,
+    // so an inbound payload is validated on deserialize.
+    Ok(!constrained_members(schema).is_empty()
+        || typed_map_value_schema(schema)?.is_some()
         || (!optional_fields(schema).is_empty()
             && (!is_open_object(schema)
                 || optional_fields(schema)
