@@ -1425,6 +1425,7 @@ impl<'a> ApiPlanner<'a> {
                     .as_ref()
                     .map(|err| Box::new(self.planned_authored_type_override_from_authored(err))),
             },
+            TypeSpec::TypeParameter(parameter) => TypeSpec::TypeParameter(parameter.clone()),
             TypeSpec::External(ExternalTypeSpec::Alias {
                 name,
                 target,
@@ -1450,6 +1451,7 @@ impl<'a> ApiPlanner<'a> {
             TypeSpec::Float => TypeSpec::Float,
             TypeSpec::String => TypeSpec::String,
             TypeSpec::Bytes => TypeSpec::Bytes,
+            TypeSpec::TypeParameter(parameter) => TypeSpec::TypeParameter(parameter.clone()),
             TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) => {
                 proto::planned_value_type_from_authored_proto(proto_name.as_str(), self)
             }
@@ -1690,6 +1692,12 @@ pub(crate) struct PlannedVariantType {
     pub(crate) name: String,
 }
 
+impl AsRef<str> for PlannedVariantType {
+    fn as_ref(&self) -> &str {
+        &self.full_name
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlannedAliasType {
     pub(crate) name: String,
@@ -1740,6 +1748,12 @@ pub(crate) struct PlannedProtoEnumType {
 pub(crate) struct PlannedRecordType {
     pub(crate) full_name: String,
     pub(crate) model_name: String,
+}
+
+impl AsRef<str> for PlannedRecordType {
+    fn as_ref(&self) -> &str {
+        &self.full_name
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

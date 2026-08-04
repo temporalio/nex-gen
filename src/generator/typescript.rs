@@ -433,7 +433,10 @@ impl<'a> ApiPlanner<'a> {
                 }
             };
             RenderedOperationInput {
-                operation_annotation: self.operation_type_annotation(input),
+                operation_annotation: typescript_erased_model_annotation(
+                    &self.operation_type_annotation(input),
+                    &type_parameters,
+                ),
                 type_id: self.operation_wire_type_identifier(input),
                 model_name,
                 type_parameters,
@@ -442,6 +445,37 @@ impl<'a> ApiPlanner<'a> {
             }
         });
 
+        let output_annotation_default = match operation.output_type() {
+            Some(PlannedType::Record(record)) => typescript_operation_output_annotation(
+                &output_annotation_default,
+                &self
+                    .api_plan
+                    .record_type_parameters(&record.full_name, Language::TypeScript),
+                input,
+                self.api_plan,
+            ),
+            _ => output_annotation_default,
+        };
+        let service_output_operation_annotation = match operation.output_type() {
+            Some(PlannedType::Record(record)) => typescript_erased_record_annotation(
+                &output_operation_annotation,
+                &self
+                    .api_plan
+                    .record_type_parameters(&record.full_name, Language::TypeScript),
+            ),
+            _ => output_operation_annotation.clone(),
+        };
+        let output_operation_annotation = match operation.output_type() {
+            Some(PlannedType::Record(record)) => typescript_operation_output_annotation(
+                &output_operation_annotation,
+                &self
+                    .api_plan
+                    .record_type_parameters(&record.full_name, Language::TypeScript),
+                input,
+                self.api_plan,
+            ),
+            _ => output_operation_annotation,
+        };
         Ok(RenderedOperation {
             name: operation.name.as_str(),
             wire_name: operation.wire_name.as_str(),
@@ -460,6 +494,7 @@ impl<'a> ApiPlanner<'a> {
                 .for_language(Language::TypeScript)
                 .map(str::to_string),
             output_operation_annotation,
+            service_output_operation_annotation,
             output_type_id,
             input: rendered_input,
             output_annotation: output_transform
@@ -625,7 +660,7 @@ impl<'a> ApiPlanner<'a> {
                 from_wire_function_name,
                 to_wire_function_name,
                 experimental: planned_model.experimental,
-                type_parameters: model_type_parameters(&planned_model),
+                type_parameters: model_type_parameters(&planned_model, self.api_plan),
                 fields: Vec::new(),
                 sourced_fields: Vec::new(),
                 functions: Vec::new(),
@@ -783,6 +818,12 @@ impl<'a> ApiPlanner<'a> {
             planned_variant.full_name.clone(),
             RenderedVariant {
                 name: planned_variant.name.clone(),
+                type_parameters: self
+                    .api_plan
+                    .variant_type_parameters(&planned_variant.full_name, Language::TypeScript)
+                    .into_iter()
+                    .map(|usage| usage.parameter.name)
+                    .collect(),
                 cases,
             },
         );
@@ -1232,6 +1273,12 @@ impl<'a> ApiPlanner<'a> {
 
     fn resolve_planned_value_type(&mut self, value_type: &PlannedType) -> ResolvedFieldType {
         match value_type {
+            PlannedType::TypeParameter(parameter) => ResolvedFieldType {
+                annotation: parameter.name.clone(),
+                kind: ResolvedFieldKind::Scalar,
+                requirements: TypeScriptRequirements::default(),
+                wire_conversion: None,
+            },
             PlannedType::Float => ResolvedFieldType {
                 annotation: "number".to_string(),
                 kind: ResolvedFieldKind::Scalar,
@@ -1309,7 +1356,15 @@ impl<'a> ApiPlanner<'a> {
                     self.ensure_rendered_variant(&planned_variant);
                 }
                 ResolvedFieldType {
-                    annotation: variant_type.name.clone(),
+                    annotation: generic_type_annotation(
+                        &variant_type.name,
+                        &self
+                            .api_plan
+                            .variant_type_parameters(&variant_type.full_name, Language::TypeScript)
+                            .into_iter()
+                            .map(|usage| usage.parameter.name)
+                            .collect::<Vec<_>>(),
+                    ),
                     kind: ResolvedFieldKind::Scalar,
                     requirements: TypeScriptRequirements::default(),
                     wire_conversion: None,
@@ -1320,8 +1375,25 @@ impl<'a> ApiPlanner<'a> {
             ))
             | PlannedType::Record(_)) => {
                 let conversion = self.resolve_message_value_conversion(message_type);
+                let annotation = if let PlannedType::Record(record) = message_type {
+                    let parameters = self
+                        .api_plan
+                        .record_type_parameters(&record.full_name, Language::TypeScript)
+                        .into_iter()
+                        .map(|usage| RenderedTypeParameter {
+                            name: usage.parameter.name,
+                            constraint: "unknown".to_string(),
+                            default: "unknown".to_string(),
+                            infer_from_operation_request: true,
+                            explicit: true,
+                        })
+                        .collect::<Vec<_>>();
+                    generic_model_annotation(&conversion.annotation, &parameters)
+                } else {
+                    conversion.annotation.clone()
+                };
                 ResolvedFieldType {
-                    annotation: conversion.annotation.clone(),
+                    annotation,
                     kind: ResolvedFieldKind::Message,
                     requirements: TypeScriptRequirements::default(),
                     wire_conversion: Some(conversion),
@@ -1945,7 +2017,7 @@ fn collect_type_replacement_imports(
 
 fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<LanguageImportSpec>) {
     match value {
-        PlannedType::Enum(_) => {}
+        PlannedType::Enum(_) | PlannedType::TypeParameter(_) => {}
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enumeration))) => {
             collect_proto_type_imports(&enumeration.proto, imports);
             if let Some(replacement) = &enumeration.replacement {
@@ -2060,7 +2132,8 @@ fn collect_authored_type_imports(
             collect_typescript_import(type_name, true, false, imports);
             collect_authored_type_imports(target, imports);
         }
-        TypeSpec::Bool
+        TypeSpec::TypeParameter(_)
+        | TypeSpec::Bool
         | TypeSpec::Int(_)
         | TypeSpec::Float
         | TypeSpec::String
@@ -2156,11 +2229,25 @@ fn reject_support_namespaces(
     Ok(())
 }
 
-fn model_type_parameters(model: &RecordSpec<PlannedTypeFamily>) -> Vec<RenderedTypeParameter> {
+fn model_type_parameters(
+    model: &RecordSpec<PlannedTypeFamily>,
+    api_plan: &PlannedSpec,
+) -> Vec<RenderedTypeParameter> {
     if model.is_empty_model() {
         return Vec::new();
     }
 
+    let mut model_parameters = api_plan
+        .record_type_parameters(&model.full_name, Language::TypeScript)
+        .into_iter()
+        .map(|usage| RenderedTypeParameter {
+            name: usage.parameter.name,
+            constraint: "unknown".to_string(),
+            default: "unknown".to_string(),
+            infer_from_operation_request: true,
+            explicit: true,
+        })
+        .collect::<Vec<_>>();
     let mut type_parameters = Vec::new();
     for (field_name, function) in model.functions() {
         let generated_name = model.field_name_override(field_name).unwrap_or(field_name);
@@ -2176,6 +2263,7 @@ fn model_type_parameters(model: &RecordSpec<PlannedTypeFamily>) -> Vec<RenderedT
                     constraint: descriptor.value_type.clone(),
                     default: descriptor.value_type,
                     infer_from_operation_request: true,
+                    explicit: false,
                 },
             ));
             type_parameters.push((
@@ -2190,6 +2278,7 @@ fn model_type_parameters(model: &RecordSpec<PlannedTypeFamily>) -> Vec<RenderedT
                         &value_parameter_name,
                     ),
                     infer_from_operation_request: false,
+                    explicit: false,
                 },
             ));
         } else {
@@ -2205,6 +2294,7 @@ fn model_type_parameters(model: &RecordSpec<PlannedTypeFamily>) -> Vec<RenderedT
                     constraint: constraint.clone(),
                     default: constraint,
                     infer_from_operation_request: true,
+                    explicit: false,
                 },
             ));
         }
@@ -2216,10 +2306,12 @@ fn model_type_parameters(model: &RecordSpec<PlannedTypeFamily>) -> Vec<RenderedT
             .then_with(|| left.1.cmp(&right.1))
             .then_with(|| left.2.cmp(&right.2))
     });
-    type_parameters
-        .into_iter()
-        .map(|(_, _, _, type_parameter)| type_parameter)
-        .collect()
+    model_parameters.extend(
+        type_parameters
+            .into_iter()
+            .map(|(_, _, _, type_parameter)| type_parameter),
+    );
+    model_parameters
 }
 
 fn typescript_function_result_annotation(result: &FunctionResultSpec<PlannedTypeFamily>) -> String {
@@ -2274,6 +2366,7 @@ pub(in crate::generator) fn typescript_authored_type_annotation(
         TypeSpec::Int(IntSpec::I64) => "Long".to_string(),
         TypeSpec::String => "string".to_string(),
         TypeSpec::Bytes => "Uint8Array".to_string(),
+        TypeSpec::TypeParameter(parameter) => parameter.name.clone(),
         TypeSpec::Option(inner) => {
             format!("{} | undefined", typescript_authored_type_annotation(inner))
         }
@@ -2498,6 +2591,80 @@ pub(in crate::generator) fn generic_model_annotation(
     }
 }
 
+fn generic_type_annotation(model_name: &str, type_parameters: &[String]) -> String {
+    if type_parameters.is_empty() {
+        model_name.to_string()
+    } else {
+        format!("{}<{}>", model_name, type_parameters.join(", "))
+    }
+}
+
+fn typescript_erased_model_annotation(
+    model_name: &str,
+    parameters: &[RenderedTypeParameter],
+) -> String {
+    let parameter_count = parameters
+        .iter()
+        .filter(|parameter| parameter.explicit)
+        .count();
+    if parameter_count == 0 {
+        model_name.to_string()
+    } else {
+        format!(
+            "{}<{}>",
+            model_name,
+            std::iter::repeat_n("any", parameter_count)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+fn typescript_erased_record_annotation(
+    model_name: &str,
+    parameters: &[crate::spec::TypeParameterUsage],
+) -> String {
+    if parameters.is_empty() {
+        model_name.to_string()
+    } else {
+        format!(
+            "{}<{}>",
+            model_name,
+            std::iter::repeat_n("any", parameters.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+fn typescript_operation_output_annotation(
+    model_name: &str,
+    output_parameters: &[crate::spec::TypeParameterUsage],
+    input: Option<&PlannedType>,
+    api_plan: &PlannedSpec,
+) -> String {
+    if output_parameters.is_empty() {
+        return model_name.to_string();
+    }
+    let input_parameters = input
+        .map(|input| api_plan.type_parameters(input, Language::TypeScript))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|usage| (usage.parameter.full_name, usage.parameter.name))
+        .collect::<BTreeMap<_, _>>();
+    let arguments = output_parameters
+        .iter()
+        .map(|usage| {
+            input_parameters
+                .get(&usage.parameter.full_name)
+                .map(String::as_str)
+                .unwrap_or("unknown")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{model_name}<{arguments}>")
+}
+
 #[derive(Debug)]
 struct RenderedService<'a> {
     name: &'a str,
@@ -2519,6 +2686,7 @@ struct RenderedOperation<'a> {
     doc: Option<String>,
     return_doc: Option<String>,
     output_operation_annotation: String,
+    service_output_operation_annotation: String,
     output_type_id: String,
     input: Option<RenderedOperationInput>,
     output_annotation: String,
@@ -2565,6 +2733,7 @@ struct RenderedFlag {
 #[derive(Debug)]
 struct RenderedVariant {
     name: String,
+    type_parameters: Vec<String>,
     cases: Vec<RenderedVariantCase>,
 }
 
@@ -2625,6 +2794,7 @@ pub(in crate::generator) struct RenderedTypeParameter {
     constraint: String,
     default: String,
     infer_from_operation_request: bool,
+    explicit: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -3907,6 +4077,11 @@ fn render_flags(output: &mut String, flags: &RenderedFlags) {
 fn render_variant(output: &mut String, variant: &RenderedVariant) {
     output.push_str("export type ");
     output.push_str(&variant.name);
+    if !variant.type_parameters.is_empty() {
+        output.push('<');
+        output.push_str(&variant.type_parameters.join(", "));
+        output.push('>');
+    }
     output.push_str(" =\n");
     if variant.cases.is_empty() {
         output.push_str("  never;\n");
@@ -3980,10 +4155,14 @@ fn render_type_parameter_list(type_parameters: &[RenderedTypeParameter]) -> Stri
     let params = type_parameters
         .iter()
         .map(|type_parameter| {
-            format!(
-                "{} extends {} = {}",
-                type_parameter.name, type_parameter.constraint, type_parameter.default
-            )
+            if type_parameter.explicit {
+                type_parameter.name.clone()
+            } else {
+                format!(
+                    "{} extends {} = {}",
+                    type_parameter.name, type_parameter.constraint, type_parameter.default
+                )
+            }
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -4003,10 +4182,12 @@ pub(in crate::generator) fn render_named_generic_function_start(
         output.push_str(&indent_str);
         output.push_str("  ");
         output.push_str(&type_parameter.name);
-        output.push_str(" extends ");
-        output.push_str(&type_parameter.constraint);
-        output.push_str(" = ");
-        output.push_str(&type_parameter.default);
+        if !type_parameter.explicit {
+            output.push_str(" extends ");
+            output.push_str(&type_parameter.constraint);
+            output.push_str(" = ");
+            output.push_str(&type_parameter.default);
+        }
         output.push_str(",\n");
     }
     output.push_str(&indent_str);
@@ -4620,7 +4801,7 @@ fn render_service_definition(output: &mut String, service: &RenderedService<'_>)
         );
         output.push_str(",\n");
         output.push_str("    ");
-        output.push_str(&operation.output_operation_annotation);
+        output.push_str(&operation.service_output_operation_annotation);
         output.push('\n');
         output.push_str("  >({ name: ");
         output.push_str(&typescript_string_literal(operation.wire_name));
@@ -4878,6 +5059,7 @@ fn typescript_resource_value_annotation(value: &PlannedType) -> String {
         PlannedType::Bool => "boolean".to_string(),
         PlannedType::String => "string".to_string(),
         PlannedType::Bytes => "Uint8Array".to_string(),
+        PlannedType::TypeParameter(parameter) => parameter.name.clone(),
         PlannedType::Enum(enum_type) => enum_type.name.clone(),
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enum_type))) => {
             enum_type

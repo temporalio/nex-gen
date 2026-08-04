@@ -1,0 +1,34 @@
+from __future__ import annotations
+
+from typing import assert_type
+
+from wit.generic_models.models import (
+    GenericRequest,
+    GenericResponse,
+    Inner,
+    OperationCompletionResult,
+    OperationCompletionSuccess,
+)
+
+
+def test_generic_model_runtime_shapes() -> None:
+    inner = Inner(value="nested")
+    request = GenericRequest(
+        context="context",
+        contexts=["first"],
+        by_name={"primary": "value"},
+        nested=inner,
+    )
+    completion = OperationCompletionSuccess(output=42)
+    result: OperationCompletionResult[int] = completion
+    response = GenericResponse(
+        context="context", completion=result, metadata=True
+    )
+
+    _ = assert_type(request, GenericRequest[str])
+    _ = assert_type(completion, OperationCompletionSuccess[int])
+    _ = assert_type(response, GenericResponse[str, int, bool])
+    _ = assert_type(response.completion, OperationCompletionResult[int])
+    assert request.nested.value == "nested"
+    assert isinstance(response.completion, OperationCompletionSuccess)
+    assert response.completion.output == 42
