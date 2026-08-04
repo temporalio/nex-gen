@@ -83,12 +83,44 @@ namespace NexGen.ShowcaseService
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            var propertyCount = AdditionalProperties.Count;
+            if (propertyCount < 1)
+            {
+                violations.Add(new Violation(path, "must have at least 1 properties, got " + propertyCount));
+            }
+            if (propertyCount > 3)
+            {
+                violations.Add(new Violation(path, "must have at most 3 properties, got " + propertyCount));
+            }
+            foreach (var propertyName in AdditionalProperties.Keys)
+            {
+                var nameLength = JsonRuntime.CodePointCount(propertyName);
+                if (nameLength > 8)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, propertyName), $"invalid property name \"{propertyName}\": must have length <= 8, got {nameLength}"));
+                }
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
-            if (AdditionalProperties.Count > 3)
-            {
-                throw new JsonException("maxProperties: at most 3 entries");
-            }
             foreach (var entry in AdditionalProperties)
             {
                 if (entry.Value is JsonElement json3 && json3.ValueKind != JsonValueKind.String)
@@ -100,6 +132,7 @@ namespace NexGen.ShowcaseService
                     throw new JsonException($"{entry.Key}: expected string");
                 }
             }
+            Validate();
         }
     }
 
@@ -180,6 +213,38 @@ namespace NexGen.ShowcaseService
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            var propertyCount = AdditionalProperties.Count;
+            if (propertyCount < 1)
+            {
+                violations.Add(new Violation(path, "must have at least 1 properties, got " + propertyCount));
+            }
+            if (propertyCount > 3)
+            {
+                violations.Add(new Violation(path, "must have at most 3 properties, got " + propertyCount));
+            }
+            if (AdditionalProperties.ContainsKey("shippingStreet") && !AdditionalProperties.ContainsKey("shippingZip"))
+            {
+                violations.Add(new Violation(JsonRuntime.JoinPath(path, "shippingZip"), "property \"shippingZip\" is required when \"shippingStreet\" is present"));
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
             if (AdditionalProperties.TryGetValue("email", out var emailValue))
@@ -218,6 +283,7 @@ namespace NexGen.ShowcaseService
                     throw new JsonException($"{"shippingZip"}: expected string");
                 }
             }
+            Validate();
         }
     }
 
@@ -231,12 +297,32 @@ namespace NexGen.ShowcaseService
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            var propertyCount = AdditionalProperties.Count;
+            if (propertyCount > 50)
+            {
+                violations.Add(new Violation(path, "must have at most 50 properties, got " + propertyCount));
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
-            if (AdditionalProperties.Count > 50)
-            {
-                throw new JsonException("maxProperties: at most 50 entries");
-            }
             foreach (var entry in AdditionalProperties)
             {
                 if (entry.Value is JsonElement json3 && json3.ValueKind != JsonValueKind.String)
@@ -248,6 +334,7 @@ namespace NexGen.ShowcaseService
                     throw new JsonException($"{entry.Key}: expected string");
                 }
             }
+            Validate();
         }
     }
 

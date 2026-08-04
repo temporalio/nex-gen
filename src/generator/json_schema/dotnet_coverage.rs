@@ -39,11 +39,10 @@ const UNENFORCED_KEYWORDS: &[&str] = &[
     // Array assertions. minItems/maxItems/uniqueItems are enforced, and so is
     // `contains` in its `const` form — see the shape check below.
     "prefixItems",
-    // Object assertions.
-    "minProperties",
-    "dependentRequired",
+    // Object assertions. minProperties/maxProperties/dependentRequired are
+    // enforced, and so is `propertyNames` on a map-shaped object — see the shape
+    // check below.
     "dependentSchemas",
-    "propertyNames",
     "patternProperties",
     // Closed value sets.
     "enum",
@@ -110,6 +109,21 @@ fn collect_schema(schema: &Value, path: &str, findings: &mut BTreeMap<&'static s
         && !is_nullable_wrapper(branches)
     {
         findings.entry("oneOf").or_default().push(path.to_string());
+    }
+
+    // `propertyNames` is lowered only for a map-shaped object, whose extension bag
+    // holds every wire member. On an object with declared properties the keyword
+    // also governs those declared names, which the bag does not carry.
+    if members.contains_key("propertyNames")
+        && members
+            .get("properties")
+            .and_then(Value::as_object)
+            .is_some_and(|properties| !properties.is_empty())
+    {
+        findings
+            .entry("propertyNames")
+            .or_default()
+            .push(path.to_string());
     }
 
     // `contains` is lowered only for a bare `const` branch; matching an arbitrary
@@ -188,6 +202,9 @@ fn format_warning(keyword: &str, paths: &[String]) -> String {
         "contentEncoding" => "is left as `string` — not decoded to bytes",
         "contains" | "minContains" | "maxContains" => {
             "is enforced only for a `const` branch, and this one is not"
+        }
+        "propertyNames" => {
+            "is enforced only on a map-shaped object, and this one declares properties"
         }
         _ => "is not enforced — .NET constraint validation is unimplemented",
     };

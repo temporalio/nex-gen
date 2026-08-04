@@ -42,11 +42,11 @@ affected members, so nothing is dropped silently.
 |---|---|---|
 | Aggregated `ValidationError` over `Violation[]` | ✅ shared `definitions` runtime | ✅ `Definitions.cs` |
 | `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` / `multipleOf` | ✅ | ✅ |
-| `maxProperties` | ✅ | ✅ |
 | `minLength` / `maxLength` / `pattern` | ✅ | ✅ |
 | `minItems` / `maxItems` / `uniqueItems` | ✅ | ✅ |
 | `contains` / `minContains` / `maxContains` | ✅ | ⚠️ `const` branch only |
-| `minProperties` / `dependentRequired` / `propertyNames` | ✅ | ❌ dropped |
+| `minProperties` / `maxProperties` / `dependentRequired` | ✅ | ✅ |
+| `propertyNames` | ✅ | ⚠️ map-shaped objects only |
 | `enum` closed value sets | ✅ | ❌ emitted as bare `string` / `long` |
 | `oneOf` discriminated unions | ✅ | ❌ emitted as an empty class — branches lost |
 | `format` temporal materialization | ✅ native types | ❌ left as `string` |

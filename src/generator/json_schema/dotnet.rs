@@ -62,6 +62,12 @@ struct Schema {
     min_contains: Option<usize>,
     #[serde(rename = "maxContains")]
     max_contains: Option<usize>,
+    #[serde(rename = "minProperties")]
+    min_properties: Option<usize>,
+    #[serde(rename = "propertyNames")]
+    property_names: Option<Box<Schema>>,
+    #[serde(rename = "dependentRequired")]
+    dependent_required: Option<IndexMap<String, Vec<String>>>,
 }
 
 impl Schema {
@@ -121,6 +127,51 @@ impl Schema {
             min: self.min_contains.unwrap_or(1),
             max: self.max_contains,
         })
+    }
+
+    /// The object-level constraints declared on this schema.
+    ///
+    /// These are checked against the **wire member set** rather than any single
+    /// member's value, which is why they render at the top level of
+    /// `CollectViolations` rather than inside a member guard.
+    fn object_constraints(&self) -> Result<ObjectConstraints> {
+        // `propertyNames` is lowered only for a map-shaped object, whose extension
+        // bag holds every wire member. On an object with declared properties the
+        // keyword also governs the declared names, which the bag does not carry.
+        let property_names = match (&self.property_names, self.has_declared_properties()) {
+            (Some(names), false) => names.length_bounds(),
+            _ => Vec::new(),
+        };
+        Ok(ObjectConstraints {
+            count_bounds: [(true, self.min_properties), (false, self.max_properties)]
+                .into_iter()
+                .filter_map(|(at_least, bound)| {
+                    bound.map(|bound| PropertyCountBound { at_least, bound })
+                })
+                .collect(),
+            property_name_lengths: property_names,
+            dependent_required: self
+                .dependent_required
+                .as_ref()
+                .map(|dependencies| {
+                    dependencies
+                        .iter()
+                        .flat_map(|(trigger, dependents)| {
+                            dependents.iter().map(move |dependent| DependentRequired {
+                                trigger: trigger.clone(),
+                                dependent: dependent.clone(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+    }
+
+    fn has_declared_properties(&self) -> bool {
+        self.properties
+            .as_ref()
+            .is_some_and(|properties| !properties.is_empty())
     }
 
     /// This schema's `pattern` with its `$` end anchor rewritten to `\z`.
@@ -303,7 +354,8 @@ fn render_model(output: &mut String, model: &PlannedJsonType) -> Result<()> {
 /// a bare `order`.
 fn render_constraint_validator(output: &mut String, schema: &Schema) -> Result<()> {
     let constrained = constrained_members(schema);
-    if constrained.is_empty() {
+    let object_constraints = schema.object_constraints()?;
+    if constrained.is_empty() && object_constraints.is_empty() {
         return Ok(());
     }
 
@@ -333,8 +385,125 @@ fn render_constraint_validator(output: &mut String, schema: &Schema) -> Result<(
     for member in &constrained {
         render_member_constraints(output, member);
     }
+    // Object-level checks come after the per-member ones, matching the order Go
+    // aggregates them so a multi-violation message reads the same.
+    render_object_constraints(output, schema, &object_constraints)?;
     output.push_str("    }\n");
     Ok(())
+}
+
+/// Emits the object-level checks: `minProperties`/`maxProperties` over the wire
+/// member count, `propertyNames` over each member name, and `dependentRequired`.
+fn render_object_constraints(
+    output: &mut String,
+    schema: &Schema,
+    constraints: &ObjectConstraints,
+) -> Result<()> {
+    if constraints.is_empty() {
+        return Ok(());
+    }
+
+    if !constraints.count_bounds.is_empty() {
+        let count_expr = wire_property_count_expression(schema)?;
+        output.push_str("        var propertyCount = ");
+        output.push_str(&count_expr);
+        output.push_str(";\n");
+        for bound in &constraints.count_bounds {
+            output.push_str("        if (");
+            output.push_str(&bound.violation_condition("propertyCount"));
+            output.push_str(")\n        {\n");
+            // Object-level violations carry the containing path, with no member
+            // segment appended — the failure is the object's, not a member's.
+            output.push_str("            violations.Add(new Violation(path, ");
+            output.push_str(&csharp_string_literal(&bound.reason_prefix()));
+            output.push_str(" + propertyCount));\n");
+            output.push_str("        }\n");
+        }
+    }
+
+    if !constraints.property_name_lengths.is_empty() {
+        output.push_str("        foreach (var propertyName in AdditionalProperties.Keys)\n");
+        output.push_str("        {\n");
+        output.push_str("            var nameLength = JsonRuntime.CodePointCount(propertyName);\n");
+        for bound in &constraints.property_name_lengths {
+            output.push_str("            if (");
+            output.push_str(&bound.violation_condition("nameLength"));
+            output.push_str(")\n            {\n");
+            output.push_str(
+                "                violations.Add(new Violation(JsonRuntime.JoinPath(path, propertyName), ",
+            );
+            // Interpolated so the reason names the offending key, matching Go's
+            // `invalid property name %q: ...`. The path carries the key too, but
+            // the duplication is what keeps the diagnostic text identical.
+            output.push_str(&format!(
+                "$\"invalid property name \\\"{{propertyName}}\\\": {}{{nameLength}}\"",
+                bound.reason_prefix()
+            ));
+            output.push_str("));\n");
+            output.push_str("            }\n");
+        }
+        output.push_str("        }\n");
+    }
+
+    for dependency in &constraints.dependent_required {
+        let trigger = member_presence_expression(schema, &dependency.trigger);
+        let dependent = member_presence_expression(schema, &dependency.dependent);
+        output.push_str("        if (");
+        output.push_str(&trigger);
+        output.push_str(" && !");
+        output.push_str(&dependent);
+        output.push_str(")\n        {\n");
+        output.push_str("            violations.Add(new Violation(JsonRuntime.JoinPath(path, ");
+        output.push_str(&csharp_string_literal(&dependency.dependent));
+        output.push_str("), ");
+        output.push_str(&csharp_string_literal(&format!(
+            "property {:?} is required when {:?} is present",
+            dependency.dependent, dependency.trigger
+        )));
+        output.push_str("));\n");
+        output.push_str("        }\n");
+    }
+    Ok(())
+}
+
+/// The C# expression for how many members the payload carried.
+///
+/// A required property is always present, so it contributes a constant; every
+/// optional and unknown member lands in the extension bag. Together those cover
+/// the whole wire member set exactly.
+fn wire_property_count_expression(schema: &Schema) -> Result<String> {
+    let required_count = schema
+        .properties
+        .as_ref()
+        .map(|properties| {
+            let required = required_fields(schema);
+            properties
+                .keys()
+                .filter(|name| required.contains(name.as_str()))
+                .count()
+        })
+        .unwrap_or(0);
+    if !model_needs_extension_data(schema)? {
+        // No bag: the member set is exactly the required properties.
+        return Ok(required_count.to_string());
+    }
+    Ok(if required_count == 0 {
+        "AdditionalProperties.Count".to_string()
+    } else {
+        format!("{required_count} + AdditionalProperties.Count")
+    })
+}
+
+/// The C# expression that is true when `json_name` was present on the wire.
+fn member_presence_expression(schema: &Schema, json_name: &str) -> String {
+    if required_fields(schema).contains(json_name) {
+        // `[JsonRequired]` already guarantees presence.
+        return "true".to_string();
+    }
+    format!(
+        "AdditionalProperties.ContainsKey({})",
+        csharp_string_literal(json_name)
+    )
 }
 
 /// A member carrying at least one enforceable constraint, paired with how its
@@ -402,6 +571,52 @@ impl ItemCountBound {
             format!("{count_expr} > {}", self.bound)
         }
     }
+}
+
+/// The object-level assertions, checked against the wire member set.
+#[derive(Debug, Default)]
+struct ObjectConstraints {
+    count_bounds: Vec<PropertyCountBound>,
+    /// Length bounds applied to every member name (map-shaped objects only).
+    property_name_lengths: Vec<LengthBound>,
+    dependent_required: Vec<DependentRequired>,
+}
+
+impl ObjectConstraints {
+    fn is_empty(&self) -> bool {
+        self.count_bounds.is_empty()
+            && self.property_name_lengths.is_empty()
+            && self.dependent_required.is_empty()
+    }
+}
+
+/// A `minProperties`/`maxProperties` bound over the wire member count.
+#[derive(Debug, Clone, Copy)]
+struct PropertyCountBound {
+    at_least: bool,
+    bound: usize,
+}
+
+impl PropertyCountBound {
+    fn reason_prefix(&self) -> String {
+        let quantifier = if self.at_least { "at least" } else { "at most" };
+        format!("must have {quantifier} {} properties, got ", self.bound)
+    }
+
+    fn violation_condition(&self, count_expr: &str) -> String {
+        if self.at_least {
+            format!("{count_expr} < {}", self.bound)
+        } else {
+            format!("{count_expr} > {}", self.bound)
+        }
+    }
+}
+
+/// One `dependentRequired` edge: presence of `trigger` requires `dependent`.
+#[derive(Debug)]
+struct DependentRequired {
+    trigger: String,
+    dependent: String,
 }
 
 /// A `contains` check over a `const` element, with its `minContains`/`maxContains`
@@ -882,19 +1097,12 @@ fn render_model_validation(output: &mut String, schema: &Schema) -> Result<()> {
     output.push('\n');
     output.push_str("    void IJsonOnDeserialized.OnDeserialized()\n    {\n");
     if let Some(value_schema) = typed_map_value_schema(schema)? {
-        if let Some(max_properties) = schema.max_properties {
-            output.push_str("        if (AdditionalProperties.Count > ");
-            output.push_str(&max_properties.to_string());
-            output.push_str(")\n        {\n");
-            output.push_str("            throw new JsonException(");
-            output.push_str(&csharp_string_literal(&format!(
-                "maxProperties: at most {max_properties} entries"
-            )));
-            output.push_str(");\n        }\n");
-        }
         output.push_str("        foreach (var entry in AdditionalProperties)\n        {\n");
         render_extension_value_validation(output, "entry.Key", "entry.Value", &value_schema, 3)?;
         output.push_str("        }\n");
+        if !schema.object_constraints()?.is_empty() {
+            output.push_str("        Validate();\n");
+        }
         output.push_str("    }\n");
         return Ok(());
     }
@@ -945,7 +1153,7 @@ fn render_model_validation(output: &mut String, schema: &Schema) -> Result<()> {
     // Structural checks above reject a malformed payload outright; the contract
     // constraints then run so an inbound value cannot enter the process in a shape
     // the contract forbids.
-    if !constrained_members(schema).is_empty() {
+    if !constrained_members(schema).is_empty() || !schema.object_constraints()?.is_empty() {
         output.push_str("        Validate();\n");
     }
     output.push_str("    }\n");
@@ -1069,6 +1277,7 @@ fn model_needs_on_deserialized(schema: &Schema) -> Result<bool> {
     // A model whose only validation is constraint checking still needs the hook,
     // so an inbound payload is validated on deserialize.
     Ok(!constrained_members(schema).is_empty()
+        || !schema.object_constraints()?.is_empty()
         || typed_map_value_schema(schema)?.is_some()
         || (!optional_fields(schema).is_empty()
             && (!is_open_object(schema)

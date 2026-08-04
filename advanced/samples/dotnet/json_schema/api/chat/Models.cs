@@ -36,12 +36,32 @@ namespace NexGen.ChatService
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            var propertyCount = AdditionalProperties.Count;
+            if (propertyCount > 50)
+            {
+                violations.Add(new Violation(path, "must have at most 50 properties, got " + propertyCount));
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
-            if (AdditionalProperties.Count > 50)
-            {
-                throw new JsonException("maxProperties: at most 50 entries");
-            }
             foreach (var entry in AdditionalProperties)
             {
                 if (entry.Value is JsonElement json3 && json3.ValueKind != JsonValueKind.String)
@@ -53,6 +73,7 @@ namespace NexGen.ChatService
                     throw new JsonException($"{entry.Key}: expected string");
                 }
             }
+            Validate();
         }
     }
 
