@@ -232,6 +232,14 @@ fn generate_files_from_planned_tree(
     } else {
         Vec::new()
     };
+    // Reported in both modes, unlike the stub-binding warnings above: the
+    // JSON-Schema samples are generated in definitions mode, which is precisely
+    // where a missing constraint validator matters. See dotnet_coverage.
+    if language == Language::Dotnet {
+        generated
+            .warnings
+            .extend(json_schema::dotnet_coverage::coverage_warnings(tree));
+    }
     Ok(generated)
 }
 

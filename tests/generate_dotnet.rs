@@ -11,6 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use nex_gen::{GenerateRequest, generate_to_file};
 
+mod common;
+use common::json_input_path;
+
 const WORKFLOW_SERVICE_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_SHOWCASE_EXAMPLE_ID: &str = "type-showcase";
 static DOTNET_COMMAND_LOCK: Mutex<()> = Mutex::new(());
@@ -564,4 +567,98 @@ interface workflow-service {
     assert!(rendered.contains("public static partial class Workflow"));
     assert!(!rendered.contains("WorkflowServiceOperations"));
     fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// The .NET JSON-Schema backend emits no constraint validator, so assertion
+/// keywords are dropped silently. `json_schema::dotnet_coverage` reports each
+/// one as a generation warning; this test pins the exact set so the gap can only
+/// shrink deliberately.
+///
+/// **When you implement a keyword, delete it from the expected list here.** A
+/// failure reading "unexpected warnings" means a new gap appeared; one reading
+/// "expected warnings that did not appear" means a gap was closed and this list
+/// is now stale.
+#[test]
+fn dotnet_json_coverage_warnings_match_known_gaps() {
+    // `showcase` is the broadest JSON-Schema input, so it surfaces the widest
+    // set of gaps in one generation.
+    let root = project_root();
+    let input_path = json_input_path(&root, "showcase");
+    let output_path = unique_output_path("dotnet-coverage-warnings");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+        .args(["dotnet"])
+        .arg(&input_path)
+        .arg("--output")
+        .arg(&output_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "generation failed: {output:?}");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let mut warned_keywords = stderr
+        .lines()
+        .filter_map(|line| line.strip_prefix("warning: dotnet: `"))
+        .filter_map(|line| line.split('`').next())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    warned_keywords.sort();
+    warned_keywords.dedup();
+
+    let expected = [
+        "contains",
+        "contentEncoding",
+        "dependentRequired",
+        "enum",
+        "exclusiveMinimum",
+        "format",
+        "maxContains",
+        "maxItems",
+        "maxLength",
+        "maximum",
+        "minContains",
+        "minItems",
+        "minLength",
+        "minProperties",
+        "minimum",
+        "multipleOf",
+        "oneOf",
+        "pattern",
+        "propertyNames",
+        "uniqueItems",
+    ];
+
+    assert_eq!(
+        warned_keywords, expected,
+        "\n.NET coverage gaps changed.\nIf you implemented a keyword, remove it \
+         from `expected`.\nfull stderr:\n{stderr}"
+    );
+    fs::remove_dir_all(output_path).unwrap();
+}
+
+/// `chat` exercises only constructs the .NET backend fully supports — including
+/// the `oneOf: [<branch>, {"type": "null"}]` nullable spelling and
+/// `maxProperties` — so it must generate clean. Guards the classifier in
+/// `dotnet_coverage` against over-reporting.
+#[test]
+fn dotnet_json_coverage_reports_no_gaps_for_supported_schema() {
+    let root = project_root();
+    let input_path = json_input_path(&root, "chat");
+    let output_path = unique_output_path("dotnet-coverage-clean");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+        .args(["dotnet"])
+        .arg(&input_path)
+        .arg("--output")
+        .arg(&output_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "generation failed: {output:?}");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        !stderr.contains("warning: dotnet:"),
+        "expected no coverage warnings, got:\n{stderr}"
+    );
+    fs::remove_dir_all(output_path).unwrap();
 }

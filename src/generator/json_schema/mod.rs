@@ -1,4 +1,5 @@
 pub(crate) mod dotnet;
+pub(crate) mod dotnet_coverage;
 pub(crate) mod go;
 pub(crate) mod java;
 pub(crate) mod python;
