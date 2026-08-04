@@ -271,6 +271,31 @@ namespace {namespace}
         }}
 
         /// <summary>
+        /// Counts Unicode code points, which is the unit JSON Schema's
+        /// <c>minLength</c>/<c>maxLength</c> measure.
+        ///
+        /// <c>string.Length</c> counts UTF-16 code units, so it would score an
+        /// astral character such as U+1F600 as 2 and reject a value the contract
+        /// permits. This matches Go's <c>utf8.RuneCountInString</c> and Java's
+        /// <c>codePointCount</c>, including counting an unpaired surrogate as one.
+        /// </summary>
+        internal static int CodePointCount(string value)
+        {{
+            var count = 0;
+            for (var index = 0; index < value.Length; index++)
+            {{
+                count++;
+                if (char.IsHighSurrogate(value[index])
+                    && index + 1 < value.Length
+                    && char.IsLowSurrogate(value[index + 1]))
+                {{
+                    index++;
+                }}
+            }}
+            return count;
+        }}
+
+        /// <summary>
         /// Joins a violation path prefix to a member name, so a nested model
         /// reports <c>page.blocks.order</c> rather than a bare <c>order</c>.
         /// </summary>

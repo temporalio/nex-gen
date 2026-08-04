@@ -31,10 +31,7 @@ use crate::workspace::{ApiSpecNode, ApiSpecTree};
 /// because the loader merges it away before any backend sees it.
 const UNENFORCED_KEYWORDS: &[&str] = &[
     // Numeric bounds are enforced; see `render_constraint_validator`.
-    // String assertions.
-    "minLength",
-    "maxLength",
-    "pattern",
+    // String assertions. minLength/maxLength/pattern are enforced.
     "format",
     "contentEncoding",
     "contentMediaType",
@@ -199,6 +196,11 @@ mod tests {
 
     use super::*;
 
+    // These cases deliberately use `contentMediaType` / `dependentSchemas` — real
+    // entries in UNENFORCED_KEYWORDS that no planned phase implements — so the
+    // classifier's behavior can be asserted without the case needing an edit every
+    // time a keyword gains enforcement. Coverage of the *current* gap set lives in
+    // `tests/generate_dotnet.rs`, which is meant to churn.
     fn findings_for(schema: serde_json::Value) -> Vec<String> {
         let mut findings = BTreeMap::new();
         collect_schema(&schema, "Model", &mut findings);
@@ -212,22 +214,24 @@ mod tests {
     fn reports_an_unenforced_constraint_on_a_member() {
         let warnings = findings_for(json!({
             "type": "object",
-            "properties": { "name": { "type": "string", "minLength": 2 } },
+            "properties": { "name": { "type": "string", "contentMediaType": "text/plain" } },
         }));
 
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("`minLength`"), "{:?}", warnings);
+        assert!(warnings[0].contains("`contentMediaType`"), "{:?}", warnings);
         assert!(warnings[0].contains("Model.name"), "{:?}", warnings);
     }
 
     #[test]
-    fn does_not_report_enforced_numeric_bounds() {
+    fn does_not_report_enforced_constraints() {
         let warnings = findings_for(json!({
             "type": "object",
             "properties": {
                 "order": { "type": "integer", "minimum": 0, "maximum": 10 },
                 "level": { "type": "integer", "exclusiveMinimum": 0 },
                 "ratio": { "type": "number", "multipleOf": 5 },
+                "name": { "type": "string", "minLength": 1, "maxLength": 8 },
+                "code": { "type": "string", "pattern": "^[A-Z]+$" },
             },
         }));
 
@@ -282,10 +286,13 @@ mod tests {
         let warnings = findings_for(json!({
             "type": "object",
             "properties": {
-                "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string", "contentMediaType": "text/plain" },
+                },
                 "nested": {
                     "type": "object",
-                    "properties": { "code": { "type": "string", "pattern": "^[A-Z]+$" } },
+                    "dependentSchemas": { "a": { "type": "object" } },
                 },
             },
         }));
@@ -294,12 +301,12 @@ mod tests {
         assert!(
             warnings
                 .iter()
-                .any(|w| w.contains("`minLength`") && w.contains("Model.tags"))
+                .any(|w| w.contains("`contentMediaType`") && w.contains("Model.tags"))
         );
         assert!(
             warnings
                 .iter()
-                .any(|w| w.contains("`pattern`") && w.contains("Model.nested.code"))
+                .any(|w| w.contains("`dependentSchemas`") && w.contains("Model.nested"))
         );
     }
 
@@ -308,12 +315,12 @@ mod tests {
         let warnings = findings_for(json!({
             "type": "object",
             "properties": {
-                "a": { "type": "string", "minLength": 1 },
-                "b": { "type": "string", "minLength": 1 },
-                "c": { "type": "string", "minLength": 1 },
-                "d": { "type": "string", "minLength": 1 },
-                "e": { "type": "string", "minLength": 1 },
-                "f": { "type": "string", "minLength": 1 },
+                "a": { "type": "string", "contentMediaType": "text/plain" },
+                "b": { "type": "string", "contentMediaType": "text/plain" },
+                "c": { "type": "string", "contentMediaType": "text/plain" },
+                "d": { "type": "string", "contentMediaType": "text/plain" },
+                "e": { "type": "string", "contentMediaType": "text/plain" },
+                "f": { "type": "string", "contentMediaType": "text/plain" },
             },
         }));
 

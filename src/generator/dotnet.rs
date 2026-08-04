@@ -88,6 +88,9 @@ impl<'a> ApiPlanner<'a> {
             imports.push("System.Text.Json");
             imports.push("System.Text.Json.Serialization");
         }
+        if self.external_model_fragments.needs_regex() {
+            imports.push("System.Text.RegularExpressions");
+        }
         // The shared runtime resolves implicitly when it sits in this namespace or
         // an enclosing one; an explicit import covers the case where divergent
         // `@nexus.namespace` overrides leave it somewhere unrelated.

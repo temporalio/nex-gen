@@ -613,13 +613,10 @@ fn dotnet_json_coverage_warnings_match_known_gaps() {
         "format",
         "maxContains",
         "maxItems",
-        "maxLength",
         "minContains",
         "minItems",
-        "minLength",
         "minProperties",
         "oneOf",
-        "pattern",
         "propertyNames",
         "uniqueItems",
     ];

@@ -4,7 +4,7 @@ Generated C# for the JSON-Schema inputs in [`../schemas/`](../schemas/), in
 **definitions** mode — plain data models plus the `NexusRpc` service interface,
 without the native-api operation/client scaffolding.
 
-- `chat/`, `kb/` — generated models, one directory per schema.
+- `chat/`, `kb/`, `showcase/` — generated models, one directory per schema.
 - `tests/` — round-trip checks that serialize the shared wire fixtures in
   [`../wire/json_schema/`](../wire/json_schema/) through `System.Text.Json` and
   assert JSON-equality.
@@ -43,7 +43,7 @@ affected members, so nothing is dropped silently.
 | Aggregated `ValidationError` over `Violation[]` | ✅ shared `definitions` runtime | ✅ `Definitions.cs` |
 | `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` / `multipleOf` | ✅ | ✅ |
 | `maxProperties` | ✅ | ✅ |
-| `minLength` / `maxLength` / `pattern` | ✅ | ❌ dropped |
+| `minLength` / `maxLength` / `pattern` | ✅ | ✅ |
 | `minItems` / `maxItems` / `uniqueItems` / `contains` | ✅ | ❌ dropped |
 | `minProperties` / `dependentRequired` / `propertyNames` | ✅ | ❌ dropped |
 | `enum` closed value sets | ✅ | ❌ emitted as bare `string` / `long` |
@@ -51,10 +51,28 @@ affected members, so nothing is dropped silently.
 | `format` temporal materialization | ✅ native types | ❌ left as `string` |
 | `contentEncoding: base64` | ✅ native bytes | ❌ left as `string` |
 
-One known diagnostic divergence within the covered set: Go reports an
-out-of-range integer as an aggregated `Violation` reading
-`exceeds ±(2^53-1) integer cap`, while .NET throws a non-aggregated
-`JsonException("expected integer")` with no member path.
+Two known diagnostic divergences within the covered set:
+
+- Go reports an out-of-range integer as an aggregated `Violation` reading
+  `exceeds ±(2^53-1) integer cap`, while .NET throws a non-aggregated
+  `JsonException("expected integer")` with no member path.
+- `pattern` reasons quote the target's own rewritten expression, and Go and Java
+  already differ here (Go `%q`-quotes and keeps `$`; Java concatenates and uses
+  `\z`). .NET follows Java, since it shares the `\z` rewrite.
+
+### .NET-specific lowering
+
+Two places where the obvious C# spelling would be wrong, both covered by
+`tests/StringConstraintChecks.cs`:
+
+- **`pattern` end anchors are rewritten `$` → `\z`.** .NET's `Regex` treats `$` as
+  "end of input, *or* immediately before a final newline", so `^[A-Z]{2,4}$` would
+  match `"ABCD\n"` — a value the contract forbids. Python (`\Z`) and Java (`\z`)
+  need the same rewrite; Go and JS do not.
+- **`minLength`/`maxLength` count code points, not `string.Length`.** C#'s
+  `string.Length` counts UTF-16 code units, so 12 astral characters would score 24
+  and be rejected against `maxLength: 12`. `JsonRuntime.CodePointCount` matches
+  Go's `utf8.RuneCountInString` and Java's `codePointCount`.
 
 The wire fixtures in `../wire/json_schema/` hold only valid payloads, so they
 exercise serialization but never rejection; `tests/ConstraintValidationChecks.cs`
@@ -71,6 +89,8 @@ cargo run --features advanced -- dotnet samples/schemas/chat.nexusrpc.yaml \
   --output samples/dotnet/chat
 cargo run --features advanced -- dotnet samples/schemas/kb \
   --output samples/dotnet/kb
+cargo run --features advanced -- dotnet samples/schemas/showcase.nexusrpc.yaml \
+  --output samples/dotnet/showcase
 ```
 
 ## Building and testing

@@ -46,6 +46,11 @@ struct Schema {
     exclusive_maximum: Option<Number>,
     #[serde(rename = "multipleOf")]
     multiple_of: Option<Number>,
+    #[serde(rename = "minLength")]
+    min_length: Option<usize>,
+    #[serde(rename = "maxLength")]
+    max_length: Option<usize>,
+    pattern: Option<String>,
 }
 
 impl Schema {
@@ -68,6 +73,28 @@ impl Schema {
         .into_iter()
         .filter_map(|(kind, bound)| bound.map(|bound| NumericBound { kind, bound }))
         .collect()
+    }
+
+    /// The string-length bounds declared on this schema, `minLength` first to
+    /// match the order Go and Java emit them in.
+    fn length_bounds(&self) -> Vec<LengthBound> {
+        [(true, self.min_length), (false, self.max_length)]
+            .into_iter()
+            .filter_map(|(at_least, bound)| bound.map(|bound| LengthBound { at_least, bound }))
+            .collect()
+    }
+
+    /// This schema's `pattern` with its `$` end anchor rewritten to `\z`.
+    ///
+    /// .NET's `Regex` treats a bare `$` as "end of string, or before a single
+    /// trailing newline" — the same exception Python and Java have — so a value
+    /// ending in `\n` would pass a `$`-anchored pattern that the contract intends
+    /// to reject. `\z` is the unconditional end-of-input anchor. Go and JS keep
+    /// `$` because their engines have no such exception.
+    fn dotnet_pattern(&self) -> Option<String> {
+        self.pattern
+            .as_deref()
+            .map(|pattern| crate::json_schema::pattern::rewrite_end_anchor(pattern, r"\z"))
     }
 }
 
@@ -130,6 +157,12 @@ pub(in crate::generator) struct RenderedModelFragments {
 impl RenderedModelFragments {
     pub(in crate::generator) fn has_models(&self) -> bool {
         !self.body.is_empty()
+    }
+
+    /// True when any emitted model compiles a `pattern`, so the models file needs
+    /// `System.Text.RegularExpressions`.
+    pub(in crate::generator) fn needs_regex(&self) -> bool {
+        self.body.contains("new Regex(")
     }
 }
 
@@ -235,6 +268,8 @@ fn render_constraint_validator(output: &mut String, schema: &Schema) -> Result<(
         return Ok(());
     }
 
+    render_pattern_fields(output, &constrained);
+
     output.push('\n');
     output.push_str("    /// <summary>\n");
     output.push_str(
@@ -267,13 +302,52 @@ fn render_constraint_validator(output: &mut String, schema: &Schema) -> Result<(
 /// value is reached in C#.
 struct ConstrainedMember<'a> {
     json_name: &'a str,
-    /// The C# expression for the member's value inside `CollectViolations`.
+    /// The C# property name holding the member's value.
     accessor: String,
-    /// True when the member is optional or nullable, so the check has to be
+    /// True when the member is optional or nullable, so the checks have to be
     /// guarded against the absent case.
     needs_null_guard: bool,
-    numeric_type: &'static str,
-    bounds: Vec<NumericBound<'a>>,
+    /// The CLR type the value binds to once unwrapped from its nullable form.
+    clr_type: &'static str,
+    numeric_bounds: Vec<NumericBound<'a>>,
+    length_bounds: Vec<LengthBound>,
+    /// The loader-normalized pattern, already end-anchor rewritten for .NET.
+    pattern: Option<String>,
+}
+
+impl ConstrainedMember<'_> {
+    fn has_constraints(&self) -> bool {
+        !self.numeric_bounds.is_empty() || !self.length_bounds.is_empty() || self.pattern.is_some()
+    }
+
+    /// The private static `Regex` field backing this member's `pattern`. Named
+    /// camelCase like the other generated private fields, which also keeps it
+    /// from colliding with any PascalCase property.
+    fn pattern_field(&self) -> String {
+        csharp_parameter_name(&format!("{}-pattern", self.json_name))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LengthBound {
+    at_least: bool,
+    bound: usize,
+}
+
+impl LengthBound {
+    /// The reason wording Go and Java both use, over a **code point** count.
+    fn reason_prefix(&self) -> String {
+        let comparison = if self.at_least { ">=" } else { "<=" };
+        format!("must have length {comparison} {}, got ", self.bound)
+    }
+
+    fn violation_condition(&self, length_expr: &str) -> String {
+        if self.at_least {
+            format!("{length_expr} < {}", self.bound)
+        } else {
+            format!("{length_expr} > {}", self.bound)
+        }
+    }
 }
 
 fn constrained_members(schema: &Schema) -> Vec<ConstrainedMember<'_>> {
@@ -284,40 +358,75 @@ fn constrained_members(schema: &Schema) -> Vec<ConstrainedMember<'_>> {
     properties
         .iter()
         .filter_map(|(json_name, property)| {
-            let bounds = property.numeric_bounds();
-            if bounds.is_empty() {
-                return None;
-            }
             let is_required = required.contains(json_name.as_str());
-            Some(ConstrainedMember {
+            let member = ConstrainedMember {
                 json_name,
                 accessor: csharp_type_name(json_name),
                 needs_null_guard: !is_required || allows_null(property),
-                numeric_type: numeric_clr_type(property),
-                bounds,
-            })
+                clr_type: constraint_clr_type(property),
+                numeric_bounds: property.numeric_bounds(),
+                length_bounds: property.length_bounds(),
+                pattern: property.dotnet_pattern(),
+            };
+            member.has_constraints().then_some(member)
         })
         .collect()
 }
 
-/// The CLR type a numeric member's value binds to when unwrapped from its
-/// nullable form — `long` for `type: integer`, `double` otherwise.
-fn numeric_clr_type(schema: &Schema) -> &'static str {
+/// The CLR type a constrained member's value binds to when unwrapped from its
+/// nullable form.
+fn constraint_clr_type(schema: &Schema) -> &'static str {
     match schema.ty.as_ref().and_then(Value::as_str) {
         Some("integer") => "long",
-        _ => "double",
+        Some("number") => "double",
+        Some("string") => "string",
+        // Nullable spellings carry the concrete type on the non-null branch.
+        _ => schema
+            .one_of
+            .as_ref()
+            .and_then(|branches| {
+                branches
+                    .iter()
+                    .find(|branch| !schema_type_includes(branch, "null"))
+                    .map(constraint_clr_type)
+            })
+            .unwrap_or("object"),
+    }
+}
+
+/// Emits the `private static readonly Regex` field for every member with a
+/// `pattern`, so the expression is compiled once per type rather than per call.
+fn render_pattern_fields(output: &mut String, members: &[ConstrainedMember<'_>]) {
+    let patterned = members
+        .iter()
+        .filter(|member| member.pattern.is_some())
+        .collect::<Vec<_>>();
+    if patterned.is_empty() {
+        return;
+    }
+    output.push('\n');
+    for member in patterned {
+        let pattern = member.pattern.as_deref().expect("pattern presence checked");
+        output.push_str("    private static readonly Regex ");
+        output.push_str(&member.pattern_field());
+        output.push_str(" = new Regex(");
+        output.push_str(&csharp_string_literal(pattern));
+        // CultureInvariant so character classes never depend on the ambient
+        // locale. Backtracking safety comes from the loader's RE2 gate, which
+        // rejects lookaround and backreferences outright.
+        output.push_str(", RegexOptions.CultureInvariant);\n");
     }
 }
 
 fn render_member_constraints(output: &mut String, member: &ConstrainedMember<'_>) {
-    // An optional member is `long?`/`double?`; bind it once so each bound reads
-    // the unwrapped value, and skip every check when it is absent.
+    // An optional member arrives as `long?`/`double?`/`string?`; bind it once so
+    // every check reads the unwrapped value, and skip them all when it is absent.
     let (indent, value_expr) = if member.needs_null_guard {
         let local = csharp_parameter_name(&format!("{}-value", member.json_name));
         output.push_str("        if (");
         output.push_str(&member.accessor);
         output.push_str(" is ");
-        output.push_str(member.numeric_type);
+        output.push_str(member.clr_type);
         output.push(' ');
         output.push_str(&local);
         output.push_str(")\n        {\n");
@@ -326,21 +435,83 @@ fn render_member_constraints(output: &mut String, member: &ConstrainedMember<'_>
         ("        ", member.accessor.clone())
     };
 
-    for bound in &member.bounds {
+    let add_violation = |output: &mut String, reason_expr: &str| {
+        output.push_str(indent);
+        output.push_str("    violations.Add(new Violation(JsonRuntime.JoinPath(path, ");
+        output.push_str(&csharp_string_literal(member.json_name));
+        output.push_str("), ");
+        output.push_str(reason_expr);
+        output.push_str("));\n");
+    };
+
+    for bound in &member.numeric_bounds {
         output.push_str(indent);
         output.push_str("if (");
         output.push_str(&bound.violation_condition(&value_expr));
         output.push_str(")\n");
         output.push_str(indent);
         output.push_str("{\n");
+        add_violation(
+            output,
+            &format!(
+                "{} + JsonRuntime.FormatNumber({value_expr})",
+                csharp_string_literal(&bound.reason_format())
+            ),
+        );
         output.push_str(indent);
-        output.push_str("    violations.Add(new Violation(JsonRuntime.JoinPath(path, ");
-        output.push_str(&csharp_string_literal(member.json_name));
-        output.push_str("), ");
-        output.push_str(&csharp_string_literal(&bound.reason_format()));
-        output.push_str(" + JsonRuntime.FormatNumber(");
+        output.push_str("}\n");
+    }
+
+    // Length is a **code point** count, matching Go's utf8.RuneCountInString and
+    // Java's codePointCount. C#'s `string.Length` counts UTF-16 units, which would
+    // over-count every astral character.
+    if !member.length_bounds.is_empty() {
+        let length_local = csharp_parameter_name(&format!("{}-length", member.json_name));
+        output.push_str(indent);
+        output.push_str("var ");
+        output.push_str(&length_local);
+        output.push_str(" = JsonRuntime.CodePointCount(");
         output.push_str(&value_expr);
-        output.push_str(")));\n");
+        output.push_str(");\n");
+        for bound in &member.length_bounds {
+            output.push_str(indent);
+            output.push_str("if (");
+            output.push_str(&bound.violation_condition(&length_local));
+            output.push_str(")\n");
+            output.push_str(indent);
+            output.push_str("{\n");
+            add_violation(
+                output,
+                &format!(
+                    "{} + {length_local}",
+                    csharp_string_literal(&bound.reason_prefix())
+                ),
+            );
+            output.push_str(indent);
+            output.push_str("}\n");
+        }
+    }
+
+    if let Some(pattern) = &member.pattern {
+        output.push_str(indent);
+        output.push_str("if (!");
+        output.push_str(&member.pattern_field());
+        output.push_str(".IsMatch(");
+        output.push_str(&value_expr);
+        output.push_str("))\n");
+        output.push_str(indent);
+        output.push_str("{\n");
+        // Wording follows Java, which like .NET rewrites the `$` end anchor to
+        // `\z` and so reports the rewritten pattern. Go quotes via `%q` and keeps
+        // `$`, so the two already differ; matching Java is the closest parity
+        // available.
+        add_violation(
+            output,
+            &format!(
+                "{} + {value_expr}",
+                csharp_string_literal(&format!("must match pattern {pattern}, got "))
+            ),
+        );
         output.push_str(indent);
         output.push_str("}\n");
     }
