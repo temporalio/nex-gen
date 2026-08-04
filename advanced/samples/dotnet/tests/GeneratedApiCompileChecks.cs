@@ -19,9 +19,11 @@ namespace NexGen.DotNetExamples.Tests
     internal static class GeneratedApiCompileChecks
     {
         internal static Task<StartWorkflowExample.StartedWorkflow> StartWorkflowAsync() =>
-            StartWorkflowExample.Operations.StartWorkflowAsync<ExampleWorkflow, string>(
-                workflow => workflow.RunAsync("workflow-input"),
-                options: new StartWorkflowExample.StartWorkflowOptions("workflow-id", "task-queue")
+            StartWorkflowExample.Operations.StartWorkflowAsync(
+                new StartWorkflowExample.StartWorkflowOptions(
+                    nameof(ExampleWorkflow),
+                    "workflow-id",
+                    "task-queue")
                 {
                     WorkflowStartDelay = TimeSpan.FromSeconds(1),
                 });

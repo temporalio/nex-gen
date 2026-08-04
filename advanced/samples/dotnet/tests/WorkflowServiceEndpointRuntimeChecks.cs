@@ -32,7 +32,6 @@ namespace NexGen.DotNetExamples.Tests
                     new SignalWithStartWorkflowOptions("started-workflow-id", taskQueue)
                     {
                         ExecutionTimeout = TimeSpan.FromSeconds(30),
-                        RequestId = "request-id",
                         RetryPolicy = new RetryPolicy
                         {
                             MaximumAttempts = 3,
@@ -106,7 +105,6 @@ namespace NexGen.DotNetExamples.Tests
             Assert.NotNull(call.SignalArgs);
             Assert.Single(call.SignalArgs);
             Assert.Equal(TimeSpan.FromSeconds(30), call.ExecutionTimeout);
-            Assert.Equal("request-id", call.RequestId);
             Assert.NotNull(call.RetryPolicy);
             Assert.Equal(3, call.RetryPolicy.MaximumAttempts);
             Assert.NotNull(call.UserMetadata);
