@@ -36,13 +36,8 @@ const UNENFORCED_KEYWORDS: &[&str] = &[
     "contentEncoding",
     "contentMediaType",
     "contentSchema",
-    // Array assertions.
-    "minItems",
-    "maxItems",
-    "uniqueItems",
-    "contains",
-    "minContains",
-    "maxContains",
+    // Array assertions. minItems/maxItems/uniqueItems are enforced, and so is
+    // `contains` in its `const` form — see the shape check below.
     "prefixItems",
     // Object assertions.
     "minProperties",
@@ -117,6 +112,20 @@ fn collect_schema(schema: &Value, path: &str, findings: &mut BTreeMap<&'static s
         findings.entry("oneOf").or_default().push(path.to_string());
     }
 
+    // `contains` is lowered only for a bare `const` branch; matching an arbitrary
+    // subschema per element would need the validator to be reentrant over element
+    // values. `minContains`/`maxContains` ride along with it, so they are reported
+    // only when the `contains` they qualify is itself unsupported.
+    if let Some(contains) = members.get("contains")
+        && !contains_is_supported(contains)
+    {
+        for keyword in ["contains", "minContains", "maxContains"] {
+            if keyword == "contains" || members.contains_key(keyword) {
+                findings.entry(keyword).or_default().push(path.to_string());
+            }
+        }
+    }
+
     for (key, value) in members {
         match key.as_str() {
             // Child schemas keyed by member name.
@@ -159,6 +168,11 @@ fn is_nullable_wrapper(branches: &[Value]) -> bool {
     null_branches > 0 && branches.len() - null_branches == 1
 }
 
+/// True when a `contains` subschema is the `const` form the backend lowers.
+fn contains_is_supported(contains: &Value) -> bool {
+    contains.get("const").is_some()
+}
+
 fn is_null_schema(schema: &Value) -> bool {
     schema
         .get("type")
@@ -172,6 +186,9 @@ fn format_warning(keyword: &str, paths: &[String]) -> String {
         "enum" => "is emitted as a bare scalar with no closed value set",
         "format" => "is left as `string` — neither asserted nor materialized",
         "contentEncoding" => "is left as `string` — not decoded to bytes",
+        "contains" | "minContains" | "maxContains" => {
+            "is enforced only for a `const` branch, and this one is not"
+        }
         _ => "is not enforced — .NET constraint validation is unimplemented",
     };
 

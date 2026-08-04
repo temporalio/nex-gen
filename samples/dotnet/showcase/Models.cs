@@ -923,6 +923,33 @@ namespace NexGen.ShowcaseService
                     violations.Add(new Violation(JsonRuntime.JoinPath(path, "step"), "must be a multiple of 3, got " + JsonRuntime.FormatNumber(stepValue)));
                 }
             }
+            if (Tags is IReadOnlyList<string> tagsValue)
+            {
+                if (tagsValue.Count < 1)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "tags"), "must have at least 1 items, got " + tagsValue.Count));
+                }
+                if (tagsValue.Count > 5)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "tags"), "must have at most 5 items, got " + tagsValue.Count));
+                }
+            }
+            if (Aliases is IReadOnlyList<string> aliasesValue)
+            {
+                JsonRuntime.CollectDuplicateItems(aliasesValue, JsonRuntime.JoinPath(path, "aliases"), violations);
+            }
+            if (Roles is IReadOnlyList<string> rolesValue)
+            {
+                var rolesMatchCount = JsonRuntime.CountMatchingItems(rolesValue, "admin");
+                if (rolesMatchCount < 1)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "roles"), "too few matching items: at least 1, got " + rolesMatchCount));
+                }
+                if (rolesMatchCount > 2)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "roles"), "too many matching items: at most 2, got " + rolesMatchCount));
+                }
+            }
         }
 
         void IJsonOnDeserialized.OnDeserialized()

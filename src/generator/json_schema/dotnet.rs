@@ -51,6 +51,17 @@ struct Schema {
     #[serde(rename = "maxLength")]
     max_length: Option<usize>,
     pattern: Option<String>,
+    #[serde(rename = "minItems")]
+    min_items: Option<usize>,
+    #[serde(rename = "maxItems")]
+    max_items: Option<usize>,
+    #[serde(rename = "uniqueItems")]
+    unique_items: Option<bool>,
+    contains: Option<Box<Schema>>,
+    #[serde(rename = "minContains")]
+    min_contains: Option<usize>,
+    #[serde(rename = "maxContains")]
+    max_contains: Option<usize>,
 }
 
 impl Schema {
@@ -82,6 +93,34 @@ impl Schema {
             .into_iter()
             .filter_map(|(at_least, bound)| bound.map(|bound| LengthBound { at_least, bound }))
             .collect()
+    }
+
+    /// The array-length bounds declared on this schema, `minItems` first.
+    fn item_count_bounds(&self) -> Vec<ItemCountBound> {
+        [(true, self.min_items), (false, self.max_items)]
+            .into_iter()
+            .filter_map(|(at_least, bound)| bound.map(|bound| ItemCountBound { at_least, bound }))
+            .collect()
+    }
+
+    /// The `contains` check, when it is a shape .NET can lower.
+    ///
+    /// Only a bare `const` branch is supported, which is what the corpus uses and
+    /// all Go emits — matching an arbitrary subschema per element would need the
+    /// whole validator to be reentrant over element values. Anything else stays a
+    /// reported gap; see [`contains_is_supported`].
+    fn contains_check(&self) -> Option<ContainsCheck> {
+        let contains = self.contains.as_deref()?;
+        let literal = contains
+            .const_value
+            .as_ref()
+            .and_then(csharp_value_literal)?;
+        Some(ContainsCheck {
+            literal,
+            // `contains` without `minContains` means "at least one" per the spec.
+            min: self.min_contains.unwrap_or(1),
+            max: self.max_contains,
+        })
     }
 
     /// This schema's `pattern` with its `$` end anchor rewritten to `\z`.
@@ -308,16 +347,25 @@ struct ConstrainedMember<'a> {
     /// guarded against the absent case.
     needs_null_guard: bool,
     /// The CLR type the value binds to once unwrapped from its nullable form.
-    clr_type: &'static str,
+    clr_type: String,
     numeric_bounds: Vec<NumericBound<'a>>,
     length_bounds: Vec<LengthBound>,
+    item_count_bounds: Vec<ItemCountBound>,
+    /// True when `uniqueItems` demands every element be distinct.
+    unique_items: bool,
+    contains: Option<ContainsCheck>,
     /// The loader-normalized pattern, already end-anchor rewritten for .NET.
     pattern: Option<String>,
 }
 
 impl ConstrainedMember<'_> {
     fn has_constraints(&self) -> bool {
-        !self.numeric_bounds.is_empty() || !self.length_bounds.is_empty() || self.pattern.is_some()
+        !self.numeric_bounds.is_empty()
+            || !self.length_bounds.is_empty()
+            || self.pattern.is_some()
+            || !self.item_count_bounds.is_empty()
+            || self.unique_items
+            || self.contains.is_some()
     }
 
     /// The private static `Regex` field backing this member's `pattern`. Named
@@ -332,6 +380,38 @@ impl ConstrainedMember<'_> {
 struct LengthBound {
     at_least: bool,
     bound: usize,
+}
+
+/// A `minItems`/`maxItems` bound over an array's element count.
+#[derive(Debug, Clone, Copy)]
+struct ItemCountBound {
+    at_least: bool,
+    bound: usize,
+}
+
+impl ItemCountBound {
+    fn reason_prefix(&self) -> String {
+        let quantifier = if self.at_least { "at least" } else { "at most" };
+        format!("must have {quantifier} {} items, got ", self.bound)
+    }
+
+    fn violation_condition(&self, count_expr: &str) -> String {
+        if self.at_least {
+            format!("{count_expr} < {}", self.bound)
+        } else {
+            format!("{count_expr} > {}", self.bound)
+        }
+    }
+}
+
+/// A `contains` check over a `const` element, with its `minContains`/`maxContains`
+/// occurrence window.
+#[derive(Debug)]
+struct ContainsCheck {
+    /// The C# literal every element is compared against.
+    literal: String,
+    min: usize,
+    max: Option<usize>,
 }
 
 impl LengthBound {
@@ -367,6 +447,9 @@ fn constrained_members(schema: &Schema) -> Vec<ConstrainedMember<'_>> {
                 numeric_bounds: property.numeric_bounds(),
                 length_bounds: property.length_bounds(),
                 pattern: property.dotnet_pattern(),
+                item_count_bounds: property.item_count_bounds(),
+                unique_items: property.unique_items.unwrap_or(false),
+                contains: property.contains_check(),
             };
             member.has_constraints().then_some(member)
         })
@@ -375,11 +458,21 @@ fn constrained_members(schema: &Schema) -> Vec<ConstrainedMember<'_>> {
 
 /// The CLR type a constrained member's value binds to when unwrapped from its
 /// nullable form.
-fn constraint_clr_type(schema: &Schema) -> &'static str {
+fn constraint_clr_type(schema: &Schema) -> String {
     match schema.ty.as_ref().and_then(Value::as_str) {
-        Some("integer") => "long",
-        Some("number") => "double",
-        Some("string") => "string",
+        Some("integer") => "long".to_string(),
+        Some("number") => "double".to_string(),
+        Some("string") => "string".to_string(),
+        // An array binds to the same read-only list shape the property exposes, so
+        // the pattern match in the null guard succeeds against the stored value.
+        Some("array") => {
+            let item = schema
+                .items
+                .as_deref()
+                .map(constraint_clr_type)
+                .unwrap_or_else(|| "object".to_string());
+            format!("IReadOnlyList<{item}>")
+        }
         // Nullable spellings carry the concrete type on the non-null branch.
         _ => schema
             .one_of
@@ -390,7 +483,7 @@ fn constraint_clr_type(schema: &Schema) -> &'static str {
                     .find(|branch| !schema_type_includes(branch, "null"))
                     .map(constraint_clr_type)
             })
-            .unwrap_or("object"),
+            .unwrap_or_else(|| "object".to_string()),
     }
 }
 
@@ -426,7 +519,7 @@ fn render_member_constraints(output: &mut String, member: &ConstrainedMember<'_>
         output.push_str("        if (");
         output.push_str(&member.accessor);
         output.push_str(" is ");
-        output.push_str(member.clr_type);
+        output.push_str(&member.clr_type);
         output.push(' ');
         output.push_str(&local);
         output.push_str(")\n        {\n");
@@ -485,6 +578,89 @@ fn render_member_constraints(output: &mut String, member: &ConstrainedMember<'_>
                 &format!(
                     "{} + {length_local}",
                     csharp_string_literal(&bound.reason_prefix())
+                ),
+            );
+            output.push_str(indent);
+            output.push_str("}\n");
+        }
+    }
+
+    if !member.item_count_bounds.is_empty() {
+        let count_expr = format!("{value_expr}.Count");
+        for bound in &member.item_count_bounds {
+            output.push_str(indent);
+            output.push_str("if (");
+            output.push_str(&bound.violation_condition(&count_expr));
+            output.push_str(")\n");
+            output.push_str(indent);
+            output.push_str("{\n");
+            add_violation(
+                output,
+                &format!(
+                    "{} + {count_expr}",
+                    csharp_string_literal(&bound.reason_prefix())
+                ),
+            );
+            output.push_str(indent);
+            output.push_str("}\n");
+        }
+    }
+
+    // Reports every duplicate occurrence against the index of its first sighting,
+    // matching Go element-for-element rather than stopping at the first pair.
+    if member.unique_items {
+        output.push_str(indent);
+        output.push_str("JsonRuntime.CollectDuplicateItems(");
+        output.push_str(&value_expr);
+        output.push_str(", JsonRuntime.JoinPath(path, ");
+        output.push_str(&csharp_string_literal(member.json_name));
+        output.push_str("), violations);\n");
+    }
+
+    if let Some(contains) = &member.contains {
+        let match_count = csharp_parameter_name(&format!("{}-match-count", member.json_name));
+        output.push_str(indent);
+        output.push_str("var ");
+        output.push_str(&match_count);
+        output.push_str(" = JsonRuntime.CountMatchingItems(");
+        output.push_str(&value_expr);
+        output.push_str(", ");
+        output.push_str(&contains.literal);
+        output.push_str(");\n");
+        output.push_str(indent);
+        output.push_str("if (");
+        output.push_str(&match_count);
+        output.push_str(" < ");
+        output.push_str(&contains.min.to_string());
+        output.push_str(")\n");
+        output.push_str(indent);
+        output.push_str("{\n");
+        add_violation(
+            output,
+            &format!(
+                "{} + {match_count}",
+                csharp_string_literal(&format!(
+                    "too few matching items: at least {}, got ",
+                    contains.min
+                ))
+            ),
+        );
+        output.push_str(indent);
+        output.push_str("}\n");
+        if let Some(max) = contains.max {
+            output.push_str(indent);
+            output.push_str("if (");
+            output.push_str(&match_count);
+            output.push_str(" > ");
+            output.push_str(&max.to_string());
+            output.push_str(")\n");
+            output.push_str(indent);
+            output.push_str("{\n");
+            add_violation(
+                output,
+                &format!(
+                    "{} + {match_count}",
+                    csharp_string_literal(&format!("too many matching items: at most {max}, got "))
                 ),
             );
             output.push_str(indent);

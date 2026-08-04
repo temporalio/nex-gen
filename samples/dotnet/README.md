@@ -44,7 +44,8 @@ affected members, so nothing is dropped silently.
 | `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` / `multipleOf` | ✅ | ✅ |
 | `maxProperties` | ✅ | ✅ |
 | `minLength` / `maxLength` / `pattern` | ✅ | ✅ |
-| `minItems` / `maxItems` / `uniqueItems` / `contains` | ✅ | ❌ dropped |
+| `minItems` / `maxItems` / `uniqueItems` | ✅ | ✅ |
+| `contains` / `minContains` / `maxContains` | ✅ | ⚠️ `const` branch only |
 | `minProperties` / `dependentRequired` / `propertyNames` | ✅ | ❌ dropped |
 | `enum` closed value sets | ✅ | ❌ emitted as bare `string` / `long` |
 | `oneOf` discriminated unions | ✅ | ❌ emitted as an empty class — branches lost |

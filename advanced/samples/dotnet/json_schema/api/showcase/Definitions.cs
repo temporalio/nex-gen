@@ -164,6 +164,53 @@ namespace NexGen.ShowcaseService
         }
 
         /// <summary>
+        /// Reports every <c>uniqueItems</c> duplicate, each against the index where
+        /// the value was first seen.
+        ///
+        /// A repeated value therefore yields one violation per later occurrence
+        /// rather than one per pair, which is what the other targets do.
+        /// </summary>
+        internal static void CollectDuplicateItems<T>(
+            IReadOnlyList<T> items,
+            string path,
+            List<Violation> violations)
+            where T : notnull
+        {
+            var seen = new Dictionary<T, int>(items.Count);
+            for (var index = 0; index < items.Count; index++)
+            {
+                if (seen.TryGetValue(items[index], out var first))
+                {
+                    violations.Add(new Violation(
+                        path,
+                        $"duplicate items: element at index {index} equals index {first}"));
+                }
+                else
+                {
+                    seen[items[index]] = index;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Counts elements equal to a <c>contains</c> <c>const</c> value, feeding the
+        /// <c>minContains</c>/<c>maxContains</c> occurrence window.
+        /// </summary>
+        internal static int CountMatchingItems<T>(IReadOnlyList<T> items, T expected)
+        {
+            var comparer = EqualityComparer<T>.Default;
+            var count = 0;
+            foreach (var item in items)
+            {
+                if (comparer.Equals(item, expected))
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        /// <summary>
         /// Counts Unicode code points, which is the unit JSON Schema's
         /// <c>minLength</c>/<c>maxLength</c> measure.
         ///

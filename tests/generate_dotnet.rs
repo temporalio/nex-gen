@@ -606,19 +606,13 @@ fn dotnet_json_coverage_warnings_match_known_gaps() {
     warned_keywords.dedup();
 
     let expected = [
-        "contains",
         "contentEncoding",
         "dependentRequired",
         "enum",
         "format",
-        "maxContains",
-        "maxItems",
-        "minContains",
-        "minItems",
         "minProperties",
         "oneOf",
         "propertyNames",
-        "uniqueItems",
     ];
 
     assert_eq!(
