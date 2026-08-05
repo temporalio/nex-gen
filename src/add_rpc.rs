@@ -542,12 +542,19 @@ impl<'a> AddRpcBuilder<'a> {
         self.validate_existing_function(function, operation_name, &input_type, &output_type)?;
 
         let mut record_updates = Vec::new();
+        let mut reconciled_proto_names = BTreeSet::new();
         for proto_name in [&rpc.input_type, &rpc.output_type] {
             let proto_name = proto_name.trim_start_matches('.');
+            if !reconciled_proto_names.insert(proto_name) {
+                continue;
+            }
             let Some(message) = self.descriptors.message(proto_name) else {
                 continue;
             };
             let Some(record) = interface.records_by_proto.get(proto_name) else {
+                if interface.type_names_by_proto.contains_key(proto_name) {
+                    continue;
+                }
                 return Err(Error::UnsupportedAddRpc {
                     context: self.context.clone(),
                     reason: format!(
@@ -644,15 +651,20 @@ impl<'a> AddRpcBuilder<'a> {
         message: &MessageMetadata,
         proto_name: &str,
     ) -> Result<Vec<String>> {
-        let expected_by_proto = message
+        let oneofs = self.real_oneof_groups(message)?;
+        let mut expected_by_proto = message
             .descriptor
             .field
             .iter()
             .map(|field| field_name(field, proto_name))
-            .collect::<Result<BTreeSet<_>>>()?;
+            .collect::<Result<BTreeSet<_>>>()?
+            .into_iter()
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>();
+        expected_by_proto.extend(oneofs.iter().map(|oneof| oneof.name.to_string()));
 
         for existing_proto_name in record.fields.keys() {
-            if !expected_by_proto.contains(existing_proto_name.as_str()) {
+            if !expected_by_proto.contains(existing_proto_name) {
                 return Err(Error::UnsupportedAddRpc {
                     context: proto_name.to_string(),
                     reason: format!(
@@ -663,39 +675,129 @@ impl<'a> AddRpcBuilder<'a> {
             }
         }
 
-        let mut missing = Vec::new();
-        for field in &message.descriptor.field {
-            let field_name = field_name(field, proto_name)?;
-            let Some(existing) = record.fields.get(field_name) else {
-                if self.record_has_field_covering_proto(record, field_name) {
-                    continue;
-                }
-                let expected = self.render_message_field(message, field)?;
-                missing.push(expected.line.clone());
-                continue;
-            };
-            if existing.omitted {
-                continue;
-            }
-            let expected = self.render_message_field_for_comparison(message, field)?;
-            let name_matches =
-                existing.wit_name == expected.wit_name || existing.explicit_proto_field;
-            let type_matches = self.type_is_compatible(&existing.type_expr, &expected.type_expr);
-            if !name_matches || !type_matches {
-                return Err(Error::UnsupportedAddRpc {
-                    context: format!("{proto_name}.{}", field_name),
-                    reason: format!(
-                        "existing WIT field is `{}: {}` but descriptor requires `{}: {}`",
-                        existing.wit_name,
-                        existing.type_expr,
-                        expected.wit_name,
-                        expected.type_expr
-                    ),
-                });
+        let mut oneof_by_field = BTreeMap::new();
+        for (group_index, oneof) in oneofs.iter().enumerate() {
+            for (field_index, _) in &oneof.fields {
+                oneof_by_field.insert(*field_index, group_index);
             }
         }
 
+        let mut missing = Vec::new();
+        for (field_index, field) in message.descriptor.field.iter().enumerate() {
+            if let Some(group_index) = oneof_by_field.get(&field_index) {
+                let oneof = &oneofs[*group_index];
+                if field_index != oneof.fields[0].0 {
+                    continue;
+                }
+                self.reconcile_existing_oneof(record, message, oneof, &mut missing)?;
+                continue;
+            }
+
+            self.reconcile_existing_proto_field(record, message, field, &mut missing)?;
+        }
+
         Ok(missing)
+    }
+
+    fn reconcile_existing_oneof(
+        &mut self,
+        record: &ExistingRecord,
+        message: &MessageMetadata,
+        oneof: &ProtoOneofGroup<'_>,
+        missing: &mut Vec<String>,
+    ) -> Result<()> {
+        let grouped = record.fields.get(oneof.name);
+        let has_legacy_members = oneof.fields.iter().any(|(_, field)| {
+            field
+                .name
+                .as_deref()
+                .is_some_and(|name| record.fields.contains_key(name))
+                || field
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| self.record_has_field_covering_proto(record, name))
+        });
+
+        if grouped.is_some() && has_legacy_members {
+            return Err(Error::UnsupportedAddRpc {
+                context: format!("{}.{}", message.full_name, oneof.name),
+                reason: format!(
+                    "existing WIT record `{}` mixes grouped and individual oneof fields",
+                    record.wit_name
+                ),
+            });
+        }
+
+        if let Some(existing) = grouped {
+            if existing.omitted {
+                return Ok(());
+            }
+            let wit_name = oneof.name.to_kebab_case();
+            let variant_name = format!("{}-{wit_name}", record.wit_name);
+            let expected_type = format!("option<{variant_name}>");
+            let name_matches = existing.wit_name == wit_name || existing.explicit_proto_field;
+            let type_matches = self.type_is_compatible(&existing.type_expr, &expected_type);
+            if !name_matches || !type_matches {
+                return Err(Error::UnsupportedAddRpc {
+                    context: format!("{}.{}", message.full_name, oneof.name),
+                    reason: format!(
+                        "existing WIT oneof field is `{}: {}` but descriptor requires `{}: {}`",
+                        existing.wit_name, existing.type_expr, wit_name, expected_type
+                    ),
+                });
+            }
+            return Ok(());
+        }
+
+        if has_legacy_members {
+            for (_, field) in &oneof.fields {
+                self.reconcile_existing_proto_field(record, message, field, missing)?;
+            }
+            return Ok(());
+        }
+
+        let variant_name =
+            self.reserve_oneof_variant_name(&record.wit_name, oneof.name, &message.full_name)?;
+        let definition = self.render_oneof_variant(message, &variant_name, oneof, false)?;
+        self.rendered_definitions.push(definition);
+        let wit_name = oneof.name.to_kebab_case();
+        missing.push(format!("    {wit_name}: option<{variant_name}>,"));
+        Ok(())
+    }
+
+    fn reconcile_existing_proto_field(
+        &mut self,
+        record: &ExistingRecord,
+        message: &MessageMetadata,
+        field: &FieldDescriptorProto,
+        missing: &mut Vec<String>,
+    ) -> Result<()> {
+        let proto_name = &message.full_name;
+        let field_name = field_name(field, proto_name)?;
+        let Some(existing) = record.fields.get(field_name) else {
+            if self.record_has_field_covering_proto(record, field_name) {
+                return Ok(());
+            }
+            let expected = self.render_message_field(message, field)?;
+            missing.push(expected.line.clone());
+            return Ok(());
+        };
+        if existing.omitted {
+            return Ok(());
+        }
+        let expected = self.render_message_field_for_comparison(message, field)?;
+        let name_matches = existing.wit_name == expected.wit_name || existing.explicit_proto_field;
+        let type_matches = self.type_is_compatible(&existing.type_expr, &expected.type_expr);
+        if !name_matches || !type_matches {
+            return Err(Error::UnsupportedAddRpc {
+                context: format!("{proto_name}.{}", field_name),
+                reason: format!(
+                    "existing WIT field is `{}: {}` but descriptor requires `{}: {}`",
+                    existing.wit_name, existing.type_expr, expected.wit_name, expected.type_expr
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn type_is_compatible(&self, existing: &str, expected: &str) -> bool {
@@ -772,6 +874,11 @@ impl<'a> AddRpcBuilder<'a> {
     }
 
     fn render_message(&mut self, message: &MessageMetadata, wit_name: &str) -> Result<String> {
+        let oneofs = self.real_oneof_groups(message)?;
+        if oneofs.len() == 1 && message.descriptor.field.len() == oneofs[0].fields.len() {
+            return self.render_oneof_variant(message, wit_name, &oneofs[0], true);
+        }
+
         let rendered_fields = self.render_message_fields(message)?;
 
         let mut rendered = String::new();
@@ -789,11 +896,183 @@ impl<'a> AddRpcBuilder<'a> {
         &mut self,
         message: &MessageMetadata,
     ) -> Result<Vec<RenderedFieldSpec>> {
+        let oneofs = self.real_oneof_groups(message)?;
+        let mut oneof_by_field = BTreeMap::new();
+        for (group_index, oneof) in oneofs.iter().enumerate() {
+            for (field_index, _) in &oneof.fields {
+                oneof_by_field.insert(*field_index, group_index);
+            }
+        }
+
         let mut rendered_fields = Vec::new();
-        for field in &message.descriptor.field {
-            rendered_fields.push(self.render_message_field(message, field)?);
+        let mut rendered_names = BTreeSet::new();
+        for (field_index, field) in message.descriptor.field.iter().enumerate() {
+            if let Some(group_index) = oneof_by_field.get(&field_index) {
+                let oneof = &oneofs[*group_index];
+                if field_index != oneof.fields[0].0 {
+                    continue;
+                }
+                let variant_name = self.reserve_oneof_variant_name(
+                    &self.local_type_name(&message.full_name),
+                    oneof.name,
+                    &message.full_name,
+                )?;
+                let definition = self.render_oneof_variant(message, &variant_name, oneof, false)?;
+                self.rendered_definitions.push(definition);
+                let wit_name = oneof.name.to_kebab_case();
+                if !rendered_names.insert(wit_name.clone()) {
+                    return Err(self.unsupported(
+                        &message.full_name,
+                        format!("generated record field `{wit_name}` would collide"),
+                    ));
+                }
+                rendered_fields.push(RenderedFieldSpec {
+                    wit_name: wit_name.clone(),
+                    type_expr: format!("option<{variant_name}>"),
+                    line: format!("    {wit_name}: option<{variant_name}>,"),
+                });
+                continue;
+            }
+
+            let rendered = self.render_message_field(message, field)?;
+            if !rendered_names.insert(rendered.wit_name.clone()) {
+                return Err(self.unsupported(
+                    &message.full_name,
+                    format!(
+                        "generated record field `{}` would collide",
+                        rendered.wit_name
+                    ),
+                ));
+            }
+            rendered_fields.push(rendered);
         }
         Ok(rendered_fields)
+    }
+
+    fn real_oneof_groups<'m>(
+        &self,
+        message: &'m MessageMetadata,
+    ) -> Result<Vec<ProtoOneofGroup<'m>>> {
+        let mut fields_by_oneof = vec![Vec::new(); message.descriptor.oneof_decl.len()];
+        for (field_index, field) in message.descriptor.field.iter().enumerate() {
+            let Some(raw_index) = field.oneof_index else {
+                continue;
+            };
+            let Ok(oneof_index) = usize::try_from(raw_index) else {
+                return Err(self.unsupported(
+                    &message.full_name,
+                    format!("field at index {field_index} has invalid oneof index {raw_index}"),
+                ));
+            };
+            let Some(fields) = fields_by_oneof.get_mut(oneof_index) else {
+                return Err(self.unsupported(
+                    &message.full_name,
+                    format!("field at index {field_index} has unknown oneof index {raw_index}"),
+                ));
+            };
+            fields.push((field_index, field));
+        }
+
+        let mut groups = Vec::new();
+        for (oneof_index, oneof) in message.descriptor.oneof_decl.iter().enumerate() {
+            let fields = std::mem::take(&mut fields_by_oneof[oneof_index]);
+            if fields.len() == 1 && fields[0].1.proto3_optional.unwrap_or(false) {
+                continue;
+            }
+            if fields.is_empty() {
+                return Err(self.unsupported(
+                    &message.full_name,
+                    format!("oneof declaration at index {oneof_index} has no fields"),
+                ));
+            }
+            if fields
+                .iter()
+                .any(|(_, field)| field.proto3_optional.unwrap_or(false))
+            {
+                return Err(self.unsupported(
+                    &message.full_name,
+                    format!("oneof declaration at index {oneof_index} is malformed"),
+                ));
+            }
+            let Some(name) = oneof.name.as_deref() else {
+                return Err(self.unsupported(
+                    &message.full_name,
+                    format!("oneof declaration at index {oneof_index} is missing a name"),
+                ));
+            };
+            groups.push(ProtoOneofGroup { name, fields });
+        }
+        Ok(groups)
+    }
+
+    fn reserve_oneof_variant_name(
+        &mut self,
+        message_wit_name: &str,
+        oneof_name: &str,
+        context: &str,
+    ) -> Result<String> {
+        let name = format!("{message_wit_name}-{}", oneof_name.to_kebab_case());
+        if !self.reserved_type_names.insert(name.clone()) {
+            return Err(self.unsupported(
+                context,
+                format!("generated oneof variant name `{name}` would collide with a WIT type"),
+            ));
+        }
+        Ok(name)
+    }
+
+    fn render_oneof_variant(
+        &mut self,
+        message: &MessageMetadata,
+        wit_name: &str,
+        oneof: &ProtoOneofGroup<'_>,
+        represents_message: bool,
+    ) -> Result<String> {
+        let mut cases = Vec::new();
+        let mut case_names = BTreeSet::new();
+        for (_, field) in &oneof.fields {
+            let proto_name = field_name(field, &message.full_name)?;
+            let case_name = proto_name.to_kebab_case();
+            if !case_names.insert(case_name.clone()) {
+                return Err(self.unsupported(
+                    &message.full_name,
+                    format!("generated variant case `{case_name}` would collide"),
+                ));
+            }
+            let payload = self.render_oneof_case_type(field, &message.full_name, proto_name)?;
+            cases.push((case_name, payload));
+        }
+
+        let mut rendered = String::new();
+        if represents_message {
+            rendered.push_str(&format!("  /// @nexus.proto \"{}\"\n", message.full_name));
+        } else {
+            rendered.push_str(&format!(
+                "  /// Protobuf oneof `{}.{}`.\n",
+                message.full_name, oneof.name
+            ));
+        }
+        rendered.push_str(&format!("  variant {wit_name} {{\n"));
+        for (case_name, payload) in cases {
+            rendered.push_str(&format!("    {case_name}({payload}),\n"));
+        }
+        rendered.push_str("  }\n");
+        Ok(rendered)
+    }
+
+    fn render_oneof_case_type(
+        &mut self,
+        field: &FieldDescriptorProto,
+        parent_type: &str,
+        field_name: &str,
+    ) -> Result<String> {
+        let context = format!("{parent_type}.{field_name}");
+        let label = Label::try_from(field.label.unwrap_or(Label::Optional as i32))
+            .map_err(|_| self.unsupported(&context, "unknown field label"))?;
+        if label == Label::Repeated {
+            return Err(self.unsupported(&context, "oneof fields cannot be repeated"));
+        }
+        self.render_field_base_type(field, parent_type, field_name)
     }
 
     fn render_message_field(
@@ -864,7 +1143,31 @@ impl<'a> AddRpcBuilder<'a> {
         let field_type = Type::try_from(field.r#type.unwrap_or_default())
             .map_err(|_| self.unsupported(&context, "unknown field type"))?;
 
-        let base_type = match field_type {
+        let base_type = self.render_field_base_type(field, parent_type, field_name)?;
+
+        if label == Label::Repeated {
+            return Ok(format!("list<{base_type}>"));
+        }
+
+        if field_has_presence(field, field_type)
+            || !field_supports_required_without_presence(field_type)
+        {
+            return Ok(format!("option<{base_type}>"));
+        }
+
+        Ok(base_type)
+    }
+
+    fn render_field_base_type(
+        &mut self,
+        field: &FieldDescriptorProto,
+        parent_type: &str,
+        field_name: &str,
+    ) -> Result<String> {
+        let context = format!("{parent_type}.{field_name}");
+        let field_type = Type::try_from(field.r#type.unwrap_or_default())
+            .map_err(|_| self.unsupported(&context, "unknown field type"))?;
+        Ok(match field_type {
             Type::Double => "f64".to_string(),
             Type::Float => "f32".to_string(),
             Type::Int64 | Type::Sint64 | Type::Sfixed64 => "s64".to_string(),
@@ -882,19 +1185,7 @@ impl<'a> AddRpcBuilder<'a> {
                 };
                 self.render_type_reference(type_name, parent_type)?
             }
-        };
-
-        if label == Label::Repeated {
-            return Ok(format!("list<{base_type}>"));
-        }
-
-        if field_has_presence(field, field_type)
-            || !field_supports_required_without_presence(field_type)
-        {
-            return Ok(format!("option<{base_type}>"));
-        }
-
-        Ok(base_type)
+        })
     }
 
     fn reserve_local_type_name(&mut self, proto_name: &str, context: &str) -> Result<String> {
@@ -996,6 +1287,11 @@ struct RenderedFieldSpec {
     wit_name: String,
     type_expr: String,
     line: String,
+}
+
+struct ProtoOneofGroup<'a> {
+    name: &'a str,
+    fields: Vec<(usize, &'a FieldDescriptorProto)>,
 }
 
 struct ExistingOperationUpdate {

@@ -282,6 +282,13 @@ directories, so `advanced/samples/inputs/deps` links every package under it.
 `add-message` follows the same input convention. It emits the selected message
 and all reachable proto message/enum types without adding an operation. When
 extending an existing WIT file, its world must export exactly one interface.
+Both scaffold commands render real protobuf `oneof` declarations as WIT
+variants. A message made up of one `oneof` becomes a variant directly; a
+message that mixes regular fields and oneofs gets an optional synthesized
+variant field for each oneof. Synthetic oneofs used to represent `proto3
+optional` fields remain ordinary optional fields. These variants are scaffold
+shapes only; automatic protobuf conversion for WIT variants is not yet
+generated.
 
 Generate WIT for a proto RPC from a descriptor set:
 
