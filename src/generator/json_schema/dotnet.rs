@@ -68,6 +68,8 @@ struct Schema {
     property_names: Option<Box<Schema>>,
     #[serde(rename = "dependentRequired")]
     dependent_required: Option<IndexMap<String, Vec<String>>>,
+    #[serde(rename = "enum")]
+    enum_values: Option<Vec<Value>>,
 }
 
 impl Schema {
@@ -166,6 +168,17 @@ impl Schema {
                 })
                 .unwrap_or_default(),
         })
+    }
+
+    /// True when the member declares a closed value set, which makes the spec
+    /// integer cap redundant — membership already bounds the value. Go skips the
+    /// cap on these for the same reason.
+    fn has_closed_value_set(&self) -> bool {
+        self.const_value.is_some()
+            || self
+                .enum_values
+                .as_ref()
+                .is_some_and(|values| !values.is_empty())
     }
 
     fn has_declared_properties(&self) -> bool {
@@ -517,6 +530,9 @@ struct ConstrainedMember<'a> {
     needs_null_guard: bool,
     /// The CLR type the value binds to once unwrapped from its nullable form.
     clr_type: String,
+    /// True for a `type: integer` member, which carries the 2^53-1 spec cap
+    /// whether or not the schema declares any explicit bound.
+    integer_cap: bool,
     numeric_bounds: Vec<NumericBound<'a>>,
     length_bounds: Vec<LengthBound>,
     item_count_bounds: Vec<ItemCountBound>,
@@ -529,7 +545,8 @@ struct ConstrainedMember<'a> {
 
 impl ConstrainedMember<'_> {
     fn has_constraints(&self) -> bool {
-        !self.numeric_bounds.is_empty()
+        self.integer_cap
+            || !self.numeric_bounds.is_empty()
             || !self.length_bounds.is_empty()
             || self.pattern.is_some()
             || !self.item_count_bounds.is_empty()
@@ -654,11 +671,18 @@ fn constrained_members(schema: &Schema) -> Vec<ConstrainedMember<'_>> {
         .iter()
         .filter_map(|(json_name, property)| {
             let is_required = required.contains(json_name.as_str());
+            let clr_type = constraint_clr_type(property);
             let member = ConstrainedMember {
                 json_name,
                 accessor: csharp_type_name(json_name),
                 needs_null_guard: !is_required || allows_null(property),
-                clr_type: constraint_clr_type(property),
+                clr_type: clr_type.clone(),
+                // Keyed off the resolved CLR type so the emitted comparison can
+                // never be against a value of another type. A genuine sum type such
+                // as `oneOf: [string, integer]` resolves to its first non-null
+                // branch and so is not capped here; Go puts that cap on the
+                // integer *branch* type, which arrives with `oneOf` support.
+                integer_cap: clr_type == "long" && !property.has_closed_value_set(),
                 numeric_bounds: property.numeric_bounds(),
                 length_bounds: property.length_bounds(),
                 pattern: property.dotnet_pattern(),
@@ -751,6 +775,23 @@ fn render_member_constraints(output: &mut String, member: &ConstrainedMember<'_>
         output.push_str(reason_expr);
         output.push_str("));\n");
     };
+
+    if member.integer_cap {
+        output.push_str(indent);
+        output.push_str("if (");
+        output.push_str(&value_expr);
+        output.push_str(" < -JsonRuntime.IntegerCap || ");
+        output.push_str(&value_expr);
+        output.push_str(" > JsonRuntime.IntegerCap)\n");
+        output.push_str(indent);
+        output.push_str("{\n");
+        add_violation(
+            output,
+            &csharp_string_literal("exceeds ±(2^53-1) integer cap"),
+        );
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
 
     for bound in &member.numeric_bounds {
         output.push_str(indent);

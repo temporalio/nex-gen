@@ -45,6 +45,7 @@ affected members, so nothing is dropped silently.
 | `minLength` / `maxLength` / `pattern` | ✅ | ✅ |
 | `minItems` / `maxItems` / `uniqueItems` | ✅ | ✅ |
 | `contains` / `minContains` / `maxContains` | ✅ | ⚠️ `const` branch only |
+| 2^53-1 spec integer cap | ✅ | ✅ |
 | `minProperties` / `maxProperties` / `dependentRequired` | ✅ | ✅ |
 | `propertyNames` | ✅ | ⚠️ map-shaped objects only |
 | `enum` closed value sets | ✅ | ❌ emitted as bare `string` / `long` |
@@ -52,11 +53,8 @@ affected members, so nothing is dropped silently.
 | `format` temporal materialization | ✅ native types | ❌ left as `string` |
 | `contentEncoding: base64` | ✅ native bytes | ❌ left as `string` |
 
-Two known diagnostic divergences within the covered set:
+One known diagnostic divergence within the covered set:
 
-- Go reports an out-of-range integer as an aggregated `Violation` reading
-  `exceeds ±(2^53-1) integer cap`, while .NET throws a non-aggregated
-  `JsonException("expected integer")` with no member path.
 - `pattern` reasons quote the target's own rewritten expression, and Go and Java
   already differ here (Go `%q`-quotes and keeps `$`; Java concatenates and uses
   `\z`). .NET follows Java, since it shares the `\z` rewrite.

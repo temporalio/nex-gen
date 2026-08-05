@@ -98,6 +98,32 @@ namespace NexGen.Generated.Content.Page
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            if (WordCount is long wordCountValue)
+            {
+                if (wordCountValue < -JsonRuntime.IntegerCap || wordCountValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "wordCount"), "exceeds ±(2^53-1) integer cap"));
+                }
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
             foreach (var key in AdditionalProperties.Keys)
@@ -112,6 +138,7 @@ namespace NexGen.Generated.Content.Page
                 JsonRuntime.RejectNull("wordCount", wordCountValue);
                 _ = JsonRuntime.ReadJsonValue<long?>(wordCountValue);
             }
+            Validate();
         }
     }
 

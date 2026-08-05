@@ -140,6 +140,32 @@ namespace NexGen.ChatService
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            if (Priority is long priorityValue)
+            {
+                if (priorityValue < -JsonRuntime.IntegerCap || priorityValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "priority"), "exceeds ±(2^53-1) integer cap"));
+                }
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
             foreach (var key in AdditionalProperties.Keys)
@@ -157,6 +183,7 @@ namespace NexGen.ChatService
                 JsonRuntime.RejectNull("priority", priorityValue);
                 _ = JsonRuntime.ReadJsonValue<long?>(priorityValue);
             }
+            Validate();
         }
     }
 

@@ -87,6 +87,10 @@ namespace NexGen.Generated.Content.Block
 
         internal void CollectViolations(List<Violation> violations, string path)
         {
+            if (Order < -JsonRuntime.IntegerCap || Order > JsonRuntime.IntegerCap)
+            {
+                violations.Add(new Violation(JsonRuntime.JoinPath(path, "order"), "exceeds ±(2^53-1) integer cap"));
+            }
             if (Order < 0)
             {
                 violations.Add(new Violation(JsonRuntime.JoinPath(path, "order"), "must be >= 0, got " + JsonRuntime.FormatNumber(Order)));
@@ -176,6 +180,10 @@ namespace NexGen.Generated.Content.Block
         {
             if (Indent is long indentValue)
             {
+                if (indentValue < -JsonRuntime.IntegerCap || indentValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "indent"), "exceeds ±(2^53-1) integer cap"));
+                }
                 if (indentValue < 0)
                 {
                     violations.Add(new Violation(JsonRuntime.JoinPath(path, "indent"), "must be >= 0, got " + JsonRuntime.FormatNumber(indentValue)));

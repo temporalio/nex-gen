@@ -3,7 +3,6 @@
 #nullable enable
 #pragma warning disable CS1591
 
-using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Globalization;
@@ -76,10 +75,13 @@ namespace NexGen.ShowcaseService
     internal static class JsonRuntime
     {
         /// <summary>
-        /// The largest integer a JSON number carries losslessly (2^53-1) — the
-        /// same cap every other target enforces.
+        /// The largest integer a JSON number carries losslessly (2^53-1).
+        ///
+        /// Exceeding it is a **contract violation**, reported through
+        /// <see cref="ValidationException"/> with the offending member's path — not
+        /// a parse failure. Mirrors Go's `integerCap`.
         /// </summary>
-        private const double MaxSafeInteger = 9007199254740991d;
+        internal const long IntegerCap = 9007199254740991L;
 
         /// <summary>
         /// Reads an optional member out of the extension-data bag, falling back to
@@ -128,7 +130,6 @@ namespace NexGen.ShowcaseService
             {
                 return default;
             }
-            double number;
             if (value is JsonElement json)
             {
                 if (json.ValueKind == JsonValueKind.Null)
@@ -139,28 +140,38 @@ namespace NexGen.ShowcaseService
                 {
                     throw new JsonException("expected integer");
                 }
-                number = json.GetDouble();
-            }
-            else if (value is long longValue)
-            {
-                number = longValue;
-            }
-            else if (value is int intValue)
-            {
-                number = intValue;
-            }
-            else
-            {
+                // Exact across the whole Int64 range, and fails for a non-integral
+                // number. Deliberately does not enforce IntegerCap: a value past
+                // 2^53-1 is a constraint violation the validator reports with a
+                // path, not a parse error. Reading through double would round it
+                // away before the validator ever saw it.
+                if (json.TryGetInt64(out var exact))
+                {
+                    return exact;
+                }
+                // A number spelled with a decimal point but no fractional part —
+                // `1.0` — is a valid integer per JSON Schema, and TryGetInt64
+                // rejects that spelling. Fall back to the double reading, bounded
+                // to the range where double to long is exact. `% 1 != 0` also
+                // rejects NaN and infinity, whose remainder is NaN.
+                if (json.TryGetDouble(out var number)
+                    && number % 1 == 0
+                    && number >= -9007199254740992d
+                    && number <= 9007199254740992d)
+                {
+                    return (long)number;
+                }
                 throw new JsonException("expected integer");
             }
-            if (double.IsNaN(number)
-                || double.IsInfinity(number)
-                || Math.Truncate(number) != number
-                || Math.Abs(number) > MaxSafeInteger)
+            if (value is long longValue)
             {
-                throw new JsonException("expected integer");
+                return longValue;
             }
-            return (long)number;
+            if (value is int intValue)
+            {
+                return intValue;
+            }
+            throw new JsonException("expected integer");
         }
 
         /// <summary>

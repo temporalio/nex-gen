@@ -51,6 +51,32 @@ namespace NexGen.ShowcaseService
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            if (Zip is long zipValue)
+            {
+                if (zipValue < -JsonRuntime.IntegerCap || zipValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "zip"), "exceeds ±(2^53-1) integer cap"));
+                }
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
             if (AdditionalProperties.TryGetValue("city", out var cityValue))
@@ -70,6 +96,7 @@ namespace NexGen.ShowcaseService
                 JsonRuntime.RejectNull("zip", zipValue);
                 _ = JsonRuntime.ReadJsonValue<long?>(zipValue);
             }
+            Validate();
         }
     }
 
@@ -369,6 +396,32 @@ namespace NexGen.ShowcaseService
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
 
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal void CollectViolations(List<Violation> violations, string path)
+        {
+            if (FontSize is long fontSizeValue)
+            {
+                if (fontSizeValue < -JsonRuntime.IntegerCap || fontSizeValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "fontSize"), "exceeds ±(2^53-1) integer cap"));
+                }
+            }
+        }
+
         void IJsonOnDeserialized.OnDeserialized()
         {
             foreach (var key in AdditionalProperties.Keys)
@@ -395,6 +448,7 @@ namespace NexGen.ShowcaseService
                 JsonRuntime.RejectNull("fontSize", fontSizeValue);
                 _ = JsonRuntime.ReadJsonValue<long?>(fontSizeValue);
             }
+            Validate();
         }
     }
 
@@ -940,6 +994,10 @@ namespace NexGen.ShowcaseService
             {
                 violations.Add(new Violation(JsonRuntime.JoinPath(path, "name"), "must have length <= 64, got " + nameLength));
             }
+            if (Count < -JsonRuntime.IntegerCap || Count > JsonRuntime.IntegerCap)
+            {
+                violations.Add(new Violation(JsonRuntime.JoinPath(path, "count"), "exceeds ±(2^53-1) integer cap"));
+            }
             if (Nickname is string nicknameValue)
             {
                 var nicknameLength = JsonRuntime.CodePointCount(nicknameValue);
@@ -974,8 +1032,19 @@ namespace NexGen.ShowcaseService
                     violations.Add(new Violation(JsonRuntime.JoinPath(path, "phrase"), "must match pattern ^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+\\z, got " + phraseValue));
                 }
             }
+            if (Retries is long retriesValue)
+            {
+                if (retriesValue < -JsonRuntime.IntegerCap || retriesValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "retries"), "exceeds ±(2^53-1) integer cap"));
+                }
+            }
             if (Priority is long priorityValue)
             {
+                if (priorityValue < -JsonRuntime.IntegerCap || priorityValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "priority"), "exceeds ±(2^53-1) integer cap"));
+                }
                 if (priorityValue < 1)
                 {
                     violations.Add(new Violation(JsonRuntime.JoinPath(path, "priority"), "must be >= 1, got " + JsonRuntime.FormatNumber(priorityValue)));
@@ -987,6 +1056,10 @@ namespace NexGen.ShowcaseService
             }
             if (Level is long levelValue)
             {
+                if (levelValue < -JsonRuntime.IntegerCap || levelValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "level"), "exceeds ±(2^53-1) integer cap"));
+                }
                 if (levelValue <= 0)
                 {
                     violations.Add(new Violation(JsonRuntime.JoinPath(path, "level"), "must be > 0, got " + JsonRuntime.FormatNumber(levelValue)));
@@ -1005,6 +1078,10 @@ namespace NexGen.ShowcaseService
             }
             if (Step is long stepValue)
             {
+                if (stepValue < -JsonRuntime.IntegerCap || stepValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "step"), "exceeds ±(2^53-1) integer cap"));
+                }
                 if (stepValue % 3 != 0)
                 {
                     violations.Add(new Violation(JsonRuntime.JoinPath(path, "step"), "must be a multiple of 3, got " + JsonRuntime.FormatNumber(stepValue)));
@@ -1408,6 +1485,10 @@ namespace NexGen.ShowcaseService
         {
             if (Size is long sizeValue)
             {
+                if (sizeValue < -JsonRuntime.IntegerCap || sizeValue > JsonRuntime.IntegerCap)
+                {
+                    violations.Add(new Violation(JsonRuntime.JoinPath(path, "size"), "exceeds ±(2^53-1) integer cap"));
+                }
                 if (sizeValue < 10)
                 {
                     violations.Add(new Violation(JsonRuntime.JoinPath(path, "size"), "must be >= 10, got " + JsonRuntime.FormatNumber(sizeValue)));
