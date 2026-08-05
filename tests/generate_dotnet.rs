@@ -605,6 +605,8 @@ fn dotnet_json_coverage_warnings_match_known_gaps() {
     warned_keywords.sort();
     warned_keywords.dedup();
 
+    // `oneOf` remains only for showcase's disjoint-kind scalar union; the
+    // `Circle | Square` tagged union is lowered.
     let expected = ["contentEncoding", "format", "oneOf"];
 
     assert_eq!(

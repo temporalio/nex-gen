@@ -73,11 +73,19 @@ fn collect_node(
 ) {
     match node {
         ApiSpecNode::Leaf(leaf) => {
+            // Deciding whether a `$ref` union is lowered needs the branch schemas,
+            // which are sibling models, so index them before walking.
+            let mut siblings = BTreeMap::new();
+            for (_, binding) in leaf.spec.external_types() {
+                if let ExternalTypeSpec::Json(json) = &binding.external_type {
+                    siblings.insert(reference_tail(&json.full_name), &json.schema);
+                }
+            }
             for (_, binding) in leaf.spec.external_types() {
                 let ExternalTypeSpec::Json(json) = &binding.external_type else {
                     continue;
                 };
-                collect_schema(&json.schema, &json.model_name, findings);
+                collect_schema(&json.schema, &json.model_name, &siblings, findings);
             }
         }
         ApiSpecNode::Branch(branch) => {
@@ -88,9 +96,24 @@ fn collect_node(
     }
 }
 
+/// The trailing name of a `$ref` or qualified model identity — the segment after
+/// the last `/` or `#`.
+fn reference_tail(reference: &str) -> String {
+    reference
+        .rsplit(['#', '/'])
+        .next()
+        .unwrap_or(reference)
+        .to_string()
+}
+
 /// Walks a schema recursively, recording each unenforced keyword against the
 /// dotted member path that carries it.
-fn collect_schema(schema: &Value, path: &str, findings: &mut BTreeMap<&'static str, Vec<String>>) {
+fn collect_schema(
+    schema: &Value,
+    path: &str,
+    siblings: &BTreeMap<String, &Value>,
+    findings: &mut BTreeMap<&'static str, Vec<String>>,
+) {
     let Value::Object(members) = schema else {
         return;
     };
@@ -101,11 +124,14 @@ fn collect_schema(schema: &Value, path: &str, findings: &mut BTreeMap<&'static s
         }
     }
 
-    // `oneOf` is only reported when it is a real sum type. The
-    // `[<branch>, {"type": "null"}]` spelling is how the loader expresses an
-    // optional-nullable member, and the backend does lower that correctly.
+    // `oneOf` is reported only for the spellings the backend does not lower.
+    // Two are lowered: the `[<branch>, {"type": "null"}]` nullable wrapper, and a
+    // tagged union over `$ref` branches (abstract base plus a routing converter).
+    // What remains — a disjoint-kind scalar union such as
+    // `oneOf: [{type: string}, {type: integer}]` — still degrades to `object`.
     if let Some(Value::Array(branches)) = members.get("oneOf")
         && !is_nullable_wrapper(branches)
+        && !is_tagged_union(branches, siblings)
     {
         findings.entry("oneOf").or_default().push(path.to_string());
     }
@@ -145,7 +171,7 @@ fn collect_schema(schema: &Value, path: &str, findings: &mut BTreeMap<&'static s
             "properties" | "$defs" | "patternProperties" => {
                 if let Value::Object(children) = value {
                     for (name, child) in children {
-                        collect_schema(child, &format!("{path}.{name}"), findings);
+                        collect_schema(child, &format!("{path}.{name}"), siblings, findings);
                     }
                 }
             }
@@ -153,7 +179,7 @@ fn collect_schema(schema: &Value, path: &str, findings: &mut BTreeMap<&'static s
             "oneOf" | "anyOf" | "allOf" | "prefixItems" => {
                 if let Value::Array(children) = value {
                     for child in children {
-                        collect_schema(child, path, findings);
+                        collect_schema(child, path, siblings, findings);
                     }
                 }
             }
@@ -164,7 +190,7 @@ fn collect_schema(schema: &Value, path: &str, findings: &mut BTreeMap<&'static s
             | "not"
             | "propertyNames"
             | "contentSchema" => {
-                collect_schema(value, path, findings);
+                collect_schema(value, path, siblings, findings);
             }
             _ => {}
         }
@@ -181,6 +207,71 @@ fn is_nullable_wrapper(branches: &[Value]) -> bool {
     null_branches > 0 && branches.len() - null_branches == 1
 }
 
+/// True when the branches form the tagged union the backend lowers: two or more
+/// `$ref`s that all resolve to objects sharing a required `const` discriminator.
+///
+/// Resolving the branches matters. The loader rewrites an inline union into
+/// `$ref`s to synthesized types, so showcase's disjoint-kind
+/// `oneOf: [{type: string}, {type: integer}]` reaches this pass as two `$ref`
+/// branches and is indistinguishable from `Circle | Square` by shape alone. Only
+/// following the refs separates the union that is lowered from the one that still
+/// degrades to `object`.
+fn is_tagged_union(branches: &[Value], siblings: &BTreeMap<String, &Value>) -> bool {
+    let resolved = branches
+        .iter()
+        .filter(|branch| !is_null_schema(branch))
+        .map(|branch| {
+            branch
+                .get("$ref")
+                .and_then(Value::as_str)
+                .map(reference_tail)
+                .and_then(|name| siblings.get(&name).copied())
+        })
+        .collect::<Option<Vec<_>>>();
+    let Some(resolved) = resolved else {
+        return false;
+    };
+    if resolved.len() < 2 {
+        return false;
+    }
+    discriminator_names(resolved[0])
+        .into_iter()
+        .any(|candidate| {
+            resolved
+                .iter()
+                .all(|branch| discriminator_names(branch).contains(&candidate))
+        })
+}
+
+/// The member names a schema declares as required with a string `const` — the
+/// candidates for a union discriminator.
+fn discriminator_names(schema: &Value) -> Vec<String> {
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| {
+            properties
+                .iter()
+                .filter(|(name, property)| {
+                    required.contains(name) && property.get("const").is_some_and(Value::is_string)
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// True when a `contains` subschema is the `const` form the backend lowers.
 fn contains_is_supported(contains: &Value) -> bool {
     contains.get("const").is_some()
@@ -195,7 +286,10 @@ fn is_null_schema(schema: &Value) -> bool {
 
 fn format_warning(keyword: &str, paths: &[String]) -> String {
     let detail = match keyword {
-        "oneOf" => "branches are dropped — the emitted class has no members",
+        "oneOf" => {
+            "is a disjoint-kind scalar union, which degrades to `object` — only \
+             `$ref` tagged unions are lowered"
+        }
         "enum" => "is emitted as a bare scalar with no closed value set",
         "format" => "is left as `string` — neither asserted nor materialized",
         "contentEncoding" => "is left as `string` — not decoded to bytes",
@@ -235,8 +329,21 @@ mod tests {
     // time a keyword gains enforcement. Coverage of the *current* gap set lives in
     // `tests/generate_dotnet.rs`, which is meant to churn.
     fn findings_for(schema: serde_json::Value) -> Vec<String> {
+        findings_with_siblings(schema, &[])
+    }
+
+    /// `siblings` supplies the `$ref` targets a union's branches resolve to,
+    /// keyed by their trailing name.
+    fn findings_with_siblings(
+        schema: serde_json::Value,
+        siblings: &[(&str, serde_json::Value)],
+    ) -> Vec<String> {
+        let resolved = siblings
+            .iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect::<BTreeMap<_, _>>();
         let mut findings = BTreeMap::new();
-        collect_schema(&schema, "Model", &mut findings);
+        collect_schema(&schema, "Model", &resolved, &mut findings);
         findings
             .into_iter()
             .map(|(keyword, paths)| format_warning(keyword, &paths))
@@ -300,18 +407,81 @@ mod tests {
     }
 
     #[test]
-    fn reports_real_sum_type_one_of() {
-        let warnings = findings_for(json!({
-            "oneOf": [{ "$ref": "#/$defs/Circle" }, { "$ref": "#/$defs/Square" }],
-        }));
+    fn does_not_report_a_ref_union_lowered_to_a_tagged_union() {
+        let warnings = findings_with_siblings(
+            json!({
+                "oneOf": [{ "$ref": "#/$defs/Circle" }, { "$ref": "#/$defs/Square" }],
+            }),
+            &[
+                (
+                    "Circle",
+                    json!({
+                        "type": "object",
+                        "required": ["kind"],
+                        "properties": { "kind": { "type": "string", "const": "circle" } },
+                    }),
+                ),
+                (
+                    "Square",
+                    json!({
+                        "type": "object",
+                        "required": ["kind"],
+                        "properties": { "kind": { "type": "string", "const": "square" } },
+                    }),
+                ),
+            ],
+        );
+
+        assert!(warnings.is_empty(), "{:?}", warnings);
+    }
+
+    /// The remaining `oneOf` gap: a disjoint-kind scalar union, which still
+    /// degrades to `object`.
+    ///
+    /// The loader rewrites an inline scalar union into `$ref`s to synthesized
+    /// types, so this arrives looking structurally like the tagged union above.
+    /// Only resolving the branches tells them apart.
+    #[test]
+    fn reports_a_ref_union_whose_branches_are_scalars() {
+        let warnings = findings_with_siblings(
+            json!({
+                "type": "object",
+                "properties": {
+                    "idOrName": {
+                        "oneOf": [
+                            { "$ref": "#/$defs/IdOrNameString" },
+                            { "$ref": "#/$defs/IdOrNameInteger" },
+                        ],
+                    },
+                },
+            }),
+            &[
+                ("IdOrNameString", json!({ "type": "string" })),
+                ("IdOrNameInteger", json!({ "type": "integer" })),
+            ],
+        );
 
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("`oneOf`"), "{:?}", warnings);
-        assert!(
-            warnings[0].contains("branches are dropped"),
-            "{:?}",
-            warnings
+        assert!(warnings[0].contains("Model.idOrName"), "{:?}", warnings);
+    }
+
+    /// A `$ref` union whose branches are objects but share no `const`
+    /// discriminator is not a tagged union either, and must still be reported.
+    #[test]
+    fn reports_a_ref_union_with_no_shared_discriminator() {
+        let warnings = findings_with_siblings(
+            json!({
+                "oneOf": [{ "$ref": "#/$defs/Left" }, { "$ref": "#/$defs/Right" }],
+            }),
+            &[
+                ("Left", json!({ "type": "object" })),
+                ("Right", json!({ "type": "object" })),
+            ],
         );
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("`oneOf`"), "{:?}", warnings);
     }
 
     #[test]

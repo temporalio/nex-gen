@@ -168,7 +168,7 @@ namespace NexGen.ShowcaseService
     /// A circle branch of the Shape tagged union.
     /// </summary>
     [GeneratedCode("nex-gen", null)]
-    public class Circle
+    public class Circle : Shape
     {
         public Circle(double radius)
         {
@@ -197,6 +197,25 @@ namespace NexGen.ShowcaseService
 
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
+
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public override void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal override void CollectViolations(List<Violation> violations, string path)
+        {
+        }
     }
 
 
@@ -456,11 +475,63 @@ namespace NexGen.ShowcaseService
     /// <summary>
     /// A closed sum type (discriminated union) of Circle | Square, tagged by the shared required `kind` const. Selection reads `kind` and routes to the matching branch; an unknown tag is a Violation.
     /// </summary>
+    [JsonConverter(typeof(ShapeJsonConverter))]
     [GeneratedCode("nex-gen", null)]
-    public class Shape
+    public abstract class Shape
     {
-        [JsonExtensionData]
-        public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
+        private protected Shape()
+        {
+        }
+
+        /// <summary>
+        /// Validates the selected branch, throwing a single
+        /// <see cref="ValidationException"/> carrying every violation.
+        /// </summary>
+        public abstract void Validate();
+
+        internal abstract void CollectViolations(List<Violation> violations, string path);
+    }
+
+    [GeneratedCode("nex-gen", null)]
+    internal sealed class ShapeJsonConverter : JsonConverter<Shape>
+    {
+        public override Shape Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            using var document = JsonDocument.ParseValue(ref reader);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                throw new ValidationException(new List<Violation>
+                {
+                    new Violation(string.Empty, "expected one of: Circle, Square"),
+                });
+            }
+            if (!root.TryGetProperty("kind", out var tag))
+            {
+                throw new ValidationException(new List<Violation>
+                {
+                    new Violation(string.Empty, "discriminator \"kind\" is required"),
+                });
+            }
+            var raw = root.GetRawText();
+            switch (tag.ValueKind == JsonValueKind.String ? tag.GetString() : null)
+            {
+                case "circle":
+                    return JsonSerializer.Deserialize<Circle>(raw, options)!;
+                case "square":
+                    return JsonSerializer.Deserialize<Square>(raw, options)!;
+                default:
+                    throw new ValidationException(new List<Violation>
+                    {
+                        new Violation(string.Empty, $"unknown discriminator kind {tag.GetRawText()}: expected one of [\"circle\", \"square\"]"),
+                    });
+            }
+        }
+
+        public override void Write(Utf8JsonWriter writer, Shape value, JsonSerializerOptions options)
+        {
+            JsonSerializer.Serialize(writer, value, value.GetType(), options);
+        }
     }
 
 
@@ -1401,7 +1472,7 @@ namespace NexGen.ShowcaseService
     /// A square branch of the Shape tagged union.
     /// </summary>
     [GeneratedCode("nex-gen", null)]
-    public class Square
+    public class Square : Shape
     {
         public Square(double side)
         {
@@ -1430,6 +1501,25 @@ namespace NexGen.ShowcaseService
 
         [JsonExtensionData]
         public Dictionary<string, object?> AdditionalProperties { get; set; } = new Dictionary<string, object?>();
+
+        /// <summary>
+        /// Validates every constraint the contract declares on this type, throwing a
+        /// single <see cref="ValidationException"/> carrying all violations rather
+        /// than stopping at the first.
+        /// </summary>
+        public override void Validate()
+        {
+            var violations = new List<Violation>();
+            CollectViolations(violations, string.Empty);
+            if (violations.Count > 0)
+            {
+                throw new ValidationException(violations);
+            }
+        }
+
+        internal override void CollectViolations(List<Violation> violations, string path)
+        {
+        }
     }
 
 

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use heck::ToUpperCamelCase;
@@ -341,23 +341,284 @@ fn model_type_ref(json_type: &PlannedJsonType) -> String {
     csharp_type_name(&json_type.model_name)
 }
 
+/// A closed sum type: `oneOf` over `$ref` branches that all share a required
+/// `const` discriminator member.
+///
+/// Lowered to an abstract base class plus a `JsonConverter` that reads the tag and
+/// routes to the branch. Before this, the union rendered as a class with no
+/// members at all and both branches were simply lost.
+#[derive(Debug)]
+struct TaggedUnion {
+    /// The JSON member carrying the tag, e.g. `kind`.
+    discriminator: String,
+    /// `(tag value, branch type name)` in declaration order.
+    branches: Vec<(String, String)>,
+}
+
+impl TaggedUnion {
+    /// The bracketed tag list Go names when no branch matches. Note the
+    /// comma-**space** separator, which differs from the `enum` reason's list.
+    fn expected_tags(&self) -> String {
+        self.branches
+            .iter()
+            .map(|(tag, _)| format!("{tag:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn converter_name(base: &str) -> String {
+        format!("{base}JsonConverter")
+    }
+}
+
+/// Every tagged union in one emitted package, plus the reverse branch index.
+#[derive(Debug, Default)]
+struct TaggedUnions {
+    definitions: BTreeMap<String, TaggedUnion>,
+    /// Branch type name to its base class.
+    branch_bases: BTreeMap<String, String>,
+}
+
+impl TaggedUnions {
+    fn resolve(json_models: &[PlannedJsonType]) -> Result<Self> {
+        // Branch schemas are looked up by emitted type name, which is how a `$ref`
+        // resolves once the name manifest has been applied.
+        let mut schemas = BTreeMap::new();
+        for model in json_models {
+            schemas.insert(model_type_ref(model), decode_schema(model)?);
+        }
+
+        let mut resolved = Self::default();
+        for model in json_models {
+            let type_name = model_type_ref(model);
+            let schema = &schemas[&type_name];
+            let Some(union) = tagged_union_for(schema, &schemas) else {
+                continue;
+            };
+            for (_, branch) in &union.branches {
+                // C# has single inheritance, so a branch shared between two unions
+                // cannot be modeled this way. Leave every union unlowered rather
+                // than emit something that will not compile; `dotnet_coverage` then
+                // reports them all as gaps.
+                if resolved.branch_bases.contains_key(branch) {
+                    return Ok(Self::default());
+                }
+                resolved
+                    .branch_bases
+                    .insert(branch.clone(), type_name.clone());
+            }
+            resolved.definitions.insert(type_name, union);
+        }
+        Ok(resolved)
+    }
+
+    fn definition(&self, type_name: &str) -> Option<&TaggedUnion> {
+        self.definitions.get(type_name)
+    }
+
+    fn base_of(&self, type_name: &str) -> Option<&str> {
+        self.branch_bases.get(type_name).map(String::as_str)
+    }
+
+    /// True when this model is a union branch, which forces its validator to be
+    /// emitted (as an override) even when it has no constraints of its own.
+    fn is_branch(&self, type_name: &str) -> bool {
+        self.branch_bases.contains_key(type_name)
+    }
+}
+
+/// Emits a tagged union: the abstract base class and the `JsonConverter` that
+/// selects a branch from the discriminator.
+///
+/// The converter is hand-rolled rather than using `[JsonPolymorphic]`, because
+/// System.Text.Json's built-in discriminator is a metadata property distinct from
+/// the model's own members. Here the tag *is* a declared member — each branch has
+/// `kind` as a required `const` — and the two mechanisms collide.
+fn render_tagged_union(
+    output: &mut String,
+    model: &PlannedJsonType,
+    union: &TaggedUnion,
+) -> Result<()> {
+    let schema = decode_schema(model)?;
+    let base = model_type_ref(model);
+    let converter = TaggedUnion::converter_name(&base);
+
+    render_xml_summary(output, "", schema.description.as_deref());
+    output.push_str("[JsonConverter(typeof(");
+    output.push_str(&converter);
+    output.push_str("))]\n");
+    output.push_str(GENERATED_CODE_ATTRIBUTE);
+    output.push('\n');
+    output.push_str("public abstract class ");
+    output.push_str(&base);
+    output.push_str("\n{\n");
+    // A private-protected constructor closes the hierarchy: only the generated
+    // branches in this assembly can derive from it, which is what `oneOf` means.
+    output.push_str("    private protected ");
+    output.push_str(&base);
+    output.push_str("()\n    {\n    }\n\n");
+    output.push_str("    /// <summary>\n");
+    output.push_str("    /// Validates the selected branch, throwing a single\n");
+    output.push_str("    /// <see cref=\"ValidationException\"/> carrying every violation.\n");
+    output.push_str("    /// </summary>\n");
+    output.push_str("    public abstract void Validate();\n\n");
+    output.push_str(
+        "    internal abstract void CollectViolations(List<Violation> violations, string path);\n",
+    );
+    output.push_str("}\n\n");
+
+    output.push_str(GENERATED_CODE_ATTRIBUTE);
+    output.push('\n');
+    output.push_str("internal sealed class ");
+    output.push_str(&converter);
+    output.push_str(" : JsonConverter<");
+    output.push_str(&base);
+    output.push_str(">\n{\n");
+    output.push_str("    public override ");
+    output.push_str(&base);
+    output.push_str(
+        " Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)\n    {\n",
+    );
+    output.push_str("        using var document = JsonDocument.ParseValue(ref reader);\n");
+    output.push_str("        var root = document.RootElement;\n");
+    output.push_str("        if (root.ValueKind != JsonValueKind.Object)\n        {\n");
+    output
+        .push_str("            throw new ValidationException(new List<Violation>\n            {\n");
+    output.push_str("                new Violation(string.Empty, ");
+    output.push_str(&csharp_string_literal(&format!(
+        "expected one of: {}",
+        union
+            .branches
+            .iter()
+            .map(|(_, branch)| branch.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )));
+    output.push_str("),\n            });\n        }\n");
+    output.push_str("        if (!root.TryGetProperty(");
+    output.push_str(&csharp_string_literal(&union.discriminator));
+    output.push_str(", out var tag))\n        {\n");
+    output
+        .push_str("            throw new ValidationException(new List<Violation>\n            {\n");
+    output.push_str("                new Violation(string.Empty, ");
+    output.push_str(&csharp_string_literal(&format!(
+        "discriminator {:?} is required",
+        union.discriminator
+    )));
+    output.push_str("),\n            });\n        }\n");
+    output.push_str("        var raw = root.GetRawText();\n");
+    output.push_str("        switch (tag.ValueKind == JsonValueKind.String ? tag.GetString() : null)\n        {\n");
+    for (tag, branch) in &union.branches {
+        output.push_str("            case ");
+        output.push_str(&csharp_string_literal(tag));
+        output.push_str(":\n                return JsonSerializer.Deserialize<");
+        output.push_str(branch);
+        output.push_str(">(raw, options)!;\n");
+    }
+    output.push_str("            default:\n");
+    output.push_str(
+        "                throw new ValidationException(new List<Violation>\n                {\n",
+    );
+    output.push_str("                    new Violation(string.Empty, $");
+    output.push_str(&csharp_string_literal(&format!(
+        "unknown discriminator {} {{tag.GetRawText()}}: expected one of [{}]",
+        union.discriminator,
+        union.expected_tags()
+    )));
+    output.push_str("),\n                });\n        }\n    }\n\n");
+    output.push_str("    public override void Write(Utf8JsonWriter writer, ");
+    output.push_str(&base);
+    output.push_str(" value, JsonSerializerOptions options)\n    {\n");
+    // Dispatching on the runtime type serializes the branch through its own
+    // converter rather than re-entering this one.
+    output.push_str("        JsonSerializer.Serialize(writer, value, value.GetType(), options);\n");
+    output.push_str("    }\n}\n\n");
+    Ok(())
+}
+
+/// Recognizes the tagged-union shape: two or more `$ref` branches, each an object
+/// declaring the same required member with a distinct string `const`.
+fn tagged_union_for(schema: &Schema, schemas: &BTreeMap<String, Schema>) -> Option<TaggedUnion> {
+    let one_of = schema.one_of.as_ref()?;
+    if one_of.len() < 2 || schema.properties.is_some() {
+        return None;
+    }
+
+    let branch_names = one_of
+        .iter()
+        .map(|branch| branch.reference.as_deref().map(reference_type_name))
+        .collect::<Option<Vec<_>>>()?;
+
+    // The discriminator is a member every branch declares as required with a
+    // string `const`.
+    let first = schemas.get(branch_names.first()?)?;
+    let candidates = first
+        .properties
+        .as_ref()?
+        .iter()
+        .filter(|(name, property)| {
+            property.const_value.as_ref().is_some_and(Value::is_string)
+                && required_fields(first).contains(name.as_str())
+        })
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+
+    for discriminator in candidates {
+        let mut branches = Vec::new();
+        for branch_name in &branch_names {
+            let Some(branch) = schemas.get(branch_name) else {
+                break;
+            };
+            if !required_fields(branch).contains(discriminator.as_str()) {
+                break;
+            }
+            let Some(tag) = branch
+                .properties
+                .as_ref()
+                .and_then(|properties| properties.get(&discriminator))
+                .and_then(|property| property.const_value.as_ref())
+                .and_then(Value::as_str)
+            else {
+                break;
+            };
+            branches.push((tag.to_string(), branch_name.clone()));
+        }
+        if branches.len() == branch_names.len() {
+            return Some(TaggedUnion {
+                discriminator,
+                branches,
+            });
+        }
+    }
+    None
+}
+
 fn render_external_models(json_models: &[PlannedJsonType]) -> Result<RenderedModelFragments> {
     if json_models.is_empty() {
         return Ok(RenderedModelFragments::default());
     }
 
+    let unions = TaggedUnions::resolve(json_models)?;
     let mut output = String::new();
     for (index, model) in json_models.iter().enumerate() {
         if index > 0 {
             output.push('\n');
         }
-        render_model(&mut output, model)?;
+        if let Some(union) = unions.definition(&model_type_ref(model)) {
+            render_tagged_union(&mut output, model, union)?;
+        } else {
+            render_model(&mut output, model, &unions)?;
+        }
     }
     Ok(RenderedModelFragments { body: output })
 }
 
-fn render_model(output: &mut String, model: &PlannedJsonType) -> Result<()> {
+fn render_model(output: &mut String, model: &PlannedJsonType, unions: &TaggedUnions) -> Result<()> {
     let schema = decode_schema(model)?;
+    let type_name = model_type_ref(model);
+    // A branch of a tagged union derives from that union's base class, so its
+    // validator overrides the base's abstract members.
+    let base_class = unions.base_of(&type_name);
     render_xml_summary(output, "", schema.description.as_deref());
     if !model_needs_extension_data(&schema)? && !is_open_object(&schema) {
         output.push_str("[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]\n");
@@ -365,9 +626,17 @@ fn render_model(output: &mut String, model: &PlannedJsonType) -> Result<()> {
     output.push_str(GENERATED_CODE_ATTRIBUTE);
     output.push('\n');
     output.push_str("public class ");
-    output.push_str(&model_type_ref(model));
+    output.push_str(&type_name);
+    let mut bases = Vec::new();
+    if let Some(base_class) = base_class {
+        bases.push(base_class.to_string());
+    }
     if model_needs_on_deserialized(&schema)? {
-        output.push_str(" : IJsonOnDeserialized");
+        bases.push("IJsonOnDeserialized".to_string());
+    }
+    if !bases.is_empty() {
+        output.push_str(" : ");
+        output.push_str(&bases.join(", "));
     }
     output.push_str("\n{\n");
 
@@ -376,7 +645,7 @@ fn render_model(output: &mut String, model: &PlannedJsonType) -> Result<()> {
         render_model_properties(output, &schema)?;
     }
     render_extension_data_property(output, &schema)?;
-    render_constraint_validator(output, &schema)?;
+    render_constraint_validator(output, &schema, unions.is_branch(&type_name))?;
     render_model_validation(output, &schema)?;
 
     output.push_str("}\n\n");
@@ -393,12 +662,19 @@ fn render_model(output: &mut String, model: &PlannedJsonType) -> Result<()> {
 /// binding can call it before serializing an outbound value. `CollectViolations`
 /// takes a path prefix so a nested model reports `page.blocks.order` rather than
 /// a bare `order`.
-fn render_constraint_validator(output: &mut String, schema: &Schema) -> Result<()> {
+fn render_constraint_validator(
+    output: &mut String,
+    schema: &Schema,
+    is_union_branch: bool,
+) -> Result<()> {
     let constrained = constrained_members(schema);
     let object_constraints = schema.object_constraints()?;
-    if constrained.is_empty() && object_constraints.is_empty() {
+    // A union branch always emits the pair, even with nothing to check, because
+    // the base class declares them abstract.
+    if !is_union_branch && constrained.is_empty() && object_constraints.is_empty() {
         return Ok(());
     }
+    let modifier = if is_union_branch { "override " } else { "" };
 
     render_pattern_fields(output, &constrained);
 
@@ -412,7 +688,9 @@ fn render_constraint_validator(output: &mut String, schema: &Schema) -> Result<(
     );
     output.push_str("    /// than stopping at the first.\n");
     output.push_str("    /// </summary>\n");
-    output.push_str("    public void Validate()\n    {\n");
+    output.push_str("    public ");
+    output.push_str(modifier);
+    output.push_str("void Validate()\n    {\n");
     output.push_str("        var violations = new List<Violation>();\n");
     output.push_str("        CollectViolations(violations, string.Empty);\n");
     output.push_str("        if (violations.Count > 0)\n        {\n");
@@ -420,9 +698,9 @@ fn render_constraint_validator(output: &mut String, schema: &Schema) -> Result<(
     output.push_str("        }\n");
     output.push_str("    }\n\n");
 
-    output.push_str(
-        "    internal void CollectViolations(List<Violation> violations, string path)\n    {\n",
-    );
+    output.push_str("    internal ");
+    output.push_str(modifier);
+    output.push_str("void CollectViolations(List<Violation> violations, string path)\n    {\n");
     for member in &constrained {
         render_member_constraints(output, member);
     }
