@@ -44,8 +44,7 @@ const UNENFORCED_KEYWORDS: &[&str] = &[
     // check below.
     "dependentSchemas",
     "patternProperties",
-    // Closed value sets.
-    "enum",
+    // Closed value sets (`enum`) are enforced.
 ];
 
 /// How many member paths to name before eliding the rest, so a large schema

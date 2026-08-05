@@ -170,6 +170,34 @@ impl Schema {
         })
     }
 
+    /// The closed value set this schema admits, as the C# literals to compare
+    /// against plus the bracketed list Go names in its violation reason.
+    fn enum_membership(&self) -> Option<EnumMembership> {
+        let values = self
+            .enum_values
+            .as_ref()
+            .filter(|values| !values.is_empty())?;
+        let literals = values
+            .iter()
+            .map(csharp_value_literal)
+            .collect::<Option<Vec<_>>>()?;
+        // Rendered the way Go's `%v` over the decoded values does: strings quoted,
+        // numbers bare, comma-separated with no spaces.
+        let rendered = values
+            .iter()
+            .map(|value| match value {
+                Value::String(text) => format!("{text:?}"),
+                other => other.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        Some(EnumMembership {
+            literals,
+            rendered,
+            quotes_value: values.iter().any(|value| value.is_string()),
+        })
+    }
+
     /// True when the member declares a closed value set, which makes the spec
     /// integer cap redundant — membership already bounds the value. Go skips the
     /// cap on these for the same reason.
@@ -533,6 +561,7 @@ struct ConstrainedMember<'a> {
     /// True for a `type: integer` member, which carries the 2^53-1 spec cap
     /// whether or not the schema declares any explicit bound.
     integer_cap: bool,
+    enum_membership: Option<EnumMembership>,
     numeric_bounds: Vec<NumericBound<'a>>,
     length_bounds: Vec<LengthBound>,
     item_count_bounds: Vec<ItemCountBound>,
@@ -546,6 +575,7 @@ struct ConstrainedMember<'a> {
 impl ConstrainedMember<'_> {
     fn has_constraints(&self) -> bool {
         self.integer_cap
+            || self.enum_membership.is_some()
             || !self.numeric_bounds.is_empty()
             || !self.length_bounds.is_empty()
             || self.pattern.is_some()
@@ -588,6 +618,17 @@ impl ItemCountBound {
             format!("{count_expr} > {}", self.bound)
         }
     }
+}
+
+/// An `enum` closed value set.
+#[derive(Debug)]
+struct EnumMembership {
+    /// C# literals for each admitted value.
+    literals: Vec<String>,
+    /// The bracket-list body Go names in the reason, e.g. `"a","b"` or `1,2,3`.
+    rendered: String,
+    /// Whether the offending value is quoted in the reason (Go's `%q` vs `%v`).
+    quotes_value: bool,
 }
 
 /// The object-level assertions, checked against the wire member set.
@@ -683,6 +724,7 @@ fn constrained_members(schema: &Schema) -> Vec<ConstrainedMember<'_>> {
                 // branch and so is not capped here; Go puts that cap on the
                 // integer *branch* type, which arrives with `oneOf` support.
                 integer_cap: clr_type == "long" && !property.has_closed_value_set(),
+                enum_membership: property.enum_membership(),
                 numeric_bounds: property.numeric_bounds(),
                 length_bounds: property.length_bounds(),
                 pattern: property.dotnet_pattern(),
@@ -775,6 +817,35 @@ fn render_member_constraints(output: &mut String, member: &ConstrainedMember<'_>
         output.push_str(reason_expr);
         output.push_str("));\n");
     };
+
+    if let Some(membership) = &member.enum_membership {
+        output.push_str(indent);
+        output.push_str("if (");
+        for (index, literal) in membership.literals.iter().enumerate() {
+            if index > 0 {
+                output.push_str(" && ");
+            }
+            output.push_str(&value_expr);
+            output.push_str(" != ");
+            output.push_str(literal);
+        }
+        output.push_str(")\n");
+        output.push_str(indent);
+        output.push_str("{\n");
+        let reason = format!("must be one of [{}], got ", membership.rendered);
+        let value_text = if membership.quotes_value {
+            // Go uses `%q` for a string value, so the offending value is quoted.
+            format!("JsonRuntime.Quote({value_expr})")
+        } else {
+            format!("JsonRuntime.FormatNumber({value_expr})")
+        };
+        add_violation(
+            output,
+            &format!("{} + {value_text}", csharp_string_literal(&reason)),
+        );
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
 
     if member.integer_cap {
         output.push_str(indent);

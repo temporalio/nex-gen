@@ -48,7 +48,7 @@ affected members, so nothing is dropped silently.
 | 2^53-1 spec integer cap | ✅ | ✅ |
 | `minProperties` / `maxProperties` / `dependentRequired` | ✅ | ✅ |
 | `propertyNames` | ✅ | ⚠️ map-shaped objects only |
-| `enum` closed value sets | ✅ | ❌ emitted as bare `string` / `long` |
+| `enum` closed value sets | ✅ | ✅ validated (not a C# `enum` type) |
 | `oneOf` discriminated unions | ✅ | ❌ emitted as an empty class — branches lost |
 | `format` temporal materialization | ✅ native types | ❌ left as `string` |
 | `contentEncoding: base64` | ✅ native bytes | ❌ left as `string` |

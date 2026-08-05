@@ -985,6 +985,18 @@ namespace NexGen.ShowcaseService
 
         internal void CollectViolations(List<Violation> violations, string path)
         {
+            if (Status != "active" && Status != "inactive" && Status != "pending")
+            {
+                violations.Add(new Violation(JsonRuntime.JoinPath(path, "status"), "must be one of [\"active\",\"inactive\",\"pending\"], got " + JsonRuntime.Quote(Status)));
+            }
+            if (Tier != 1 && Tier != 2 && Tier != 3)
+            {
+                violations.Add(new Violation(JsonRuntime.JoinPath(path, "tier"), "must be one of [1,2,3], got " + JsonRuntime.FormatNumber(Tier)));
+            }
+            if (Scale != 1.5 && Scale != 2.5)
+            {
+                violations.Add(new Violation(JsonRuntime.JoinPath(path, "scale"), "must be one of [1.5,2.5], got " + JsonRuntime.FormatNumber(Scale)));
+            }
             var nameLength = JsonRuntime.CodePointCount(Name);
             if (nameLength < 1)
             {

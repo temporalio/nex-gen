@@ -247,6 +247,13 @@ namespace NexGen.ShowcaseService
         }
 
         /// <summary>
+        /// Quotes a string for a violation reason, mirroring Go's <c>%q</c> for the
+        /// values a contract admits. Used by the <c>enum</c> reason, which names the
+        /// offending value alongside the admitted set.
+        /// </summary>
+        internal static string Quote(string value) => "\"" + value + "\"";
+
+        /// <summary>
         /// Joins a violation path prefix to a member name, so a nested model
         /// reports <c>page.blocks.order</c> rather than a bare <c>order</c>.
         /// </summary>
