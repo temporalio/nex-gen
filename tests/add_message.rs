@@ -280,10 +280,16 @@ fn add_message_renders_real_oneofs_as_variants() {
     let rendered = add_message_to_string(&[descriptor], "acme.oneof.v1.Root", &[]).unwrap();
 
     assert!(rendered.contains(
-        r#"/// @nexus.proto "acme.oneof.v1.Root.Outcome"
-  variant root-outcome {
+        r#"/// Protobuf oneof `acme.oneof.v1.Root.Outcome.result`.
+  variant root-outcome-result {
     success(string),
     failure(failure-detail),
+  }"#
+    ));
+    assert!(rendered.contains(
+        r#"/// @nexus.proto "acme.oneof.v1.Root.Outcome"
+  record root-outcome {
+    %result: option<root-outcome-result>,
   }"#
     ));
     assert!(rendered.contains(
@@ -310,14 +316,15 @@ fn add_rpc_uses_the_same_oneof_variant_rendering() {
     let descriptor = write_oneof_descriptor();
     let rendered = add_rpc_to_string(&[descriptor], "TestService.Run", &[]).unwrap();
 
-    assert!(rendered.contains("variant root-outcome {"));
+    assert!(rendered.contains("variant root-outcome-result {"));
+    assert!(rendered.contains("%result: option<root-outcome-result>,"));
     assert!(rendered.contains("variant mixed-choice {"));
     assert!(rendered.contains("choice: option<mixed-choice>,"));
     assert!(rendered.contains("run: func("));
 }
 
 #[test]
-fn add_rpc_preserves_an_existing_pure_oneof_variant() {
+fn scaffold_commands_reject_an_existing_direct_oneof_variant() {
     let descriptor = write_oneof_descriptor();
     let input_path = write_temp_wit(
         "existing-oneof-variant",
@@ -343,13 +350,25 @@ interface test-service {
 "#,
     );
 
-    let rendered = add_rpc_to_string(&[descriptor], "TestService.Complete", &[input_path]).unwrap();
-    assert!(rendered.contains("variant root-outcome {"));
-    assert_eq!(rendered.matches("variant root-outcome {").count(), 1);
+    let error = add_rpc_to_string(
+        &[descriptor.clone()],
+        "TestService.Complete",
+        &[input_path.clone()],
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains(
+        "is not a record, but protobuf message `acme.oneof.v1.Root.Outcome` contains a oneof"
+    ));
+
+    let error = add_message_to_string(&[descriptor], "acme.oneof.v1.Root.Outcome", &[input_path])
+        .unwrap_err();
+    assert!(error.to_string().contains(
+        "is not a record, but protobuf message `acme.oneof.v1.Root.Outcome` contains a oneof"
+    ));
 }
 
 #[test]
-fn add_rpc_accepts_grouped_and_legacy_existing_oneof_records() {
+fn add_rpc_accepts_an_existing_grouped_oneof_record() {
     let descriptor = write_oneof_descriptor();
     let grouped = r#"package temporal:nexus@1.0.0;
 
@@ -377,6 +396,39 @@ interface test-service {
         add_rpc_to_string(&[descriptor.clone()], "TestService.Choose", &[grouped_path]).unwrap();
     assert_eq!(rendered, grouped);
 
+    let single_group = r#"package temporal:nexus@1.0.0;
+
+world system {
+  export test-service;
+}
+
+interface test-service {
+  variant root-outcome-result {
+    success(string),
+    failure(failure-detail),
+  }
+
+  /// @nexus.proto "acme.oneof.v1.Root.Outcome"
+  record root-outcome {
+    %result: option<root-outcome-result>,
+  }
+
+  /// @nexus.proto "acme.oneof.v1.FailureDetail"
+  record failure-detail {
+  }
+
+  complete: func(request: root-outcome) -> root-outcome;
+}
+"#;
+    let single_group_path = write_temp_wit("existing-single-group-oneof", single_group);
+    let rendered =
+        add_rpc_to_string(&[descriptor], "TestService.Complete", &[single_group_path]).unwrap();
+    assert_eq!(rendered, single_group);
+}
+
+#[test]
+fn scaffold_commands_reject_existing_ungrouped_oneofs() {
+    let descriptor = write_oneof_descriptor();
     let legacy = r#"package temporal:nexus@1.0.0;
 
 world system {
@@ -395,8 +447,115 @@ interface test-service {
 }
 "#;
     let legacy_path = write_temp_wit("existing-legacy-oneof", legacy);
-    let rendered = add_rpc_to_string(&[descriptor], "TestService.Choose", &[legacy_path]).unwrap();
-    assert_eq!(rendered, legacy);
+    let error =
+        add_rpc_to_string(&[descriptor.clone()], "TestService.Choose", &[legacy_path]).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("represents this oneof as individual fields")
+    );
+
+    let without_operation = legacy.replace("  choose: func(request: mixed) -> mixed;\n", "");
+    let new_operation_path = write_temp_wit("new-operation-legacy-oneof", &without_operation);
+    let error = add_rpc_to_string(
+        &[descriptor.clone()],
+        "TestService.Choose",
+        &[new_operation_path],
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("represents this oneof as individual fields")
+    );
+
+    let add_message_path = write_temp_wit("add-message-legacy-oneof", legacy);
+    let error = add_message_to_string(
+        &[descriptor.clone()],
+        "acme.oneof.v1.Mixed",
+        &[add_message_path],
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("represents this oneof as individual fields")
+    );
+
+    let linked_collection = unique_temp_dir("linked-legacy-oneof");
+    let linked_package = linked_collection.join("oneof-model");
+    fs::create_dir_all(&linked_package).unwrap();
+    fs::write(
+        linked_package.join("model.wit"),
+        r#"package acme:oneof-model@1.0.0;
+
+interface model {
+  /// @nexus.proto "acme.oneof.v1.Mixed"
+  record mixed {
+    id: string,
+    text: option<string>,
+    count: option<s32>,
+  }
+}
+"#,
+    )
+    .unwrap();
+    let error = add_message_to_string(
+        &[descriptor.clone()],
+        "acme.oneof.v1.Mixed",
+        &[linked_collection],
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("represents this oneof as individual fields")
+    );
+
+    let pure_record = r#"package temporal:nexus@1.0.0;
+
+world system {
+  export test-service;
+}
+
+interface test-service {
+  /// @nexus.proto "acme.oneof.v1.Root.Outcome"
+  record root-outcome {
+    success: option<string>,
+    failure: option<failure-detail>,
+  }
+
+  /// @nexus.proto "acme.oneof.v1.FailureDetail"
+  record failure-detail {
+  }
+
+  complete: func(request: root-outcome) -> root-outcome;
+}
+"#;
+    let pure_record_path = write_temp_wit("existing-pure-oneof-record", pure_record);
+    let error = add_rpc_to_string(
+        &[descriptor.clone()],
+        "TestService.Complete",
+        &[pure_record_path.clone()],
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("represents this oneof as individual fields")
+    );
+
+    let error = add_message_to_string(
+        &[descriptor],
+        "acme.oneof.v1.Root.Outcome",
+        &[pure_record_path],
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("represents this oneof as individual fields")
+    );
 }
 
 #[test]

@@ -20,6 +20,16 @@ type PackageOrigins = BTreeMap<PackageId, PathBuf>;
 pub(crate) struct LinkedTypeMetadata {
     pub(crate) wit_name: String,
     pub(crate) use_path: String,
+    pub(crate) record_fields: Option<BTreeMap<String, LinkedRecordFieldMetadata>>,
+    pub(crate) is_variant: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LinkedRecordFieldMetadata {
+    pub(crate) wit_name: String,
+    pub(crate) type_expr: String,
+    pub(crate) explicit_proto_field: bool,
+    pub(crate) omitted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -312,11 +322,53 @@ pub(crate) fn load_linked_wit_metadata_from_inputs(
                     continue;
                 };
 
+                let record_fields = if let TypeDefKind::Record(record) = &type_def.kind {
+                    let mut fields = BTreeMap::new();
+                    for field in &record.fields {
+                        let field_context = format!("{context} field `{}`", field.name);
+                        let field_directives = parse_directives(
+                            field.docs.contents.as_deref(),
+                            &origin_path,
+                            &field_context,
+                        )?;
+                        let explicit_proto_name = directive_value(
+                            &field_directives,
+                            "proto-field",
+                            &origin_path,
+                            &field_context,
+                            "value",
+                        )?;
+                        let field_proto_name = explicit_proto_name
+                            .clone()
+                            .unwrap_or_else(|| field.name.replace('-', "_"));
+                        fields.insert(
+                            field_proto_name,
+                            LinkedRecordFieldMetadata {
+                                wit_name: field.name.clone(),
+                                type_expr: render_wit_type(&resolve, &field.ty),
+                                explicit_proto_field: explicit_proto_name.is_some(),
+                                omitted: directive(
+                                    &field_directives,
+                                    "omit",
+                                    &origin_path,
+                                    &field_context,
+                                )?
+                                .is_some(),
+                            },
+                        );
+                    }
+                    Some(fields)
+                } else {
+                    None
+                };
+
                 if let Some(existing) = proto_types.insert(
                     proto_name.clone(),
                     LinkedTypeMetadata {
                         wit_name: type_name.to_string(),
                         use_path: use_path.clone(),
+                        record_fields,
+                        is_variant: matches!(type_def.kind, TypeDefKind::Variant(_)),
                     },
                 ) {
                     return Err(Error::InvalidWit {
@@ -337,6 +389,64 @@ pub(crate) fn load_linked_wit_metadata_from_inputs(
         type_covered_fields,
         type_use_paths,
     })
+}
+
+pub(crate) fn render_wit_type(resolve: &Resolve, ty: &Type) -> String {
+    match ty {
+        Type::Bool => "bool".to_string(),
+        Type::U8 => "u8".to_string(),
+        Type::U16 => "u16".to_string(),
+        Type::U32 => "u32".to_string(),
+        Type::U64 => "u64".to_string(),
+        Type::S8 => "s8".to_string(),
+        Type::S16 => "s16".to_string(),
+        Type::S32 => "s32".to_string(),
+        Type::S64 => "s64".to_string(),
+        Type::F32 => "f32".to_string(),
+        Type::F64 => "f64".to_string(),
+        Type::Char => "char".to_string(),
+        Type::String => "string".to_string(),
+        Type::ErrorContext => "error-context".to_string(),
+        Type::Id(type_id) => render_wit_type_id(resolve, *type_id),
+    }
+}
+
+fn render_wit_type_id(resolve: &Resolve, type_id: TypeId) -> String {
+    let type_def = &resolve.types[type_id];
+    if let Some(name) = &type_def.name {
+        return name.clone();
+    }
+    match &type_def.kind {
+        TypeDefKind::Option(inner) => format!("option<{}>", render_wit_type(resolve, inner)),
+        TypeDefKind::List(inner) => format!("list<{}>", render_wit_type(resolve, inner)),
+        TypeDefKind::Type(inner) => render_wit_type(resolve, inner),
+        TypeDefKind::Tuple(tuple) => format!(
+            "tuple<{}>",
+            tuple
+                .types
+                .iter()
+                .map(|ty| render_wit_type(resolve, ty))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        TypeDefKind::Result(result) => {
+            let ok = result
+                .ok
+                .as_ref()
+                .map(|ty| render_wit_type(resolve, ty))
+                .unwrap_or_else(|| "_".to_string());
+            let err = result
+                .err
+                .as_ref()
+                .map(|ty| render_wit_type(resolve, ty))
+                .unwrap_or_else(|| "_".to_string());
+            format!("result<{ok}, {err}>")
+        }
+        _ => type_def
+            .name
+            .clone()
+            .unwrap_or_else(|| type_def.kind.as_str().to_string()),
+    }
 }
 
 fn collect_support_spec(
