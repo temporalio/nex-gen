@@ -8,6 +8,7 @@ world system {
 interface type-roundtrip-service {
   use nexus:temporal-types/model@1.0.0.{
     duration,
+    failure,
     placeholder,
     priority,
     retry-policy,
@@ -28,5 +29,11 @@ interface type-roundtrip-service {
     heartbeat-timeout: placeholder,
   }
 
+  /// @nexus.proto "temporal.api.command.v1.FailWorkflowExecutionCommandAttributes" typescript-import="@temporalio/proto"
+  record failure-container {
+    failure: option<failure>,
+  }
+
   activity-options-operation: func(request: activity-options) -> activity-options;
+  failure-operation: func(request: failure-container) -> failure-container;
 }

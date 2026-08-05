@@ -5,6 +5,7 @@ import type { temporal } from "@temporalio/proto";
 import {
   retryPolicyToProto,
   taskQueueToProto,
+  failureToProto,
   durationToProto,
   priorityToProto,
 } from "./support";
@@ -43,5 +44,20 @@ export function activityOptionsToProto(
         ? undefined
         : durationToProto(model.scheduleToCloseTimeout),
     priority: model.priority == null ? undefined : priorityToProto(model.priority),
+  };
+}
+
+export interface FailureContainer {
+  failure?: Error;
+}
+
+export function failureContainerToProto(
+  model: FailureContainer | null | undefined,
+): temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes | undefined {
+  if (model == null) {
+    return undefined;
+  }
+  return {
+    failure: model.failure == null ? undefined : failureToProto(model.failure),
   };
 }

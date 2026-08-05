@@ -5,11 +5,13 @@ import typing
 import google.protobuf.duration_pb2
 import temporalio.api.common.v1.message_pb2 as common_pb2
 import temporalio.api.enums.v1.workflow_pb2 as workflow_enums_pb2
+import temporalio.api.failure.v1.message_pb2 as failure_pb2
 import temporalio.api.taskqueue.v1.message_pb2 as taskqueue_pb2
 import temporalio.api.workflow.v1 as workflow_pb2
 import temporalio.converter as temporalio_converter
 import temporalio.common as temporalio_common
 import temporalio.nexus.system
+import temporalio.exceptions as temporalio_exceptions
 
 
 class SignalWithStartWorkflowModelRequest(typing.Protocol):
@@ -138,6 +140,39 @@ def payload_to_proto(
     payload: object,
 ) -> common_pb2.Payload:
     return _value_to_payload(payload)
+
+
+def failure_from_proto(
+    proto: failure_pb2.Failure,
+) -> BaseException:
+    return temporalio_converter.FailureConverter.default.from_failure(
+        proto,
+        _failure_payload_converter(),
+    )
+
+
+def failure_to_proto(
+    failure: BaseException,
+) -> failure_pb2.Failure:
+    proto = failure_pb2.Failure()
+    temporalio_converter.FailureConverter.default.to_failure(
+        failure,
+        _failure_payload_converter(),
+        proto,
+    )
+    return proto
+
+
+def _failure_payload_converter() -> temporalio_converter.PayloadConverter:
+    try:
+        return temporalio.nexus.system._current_user_payload_converter()
+    except RuntimeError:
+        try:
+            from temporalio.workflow import payload_converter
+
+            return payload_converter()
+        except temporalio_exceptions.TemporalError:
+            return temporalio_converter.PayloadConverter.default
 
 
 def memo_from_proto(

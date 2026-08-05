@@ -382,8 +382,7 @@ fn go_message_conversion(
         if let Some(type_name) = go_replacement_type_name(replacement, package) {
             let from = go_from_proto_converter(&message.info.full_name, replacement);
             let to = go_to_proto_converter(&message.info.full_name, replacement);
-            let native_is_nilable_value =
-                type_name == "any" || type_name.starts_with("[]") || type_name.starts_with("map[");
+            let native_is_nilable_value = crate::generator::go::go_type_is_nilable(&type_name);
             return Ok(GoValueConversion {
                 kind: GoConversionKind::OverrideConverter,
                 from_proto: Box::new(move |expr| format!("{from}(ctx, {expr})")),

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
-from .models import ActivityOptions
+from .models import (
+    ActivityOptions,
+    FailureContainer,
+)
 
 
 @service
@@ -12,3 +15,8 @@ class TypeRoundtripService:
         ActivityOptions,
         ActivityOptions,
     ] = Operation(name="ActivityOptionsOperation")
+
+    failure_operation: Operation[
+        FailureContainer,
+        FailureContainer,
+    ] = Operation(name="FailureOperation")

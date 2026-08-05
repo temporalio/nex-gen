@@ -9,6 +9,10 @@ export const typeRoundtripService = nexus.service("TypeRoundtripService", {
     temporal.api.activity.v1.IActivityOptions,
     temporal.api.activity.v1.IActivityOptions
   >({ name: "ActivityOptionsOperation" }),
+  failureOperation: nexus.operation<
+    temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes,
+    temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes
+  >({ name: "FailureOperation" }),
 });
 
 export const operationRegistry = [
@@ -17,5 +21,11 @@ export const operationRegistry = [
     operation: "ActivityOptionsOperation",
     inputType: "temporal.api.activity.v1.ActivityOptions",
     outputType: "temporal.api.activity.v1.ActivityOptions",
+  },
+  {
+    service: "TypeRoundtripService",
+    operation: "FailureOperation",
+    inputType: "temporal.api.command.v1.FailWorkflowExecutionCommandAttributes",
+    outputType: "temporal.api.command.v1.FailWorkflowExecutionCommandAttributes",
   },
 ] as const;

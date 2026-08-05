@@ -9,6 +9,7 @@ using Temporalio.Converters;
 using Temporalio.Workflows;
 using ApiCommon = Temporalio.Api.Common.V1;
 using ApiDeployment = Temporalio.Api.Deployment.V1;
+using ApiFailure = Temporalio.Api.Failure.V1;
 using ApiTaskQueue = Temporalio.Api.TaskQueue.V1;
 using ApiWorkflow = Temporalio.Api.Workflow.V1;
 
@@ -83,6 +84,12 @@ namespace NexGen.Support
 
         internal static IReadOnlyCollection<object?> FromPayloads(ApiCommon.Payloads payloads, IPayloadConverter? payloadConverter = null) =>
             payloads.Payloads_.Select(payload => FromPayload(payload, payloadConverter)).ToArray();
+
+        internal static ApiFailure.Failure ToFailureProto(this Exception value, IPayloadConverter? payloadConverter = null) =>
+            DataConverter.Default.FailureConverter.ToFailure(value, payloadConverter ?? Workflow.PayloadConverter);
+
+        internal static Exception FromFailureProto(ApiFailure.Failure value, IPayloadConverter? payloadConverter = null) =>
+            DataConverter.Default.FailureConverter.ToException(value, payloadConverter ?? Workflow.PayloadConverter);
 
         internal static Duration ToProto(this TimeSpan value, IPayloadConverter? payloadConverter = null) =>
             Duration.FromTimeSpan(value);

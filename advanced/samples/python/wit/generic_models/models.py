@@ -38,7 +38,6 @@ class OperationCompletionSuccess(typing.Generic[OutputT]):
 
 @dataclasses.dataclass(slots=True)
 class OperationCompletionFailure:
-    tag: typing.Literal["failure"]
     message: str
 
 

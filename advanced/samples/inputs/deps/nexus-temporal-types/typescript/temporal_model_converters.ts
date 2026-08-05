@@ -126,6 +126,24 @@ function configuredPayloadConverter(): common.PayloadConverter {
   return activator.payloadConverter;
 }
 
+export function failureFromProto(
+  proto: temporal.api.failure.v1.IFailure,
+): Error {
+  return common.defaultFailureConverter.failureToError(
+    proto,
+    configuredPayloadConverter(),
+  );
+}
+
+export function failureToProto(
+  failure: Error,
+): temporal.api.failure.v1.IFailure {
+  return common.defaultFailureConverter.errorToFailure(
+    failure,
+    configuredPayloadConverter(),
+  );
+}
+
 export function memoFromProto(
   proto: temporal.api.common.v1.IMemo,
 ): Record<string, unknown> {

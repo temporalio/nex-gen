@@ -1,5 +1,9 @@
-import type * as common from "@temporalio/common";
-import { activityOptionsOperation } from "../../wit/type-roundtrip/index.ts";
+import * as common from "@temporalio/common";
+import {
+  activityOptionsOperation,
+  failureOperation,
+} from "../../wit/type-roundtrip/index.ts";
+import { failureFromProto } from "../../wit/type-roundtrip/support.ts";
 
 const TASK_QUEUE = "demo-task-queue";
 
@@ -24,6 +28,11 @@ function durationSecondsToMillis(
 }
 
 export async function typeRoundtripCaller(): Promise<{
+  failureCauseMessage: string | undefined;
+  failureDetails: unknown[] | undefined;
+  failureMessage: string | undefined;
+  failureNonRetryable: boolean | undefined;
+  failureType: string | undefined;
   priorityKey: number | undefined;
   retryMaximumAttempts: number | undefined;
   scheduleToCloseTimeout: number | undefined;
@@ -42,8 +51,30 @@ export async function typeRoundtripCaller(): Promise<{
   });
   const activityRoundTrip = await activityHandle.result();
   const scheduleToCloseSeconds = activityRoundTrip.scheduleToCloseTimeout?.seconds;
+  const failureHandle = await failureOperation({
+    failure: common.ApplicationFailure.create({
+      message: "outer failure",
+      type: "OuterFailure",
+      nonRetryable: true,
+      cause: common.ApplicationFailure.create({
+        message: "inner failure",
+        type: "InnerFailure",
+      }),
+    }),
+  });
+  const failureRoundTrip = await failureHandle.result();
+  const convertedFailure =
+    failureRoundTrip.failure == null
+      ? undefined
+      : failureFromProto(failureRoundTrip.failure);
+  const applicationFailure = convertedFailure as common.ApplicationFailure | undefined;
 
   return {
+    failureCauseMessage: applicationFailure?.cause?.message,
+    failureDetails: applicationFailure?.details ?? undefined,
+    failureMessage: applicationFailure?.message,
+    failureNonRetryable: applicationFailure?.nonRetryable ?? undefined,
+    failureType: applicationFailure?.type ?? undefined,
     priorityKey: activityRoundTrip.priority?.priorityKey ?? undefined,
     retryMaximumAttempts: activityRoundTrip.retryPolicy?.maximumAttempts ?? undefined,
     scheduleToCloseTimeout: durationSecondsToMillis(scheduleToCloseSeconds),

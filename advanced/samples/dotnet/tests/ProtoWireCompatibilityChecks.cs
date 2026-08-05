@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Google.Protobuf;
 using NexGen.Support;
 using Xunit;
 using ActivityOptions = NexGen.TypeRoundtripService.ActivityOptions;
+using FailureContainer = NexGen.TypeRoundtripService.FailureContainer;
 using Payload = Temporalio.Api.Common.V1.Payload;
 
 namespace NexGen.DotNetExamples.Tests
@@ -33,6 +35,59 @@ namespace NexGen.DotNetExamples.Tests
                     item => item.Key.Contains("temporal-wire", StringComparison.Ordinal));
                 AssertActivityOptionsModel(converter.ToValue(payload, typeof(ActivityOptions)));
             }
+        }
+
+        [Fact]
+        public void FailureIntermediateUsesSdkFailureConverter()
+        {
+            var payloadConverter = new Temporalio.Converters.DefaultPayloadConverter();
+            var wire = new Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes
+            {
+                Failure = new Temporalio.Api.Failure.V1.Failure
+                {
+                    Message = "Encoded failure",
+                    EncodedAttributes = payloadConverter.ToPayload(
+                        new Dictionary<string, object?>
+                        {
+                            ["message"] = "decoded outer failure",
+                            ["stack_trace"] = "decoded stack",
+                        }),
+                    ApplicationFailureInfo = new()
+                    {
+                        Type = "OuterFailure",
+                        NonRetryable = true,
+                    },
+                    Cause = new Temporalio.Api.Failure.V1.Failure
+                    {
+                        Message = "inner failure",
+                        ApplicationFailureInfo = new() { Type = "InnerFailure" },
+                    },
+                },
+            };
+
+            var model = FailureContainer.TemporalFromIntermediate(wire, payloadConverter);
+            var failure = Assert.IsType<Temporalio.Exceptions.ApplicationFailureException>(
+                model.Failure);
+            Assert.Equal("decoded outer failure", failure.Message);
+            Assert.Equal("OuterFailure", failure.ErrorType);
+            Assert.True(failure.NonRetryable);
+            var cause = Assert.IsType<Temporalio.Exceptions.ApplicationFailureException>(
+                failure.InnerException);
+            Assert.Equal("inner failure", cause.Message);
+
+            var roundTripped = Assert.IsType<
+                Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes>(
+                model.TemporalToIntermediate(payloadConverter));
+            Assert.Equal("decoded outer failure", roundTripped.Failure.Message);
+            Assert.Equal(
+                "OuterFailure",
+                roundTripped.Failure.ApplicationFailureInfo.Type);
+            Assert.Equal("inner failure", roundTripped.Failure.Cause.Message);
+
+            var absent = FailureContainer.TemporalFromIntermediate(
+                new Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes(),
+                payloadConverter);
+            Assert.Null(absent.Failure);
         }
 
         private static void AssertActivityOptionsModel(object? value)

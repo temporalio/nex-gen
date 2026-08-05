@@ -7,11 +7,14 @@ import typing_extensions
 import datetime
 import temporalio.common
 import temporalio.api.activity.v1.message_pb2
+import temporalio.api.command.v1.message_pb2
 import temporalio.converter
 
 from ._support import (
     duration_from_proto,
     duration_to_proto,
+    failure_from_proto,
+    failure_to_proto,
     priority_from_proto,
     priority_to_proto,
     retry_policy_from_proto,
@@ -80,3 +83,46 @@ class ActivityOptions:
     retry_policy: temporalio.common.RetryPolicy
     schedule_to_close_timeout: datetime.timedelta | None = None
     priority: temporalio.common.Priority | None = None
+
+
+class _FailureContainerTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        "FailureContainer",
+        temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes,
+    ]
+):
+    transfer_type: (
+        type[
+            temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes
+        ]
+        | None
+    ) = temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes,
+        type_hint: type["FailureContainer"],
+    ) -> "FailureContainer":
+        proto = value
+        return FailureContainer(
+            failure=failure_from_proto(proto.failure)
+            if proto.HasField("failure")
+            else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: "FailureContainer",
+    ) -> temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes:
+        message = temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes()
+        if value.failure is not None:
+            message.failure.CopyFrom(failure_to_proto(value.failure))
+        return message
+
+
+@temporalio.converter.transfer_type_convertible(_FailureContainerTransferTypeConverter)
+@dataclasses.dataclass(slots=True)
+class FailureContainer:
+    failure: BaseException | None = None

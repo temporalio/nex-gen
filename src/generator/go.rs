@@ -2629,11 +2629,17 @@ fn type_needs_pointer_when_optional(value: &PlannedValueType, type_expr: &str) -
     ) {
         return false;
     }
-    // Already-nilable Go types (`any`, slices, maps) represent absence directly.
-    if type_expr == "any" || type_expr.starts_with("[]") || type_expr.starts_with("map[") {
+    // Already-nilable Go types represent absence directly.
+    if go_type_is_nilable(type_expr) {
         return false;
     }
     true
+}
+
+pub(in crate::generator) fn go_type_is_nilable(type_expr: &str) -> bool {
+    matches!(type_expr, "any" | "error")
+        || type_expr.starts_with("[]")
+        || type_expr.starts_with("map[")
 }
 
 /// Key prefix for generic helper models in the rendered-model map, chosen so
@@ -4979,4 +4985,17 @@ fn render_forwarding_wrapper(
     output.push_str(&operation.func_name);
     output.push_str("(ctx, request)\n");
     output.push_str("}\n");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn recognizes_builtin_nilable_types() {
+        for type_expr in ["any", "error", "[]byte", "map[string]any"] {
+            assert!(super::go_type_is_nilable(type_expr), "{type_expr}");
+        }
+        for type_expr in ["string", "time.Duration", "temporal.RetryPolicy"] {
+            assert!(!super::go_type_is_nilable(type_expr), "{type_expr}");
+        }
+    }
 }

@@ -9,9 +9,11 @@ import nexusrpc
 import temporalio.converter
 from . import services as _services
 from .operations.activity_options_operation import activity_options_operation
+from .operations.failure_operation import failure_operation
 
 __all__ = [
     "activity_options_operation",
+    "failure_operation",
 ]
 
 
@@ -43,5 +45,11 @@ __nexus_operation_registry__ = {
         "ActivityOptionsOperation",
     ): _NexusOperationInfo(
         operation=_services.TypeRoundtripService.activity_options_operation,
+    ),
+    (
+        "TypeRoundtripService",
+        "FailureOperation",
+    ): _NexusOperationInfo(
+        operation=_services.TypeRoundtripService.failure_operation,
     ),
 }

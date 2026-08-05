@@ -7,6 +7,11 @@ import uuid
 from nexusrpc import Operation
 from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
 import temporalio.common
+import temporalio.converter
+import temporalio.exceptions
+import temporalio.api.command.v1
+import temporalio.api.failure.v1
+import temporalio.nexus.system
 from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
@@ -22,6 +27,10 @@ ACTIVITY_OPTIONS_OPERATION_INFO = type_roundtrip.__nexus_operation_registry__[
     ("TypeRoundtripService", "ActivityOptionsOperation")
 ]
 ACTIVITY_OPTIONS_OPERATION = ACTIVITY_OPTIONS_OPERATION_INFO.operation
+FAILURE_OPERATION_INFO = type_roundtrip.__nexus_operation_registry__[
+    ("TypeRoundtripService", "FailureOperation")
+]
+FAILURE_OPERATION = FAILURE_OPERATION_INFO.operation
 
 
 @service_handler(service=type_roundtrip_services.TypeRoundtripService)
@@ -44,11 +53,30 @@ class TypeRoundtripServiceHandler:
         assert proto.priority.priority_key == 4
         return input
 
+    @sync_operation
+    async def failure_operation(
+        self,
+        _ctx: StartOperationContext,
+        input: type_roundtrip_models.FailureContainer,
+    ) -> type_roundtrip_models.FailureContainer:
+        self.calls.append(("FailureOperation", input))
+        failure = input.failure
+        assert isinstance(failure, temporalio.exceptions.ApplicationError)
+        assert failure.message == "outer failure"
+        assert failure.type == "OuterFailure"
+        assert failure.non_retryable
+        assert list(failure.details) == ["detail"]
+        assert isinstance(failure.__cause__, temporalio.exceptions.ApplicationError)
+        assert failure.__cause__.message == "inner failure"
+        return input
+
 
 @workflow.defn
 class TypeRoundtripCallerWorkflow:
     @workflow.run
-    async def run(self) -> tuple[str | None, int | None, int | None]:
+    async def run(
+        self,
+    ) -> tuple[str | None, int | None, int | None, str, str, bool, str]:
         retry_policy = temporalio.common.RetryPolicy(maximum_attempts=3)
         activity_handle = await type_roundtrip.activity_options_operation(
             task_queue=TASK_QUEUE,
@@ -61,6 +89,23 @@ class TypeRoundtripCallerWorkflow:
             ),
         )
         activity_response = await activity_handle
+        cause = temporalio.exceptions.ApplicationError(
+            "inner failure",
+            type="InnerFailure",
+        )
+        failure = temporalio.exceptions.ApplicationError(
+            "outer failure",
+            "detail",
+            type="OuterFailure",
+            non_retryable=True,
+        )
+        failure.__cause__ = cause
+        failure_handle = await type_roundtrip.failure_operation(failure=failure)
+        failure_response = await failure_handle
+        converted_failure = failure_response.failure
+        assert isinstance(converted_failure, temporalio.exceptions.ApplicationError)
+        converted_cause = converted_failure.__cause__
+        assert isinstance(converted_cause, temporalio.exceptions.ApplicationError)
         return (
             activity_response.task_queue,
             int(activity_response.schedule_to_close_timeout.total_seconds())
@@ -69,6 +114,10 @@ class TypeRoundtripCallerWorkflow:
             activity_response.priority.priority_key
             if activity_response.priority is not None
             else None,
+            converted_failure.message,
+            converted_failure.type or "",
+            converted_failure.non_retryable,
+            converted_cause.message,
         )
 
 
@@ -87,6 +136,7 @@ def priority() -> temporalio.common.Priority:
 def test_generated_metadata() -> None:
     assert OUTPUT_PATH.exists(), f"expected generated package at {OUTPUT_PATH}"
     assert isinstance(ACTIVITY_OPTIONS_OPERATION, Operation)
+    assert isinstance(FAILURE_OPERATION, Operation)
     assert (
         type_roundtrip.__nexus_operation_registry__[
             ("TypeRoundtripService", "ActivityOptionsOperation")
@@ -101,6 +151,7 @@ def test_generated_metadata() -> None:
     )
     assert not hasattr(type_roundtrip, "TypeRoundtripService")
     assert not hasattr(type_roundtrip, "ActivityOptions")
+    assert not hasattr(type_roundtrip, "FailureContainer")
 
 
 def test_activity_options_round_trip() -> None:
@@ -133,6 +184,50 @@ def test_activity_options_round_trip() -> None:
     assert round_tripped_activity.priority == priority()
 
 
+def test_failure_encoded_attributes_round_trip() -> None:
+    payload_converter = temporalio.converter.PayloadConverter.default
+    encoded_attributes = payload_converter.to_payloads(
+        [{"message": "decoded failure", "stack_trace": "decoded stack"}]
+    )[0]
+    failure = temporalio.api.failure.v1.Failure(
+        message="Encoded failure",
+        encoded_attributes=encoded_attributes,
+        application_failure_info=temporalio.api.failure.v1.ApplicationFailureInfo(
+            type="EncodedFailure",
+            non_retryable=True,
+        ),
+    )
+    proto = temporalio.api.command.v1.FailWorkflowExecutionCommandAttributes(
+        failure=failure
+    )
+    converter = getattr(
+        type_roundtrip_models.FailureContainer,
+        "__temporal_transfer_type_converter",
+    )
+
+    with temporalio.nexus.system._user_payload_converter_context(payload_converter):
+        model = converter.from_transfer_type(
+            proto,
+            type_roundtrip_models.FailureContainer,
+        )
+        round_tripped = converter.to_transfer_type(model)
+
+    converted_failure = model.failure
+    assert isinstance(converted_failure, temporalio.exceptions.ApplicationError)
+    assert converted_failure.message == "decoded failure"
+    assert converted_failure.type == "EncodedFailure"
+    assert converted_failure.non_retryable
+    assert round_tripped.failure.message == "decoded failure"
+    assert round_tripped.failure.application_failure_info.type == "EncodedFailure"
+
+    with temporalio.nexus.system._user_payload_converter_context(payload_converter):
+        absent = converter.from_transfer_type(
+            temporalio.api.command.v1.FailWorkflowExecutionCommandAttributes(),
+            type_roundtrip_models.FailureContainer,
+        )
+    assert absent.failure is None
+
+
 async def test_operations_use_real_nexus_client(env: WorkflowEnvironment) -> None:
     task_queue = str(uuid.uuid4())
     service_handler = TypeRoundtripServiceHandler()
@@ -154,8 +249,19 @@ async def test_operations_use_real_nexus_client(env: WorkflowEnvironment) -> Non
         finally:
             await env.delete_nexus_endpoint(endpoint)
 
-    assert result == (TASK_QUEUE, 7, 4)
-    assert len(service_handler.calls) == 1
+    assert result == (
+        TASK_QUEUE,
+        7,
+        4,
+        "outer failure",
+        "OuterFailure",
+        True,
+        "inner failure",
+    )
+    assert len(service_handler.calls) == 2
     activity_operation, activity_request = service_handler.calls[0]
     assert activity_operation == "ActivityOptionsOperation"
     assert isinstance(activity_request, type_roundtrip_models.ActivityOptions)
+    failure_operation, failure_request = service_handler.calls[1]
+    assert failure_operation == "FailureOperation"
+    assert isinstance(failure_request, type_roundtrip_models.FailureContainer)

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	activity "go.temporal.io/api/activity/v1"
+	command "go.temporal.io/api/command/v1"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -28,6 +29,32 @@ func activityOptionsOperation(ctx workflow.Context, request ActivityOptions) wor
 			return
 		}
 		value, err := activityOptionsFromProto(ctx, &result)
+		if err != nil {
+			resultSettable.SetError(err)
+			return
+		}
+		resultSettable.Set(value, nil)
+	})
+	return result
+}
+
+func failureOperation(ctx workflow.Context, request FailureContainer) workflow.Future {
+	requestProto, err := request.toProto(ctx)
+	if err != nil {
+		result, resultSettable := workflow.NewFuture(ctx)
+		resultSettable.SetError(err)
+		return result
+	}
+	c := workflow.NewNexusClient("temporal-system", "TypeRoundtripService")
+	fut := c.ExecuteOperation(ctx, "FailureOperation", requestProto, workflow.NexusOperationOptions{})
+	result, resultSettable := workflow.NewFuture(ctx)
+	workflow.Go(ctx, func(ctx workflow.Context) {
+		var result command.FailWorkflowExecutionCommandAttributes
+		if err := fut.Get(ctx, &result); err != nil {
+			resultSettable.SetError(err)
+			return
+		}
+		value, err := failureContainerFromProto(ctx, &result)
 		if err != nil {
 			resultSettable.SetError(err)
 			return
@@ -118,6 +145,35 @@ func activityOptionsFromProto(ctx workflow.Context, proto *activity.ActivityOpti
 	return value, nil
 }
 
+type FailureContainer struct {
+	// Optional.
+	Failure error
+}
+
+func (m FailureContainer) toProto(ctx workflow.Context) (*command.FailWorkflowExecutionCommandAttributes, error) {
+	message := &command.FailWorkflowExecutionCommandAttributes{}
+	{
+		converted, err := failureToProto(ctx, m.Failure)
+		if err != nil {
+			return nil, err
+		}
+		message.Failure = converted
+	}
+	return message, nil
+}
+
+func failureContainerFromProto(ctx workflow.Context, proto *command.FailWorkflowExecutionCommandAttributes) (FailureContainer, error) {
+	value := FailureContainer{}
+	{
+		converted, err := failureFromProto(ctx, proto.GetFailure())
+		if err != nil {
+			return value, err
+		}
+		value.Failure = converted
+	}
+	return value, nil
+}
+
 type ActivityOptionsOperationOptions struct {
 	// Optional.
 	TaskQueue string
@@ -143,5 +199,16 @@ func ActivityOptionsOperation(ctx workflow.Context, opts ActivityOptionsOperatio
 		RetryPolicy:            opts.RetryPolicy,
 		ScheduleToCloseTimeout: scheduleToCloseTimeout,
 		Priority:               opts.Priority,
+	})
+}
+
+type FailureOperationOptions struct {
+	// Optional.
+	Failure error
+}
+
+func FailureOperation(ctx workflow.Context, opts FailureOperationOptions) workflow.Future {
+	return failureOperation(ctx, FailureContainer{
+		Failure: opts.Failure,
 	})
 }

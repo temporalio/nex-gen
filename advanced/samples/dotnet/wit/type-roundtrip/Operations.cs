@@ -32,6 +32,12 @@ namespace NexGen.TypeRoundtripService
     }
 
     [GeneratedCode("nex-gen", null)]
+    public class FailureOperationOptions
+    {
+        public System.Exception? Failure { get; set; }
+    }
+
+    [GeneratedCode("nex-gen", null)]
     public static class Operations
     {
         [GeneratedCode("nex-gen", null)]
@@ -56,6 +62,25 @@ namespace NexGen.TypeRoundtripService
                 Priority = options.Priority,
             };
             return ActivityOptionsOperationAsync(request);
+        }
+
+        [GeneratedCode("nex-gen", null)]
+        private static async Task<FailureContainer> FailureOperationAsync(FailureContainer request)
+        {
+            var client = Workflow.CreateNexusWorkflowClient<ITypeRoundtripService>(TypeRoundtripServiceEndpoint);
+            var result = await client.ExecuteNexusOperationAsync<FailureContainer>(svc => svc.FailureOperation(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nex-gen", null)]
+        public static Task<FailureContainer> FailureOperationAsync(FailureOperationOptions? options = null)
+        {
+            var request = new FailureContainer()
+            {
+                Failure = options?.Failure,
+            };
+            return FailureOperationAsync(request);
         }
 
     }

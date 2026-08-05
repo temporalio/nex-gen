@@ -20,6 +20,10 @@ namespace NexGen.TypeRoundtripService
         [NexusOperation("ActivityOptionsOperation")]
         ActivityOptions ActivityOptionsOperation(ActivityOptions request);
 
+        [GeneratedCode("nex-gen", null)]
+        [NexusOperation("FailureOperation")]
+        FailureContainer FailureOperation(FailureContainer request);
+
     }
 
 }

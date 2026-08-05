@@ -55,4 +55,29 @@ namespace NexGen.TypeRoundtripService
 
     }
 
+    [GeneratedCode("nex-gen", null)]
+    public class FailureContainer : NexGen.Support.ITemporalIntermediate
+    {
+        public System.Exception? Failure { get; init; }
+
+        public static FailureContainer TemporalFromIntermediate(Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        {
+            return new FailureContainer()
+            {
+                Failure = wire.Failure == null ? null : NexGen.Support.ProtoExtensions.FromFailureProto(wire.Failure, payloadConverter),
+            };
+        }
+
+        public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        {
+            var proto = new Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes();
+            if (Failure is { } failure)
+            {
+                proto.Failure = NexGen.Support.ProtoExtensions.ToFailureProto(failure, payloadConverter);
+            }
+            return proto;
+        }
+
+    }
+
 }

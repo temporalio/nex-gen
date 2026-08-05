@@ -8,6 +8,7 @@ import (
 	common "go.temporal.io/api/common/v1"
 	deploymentpb "go.temporal.io/api/deployment/v1"
 	enums "go.temporal.io/api/enums/v1"
+	failurepb "go.temporal.io/api/failure/v1"
 	taskqueue "go.temporal.io/api/taskqueue/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
 	"go.temporal.io/sdk/client"
@@ -185,6 +186,25 @@ func getWorkflowDataConverter(ctx workflow.Context) converter.DataConverter {
 		return contextAware.WithWorkflowContext(ctx)
 	}
 	return dataConverter
+}
+
+// --- Failure (temporal.api.failure.v1.Failure) ---
+
+func failureToProto(ctx workflow.Context, value error) (*failurepb.Failure, error) {
+	failureConverter := temporal.NewDefaultFailureConverter(temporal.DefaultFailureConverterOptions{
+		DataConverter: getWorkflowDataConverter(ctx),
+	})
+	return failureConverter.ErrorToFailure(value), nil
+}
+
+func failureFromProto(ctx workflow.Context, failure *failurepb.Failure) (error, error) {
+	if failure == nil {
+		return nil, nil
+	}
+	failureConverter := temporal.NewDefaultFailureConverter(temporal.DefaultFailureConverterOptions{
+		DataConverter: getWorkflowDataConverter(ctx),
+	})
+	return failureConverter.FailureToError(failure), nil
 }
 
 // --- Memo (temporal.api.common.v1.Memo) ---
