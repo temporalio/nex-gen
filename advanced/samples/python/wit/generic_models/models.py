@@ -38,9 +38,11 @@ class OperationCompletionSuccess(typing.Generic[OutputT]):
 
 @dataclasses.dataclass(slots=True)
 class OperationCompletionFailure:
+    tag: typing.Literal["failure"]
     message: str
 
 
-OperationCompletionResult: typing.TypeAlias = (
-    OperationCompletionSuccess[OutputT] | OperationCompletionFailure
+OperationCompletionResult = (
+    tuple[typing.Literal["success"], OperationCompletionSuccess[OutputT]]
+    | tuple[typing.Literal["failure"], OperationCompletionFailure]
 )

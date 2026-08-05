@@ -647,13 +647,7 @@ pub struct FlagSpec {
 pub struct VariantSpec<F: TypeNameFamily = AuthoredNames> {
     pub name: String,
     pub full_name: String,
-    pub python_style: Option<PythonVariantStyle>,
     pub cases: Vec<VariantCaseSpec<F>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PythonVariantStyle {
-    PayloadUnion,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -846,7 +840,6 @@ impl<F: TypeNameFamily> VariantSpec<F> {
         VariantSpec {
             name: self.name,
             full_name: self.full_name,
-            python_style: self.python_style,
             cases: self
                 .cases
                 .into_iter()

@@ -1196,38 +1196,6 @@ are closed automatically wherever they occur.
 
 ---
 
-### @nexus.variant-style
-
-**Placement:** Variant
-**Syntax:** `@nexus.variant-style python="payload-union"`
-
-Selects a language-specific public representation for a WIT variant. The
-currently supported value is Python `payload-union`, which omits the WIT case
-tags and uses distinct payload record classes as the runtime discriminants.
-Every case must therefore have a direct, distinct WIT record payload.
-
-```wit
-record operation-completion-success {
-  output: output-t,
-}
-
-record operation-completion-failure {
-  message: string,
-}
-
-/// @nexus.variant-style python="payload-union"
-variant operation-completion-result {
-  success(operation-completion-success),
-  failure(operation-completion-failure),
-}
-```
-
-Python emits `OperationCompletionSuccess[OutputT] |
-OperationCompletionFailure`. TypeScript, Go, and .NET continue to emit their
-normal tagged variant representations.
-
----
-
 ### @nexus.proto-field
 
 **Placement:** Record field (within a `@nexus.proto` record)

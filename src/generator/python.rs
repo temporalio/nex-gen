@@ -21,8 +21,8 @@ use crate::resources::{RequestPlan, ResolvedResourceBindingSource, render_reques
 use crate::spec::{
     EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec,
     LanguageImportSpec, LanguageImportStyle, LanguageStringSpec, ModulePath, OperationSpec,
-    PythonVariantStyle, RecordFieldSpec, RecordFieldVisibility, RecordSpec, SupportFragmentSpec,
-    TypeReplacementSpec, TypeSpec, VariantSpec,
+    RecordFieldSpec, RecordFieldVisibility, RecordSpec, SupportFragmentSpec, TypeReplacementSpec,
+    TypeSpec, VariantSpec,
 };
 use crate::workspace::{ApiSpecBranch, ApiSpecNode};
 
@@ -1616,7 +1616,6 @@ impl<'a> ApiPlanner<'a> {
                     .into_iter()
                     .map(|usage| usage.parameter.name)
                     .collect(),
-                payload_union: variant_spec.python_style == Some(PythonVariantStyle::PayloadUnion),
                 cases,
             },
         );
@@ -2489,7 +2488,6 @@ struct RenderedFlag {
 struct RenderedVariant {
     name: String,
     type_parameters: Vec<String>,
-    payload_union: bool,
     cases: Vec<RenderedVariantCase>,
 }
 
@@ -4881,11 +4879,7 @@ fn render_flags(output: &mut String, flags: &RenderedFlags) {
 
 fn render_variant(output: &mut String, variant: &RenderedVariant) {
     output.push_str(variant.name.as_str());
-    output.push_str(if variant.payload_union {
-        ": typing.TypeAlias = "
-    } else {
-        " = "
-    });
+    output.push_str(" = ");
     if variant.cases.is_empty() {
         output.push_str("typing.Never\n");
         return;
@@ -4897,22 +4891,14 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
         if index > 0 {
             output.push_str("\n    | ");
         }
-        if variant.payload_union {
-            output.push_str(
-                case.payload_annotation
-                    .as_deref()
-                    .expect("payload-union variants are validated to have payloads"),
-            );
-        } else {
-            output.push_str("tuple[typing.Literal[");
-            output.push_str(&python_string_literal(&case.name));
-            output.push(']');
-            if let Some(payload_annotation) = &case.payload_annotation {
-                output.push_str(", ");
-                output.push_str(payload_annotation);
-            }
-            output.push(']');
+        output.push_str("tuple[typing.Literal[");
+        output.push_str(&python_string_literal(&case.name));
+        output.push(']');
+        if let Some(payload_annotation) = &case.payload_annotation {
+            output.push_str(", ");
+            output.push_str(payload_annotation);
         }
+        output.push(']');
     }
     if variant.cases.len() > 1 {
         output.push_str("\n)");
