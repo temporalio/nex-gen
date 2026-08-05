@@ -25,7 +25,7 @@ path = "src/main.rs"
 # Exposes the CLI surface that is not covered by README.md: the `dotnet`
 # generate target, the WIT/proto-oriented generate flags (`--support-file`,
 # `--descriptors`, `--format`, `--native-api`), and the maintenance subcommands
-# (`build-examples`, `build-json-examples`, `add-rpc`, `debug-wit-dir`). See
+# (`build-examples`, `build-json-examples`, `add-rpc`, `add-message`, `debug-wit-dir`). See
 # advanced/README.md. Off by default so the published binary only offers the
 # documented JSON Schema workflow.
 advanced = []

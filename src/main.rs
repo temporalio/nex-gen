@@ -8,7 +8,8 @@ use nex_gen::language::Language;
 use nex_gen::parser::write_prepared_wit_directory;
 #[cfg(feature = "advanced")]
 use nex_gen::{
-    AddRpcRequest, BuildExamplesRequest, add_rpc_to_file, build_examples, build_json_examples,
+    AddMessageRequest, AddRpcRequest, BuildExamplesRequest, add_message_to_file, add_rpc_to_file,
+    build_examples, build_json_examples,
 };
 use nex_gen::{GenerateRequest, generate_to_file};
 
@@ -45,6 +46,11 @@ enum Commands {
         about = "Add an RPC scaffold to an existing WIT file, or generate standalone WIT for one RPC"
     )]
     AddRpc(AddRpcArgs),
+    #[cfg(feature = "advanced")]
+    #[command(
+        about = "Add a proto message tree to an existing WIT file, or generate standalone WIT for one message"
+    )]
+    AddMessage(AddMessageArgs),
     #[cfg(feature = "advanced")]
     #[command(about = "Write the prepared WIT workspace used for parsing to a directory")]
     DebugWitDir(DebugWitDirArgs),
@@ -123,6 +129,19 @@ struct AddRpcArgs {
     descriptors: Vec<PathBuf>,
     #[arg(long)]
     rpc: String,
+    #[arg(long = "input")]
+    inputs: Vec<PathBuf>,
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[cfg(feature = "advanced")]
+#[derive(Args)]
+struct AddMessageArgs {
+    #[arg(long, required = true)]
+    descriptors: Vec<PathBuf>,
+    #[arg(long)]
+    message: String,
     #[arg(long = "input")]
     inputs: Vec<PathBuf>,
     #[arg(long)]
@@ -210,6 +229,13 @@ fn main() -> ExitCode {
         Commands::AddRpc(args) => add_rpc_to_file(&AddRpcRequest {
             descriptor_paths: args.descriptors,
             rpc_name: args.rpc,
+            input_paths: args.inputs,
+            output_path: args.output,
+        }),
+        #[cfg(feature = "advanced")]
+        Commands::AddMessage(args) => add_message_to_file(&AddMessageRequest {
+            descriptor_paths: args.descriptors,
+            message_name: args.message,
             input_paths: args.inputs,
             output_path: args.output,
         }),

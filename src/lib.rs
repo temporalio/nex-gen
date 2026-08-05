@@ -25,7 +25,10 @@ use language::Language;
 use spec::SupportFragmentSpec;
 use workspace::{ApiSpecNode, ApiSpecTree};
 
-pub use add_rpc::{AddRpcRequest, add_rpc_to_file, add_rpc_to_string};
+pub use add_rpc::{
+    AddMessageRequest, AddRpcRequest, add_message_to_file, add_message_to_string, add_rpc_to_file,
+    add_rpc_to_string,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SupportFiles {

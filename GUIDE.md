@@ -1496,7 +1496,7 @@ workflow-call: async func(callable-prefix: callable-prefix, args: payloads) -> w
 **Syntax:** `@nexus.add-rpc-compatible-with "<type-name>"`
 
 Declares that a type is assignment-compatible with another type for the
-`add-rpc` scaffolding command. This allows the scaffolder to substitute
+`add-rpc` and `add-message` scaffolding commands. This allows the scaffolder to substitute
 compatible types when generating WIT from proto RPCs.
 
 ```wit
@@ -1504,5 +1504,5 @@ compatible types when generating WIT from proto RPCs.
 type workflow-function = placeholder;
 ```
 
-This directive has no effect on code generation -- it only affects the `add-rpc`
-command.
+This directive has no effect on code generation -- it only affects the scaffold
+commands.

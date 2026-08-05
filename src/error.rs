@@ -142,6 +142,12 @@ pub enum Error {
     #[error("RPC name `{name}` is ambiguous; matches: {matches:?}")]
     AmbiguousRpcName { name: String, matches: Vec<String> },
 
+    #[error("message `{name}` was not found in the descriptor set")]
+    UnknownMessageName { name: String },
+
+    #[error("message name `{name}` is ambiguous; matches: {matches:?}")]
+    AmbiguousMessageName { name: String, matches: Vec<String> },
+
     #[error("unknown {language} example `{example_id}`")]
     UnknownExampleId {
         language: Language,
@@ -150,6 +156,9 @@ pub enum Error {
 
     #[error("cannot generate add-rpc WIT for `{context}`: {reason}")]
     UnsupportedAddRpc { context: String, reason: String },
+
+    #[error("cannot generate add-message WIT for `{context}`: {reason}")]
+    UnsupportedAddMessage { context: String, reason: String },
 
     #[error("service `{service}` is missing an endpoint")]
     MissingServiceEndpoint { service: String },

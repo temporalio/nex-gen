@@ -148,6 +148,53 @@ impl DescriptorIndex {
             name: query.to_string(),
         })
     }
+
+    pub fn resolve_message(&self, query: &str) -> Result<&MessageMetadata> {
+        let normalized_query = normalize_identifier(query);
+        let exact_matches = self
+            .messages
+            .values()
+            .filter(|message| message.matches_exact(&normalized_query))
+            .collect::<Vec<_>>();
+        if let [message] = exact_matches.as_slice() {
+            return Ok(*message);
+        }
+        if !exact_matches.is_empty() {
+            let mut matches = exact_matches
+                .iter()
+                .map(|message| message.full_name.clone())
+                .collect::<Vec<_>>();
+            matches.sort();
+            return Err(Error::AmbiguousMessageName {
+                name: query.to_string(),
+                matches,
+            });
+        }
+
+        let fuzzy_matches = self
+            .messages
+            .values()
+            .filter(|message| message.matches_fuzzy(query))
+            .collect::<Vec<_>>();
+        if let [message] = fuzzy_matches.as_slice() {
+            return Ok(*message);
+        }
+        if !fuzzy_matches.is_empty() {
+            let mut matches = fuzzy_matches
+                .iter()
+                .map(|message| message.full_name.clone())
+                .collect::<Vec<_>>();
+            matches.sort();
+            return Err(Error::AmbiguousMessageName {
+                name: query.to_string(),
+                matches,
+            });
+        }
+
+        Err(Error::UnknownMessageName {
+            name: query.to_string(),
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -158,6 +205,27 @@ pub struct MessageMetadata {
     pub go_package: Option<String>,
     pub file_options: Option<FileOptions>,
     pub descriptor: DescriptorProto,
+}
+
+impl MessageMetadata {
+    fn matches_exact(&self, normalized_query: &str) -> bool {
+        [
+            normalize_identifier(&self.full_name),
+            normalize_identifier(self.full_name.rsplit('.').next().unwrap_or_default()),
+        ]
+        .into_iter()
+        .any(|candidate| candidate == normalized_query)
+    }
+
+    fn matches_fuzzy(&self, query: &str) -> bool {
+        let query_tokens = kebab_tokens(query);
+        !query_tokens.is_empty()
+            && (tokens_are_subsequence(&query_tokens, &kebab_tokens(&self.full_name))
+                || tokens_are_subsequence(
+                    &query_tokens,
+                    &kebab_tokens(self.full_name.rsplit('.').next().unwrap_or_default()),
+                ))
+    }
 }
 
 #[derive(Debug, Clone)]
