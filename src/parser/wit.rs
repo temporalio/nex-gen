@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use heck::{ToLowerCamelCase, ToSnakeCase, ToUpperCamelCase};
+use heck::{ToSnakeCase, ToUpperCamelCase};
 use tempfile::TempDir;
 use wit_parser_crate::{
     Function, FunctionKind, Handle, Interface, PackageId, PackageSourceMap, Record, Resolve, Type,
@@ -1109,16 +1109,6 @@ fn validate_type_parameter_directive(
 ) -> Result<()> {
     let context = format!("type `{}`", wit_type_full_name(resolve, type_id));
     let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
-    if directive(&directives, "variant-style", path, &context)?.is_some()
-        && !matches!(type_def.kind, TypeDefKind::Variant(_))
-    {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context,
-            directive: "@nexus.variant-style".to_string(),
-            reason: "is only supported on WIT variants".to_string(),
-        });
-    }
     let Some(parameter) = directive(&directives, "type-parameter", path, &context)? else {
         return Ok(());
     };
@@ -1170,16 +1160,6 @@ fn validate_generic_model_semantics(spec: &ApiSpec, path: &Path, language: Langu
                     usage.parameter.full_name, usage.parameter.name
                 )));
             }
-        }
-        let function_parameter_names = generated_function_type_parameter_names(record, language);
-        if let Some(collision) = parameters
-            .iter()
-            .find(|usage| function_parameter_names.contains(usage.parameter.name.as_str()))
-        {
-            return Err(invalid(format!(
-                "record `{}` model type parameter `{}` conflicts with a generated function type parameter",
-                record.full_name, collision.parameter.name
-            )));
         }
         if record.source_type.is_some() && !parameters.is_empty() {
             return Err(invalid(format!(
@@ -1296,49 +1276,6 @@ fn validate_generic_model_semantics(spec: &ApiSpec, path: &Path, language: Langu
     Ok(())
 }
 
-fn generated_function_type_parameter_names(
-    record: &RecordSpec,
-    language: Language,
-) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    for (field_name, function) in record.functions() {
-        let generated_name = record.field_name_override(field_name).unwrap_or(field_name);
-        match language {
-            Language::TypeScript => {
-                let field_name = generated_name.to_lower_camel_case();
-                let stem = field_name
-                    .strip_suffix("Type")
-                    .or_else(|| field_name.strip_suffix("Name"))
-                    .unwrap_or(&field_name)
-                    .to_upper_camel_case();
-                names.insert(format!("{stem}Fn"));
-                names.insert(format!("{stem}Value"));
-                names.insert(format!("{stem}Args"));
-            }
-            Language::Go => {
-                names.insert(format!("{}F", generated_name.to_upper_camel_case()));
-            }
-            Language::Dotnet => {
-                names.insert("TWorkflow".to_string());
-                if function.result_type_parameter.is_some() {
-                    names.insert("TResult".to_string());
-                }
-            }
-            Language::Python => {
-                let prefix = generated_name.to_snake_case().to_upper_camel_case();
-                names.insert(format!("{prefix}Arg"));
-                names.insert(format!("{prefix}Args"));
-                names.insert("SelfType".to_string());
-                if let Some(result) = &function.result_type_parameter {
-                    names.insert(result.clone());
-                }
-            }
-            Language::Java | Language::Ruby => {}
-        }
-    }
-    names
-}
-
 fn build_wit_enum_spec(resolve: &Resolve, type_id: TypeId, type_def: &TypeDef) -> Option<EnumSpec> {
     let TypeDefKind::Enum(enumeration) = &type_def.kind else {
         return None;
@@ -1399,9 +1336,6 @@ fn build_wit_variant_spec(
 
     let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
     let context = format!("type `{}`", wit_type_full_name(resolve, type_id));
-    let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
-    let python_style = build_python_variant_style(&directives, path, &context)?;
-    let mut payload_records = BTreeSet::new();
     let cases = variant
         .cases
         .iter()
@@ -1409,14 +1343,12 @@ fn build_wit_variant_spec(
             let case_context = format!("{context} case `{}`", case.name);
             let case_directives =
                 parse_directives(case.docs.contents.as_deref(), path, &case_context)?;
-            reject_misplaced_variant_style(&case_directives, path, &case_context)?;
             let mut payload = case
                 .ty
                 .as_ref()
                 .map(|ty| {
-                    resolve_authored_field_type_spec(resolve, ty, path, &case_context).map(
-                        |field_type| authored_field_type_for_language(field_type, language),
-                    )
+                    resolve_authored_field_type_spec(resolve, ty, path, &case_context)
+                        .map(|field_type| authored_field_type_for_language(field_type, language))
                 })
                 .transpose()?;
             if let Some(alias_name) = directive_value(
@@ -1442,38 +1374,6 @@ fn build_wit_variant_spec(
                 )?;
                 payload = Some(TypeSpec::Map(Box::new(key), value));
             }
-            if python_style == Some(PythonVariantStyle::PayloadUnion) {
-                let direct_record_name = case.ty.as_ref().and_then(|ty| match ty {
-                    Type::Id(id) if matches!(resolve.types[*id].kind, TypeDefKind::Record(_)) => {
-                        Some(wit_type_full_name(resolve, *id))
-                    }
-                    _ => None,
-                });
-                let (Some(TypeSpec::Record(_)), Some(record_name)) =
-                    (payload.as_ref(), direct_record_name)
-                else {
-                    return Err(Error::InvalidWitDirective {
-                        path: path.to_path_buf(),
-                        context: context.clone(),
-                        directive: "@nexus.variant-style".to_string(),
-                        reason: format!(
-                            "Python `payload-union` requires case `{}` to have a direct WIT record payload",
-                            case.name
-                        ),
-                    });
-                };
-                if !payload_records.insert(record_name.clone()) {
-                    return Err(Error::InvalidWitDirective {
-                        path: path.to_path_buf(),
-                        context: context.clone(),
-                        directive: "@nexus.variant-style".to_string(),
-                        reason: format!(
-                            "Python `payload-union` requires distinct payload records; `{}` is used more than once",
-                            record_name
-                        ),
-                    });
-                }
-            }
             Ok(VariantCaseSpec {
                 name: case.name.clone(),
                 payload,
@@ -1483,42 +1383,8 @@ fn build_wit_variant_spec(
     Ok(Some(VariantSpec {
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
-        python_style,
         cases,
     }))
-}
-
-fn build_python_variant_style(
-    directives: &[Directive],
-    path: &Path,
-    context: &str,
-) -> Result<Option<PythonVariantStyle>> {
-    let Some(directive) = directive(directives, "variant-style", path, context)? else {
-        return Ok(None);
-    };
-    if directive.args.keys().any(|key| key != "python") {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.variant-style".to_string(),
-            reason: "only the `python` argument is supported".to_string(),
-        });
-    }
-    match directive.value("python") {
-        Some("payload-union") => Ok(Some(PythonVariantStyle::PayloadUnion)),
-        Some(value) => Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.variant-style".to_string(),
-            reason: format!("unsupported Python variant style `{value}`; expected `payload-union`"),
-        }),
-        None => Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.variant-style".to_string(),
-            reason: "missing required `python` argument".to_string(),
-        }),
-    }
 }
 
 fn build_wit_record_spec(
@@ -1684,7 +1550,6 @@ fn build_fields_from_record(
         let field_context = format!("{context} field `{}`", field.name);
         let directives = parse_directives(field.docs.contents.as_deref(), path, &field_context)?;
         reject_misplaced_type_parameter(&directives, path, &field_context)?;
-        reject_misplaced_variant_style(&directives, path, &field_context)?;
         let generated_field_name = directive(&directives, "name", path, &field_context)?
             .and_then(|directive| directive_language_value(directive, language))
             .unwrap_or(&field.name)
@@ -3063,7 +2928,6 @@ fn build_service(
     let context = format!("interface `{interface_name}`");
     let directives = parse_directives(interface.docs.contents.as_deref(), path, &context)?;
     reject_misplaced_type_parameter(&directives, path, &context)?;
-    reject_misplaced_variant_style(&directives, path, &context)?;
     let endpoint = directive_value_for_language(&directives, "endpoint", path, &context, language)?;
     let service_name = interface_name.to_upper_camel_case();
     let wire_service_name = build_wire_service_name(&directives, path, &context, &service_name)?;
@@ -3198,7 +3062,6 @@ fn build_resource(
             &constructor_context,
         )?;
         reject_misplaced_type_parameter(&directives, path, &constructor_context)?;
-        reject_misplaced_variant_style(&directives, path, &constructor_context)?;
     }
     let fields = match constructor {
         Some(constructor) => constructor
@@ -3273,7 +3136,6 @@ fn build_resource_method(
     );
     let directives = parse_directives(function.docs.contents.as_deref(), path, &context)?;
     reject_misplaced_type_parameter(&directives, path, &context)?;
-    reject_misplaced_variant_style(&directives, path, &context)?;
     let params = function
         .params
         .iter()
@@ -3380,7 +3242,6 @@ fn build_operation(
     let context = format!("{service_context} operation `{operation_name}`");
     let directives = parse_directives(function.docs.contents.as_deref(), path, &context)?;
     reject_misplaced_type_parameter(&directives, path, &context)?;
-    reject_misplaced_variant_style(&directives, path, &context)?;
     let wire_operation_name =
         build_wire_operation_name(&directives, path, &context, &operation_name)?;
     let experimental = experimental_directive(&directives, path, &context)?;
@@ -3835,22 +3696,6 @@ fn reject_misplaced_type_parameter(
     Ok(())
 }
 
-fn reject_misplaced_variant_style(
-    directives: &[Directive],
-    path: &Path,
-    context: &str,
-) -> Result<()> {
-    if directive(directives, "variant-style", path, context)?.is_some() {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.variant-style".to_string(),
-            reason: "is only supported on WIT variants".to_string(),
-        });
-    }
-    Ok(())
-}
-
 fn directive_language_value<'a>(directive: &'a Directive, language: Language) -> Option<&'a str> {
     directive.value(language_key(language))
 }
@@ -4238,118 +4083,6 @@ interface generic-service {
         );
         let error = parse_result(Language::Dotnet, &resource).unwrap_err();
         assert!(error.to_string().contains("resource"));
-    }
-
-    #[test]
-    fn validates_python_payload_union_variant_style() {
-        let styled = GENERIC_WIT.replace(
-            "record inner { value: context-t, }",
-            r#"record success { value: context-t, }
-  record failure { message: string, }
-
-  /// @nexus.variant-style python="payload-union"
-  variant completion { success(success), failure(failure), }
-
-  record inner { value: context-t, }"#,
-        );
-        let spec = parse(Language::Python, &styled);
-        let completion = spec.variant("generic-service.completion").unwrap();
-        assert_eq!(
-            completion.python_style,
-            Some(crate::spec::PythonVariantStyle::PayloadUnion)
-        );
-
-        for (label, replacement) in [
-            (
-                "missing payload",
-                "variant completion { success, failure(failure), }",
-            ),
-            (
-                "scalar payload",
-                "variant completion { success(context-t), failure(failure), }",
-            ),
-            (
-                "repeated record",
-                "variant completion { success(success), failure(success), }",
-            ),
-        ] {
-            let invalid = styled.replace(
-                "variant completion { success(success), failure(failure), }",
-                replacement,
-            );
-            assert!(
-                parse_result(Language::Python, &invalid).is_err(),
-                "expected {label} to fail"
-            );
-        }
-
-        let aliased_payload = styled.replace(
-            "variant completion { success(success), failure(failure), }",
-            "type success-alias = success;\n  variant completion { success(success-alias), failure(failure), }",
-        );
-        assert!(parse_result(Language::Python, &aliased_payload).is_err());
-
-        let container_payload = styled.replace(
-            "variant completion { success(success), failure(failure), }",
-            "variant completion { success(list<success>), failure(failure), }",
-        );
-        assert!(parse_result(Language::Python, &container_payload).is_err());
-
-        for directive in [
-            "@nexus.variant-style python=\"tagged\"",
-            "@nexus.variant-style typescript=\"payload-union\"",
-            "@nexus.variant-style",
-        ] {
-            let invalid =
-                styled.replace("@nexus.variant-style python=\"payload-union\"", directive);
-            assert!(parse_result(Language::Python, &invalid).is_err());
-        }
-
-        let misplaced = GENERIC_WIT.replace(
-            "record inner { value: context-t, }",
-            "/// @nexus.variant-style python=\"payload-union\"\n  record inner { value: context-t, }",
-        );
-        assert!(parse_result(Language::Python, &misplaced).is_err());
-    }
-
-    #[test]
-    fn rejects_model_and_function_type_parameter_name_collisions() {
-        let wit = r#"
-package temporal:nexus@1.0.0;
-
-world system { export generic-service; }
-
-interface functions {
-  type placeholder = string;
-
-  function-call: func(value: string) -> string;
-
-  /// @nexus.function signature="function-call"
-  type executable-function = placeholder;
-}
-
-interface generic-service {
-  use functions.{executable-function};
-
-  /// @nexus.type-parameter
-  type function-fn = string;
-
-  record request {
-    generic: function-fn,
-    function: executable-function,
-  }
-
-  record response { value: string, }
-  execute: func(request: request) -> response;
-}
-"#;
-        let error = parse_result(Language::TypeScript, wit).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("generated function type parameter"),
-            "{error}"
-        );
     }
 
     #[test]

@@ -36,7 +36,6 @@ interface generic-model-service {
     message: string,
   }
 
-  /// @nexus.variant-style python="payload-union"
   variant operation-completion-result {
     success(operation-completion-success),
     failure(operation-completion-failure),
