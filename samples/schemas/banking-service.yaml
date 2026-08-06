@@ -1,0 +1,80 @@
+nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+description: A banking service for sending a receiving money
+services:
+  BankService:
+    fqn: org.example.BankService
+    description: Send and Receive Money into accounts
+    operations:
+      sendMoney:
+        input: { $ref: "#/$defs/TransferMoneyInput" }
+        output: { $ref: "#/$defs/TransferMoneyOutput" }
+      getBalance:
+        input: { $ref: "#/$defs/GetBalanceInput" }
+        output: { $ref: "#/$defs/GetBalanceOutput" }
+      createAccount:
+        input: { $ref: "#/$defs/CreateAccountInput" }
+        output: { $ref: "#/$defs/CreateAccountOutput" }
+
+$defs:
+  TransferMoneyInput:
+    description: Request to transfer money
+    type: object
+    additionalProperties: false
+    properties:
+      sourceAccountId:
+        description: The Account sending money
+        type: string
+      destinationAccountId:
+        description: The Account receiving money
+        type: string
+      amount:
+        type: integer
+        exclusiveMinimum: 0
+        maximum: 100000
+    required: [sourceAccountId, destinationAccountId, amount]
+  TransferMoneyOutput:
+    type: object
+    additionalProperties: false
+    properties:
+      success:
+        type: boolean
+      errorMessage:
+        description: Error if the transfer failed
+        type: string
+    required: [success]
+  GetBalanceInput:
+    type: object
+    additionalProperties: false
+    properties:
+      accountId:
+        type: string
+    required: [accountId]
+  GetBalanceOutput:
+    type: object
+    additionalProperties: false
+    properties:
+      accountId:
+        type: string
+      amount:
+        type: integer
+    required: [accountId, amount]
+  CreateAccountInput:
+    type: object
+    additionalProperties: false
+    properties:
+      accountId: { type: string }
+      amount:
+        type: integer
+        minimum: 0
+        default: 500
+    required: [ accountId ]
+  CreateAccountOutput:
+    type: object
+    additionalProperties: false
+    properties:
+      accountId:
+        type: string
+      amount:
+        type: integer
+    required: [accountId, amount]
