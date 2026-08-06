@@ -27,21 +27,9 @@ pub(crate) struct LinkedTypeMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LinkedRecordFieldMetadata {
     pub(crate) wit_name: String,
-    pub(crate) ty: ParsedWitType,
+    pub(crate) type_expr: String,
     pub(crate) explicit_proto_field: bool,
     pub(crate) omitted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ParsedWitType {
-    Atom(String),
-    Option(Box<ParsedWitType>),
-    List(Box<ParsedWitType>),
-    Tuple(Vec<ParsedWitType>),
-    Result {
-        ok: Option<Box<ParsedWitType>>,
-        err: Option<Box<ParsedWitType>>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -357,7 +345,7 @@ pub(crate) fn load_linked_wit_metadata_from_inputs(
                             field_proto_name,
                             LinkedRecordFieldMetadata {
                                 wit_name: field.name.clone(),
-                                ty: parse_wit_type(&resolve, &field.ty),
+                                type_expr: render_wit_type(&resolve, &field.ty),
                                 explicit_proto_field: explicit_proto_name.is_some(),
                                 omitted: directive(
                                     &field_directives,
@@ -403,55 +391,61 @@ pub(crate) fn load_linked_wit_metadata_from_inputs(
     })
 }
 
-pub(crate) fn parse_wit_type(resolve: &Resolve, ty: &Type) -> ParsedWitType {
+pub(crate) fn render_wit_type(resolve: &Resolve, ty: &Type) -> String {
     match ty {
-        Type::Bool => ParsedWitType::Atom("bool".to_string()),
-        Type::U8 => ParsedWitType::Atom("u8".to_string()),
-        Type::U16 => ParsedWitType::Atom("u16".to_string()),
-        Type::U32 => ParsedWitType::Atom("u32".to_string()),
-        Type::U64 => ParsedWitType::Atom("u64".to_string()),
-        Type::S8 => ParsedWitType::Atom("s8".to_string()),
-        Type::S16 => ParsedWitType::Atom("s16".to_string()),
-        Type::S32 => ParsedWitType::Atom("s32".to_string()),
-        Type::S64 => ParsedWitType::Atom("s64".to_string()),
-        Type::F32 => ParsedWitType::Atom("f32".to_string()),
-        Type::F64 => ParsedWitType::Atom("f64".to_string()),
-        Type::Char => ParsedWitType::Atom("char".to_string()),
-        Type::String => ParsedWitType::Atom("string".to_string()),
-        Type::ErrorContext => ParsedWitType::Atom("error-context".to_string()),
-        Type::Id(type_id) => parse_wit_type_id(resolve, *type_id),
+        Type::Bool => "bool".to_string(),
+        Type::U8 => "u8".to_string(),
+        Type::U16 => "u16".to_string(),
+        Type::U32 => "u32".to_string(),
+        Type::U64 => "u64".to_string(),
+        Type::S8 => "s8".to_string(),
+        Type::S16 => "s16".to_string(),
+        Type::S32 => "s32".to_string(),
+        Type::S64 => "s64".to_string(),
+        Type::F32 => "f32".to_string(),
+        Type::F64 => "f64".to_string(),
+        Type::Char => "char".to_string(),
+        Type::String => "string".to_string(),
+        Type::ErrorContext => "error-context".to_string(),
+        Type::Id(type_id) => render_wit_type_id(resolve, *type_id),
     }
 }
 
-fn parse_wit_type_id(resolve: &Resolve, type_id: TypeId) -> ParsedWitType {
+fn render_wit_type_id(resolve: &Resolve, type_id: TypeId) -> String {
     let type_def = &resolve.types[type_id];
     if let Some(name) = &type_def.name {
-        return ParsedWitType::Atom(name.clone());
+        return name.clone();
     }
     match &type_def.kind {
-        TypeDefKind::Option(inner) => {
-            ParsedWitType::Option(Box::new(parse_wit_type(resolve, inner)))
-        }
-        TypeDefKind::List(inner) => ParsedWitType::List(Box::new(parse_wit_type(resolve, inner))),
-        TypeDefKind::Type(inner) => parse_wit_type(resolve, inner),
-        TypeDefKind::Tuple(tuple) => ParsedWitType::Tuple(
+        TypeDefKind::Option(inner) => format!("option<{}>", render_wit_type(resolve, inner)),
+        TypeDefKind::List(inner) => format!("list<{}>", render_wit_type(resolve, inner)),
+        TypeDefKind::Type(inner) => render_wit_type(resolve, inner),
+        TypeDefKind::Tuple(tuple) => format!(
+            "tuple<{}>",
             tuple
                 .types
                 .iter()
-                .map(|ty| parse_wit_type(resolve, ty))
-                .collect(),
+                .map(|ty| render_wit_type(resolve, ty))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
-        TypeDefKind::Result(result) => ParsedWitType::Result {
-            ok: result
+        TypeDefKind::Result(result) => {
+            let ok = result
                 .ok
                 .as_ref()
-                .map(|ty| Box::new(parse_wit_type(resolve, ty))),
-            err: result
+                .map(|ty| render_wit_type(resolve, ty))
+                .unwrap_or_else(|| "_".to_string());
+            let err = result
                 .err
                 .as_ref()
-                .map(|ty| Box::new(parse_wit_type(resolve, ty))),
-        },
-        _ => ParsedWitType::Atom(type_def.kind.as_str().to_string()),
+                .map(|ty| render_wit_type(resolve, ty))
+                .unwrap_or_else(|| "_".to_string());
+            format!("result<{ok}, {err}>")
+        }
+        _ => type_def
+            .name
+            .clone()
+            .unwrap_or_else(|| type_def.kind.as_str().to_string()),
     }
 }
 

@@ -13,8 +13,8 @@ use wit_parser_crate::{
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata, RpcMetadata};
 use crate::error::{Error, Result};
 use crate::parser::{
-    LinkedWitMetadata, ParsedWitType, find_proto_name_for_type, find_proto_name_for_type_def,
-    load_linked_wit_metadata_from_inputs, parse_wit_type, parse_wit_with_inputs, select_world,
+    LinkedWitMetadata, find_proto_name_for_type, find_proto_name_for_type_def,
+    load_linked_wit_metadata_from_inputs, parse_wit_with_inputs, render_wit_type, select_world,
     wire_operation_name_from_docs,
 };
 
@@ -420,7 +420,7 @@ impl ExistingRecord {
                 proto_name,
                 ExistingField {
                     wit_name: field.name.clone(),
-                    type_expr: render_wit_type(&parse_wit_type(resolve, &field.ty)),
+                    type_expr: render_wit_type(resolve, &field.ty),
                     explicit_proto_field: explicit_proto_name.is_some(),
                     omitted: field_has_omit_directive(docs),
                 },
@@ -807,7 +807,7 @@ impl<'a> AddRpcBuilder<'a> {
                             proto_name,
                             ExistingField {
                                 wit_name: field.wit_name,
-                                type_expr: render_wit_type(&field.ty),
+                                type_expr: field.type_expr,
                                 explicit_proto_field: field.explicit_proto_field,
                                 omitted: field.omitted,
                             },
@@ -1685,33 +1685,6 @@ fn wit_type_name(resolve: &Resolve, ty: &WitType) -> Option<String> {
         return None;
     };
     resolve.types[*type_id].name.clone()
-}
-
-fn render_wit_type(ty: &ParsedWitType) -> String {
-    match ty {
-        ParsedWitType::Atom(name) => name.clone(),
-        ParsedWitType::Option(inner) => format!("option<{}>", render_wit_type(inner)),
-        ParsedWitType::List(inner) => format!("list<{}>", render_wit_type(inner)),
-        ParsedWitType::Tuple(types) => format!(
-            "tuple<{}>",
-            types
-                .iter()
-                .map(render_wit_type)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        ParsedWitType::Result { ok, err } => {
-            let ok = ok
-                .as_deref()
-                .map(render_wit_type)
-                .unwrap_or_else(|| "_".to_string());
-            let err = err
-                .as_deref()
-                .map(render_wit_type)
-                .unwrap_or_else(|| "_".to_string());
-            format!("result<{ok}, {err}>")
-        }
-    }
 }
 
 fn option_inner_type(type_expr: &str) -> Option<&str> {
