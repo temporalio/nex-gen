@@ -16,20 +16,6 @@ use crate::spec::*;
 
 type PackageOrigins = BTreeMap<PackageId, PathBuf>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LinkedTypeMetadata {
-    pub(crate) wit_name: String,
-    pub(crate) use_path: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LinkedWitMetadata {
-    pub(crate) proto_types: BTreeMap<String, LinkedTypeMetadata>,
-    pub(crate) type_compatibility: BTreeMap<String, BTreeSet<String>>,
-    pub(crate) type_covered_fields: BTreeMap<String, BTreeSet<String>>,
-    pub(crate) type_use_paths: BTreeMap<String, String>,
-}
-
 pub(crate) struct ParsedWitPackage {
     pub resolve: Resolve,
     pub package_id: PackageId,
@@ -179,164 +165,6 @@ fn parse_prepared_wit_workspace(
 
 fn format_error_chain(error: &impl std::fmt::Display) -> String {
     format!("{error:#}")
-}
-
-pub(crate) fn load_linked_wit_metadata_from_inputs(
-    input_paths: &[PathBuf],
-) -> Result<LinkedWitMetadata> {
-    let workspace = prepare_linked_metadata_workspace(input_paths)?;
-    let mut resolve = Resolve::default();
-    let (main_package_id, source_map) =
-        resolve
-            .push_dir(&workspace.package_root)
-            .map_err(|error| Error::InvalidWit {
-                path: input_paths
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| PathBuf::from("<input>")),
-                reason: format!("failed to parse Temporal type WIT input: {error}"),
-            })?;
-    let package_origins = collect_package_origins(&resolve, &source_map)?;
-
-    let mut proto_types = BTreeMap::new();
-    let mut type_compatibility = BTreeMap::<String, BTreeSet<String>>::new();
-    let mut type_covered_fields = BTreeMap::<String, BTreeSet<String>>::new();
-    let mut type_use_paths = BTreeMap::new();
-
-    for (package_id, package) in resolve.packages.iter() {
-        if package_id == main_package_id {
-            continue;
-        }
-
-        let package_name = if let Some(version) = &package.name.version {
-            format!(
-                "{}:{}@{}",
-                package.name.namespace, package.name.name, version
-            )
-        } else {
-            format!("{}:{}", package.name.namespace, package.name.name)
-        };
-        let origin_path = package_origins
-            .get(&package_id)
-            .cloned()
-            .or_else(|| input_paths.first().cloned())
-            .unwrap_or_else(|| PathBuf::from("<input>"));
-
-        for interface_id in package.interfaces.values() {
-            let interface = &resolve.interfaces[*interface_id];
-            let Some(interface_name) = interface.name.as_deref() else {
-                continue;
-            };
-            let use_path = if let Some(version) = &package.name.version {
-                format!(
-                    "{}:{}/{}@{}",
-                    package.name.namespace, package.name.name, interface_name, version
-                )
-            } else {
-                format!(
-                    "{}:{}/{}",
-                    package.name.namespace, package.name.name, interface_name
-                )
-            };
-
-            for type_id in interface.types.values() {
-                let type_def = &resolve.types[*type_id];
-                let Some(type_name) = type_def.name.as_deref() else {
-                    continue;
-                };
-                let context =
-                    format!("linked WIT type `{package_name}.{interface_name}.{type_name}`");
-                let directives =
-                    parse_directives(type_def.docs.contents.as_deref(), &origin_path, &context)?;
-
-                for directive in &directives {
-                    if directive.name != "add-rpc-compatible-with" {
-                        continue;
-                    }
-                    let Some(target) = directive.value("value") else {
-                        return Err(Error::InvalidWitDirective {
-                            path: origin_path.join("model.wit"),
-                            context: context.clone(),
-                            directive: "@nexus.add-rpc-compatible-with".to_string(),
-                            reason: "missing compatibility target".to_string(),
-                        });
-                    };
-                    type_compatibility
-                        .entry(type_name.to_string())
-                        .or_default()
-                        .insert(target.to_string());
-                }
-
-                for directive in &directives {
-                    if directive.name != "function" {
-                        continue;
-                    }
-                    let Some(signature_name) = directive.value("signature") else {
-                        continue;
-                    };
-                    let covered_field = if let Some(args_field) = directive.value("args-field") {
-                        args_field.to_string()
-                    } else {
-                        resolve_function_signature_args(
-                            &resolve,
-                            type_def,
-                            signature_name,
-                            &origin_path,
-                            &context,
-                        )?
-                        .0
-                    }
-                    .replace('-', "_");
-                    type_covered_fields
-                        .entry(type_name.to_string())
-                        .or_default()
-                        .insert(covered_field);
-                }
-
-                if let Some(existing) =
-                    type_use_paths.insert(type_name.to_string(), use_path.clone())
-                {
-                    if existing != use_path {
-                        return Err(Error::InvalidWit {
-                            path: origin_path.join("model.wit"),
-                            reason: format!(
-                                "linked WIT type `{type_name}` is declared under multiple use paths"
-                            ),
-                        });
-                    }
-                }
-
-                let Some(proto_name) =
-                    directive_value(&directives, "proto", &origin_path, &context, "value")?
-                else {
-                    continue;
-                };
-
-                if let Some(existing) = proto_types.insert(
-                    proto_name.clone(),
-                    LinkedTypeMetadata {
-                        wit_name: type_name.to_string(),
-                        use_path: use_path.clone(),
-                    },
-                ) {
-                    return Err(Error::InvalidWit {
-                        path: origin_path.join("model.wit"),
-                        reason: format!(
-                            "duplicate linked `@nexus.proto` mapping for `{proto_name}` (`{}` and `{}`)",
-                            existing.wit_name, type_name
-                        ),
-                    });
-                }
-            }
-        }
-    }
-
-    Ok(LinkedWitMetadata {
-        proto_types,
-        type_compatibility,
-        type_covered_fields,
-        type_use_paths,
-    })
 }
 
 fn collect_support_spec(
@@ -519,32 +347,6 @@ fn prepare_wit_workspace(
 
     copy_linked_inputs(&package_root, linked_input_paths)?;
 
-    Ok(PreparedWitWorkspace {
-        temp_dir,
-        package_root,
-    })
-}
-
-fn prepare_linked_metadata_workspace(input_paths: &[PathBuf]) -> Result<PreparedWitWorkspace> {
-    let temp_dir = tempfile::tempdir().map_err(|source| Error::WriteFile {
-        path: PathBuf::from("<tempdir>"),
-        source,
-    })?;
-    let package_root = temp_dir.path().join("main");
-    fs::create_dir_all(&package_root).map_err(|source| Error::WriteFile {
-        path: package_root.clone(),
-        source,
-    })?;
-    let stub_path = package_root.join("main.wit");
-    fs::write(
-        &stub_path,
-        "package temporary:root@0.0.0;\n\nworld system {\n}\n",
-    )
-    .map_err(|source| Error::WriteFile {
-        path: stub_path,
-        source,
-    })?;
-    copy_linked_inputs(&package_root, input_paths)?;
     Ok(PreparedWitWorkspace {
         temp_dir,
         package_root,
@@ -2411,7 +2213,7 @@ fn primitive_wit_type(type_name: &str) -> Option<TypeSpec> {
     }
 }
 
-fn resolve_function_signature_args(
+pub(crate) fn resolve_function_signature_args(
     resolve: &Resolve,
     type_def: &TypeDef,
     signature_name: &str,
@@ -3302,7 +3104,7 @@ fn directive_result_type_parameter(directive: &Directive) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn directive_value(
+pub(crate) fn directive_value(
     directives: &[Directive],
     name: &str,
     path: &Path,
@@ -3394,7 +3196,11 @@ fn language_key(language: Language) -> &'static str {
     }
 }
 
-fn parse_directives(docs: Option<&str>, path: &Path, context: &str) -> Result<Vec<Directive>> {
+pub(crate) fn parse_directives(
+    docs: Option<&str>,
+    path: &Path,
+    context: &str,
+) -> Result<Vec<Directive>> {
     let Some(docs) = docs else {
         return Ok(Vec::new());
     };
@@ -3439,13 +3245,17 @@ fn parse_directives(docs: Option<&str>, path: &Path, context: &str) -> Result<Ve
 }
 
 #[derive(Debug, Clone)]
-struct Directive {
+pub(crate) struct Directive {
     name: String,
     args: BTreeMap<String, String>,
 }
 
 impl Directive {
-    fn value(&self, key: &str) -> Option<&str> {
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn value(&self, key: &str) -> Option<&str> {
         self.args.get(key).map(String::as_str)
     }
 }
@@ -3551,7 +3361,7 @@ mod tests {
 
     use super::{
         ApiSpec, AuthoredResourceType, ExternalTypeSpec, FunctionArgSpec, FunctionArgsSpec, Symbol,
-        TypeSpec, directive, load_linked_wit_metadata_from_inputs, parse_directives,
+        TypeSpec, directive, parse_directives,
     };
 
     fn root() -> PathBuf {
@@ -4770,40 +4580,6 @@ interface workflow-service {
         );
 
         fs::remove_dir_all(temp_dir).unwrap();
-    }
-
-    #[test]
-    fn loads_linked_wit_metadata_from_temporal_type_input() {
-        let linked_types = load_linked_wit_metadata_from_inputs(&[linked_inputs_path()]).unwrap();
-
-        let payload = linked_types
-            .proto_types
-            .get("temporal.api.common.v1.Payload")
-            .unwrap();
-        assert_eq!(payload.wit_name, "payload");
-        assert_eq!(payload.use_path, "nexus:temporal-types/model@1.0.0");
-
-        let task_queue = linked_types
-            .proto_types
-            .get("temporal.api.taskqueue.v1.TaskQueue")
-            .unwrap();
-        assert_eq!(task_queue.wit_name, "task-queue");
-        assert_eq!(task_queue.use_path, "nexus:temporal-types/model@1.0.0");
-
-        assert_eq!(
-            linked_types
-                .type_use_paths
-                .get("workflow-function")
-                .map(String::as_str),
-            Some("nexus:temporal-types/model@1.0.0")
-        );
-        assert_eq!(
-            linked_types
-                .type_use_paths
-                .get("signal-function")
-                .map(String::as_str),
-            Some("nexus:temporal-types/model@1.0.0")
-        );
     }
 
     #[test]

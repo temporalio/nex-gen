@@ -18,8 +18,8 @@ pub(crate) use json_schema::{ManifestModel, ManifestService, NameManifest, build
 pub use wit::{load_api_spec_from_wit_for_language_with_inputs, write_prepared_wit_directory};
 
 pub(crate) use wit::{
-    LinkedWitMetadata, find_proto_name_for_type, find_proto_name_for_type_def,
-    load_linked_wit_metadata_from_inputs, parse_wit_with_inputs, select_world,
+    directive_value, find_proto_name_for_type, find_proto_name_for_type_def, parse_directives,
+    parse_wit_with_inputs, resolve_function_signature_args, select_world,
     wire_operation_name_from_docs,
 };
 
