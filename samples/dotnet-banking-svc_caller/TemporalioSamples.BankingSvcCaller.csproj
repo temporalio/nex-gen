@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TemporalioSamples.BankingSvcCaller</RootNamespace>
+    <AssemblyName>TemporalioSamples.BankingSvcCaller</AssemblyName>
+    <!-- Targets net8.0 to match the rest of the repo's samples, but runs on any
+         newer runtime so a machine with only .NET 9/10 installed still works. -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Versions match temporalio/samples-dotnet, whose NexusStandaloneOperations
+         sample this is modeled on. -->
+    <PackageReference Include="Temporalio" Version="1.17.0" />
+    <PackageReference Include="NexusRpc" Version="0.3.0" />
+  </ItemGroup>
+
+</Project>
