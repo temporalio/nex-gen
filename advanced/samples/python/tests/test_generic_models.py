@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import assert_type
+from typing_extensions import assert_type
 
 from wit.generic_models.models import (
     GenericRequest,
@@ -21,9 +21,7 @@ def test_generic_model_runtime_shapes() -> None:
     )
     completion = OperationCompletionSuccess(output=42)
     result: OperationCompletionResult[int] = ("success", completion)
-    response = GenericResponse(
-        context="context", completion=result, metadata=True
-    )
+    response = GenericResponse(context="context", completion=result, metadata=True)
 
     _ = assert_type(request, GenericRequest[str])
     _ = assert_type(completion, OperationCompletionSuccess[int])
