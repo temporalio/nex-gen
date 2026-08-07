@@ -3151,7 +3151,7 @@ fn delay_load_temporalio_workflow_directive(
     Ok(true)
 }
 
-fn directive<'a>(
+pub(crate) fn directive<'a>(
     directives: &'a [Directive],
     name: &str,
     path: &Path,

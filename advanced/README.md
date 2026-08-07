@@ -283,6 +283,16 @@ directories, so `advanced/samples/inputs/deps` links every package under it.
 and all reachable proto message/enum types without adding an operation. When
 extending an existing WIT file, its world must export exactly one interface.
 
+### Oneof scaffolding
+
+Both scaffold commands render real protobuf `oneof` declarations as WIT
+variants. Every message remains a record, with an optional synthesized variant
+field for each oneof—even when the message contains only one oneof. Synthetic
+oneofs used to represent `proto3 optional` fields remain ordinary optional
+fields. Existing WIT mappings must use the same grouped-record shape. These
+variants are scaffold shapes only; automatic protobuf conversion for WIT
+variants is not yet generated.
+
 Generate WIT for a proto RPC from a descriptor set:
 
 ```bash
