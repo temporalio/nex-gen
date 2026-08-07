@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
@@ -9,9 +10,148 @@ use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::python;
 use crate::language::Language;
 use crate::spec::{
-    ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, RecordFieldVisibility, RecordSpec,
-    ServiceSpec, TypeSpec,
+    ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, FunctionArgsSpec, FunctionResultSpec,
+    RecordFieldVisibility, RecordSpec, ServiceSpec, TypeSpec,
 };
+
+pub(crate) fn validate_generic_model_semantics(
+    spec: &ApiSpec,
+    path: &Path,
+    language: Language,
+) -> Result<()> {
+    let invalid = |reason: String| Error::InvalidWit {
+        path: path.to_path_buf(),
+        reason,
+    };
+    for (_, record) in spec.records() {
+        let parameters = spec.record_type_parameters(&record.full_name, language);
+        let mut generated_names = BTreeMap::<String, String>::new();
+        for usage in &parameters {
+            if let Some(previous) = generated_names.insert(
+                usage.parameter.name.clone(),
+                usage.parameter.full_name.clone(),
+            ) && previous != usage.parameter.full_name
+            {
+                return Err(invalid(format!(
+                    "type parameters `{previous}` and `{}` both generate the name `{}`",
+                    usage.parameter.full_name, usage.parameter.name
+                )));
+            }
+        }
+        if record.source_type.is_some() && !parameters.is_empty() {
+            return Err(invalid(format!(
+                "proto-backed record `{}` cannot contain generic type parameters",
+                record.full_name
+            )));
+        }
+        for (field_name, function) in record.functions() {
+            let uses_parameter = match &function.result {
+                FunctionResultSpec::Authored(result) => {
+                    !spec.type_parameters(result, language).is_empty()
+                }
+                FunctionResultSpec::Annotation(_) => false,
+            } || match &function.args {
+                FunctionArgsSpec::Varargs { prefix, .. } | FunctionArgsSpec::Fixed(prefix) => {
+                    prefix
+                        .iter()
+                        .any(|arg| !spec.type_parameters(&arg.field_type, language).is_empty())
+                }
+            } || function
+                .alternate_type
+                .as_ref()
+                .is_some_and(|alternate| !spec.type_parameters(alternate, language).is_empty());
+            if uses_parameter {
+                return Err(invalid(format!(
+                    "record `{}` field `{field_name}` uses a type parameter in function-signature metadata, which is not supported",
+                    record.full_name
+                )));
+            }
+        }
+    }
+
+    for (_, variant) in spec.variants() {
+        let parameters = spec.variant_type_parameters(&variant.full_name, language);
+        let mut generated_names = BTreeMap::<String, String>::new();
+        for usage in parameters {
+            if let Some(previous) = generated_names.insert(
+                usage.parameter.name.clone(),
+                usage.parameter.full_name.clone(),
+            ) && previous != usage.parameter.full_name
+            {
+                return Err(invalid(format!(
+                    "variant `{}` uses type parameters `{previous}` and `{}` that both generate the name `{}`",
+                    variant.full_name, usage.parameter.full_name, usage.parameter.name
+                )));
+            }
+        }
+    }
+
+    for service in &spec.services {
+        for operation in &service.operations {
+            let mut generated_names = BTreeMap::<String, String>::new();
+            let operation_parameters = operation
+                .input_type()
+                .into_iter()
+                .chain(operation.output_type())
+                .flat_map(|value| spec.type_parameters(value, language));
+            for usage in operation_parameters {
+                if let Some(previous) = generated_names.insert(
+                    usage.parameter.name.clone(),
+                    usage.parameter.full_name.clone(),
+                ) && previous != usage.parameter.full_name
+                {
+                    return Err(invalid(format!(
+                        "operation `{}` uses type parameters `{previous}` and `{}` that both generate the name `{}`",
+                        operation.name, usage.parameter.full_name, usage.parameter.name
+                    )));
+                }
+            }
+        }
+        for resource in &service.resources {
+            let resource_is_generic =
+                resource
+                    .fields
+                    .iter()
+                    .any(|field| !spec.type_parameters(&field.field_type, language).is_empty())
+                    || resource.methods.iter().any(|method| {
+                        method.params.iter().any(|param| {
+                            !spec.type_parameters(&param.field_type, language).is_empty()
+                        }) || method.result.as_ref().is_some_and(|result| {
+                            !spec
+                                .type_parameters(&result.result_type, language)
+                                .is_empty()
+                        })
+                    });
+            if resource_is_generic {
+                return Err(invalid(format!(
+                    "resource `{}` cannot contain generic type parameters",
+                    resource.name
+                )));
+            }
+
+            for method in &resource.methods {
+                let Some(operation_name) = &method.operation_name else {
+                    continue;
+                };
+                let Some(operation) = service.operation(operation_name) else {
+                    continue;
+                };
+                let operation_is_generic = operation
+                    .input_type()
+                    .is_some_and(|input| !spec.type_parameters(input, language).is_empty())
+                    || operation
+                        .output_type()
+                        .is_some_and(|output| !spec.type_parameters(output, language).is_empty());
+                if operation_is_generic {
+                    return Err(invalid(format!(
+                        "resource-bound operation `{operation_name}` cannot use generic type parameters"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 struct MessageUsage {
