@@ -4,10 +4,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use heck::ToKebabCase;
 use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
 
-use crate::descriptors::{DescriptorIndex, MessageMetadata};
+use crate::descriptors::{DescriptorIndex, MessageMetadata, ProtoOneofGroup, real_oneof_groups};
 use crate::error::{Error, Result};
 use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::python;
@@ -38,7 +39,7 @@ fn validate_generic_model_semantics(spec: &ApiSpec, path: &Path, language: Langu
                 )));
             }
         }
-        if record.source_type.is_some() && !parameters.is_empty() {
+        if language != Language::Python && record.source_type.is_some() && !parameters.is_empty() {
             return Err(invalid(format!(
                 "proto-backed record `{}` cannot contain generic type parameters",
                 record.full_name
@@ -220,6 +221,7 @@ fn validate_external_type_bindings(
             validate_message_external_type_binding(type_name, binding)?;
             if let Some(record) = spec.record_for_proto(type_name) {
                 validate_message_model_config(
+                    spec,
                     type_name,
                     ModelConfig::from_record(record),
                     message,
@@ -307,7 +309,192 @@ fn operation_output_resource_name<'a>(
         .map(|_| resource_name.as_str())
 }
 
+fn validated_real_oneofs<'a>(
+    message_name: &str,
+    message: &'a MessageMetadata,
+) -> Result<Vec<ProtoOneofGroup<'a>>> {
+    real_oneof_groups(message).map_err(|reason| Error::InvalidTypeOverrideField {
+        message: message_name.to_string(),
+        field: "<oneof>".to_string(),
+        property: "oneof",
+        reason,
+    })
+}
+
+fn oneof_by_name<'a, 'm>(
+    oneofs: &'a [ProtoOneofGroup<'m>],
+    name: &str,
+) -> Option<&'a ProtoOneofGroup<'m>> {
+    oneofs.iter().find(|oneof| oneof.name == name)
+}
+
+fn validate_oneof_model_config(
+    spec: &ApiSpec,
+    message_name: &str,
+    model_config: ModelConfig<'_>,
+    _message: &MessageMetadata,
+    oneofs: &[ProtoOneofGroup<'_>],
+) -> Result<()> {
+    for oneof in oneofs {
+        for (_, member) in &oneof.fields {
+            let member_name = member
+                .name
+                .as_deref()
+                .expect("descriptor fields should be named");
+            if model_config.record.fields.contains_key(member_name) {
+                return Err(Error::InvalidTypeOverrideField {
+                    message: message_name.to_string(),
+                    field: member_name.to_string(),
+                    property: "oneof",
+                    reason: format!(
+                        "protobuf oneof member must be represented by grouped field `{}`",
+                        oneof.name.to_kebab_case()
+                    ),
+                });
+            }
+        }
+
+        let Some(grouped_field) = model_config.record.fields.get(oneof.name) else {
+            return Err(Error::UndeclaredTypeOverrideField {
+                message: message_name.to_string(),
+                field: oneof.name.to_string(),
+            });
+        };
+        if grouped_field.visibility == RecordFieldVisibility::Omitted {
+            continue;
+        }
+        if matches!(
+            grouped_field.visibility,
+            RecordFieldVisibility::Sourced { .. }
+        ) {
+            return Err(Error::InvalidTypeOverrideField {
+                message: message_name.to_string(),
+                field: oneof.name.to_string(),
+                property: "source",
+                reason: "protobuf oneof groups cannot be sourced fields".to_string(),
+            });
+        }
+        if grouped_field.function.is_some() {
+            return Err(Error::InvalidTypeOverrideField {
+                message: message_name.to_string(),
+                field: oneof.name.to_string(),
+                property: "function",
+                reason: "protobuf oneof groups cannot be function fields".to_string(),
+            });
+        }
+        if grouped_field.flattened_annotation.is_some() {
+            return Err(Error::InvalidTypeOverrideField {
+                message: message_name.to_string(),
+                field: oneof.name.to_string(),
+                property: "flattenedType",
+                reason: "protobuf oneof groups cannot use a flattened type".to_string(),
+            });
+        }
+
+        let variant_name = match &grouped_field.field_type {
+            TypeSpec::Variant(variant_name) => variant_name,
+            TypeSpec::Option(grouped_type) => match grouped_type.as_ref() {
+                TypeSpec::Variant(variant_name) => variant_name,
+                _ => {
+                    return Err(Error::InvalidTypeOverrideField {
+                        message: message_name.to_string(),
+                        field: oneof.name.to_string(),
+                        property: "type",
+                        reason: "protobuf oneof groups must use `variant` or `option<variant>`"
+                            .to_string(),
+                    });
+                }
+            },
+            _ => {
+                return Err(Error::InvalidTypeOverrideField {
+                    message: message_name.to_string(),
+                    field: oneof.name.to_string(),
+                    property: "type",
+                    reason: "protobuf oneof groups must use `variant` or `option<variant>`"
+                        .to_string(),
+                });
+            }
+        };
+        let Some(variant) = spec.variant(variant_name.as_str()) else {
+            return Err(Error::InvalidTypeOverrideField {
+                message: message_name.to_string(),
+                field: oneof.name.to_string(),
+                property: "type",
+                reason: format!("unknown WIT variant `{variant_name}`"),
+            });
+        };
+
+        for (_, member) in &oneof.fields {
+            if field_label(member) == Some(Label::Repeated) {
+                return Err(Error::InvalidTypeOverrideField {
+                    message: message_name.to_string(),
+                    field: oneof.name.to_string(),
+                    property: "oneof",
+                    reason: "protobuf oneof members cannot be repeated".to_string(),
+                });
+            }
+            let member_name = member
+                .name
+                .as_deref()
+                .expect("descriptor fields should be named");
+            let wit_case_name = member_name.to_kebab_case();
+            let Some(case) = variant.cases.iter().find(|case| case.name == wit_case_name) else {
+                return Err(Error::InvalidTypeOverrideField {
+                    message: message_name.to_string(),
+                    field: oneof.name.to_string(),
+                    property: "type",
+                    reason: format!(
+                        "WIT variant `{}` is missing case `{wit_case_name}`",
+                        variant.name
+                    ),
+                });
+            };
+            let Some(payload) = case.payload.as_ref() else {
+                return Err(Error::InvalidTypeOverrideField {
+                    message: message_name.to_string(),
+                    field: oneof.name.to_string(),
+                    property: "type",
+                    reason: format!(
+                        "WIT variant case `{wit_case_name}` must carry the protobuf member value"
+                    ),
+                });
+            };
+            if !authored_field_matches_singular_proto(payload, member)? {
+                return Err(Error::InvalidTypeOverrideField {
+                    message: message_name.to_string(),
+                    field: oneof.name.to_string(),
+                    property: "type",
+                    reason: format!(
+                        "WIT variant case `{wit_case_name}` payload `{}` does not match protobuf member `{member_name}`",
+                        payload.to_type_string()
+                    ),
+                });
+            }
+        }
+        for case in &variant.cases {
+            let proto_name = case.name.replace('-', "_");
+            if !oneof
+                .fields
+                .iter()
+                .any(|(_, member)| member.name.as_deref() == Some(proto_name.as_str()))
+            {
+                return Err(Error::InvalidTypeOverrideField {
+                    message: message_name.to_string(),
+                    field: oneof.name.to_string(),
+                    property: "type",
+                    reason: format!(
+                        "WIT variant `{}` has extra case `{}`",
+                        variant.name, case.name
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_message_model_config(
+    spec: &ApiSpec,
     message_name: &str,
     model_config: ModelConfig<'_>,
     message: &MessageMetadata,
@@ -315,6 +502,8 @@ fn validate_message_model_config(
     usage: MessageUsage,
     language: Language,
 ) -> Result<()> {
+    let oneofs = validated_real_oneofs(message_name, message)?;
+    validate_oneof_model_config(spec, message_name, model_config, message, &oneofs)?;
     for field_name in model_config
         .record
         .fields
@@ -322,6 +511,9 @@ fn validate_message_model_config(
         .filter(|(_, field)| field.required)
         .map(|(field_name, _)| field_name)
     {
+        if oneof_by_name(&oneofs, field_name).is_some() {
+            continue;
+        }
         validate_model_required_field(message_name, field_name, message, descriptors)?;
     }
     for field_name in model_config
@@ -331,13 +523,26 @@ fn validate_message_model_config(
         .filter(|(_, field)| field.visibility == RecordFieldVisibility::Omitted)
         .map(|(field_name, _)| field_name)
     {
+        if oneof_by_name(&oneofs, field_name).is_some() {
+            continue;
+        }
         validate_model_override_field(message_name, field_name, message)?;
     }
     for field_name in model_config.record.fields.keys() {
+        if oneof_by_name(&oneofs, field_name).is_some() {
+            continue;
+        }
         validate_model_override_field(message_name, field_name, message)?;
     }
-    validate_record_fields(message_name, model_config, message, usage, language)?;
-    validate_authored_field_types(message_name, model_config, message, descriptors)?;
+    validate_record_fields(
+        message_name,
+        model_config,
+        message,
+        &oneofs,
+        usage,
+        language,
+    )?;
+    validate_authored_field_types(message_name, model_config, message, &oneofs, descriptors)?;
     validate_invocation_fields(message_name, model_config, message, descriptors, usage)?;
     for (field_name, _) in
         model_config.record.fields.iter().filter(|(_, field)| {
@@ -357,10 +562,14 @@ fn validate_record_fields(
     message_name: &str,
     model_config: ModelConfig<'_>,
     message: &MessageMetadata,
+    oneofs: &[ProtoOneofGroup<'_>],
     usage: MessageUsage,
     language: Language,
 ) -> Result<()> {
     for (field_name, field) in &model_config.record.fields {
+        if oneof_by_name(oneofs, field_name).is_some() {
+            continue;
+        }
         validate_model_override_field(message_name, field_name, message)?;
         if field.visibility == RecordFieldVisibility::Omitted
             && (field.doc.is_some()
@@ -383,6 +592,9 @@ fn validate_record_fields(
         .iter()
         .filter(|(_, field)| field.annotation.is_some())
     {
+        if oneof_by_name(oneofs, field_name).is_some() {
+            continue;
+        }
         validate_model_override_field(message_name, field_name, message)?;
         if model_config.is_field_omitted(field_name) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
@@ -398,6 +610,9 @@ fn validate_record_fields(
         .iter()
         .filter(|(_, field)| field.flattened_annotation.is_some())
     {
+        if oneof_by_name(oneofs, field_name).is_some() {
+            continue;
+        }
         validate_model_override_field(message_name, field_name, message)?;
         if model_config.is_field_omitted(field_name) {
             return Err(Error::OmittedCustomizedTypeOverrideField {
@@ -418,6 +633,9 @@ fn validate_record_fields(
     }
 
     for (field_name, _, _) in model_config.record.sourced_fields() {
+        if oneof_by_name(oneofs, field_name).is_some() {
+            continue;
+        }
         validate_model_override_field(message_name, field_name, message)?;
         if model_config.is_field_omitted(field_name) {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
@@ -445,6 +663,13 @@ fn validate_record_fields(
             .expect("descriptor fields should be named");
         if !model_config.is_field_omitted(proto_name)
             && !model_config.record.fields.contains_key(proto_name)
+            && !oneofs.iter().any(|oneof| {
+                model_config.record.fields.contains_key(oneof.name)
+                    && oneof
+                        .fields
+                        .iter()
+                        .any(|(_, member)| member.name.as_deref() == Some(proto_name))
+            })
         {
             return Err(Error::UndeclaredTypeOverrideField {
                 message: message_name.to_string(),
@@ -481,9 +706,13 @@ fn validate_authored_field_types(
     message_name: &str,
     model_config: ModelConfig<'_>,
     message: &MessageMetadata,
+    oneofs: &[ProtoOneofGroup<'_>],
     descriptors: &DescriptorIndex,
 ) -> Result<()> {
     for (field_name, field_spec) in &model_config.record.fields {
+        if oneof_by_name(oneofs, field_name).is_some() {
+            continue;
+        }
         if field_spec.function.is_some() {
             continue;
         }
@@ -801,6 +1030,15 @@ fn authored_field_matches_singular_proto(
     field: &FieldDescriptorProto,
 ) -> Result<bool> {
     let authored_type = authored_type.validation_type();
+    if matches!(authored_type, TypeSpec::TypeParameter(_)) {
+        return Ok(matches!(
+            field
+                .type_name
+                .as_deref()
+                .map(|name| name.trim_start_matches('.')),
+            Some("temporal.api.common.v1.Payload" | "temporal.api.common.v1.Payloads")
+        ));
+    }
     let matches = match field_type(field) {
         Some(Type::Double | Type::Float) => {
             matches!(authored_type, TypeSpec::Float)

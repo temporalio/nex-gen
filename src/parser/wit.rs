@@ -2524,7 +2524,13 @@ fn build_service(
         delay_load_temporalio_workflow,
         operations,
         resources,
-        data: (),
+        data: AuthoredServiceData {
+            declared_type_names: interface
+                .types
+                .values()
+                .map(|type_id| wit_type_full_name(resolve, *type_id))
+                .collect(),
+        },
     })
 }
 

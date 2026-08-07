@@ -1,8 +1,8 @@
-use heck::ToUpperCamelCase;
+use heck::{ToKebabCase, ToUpperCamelCase};
 use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
 
-use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata};
+use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata, real_oneof_groups};
 use crate::generator::ModelWireCapabilities;
 use crate::spec::{ApiSpec, ExternalTypeSpec, IntSpec, RecordSpec, TypeSpec};
 
@@ -10,7 +10,8 @@ use super::OperationLoweredFamily;
 
 use super::type_planning::TypePlanningContext;
 use super::{
-    PlannedProtoEnumType, PlannedProtoMessageType, PlannedProtoType, PlannedProtoTypeInfo,
+    PlannedFieldData, PlannedProtoEnumType, PlannedProtoGenericCarrier, PlannedProtoMessageType,
+    PlannedProtoOneofCase, PlannedProtoOneofField, PlannedProtoType, PlannedProtoTypeInfo,
     PlannedType, materialize_selected_replacement, materialize_selected_text,
 };
 
@@ -172,15 +173,82 @@ pub(super) fn record_proto_info(
         .map(|message| PlannedProtoTypeInfo::from_message(message, spec))
 }
 
-pub(super) fn record_field_has_presence(
+pub(super) fn planned_record_field_data(
     record: &RecordSpec<OperationLoweredFamily>,
     field_name: &str,
+    spec: &ApiSpec<OperationLoweredFamily>,
     descriptors: &DescriptorIndex,
-) -> Option<bool> {
+) -> Option<PlannedFieldData> {
     let proto_name = record_proto_name(record)?;
     let message = descriptors.message(proto_name)?;
-    let field = descriptor_field_by_name(message, field_name);
-    Some(field_has_presence(field, field_type(field)))
+    let oneofs = real_oneof_groups(message).expect("oneofs should be validated before planning");
+    if let Some(oneof) = oneofs.iter().find(|oneof| oneof.name == field_name) {
+        let variant = record.fields.get(field_name).and_then(|field| {
+            match field.field_type.without_option().validation_type() {
+                TypeSpec::Variant(name) => spec.variant(name.as_ref()),
+                _ => None,
+            }
+        });
+        return Some(PlannedFieldData {
+            has_presence: Some(true),
+            oneof: Some(PlannedProtoOneofField {
+                name: oneof.name.to_string(),
+                cases: oneof
+                    .fields
+                    .iter()
+                    .map(|(_, field)| {
+                        let proto_name = field
+                            .name
+                            .as_deref()
+                            .expect("descriptor fields should be named");
+                        PlannedProtoOneofCase {
+                            wit_name: proto_name.to_kebab_case(),
+                            proto_name: proto_name.to_string(),
+                            generic_carrier: variant
+                                .and_then(|variant| {
+                                    variant
+                                        .cases
+                                        .iter()
+                                        .find(|case| case.name == proto_name.to_kebab_case())
+                                })
+                                .and_then(|case| case.payload.as_ref())
+                                .filter(|payload| {
+                                    matches!(payload.validation_type(), TypeSpec::TypeParameter(_))
+                                })
+                                .and_then(|_| proto_generic_carrier(field)),
+                        }
+                    })
+                    .collect(),
+            }),
+            generic_carrier: None,
+        });
+    }
+    let field = message
+        .descriptor
+        .field
+        .iter()
+        .find(|field| field.name.as_deref() == Some(field_name))?;
+    Some(PlannedFieldData {
+        has_presence: Some(field_has_presence(field, field_type(field))),
+        oneof: None,
+        generic_carrier: record
+            .fields
+            .get(field_name)
+            .map(|field| field.field_type.without_option())
+            .filter(|field_type| matches!(field_type.validation_type(), TypeSpec::TypeParameter(_)))
+            .and_then(|_| proto_generic_carrier(field)),
+    })
+}
+
+fn proto_generic_carrier(field: &FieldDescriptorProto) -> Option<PlannedProtoGenericCarrier> {
+    if field_type(field) != Some(Type::Message) || field_label(field) == Some(Label::Repeated) {
+        return None;
+    }
+    match field.type_name.as_deref()?.trim_start_matches('.') {
+        "temporal.api.common.v1.Payload" => Some(PlannedProtoGenericCarrier::Payload),
+        "temporal.api.common.v1.Payloads" => Some(PlannedProtoGenericCarrier::Payloads),
+        _ => None,
+    }
 }
 
 pub(super) fn planned_record_field_type(
@@ -191,7 +259,21 @@ pub(super) fn planned_record_field_type(
 ) -> Option<PlannedType> {
     let proto_name = record_proto_name(record)?;
     let message = planner.descriptors.message(proto_name)?.clone();
+    let oneofs = real_oneof_groups(&message).expect("oneofs should be validated before planning");
+    if oneofs.iter().any(|oneof| oneof.name == field_name) {
+        let field = record.fields.get(field_name)?;
+        return Some(planner.planned_type_from_authored(field.field_type.without_option()));
+    }
     let field = descriptor_field_by_name(&message, field_name);
+    if record.fields.get(field_name).is_some_and(|authored_field| {
+        matches!(
+            authored_field.field_type.without_option().validation_type(),
+            TypeSpec::TypeParameter(_)
+        ) && proto_generic_carrier(field).is_some()
+    }) {
+        let authored_type = record.fields.get(field_name)?.field_type.without_option();
+        return Some(planner.planned_type_from_authored(authored_type));
+    }
     Some(planned_field_type(field, requested_capabilities, planner))
 }
 

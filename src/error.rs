@@ -128,6 +128,13 @@ pub enum Error {
     #[error("language `{language}` is not implemented yet")]
     UnsupportedLanguage { language: Language },
 
+    #[error("{language} protobuf conversion does not yet support oneof group `{message}.{oneof}`")]
+    UnsupportedProtoOneofConversion {
+        language: Language,
+        message: String,
+        oneof: String,
+    },
+
     #[error("{language} support namespace `{namespace}` is not supported")]
     UnsupportedSupportNamespace {
         language: Language,

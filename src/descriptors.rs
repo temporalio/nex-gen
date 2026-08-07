@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use heck::ToKebabCase;
 use prost::Message;
 use prost_types::{
-    DescriptorProto, EnumDescriptorProto, FileDescriptorProto, FileDescriptorSet, FileOptions,
-    MethodDescriptorProto, ServiceDescriptorProto,
+    DescriptorProto, EnumDescriptorProto, FieldDescriptorProto, FileDescriptorProto,
+    FileDescriptorSet, FileOptions, MethodDescriptorProto, ServiceDescriptorProto,
 };
 
 use crate::error::{Error, Result};
@@ -205,6 +205,67 @@ pub struct MessageMetadata {
     pub go_package: Option<String>,
     pub file_options: Option<FileOptions>,
     pub descriptor: DescriptorProto,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ProtoOneofGroup<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) fields: Vec<(usize, &'a FieldDescriptorProto)>,
+}
+
+/// Returns the real protobuf oneofs declared by `message`.
+///
+/// Protobuf represents `proto3 optional` with a synthetic, single-field oneof.
+/// Those declarations deliberately stay ordinary optional fields everywhere in
+/// nex-gen and are therefore filtered out here.
+pub(crate) fn real_oneof_groups(
+    message: &MessageMetadata,
+) -> std::result::Result<Vec<ProtoOneofGroup<'_>>, String> {
+    let mut fields_by_oneof = vec![Vec::new(); message.descriptor.oneof_decl.len()];
+    for (field_index, field) in message.descriptor.field.iter().enumerate() {
+        let Some(raw_index) = field.oneof_index else {
+            continue;
+        };
+        let Ok(oneof_index) = usize::try_from(raw_index) else {
+            return Err(format!(
+                "field at index {field_index} has invalid oneof index {raw_index}"
+            ));
+        };
+        let Some(fields) = fields_by_oneof.get_mut(oneof_index) else {
+            return Err(format!(
+                "field at index {field_index} has unknown oneof index {raw_index}"
+            ));
+        };
+        fields.push((field_index, field));
+    }
+
+    let mut groups = Vec::new();
+    for (oneof_index, oneof) in message.descriptor.oneof_decl.iter().enumerate() {
+        let fields = std::mem::take(&mut fields_by_oneof[oneof_index]);
+        if fields.len() == 1 && fields[0].1.proto3_optional.unwrap_or(false) {
+            continue;
+        }
+        if fields.is_empty() {
+            return Err(format!(
+                "oneof declaration at index {oneof_index} has no fields"
+            ));
+        }
+        if fields
+            .iter()
+            .any(|(_, field)| field.proto3_optional.unwrap_or(false))
+        {
+            return Err(format!(
+                "oneof declaration at index {oneof_index} is malformed"
+            ));
+        }
+        let Some(name) = oneof.name.as_deref() else {
+            return Err(format!(
+                "oneof declaration at index {oneof_index} is missing a name"
+            ));
+        };
+        groups.push(ProtoOneofGroup { name, fields });
+    }
+    Ok(groups)
 }
 
 impl MessageMetadata {

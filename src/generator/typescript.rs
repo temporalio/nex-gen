@@ -1805,6 +1805,7 @@ pub(crate) fn generate(
     mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
 ) -> Result<GeneratedFiles> {
+    crate::generator::proto::ensure_supported_oneof_conversions(tree, Language::TypeScript)?;
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);

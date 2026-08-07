@@ -1,0 +1,51 @@
+/// Python protobuf-oneof generation and runtime fixture.
+package temporal:nexus@1.0.0;
+
+world system {
+  export outcome;
+}
+
+interface outcome {
+  use nexus:temporal-types/model@1.0.0.{
+    failure,
+    payloads,
+    placeholder,
+  };
+
+  /// Generic logical value carried by protobuf `Payloads` on the wire.
+  /// @nexus.type-parameter
+  type output-t = placeholder;
+
+  /// Protobuf oneof `temporal.api.update.v1.Outcome.value`.
+  variant outcome-value {
+    success(output-t),
+    failure(failure),
+  }
+
+  /// @nexus.proto "temporal.api.update.v1.Outcome"
+  record outcome {
+    value: outcome-value,
+  }
+
+  /// Selects an activity by ID or activity type.
+  variant activity-selection {
+    id(string),
+    %type(string),
+  }
+
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  record workflow-execution {
+    workflow-id: string,
+    run-id: string,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.PauseActivityRequest"
+  record pause-activity-request {
+    namespace: string,
+    execution: option<workflow-execution>,
+    identity: string,
+    activity: option<activity-selection>,
+    reason: string,
+    request-id: string,
+  }
+}

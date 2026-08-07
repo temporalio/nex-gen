@@ -9,10 +9,11 @@ use prost_types::field_descriptor_proto::Type;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ApiSpecTransform, AuthoredFamily, AuthoredResourceType, ExternalTypeSpec,
-    JsonModelSpec, OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
-    ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec, ResourceSpec, SelectedFamily,
-    SelectedSupportSpec, SelectedTextSpec, ServiceSpec, Symbol, TypeFamily, TypeSpec,
+    ApiSpec, ApiSpecTransform, AuthoredFamily, AuthoredResourceType, AuthoredServiceData,
+    ExternalTypeSpec, JsonModelSpec, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
+    RecordSpec, ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec, ResourceSpec,
+    SelectedFamily, SelectedSupportSpec, SelectedTextSpec, ServiceSpec, Symbol, TypeFamily,
+    TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 /// Selected IR after resource-method and resource-return bindings are resolved.
@@ -34,7 +35,7 @@ impl TypeFamily for ResourceBoundFamily {
     type Proto = Symbol;
     type Json = crate::spec::JsonModelSpec<Symbol>;
     type Alias = Symbol;
-    type ServiceData = ();
+    type ServiceData = AuthoredServiceData;
     type RecordData = ();
     type ResourceData = ();
     type OperationData = ();
@@ -75,7 +76,9 @@ impl ApiSpecTransform<SelectedFamily, ResourceBoundFamily> for ResourceBindingMa
     fn map_alias(&mut self, value: Symbol) -> Symbol {
         value
     }
-    fn map_service_data(&mut self, _: &str, _: ()) {}
+    fn map_service_data(&mut self, _: &str, data: AuthoredServiceData) -> AuthoredServiceData {
+        data
+    }
     fn map_record_data(&mut self, _: &str, _: ()) {}
     fn map_resource_data(&mut self, _: &str, _: ()) {}
     fn map_operation_data(&mut self, _: &str, _: ()) {}

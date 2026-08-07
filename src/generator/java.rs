@@ -19,6 +19,10 @@ pub(crate) fn generate(
     _mode: GenerationMode,
     base_package: Option<&str>,
 ) -> Result<GeneratedFiles> {
+    crate::generator::proto::ensure_supported_oneof_conversions(
+        tree,
+        crate::language::Language::Java,
+    )?;
     let base_package = base_package.unwrap_or(DEFAULT_PACKAGE);
     let root_package = base_package;
 

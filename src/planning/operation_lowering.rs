@@ -42,7 +42,7 @@ impl crate::spec::TypeFamily for OperationLoweredFamily {
     type Proto = Symbol;
     type Json = JsonModelSpec<Symbol>;
     type Alias = Symbol;
-    type ServiceData = ();
+    type ServiceData = crate::spec::AuthoredServiceData;
     type RecordData = OperationLoweredRecordData;
     type ResourceData = OperationBoundResource;
     type OperationData = OperationBoundOperation;
@@ -189,7 +189,13 @@ impl ApiSpecTransform<OperationBoundFamily, OperationLoweredFamily> for Operatio
     fn map_alias(&mut self, value: Symbol) -> Symbol {
         value
     }
-    fn map_service_data(&mut self, _: &str, _: ()) {}
+    fn map_service_data(
+        &mut self,
+        _: &str,
+        data: crate::spec::AuthoredServiceData,
+    ) -> crate::spec::AuthoredServiceData {
+        data
+    }
     fn map_record_data(&mut self, _: &str, _: ()) -> OperationLoweredRecordData {
         OperationLoweredRecordData::default()
     }

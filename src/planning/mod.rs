@@ -207,6 +207,27 @@ pub(crate) struct PlannedRecordData {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PlannedFieldData {
     pub(crate) has_presence: Option<bool>,
+    pub(crate) oneof: Option<PlannedProtoOneofField>,
+    pub(crate) generic_carrier: Option<PlannedProtoGenericCarrier>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PlannedProtoOneofField {
+    pub(crate) name: String,
+    pub(crate) cases: Vec<PlannedProtoOneofCase>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PlannedProtoOneofCase {
+    pub(crate) wit_name: String,
+    pub(crate) proto_name: String,
+    pub(crate) generic_carrier: Option<PlannedProtoGenericCarrier>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlannedProtoGenericCarrier {
+    Payload,
+    Payloads,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

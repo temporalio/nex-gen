@@ -11,7 +11,8 @@ fn module_import_index(
 }
 
 fn module_export_names(spec: &ApiSpec<OperationLoweredFamily>) -> BTreeSet<String> {
-    spec.types
+    let mut exports = spec
+        .types
         .iter()
         .filter_map(|(name, decl)| {
             // Only JSON-schema models are treated as an always-exported module
@@ -28,7 +29,15 @@ fn module_export_names(spec: &ApiSpec<OperationLoweredFamily>) -> BTreeSet<Strin
                 .is_none_or(|module_path| module_path == &spec.module_path)
                 .then(|| name.clone())
         })
-        .collect()
+        .collect::<BTreeSet<_>>();
+
+    for service in &spec.services {
+        if service.operations.is_empty() && service.resources.is_empty() {
+            exports.extend(service.data.declared_type_names.iter().cloned());
+        }
+    }
+
+    exports
 }
 
 fn external_type_module_path(
@@ -414,7 +423,7 @@ impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMap
         }
     }
 
-    fn map_service_data(&mut self, _name: &str, _data: ()) {}
+    fn map_service_data(&mut self, _name: &str, _data: crate::spec::AuthoredServiceData) {}
 
     fn map_record_data(
         &mut self,
@@ -455,13 +464,17 @@ impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMap
         field_name: &str,
         _data: (),
     ) -> PlannedFieldData {
-        let has_presence = self
-            .source_spec
+        self.source_spec
             .record(record_full_name)
             .and_then(|record| {
-                proto::record_field_has_presence(record, field_name, self.planner.descriptors)
-            });
-        PlannedFieldData { has_presence }
+                proto::planned_record_field_data(
+                    record,
+                    field_name,
+                    self.source_spec,
+                    self.planner.descriptors,
+                )
+            })
+            .unwrap_or_default()
     }
 
     fn map_text(&mut self, text: SelectedTextSpec) -> LanguageStringSpec {
@@ -951,6 +964,16 @@ impl<'a> TypePlanningContext<'a> {
             TypeSpec::Record(record_type) => {
                 if let Some(record) = self.spec.record(&record_type.full_name).cloned() {
                     self.plan_record_type(&record, requested_capabilities);
+                }
+            }
+            TypeSpec::Variant(variant_type) => {
+                if let Some(variant) = self.spec.variant(&variant_type.full_name).cloned() {
+                    for case in &variant.cases {
+                        if let Some(payload) = &case.payload {
+                            let payload = self.planned_type_from_authored(payload);
+                            self.ensure_planned_type_capabilities(&payload, requested_capabilities);
+                        }
+                    }
                 }
             }
             TypeSpec::Resource(resource) => {
@@ -1447,6 +1470,7 @@ impl CompilerPass<OperationLoweredFamily, PlannedFamily> for TypePlanningPass<'_
             self.descriptors,
             self.language,
         )?;
+        planner.plan_module_exports();
         let lowered = planner.plan_operations()?;
         let source_spec = planner.spec.clone();
         let mut planned = planner.plan_spec(source_spec);
@@ -1492,7 +1516,13 @@ impl ApiSpecTransform<SelectedFamily, OperationLoweredFamily> for SelectedToOper
     fn map_alias(&mut self, value: Symbol) -> Symbol {
         value
     }
-    fn map_service_data(&mut self, _: &str, _: ()) {}
+    fn map_service_data(
+        &mut self,
+        _: &str,
+        data: crate::spec::AuthoredServiceData,
+    ) -> crate::spec::AuthoredServiceData {
+        data
+    }
     fn map_record_data(&mut self, _: &str, _: ()) -> OperationLoweredRecordData {
         OperationLoweredRecordData::default()
     }
@@ -1515,6 +1545,28 @@ impl ApiSpecTransform<SelectedFamily, OperationLoweredFamily> for SelectedToOper
 }
 
 impl TypePlanningContext<'_> {
+    fn plan_module_exports(&mut self) {
+        let requested_capabilities = if self.language == Language::Python {
+            ModelWireCapabilities::BIDIRECTIONAL
+        } else {
+            ModelWireCapabilities::default()
+        };
+        for name in self.spec_data.module_exports.clone() {
+            let Some(declaration) = self.spec.types.get(&name).cloned() else {
+                continue;
+            };
+            let authored_type = match declaration {
+                TypeDeclSpec::Record(_) => TypeSpec::Record(Symbol::new(name)),
+                TypeDeclSpec::Enum(_) => TypeSpec::Enum(Symbol::new(name)),
+                TypeDeclSpec::Flags(_) => TypeSpec::Flags(Symbol::new(name)),
+                TypeDeclSpec::Variant(_) => TypeSpec::Variant(Symbol::new(name)),
+                TypeDeclSpec::External(binding) => TypeSpec::External(binding.external_type),
+            };
+            let planned_type = self.planned_type_from_authored(&authored_type);
+            self.ensure_planned_type_capabilities(&planned_type, requested_capabilities);
+        }
+    }
+
     fn plan_operations(&mut self) -> Result<PlannedOperations> {
         let services = self.spec.services.clone();
         let mut operations = IndexMap::new();
@@ -1623,7 +1675,7 @@ mod tests {
                     data: (),
                 }],
                 resources: Vec::new(),
-                data: (),
+                data: crate::spec::AuthoredServiceData::default(),
             }],
             types: BTreeMap::new(),
         }

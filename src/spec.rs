@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use indexmap::IndexMap;
@@ -175,6 +175,11 @@ pub trait SupportSpecFamily: std::fmt::Debug + Clone + PartialEq {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthoredFamily;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuthoredServiceData {
+    pub(crate) declared_type_names: BTreeSet<String>,
+}
+
 impl TypeFamily for AuthoredFamily {
     type SpecData = ();
     type Record = Symbol;
@@ -185,7 +190,7 @@ impl TypeFamily for AuthoredFamily {
     type Proto = Symbol;
     type Json = JsonModelSpec<Symbol>;
     type Alias = Symbol;
-    type ServiceData = ();
+    type ServiceData = AuthoredServiceData;
     type RecordData = ();
     type ResourceData = ();
     type OperationData = ();
@@ -209,7 +214,7 @@ impl TypeFamily for SelectedFamily {
     type Proto = Symbol;
     type Json = JsonModelSpec<Symbol>;
     type Alias = Symbol;
-    type ServiceData = ();
+    type ServiceData = AuthoredServiceData;
     type RecordData = ();
     type ResourceData = ();
     type OperationData = ();

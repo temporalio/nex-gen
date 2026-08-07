@@ -631,6 +631,7 @@ pub(crate) fn generate_tree(
     options: &GoOptions,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
+    crate::generator::proto::ensure_supported_oneof_conversions(tree, Language::Go)?;
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => generate_single_leaf(leaf, support, options, mode),
         ApiSpecNode::Branch(branch) => generate_branch_tree(branch, support, options, mode),

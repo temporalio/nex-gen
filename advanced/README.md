@@ -281,18 +281,31 @@ single WIT file, a WIT package directory, or a directory containing WIT package
 directories, so `advanced/samples/inputs/deps` links every package under it.
 
 `add-message` follows the same input convention. It emits the selected message
-and all reachable proto message/enum types without adding an operation. When
-extending an existing WIT file, its world must export exactly one interface.
+and all reachable proto message/enum types without adding an operation. The
+operation-free interface still emits and re-exports its owned model
+declarations; linked dependency declarations remain tree-shaken unless an owned
+model references them. When extending an existing WIT file, its world must
+export exactly one interface.
 
-### Oneof scaffolding
+### Protobuf oneofs
 
-Both scaffold commands render real protobuf `oneof` declarations as WIT
-variants. Every message remains a record, with an optional synthesized variant
-field for each oneof—even when the message contains only one oneof. Synthetic
-oneofs used to represent `proto3 optional` fields remain ordinary optional
-fields. Existing WIT mappings must use the same grouped-record shape. These
-variants are scaffold shapes only; automatic protobuf conversion for WIT
-variants is not yet generated.
+Both scaffold commands render protobuf `oneof` declarations as WIT variants.
+Every message remains a record, with an `option<variant>` field for each
+oneof—even when the message contains only one oneof. Scaffolding stays optional
+because protobuf descriptors permit a oneof to be unset. Authors can remove
+`option<>` to assert that exactly one case is required by their model. Existing
+WIT mappings must use the same grouped-record shape.
+
+Python native-API generation converts both authored shapes bidirectionally.
+For `option<variant>`, an unset protobuf oneof decodes to `None`, and encoding
+`None` leaves the oneof unset. A required `variant` has no `None` annotation or
+constructor default; decoding an unset oneof or encoding a runtime `None`
+raises `ValueError("missing required field Model.field")`. Each selected case
+uses the normal WIT variant tuple form `(tag, payload)`, and unknown authored
+tags continue to raise `ValueError`.
+
+Other language backends report an explicit unsupported-conversion error when a
+reachable oneof model requires protobuf conversion.
 
 Generate WIT for a proto RPC from a descriptor set:
 

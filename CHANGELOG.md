@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added grouped protobuf `oneof` authoring and bidirectional Python conversion,
+  including required and optional oneofs, scaffolding through `add-rpc` and
+  `add-message`, and explicit diagnostics for unsupported target backends.
+- Python proto-backed generic records may use Temporal `Payload` and `Payloads`
+  fields (including oneof members) as runtime value carriers.
+
 ### Changed
 
 - Generating into an existing `--output` directory no longer deletes it first.

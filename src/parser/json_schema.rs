@@ -3074,7 +3074,7 @@ fn build_service(
         delay_load_temporalio_workflow: false,
         operations,
         resources: Vec::new(),
-        data: (),
+        data: crate::spec::AuthoredServiceData::default(),
     })
 }
 

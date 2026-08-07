@@ -668,6 +668,60 @@ fn python_request_models_are_bidirectional_wire_models() {
 }
 
 #[test]
+fn python_standalone_proto_oneof_models_are_exported_and_converted() {
+    let root = project_root();
+    let package = generate_python_package_files(
+        &example_input_paths(&root, "proto-oneof"),
+        &[descriptor_path(&root)],
+    );
+    let models = package
+        .get(&PathBuf::from("models.py"))
+        .expect("standalone Python package should include models.py");
+    let package_init = package
+        .get(&PathBuf::from("__init__.py"))
+        .expect("standalone Python package should include __init__.py");
+
+    assert!(models.contains("class Outcome(typing.Generic[OutputT]):"));
+    assert!(models.contains("OutcomeValue = ("));
+    assert!(models.contains("    value: OutcomeValue[OutputT]\n"));
+    assert!(!models.contains("value: OutcomeValue[OutputT] | None"));
+    assert!(!models.contains("class Failure:"));
+    assert!(!models.contains("class Payloads:"));
+    assert!(models.contains("_oneof_value_case = proto.WhichOneof(\"value\")"));
+    assert!(models.contains(
+        "if _oneof_value_case is None:\n            raise ValueError(\"missing required field Outcome.value\")"
+    ));
+    assert!(models.contains(
+        "_oneof_value = (\"success\", typing.cast(typing.Any, payloads_from_proto(proto.success)))"
+    ));
+    assert!(models.contains("_oneof_value = (\"failure\", failure_from_proto(proto.failure))"));
+    assert!(models.contains("if value.value[0] == \"success\":"));
+    assert!(models.contains(
+        "if value.value is None:\n            raise ValueError(\"missing required field Outcome.value\")"
+    ));
+    assert!(models.contains(
+        "message.success.CopyFrom(payloads_to_proto(typing.cast(collections.abc.Sequence[typing.Any], value.value[1])))"
+    ));
+    assert!(models.contains("elif value.value[0] == \"failure\":"));
+    assert!(models.contains("message.failure.CopyFrom(failure_to_proto(value.value[1]))"));
+    assert!(models.contains("raise ValueError(f\"unknown protobuf oneof tag Outcome.value:"));
+    assert!(models.contains("class PauseActivityRequest:"));
+    assert!(models.contains("namespace: str"));
+    assert!(models.contains("execution: WorkflowExecution | None = None"));
+    assert!(models.contains("identity: str"));
+    assert!(models.contains("activity: ActivitySelection | None = None"));
+    assert!(models.contains("reason: str"));
+    assert!(models.contains("request_id: str"));
+    assert!(models.contains("class WorkflowExecution:"));
+    assert!(models.contains("_oneof_activity_case = proto.WhichOneof(\"activity\")"));
+    assert!(
+        models.contains("if _oneof_activity_case is None:\n            _oneof_activity = None")
+    );
+    assert!(package_init.contains("ActivitySelection,"));
+    assert!(package_init.contains("PauseActivityRequest,"));
+}
+
+#[test]
 fn python_rejects_support_namespace() {
     let root = project_root();
     let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(

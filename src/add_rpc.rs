@@ -10,7 +10,9 @@ use wit_parser_crate::{
     WorldItem, WorldKey,
 };
 
-use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata, RpcMetadata};
+use crate::descriptors::{
+    DescriptorIndex, EnumMetadata, MessageMetadata, ProtoOneofGroup, RpcMetadata, real_oneof_groups,
+};
 use crate::error::{Error, Result};
 use crate::parser::{
     directive, directive_value, find_proto_name_for_type, find_proto_name_for_type_def,
@@ -1218,56 +1220,7 @@ impl<'a> AddRpcBuilder<'a> {
         &self,
         message: &'m MessageMetadata,
     ) -> Result<Vec<ProtoOneofGroup<'m>>> {
-        let mut fields_by_oneof = vec![Vec::new(); message.descriptor.oneof_decl.len()];
-        for (field_index, field) in message.descriptor.field.iter().enumerate() {
-            let Some(raw_index) = field.oneof_index else {
-                continue;
-            };
-            let Ok(oneof_index) = usize::try_from(raw_index) else {
-                return Err(self.unsupported(
-                    &message.full_name,
-                    format!("field at index {field_index} has invalid oneof index {raw_index}"),
-                ));
-            };
-            let Some(fields) = fields_by_oneof.get_mut(oneof_index) else {
-                return Err(self.unsupported(
-                    &message.full_name,
-                    format!("field at index {field_index} has unknown oneof index {raw_index}"),
-                ));
-            };
-            fields.push((field_index, field));
-        }
-
-        let mut groups = Vec::new();
-        for (oneof_index, oneof) in message.descriptor.oneof_decl.iter().enumerate() {
-            let fields = std::mem::take(&mut fields_by_oneof[oneof_index]);
-            if fields.len() == 1 && fields[0].1.proto3_optional.unwrap_or(false) {
-                continue;
-            }
-            if fields.is_empty() {
-                return Err(self.unsupported(
-                    &message.full_name,
-                    format!("oneof declaration at index {oneof_index} has no fields"),
-                ));
-            }
-            if fields
-                .iter()
-                .any(|(_, field)| field.proto3_optional.unwrap_or(false))
-            {
-                return Err(self.unsupported(
-                    &message.full_name,
-                    format!("oneof declaration at index {oneof_index} is malformed"),
-                ));
-            }
-            let Some(name) = oneof.name.as_deref() else {
-                return Err(self.unsupported(
-                    &message.full_name,
-                    format!("oneof declaration at index {oneof_index} is missing a name"),
-                ));
-            };
-            groups.push(ProtoOneofGroup { name, fields });
-        }
-        Ok(groups)
+        real_oneof_groups(message).map_err(|reason| self.unsupported(&message.full_name, reason))
     }
 
     fn reserve_oneof_variant_name(
@@ -1553,11 +1506,6 @@ struct RenderedFieldSpec {
     wit_name: String,
     type_expr: String,
     line: String,
-}
-
-struct ProtoOneofGroup<'a> {
-    name: &'a str,
-    fields: Vec<(usize, &'a FieldDescriptorProto)>,
 }
 
 struct ExistingOperationUpdate {

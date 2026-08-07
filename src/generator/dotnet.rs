@@ -2133,6 +2133,7 @@ pub(crate) fn generate(
     support: &crate::SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
+    crate::generator::proto::ensure_supported_oneof_conversions(tree, Language::Dotnet)?;
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);

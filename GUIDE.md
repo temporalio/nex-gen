@@ -1156,6 +1156,29 @@ proto descriptor. Requires `--descriptors` on the CLI.
 record activity-options { ... }
 ```
 
+Protobuf `oneof` groups are authored as a single record field whose name
+matches the oneof and whose type is a WIT variant. Each variant case must match
+a protobuf member name (with kebab-case WIT naming) and carry the corresponding
+member value. Use `option<variant>` when the protobuf oneof may be unset, or a
+required `variant` when an unset value should be rejected during conversion.
+
+```wit
+variant outcome {
+  success(list<u8>),
+  failure(string),
+}
+
+/// @nexus.proto "example.v1.Response"
+record response {
+  result: option<outcome>,
+}
+```
+
+Python performs bidirectional oneof conversion using tagged tuples such as
+`("success", value)`. Other targets reject a reachable protobuf-backed model
+that requires oneof wire conversion; unused declarations, omitted oneofs, and
+models that do not require wire conversion remain valid.
+
 ---
 
 ### @nexus.type-parameter
@@ -1184,9 +1207,11 @@ This generates `Request[ContextT]`-style models in Python, TypeScript, Go, and
 field occurrence and therefore removes it from generic inference for that
 target.
 
-Type parameters are not currently supported in proto-backed records,
-resources, map keys, function-signature metadata, or resource-bound generic
-operations. Go type parameters use an `any` constraint.
+Type parameters are not currently supported in proto-backed records except in
+Python when a field or oneof member maps to Temporal's protobuf `Payload` or
+`Payloads` carrier. They are also unsupported in resources, map keys,
+function-signature metadata, or resource-bound generic operations. Go type
+parameters use an `any` constraint.
 
 Generic variants retain each target's normal tagged representation: tagged
 tuples in Python, tagged object unions in TypeScript, sealed interfaces and
