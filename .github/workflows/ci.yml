@@ -67,6 +67,13 @@ jobs:
           java-version: "21"
           cache: gradle
 
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: |
+            8.0.x  # Oldest LTS version
+            9.0.x
+
       - name: Install Python dependencies (samples)
         working-directory: samples/python
         run: uv sync --locked
@@ -137,3 +144,11 @@ jobs:
       - name: Run Java tests (advanced)
         working-directory: advanced/samples/java
         run: ./gradlew build --no-daemon
+
+      - name: Run .NET tests (samples)
+        working-directory: samples/dotnet
+        run: dotnet test tests/ --nologo
+
+      - name: Run .NET tests (advanced)
+        working-directory: advanced/samples/dotnet
+        run: dotnet test tests/ --nologo
