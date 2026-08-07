@@ -723,7 +723,14 @@ fn reset_example_output_directory(language_root: &Path, output_path: &Path) -> R
 }
 
 fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Result<()> {
-    let descriptor_path = repo_root.join("advanced/samples/descriptors/temporal_api.bin");
+    let descriptor_file = if example_id == "notification-service" {
+        "api_with_callbacks.bin"
+    } else {
+        "temporal_api.bin"
+    };
+    let descriptor_path = repo_root
+        .join("advanced/samples/descriptors")
+        .join(descriptor_file);
     let input_path = example_input_path(repo_root, example_id);
     let mut input_paths = vec![input_path];
     input_paths.extend(example_linked_input_paths(repo_root));

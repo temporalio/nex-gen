@@ -24,7 +24,9 @@ line-length = 88
 target-version = "py310"
 
 [tool.basedpyright]
-exclude = [".venv"]
+# The callback descriptor is newer than the released Python SDK, so its generated
+# notification-service snapshot cannot resolve its protobuf module yet.
+exclude = [".venv", "wit/notification_service"]
 reportAny = false
 reportExplicitAny = false
 reportPrivateUsage = false

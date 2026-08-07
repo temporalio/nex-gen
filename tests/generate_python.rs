@@ -94,6 +94,18 @@ fn descriptor_path(root: &Path) -> PathBuf {
     root.join("advanced/samples/descriptors/temporal_api.bin")
 }
 
+fn callback_descriptor_path(root: &Path) -> PathBuf {
+    root.join("advanced/samples/descriptors/api_with_callbacks.bin")
+}
+
+fn example_descriptor_path(root: &Path, example_id: &str) -> PathBuf {
+    if example_id == "notification-service" {
+        callback_descriptor_path(root)
+    } else {
+        descriptor_path(root)
+    }
+}
+
 fn linked_inputs_path(root: &Path) -> PathBuf {
     root.join("advanced/samples/inputs/deps")
 }
@@ -258,7 +270,7 @@ fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: 
             input_path(root, example_id).to_str().unwrap(),
             linked_inputs_path(root).to_str().unwrap(),
             "--descriptors",
-            descriptor_path(root).to_str().unwrap(),
+            example_descriptor_path(root, example_id).to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
             "--native-api",

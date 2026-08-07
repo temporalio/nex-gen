@@ -1,0 +1,38 @@
+/// WIT scaffold generated from `temporal.api.notificationservice.v1.OnCompleteRequest`.
+package temporal:nexus@1.0.0;
+
+world system {
+  export on-complete-request;
+}
+
+interface on-complete-request {
+  use nexus:temporal-types/model@1.0.0.{
+    failure,
+    placeholder,
+  };
+
+
+  /// @nexus.type-parameter
+  type source-context-t = placeholder;
+
+  /// @nexus.type-parameter
+  type output-t = placeholder;
+
+
+  /// Protobuf oneof `temporal.api.notificationservice.v1.OnCompleteRequest.Outcome.result`.
+  variant on-complete-request-outcome-result {
+    success(output-t),
+    failure(failure),
+  }
+
+  /// @nexus.proto "temporal.api.notificationservice.v1.OnCompleteRequest.Outcome"
+  record on-complete-request-outcome {
+    %result: on-complete-request-outcome-result,
+  }
+
+  /// @nexus.proto "temporal.api.notificationservice.v1.OnCompleteRequest"
+  record on-complete-request {
+    outcome: on-complete-request-outcome,
+    source-context: source-context-t,
+  }
+}
