@@ -799,6 +799,42 @@ fn python_standalone_proto_oneof_models_are_exported_and_converted() {
 }
 
 #[test]
+fn python_proto_generics_propagate_payload_type_hints() {
+    let root = project_root();
+    let package = generate_python_package_files(
+        &example_input_paths(&root, "proto-generic-python"),
+        &[descriptor_path(&root)],
+    );
+    let models = package
+        .get(&PathBuf::from("models.py"))
+        .expect("proto generic models should include models.py");
+    let support = package
+        .get(&PathBuf::from("_support/temporal_model_converters.py"))
+        .expect("proto generic models should include the Temporal converter support module");
+
+    assert!(models.contains("class PayloadBackedEnvelope(typing.Generic[OutputT, ContextT]):"));
+    assert!(models.contains(
+        "_output_type, _context_type = typing.get_args(type_hint) or (typing.Any, typing.Any)"
+    ));
+    assert!(models.contains(
+        "_PayloadBackedOutputTransferTypeConverter().from_transfer_type(proto.provider, PayloadBackedOutput[_output_type])"
+    ));
+    assert!(models.contains(
+        "_PayloadBackedContextTransferTypeConverter().from_transfer_type(proto.scaler, PayloadBackedContext[_context_type])"
+    ));
+    assert!(models.contains("_output_type, = typing.get_args(type_hint) or (typing.Any,)"));
+    assert!(models.contains(
+        "payload_from_proto(proto.details, typing.cast(type[typing.Any], _output_type))"
+    ));
+    assert!(models.contains("_context_type, = typing.get_args(type_hint) or (typing.Any,)"));
+    assert!(models.contains(
+        "payload_from_proto(proto.details, typing.cast(type[typing.Any], _context_type))"
+    ));
+    assert!(support.contains("type_hint: type[typing.Any] | None = None,"));
+    assert!(support.contains("converter.from_payload(_clone_payload(proto), type_hint)"));
+}
+
+#[test]
 fn python_rejects_support_namespace() {
     let root = project_root();
     let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(

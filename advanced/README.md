@@ -307,6 +307,13 @@ tags continue to raise `ValueError`.
 Other language backends report an explicit unsupported-conversion error when a
 reachable oneof model requires protobuf conversion.
 
+Python also preserves concrete runtime type arguments while decoding nested
+proto-backed generic records. A type parameter represented by Temporal's
+single-value `Payload` carrier is passed to the payload converter as its type
+hint; `Payloads` continues to decode as a sequence. The
+`proto-generic-python` sample exercises this Python-only exception without
+making the cross-language `generic-models` sample depend on protobuf support.
+
 Generate WIT for a proto RPC from a descriptor set:
 
 ```bash

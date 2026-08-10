@@ -132,8 +132,15 @@ def _payload_to_value(
 
 def payload_from_proto(
     proto: common_pb2.Payload,
+    type_hint: type[typing.Any] | None = None,
 ) -> object:
-    return _payload_to_value(proto)
+    converter = temporalio.nexus.system._current_user_payload_converter()
+    if type_hint is None:
+        return typing.cast(object, converter.from_payload(_clone_payload(proto)))
+    return typing.cast(
+        object,
+        converter.from_payload(_clone_payload(proto), type_hint),
+    )
 
 
 def payload_to_proto(

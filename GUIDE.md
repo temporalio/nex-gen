@@ -68,11 +68,13 @@ This produces a data model for the request and response, a service definition,
 and a convenience wrapper function that lets callers write:
 
 **Python:**
+
 ```python
 user = await get_user(user_id="abc")
 ```
 
 **TypeScript:**
+
 ```typescript
 const user = await getUser({ userId: "abc" });
 ```
@@ -94,6 +96,7 @@ record postal-address {
 ```
 
 **Python:**
+
 ```python
 @dataclasses.dataclass(slots=True)
 class PostalAddress:
@@ -103,6 +106,7 @@ class PostalAddress:
 ```
 
 **TypeScript:**
+
 ```typescript
 export interface PostalAddress {
   street: string;
@@ -128,6 +132,7 @@ enum user-status {
 ```
 
 **Python:**
+
 ```python
 class UserStatus(enum.IntEnum):
     Active = 0
@@ -136,6 +141,7 @@ class UserStatus(enum.IntEnum):
 ```
 
 **TypeScript:**
+
 ```typescript
 export enum UserStatus {
   Active = 0,
@@ -157,6 +163,7 @@ flags user-capability {
 ```
 
 **Python:**
+
 ```python
 UserCapability: typing.TypeAlias = int
 UserCapabilityReadProfile = 1 << 0
@@ -165,6 +172,7 @@ UserCapabilityDeactivate = 1 << 2
 ```
 
 **TypeScript:**
+
 ```typescript
 export enum UserCapability {
   ReadProfile = 2 ** 0,
@@ -186,6 +194,7 @@ variant notification-target {
 ```
 
 **Python:**
+
 ```python
 NotificationTarget = (
     tuple[typing.Literal["email"], str]
@@ -195,6 +204,7 @@ NotificationTarget = (
 ```
 
 **TypeScript:**
+
 ```typescript
 export type NotificationTarget =
   | { tag: "email"; value: string }
@@ -216,11 +226,13 @@ record user-profile {
 ```
 
 **Python:**
+
 ```python
 sync_state: tuple[typing.Literal["ok"], str] | tuple[typing.Literal["err"], str]
 ```
 
 **TypeScript:**
+
 ```typescript
 syncState: { tag: "ok"; value: string } | { tag: "err"; value: string };
 ```
@@ -236,11 +248,13 @@ record postal-address {
 ```
 
 **Python:**
+
 ```python
 coordinates: tuple[float, float] | None = None
 ```
 
 **TypeScript:**
+
 ```typescript
 coordinates?: [number, number];
 ```
@@ -250,6 +264,7 @@ coordinates?: [number, number];
 `option<T>` fields become optional with a `None`/`undefined` default.
 
 **Python:**
+
 ```python
 # Required field: no default
 user_id: str
@@ -258,6 +273,7 @@ reason: str | None = None
 ```
 
 **TypeScript:**
+
 ```typescript
 // Required field: no ?
 userId: string;
@@ -277,12 +293,14 @@ record user-profile {
 ```
 
 **Python:**
+
 ```python
 tags: list[str] | None = dataclasses.field(default_factory=list)
 metadata: dict[str, str] | None = dataclasses.field(default_factory=dict)
 ```
 
 **TypeScript:**
+
 ```typescript
 tags?: string[];
 metadata?: Record<string, string>;
@@ -320,6 +338,7 @@ update-email: func(request: update-email-request) -> user-result;
 ```
 
 **Python:**
+
 ```python
 @dataclasses.dataclass
 class User:
@@ -332,16 +351,17 @@ class User:
 ```
 
 **TypeScript:**
+
 ```typescript
 export class User {
-    public constructor(
-        public readonly userId: string,
-        public readonly email: string,
-    ) {}
+  public constructor(
+    public readonly userId: string,
+    public readonly email: string,
+  ) {}
 
-    public async updateEmail(email: string): Promise<User> {
-        return await updateEmail({ userId: this.userId, email: email });
-    }
+  public async updateEmail(email: string): Promise<User> {
+    return await updateEmail({ userId: this.userId, email: email });
+  }
 }
 ```
 
@@ -365,6 +385,7 @@ say "method X calls operation Y." Instead, it uses **field-name matching** to
 automatically bind resource methods to operations.
 
 For each resource method, the generator builds a **name environment** from:
+
 - The resource's **constructor field names** (e.g., `user-id`, `email`)
 - The method's **parameter names** (e.g., `email`)
 
@@ -385,11 +406,13 @@ update-email: func(request: update-email-request) -> user-result;
 ```
 
 The environment for the `update-email` method is:
+
 ```
 user-id  =>  ResourceField("user-id")   (from constructor)
 email    =>  MethodParam("email")       (from method signature)
 ```
-Notice that the method's `email` parameter shadows the `email` parameter we got 
+
+Notice that the method's `email` parameter shadows the `email` parameter we got
 from the constructor!
 
 The generator tries the `update-email` operation, which has input
@@ -398,6 +421,7 @@ are found in the environment, so the binding succeeds.
 
 The generated code then uses `self.user_id` for the resource field and the
 `email` parameter for the method parameter:
+
 ```python
 request = UpdateEmailRequest(user_id=self.user_id, email=email)
 ```
@@ -424,6 +448,7 @@ record cancel-workflow-request {
 ```
 
 The environment for `cancel` is:
+
 ```
 namespace    =>  ResourceField
 workflow-id  =>  ResourceField
@@ -432,6 +457,7 @@ reason       =>  MethodParam
 ```
 
 The `cancel-workflow-request` has three fields:
+
 - `namespace` -- directly matched to ResourceField
 - `workflow-execution` -- not directly in the environment, but it is a record
   type, so the generator recurses into it and finds `workflow-id` and `run-id`,
@@ -590,6 +616,7 @@ record activity-options {
 ```
 
 **Python:**
+
 ```python
 @dataclasses.dataclass(slots=True, kw_only=True)
 class ActivityOptions:
@@ -615,6 +642,7 @@ class ActivityOptions:
 ```
 
 **TypeScript:**
+
 ```typescript
 export interface ActivityOptions {
     taskQueue?: string;
@@ -713,9 +741,9 @@ async def signal_with_start_workflow(
     )
 ```
 
-In the snippet above, notice that the entire `user-metadata` field is `None` if 
+In the snippet above, notice that the entire `user-metadata` field is `None` if
 all its constituent fields are `None`. This is the behavior in Python and Typescript,
-but not in Go; in Go we implement flattening with value embedding, so `user-metadata` 
+but not in Go; in Go we implement flattening with value embedding, so `user-metadata`
 is never nil.
 
 ### Output Transforms
@@ -748,7 +776,10 @@ return workflow.get_external_workflow_handle(request.id, run_id=result.run_id)
 
 ```typescript
 const result = await handle.result();
-return workflow.getExternalWorkflowHandle(request.id, result.runId ?? undefined);
+return workflow.getExternalWorkflowHandle(
+  request.id,
+  result.runId ?? undefined,
+);
 ```
 
 ```go
@@ -1075,26 +1106,25 @@ language-prefixed keys such as `python-result` and `typescript-result` when it
 does not. Do not combine these result overrides with `signature` on a type
 alias.
 
-
 ### Option Summary
 
-| Option | Motivation | Generated effect |
-| --- | --- | --- |
-| `signature` | Keep callable shape in a WIT function instead of a placeholder alias. | Derives callable argument and result annotations. Required for type-alias `@nexus.function`. |
-| `alternate-type` | Accept raw names as well as typed callables. | Generates union annotations and overloads such as `str | Callable[...]`. |
-| `args-field` | Map ergonomic function args to a wire field such as `input` or `signal-input`. | Stores normalized args in that request/proto field. Defaults to the signature's args name for type aliases. |
-| `result-type-parameter` | Preserve the callable's result type in returned handles. | Emits a type variable such as `WorkflowResult` and uses it in callable overload returns. |
-| `primary` | Identify the main callable when a request has multiple function references. | Enables positional primary args and result type propagation. Defaults to `false`. |
-| `converter` | Reuse the same conversion helper name in all languages. | Calls the helper when converting the function field to proto. |
-| `<language>-converter` | Use language-specific conversion helper names. | Python uses `python-converter`; TypeScript uses `typescript-converter`. |
-| `result` / `<language>-result` | Direct field-level form when there is no type alias `signature`. | Supplies the callable result annotation directly. Prefer `signature` for authored aliases. |
+| Option                         | Motivation                                                                     | Generated effect                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `signature`                    | Keep callable shape in a WIT function instead of a placeholder alias.          | Derives callable argument and result annotations. Required for type-alias `@nexus.function`.                |
+| `alternate-type`               | Accept raw names as well as typed callables.                                   | Generates union annotations and overloads such as `str \| Callable[...]`.                                   |
+| `args-field`                   | Map ergonomic function args to a wire field such as `input` or `signal-input`. | Stores normalized args in that request/proto field. Defaults to the signature's args name for type aliases. |
+| `result-type-parameter`        | Preserve the callable's result type in returned handles.                       | Emits a type variable such as `WorkflowResult` and uses it in callable overload returns.                    |
+| `primary`                      | Identify the main callable when a request has multiple function references.    | Enables positional primary args and result type propagation. Defaults to `false`.                           |
+| `converter`                    | Reuse the same conversion helper name in all languages.                        | Calls the helper when converting the function field to proto.                                               |
+| `<language>-converter`         | Use language-specific conversion helper names.                                 | Python uses `python-converter`; TypeScript uses `typescript-converter`.                                     |
+| `result` / `<language>-result` | Direct field-level form when there is no type alias `signature`.               | Supplies the callable result annotation directly. Prefer `signature` for authored aliases.                  |
 
 `@nexus.function-args` options:
 
-| Option | Motivation | Generated effect |
-| --- | --- | --- |
-| `varargs` | Treat a final list-shaped signature parameter as `*args`. | Generates positional overloads plus list-form `args`. |
-| `param` | Disambiguate which final parameter is the varargs list. | Required when the signature has more than one parameter. |
+| Option                   | Motivation                                                             | Generated effect                                           |
+| ------------------------ | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `varargs`                | Treat a final list-shaped signature parameter as `*args`.              | Generates positional overloads plus list-form `args`.      |
+| `param`                  | Disambiguate which final parameter is the varargs list.                | Required when the signature has more than one parameter.   |
 | `typescript-drop-prefix` | Remove implicit receiver/context parameters from TypeScript inference. | TypeScript omits the prefix from inferred argument tuples. |
 
 ---
@@ -1175,7 +1205,7 @@ record response {
 ```
 
 Python performs bidirectional oneof conversion using tagged tuples such as
-`("success", value)`. Other targets reject a reachable model containing a 
+`("success", value)`. Other targets reject a reachable model containing a
 oneof they cannot convert; unreachable declarations and omitted oneofs remain valid.
 
 ---
@@ -1208,9 +1238,13 @@ target.
 
 Type parameters are not currently supported in proto-backed records except in
 Python when a field or oneof member maps to Temporal's protobuf `Payload` or
-`Payloads` carrier. They are also unsupported in resources, map keys,
-function-signature metadata, or resource-bound generic operations. Go type
-parameters use an `any` constraint.
+`Payloads` carrier. When decoding a parameterized Python model, concrete type
+arguments propagate through nested proto-backed records and become type hints
+for single-value `Payload` fields. An unparameterized model decodes those fields
+as `typing.Any`. `Payloads` fields continue to decode as untyped sequences.
+
+Type parameters are also unsupported in resources, map keys, function-signature
+metadata, or resource-bound generic operations.
 
 Generic variants retain each target's normal tagged representation: tagged
 tuples in Python, tagged object unions in TypeScript, sealed interfaces and
@@ -1327,6 +1361,7 @@ id-reuse-policy: workflow-id-reuse-policy,
 ```
 
 **Python:**
+
 ```python
 id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (
     temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
@@ -1427,6 +1462,7 @@ The referenced helper must be provided through `@nexus.support`.
 
 **Placement:** Operation (function)
 **Syntax:**
+
 ```
 @nexus.output-transform
   python-type="<type>" python="<expr>"
@@ -1511,6 +1547,7 @@ static-summary: option<payload>,
 
 **Placement:** Type alias or record field
 **Syntax:**
+
 ```
 @nexus.function
   signature="<wit-function-name>"
@@ -1532,6 +1569,7 @@ generated Python samples.
 
 **Placement:** Function used as a `@nexus.function signature`
 **Syntax:**
+
 ```
 @nexus.function-args
   varargs=true
