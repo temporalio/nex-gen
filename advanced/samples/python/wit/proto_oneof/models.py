@@ -38,6 +38,7 @@ class _OutcomeTransferTypeConverter(
         type_hint: type[typing.Any],
     ) -> typing.Any:
         proto = value
+        (_output_type,) = typing.get_args(type_hint) or (object,)
         _oneof_value_case = proto.WhichOneof("value")
         if _oneof_value_case is None:
             raise ValueError("missing required field Outcome.value")

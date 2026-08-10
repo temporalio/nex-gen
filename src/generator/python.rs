@@ -2730,7 +2730,17 @@ pub(in crate::generator) struct WireValueConversion {
 
 impl WireValueConversion {
     pub(in crate::generator) fn from_wire_expr(&self, wire_expr: &str) -> String {
-        self.from_wire.replace("{wire}", wire_expr)
+        self.from_wire_expr_with_type_hint(wire_expr, &self.annotation)
+    }
+
+    pub(in crate::generator) fn from_wire_expr_with_type_hint(
+        &self,
+        wire_expr: &str,
+        type_hint_expr: &str,
+    ) -> String {
+        self.from_wire
+            .replace("{wire}", wire_expr)
+            .replace("{type_hint}", type_hint_expr)
     }
 
     pub(in crate::generator) fn to_wire_expr(&self, value_expr: &str) -> String {
