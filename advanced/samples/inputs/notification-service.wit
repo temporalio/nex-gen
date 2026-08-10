@@ -19,20 +19,18 @@ interface on-complete-request {
   type output-t = placeholder;
 
 
-  /// Protobuf oneof `temporal.api.notificationservice.v1.OnCompleteRequest.Outcome.result`.
-  variant on-complete-request-outcome-result {
+  /// Protobuf oneof `temporal.api.notificationservice.v1.OnCompleteRequest.result`.
+  variant on-complete-request-result {
     success(output-t),
     failure(failure),
   }
 
-  /// @nexus.proto "temporal.api.notificationservice.v1.OnCompleteRequest.Outcome"
-  record on-complete-request-outcome {
-    %result: on-complete-request-outcome-result,
-  }
-
   /// @nexus.proto "temporal.api.notificationservice.v1.OnCompleteRequest"
   record on-complete-request {
-    outcome: on-complete-request-outcome,
+    %result: on-complete-request-result,
     source-context: source-context-t,
+  }
+  /// @nexus.proto "temporal.api.notificationservice.v1.OnCompleteResponse"
+  record on-complete-response {
   }
 }
