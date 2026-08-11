@@ -25,6 +25,10 @@
 
 ## Architecture and ownership
 
+- Before changing JSON Schema behavior or architecture, read
+  [`specs/json-schema/PRINCIPLES.md`](specs/json-schema/PRINCIPLES.md). Before
+  changing WIT authoring or WIT-facing generated behavior, read
+  [`GUIDE.md`](GUIDE.md).
 - `src/parser/wit.rs` is the only place that should understand WIT-specific
   syntax and semantics. Keep WIT details out of the shared model and later
   pipeline stages.
