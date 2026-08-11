@@ -2548,17 +2548,7 @@ fn go_generic_declaration_name(
     }
     let declarations = parameters
         .iter()
-        .map(|usage| {
-            format!(
-                "{} {}",
-                usage.parameter.name,
-                if usage.requires_comparable {
-                    "comparable"
-                } else {
-                    "any"
-                }
-            )
-        })
+        .map(|usage| format!("{} any", usage.parameter.name))
         .collect::<Vec<_>>()
         .join(", ");
     format!("{model_name}[{declarations}]")
@@ -2577,12 +2567,7 @@ fn render_go_model_type_parameter_declaration(
             output.push_str(", ");
         }
         output.push_str(&usage.parameter.name);
-        output.push(' ');
-        output.push_str(if usage.requires_comparable {
-            "comparable"
-        } else {
-            "any"
-        });
+        output.push_str(" any");
     }
     output.push(']');
 }
@@ -4645,16 +4630,7 @@ fn render_convenience_wrapper(
     let mut type_params = operation
         .model_type_parameters
         .iter()
-        .map(|usage| {
-            (
-                usage.parameter.name.clone(),
-                if usage.requires_comparable {
-                    "comparable".to_string()
-                } else {
-                    "any".to_string()
-                },
-            )
-        })
+        .map(|usage| (usage.parameter.name.clone(), "any".to_string()))
         .collect::<Vec<_>>();
     type_params.extend(required_function_type_parameters(
         params, package, visibility,

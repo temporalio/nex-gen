@@ -342,95 +342,13 @@ fn prepare_wit_workspace(
             source,
         })?;
     }
-    let prepared_input = prepare_generic_map_key_aliases(input);
-    fs::write(&target_path, prepared_input).map_err(|source| Error::WriteFile {
+    fs::write(&target_path, input).map_err(|source| Error::WriteFile {
         path: target_path,
         source,
     })?;
 
     copy_linked_inputs(&package_root, linked_input_paths)?;
 
-    Ok(PreparedWitWorkspace {
-        temp_dir,
-        package_root,
-    })
-}
-
-/// `wit-parser` intentionally rejects aliases as map keys even when their
-/// target is a legal scalar. Type-parameter aliases are semantically opaque,
-/// so temporarily lower them to `string` for WIT parsing and attach private
-/// metadata that restores the alias identity in the authored type graph.
-fn prepare_generic_map_key_aliases(input: &str) -> String {
-    let lines = input.lines().collect::<Vec<_>>();
-    let mut parameter_aliases = BTreeSet::new();
-    let mut previous_was_parameter = false;
-    for line in &lines {
-        let trimmed = line.trim();
-        if trimmed == "/// @nexus.type-parameter" {
-            previous_was_parameter = true;
-            continue;
-        }
-        if previous_was_parameter {
-            if let Some(rest) = trimmed.strip_prefix("type ")
-                && let Some((name, _)) = rest.split_once('=')
-            {
-                parameter_aliases.insert(name.trim().to_string());
-            }
-            previous_was_parameter = false;
-        }
-    }
-    if parameter_aliases.is_empty() {
-        return input.to_string();
-    }
-
-    let mut output = String::with_capacity(input.len());
-    for line in lines {
-        let mut rewritten = line.to_string();
-        let mut map_key_parameter = None;
-        for alias in &parameter_aliases {
-            let pattern = format!("map<{alias},");
-            if rewritten.contains(&pattern) {
-                rewritten = rewritten.replace(&pattern, "map<string,");
-                map_key_parameter = Some(alias.as_str());
-                break;
-            }
-        }
-        if let Some(alias) = map_key_parameter {
-            let indent = line
-                .chars()
-                .take_while(|character| character.is_whitespace())
-                .collect::<String>();
-            output.push_str(&indent);
-            output.push_str("/// @nexus.type-parameter-map-key \"");
-            output.push_str(alias);
-            output.push_str("\"\n");
-        }
-        output.push_str(&rewritten);
-        output.push('\n');
-    }
-    output
-}
-
-fn prepare_linked_metadata_workspace(input_paths: &[PathBuf]) -> Result<PreparedWitWorkspace> {
-    let temp_dir = tempfile::tempdir().map_err(|source| Error::WriteFile {
-        path: PathBuf::from("<tempdir>"),
-        source,
-    })?;
-    let package_root = temp_dir.path().join("main");
-    fs::create_dir_all(&package_root).map_err(|source| Error::WriteFile {
-        path: package_root.clone(),
-        source,
-    })?;
-    let stub_path = package_root.join("main.wit");
-    fs::write(
-        &stub_path,
-        "package temporary:root@0.0.0;\n\nworld system {\n}\n",
-    )
-    .map_err(|source| Error::WriteFile {
-        path: stub_path,
-        source,
-    })?;
-    copy_linked_inputs(&package_root, input_paths)?;
     Ok(PreparedWitWorkspace {
         temp_dir,
         package_root,
@@ -956,7 +874,7 @@ fn validate_type_parameter_directive(
             reason: "is only supported on WIT type aliases".to_string(),
         });
     }
-    for conflict in ["proto", "type", "function", "flatten-in-api", "omit"] {
+    for conflict in ["proto", "type", "function"] {
         if directive(&directives, conflict, path, &context)?.is_some() {
             return Err(Error::InvalidWitDirective {
                 path: path.to_path_buf(),
@@ -1034,9 +952,7 @@ fn build_wit_variant_spec(
         .iter()
         .map(|case| {
             let case_context = format!("{context} case `{}`", case.name);
-            let case_directives =
-                parse_directives(case.docs.contents.as_deref(), path, &case_context)?;
-            let mut payload = case
+            let payload = case
                 .ty
                 .as_ref()
                 .map(|ty| {
@@ -1044,29 +960,6 @@ fn build_wit_variant_spec(
                         .map(|field_type| authored_field_type_for_language(field_type, language))
                 })
                 .transpose()?;
-            if let Some(alias_name) = directive_value(
-                &case_directives,
-                "type-parameter-map-key",
-                path,
-                &case_context,
-                "value",
-            )? {
-                let Some(TypeSpec::Map(_, value)) = payload else {
-                    return Err(Error::InvalidWit {
-                        path: path.to_path_buf(),
-                        reason: format!("{case_context} has invalid generic map-key metadata"),
-                    });
-                };
-                let key = resolve_named_wit_type(
-                    resolve,
-                    type_def.owner,
-                    &alias_name,
-                    path,
-                    &case_context,
-                    "@nexus.type-parameter-map-key",
-                )?;
-                payload = Some(TypeSpec::Map(Box::new(key), value));
-            }
             Ok(VariantCaseSpec {
                 name: case.name.clone(),
                 payload,
@@ -1324,33 +1217,10 @@ fn build_fields_from_record(
         let field_doc = directive(&directives, "doc", path, &field_context)?
             .map(directive_language_string)
             .filter(|doc| !doc.is_empty());
-        let mut field_type = authored_field_type_for_language(
+        let field_type = authored_field_type_for_language(
             resolve_authored_field_type_spec(resolve, &field.ty, path, &field_context)?,
             language,
         );
-        if let Some(alias_name) = directive_value(
-            &directives,
-            "type-parameter-map-key",
-            path,
-            &field_context,
-            "value",
-        )? {
-            let TypeSpec::Map(_, value) = field_type else {
-                return Err(Error::InvalidWit {
-                    path: path.to_path_buf(),
-                    reason: format!("{field_context} has invalid generic map-key metadata"),
-                });
-            };
-            let key = resolve_named_wit_type(
-                resolve,
-                owner,
-                &alias_name,
-                path,
-                &field_context,
-                "@nexus.type-parameter-map-key",
-            )?;
-            field_type = TypeSpec::Map(Box::new(key), value);
-        }
         let field_default =
             build_field_default(resolve, &field.ty, default_directive, path, &field_context)?;
         let required = !is_optional_type(resolve, &field.ty) && field_default.is_none();
@@ -1560,35 +1430,20 @@ fn resolve_authored_field_type_spec(
                         })
                         .collect::<Result<Vec<_>>>()?,
                 )),
-                TypeDefKind::Map(key, value) => {
-                    let key = if let Some(alias_name) = directive_value(
-                        &directives,
-                        "type-parameter-map-key",
+                TypeDefKind::Map(key, value) => Ok(TypeSpec::Map(
+                    Box::new(resolve_authored_field_type_spec(
+                        resolve,
+                        key,
                         path,
                         &type_context,
-                        "value",
-                    )? {
-                        resolve_named_wit_type(
-                            resolve,
-                            type_def.owner,
-                            &alias_name,
-                            path,
-                            &type_context,
-                            "@nexus.type-parameter-map-key",
-                        )?
-                    } else {
-                        resolve_authored_field_type_spec(resolve, key, path, &type_context)?
-                    };
-                    Ok(TypeSpec::Map(
-                        Box::new(key),
-                        Box::new(resolve_authored_field_type_spec(
-                            resolve,
-                            value,
-                            path,
-                            &type_context,
-                        )?),
-                    ))
-                }
+                    )?),
+                    Box::new(resolve_authored_field_type_spec(
+                        resolve,
+                        value,
+                        path,
+                        &type_context,
+                    )?),
+                )),
                 TypeDefKind::Result(result) => Ok(TypeSpec::Result {
                     ok: result
                         .ok
@@ -3700,7 +3555,7 @@ interface generic-service {
     }
 
     #[test]
-    fn infers_comparable_constraint_for_map_key_parameters() {
+    fn rejects_generic_map_key_parameters() {
         let wit = GENERIC_WIT.replace(
             "/// @nexus.type-parameter\n  type output-t = placeholder;",
             "/// @nexus.type-parameter\n  type output-t = placeholder;\n\n  /// @nexus.type-parameter\n  type key-t = string;\n\n  type keyed-values = map<key-t, string>;",
@@ -3708,11 +3563,7 @@ interface generic-service {
             "values: list<context-t>,",
             "values: list<context-t>,\n    by-key: keyed-values,",
         );
-        let spec = parse(Language::Go, &wit);
-        let parameters = spec.record_type_parameters("generic-service.request", Language::Go);
-        assert_eq!(parameters.len(), 2);
-        assert_eq!(parameters[1].parameter.name, "KeyT");
-        assert!(parameters[1].requires_comparable);
+        assert!(parse_result(Language::Go, &wit).is_err());
     }
 
     #[test]
@@ -3751,7 +3602,7 @@ interface generic-service {
             )
             .replace(
                 "record inner { value: context-t, }",
-                "variant inner-result { value(context-t), }\n\n  variant outer-result {\n    nested(inner-result),\n    keyed(map<key-t, string>),\n    output(output-t),\n  }\n\n  record inner { value: context-t, }",
+                "variant inner-result { value(context-t), }\n\n  variant outer-result {\n    nested(inner-result),\n    keyed(map<string, key-t>),\n    output(output-t),\n  }\n\n  record inner { value: context-t, }",
             )
             .replace(
                 "context: context-t,\n    output: output-t,",
@@ -3768,7 +3619,6 @@ interface generic-service {
                 .collect::<Vec<_>>(),
             ["ContextT", "KeyT", "OutputT"]
         );
-        assert!(outer[1].requires_comparable);
         let response = spec.record_type_parameters("generic-service.response", Language::Go);
         assert_eq!(
             response

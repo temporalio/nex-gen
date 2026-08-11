@@ -975,7 +975,6 @@ pub struct TypeParameterSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeParameterUsage {
     pub parameter: TypeParameterSpec,
-    pub requires_comparable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1204,13 +1203,7 @@ where
     ) -> Vec<TypeParameterUsage> {
         let mut parameters = IndexMap::<String, TypeParameterUsage>::new();
         let mut visiting = std::collections::BTreeSet::new();
-        self.collect_record_type_parameters(
-            record_name,
-            language,
-            false,
-            &mut visiting,
-            &mut parameters,
-        );
+        self.collect_record_type_parameters(record_name, language, &mut visiting, &mut parameters);
         parameters.into_values().collect()
     }
 
@@ -1226,7 +1219,6 @@ where
         self.collect_variant_type_parameters(
             variant_name,
             language,
-            false,
             &mut visiting,
             &mut parameters,
         );
@@ -1240,7 +1232,7 @@ where
     ) -> Vec<TypeParameterUsage> {
         let mut parameters = IndexMap::<String, TypeParameterUsage>::new();
         let mut visiting = std::collections::BTreeSet::new();
-        self.collect_type_parameters(value, language, false, &mut visiting, &mut parameters);
+        self.collect_type_parameters(value, language, &mut visiting, &mut parameters);
         parameters.into_values().collect()
     }
 
@@ -1248,7 +1240,6 @@ where
         &self,
         record_name: &str,
         language: Language,
-        map_key: bool,
         visiting: &mut std::collections::BTreeSet<String>,
         parameters: &mut IndexMap<String, TypeParameterUsage>,
     ) {
@@ -1265,13 +1256,7 @@ where
                 {
                     continue;
                 }
-                self.collect_type_parameters(
-                    &field.field_type,
-                    language,
-                    map_key,
-                    visiting,
-                    parameters,
-                );
+                self.collect_type_parameters(&field.field_type, language, visiting, parameters);
             }
         }
         visiting.remove(record_name);
@@ -1281,7 +1266,6 @@ where
         &self,
         variant_name: &str,
         language: Language,
-        map_key: bool,
         visiting: &mut std::collections::BTreeSet<String>,
         parameters: &mut IndexMap<String, TypeParameterUsage>,
     ) {
@@ -1291,7 +1275,7 @@ where
         if let Some(variant) = self.variant(variant_name) {
             for case in &variant.cases {
                 if let Some(payload) = &case.payload {
-                    self.collect_type_parameters(payload, language, map_key, visiting, parameters);
+                    self.collect_type_parameters(payload, language, visiting, parameters);
                 }
             }
         }
@@ -1302,60 +1286,51 @@ where
         &self,
         value: &TypeSpec<F>,
         language: Language,
-        map_key: bool,
         visiting: &mut std::collections::BTreeSet<String>,
         parameters: &mut IndexMap<String, TypeParameterUsage>,
     ) {
         match value {
             TypeSpec::TypeParameter(parameter) => {
-                if let Some(existing) = parameters.get_mut(&parameter.full_name) {
-                    existing.requires_comparable |= map_key;
-                } else {
+                if !parameters.contains_key(&parameter.full_name) {
                     parameters.insert(
                         parameter.full_name.clone(),
                         TypeParameterUsage {
                             parameter: parameter.clone(),
-                            requires_comparable: map_key,
                         },
                     );
                 }
             }
             TypeSpec::Option(inner) | TypeSpec::List(inner) => {
-                self.collect_type_parameters(inner, language, map_key, visiting, parameters)
+                self.collect_type_parameters(inner, language, visiting, parameters)
             }
             TypeSpec::Tuple(items) => {
                 for item in items {
-                    self.collect_type_parameters(item, language, map_key, visiting, parameters);
+                    self.collect_type_parameters(item, language, visiting, parameters);
                 }
             }
             TypeSpec::Map(key, value) => {
-                self.collect_type_parameters(key, language, true, visiting, parameters);
-                self.collect_type_parameters(value, language, map_key, visiting, parameters);
+                self.collect_type_parameters(key, language, visiting, parameters);
+                self.collect_type_parameters(value, language, visiting, parameters);
             }
             TypeSpec::Result { ok, err } => {
                 if let Some(ok) = ok {
-                    self.collect_type_parameters(ok, language, map_key, visiting, parameters);
+                    self.collect_type_parameters(ok, language, visiting, parameters);
                 }
                 if let Some(err) = err {
-                    self.collect_type_parameters(err, language, map_key, visiting, parameters);
+                    self.collect_type_parameters(err, language, visiting, parameters);
                 }
             }
-            TypeSpec::Record(record) => self.collect_record_type_parameters(
-                record.as_ref(),
-                language,
-                map_key,
-                visiting,
-                parameters,
-            ),
+            TypeSpec::Record(record) => {
+                self.collect_record_type_parameters(record.as_ref(), language, visiting, parameters)
+            }
             TypeSpec::Variant(variant) => self.collect_variant_type_parameters(
                 variant.as_ref(),
                 language,
-                map_key,
                 visiting,
                 parameters,
             ),
             TypeSpec::External(ExternalTypeSpec::Alias { target, .. }) => {
-                self.collect_type_parameters(target, language, map_key, visiting, parameters)
+                self.collect_type_parameters(target, language, visiting, parameters)
             }
             TypeSpec::Bool
             | TypeSpec::Int(_)

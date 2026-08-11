@@ -1185,9 +1185,8 @@ field occurrence and therefore removes it from generic inference for that
 target.
 
 Type parameters are not currently supported in proto-backed records,
-resources, function-signature metadata, or resource-bound generic operations.
-Go parameters used as map keys receive a `comparable` constraint; all other Go
-parameters use `any`.
+resources, map keys, function-signature metadata, or resource-bound generic
+operations. Go type parameters use an `any` constraint.
 
 Generic variants retain each target's normal tagged representation: tagged
 tuples in Python, tagged object unions in TypeScript, sealed interfaces and
