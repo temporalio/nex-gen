@@ -24,6 +24,20 @@ export interface StartWorkflowResult {
   runId?: string;
 }
 
+export function startWorkflowResultFromProto(
+  proto:
+    | temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse
+    | null
+    | undefined,
+): StartWorkflowResult | undefined {
+  if (proto == null) {
+    return undefined;
+  }
+  return {
+    runId: proto.runId ?? undefined,
+  };
+}
+
 export function startWorkflowResultToProto(
   model: StartWorkflowResult | null | undefined,
 ): temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse | undefined {
@@ -66,6 +80,20 @@ export function startWorkflowRequestToProto(
 
 export interface RestartWorkflowResult {
   runId?: string;
+}
+
+export function restartWorkflowResultFromProto(
+  proto:
+    | temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse
+    | null
+    | undefined,
+): RestartWorkflowResult | undefined {
+  if (proto == null) {
+    return undefined;
+  }
+  return {
+    runId: proto.runId ?? undefined,
+  };
 }
 
 export function restartWorkflowResultToProto(
