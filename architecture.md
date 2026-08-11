@@ -6,20 +6,19 @@ The long-term design keeps one structural API-spec graph throughout the compiler
 equivalent services, operations, fields, and type references as passes enrich
 the graph.
 
-## Current flow
+## Flow
 
-The current implementation has an explicit compiler spine. Parsing creates
-authored IR; selection collapses language-specific values once; planning then
-runs four named transforms over the same structural `ApiSpecTree` family.
-Each pass returns a complete IR for its successor; no pass receives planner
-state saved by an earlier pass.
+The compiler has an explicit spine. Parsing creates authored IR; selection
+collapses language-specific values once; the remaining passes enrich the same
+structural `ApiSpecTree` family. Each pass returns a complete IR for its
+successor; no pass receives planner state saved by an earlier pass.
 
 ```mermaid
 flowchart LR
     input[WIT or JSON Schema input]
     detect[Detect input format]
-    wit[WIT parser<br/>target-aware]
-    json[JSON Schema parser<br/>target-aware]
+    wit[WIT parser]
+    json[JSON Schema parser]
     authored[ApiSpec&lt;AuthoredNames&gt;]
     validate[AuthoredValidationPass]
     select[Select target language]
@@ -45,51 +44,10 @@ flowchart LR
 
 The concrete orchestration lives in `compile_tree_to_files`: validate authored
 IR, select language metadata, run the planning passes, resolve emitted names,
-then generate files. The planning sequence is authored validation, language
-selection, resource resolution, operation binding, operation lowering, type
-planning, reachability pruning, and emitted-name resolution.
+then generate files. Passes may use descriptors and the selected target
+language as immutable inputs, but they do not exchange side tables or mutable
+planner objects.
 
-## Proposed end state
-
-Parsing preserves author intent; target selection is the only pass that applies
-language override/default precedence. Every following pass consumes selected
-values and therefore cannot make a second language-selection decision.
-
-```mermaid
-flowchart LR
-    input[WIT or JSON Schema input]
-
-    subgraph frontend[Format frontend]
-        witparse[Parse and resolve WIT]
-        jsonparse[Parse JSON documents]
-        jsonvalidate[Normalize and validate<br/>JSON Schema documents]
-        buildauthored[Build authored API spec]
-        jsonparse --> jsonvalidate --> buildauthored
-        witparse --> buildauthored
-    end
-
-    authored[ApiSpec&lt;AuthoredNames&gt;<br/>all overrides preserved]
-    validate[AuthoredValidationPass]
-    select[LanguageSelectionPass]
-    selected[ApiSpec&lt;SelectedNames&gt;<br/>plain selected text/import/support values]
-    resources[ResourceResolutionPass]
-    operation[OperationBindingPass]
-    lowering[OperationLoweringPass]
-    models[TypePlanningPass]
-    reachability[ReachabilityPass]
-    planned[ApiSpec&lt;PlannedTypeFamily&gt;]
-    names[EmittedNameResolutionPass]
-    generate[Language backend]
-    output[Generated files]
-
-    input --> witparse
-    input --> jsonparse
-    buildauthored --> authored --> validate --> select --> selected
-    selected --> resources --> operation --> lowering --> models --> reachability --> planned --> names --> generate --> output
-```
-
-Passes may use descriptors and the selected target language as immutable
-inputs, but they do not exchange side tables or mutable planner objects.
 `ResourceResolutionPass` resolves resource-method and resource-return facts;
 `OperationBindingPass` attaches those facts to the operations and resources
 that own them; `OperationLoweringPass` turns wire-backed resource returns into
