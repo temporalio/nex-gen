@@ -8,10 +8,10 @@ using Temporalio.Client;
 using Temporalio.Testing;
 using Temporalio.Worker;
 using Temporalio.Workflows;
-using UserServiceExample = NexGen.UserService;
+using UserServiceExample = Nexgen.UserService;
 using Xunit;
 
-namespace NexGen.DotNetExamples.Tests
+namespace Nexgen.DotNetExamples.Tests
 {
 
     public class UserServiceEndpointRuntimeChecks

@@ -20,7 +20,7 @@ Regenerate WIT output with `cargo build-examples --lang dotnet` from the repo
 root.
 
 ```bash
-dotnet build NexusApiGen.DotNetExamples.csproj
+dotnet build Nexgen.DotNetExamples.csproj
 dotnet test tests/
 ```
 

@@ -30,7 +30,7 @@ mod format_tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        env::temp_dir().join(format!("nex-gen-{name}-{unique}"))
+        env::temp_dir().join(format!("nexgen-{name}-{unique}"))
     }
 
     fn write_formatter_script(dir: &Path, name: &str, marker: &str) -> PathBuf {

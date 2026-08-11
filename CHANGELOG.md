@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+- Renamed the project to `nexgen`. The crate is published as `nexgen` (was
+  `nex-gen`), generated .NET code uses the `Nexgen.*` namespaces and the
+  `NexgenClient`/`RequireNexgenClient` members (were `NexGen.*` and
+  `NexGenClient`/`RequireNexGenClient`), the TypeScript definitions namespace is
+  `__nexgenDefinitions` (was `__nexGenDefinitions`), and the samples honor
+  `NEXGEN_BIN` (was `NEX_GEN_BIN`). Generated-file headers and the
+  `[GeneratedCode]` attribute now read `nexgen`.
+
 ### Fixed
 
 ### Security

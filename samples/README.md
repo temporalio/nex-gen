@@ -3,7 +3,7 @@
 Beginner-friendly samples generated from **JSON Schema** inputs. Each schema in
 [`schemas/`](schemas/) is turned into idiomatic data models (the generator's
 *definitions* mode) for .NET, Go, Java, Python, and TypeScript. This is the
-recommended starting point for using `nex-gen`.
+recommended starting point for using `nexgen`.
 
 For the more advanced WIT-based generation and the JSON Schema *native-api*
 (service/client) mode, see [`../advanced/samples/`](../advanced/samples/).

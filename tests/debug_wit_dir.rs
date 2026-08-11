@@ -24,7 +24,7 @@ fn unique_temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    env::temp_dir().join(format!("nex-gen-{name}-{unique}"))
+    env::temp_dir().join(format!("nexgen-{name}-{unique}"))
 }
 
 #[test]

@@ -2,16 +2,16 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use nex_gen::generator::TsDateTimeTypes;
-use nex_gen::language::Language;
+use nexgen::generator::TsDateTimeTypes;
+use nexgen::language::Language;
 #[cfg(feature = "advanced")]
-use nex_gen::parser::write_prepared_wit_directory;
+use nexgen::parser::write_prepared_wit_directory;
 #[cfg(feature = "advanced")]
-use nex_gen::{
+use nexgen::{
     AddMessageRequest, AddRpcRequest, BuildExamplesRequest, add_message_to_file, add_rpc_to_file,
     build_examples, build_json_examples,
 };
-use nex_gen::{GenerateRequest, generate_to_file};
+use nexgen::{GenerateRequest, generate_to_file};
 
 #[derive(Parser)]
 #[command(name = "nexgen")]

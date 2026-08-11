@@ -663,7 +663,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         &output_path,
     )?;
 
-    println!("Built {} with nex-gen", output_path.display());
+    println!("Built {} with nexgen", output_path.display());
     Ok(())
 }
 
@@ -738,7 +738,7 @@ fn build_json_example_variant(
         &definitions_output_path,
     )?;
 
-    println!("Built {} with nex-gen", definitions_output_path.display());
+    println!("Built {} with nexgen", definitions_output_path.display());
 
     let api_output_path =
         json_example_output_path(repo_root, language, output_id, GenerationMode::NativeApi);
@@ -760,7 +760,7 @@ fn build_json_example_variant(
         &api_output_path,
     )?;
 
-    println!("Built {} with nex-gen", api_output_path.display());
+    println!("Built {} with nexgen", api_output_path.display());
 
     Ok(())
 }
@@ -1056,19 +1056,19 @@ mod tests {
                 r#"
 using System;
 
-namespace NexGen.Support
+namespace Nexgen.Support
 {
     internal static class TemporalSupport { }
 }
 "#
             )
             .as_deref(),
-            Some("NexGen.Support")
+            Some("Nexgen.Support")
         );
         assert_eq!(
-            infer_dotnet_namespace("namespace NexGen.Support;\ninternal static class Support { }")
+            infer_dotnet_namespace("namespace Nexgen.Support;\ninternal static class Support { }")
                 .as_deref(),
-            Some("NexGen.Support")
+            Some("Nexgen.Support")
         );
     }
 

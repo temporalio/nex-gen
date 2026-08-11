@@ -12,7 +12,7 @@ converters) with no service/endpoint scaffolding.
 Regenerate with `cargo build-json-examples --lang dotnet` from the repo root.
 
 ```bash
-dotnet build NexusApiGen.DotNetExamples.csproj   # compile the models
+dotnet build Nexgen.DotNetExamples.csproj   # compile the models
 dotnet test tests/                                # round-trip the fixtures
 ```
 

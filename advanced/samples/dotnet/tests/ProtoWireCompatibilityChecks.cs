@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Google.Protobuf;
-using NexGen.Support;
+using Nexgen.Support;
 using Xunit;
-using ActivityOptions = NexGen.TypeRoundtripService.ActivityOptions;
-using FailureContainer = NexGen.TypeRoundtripService.FailureContainer;
+using ActivityOptions = Nexgen.TypeRoundtripService.ActivityOptions;
+using FailureContainer = Nexgen.TypeRoundtripService.FailureContainer;
 using Payload = Temporalio.Api.Common.V1.Payload;
 
-namespace NexGen.DotNetExamples.Tests
+namespace Nexgen.DotNetExamples.Tests
 {
 
     public class ProtoWireCompatibilityChecks

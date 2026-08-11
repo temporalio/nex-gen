@@ -1,10 +1,10 @@
 [package]
-name = "nex-gen"
+name = "nexgen"
 version = "0.2.1"
 edition = "2024"
 description = "Generate language-specific Nexus operation bindings from WIT"
 license = "MIT"
-repository = "https://github.com/temporalio/nex-gen"
+repository = "https://github.com/temporalio/nexgen"
 readme = "README.md"
 include = [
     "/Cargo.toml",

@@ -3481,7 +3481,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("nex-gen-{label}-{unique}"))
+        std::env::temp_dir().join(format!("nexgen-{label}-{unique}"))
     }
 
     const GENERIC_WIT: &str = r#"
@@ -3972,7 +3972,7 @@ interface workflow-service {
         );
         assert_eq!(
             dotnet_support[0].namespace.as_deref(),
-            Some("NexGen.Support")
+            Some("Nexgen.Support")
         );
         assert!(
             python

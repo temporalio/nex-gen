@@ -1,4 +1,4 @@
-"""Prepare checked-in files for a nex-gen release."""
+"""Prepare checked-in files for a nexgen release."""
 
 from __future__ import annotations
 
@@ -93,10 +93,10 @@ def replace_manifest_version(text: str, version: str) -> str:
 
 def replace_lock_package_version(text: str, version: str) -> str:
     return _replace_once(
-        r'(?ms)(\[\[package\]\]\nname = "nex-gen"\nversion = ")[^"]+(")',
+        r'(?ms)(\[\[package\]\]\nname = "nexgen"\nversion = ")[^"]+(")',
         rf"\g<1>{validate_version(version)}\2",
         text,
-        description="Cargo.lock nex-gen package version",
+        description="Cargo.lock nexgen package version",
     )
 
 
@@ -178,7 +178,7 @@ def create_release_pr(repo_root: pathlib.Path, version: str) -> None:
             "--title",
             f"Prepare release {version}",
             "--body",
-            f"Prepare nex-gen release {version}.",
+            f"Prepare nexgen release {version}.",
         ],
         cwd=repo_root,
         check=True,

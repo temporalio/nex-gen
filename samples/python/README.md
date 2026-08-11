@@ -27,7 +27,7 @@ uv run pytest
 uv run basedpyright
 ```
 
-Set `NEX_GEN_BIN=/path/to/nex-gen` to make `build_outputs.py` use an
+Set `NEXGEN_BIN=/path/to/nexgen` to make `build_outputs.py` use an
 already-built binary instead of the cargo alias.
 
 The native-api variant of these schemas (services + clients) lives under

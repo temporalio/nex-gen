@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nex_gen::add_rpc_to_string;
-use nex_gen::language::Language;
-use nex_gen::spec::{ApiSpec, TypeSpec};
+use nexgen::add_rpc_to_string;
+use nexgen::language::Language;
+use nexgen::spec::{ApiSpec, TypeSpec};
 
 const PRIMARY_EXAMPLE_PATH: &str = "advanced/samples/inputs/workflow-service.wit";
 
@@ -37,7 +37,7 @@ fn unique_temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nex-gen-{name}-{unique}"))
+    std::env::temp_dir().join(format!("nexgen-{name}-{unique}"))
 }
 
 fn write_temp_wit(name: &str, contents: &str) -> PathBuf {
@@ -51,7 +51,7 @@ fn write_temp_wit(name: &str, contents: &str) -> PathBuf {
 fn parse(language: Language, wit: &str, path: &str) -> ApiSpec {
     let root = project_root();
     let input_path = write_temp_wit(path, wit);
-    nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
+    nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
         language,
         &merge_inputs(&root, input_path),
     )
@@ -104,13 +104,13 @@ fn add_rpc_matches_signal_with_start_proto_shape_but_not_handwritten_refinements
     .unwrap();
 
     let generated_python = parse(Language::Python, &generated, "generated-add-rpc.wit");
-    let handwritten_python = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
+    let handwritten_python = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
         Language::Python,
         &[root.join(PRIMARY_EXAMPLE_PATH), linked_inputs_path(&root)],
     )
     .unwrap();
     let generated_typescript = parse(Language::TypeScript, &generated, "generated-add-rpc.wit");
-    let handwritten_typescript = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
+    let handwritten_typescript = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
         Language::TypeScript,
         &[root.join(PRIMARY_EXAMPLE_PATH), linked_inputs_path(&root)],
     )

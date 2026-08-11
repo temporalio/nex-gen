@@ -10,10 +10,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use heck::ToSnakeCase;
-use nex_gen::SupportFiles;
-use nex_gen::generator::generate_source;
-use nex_gen::spec::SupportFragmentSpec;
-use nex_gen::{GenerateRequest, generate_to_file};
+use nexgen::SupportFiles;
+use nexgen::generator::generate_source;
+use nexgen::spec::SupportFragmentSpec;
+use nexgen::{GenerateRequest, generate_to_file};
 
 mod common;
 use common::json_input_path;
@@ -144,7 +144,7 @@ fn generate_python_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
     let temp_dir = unique_output_path("python-rendered");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
-        language: nex_gen::language::Language::Python,
+        language: nexgen::language::Language::Python,
         input_paths: input_paths.to_vec(),
         support_paths: Vec::new(),
         descriptor_paths: descriptor_paths.to_vec(),
@@ -171,7 +171,7 @@ fn generate_python_package_files(
     let temp_dir = unique_output_path("python-package");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
-        language: nex_gen::language::Language::Python,
+        language: nexgen::language::Language::Python,
         input_paths: input_paths.to_vec(),
         support_paths: Vec::new(),
         descriptor_paths: descriptor_paths.to_vec(),
@@ -293,7 +293,7 @@ fn unique_output_path(label: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}-{counter}"))
+    std::env::temp_dir().join(format!("nexgen-{label}-{unique}-{counter}"))
 }
 
 #[test]
@@ -670,14 +670,14 @@ fn python_request_models_are_bidirectional_wire_models() {
 #[test]
 fn python_rejects_support_namespace() {
     let root = project_root();
-    let spec = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
-        nex_gen::language::Language::Python,
+    let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
+        nexgen::language::Language::Python,
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
     )
     .unwrap();
-    let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let descriptors = nexgen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
     let err = generate_source(
-        nex_gen::language::Language::Python,
+        nexgen::language::Language::Python,
         spec.clone(),
         &descriptors,
         &SupportFiles {

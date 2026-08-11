@@ -1,9 +1,9 @@
 using System;
 using System.Threading.Tasks;
 using Temporalio.Workflows;
-using StartWorkflowExample = NexGen.StartWorkflowService;
+using StartWorkflowExample = Nexgen.StartWorkflowService;
 
-namespace NexGen.DotNetExamples.Tests
+namespace Nexgen.DotNetExamples.Tests
 {
 
     [Workflow]

@@ -1447,7 +1447,7 @@ fn build_field_conversion(
                     format!("\ttyped, ok := converted.({native_go_type})"),
                     "\tif !ok {".to_string(),
                     format!(
-                        "\t\treturn value, fmt.Errorf(\"nex-gen decoded field {go_field} has unexpected type %T\", converted)"
+                        "\t\treturn value, fmt.Errorf(\"nexgen decoded field {go_field} has unexpected type %T\", converted)"
                     ),
                     "\t}".to_string(),
                     format!("\tvalue.{go_field} = typed"),

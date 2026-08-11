@@ -3,7 +3,7 @@
 ///   typescript="typescript/temporal_model_converters.ts"
 ///   go="go/temporal_model_converters.go"
 ///   dotnet="dotnet/TemporalSupport.cs"
-/// @nexus.support-namespace dotnet="NexGen.Support"
+/// @nexus.support-namespace dotnet="Nexgen.Support"
 package nexus:temporal-types@1.0.0;
 
 interface model {

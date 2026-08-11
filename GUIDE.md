@@ -1,4 +1,4 @@
-# WIT Author's Guide to nexus-api-gen
+# WIT Author's Guide to nexgen
 
 This guide explains what the code generator produces from your WIT definitions,
 with examples in Python and TypeScript. It covers every type mapping, the

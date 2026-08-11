@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using GenericModels = NexGen.GenericModelService;
+using GenericModels = Nexgen.GenericModelService;
 
-namespace NexGen.DotNetExamples
+namespace Nexgen.DotNetExamples
 {
     internal static class GenericModelCompileChecks
     {

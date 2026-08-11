@@ -30,7 +30,7 @@ npm run typecheck
 npm run test
 ```
 
-Set `NEX_GEN_BIN=/path/to/nex-gen` to make `build_outputs.mjs` use an
+Set `NEXGEN_BIN=/path/to/nexgen` to make `build_outputs.mjs` use an
 already-built binary instead of the cargo alias.
 
 The native-api (Nexus service/client) variant of these same schemas is

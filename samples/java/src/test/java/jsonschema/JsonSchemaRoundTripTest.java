@@ -130,7 +130,7 @@ final class JsonSchemaRoundTripTest {
         assertNull(page.getBlocks().get(0).getPage());
         assertNotNull(page.getBlocks().get(0).getStyle());
         assertTrue(page.getBlocks().get(0).getStyle().getBold());
-        assertEquals("nex-gen", page.getMeta().getAuthor());
+        assertEquals("nexgen", page.getMeta().getAuthor());
 
         Block block = decode("kb", "block.json", Block.class);
         assertEquals("block-1", block.getBlockId());

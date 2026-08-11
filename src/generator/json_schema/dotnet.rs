@@ -14,7 +14,7 @@ use crate::generator::dotnet::{
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
 use crate::spec::{ExternalTypeSpec, RecordSpec};
 
-const GENERATED_CODE_ATTRIBUTE: &str = "[GeneratedCode(\"nex-gen\", null)]";
+const GENERATED_CODE_ATTRIBUTE: &str = "[GeneratedCode(\"nexgen\", null)]";
 
 #[derive(Debug, Deserialize, Default)]
 struct Schema {
@@ -713,7 +713,7 @@ fn reference_type_name(reference: &str) -> String {
             .collect::<Vec<_>>()
             .join(".");
         return format!(
-            "global::NexGen.Generated.{}.{}",
+            "global::Nexgen.Generated.{}.{}",
             namespace,
             csharp_type_name(model_name)
         );

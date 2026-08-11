@@ -25,7 +25,7 @@ func TestJSONSchemaKBRuntime(t *testing.T) {
 	// which Go collapses on serialize, so verify by deserialization only.
 	page := decodeFixture[kb.Page](t, dc, "kb", "page.json")
 	require.Equal(t, "page-1", page.PageId)
-	require.Equal(t, "nex-gen", page.Meta.Author)
+	require.Equal(t, "nexgen", page.Meta.Author)
 	require.Len(t, page.Blocks, 1)
 	require.Equal(t, "block-1", page.Blocks[0].BlockId)
 	require.Nil(t, page.Blocks[0].Page)

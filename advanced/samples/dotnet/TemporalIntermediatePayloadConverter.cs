@@ -3,7 +3,7 @@ using System.Reflection;
 using Temporalio.Converters;
 using Payload = Temporalio.Api.Common.V1.Payload;
 
-namespace NexGen.Support
+namespace Nexgen.Support
 {
     public interface ITemporalIntermediate
     {

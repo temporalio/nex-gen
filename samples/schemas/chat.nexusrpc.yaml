@@ -1,6 +1,6 @@
 nexusrpc: "1.0.0"
 $schema: https://json-schema.org/draft/2020-12/schema
-description: A small chat service demonstrating nex-gen.
+description: A small chat service demonstrating nexgen.
 services:
   ChatService:
     fqn: example.chat.v1.ChatService

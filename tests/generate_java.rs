@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nex_gen::{GenerateRequest, generate_to_file};
+use nexgen::{GenerateRequest, generate_to_file};
 
 mod common;
 use common::json_input_path;
@@ -35,7 +35,7 @@ fn unique_output_path(label: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}-{counter}"))
+    std::env::temp_dir().join(format!("nexgen-{label}-{unique}-{counter}"))
 }
 
 fn read_java_files(dir: &Path) -> BTreeMap<PathBuf, String> {
@@ -73,7 +73,7 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
         let output_path = temp_dir.join(example_id);
 
         generate_to_file(&GenerateRequest {
-            language: nex_gen::language::Language::Java,
+            language: nexgen::language::Language::Java,
             input_paths: vec![json_input_path(&root, example_id)],
             support_paths: Vec::new(),
             descriptor_paths: Vec::new(),

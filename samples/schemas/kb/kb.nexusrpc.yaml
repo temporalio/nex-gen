@@ -1,4 +1,4 @@
-# Sample input for nex-gen - the multi-file closure entry point.
+# Sample input for nexgen - the multi-file closure entry point.
 nexusrpc: "1.0.0"
 $schema: https://json-schema.org/draft/2020-12/schema
 description: A knowledge-base service whose types span several schema files.

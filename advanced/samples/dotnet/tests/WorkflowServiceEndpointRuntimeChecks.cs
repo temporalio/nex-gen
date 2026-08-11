@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NexusRpc;
 using NexusRpc.Handlers;
-using NexGen.Support;
+using Nexgen.Support;
 using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Converters;
@@ -13,7 +13,7 @@ using Temporalio.Worker;
 using Temporalio.Workflows;
 using Xunit;
 
-namespace NexGen.DotNetExamples.Tests
+namespace Nexgen.DotNetExamples.Tests
 {
 
     public class WorkflowServiceEndpointRuntimeChecks

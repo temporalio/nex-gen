@@ -9,9 +9,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nex_gen::generator::generate_source;
-use nex_gen::spec::SupportFragmentSpec;
-use nex_gen::{GenerateRequest, SupportFiles, generate_to_file};
+use nexgen::generator::generate_source;
+use nexgen::spec::SupportFragmentSpec;
+use nexgen::{GenerateRequest, SupportFiles, generate_to_file};
 
 mod common;
 use common::json_input_path;
@@ -148,7 +148,7 @@ fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[Pa
     let temp_dir = unique_output_path("typescript-rendered");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
-        language: nex_gen::language::Language::TypeScript,
+        language: nexgen::language::Language::TypeScript,
         input_paths: input_paths.to_vec(),
         support_paths: Vec::new(),
         descriptor_paths: descriptor_paths.to_vec(),
@@ -272,7 +272,7 @@ fn unique_output_path(label: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}-{counter}"))
+    std::env::temp_dir().join(format!("nexgen-{label}-{unique}-{counter}"))
 }
 
 #[test]
@@ -404,14 +404,14 @@ fn cli_generates_typescript_support_file_from_parameter() {
 #[test]
 fn typescript_rejects_support_namespace() {
     let root = project_root();
-    let spec = nex_gen::parser::load_api_spec_from_wit_for_language_with_inputs(
-        nex_gen::language::Language::TypeScript,
+    let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
+        nexgen::language::Language::TypeScript,
         &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
     )
     .unwrap();
-    let descriptors = nex_gen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let descriptors = nexgen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
     let err = generate_source(
-        nex_gen::language::Language::TypeScript,
+        nexgen::language::Language::TypeScript,
         spec.clone(),
         &descriptors,
         &SupportFiles {

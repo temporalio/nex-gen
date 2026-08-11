@@ -13,7 +13,7 @@ using ApiFailure = Temporalio.Api.Failure.V1;
 using ApiTaskQueue = Temporalio.Api.TaskQueue.V1;
 using ApiWorkflow = Temporalio.Api.Workflow.V1;
 
-namespace NexGen.Support
+namespace Nexgen.Support
 {
     internal static class TemporalWorkflowContext
     {

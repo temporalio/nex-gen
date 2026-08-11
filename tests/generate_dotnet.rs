@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nex_gen::{GenerateRequest, generate_to_file};
+use nexgen::{GenerateRequest, generate_to_file};
 
 const WORKFLOW_SERVICE_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_SHOWCASE_EXAMPLE_ID: &str = "type-showcase";
@@ -124,7 +124,7 @@ fn generate_dotnet_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
     let temp_dir = unique_output_path("dotnet-rendered");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
-        language: nex_gen::language::Language::Dotnet,
+        language: nexgen::language::Language::Dotnet,
         input_paths: input_paths.to_vec(),
         support_paths: Vec::new(),
         descriptor_paths: descriptor_paths.to_vec(),
@@ -167,7 +167,7 @@ fn unique_output_path(label: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("nex-gen-{label}-{unique}-{counter}"))
+    std::env::temp_dir().join(format!("nexgen-{label}-{unique}-{counter}"))
 }
 
 fn dotnet_msbuild_dir(path: &Path) -> String {
@@ -233,7 +233,7 @@ fn cli_generates_dotnet_support_file_from_parameter() {
 fn dotnet_example_project_builds() {
     let root = project_root();
     let project =
-        fs::read_to_string(dotnet_root(&root).join("NexusApiGen.DotNetExamples.csproj")).unwrap();
+        fs::read_to_string(dotnet_root(&root).join("Nexgen.DotNetExamples.csproj")).unwrap();
     assert!(project.contains("<LangVersion>9.0</LangVersion>"));
     let build_path = unique_output_path("dotnet-build");
     fs::create_dir_all(&build_path).unwrap();
@@ -248,7 +248,7 @@ fn dotnet_example_project_builds() {
         .current_dir(dotnet_root(&root))
         .args([
             "build",
-            "NexusApiGen.DotNetExamples.csproj",
+            "Nexgen.DotNetExamples.csproj",
             "--nologo",
             "-p:LangVersion=9.0",
             "-p:RestoreUseStaticGraphEvaluation=true",
@@ -279,8 +279,8 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
     assert!(rendered.contains("internal interface ITypeShowcase"));
     assert!(rendered.contains("[NexusOperation(\"SetProfile\")]"));
     assert!(rendered.contains("User SetProfile(SetProfileRequest request);"));
-    assert!(!rendered.contains("public sealed class NexGenNexusOperation"));
-    assert!(!rendered.contains("NexGenOperationRegistry"));
+    assert!(!rendered.contains("public sealed class NexgenNexusOperation"));
+    assert!(!rendered.contains("NexgenOperationRegistry"));
     assert!(!rendered.contains("ServiceDefinition.FromType"));
     assert!(!rendered.contains("OperationDefinition"));
     assert!(!rendered.contains("OperationDefinition.FromMethod"));
@@ -301,7 +301,7 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
     );
     assert!(rendered.contains("public static Task<User> GetUserAsync(GetUserOptions options)"));
     assert!(
-        rendered.contains("[GeneratedCode(\"nex-gen\", null)]\n    public static class Operations")
+        rendered.contains("[GeneratedCode(\"nexgen\", null)]\n    public static class Operations")
     );
     assert!(!rendered.contains("public static partial class Operations"));
     assert!(!rendered.contains("TypeShowcaseOperations"));
@@ -324,14 +324,13 @@ fn dotnet_renders_proto_backed_temporal_types() {
 
     assert!(rendered.contains("internal interface IWorkflowService"));
     assert!(rendered.contains("namespace Temporalio.Workflows\n{"));
-    assert!(rendered.contains("namespace NexGen.Support\n{"));
-    assert!(!rendered.contains("namespace NexusApiGen."));
+    assert!(rendered.contains("namespace Nexgen.Support\n{"));
     assert!(!rendered.contains("namespace Temporalio.Workflows;"));
-    assert!(!rendered.contains("namespace NexGen.Support;"));
+    assert!(!rendered.contains("namespace Nexgen.Support;"));
     assert!(rendered.contains(
         "SignalWithStartWorkflowResponse SignalWithStartWorkflow(SignalWithStartWorkflowRequest request);"
     ));
-    assert!(!rendered.contains("NexGenOperationRegistry"));
+    assert!(!rendered.contains("NexgenOperationRegistry"));
     assert!(!rendered.contains("ServiceDefinition.FromType"));
     assert!(!rendered.contains("OperationDefinition"));
     assert!(!rendered.contains("endpoint: \"temporal-system\""));
@@ -375,20 +374,20 @@ fn dotnet_renders_proto_backed_temporal_types() {
     );
     assert!(rendered.contains("Expression<Func<TWorkflow, Task<TResult>>> workflow"));
     assert!(rendered.contains("using System.CodeDom.Compiler;"));
-    assert!(rendered.contains("[GeneratedCode(\"nex-gen\", null)]\n    [NexusService(\"temporal.api.workflowservice.v1.WorkflowService\")]\n    internal interface IWorkflowService"));
+    assert!(rendered.contains("[GeneratedCode(\"nexgen\", null)]\n    [NexusService(\"temporal.api.workflowservice.v1.WorkflowService\")]\n    internal interface IWorkflowService"));
     assert!(rendered.contains(
-        "[GeneratedCode(\"nex-gen\", null)]\n    internal class SignalWithStartWorkflowRequest"
+        "[GeneratedCode(\"nexgen\", null)]\n    internal class SignalWithStartWorkflowRequest"
     ));
     assert!(rendered.contains(
-        "[GeneratedCode(\"nex-gen\", null)]\n    public class SignalWithStartWorkflowOptions"
+        "[GeneratedCode(\"nexgen\", null)]\n    public class SignalWithStartWorkflowOptions"
     ));
     assert!(
         !rendered.contains(
-            "[GeneratedCode(\"nex-gen\", null)]\n    public static partial class Workflow"
+            "[GeneratedCode(\"nexgen\", null)]\n    public static partial class Workflow"
         )
     );
     assert!(!rendered.contains(
-        "public static partial class Workflow\n    {\n        [GeneratedCode(\"nex-gen\", null)]\n        private const string WorkflowServiceEndpoint"
+        "public static partial class Workflow\n    {\n        [GeneratedCode(\"nexgen\", null)]\n        private const string WorkflowServiceEndpoint"
     ));
     assert!(rendered.contains(
         "/// <remarks>WARNING: This API is experimental and may change in the future.</remarks>"
@@ -416,8 +415,8 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("SignalWithStartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)"));
     assert!(rendered.contains("SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)"));
     assert!(rendered.contains("SignalWithStartWorkflowAsync<TWorkflow>(string workflow, IReadOnlyCollection<object?>? args, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)"));
-    assert!(rendered.contains("NexGen.Support.TemporalFunctionNames.ExtractCall(workflow)"));
-    assert!(rendered.contains("NexGen.Support.TemporalFunctionNames.ExtractCall(signal)"));
+    assert!(rendered.contains("Nexgen.Support.TemporalFunctionNames.ExtractCall(workflow)"));
+    assert!(rendered.contains("Nexgen.Support.TemporalFunctionNames.ExtractCall(signal)"));
     assert!(!rendered.contains(
         "private static (MethodInfo Method, IReadOnlyCollection<object?> Args) ExtractCall"
     ));
@@ -427,11 +426,11 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("System.TimeSpan? executionTimeout = null"));
     assert!(
         rendered.contains(
-            "new SignalWithStartWorkflowRequest(NexGen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.Id, options.TaskQueue"
+            "new SignalWithStartWorkflowRequest(Nexgen.Support.TemporalFunctionNames.WorkflowName(workflowMethod), options.Id, options.TaskQueue"
         )
     );
     assert!(rendered.contains(
-        "options.TaskQueue, NexGen.Support.TemporalFunctionNames.SignalName(signalMethod))"
+        "options.TaskQueue, Nexgen.Support.TemporalFunctionNames.SignalName(signalMethod))"
     ));
     assert!(rendered.contains("Args = workflowArgs"));
     assert!(rendered.contains("Args = args"));
@@ -446,7 +445,7 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("var wireRequest = request.ToProto();"));
     assert!(rendered.contains("svc.SignalWithStartWorkflow(request)"));
     assert!(rendered.contains(
-        "internal class SignalWithStartWorkflowRequest : NexGen.Support.ITemporalIntermediate"
+        "internal class SignalWithStartWorkflowRequest : Nexgen.Support.ITemporalIntermediate"
     ));
     assert!(!rendered.contains("ITemporalIntermediate<"));
     assert!(
@@ -462,9 +461,9 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains(
         "public Temporalio.Api.Sdk.V1.UserMetadata ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)"
     ));
-    assert!(rendered.contains("using NexGen.Support;"));
-    assert!(rendered.contains("NexGen.Support.ProtoExtensions.ToWorkflowTypeProto(Workflow"));
-    assert!(rendered.contains("NexGen.Support.ProtoExtensions.ToTaskQueueProto(TaskQueue"));
+    assert!(rendered.contains("using Nexgen.Support;"));
+    assert!(rendered.contains("Nexgen.Support.ProtoExtensions.ToWorkflowTypeProto(Workflow"));
+    assert!(rendered.contains("Nexgen.Support.ProtoExtensions.ToTaskQueueProto(TaskQueue"));
     assert!(rendered.contains("proto.UserMetadata = (Temporalio.Api.Sdk.V1.UserMetadata)userMetadata.TemporalToIntermediate(payloadConverter);"));
     assert!(!rendered.contains("var wireRequest = ToProto(request);"));
     assert!(!rendered.contains("private static Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest ToProto(SignalWithStartWorkflowRequest request)"));
@@ -475,11 +474,11 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("proto.WorkflowExecutionTimeout = executionTimeout.ToProto();"));
     assert!(rendered.contains("public IReadOnlyCollection<object?>? Args { get; init; }"));
     assert!(rendered.contains(
-        "proto.Input = NexGen.Support.ProtoExtensions.ToPayloads(args, payloadConverter);"
+        "proto.Input = Nexgen.Support.ProtoExtensions.ToPayloads(args, payloadConverter);"
     ));
     assert!(rendered.contains("Args = args,"));
     assert!(rendered.contains(
-        "proto.Summary = NexGen.Support.ProtoExtensions.ToPayload(staticSummary, payloadConverter);"
+        "proto.Summary = Nexgen.Support.ProtoExtensions.ToPayload(staticSummary, payloadConverter);"
     ));
     assert!(rendered.contains(
         "internal static ApiCommon.Payload ToPayload(object? value, IPayloadConverter? payloadConverter = null)"

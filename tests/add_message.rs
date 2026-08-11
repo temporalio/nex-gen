@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nex_gen::{add_message_to_string, add_rpc_to_string};
+use nexgen::{add_message_to_string, add_rpc_to_string};
 use prost::Message;
 use prost_types::field_descriptor_proto::{Label, Type};
 use prost_types::{
@@ -31,7 +31,7 @@ fn unique_temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nex-gen-{name}-{unique}"))
+    std::env::temp_dir().join(format!("nexgen-{name}-{unique}"))
 }
 
 fn write_temp_wit(name: &str, contents: &str) -> PathBuf {

@@ -21,8 +21,8 @@ function main() {
 }
 
 function generatorCommand() {
-  if (process.env.NEX_GEN_BIN) {
-    return [process.env.NEX_GEN_BIN, "build-examples", "--lang", "typescript"];
+  if (process.env.NEXGEN_BIN) {
+    return [process.env.NEXGEN_BIN, "build-examples", "--lang", "typescript"];
   }
 
   return ["cargo", "build-examples", "--lang", "typescript"];

@@ -4,13 +4,13 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Xunit;
-using Chat = NexGen.ChatService;
-using Kb = NexGen.Generated.Kb;
-using KbBlock = NexGen.Generated.Content.Block;
-using KbCategory = NexGen.Generated.Tree.Category;
-using KbPage = NexGen.Generated.Content.Page;
+using Chat = Nexgen.ChatService;
+using Kb = Nexgen.Generated.Kb;
+using KbBlock = Nexgen.Generated.Content.Block;
+using KbCategory = Nexgen.Generated.Tree.Category;
+using KbPage = Nexgen.Generated.Content.Page;
 
-namespace NexGen.DotNetExamples.Tests
+namespace Nexgen.DotNetExamples.Tests
 {
 
     public class JsonSchemaRuntimeChecks
