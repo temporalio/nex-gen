@@ -27,7 +27,6 @@ mod resource_binding;
 mod selection;
 mod type_planning;
 
-pub(crate) use authored_validation::validate_generic_model_semantics;
 pub(crate) use emitted_names::EmittedNameResolutionPass;
 pub(crate) use emitted_names::build_json_name_manifest;
 pub(crate) use operation_binding::OperationBindingPass;
@@ -665,6 +664,12 @@ pub(crate) struct PlannedVariantType {
     pub(crate) name: String,
 }
 
+impl AsRef<str> for PlannedVariantType {
+    fn as_ref(&self) -> &str {
+        &self.full_name
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlannedAliasType {
     pub(crate) name: String,
@@ -715,6 +720,12 @@ pub(crate) struct PlannedProtoEnumType {
 pub(crate) struct PlannedRecordType {
     pub(crate) full_name: String,
     pub(crate) model_name: String,
+}
+
+impl AsRef<str> for PlannedRecordType {
+    fn as_ref(&self) -> &str {
+        &self.full_name
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -119,7 +119,8 @@ fn enqueue_type_references(
         | TypeSpec::Int(_)
         | TypeSpec::Float
         | TypeSpec::String
-        | TypeSpec::Bytes => {}
+        | TypeSpec::Bytes
+        | TypeSpec::TypeParameter(_) => {}
     }
 }
 

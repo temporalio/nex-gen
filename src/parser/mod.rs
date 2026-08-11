@@ -5,8 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::language::Language;
-use crate::spec::ApiSpec;
-use crate::spec::ApiSpecTree;
+use crate::spec::{ApiSpec, ApiSpecLeaf, ApiSpecNode, ApiSpecTree, ModulePath};
 
 pub(crate) use json_schema::strip_json_schema_extension;
 pub use json_schema::{
@@ -54,7 +53,21 @@ pub fn load_api_spec_tree_for_language_with_inputs(
     match format {
         InputFormat::Wit => {
             let spec = load_api_spec_from_wit_for_language_with_inputs(language, input_paths)?;
-            Ok(ApiSpecTree::single(spec))
+            let source_path = input_paths
+                .first()
+                .cloned()
+                .expect("WIT input paths were validated during format detection");
+            Ok(ApiSpecTree {
+                root: ApiSpecNode::Leaf(ApiSpecLeaf {
+                    module_path: ModulePath::default(),
+                    source_root: source_path
+                        .parent()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_default(),
+                    source_path,
+                    spec,
+                }),
+            })
         }
         InputFormat::JsonSchema => {
             load_api_spec_tree_from_json_schema_for_language_with_inputs(language, input_paths)

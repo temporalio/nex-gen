@@ -771,6 +771,7 @@ impl<'a> TypePlanningContext<'a> {
             TypeSpec::Resource(resource) => {
                 TypeSpec::Resource(self.planned_resource_type_from_authored(resource))
             }
+            TypeSpec::TypeParameter(parameter) => TypeSpec::TypeParameter(parameter.clone()),
             TypeSpec::Bool => TypeSpec::Bool,
             TypeSpec::Int(int) => TypeSpec::Int(*int),
             TypeSpec::Float => TypeSpec::Float,
@@ -937,6 +938,7 @@ impl<'a> TypePlanningContext<'a> {
             TypeSpec::Float => TypeSpec::Float,
             TypeSpec::String => TypeSpec::String,
             TypeSpec::Bytes => TypeSpec::Bytes,
+            TypeSpec::TypeParameter(parameter) => TypeSpec::TypeParameter(parameter.clone()),
             TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) => {
                 proto::planned_value_type_from_authored_proto(proto_name.as_str(), self)
             }
