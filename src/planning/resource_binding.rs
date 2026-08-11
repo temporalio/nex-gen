@@ -1,3 +1,5 @@
+//! Resource resolution resolves resource methods and operation-return field sources.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use heck::{ToKebabCase, ToUpperCamelCase};
@@ -8,29 +10,30 @@ use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
     ApiSpec, AuthoredNames, ExternalTypeSpec, OperationSpec, RecordFieldSpec,
-    RecordFieldVisibility, ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec, ServiceSpec,
-    TypeSpec,
+    RecordFieldVisibility, RecordSpec, ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec,
+    ResourceSpec, SelectedNames, ServiceSpec, TypeSpec,
 };
+use crate::spec::{ApiSpecLeaf, CompilerPass};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedServiceResources {
-    pub resources: Vec<ResolvedResourceSpec>,
-    pub operation_returns: BTreeMap<String, ResolvedResourceReturnSpec>,
+pub(crate) struct ResolvedServiceResources {
+    pub(crate) resources: Vec<ResolvedResourceSpec>,
+    pub(crate) operation_returns: BTreeMap<String, ResolvedResourceReturnSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedResourceSpec {
-    pub name: String,
-    pub fields: Vec<ResourceFieldSpec>,
-    pub methods: Vec<ResolvedResourceMethodSpec>,
+pub(crate) struct ResolvedResourceSpec {
+    pub(crate) name: String,
+    pub(crate) fields: Vec<ResourceFieldSpec<SelectedNames>>,
+    pub(crate) methods: Vec<ResolvedResourceMethodSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedResourceMethodSpec {
-    pub name: String,
-    pub params: Vec<ResourceFieldSpec>,
-    pub result: Option<ResourceResultSpec>,
-    pub binding: ResolvedResourceMethodBinding,
+pub(crate) struct ResolvedResourceMethodSpec {
+    pub(crate) name: String,
+    pub(crate) params: Vec<ResourceFieldSpec<SelectedNames>>,
+    pub(crate) result: Option<ResourceResultSpec<SelectedNames>>,
+    pub(crate) binding: ResolvedResourceMethodBinding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,53 +93,6 @@ pub enum RequestPlanSource {
     MethodParam(String),
 }
 
-pub(crate) fn render_request_plan<FName, FAssign, FConstruct, FResource, FParam>(
-    plan: &RequestPlan,
-    member_name: FName,
-    render_assignment: FAssign,
-    render_construct: FConstruct,
-    render_resource_field_source: FResource,
-    render_method_param_source: FParam,
-) -> String
-where
-    FName: Fn(&str) -> String + Copy,
-    FAssign: Fn(String, String) -> String + Copy,
-    FConstruct: Fn(&str, Vec<String>) -> String + Copy,
-    FResource: Fn(&str) -> String + Copy,
-    FParam: Fn(&str) -> String + Copy,
-{
-    match plan {
-        RequestPlan::Source(RequestPlanSource::ResourceField(name)) => {
-            render_resource_field_source(name)
-        }
-        RequestPlan::Source(RequestPlanSource::MethodParam(name)) => {
-            render_method_param_source(name)
-        }
-        RequestPlan::Construct {
-            message_name,
-            fields,
-        } => {
-            let rendered_fields = fields
-                .iter()
-                .map(|field| {
-                    render_assignment(
-                        member_name(&field.field_name),
-                        render_request_plan(
-                            &field.value,
-                            member_name,
-                            render_assignment,
-                            render_construct,
-                            render_resource_field_source,
-                            render_method_param_source,
-                        ),
-                    )
-                })
-                .collect::<Vec<_>>();
-            render_construct(message_name, rendered_fields)
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct MessageFieldInfo {
     proto_name: String,
@@ -147,8 +103,8 @@ struct MessageFieldInfo {
 }
 
 pub(crate) fn resolve_service_resources(
-    spec: &ApiSpec,
-    service: &ServiceSpec,
+    spec: &ApiSpec<SelectedNames>,
+    service: &ServiceSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
 ) -> Result<ResolvedServiceResources> {
     let resources = service
@@ -256,9 +212,9 @@ pub(crate) fn resolve_service_resources(
 }
 
 fn resolve_resource_methods(
-    spec: &ApiSpec,
-    service: &ServiceSpec,
-    resource: &crate::spec::ResourceSpec,
+    spec: &ApiSpec<SelectedNames>,
+    service: &ServiceSpec<SelectedNames>,
+    resource: &ResourceSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
 ) -> Result<ResolvedResourceSpec> {
     let methods = resource
@@ -274,10 +230,10 @@ fn resolve_resource_methods(
 }
 
 fn resolve_resource_method(
-    spec: &ApiSpec,
-    service: &ServiceSpec,
-    resource: &crate::spec::ResourceSpec,
-    method: &ResourceMethodSpec,
+    spec: &ApiSpec<SelectedNames>,
+    service: &ServiceSpec<SelectedNames>,
+    resource: &ResourceSpec<SelectedNames>,
+    method: &ResourceMethodSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
 ) -> Result<ResolvedResourceMethodSpec> {
     let mut environment = BTreeMap::new();
@@ -389,9 +345,9 @@ fn resolve_resource_method(
 }
 
 fn resource_method_result_matches_operation(
-    service: &ServiceSpec,
-    method: &ResourceMethodSpec,
-    operation: &OperationSpec,
+    service: &ServiceSpec<SelectedNames>,
+    method: &ResourceMethodSpec<SelectedNames>,
+    operation: &OperationSpec<SelectedNames>,
 ) -> bool {
     let Some(result) = &method.result else {
         return true;
@@ -409,9 +365,9 @@ fn resource_method_result_matches_operation(
 }
 
 fn synthesize_operation_request_plan(
-    spec: &ApiSpec,
+    spec: &ApiSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
-    operation: &OperationSpec,
+    operation: &OperationSpec<SelectedNames>,
     environment: &BTreeMap<String, RequestPlanSource>,
 ) -> Result<Option<RequestPlan>> {
     if let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_ref))) = operation.input_type() {
@@ -424,7 +380,7 @@ fn synthesize_operation_request_plan(
 }
 
 fn bind_resource_return_field(
-    spec: &ApiSpec,
+    spec: &ApiSpec<SelectedNames>,
     service_name: &str,
     resource_name: &str,
     descriptors: &DescriptorIndex,
@@ -457,7 +413,7 @@ fn bind_resource_return_field(
 }
 
 fn synthesize_request_plan(
-    spec: &ApiSpec,
+    spec: &ApiSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
     message_name: &str,
     environment: &BTreeMap<String, RequestPlanSource>,
@@ -497,7 +453,7 @@ fn synthesize_request_plan(
 }
 
 fn synthesize_record_request_plan(
-    spec: &ApiSpec,
+    spec: &ApiSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
     record_name: &str,
     environment: &BTreeMap<String, RequestPlanSource>,
@@ -549,7 +505,7 @@ fn synthesize_record_request_plan(
 }
 
 fn visible_message_fields(
-    spec: &ApiSpec,
+    spec: &ApiSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
     message_name: &str,
 ) -> Result<Vec<MessageFieldInfo>> {
@@ -559,7 +515,10 @@ fn visible_message_fields(
         .collect())
 }
 
-fn visible_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<MessageFieldInfo>> {
+fn visible_record_fields(
+    spec: &ApiSpec<SelectedNames>,
+    record_name: &str,
+) -> Result<Vec<MessageFieldInfo>> {
     Ok(all_record_fields(spec, record_name)?
         .into_iter()
         .filter(|field| !field.hidden)
@@ -567,7 +526,7 @@ fn visible_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<Messag
 }
 
 fn find_visible_message_field(
-    spec: &ApiSpec,
+    spec: &ApiSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
     message_name: &str,
     field_name: &str,
@@ -578,7 +537,7 @@ fn find_visible_message_field(
 }
 
 fn find_message_field(
-    spec: &ApiSpec,
+    spec: &ApiSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
     message_name: &str,
     field_name: &str,
@@ -589,7 +548,7 @@ fn find_message_field(
 }
 
 fn all_message_fields(
-    spec: &ApiSpec,
+    spec: &ApiSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
     message_name: &str,
 ) -> Result<Vec<MessageFieldInfo>> {
@@ -608,7 +567,10 @@ fn all_message_fields(
         .collect()
 }
 
-fn all_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<MessageFieldInfo>> {
+fn all_record_fields(
+    spec: &ApiSpec<SelectedNames>,
+    record_name: &str,
+) -> Result<Vec<MessageFieldInfo>> {
     let record = spec
         .record(record_name)
         .ok_or_else(|| Error::UnknownTypeOverride {
@@ -624,8 +586,8 @@ fn all_record_fields(spec: &ApiSpec, record_name: &str) -> Result<Vec<MessageFie
 
 fn build_record_field_info(
     field_name: &str,
-    field: &RecordFieldSpec,
-    spec: &ApiSpec,
+    field: &RecordFieldSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedNames>,
 ) -> Result<MessageFieldInfo> {
     let api_name = field.name.clone();
     let required = field.required;
@@ -640,7 +602,10 @@ fn build_record_field_info(
     })
 }
 
-fn api_field_message_name(field_type: &TypeSpec, spec: &ApiSpec) -> Option<String> {
+fn api_field_message_name(
+    field_type: &TypeSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedNames>,
+) -> Option<String> {
     match field_type.without_option() {
         TypeSpec::Record(record_name) => Some(record_name.as_str().to_string()),
         TypeSpec::External(ExternalTypeSpec::Proto(proto_name))
@@ -654,7 +619,7 @@ fn api_field_message_name(field_type: &TypeSpec, spec: &ApiSpec) -> Option<Strin
 
 fn build_message_field_info(
     field: &FieldDescriptorProto,
-    record: Option<&crate::spec::RecordSpec>,
+    record: Option<&RecordSpec<SelectedNames>>,
     descriptors: &DescriptorIndex,
 ) -> Result<MessageFieldInfo> {
     let proto_name = field
@@ -692,7 +657,7 @@ fn field_message_name(
 }
 
 fn operation_input_message_name<'a>(
-    operation: &'a OperationSpec,
+    operation: &'a OperationSpec<SelectedNames>,
     descriptors: &DescriptorIndex,
 ) -> Option<&'a str> {
     let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_ref))) = operation.input_type()
@@ -705,8 +670,8 @@ fn operation_input_message_name<'a>(
 }
 
 fn operation_output_resource_name<'a>(
-    service: &'a ServiceSpec,
-    operation: &'a OperationSpec,
+    service: &'a ServiceSpec<SelectedNames>,
+    operation: &'a OperationSpec<SelectedNames>,
 ) -> Option<&'a str> {
     let TypeSpec::Resource(resource_name) = operation.output_type()? else {
         return None;
@@ -716,11 +681,13 @@ fn operation_output_resource_name<'a>(
         .map(|_| resource_name.as_str())
 }
 
-fn operation_output_ref(operation: &OperationSpec) -> Option<&str> {
+fn operation_output_ref(operation: &OperationSpec<SelectedNames>) -> Option<&str> {
     operation.output_type()?.reference()
 }
 
-fn operation_output_resource_message_name(operation: &OperationSpec) -> Option<&str> {
+fn operation_output_resource_message_name(
+    operation: &OperationSpec<SelectedNames>,
+) -> Option<&str> {
     let Some(ExternalTypeSpec::Proto(type_name)) = operation_output_resource_wire_type(operation)
     else {
         return None;
@@ -729,7 +696,7 @@ fn operation_output_resource_message_name(operation: &OperationSpec) -> Option<&
 }
 
 fn operation_output_resource_wire_type(
-    operation: &OperationSpec,
+    operation: &OperationSpec<SelectedNames>,
 ) -> Option<&ExternalTypeSpec<AuthoredNames>> {
     let TypeSpec::Resource(resource_name) = operation.output_type()? else {
         return None;
@@ -737,7 +704,41 @@ fn operation_output_resource_wire_type(
     resource_name.wire_type.as_ref()
 }
 
-pub(crate) fn ensure_unique_resource_names(spec: &ApiSpec) -> Result<()> {
+/// Resolves descriptor-backed resource facts before they are attached to their
+/// owning operation and resource nodes by `OperationBindingPass`.
+pub(crate) struct ResourceResolutionPass<'a> {
+    descriptors: &'a DescriptorIndex,
+    mode: super::PlanningMode,
+}
+
+impl<'a> ResourceResolutionPass<'a> {
+    pub(crate) fn new(descriptors: &'a DescriptorIndex, mode: super::PlanningMode) -> Self {
+        Self { descriptors, mode }
+    }
+
+    pub(super) fn bind_spec(
+        &self,
+        spec: ApiSpec<SelectedNames>,
+    ) -> Result<ApiSpec<super::ResourceBoundNames>> {
+        ensure_unique_resource_names(&spec)?;
+        let bindings = if self.mode == super::PlanningMode::NativeApi {
+            spec.services
+                .iter()
+                .map(|service| {
+                    resolve_service_resources(&spec, service, self.descriptors)
+                        .map(|resources| (service.name.clone(), resources))
+                })
+                .collect::<Result<BTreeMap<_, _>>>()?
+        } else {
+            BTreeMap::new()
+        };
+        Ok(spec.map_names(super::ResourceBindingMapper {
+            data: super::ResourceBoundData { bindings },
+        }))
+    }
+}
+
+fn ensure_unique_resource_names(spec: &ApiSpec<SelectedNames>) -> Result<()> {
     let mut seen_names = BTreeSet::new();
     for service in &spec.services {
         for resource in &service.resources {
@@ -754,6 +755,22 @@ pub(crate) fn ensure_unique_resource_names(spec: &ApiSpec) -> Result<()> {
     Ok(())
 }
 
+impl CompilerPass<SelectedNames, super::ResourceBoundNames> for ResourceResolutionPass<'_> {
+    type Error = Error;
+
+    fn transform_leaf(
+        &mut self,
+        leaf: ApiSpecLeaf<SelectedNames>,
+    ) -> Result<ApiSpecLeaf<super::ResourceBoundNames>> {
+        Ok(ApiSpecLeaf {
+            module_path: leaf.module_path,
+            source_root: leaf.source_root,
+            source_path: leaf.source_path,
+            spec: self.bind_spec(leaf.spec)?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -762,7 +779,7 @@ mod tests {
 
     use crate::descriptors::DescriptorIndex;
     use crate::language::Language;
-    use crate::spec::ApiSpec;
+    use crate::spec::{ApiSpec, SelectedNames};
 
     use super::{
         RequestPlan, RequestPlanSource, ResolvedResourceMethodBinding, resolve_service_resources,
@@ -780,16 +797,17 @@ mod tests {
         DescriptorIndex::from_descriptor_set(FileDescriptorSet { file: Vec::new() }).unwrap()
     }
 
-    fn parse(language: Language, wit: &str) -> ApiSpec {
+    fn parse(language: Language, wit: &str) -> ApiSpec<SelectedNames> {
         let temporal_types_input =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("advanced/samples/inputs/deps");
-        crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
+        let authored = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
             language,
             wit,
             PathBuf::from("inline.wit"),
             &[temporal_types_input],
         )
-        .unwrap()
+        .unwrap();
+        crate::planning::select_spec(authored, language)
     }
 
     #[test]
@@ -934,12 +952,7 @@ interface user-service {
   updates-email: func(request: update-email-request) -> user-result;
 }
 "#;
-        let spec = crate::parser::parse_api_spec_from_wit_for_language(
-            Language::Python,
-            wit,
-            PathBuf::from("inline.wit"),
-        )
-        .unwrap();
+        let spec = parse(Language::Python, wit);
         let service = &spec.services[0];
         let resolved = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap();
         let method = &resolved.resources[0].methods[0];
@@ -979,12 +992,7 @@ interface user-service {
   updates-email: func(request: update-email-request) -> user-result;
 }
 "#;
-        let spec = crate::parser::parse_api_spec_from_wit_for_language(
-            Language::Python,
-            wit,
-            PathBuf::from("inline.wit"),
-        )
-        .unwrap();
+        let spec = parse(Language::Python, wit);
         let service = &spec.services[0];
         let resolved = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap();
         let method = &resolved.resources[0].methods[0];
@@ -1050,12 +1058,7 @@ interface user-service {
   update-email: func(request: update-email-request) -> user-result;
 }
 "#;
-        let spec = crate::parser::parse_api_spec_from_wit_for_language(
-            Language::Python,
-            wit,
-            PathBuf::from("inline.wit"),
-        )
-        .unwrap();
+        let spec = parse(Language::Python, wit);
         let service = &spec.services[0];
         let error = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap_err();
 
@@ -1092,12 +1095,7 @@ interface user-service {
   update-email: func(request: update-email-request) -> user-result;
 }
 "#;
-        let spec = crate::parser::parse_api_spec_from_wit_for_language(
-            Language::Python,
-            wit,
-            PathBuf::from("inline.wit"),
-        )
-        .unwrap();
+        let spec = parse(Language::Python, wit);
         let service = &spec.services[0];
         let resolved = resolve_service_resources(&spec, service, &empty_descriptors()).unwrap();
         let method = &resolved.resources[0].methods[0];

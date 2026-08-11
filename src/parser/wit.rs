@@ -114,7 +114,7 @@ fn api_spec_from_wit(
         services,
         types,
     };
-    crate::validation::validate_generic_model_semantics(&spec, &path, language)?;
+    crate::planning::validate_generic_model_semantics(&spec, &path, language)?;
     Ok(spec)
 }
 
@@ -3473,7 +3473,7 @@ mod tests {
     fn validate(language: Language, wit: &str) -> Result<(), Error> {
         let spec = parse(language, wit);
         let descriptors = descriptors();
-        crate::validation::validate_external_type_bindings(&spec, &descriptors, language)
+        crate::planning::AuthoredValidationPass::new(&descriptors, language).validate_spec(&spec)
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {

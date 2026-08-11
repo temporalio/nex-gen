@@ -7,10 +7,7 @@ pub mod generator;
 pub mod json_schema;
 pub mod language;
 pub mod parser;
-pub mod resources;
 pub mod spec;
-pub mod validation;
-pub mod workspace;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,7 +20,7 @@ use generator::{GenerateFilesOptions, GeneratedFiles, GeneratedOutputLayout, Gen
 use heck::ToSnakeCase;
 use language::Language;
 use spec::SupportFragmentSpec;
-use workspace::{ApiSpecNode, ApiSpecTree};
+use spec::{ApiSpecNode, ApiSpecTree, CompilerPass};
 
 pub use add_rpc::{
     AddMessageRequest, AddRpcRequest, add_message_to_file, add_message_to_string, add_rpc_to_file,
@@ -71,7 +68,7 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
         });
     }
 
-    let tree = crate::parser::load_api_spec_tree_for_language_with_inputs(
+    let tree = parser::load_api_spec_tree_for_language_with_inputs(
         request.language,
         &request.input_paths,
     )?;
@@ -90,7 +87,7 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
         },
         ts_date_time_types: request.ts_date_time_types,
     };
-    let generated = generator::generate_files_for_tree_with_mode_and_options(
+    let generated = compile_tree_to_files(
         request.language,
         tree,
         &descriptors,
@@ -111,6 +108,54 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// The compiler's explicit high-level pipeline. Parsing is deliberately kept
+/// at the call site: different input frontends produce the authored tree, then
+/// every common compiler pass is visible here in order.
+pub(crate) fn compile_tree_to_files(
+    language: Language,
+    authored_tree: ApiSpecTree,
+    descriptors: &DescriptorIndex,
+    support: &SupportFiles,
+    mode: GenerationMode,
+    options: GenerateFilesOptions,
+) -> Result<GeneratedFiles> {
+    // parse (frontend) -> validate authored intent -> select target metadata
+    let authored_tree =
+        planning::AuthoredValidationPass::new(descriptors, language).apply(authored_tree)?;
+    let selected_tree = planning::LanguageSelectionPass::new(language)
+        .apply(authored_tree)
+        .expect("language selection is infallible");
+
+    // selected IR -> resource bindings -> operation relationships -> lowered
+    // operation results -> planned types -> reachability-pruned planned IR
+    let resource_bound_tree = planning::ResourceResolutionPass::new(
+        descriptors,
+        match mode {
+            GenerationMode::NativeApi => planning::PlanningMode::NativeApi,
+            GenerationMode::DefinitionsOnly => planning::PlanningMode::DefinitionsOnly,
+        },
+    )
+    .apply(selected_tree)?;
+    let operation_bound_tree = planning::OperationBindingPass::new().apply(resource_bound_tree)?;
+    let operation_lowered_tree =
+        planning::OperationLoweringPass::new().apply(operation_bound_tree)?;
+    let type_planning =
+        planning::TypePlanningPass::new(&operation_lowered_tree, descriptors, language);
+    let planned_tree = type_planning.apply(operation_lowered_tree)?;
+    let planned_tree = planning::ReachabilityPass::new().apply(planned_tree)?;
+
+    // planned IR -> emitted JSON names -> render target-language files
+    let generator_ready_tree =
+        planning::EmittedNameResolutionPass::new(language).apply(planned_tree)?;
+    generator::generate_files_from_planned_tree(
+        language,
+        &generator_ready_tree,
+        support,
+        mode,
+        options,
+    )
 }
 
 pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
@@ -562,7 +607,7 @@ fn discover_json_example_ids(repo_root: &Path) -> Result<Vec<String>> {
                 return None;
             }
             let file_name = path.file_name()?.to_str()?;
-            Some(crate::parser::strip_json_schema_extension(file_name).to_string())
+            Some(parser::strip_json_schema_extension(file_name).to_string())
         })
         .collect::<Vec<_>>();
     ids.sort();

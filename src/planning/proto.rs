@@ -6,13 +6,16 @@ use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata};
 use crate::generator::ModelWireCapabilities;
 use crate::spec::{ApiSpec, ExternalTypeSpec, IntSpec, RecordSpec, TypeSpec};
 
+use super::OperationLoweredNames;
+
+use super::type_planning::TypePlanningContext;
 use super::{
-    ApiPlanner, PlannedEnum, PlannedEnumValue, PlannedProtoEnumType, PlannedProtoMessageType,
-    PlannedProtoType, PlannedProtoTypeInfo, PlannedType,
+    PlannedProtoEnumType, PlannedProtoMessageType, PlannedProtoType, PlannedProtoTypeInfo,
+    PlannedType, materialize_selected_replacement, materialize_selected_text,
 };
 
 impl PlannedProtoTypeInfo {
-    fn from_message(message: &MessageMetadata, spec: &ApiSpec) -> Self {
+    fn from_message(message: &MessageMetadata, spec: &ApiSpec<OperationLoweredNames>) -> Self {
         Self {
             full_name: message.full_name.clone(),
             package: message.package.clone(),
@@ -20,16 +23,16 @@ impl PlannedProtoTypeInfo {
             file_options: message.file_options.clone(),
             reference: spec
                 .external_type_binding(&message.full_name)
-                .map(|binding| binding.reference().clone())
+                .map(|binding| materialize_selected_text(binding.reference()))
                 .unwrap_or_default(),
             type_name: spec
                 .external_type_binding(&message.full_name)
-                .map(|binding| binding.type_name().clone())
+                .map(|binding| materialize_selected_text(binding.type_name()))
                 .unwrap_or_default(),
         }
     }
 
-    fn from_enum(enumeration: &EnumMetadata, spec: &ApiSpec) -> Self {
+    fn from_enum(enumeration: &EnumMetadata, spec: &ApiSpec<OperationLoweredNames>) -> Self {
         Self {
             full_name: enumeration.full_name.clone(),
             package: enumeration.package.clone(),
@@ -37,11 +40,11 @@ impl PlannedProtoTypeInfo {
             file_options: enumeration.file_options.clone(),
             reference: spec
                 .external_type_binding(&enumeration.full_name)
-                .map(|binding| binding.reference().clone())
+                .map(|binding| materialize_selected_text(binding.reference()))
                 .unwrap_or_default(),
             type_name: spec
                 .external_type_binding(&enumeration.full_name)
-                .map(|binding| binding.type_name().clone())
+                .map(|binding| materialize_selected_text(binding.type_name()))
                 .unwrap_or_default(),
         }
     }
@@ -56,7 +59,10 @@ pub(crate) fn message_model_name(full_name: &str) -> String {
         .to_string()
 }
 
-fn planned_proto_model_name(message: &MessageMetadata, spec: &ApiSpec) -> String {
+fn planned_proto_model_name(
+    message: &MessageMetadata,
+    spec: &ApiSpec<OperationLoweredNames>,
+) -> String {
     spec.record_for_proto(&message.full_name)
         .map(|record| record.name.clone())
         .unwrap_or_else(|| message_model_name(&message.full_name))
@@ -100,7 +106,7 @@ fn field_type(field: &FieldDescriptorProto) -> Option<Type> {
 pub(super) fn planned_type_for_message(
     message: &MessageMetadata,
     requested_capabilities: ModelWireCapabilities,
-    planner: &mut ApiPlanner<'_>,
+    planner: &mut TypePlanningContext<'_>,
 ) -> PlannedType {
     let planned_message = planned_message_reference(message, planner);
     if planned_message.replacement.is_some() || planned_message.authored_type.is_some() {
@@ -118,7 +124,7 @@ pub(super) fn planned_type_for_message(
 
 pub(super) fn planned_message_reference(
     message: &MessageMetadata,
-    planner: &mut ApiPlanner<'_>,
+    planner: &mut TypePlanningContext<'_>,
 ) -> PlannedProtoMessageType {
     let replacement = planner
         .spec
@@ -135,14 +141,14 @@ pub(super) fn planned_message_reference(
     PlannedProtoMessageType {
         proto: PlannedProtoTypeInfo::from_message(message, &planner.spec),
         model_name: planned_proto_model_name(message, &planner.spec),
-        replacement,
+        replacement: replacement.as_ref().map(materialize_selected_replacement),
         authored_type,
     }
 }
 
 pub(super) fn planned_enum_reference(
     enumeration: &EnumMetadata,
-    spec: &ApiSpec,
+    spec: &ApiSpec<OperationLoweredNames>,
 ) -> PlannedProtoEnumType {
     let replacement = spec
         .external_type_binding(&enumeration.full_name)
@@ -151,13 +157,13 @@ pub(super) fn planned_enum_reference(
     PlannedProtoEnumType {
         proto: PlannedProtoTypeInfo::from_enum(enumeration, spec),
         name: enum_name(&enumeration.full_name),
-        replacement,
+        replacement: replacement.as_ref().map(materialize_selected_replacement),
     }
 }
 
 pub(super) fn record_proto_info(
-    record: &RecordSpec,
-    spec: &ApiSpec,
+    record: &RecordSpec<OperationLoweredNames>,
+    spec: &ApiSpec<OperationLoweredNames>,
     descriptors: &DescriptorIndex,
 ) -> Option<PlannedProtoTypeInfo> {
     let proto_name = record_proto_name(record)?;
@@ -167,7 +173,7 @@ pub(super) fn record_proto_info(
 }
 
 pub(super) fn record_field_has_presence(
-    record: &RecordSpec,
+    record: &RecordSpec<OperationLoweredNames>,
     field_name: &str,
     descriptors: &DescriptorIndex,
 ) -> Option<bool> {
@@ -178,10 +184,10 @@ pub(super) fn record_field_has_presence(
 }
 
 pub(super) fn planned_record_field_type(
-    record: &RecordSpec,
+    record: &RecordSpec<OperationLoweredNames>,
     field_name: &str,
     requested_capabilities: ModelWireCapabilities,
-    planner: &mut ApiPlanner<'_>,
+    planner: &mut TypePlanningContext<'_>,
 ) -> Option<PlannedType> {
     let proto_name = record_proto_name(record)?;
     let message = planner.descriptors.message(proto_name)?.clone();
@@ -189,7 +195,7 @@ pub(super) fn planned_record_field_type(
     Some(planned_field_type(field, requested_capabilities, planner))
 }
 
-fn record_proto_name(record: &RecordSpec) -> Option<&str> {
+fn record_proto_name(record: &RecordSpec<OperationLoweredNames>) -> Option<&str> {
     let Some(ExternalTypeSpec::Proto(proto_name)) = record.source_type.as_ref() else {
         return None;
     };
@@ -209,8 +215,8 @@ fn descriptor_field_by_name<'a>(
 }
 
 pub(super) fn planned_type_from_authored_proto(
-    authored_type: &TypeSpec,
-    planner: &mut ApiPlanner<'_>,
+    authored_type: &TypeSpec<OperationLoweredNames>,
+    planner: &mut TypePlanningContext<'_>,
 ) -> Option<PlannedType> {
     let TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) = authored_type else {
         return None;
@@ -235,19 +241,11 @@ pub(super) fn planned_type_from_authored_proto(
 
 pub(super) fn planned_value_type_from_authored_proto(
     proto_name: &str,
-    planner: &mut ApiPlanner<'_>,
+    planner: &mut TypePlanningContext<'_>,
 ) -> PlannedType {
     if let Some(message) = planner.descriptors.message(proto_name).cloned() {
         planned_type_for_message(&message, ModelWireCapabilities::BIDIRECTIONAL, planner)
     } else if let Some(enumeration) = planner.descriptors.enumeration(proto_name).cloned() {
-        let replacement = planner
-            .spec
-            .external_type_binding(&enumeration.full_name)
-            .and_then(|binding| binding.replacement())
-            .cloned();
-        if replacement.is_none() {
-            ensure_enum_plan(&enumeration, planner);
-        }
         TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(
             planned_enum_reference(&enumeration, &planner.spec),
         )))
@@ -256,29 +254,10 @@ pub(super) fn planned_value_type_from_authored_proto(
     }
 }
 
-fn ensure_enum_plan(enumeration: &EnumMetadata, planner: &mut ApiPlanner<'_>) {
-    planner.insert_enum(PlannedEnum {
-        full_name: enumeration.full_name.clone(),
-        proto: Some(PlannedProtoTypeInfo::from_enum(enumeration, &planner.spec)),
-        name: enum_name(&enumeration.full_name),
-        values: enumeration
-            .descriptor
-            .value
-            .iter()
-            .filter_map(|value| {
-                Some(PlannedEnumValue {
-                    name: value.name.as_deref()?.to_string(),
-                    number: value.number?,
-                })
-            })
-            .collect(),
-    });
-}
-
 fn planned_field_type(
     field: &FieldDescriptorProto,
     requested_capabilities: ModelWireCapabilities,
-    planner: &mut ApiPlanner<'_>,
+    planner: &mut TypePlanningContext<'_>,
 ) -> PlannedType {
     if let Some((key, value)) = map_field_value_types(field, requested_capabilities, planner) {
         return TypeSpec::Map(Box::new(key), Box::new(value));
@@ -295,7 +274,7 @@ fn planned_field_type(
 fn map_field_value_types(
     field: &FieldDescriptorProto,
     requested_capabilities: ModelWireCapabilities,
-    planner: &mut ApiPlanner<'_>,
+    planner: &mut TypePlanningContext<'_>,
 ) -> Option<(PlannedType, PlannedType)> {
     if field_label(field) != Some(Label::Repeated) || field_type(field) != Some(Type::Message) {
         return None;
@@ -333,7 +312,7 @@ fn map_field_value_types(
 fn planned_value_type(
     field: &FieldDescriptorProto,
     _requested_capabilities: ModelWireCapabilities,
-    planner: &mut ApiPlanner<'_>,
+    planner: &mut TypePlanningContext<'_>,
 ) -> PlannedType {
     match field_type(field) {
         Some(Type::Double | Type::Float) => TypeSpec::Float,
@@ -363,7 +342,10 @@ fn planned_value_type(
     }
 }
 
-fn plan_enum_type(field: &FieldDescriptorProto, planner: &mut ApiPlanner<'_>) -> PlannedType {
+fn plan_enum_type(
+    field: &FieldDescriptorProto,
+    planner: &mut TypePlanningContext<'_>,
+) -> PlannedType {
     let Some(enumeration) = field.type_name.as_deref().and_then(|type_name| {
         planner
             .descriptors
@@ -378,15 +360,11 @@ fn plan_enum_type(field: &FieldDescriptorProto, planner: &mut ApiPlanner<'_>) ->
         .external_type_binding(&enumeration.full_name)
         .and_then(|binding| binding.replacement())
         .cloned();
-    if replacement.is_none() {
-        ensure_enum_plan(&enumeration, planner);
-    }
-
     TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(
         PlannedProtoEnumType {
             proto: PlannedProtoTypeInfo::from_enum(&enumeration, &planner.spec),
             name: enum_name(&enumeration.full_name),
-            replacement,
+            replacement: replacement.as_ref().map(materialize_selected_replacement),
         },
     )))
 }

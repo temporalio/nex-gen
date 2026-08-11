@@ -10,7 +10,7 @@ pub struct ApiSpec<F: TypeNameFamily = AuthoredNames> {
     pub module_path: ModulePath,
     pub data: F::SpecData,
     pub version: String,
-    pub support: SupportSpec,
+    pub support: F::Support,
     pub services: Vec<ServiceSpec<F>>,
     pub types: BTreeMap<String, TypeDeclSpec<F>>,
 }
@@ -138,6 +138,21 @@ pub trait TypeNameFamily {
     type ResourceData: std::fmt::Debug + Clone + PartialEq;
     type OperationData: std::fmt::Debug + Clone + PartialEq;
     type FieldData: std::fmt::Debug + Clone + PartialEq;
+    type Text: TextSpec;
+    type Support: SupportSpecFamily;
+}
+
+/// Text metadata carried by an API-spec stage. `for_language` remains a small
+/// compatibility shim for emitters during the migration; selected text ignores
+/// its argument because selection has already happened.
+pub trait TextSpec: std::fmt::Debug + Clone + PartialEq {
+    fn for_language(&self, language: Language) -> Option<&str>;
+    fn import_for_language(&self, language: Language) -> Option<&str>;
+    fn is_empty(&self) -> bool;
+}
+
+pub trait SupportSpecFamily: std::fmt::Debug + Clone + PartialEq {
+    fn fragments_for_language(&self, language: Language) -> &[SupportFragmentSpec];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,9 +173,39 @@ impl TypeNameFamily for AuthoredNames {
     type ResourceData = ();
     type OperationData = ();
     type FieldData = ();
+    type Text = LanguageStringSpec;
+    type Support = SupportSpec;
 }
 
-pub trait TypeNameMapper<From: TypeNameFamily, To: TypeNameFamily> {
+/// Name family after target-language selection. It preserves the `ApiSpec<F>`
+/// shape while making per-language maps unrepresentable in selected IR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SelectedNames;
+
+impl TypeNameFamily for SelectedNames {
+    type SpecData = ();
+    type Record = Symbol;
+    type Enum = Symbol;
+    type Flags = Symbol;
+    type Variant = Symbol;
+    type Resource = AuthoredResourceType;
+    type Proto = Symbol;
+    type Json = JsonModelSpec<Symbol>;
+    type Alias = Symbol;
+    type ServiceData = ();
+    type RecordData = ();
+    type ResourceData = ();
+    type OperationData = ();
+    type FieldData = ();
+    type Text = SelectedTextSpec;
+    type Support = SelectedSupportSpec;
+}
+
+/// Maps one structural `ApiSpec` family into another.
+///
+/// This is intentionally broader than names: a family transform also maps the
+/// pass-specific data attached to specs, declarations, operations, and fields.
+pub trait ApiSpecTransform<From: TypeNameFamily, To: TypeNameFamily> {
     fn map_spec_data(&mut self, data: From::SpecData) -> To::SpecData;
     fn map_record(&mut self, name: From::Record) -> To::Record;
     fn map_enum(&mut self, name: From::Enum) -> To::Enum;
@@ -180,6 +225,8 @@ pub trait TypeNameMapper<From: TypeNameFamily, To: TypeNameFamily> {
         field_name: &str,
         data: From::FieldData,
     ) -> To::FieldData;
+    fn map_text(&mut self, text: From::Text) -> To::Text;
+    fn map_support(&mut self, support: From::Support) -> To::Support;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -276,7 +323,7 @@ impl<F: TypeNameFamily> ApiSpec<F> {
     pub fn map_names<G, M>(self, mut map: M) -> ApiSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         self.map_names_with(&mut map)
     }
@@ -284,13 +331,13 @@ impl<F: TypeNameFamily> ApiSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ApiSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         ApiSpec {
             module_path: self.module_path,
             data: map.map_spec_data(self.data),
             version: self.version,
-            support: self.support,
+            support: map.map_support(self.support),
             services: self
                 .services
                 .into_iter()
@@ -305,8 +352,12 @@ impl<F: TypeNameFamily> ApiSpec<F> {
     }
 }
 
-impl ApiSpec<AuthoredNames> {
-    pub fn record_for_proto(&self, proto_name: &str) -> Option<&RecordSpec> {
+impl<F> ApiSpec<F>
+where
+    F: TypeNameFamily,
+    F::Proto: AsRef<str>,
+{
+    pub fn record_for_proto(&self, proto_name: &str) -> Option<&RecordSpec<F>> {
         let proto_name = proto_name.trim_start_matches('.');
         self.types.values().find_map(|decl| {
             let TypeDeclSpec::Record(record) = decl else {
@@ -315,7 +366,7 @@ impl ApiSpec<AuthoredNames> {
             matches!(
                 record.source_type.as_ref(),
                 Some(ExternalTypeSpec::Proto(source_proto))
-                    if source_proto.as_str() == proto_name
+                    if source_proto.as_ref() == proto_name
             )
             .then_some(record)
         })
@@ -335,7 +386,7 @@ impl<F: TypeNameFamily> TypeDeclSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> TypeDeclSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         match self {
             TypeDeclSpec::External(binding) => TypeDeclSpec::External(binding.map_names_with(map)),
@@ -354,11 +405,11 @@ pub struct ServiceSpec<F: TypeNameFamily = AuthoredNames> {
     /// (`x-<lang>-name` on a JSON-schema `services:` entry). Empty for a language
     /// with no override, in which case the identifier is derived as usual. Never
     /// affects `wire_name`.
-    pub code_name: LanguageStringSpec,
+    pub code_name: F::Text,
     pub wire_name: String,
-    pub doc: LanguageStringSpec,
-    pub namespace: LanguageStringSpec,
-    pub operations_class: LanguageStringSpec,
+    pub doc: F::Text,
+    pub namespace: F::Text,
+    pub operations_class: F::Text,
     pub endpoint: Option<String>,
     pub experimental: bool,
     pub delay_load_temporalio_workflow: bool,
@@ -381,16 +432,16 @@ impl<F: TypeNameFamily> ServiceSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ServiceSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         let data = map.map_service_data(&self.name, self.data);
         ServiceSpec {
             name: self.name,
-            code_name: self.code_name,
+            code_name: map.map_text(self.code_name),
             wire_name: self.wire_name,
-            doc: self.doc,
-            namespace: self.namespace,
-            operations_class: self.operations_class,
+            doc: map.map_text(self.doc),
+            namespace: map.map_text(self.namespace),
+            operations_class: map.map_text(self.operations_class),
             endpoint: self.endpoint,
             experimental: self.experimental,
             delay_load_temporalio_workflow: self.delay_load_temporalio_workflow,
@@ -423,6 +474,23 @@ impl SupportSpec {
     }
 }
 
+impl SupportSpecFamily for SupportSpec {
+    fn fragments_for_language(&self, language: Language) -> &[SupportFragmentSpec] {
+        self.fragments_for_language(language)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SelectedSupportSpec {
+    pub(crate) fragments: Vec<SupportFragmentSpec>,
+}
+
+impl SupportSpecFamily for SelectedSupportSpec {
+    fn fragments_for_language(&self, _language: Language) -> &[SupportFragmentSpec] {
+        &self.fragments
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SupportFragmentSpec {
     pub path: String,
@@ -437,15 +505,15 @@ pub struct OperationSpec<F: TypeNameFamily = AuthoredNames> {
     /// (`x-<lang>-name` on a JSON-schema `operations:` entry). Empty for a
     /// language with no override, in which case the identifier is derived as
     /// usual. Never affects `wire_name`.
-    pub code_name: LanguageStringSpec,
+    pub code_name: F::Text,
     pub wire_name: String,
     pub experimental: bool,
-    pub doc: LanguageStringSpec,
-    pub return_doc: LanguageStringSpec,
+    pub doc: F::Text,
+    pub return_doc: F::Text,
     pub input: Option<TypeSpec<F>>,
     pub output: Option<TypeSpec<F>>,
-    pub output_transform: Option<OperationOutputTransformSpec>,
-    pub serialization_context: LanguageStringSpec,
+    pub output_transform: Option<OperationOutputTransformSpec<F>>,
+    pub serialization_context: F::Text,
     pub data: F::OperationData,
 }
 
@@ -458,27 +526,29 @@ impl<F: TypeNameFamily> OperationSpec<F> {
         self.output.as_ref()
     }
 
-    pub fn output_transform(&self) -> Option<&OperationOutputTransformSpec> {
+    pub fn output_transform(&self) -> Option<&OperationOutputTransformSpec<F>> {
         self.output_transform.as_ref()
     }
 
     fn map_names_with<G, M>(self, map: &mut M) -> OperationSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         let data = map.map_operation_data(&self.name, self.data);
         OperationSpec {
             name: self.name,
-            code_name: self.code_name,
+            code_name: map.map_text(self.code_name),
             wire_name: self.wire_name,
             experimental: self.experimental,
-            doc: self.doc,
-            return_doc: self.return_doc,
+            doc: map.map_text(self.doc),
+            return_doc: map.map_text(self.return_doc),
             input: self.input.map(|input| input.map_names_with(map)),
             output: self.output.map(|output| output.map_names_with(map)),
-            output_transform: self.output_transform,
-            serialization_context: self.serialization_context,
+            output_transform: self
+                .output_transform
+                .map(|transform| transform.map_names_with(map)),
+            serialization_context: map.map_text(self.serialization_context),
             data,
         }
     }
@@ -517,7 +587,7 @@ impl<F: TypeNameFamily> ResourceSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ResourceSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         let data = map.map_resource_data(&self.name, self.data);
         ResourceSpec {
@@ -541,7 +611,7 @@ impl<F: TypeNameFamily> ResourceFieldSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ResourceFieldSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         ResourceFieldSpec {
             name: self.name,
@@ -556,7 +626,7 @@ impl<F: TypeNameFamily> ResourceMethodSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ResourceMethodSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         ResourceMethodSpec {
             name: self.name,
@@ -575,7 +645,7 @@ impl<F: TypeNameFamily> ResourceResultSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ResourceResultSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         ResourceResultSpec {
             result_type: self.result_type.map_names_with(map),
@@ -587,7 +657,7 @@ impl<F: TypeNameFamily> ResourceResultSpec<F> {
 pub struct RecordSpec<F: TypeNameFamily = AuthoredNames> {
     pub name: String,
     pub full_name: String,
-    pub doc: LanguageStringSpec,
+    pub doc: F::Text,
     pub source_type: Option<ExternalTypeSpec<F>>,
     pub experimental: bool,
     pub flatten_in_api: bool,
@@ -598,9 +668,9 @@ pub struct RecordSpec<F: TypeNameFamily = AuthoredNames> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordFieldSpec<F: TypeNameFamily = AuthoredNames> {
     pub name: String,
-    pub doc: Option<LanguageStringSpec>,
-    pub annotation: Option<LanguageStringSpec>,
-    pub flattened_annotation: Option<LanguageStringSpec>,
+    pub doc: Option<F::Text>,
+    pub annotation: Option<F::Text>,
+    pub flattened_annotation: Option<F::Text>,
     pub field_type: TypeSpec<F>,
     pub default_value: Option<FieldDefaultSpec>,
     pub required: bool,
@@ -660,14 +730,14 @@ impl<F: TypeNameFamily> RecordSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> RecordSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         let full_name = self.full_name;
         let data = map.map_record_data(&full_name, self.data);
         RecordSpec {
             name: self.name,
             full_name: full_name.clone(),
-            doc: self.doc,
+            doc: map.map_text(self.doc),
             source_type: self
                 .source_type
                 .map(|source_type| source_type.map_names_with(map)),
@@ -685,7 +755,7 @@ impl<F: TypeNameFamily> RecordSpec<F> {
         }
     }
 
-    pub fn doc(&self) -> &LanguageStringSpec {
+    pub fn doc(&self) -> &F::Text {
         &self.doc
     }
 
@@ -726,19 +796,19 @@ impl<F: TypeNameFamily> RecordSpec<F> {
         self.fields.get(field_name).map(|field| field.name.as_str())
     }
 
-    pub fn field_doc(&self, field_name: &str) -> Option<&LanguageStringSpec> {
+    pub fn field_doc(&self, field_name: &str) -> Option<&F::Text> {
         self.fields
             .get(field_name)
             .and_then(|field| field.doc.as_ref())
     }
 
-    pub fn field_annotation(&self, field_name: &str) -> Option<&LanguageStringSpec> {
+    pub fn field_annotation(&self, field_name: &str) -> Option<&F::Text> {
         self.fields
             .get(field_name)
             .and_then(|field| field.annotation.as_ref())
     }
 
-    pub fn field_flattened_annotation(&self, field_name: &str) -> Option<&LanguageStringSpec> {
+    pub fn field_flattened_annotation(&self, field_name: &str) -> Option<&F::Text> {
         self.fields
             .get(field_name)
             .and_then(|field| field.flattened_annotation.as_ref())
@@ -802,14 +872,14 @@ impl<F: TypeNameFamily> RecordFieldSpec<F> {
     ) -> RecordFieldSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         let data = map.map_field_data(record_full_name, field_name, self.data);
         RecordFieldSpec {
             name: self.name,
-            doc: self.doc,
-            annotation: self.annotation,
-            flattened_annotation: self.flattened_annotation,
+            doc: self.doc.map(|text| map.map_text(text)),
+            annotation: self.annotation.map(|text| map.map_text(text)),
+            flattened_annotation: self.flattened_annotation.map(|text| map.map_text(text)),
             field_type: self.field_type.map_names_with(map),
             default_value: self.default_value,
             required: self.required,
@@ -835,7 +905,7 @@ impl<F: TypeNameFamily> VariantSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> VariantSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         VariantSpec {
             name: self.name,
@@ -853,7 +923,7 @@ impl<F: TypeNameFamily> VariantCaseSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> VariantCaseSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         VariantCaseSpec {
             name: self.name,
@@ -863,9 +933,21 @@ impl<F: TypeNameFamily> VariantCaseSpec<F> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OperationOutputTransformSpec {
-    pub type_name: LanguageStringSpec,
-    pub transform: LanguageStringSpec,
+pub struct OperationOutputTransformSpec<F: TypeNameFamily = AuthoredNames> {
+    pub type_name: F::Text,
+    pub transform: F::Text,
+}
+
+impl<F: TypeNameFamily> OperationOutputTransformSpec<F> {
+    fn map_names_with<G: TypeNameFamily, M: ApiSpecTransform<F, G>>(
+        self,
+        map: &mut M,
+    ) -> OperationOutputTransformSpec<G> {
+        OperationOutputTransformSpec {
+            type_name: map.map_text(self.type_name),
+            transform: map.map_text(self.transform),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -896,38 +978,74 @@ impl LanguageStringSpec {
     }
 }
 
+impl TextSpec for LanguageStringSpec {
+    fn for_language(&self, language: Language) -> Option<&str> {
+        LanguageStringSpec::for_language(self, language)
+    }
+
+    fn import_for_language(&self, language: Language) -> Option<&str> {
+        LanguageStringSpec::import_for_language(self, language)
+    }
+
+    fn is_empty(&self) -> bool {
+        LanguageStringSpec::is_empty(self)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SelectedTextSpec {
+    pub(crate) value: Option<String>,
+    pub(crate) import: Option<String>,
+}
+
+impl TextSpec for SelectedTextSpec {
+    fn for_language(&self, _language: Language) -> Option<&str> {
+        self.value.as_deref()
+    }
+
+    fn import_for_language(&self, _language: Language) -> Option<&str> {
+        self.import.as_deref()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.value.is_none()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExternalTypeBindingSpec<F: TypeNameFamily = AuthoredNames> {
     pub external_type: ExternalTypeSpec<F>,
-    pub reference: LanguageStringSpec,
-    pub type_name: LanguageStringSpec,
-    pub replacement: Option<TypeReplacementSpec>,
+    pub reference: F::Text,
+    pub type_name: F::Text,
+    pub replacement: Option<TypeReplacementSpec<F>>,
     pub authored_type: Option<TypeSpec<F>>,
 }
 
 impl<F: TypeNameFamily> ExternalTypeBindingSpec<F> {
-    pub fn type_name(&self) -> &LanguageStringSpec {
+    pub fn type_name(&self) -> &F::Text {
         &self.type_name
     }
 
-    pub fn reference(&self) -> &LanguageStringSpec {
+    pub fn reference(&self) -> &F::Text {
         &self.reference
     }
 
-    pub fn replacement(&self) -> Option<&TypeReplacementSpec> {
+    pub fn replacement(&self) -> Option<&TypeReplacementSpec<F>> {
         self.replacement.as_ref()
     }
 
     fn map_names_with<G, M>(self, map: &mut M) -> ExternalTypeBindingSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         ExternalTypeBindingSpec {
             external_type: self.external_type.map_names_with(map),
-            reference: self.reference,
-            type_name: self.type_name,
-            replacement: self.replacement,
+            reference: map.map_text(self.reference),
+            type_name: map.map_text(self.type_name),
+            replacement: self
+                .replacement
+                .map(|replacement| replacement.map_names_with(map)),
             authored_type: self
                 .authored_type
                 .map(|authored_type| authored_type.map_names_with(map)),
@@ -936,10 +1054,24 @@ impl<F: TypeNameFamily> ExternalTypeBindingSpec<F> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeReplacementSpec {
-    pub type_name: LanguageStringSpec,
-    pub from_proto: LanguageStringSpec,
-    pub to_proto: LanguageStringSpec,
+pub struct TypeReplacementSpec<F: TypeNameFamily = AuthoredNames> {
+    pub type_name: F::Text,
+    pub from_proto: F::Text,
+    pub to_proto: F::Text,
+}
+
+impl<F: TypeNameFamily> TypeReplacementSpec<F> {
+    fn map_names_with<G, M>(self, map: &mut M) -> TypeReplacementSpec<G>
+    where
+        G: TypeNameFamily,
+        M: ApiSpecTransform<F, G>,
+    {
+        TypeReplacementSpec {
+            type_name: map.map_text(self.type_name),
+            from_proto: map.map_text(self.from_proto),
+            to_proto: map.map_text(self.to_proto),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1014,7 +1146,7 @@ pub enum ExternalTypeSpec<F: TypeNameFamily = AuthoredNames> {
     Alias {
         name: F::Alias,
         target: Box<TypeSpec<F>>,
-        type_name: LanguageStringSpec,
+        type_name: F::Text,
     },
 }
 
@@ -1022,7 +1154,7 @@ impl<F: TypeNameFamily> TypeSpec<F> {
     pub fn map_names<G, M>(self, mut map: M) -> TypeSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         self.map_names_with(&mut map)
     }
@@ -1030,7 +1162,7 @@ impl<F: TypeNameFamily> TypeSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> TypeSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         match self {
             TypeSpec::Bool => TypeSpec::Bool,
@@ -1149,7 +1281,7 @@ impl<F: TypeNameFamily> ExternalTypeSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ExternalTypeSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         match self {
             ExternalTypeSpec::Proto(type_name) => ExternalTypeSpec::Proto(map.map_proto(type_name)),
@@ -1161,7 +1293,7 @@ impl<F: TypeNameFamily> ExternalTypeSpec<F> {
             } => ExternalTypeSpec::Alias {
                 name: map.map_alias(name),
                 target: Box::new(target.map_names_with(map)),
-                type_name,
+                type_name: map.map_text(type_name),
             },
         }
     }
@@ -1358,7 +1490,7 @@ pub struct FunctionFieldSpec<F: TypeNameFamily = AuthoredNames> {
     pub name_extractor: Option<String>,
     pub call_extractor: Option<String>,
     pub result_type_parameter: Option<String>,
-    pub type_descriptor: Option<FunctionTypeDescriptorSpec>,
+    pub type_descriptor: Option<FunctionTypeDescriptorSpec<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1379,20 +1511,33 @@ pub struct FunctionArgSpec<F: TypeNameFamily = AuthoredNames> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FunctionResultSpec<F: TypeNameFamily = AuthoredNames> {
     Authored(TypeSpec<F>),
-    Annotation(LanguageStringSpec),
+    Annotation(F::Text),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FunctionTypeDescriptorSpec {
-    pub value_type: LanguageStringSpec,
-    pub args_type: LanguageStringSpec,
+pub struct FunctionTypeDescriptorSpec<F: TypeNameFamily = AuthoredNames> {
+    pub value_type: F::Text,
+    pub args_type: F::Text,
+}
+
+impl<F: TypeNameFamily> FunctionTypeDescriptorSpec<F> {
+    fn map_names_with<G, M>(self, map: &mut M) -> FunctionTypeDescriptorSpec<G>
+    where
+        G: TypeNameFamily,
+        M: ApiSpecTransform<F, G>,
+    {
+        FunctionTypeDescriptorSpec {
+            value_type: map.map_text(self.value_type),
+            args_type: map.map_text(self.args_type),
+        }
+    }
 }
 
 impl<F: TypeNameFamily> FunctionFieldSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> FunctionFieldSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         FunctionFieldSpec {
             primary: self.primary,
@@ -1407,7 +1552,9 @@ impl<F: TypeNameFamily> FunctionFieldSpec<F> {
             name_extractor: self.name_extractor,
             call_extractor: self.call_extractor,
             result_type_parameter: self.result_type_parameter,
-            type_descriptor: self.type_descriptor,
+            type_descriptor: self
+                .type_descriptor
+                .map(|descriptor| descriptor.map_names_with(map)),
         }
     }
 }
@@ -1416,7 +1563,7 @@ impl<F: TypeNameFamily> FunctionArgsSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> FunctionArgsSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         match self {
             FunctionArgsSpec::Varargs {
@@ -1442,7 +1589,7 @@ impl<F: TypeNameFamily> FunctionArgSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> FunctionArgSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         FunctionArgSpec {
             name: self.name,
@@ -1455,15 +1602,112 @@ impl<F: TypeNameFamily> FunctionResultSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> FunctionResultSpec<G>
     where
         G: TypeNameFamily,
-        M: TypeNameMapper<F, G>,
+        M: ApiSpecTransform<F, G>,
     {
         match self {
             FunctionResultSpec::Authored(authored_type) => {
                 FunctionResultSpec::Authored(authored_type.map_names_with(map))
             }
             FunctionResultSpec::Annotation(annotation) => {
-                FunctionResultSpec::Annotation(annotation)
+                FunctionResultSpec::Annotation(map.map_text(annotation))
             }
         }
     }
+}
+
+/// A semantic compiler pass over an API-spec tree.
+///
+/// The shared tree traversal retains module structure and source metadata;
+/// implementations provide the leaf-level transformation for the pass.
+pub trait CompilerPass<From: TypeNameFamily, To: TypeNameFamily> {
+    type Error;
+
+    fn transform_leaf(&mut self, leaf: ApiSpecLeaf<From>) -> Result<ApiSpecLeaf<To>, Self::Error>;
+
+    /// Apply this pass to the full tree.
+    fn apply(self, tree: ApiSpecTree<From>) -> Result<ApiSpecTree<To>, Self::Error>
+    where
+        Self: Sized,
+    {
+        let mut pass = self;
+        transform_tree(tree, &mut pass)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApiSpecTree<F: TypeNameFamily = AuthoredNames> {
+    pub root: ApiSpecNode<F>,
+}
+
+impl ApiSpecTree<AuthoredNames> {
+    pub fn single(spec: ApiSpec) -> Self {
+        Self {
+            root: ApiSpecNode::Leaf(ApiSpecLeaf {
+                module_path: ModulePath::default(),
+                source_root: PathBuf::new(),
+                source_path: PathBuf::new(),
+                spec,
+            }),
+        }
+    }
+
+    pub fn into_single_spec(self) -> Option<ApiSpec> {
+        match self.root {
+            ApiSpecNode::Leaf(leaf) => Some(leaf.spec),
+            ApiSpecNode::Branch(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApiSpecNode<F: TypeNameFamily = AuthoredNames> {
+    Leaf(ApiSpecLeaf<F>),
+    Branch(ApiSpecBranch<F>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApiSpecBranch<F: TypeNameFamily = AuthoredNames> {
+    pub module_path: ModulePath,
+    pub children: BTreeMap<String, ApiSpecNode<F>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApiSpecLeaf<F: TypeNameFamily = AuthoredNames> {
+    pub module_path: ModulePath,
+    pub source_root: PathBuf,
+    pub source_path: PathBuf,
+    pub spec: ApiSpec<F>,
+}
+
+fn transform_tree<F, G, P>(tree: ApiSpecTree<F>, pass: &mut P) -> Result<ApiSpecTree<G>, P::Error>
+where
+    F: TypeNameFamily,
+    G: TypeNameFamily,
+    P: CompilerPass<F, G>,
+{
+    fn transform_node<F, G, P>(
+        node: ApiSpecNode<F>,
+        pass: &mut P,
+    ) -> Result<ApiSpecNode<G>, P::Error>
+    where
+        F: TypeNameFamily,
+        G: TypeNameFamily,
+        P: CompilerPass<F, G>,
+    {
+        match node {
+            ApiSpecNode::Leaf(leaf) => pass.transform_leaf(leaf).map(ApiSpecNode::Leaf),
+            ApiSpecNode::Branch(branch) => Ok(ApiSpecNode::Branch(ApiSpecBranch {
+                module_path: branch.module_path,
+                children: branch
+                    .children
+                    .into_iter()
+                    .map(|(name, child)| Ok((name, transform_node(child, pass)?)))
+                    .collect::<Result<_, _>>()?,
+            })),
+        }
+    }
+
+    Ok(ApiSpecTree {
+        root: transform_node(tree.root, pass)?,
+    })
 }

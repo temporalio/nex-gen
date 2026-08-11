@@ -8,13 +8,13 @@ use crate::generator::json_schema::java as java_json;
 use crate::generator::json_schema::java::JavaContext;
 use crate::generator::{GeneratedFiles, GeneratedOutputLayout, GenerationMode};
 use crate::planning::{PlannedJsonType, PlannedTypeFamily};
+use crate::spec::{ApiSpecLeaf, ApiSpecNode};
 use crate::spec::{ExternalTypeSpec, ModulePath, ServiceSpec, TypeSpec};
-use crate::workspace::{ApiSpecLeaf, ApiSpecNode};
 
 const DEFAULT_PACKAGE: &str = "generated";
 
 pub(crate) fn generate(
-    tree: &crate::workspace::ApiSpecTree<PlannedTypeFamily>,
+    tree: &crate::spec::ApiSpecTree<PlannedTypeFamily>,
     _support: &crate::SupportFiles,
     _mode: GenerationMode,
     base_package: Option<&str>,

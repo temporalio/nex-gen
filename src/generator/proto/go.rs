@@ -7,8 +7,8 @@ use indexmap::IndexMap;
 use crate::error::{Error, Result};
 use crate::generator::{ExternalModelBackend, ModelWireCapabilities};
 use crate::language::Language;
+use crate::planning::ResolvedResourceBindingSource;
 use crate::planning::{PlannedResource, PlannedResourceField, PlannedSpec, PlannedTypeFamily};
-use crate::resources::ResolvedResourceBindingSource;
 use crate::spec::{RecordFieldSpec, RecordSpec};
 
 use crate::generator::go::{

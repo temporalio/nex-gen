@@ -7,20 +7,18 @@ pub(crate) mod java;
 pub(crate) mod json_schema;
 pub(crate) mod proto;
 pub(crate) mod python;
+mod resource_plan;
 pub(crate) mod typescript;
 
 use crate::SupportFiles;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
-use crate::planning::{
-    PlannedSpec, PlannedType, PlannedTypeFamily, PlanningMode, build_api_plans_for_tree_with_mode,
-    build_leaf_api_plan_with_mode,
-};
-use crate::resources::ensure_unique_resource_names;
+use crate::planning::{PlannedSpec, PlannedType, PlannedTypeFamily};
 use crate::spec::{ApiSpec, RecordSpec};
-use crate::validation::validate_external_type_bindings;
-use crate::workspace::{ApiSpecNode, ApiSpecTree};
+use crate::spec::{ApiSpecNode, ApiSpecTree};
+
+pub(crate) use resource_plan::render_request_plan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedOutputLayout {
@@ -159,58 +157,10 @@ pub(crate) fn generate_files_for_tree_with_mode_and_options(
     mode: GenerationMode,
     options: GenerateFilesOptions,
 ) -> Result<GeneratedFiles> {
-    validate_tree_specs(&tree.root, descriptors, language)?;
-    let mut planned_tree = match tree.root {
-        ApiSpecNode::Leaf(leaf) => {
-            let planned = build_leaf_api_plan_with_mode(
-                leaf.spec,
-                descriptors,
-                planning_mode(mode),
-                language,
-            )?;
-            ApiSpecTree {
-                root: ApiSpecNode::Leaf(crate::workspace::ApiSpecLeaf {
-                    module_path: leaf.module_path,
-                    source_root: leaf.source_root,
-                    source_path: leaf.source_path,
-                    spec: planned,
-                }),
-            }
-        }
-        ApiSpecNode::Branch(_) => {
-            build_api_plans_for_tree_with_mode(tree, descriptors, planning_mode(mode), language)?
-        }
-    };
-    // Resolve every emitted type identifier once against the name manifest and
-    // adopt it as each JSON model's `model_name`, so every consumer — the JSON
-    // model backends, the outer service/file-name/I/O emitters — reads the same
-    // (override-applied) identifier. This is the single resolution point per
-    // language; the per-backend `$ref` fixups then only re-route ref recasing.
-    // A no-op for non-JSON (WIT/proto) inputs.
-    json_schema::apply_name_manifest_to_planned_tree(&mut planned_tree.root, language)?;
-    generate_files_from_planned_tree(language, &planned_tree, support, mode, options)
+    crate::compile_tree_to_files(language, tree, descriptors, support, mode, options)
 }
 
-fn validate_tree_specs(
-    node: &ApiSpecNode,
-    descriptors: &DescriptorIndex,
-    language: Language,
-) -> Result<()> {
-    match node {
-        ApiSpecNode::Leaf(leaf) => {
-            validate_external_type_bindings(&leaf.spec, descriptors, language)?;
-            ensure_unique_resource_names(&leaf.spec)
-        }
-        ApiSpecNode::Branch(branch) => {
-            for child in branch.children.values() {
-                validate_tree_specs(child, descriptors, language)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-fn generate_files_from_planned_tree(
+pub(crate) fn generate_files_from_planned_tree(
     language: Language,
     tree: &ApiSpecTree<PlannedTypeFamily>,
     support: &SupportFiles,
@@ -250,13 +200,6 @@ fn generate_go_tree(
         },
         mode,
     )
-}
-
-fn planning_mode(mode: GenerationMode) -> PlanningMode {
-    match mode {
-        GenerationMode::NativeApi => PlanningMode::NativeApi,
-        GenerationMode::DefinitionsOnly => PlanningMode::DefinitionsOnly,
-    }
 }
 
 pub fn generate_source(
@@ -355,7 +298,7 @@ mod tests {
     use super::{
         GenerateFilesOptions, GenerationMode, generate_files_for_tree_with_mode_and_options,
     };
-    use crate::workspace::ApiSpecTree;
+    use crate::spec::ApiSpecTree;
 
     #[test]
     fn warns_when_resource_method_generates_as_stub() {

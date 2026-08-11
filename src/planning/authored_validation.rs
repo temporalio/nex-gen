@@ -1,3 +1,6 @@
+//! `AuthoredValidationPass` verifies descriptor-backed authored intent before
+//! target selection discards language alternatives.
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -10,9 +13,10 @@ use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::python;
 use crate::language::Language;
 use crate::spec::{
-    ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, FunctionArgsSpec, FunctionResultSpec,
-    RecordFieldVisibility, RecordSpec, ServiceSpec, TypeSpec,
+    ApiSpec, AuthoredNames, ExternalTypeBindingSpec, ExternalTypeSpec, FunctionArgsSpec,
+    FunctionResultSpec, RecordFieldVisibility, RecordSpec, ServiceSpec, TypeSpec,
 };
+use crate::spec::{ApiSpecLeaf, CompilerPass};
 
 pub(crate) fn validate_generic_model_semantics(
     spec: &ApiSpec,
@@ -108,20 +112,19 @@ pub(crate) fn validate_generic_model_semantics(
             }
         }
         for resource in &service.resources {
-            let resource_is_generic =
-                resource
-                    .fields
-                    .iter()
-                    .any(|field| !spec.type_parameters(&field.field_type, language).is_empty())
-                    || resource.methods.iter().any(|method| {
-                        method.params.iter().any(|param| {
-                            !spec.type_parameters(&param.field_type, language).is_empty()
-                        }) || method.result.as_ref().is_some_and(|result| {
-                            !spec
-                                .type_parameters(&result.result_type, language)
-                                .is_empty()
-                        })
-                    });
+            let resource_is_generic = resource
+                .fields
+                .iter()
+                .any(|field| !spec.type_parameters(&field.field_type, language).is_empty())
+                || resource.methods.iter().any(|method| {
+                    method.params.iter().any(|param| {
+                        !spec.type_parameters(&param.field_type, language).is_empty()
+                    }) || method.result.as_ref().is_some_and(|result| {
+                        !spec
+                            .type_parameters(&result.result_type, language)
+                            .is_empty()
+                    })
+                });
             if resource_is_generic {
                 return Err(invalid(format!(
                     "resource `{}` cannot contain generic type parameters",
@@ -164,6 +167,36 @@ struct ModelConfig<'a> {
     record: &'a RecordSpec,
 }
 
+pub(crate) struct AuthoredValidationPass<'a> {
+    descriptors: &'a DescriptorIndex,
+    language: Language,
+}
+
+impl<'a> AuthoredValidationPass<'a> {
+    pub(crate) fn new(descriptors: &'a DescriptorIndex, language: Language) -> Self {
+        Self {
+            descriptors,
+            language,
+        }
+    }
+
+    pub(crate) fn validate_spec(&self, spec: &ApiSpec) -> Result<()> {
+        validate_external_type_bindings(spec, self.descriptors, self.language)
+    }
+}
+
+impl CompilerPass<AuthoredNames, AuthoredNames> for AuthoredValidationPass<'_> {
+    type Error = Error;
+
+    fn transform_leaf(
+        &mut self,
+        leaf: ApiSpecLeaf<AuthoredNames>,
+    ) -> Result<ApiSpecLeaf<AuthoredNames>> {
+        self.validate_spec(&leaf.spec)?;
+        Ok(leaf)
+    }
+}
+
 impl<'a> ModelConfig<'a> {
     fn from_record(record: &'a RecordSpec) -> Self {
         Self { record }
@@ -178,7 +211,7 @@ impl<'a> ModelConfig<'a> {
     }
 }
 
-pub(crate) fn validate_external_type_bindings(
+fn validate_external_type_bindings(
     spec: &ApiSpec,
     descriptors: &DescriptorIndex,
     language: Language,

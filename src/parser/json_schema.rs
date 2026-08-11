@@ -13,7 +13,7 @@ use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelSpec, LanguageStringSpec,
     ModulePath, OperationSpec, ServiceSpec, SupportSpec, Symbol, TypeDeclSpec, TypeSpec,
 };
-use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
+use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
 #[derive(Debug, Clone, Deserialize, Default)]
 struct Document {

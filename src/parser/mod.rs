@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::spec::ApiSpec;
-use crate::workspace::ApiSpecTree;
+use crate::spec::ApiSpecTree;
 
 pub(crate) use json_schema::strip_json_schema_extension;
 pub use json_schema::{

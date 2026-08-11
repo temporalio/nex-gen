@@ -19,8 +19,8 @@ use crate::generator::python::{
 use crate::language::Language;
 use crate::parser::NameManifest;
 use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
+use crate::spec::{ApiSpecBranch, ApiSpecNode};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
-use crate::workspace::{ApiSpecBranch, ApiSpecNode};
 
 #[derive(Debug, Deserialize, Default)]
 struct Schema {

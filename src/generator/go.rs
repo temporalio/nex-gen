@@ -6,6 +6,7 @@ use indexmap::IndexMap;
 
 use crate::SupportFiles;
 use crate::error::{Error, Result};
+use crate::generator::render_request_plan;
 use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
@@ -14,14 +15,13 @@ use crate::planning::{
     PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedType,
     PlannedTypeFamily,
 };
-use crate::resources::render_request_plan;
+use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 use crate::spec::{
     EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec as GenericFunctionArgsSpec,
     FunctionFieldSpec as GenericFunctionFieldSpec, FunctionResultSpec as GenericFunctionResultSpec,
     IntSpec, LanguageStringSpec, ModulePath, OperationSpec, RecordFieldSpec, RecordSpec,
     SupportFragmentSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
-use crate::workspace::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
 use super::json_schema::go as json;
 use super::proto::go as proto;
