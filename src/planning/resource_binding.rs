@@ -9,11 +9,84 @@ use prost_types::field_descriptor_proto::Type;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, AuthoredNames, ExternalTypeSpec, OperationSpec, RecordFieldSpec,
-    RecordFieldVisibility, RecordSpec, ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec,
-    ResourceSpec, SelectedNames, ServiceSpec, TypeSpec,
+    ApiSpec, ApiSpecTransform, AuthoredNames, AuthoredResourceType, ExternalTypeSpec,
+    JsonModelSpec, OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
+    ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec, ResourceSpec, SelectedNames,
+    SelectedSupportSpec, SelectedTextSpec, ServiceSpec, Symbol, TypeNameFamily, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
+/// Selected IR after resource-method and resource-return bindings are resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ResourceBoundNames;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ResourceBoundData {
+    pub(crate) bindings: BTreeMap<String, ResolvedServiceResources>,
+}
+
+impl TypeNameFamily for ResourceBoundNames {
+    type SpecData = ResourceBoundData;
+    type Record = Symbol;
+    type Enum = Symbol;
+    type Flags = Symbol;
+    type Variant = Symbol;
+    type Resource = crate::spec::AuthoredResourceType;
+    type Proto = Symbol;
+    type Json = crate::spec::JsonModelSpec<Symbol>;
+    type Alias = Symbol;
+    type ServiceData = ();
+    type RecordData = ();
+    type ResourceData = ();
+    type OperationData = ();
+    type FieldData = ();
+    type Text = SelectedTextSpec;
+    type Support = SelectedSupportSpec;
+}
+
+struct ResourceBindingMapper {
+    data: ResourceBoundData,
+}
+
+impl ApiSpecTransform<SelectedNames, ResourceBoundNames> for ResourceBindingMapper {
+    fn map_spec_data(&mut self, _: ()) -> ResourceBoundData {
+        self.data.clone()
+    }
+    fn map_record(&mut self, value: Symbol) -> Symbol {
+        value
+    }
+    fn map_enum(&mut self, value: Symbol) -> Symbol {
+        value
+    }
+    fn map_flags(&mut self, value: Symbol) -> Symbol {
+        value
+    }
+    fn map_variant(&mut self, value: Symbol) -> Symbol {
+        value
+    }
+    fn map_resource(&mut self, value: AuthoredResourceType) -> AuthoredResourceType {
+        value
+    }
+    fn map_proto(&mut self, value: Symbol) -> Symbol {
+        value
+    }
+    fn map_json(&mut self, value: JsonModelSpec<Symbol>) -> JsonModelSpec<Symbol> {
+        value
+    }
+    fn map_alias(&mut self, value: Symbol) -> Symbol {
+        value
+    }
+    fn map_service_data(&mut self, _: &str, _: ()) {}
+    fn map_record_data(&mut self, _: &str, _: ()) {}
+    fn map_resource_data(&mut self, _: &str, _: ()) {}
+    fn map_operation_data(&mut self, _: &str, _: ()) {}
+    fn map_field_data(&mut self, _: &str, _: &str, _: ()) {}
+    fn map_text(&mut self, value: SelectedTextSpec) -> SelectedTextSpec {
+        value
+    }
+    fn map_support(&mut self, value: SelectedSupportSpec) -> SelectedSupportSpec {
+        value
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedServiceResources {
@@ -732,8 +805,8 @@ impl<'a> ResourceResolutionPass<'a> {
         } else {
             BTreeMap::new()
         };
-        Ok(spec.map_names(super::ResourceBindingMapper {
-            data: super::ResourceBoundData { bindings },
+        Ok(spec.map_names(ResourceBindingMapper {
+            data: ResourceBoundData { bindings },
         }))
     }
 }

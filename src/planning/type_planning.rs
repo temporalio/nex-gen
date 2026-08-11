@@ -2,6 +2,305 @@
 //!
 //! Its analysis is local to the pass. The output is a self-contained
 //! `PlannedTypeFamily`, never a saved planner state for a later pass.
+fn module_import_index(
+    tree: &ApiSpecTree<OperationLoweredNames>,
+) -> BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>> {
+    let mut imports = BTreeMap::<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>::new();
+    collect_tree_module_imports(&tree.root, &mut imports);
+    imports
+}
+
+fn module_export_names(spec: &ApiSpec<OperationLoweredNames>) -> BTreeSet<String> {
+    spec.types
+        .iter()
+        .filter_map(|(name, decl)| {
+            // Only JSON-schema models are treated as an always-exported module
+            // surface (root type + every `$def`, including unreferenced ones).
+            // WIT-sourced records/enums/protos keep their reachability-based
+            // tree-shaking, so they are never force-exported here.
+            let TypeDeclSpec::External(binding) = decl else {
+                return None;
+            };
+            if !matches!(binding.external_type, ExternalTypeSpec::Json(_)) {
+                return None;
+            }
+            external_type_module_path(&binding.external_type)
+                .is_none_or(|module_path| module_path == &spec.module_path)
+                .then(|| name.clone())
+        })
+        .collect()
+}
+
+fn external_type_module_path(
+    external: &ExternalTypeSpec<OperationLoweredNames>,
+) -> Option<&ModulePath> {
+    match external {
+        ExternalTypeSpec::Proto(symbol) => symbol.module_path(),
+        ExternalTypeSpec::Json(json_type) => json_type.name.module_path(),
+        ExternalTypeSpec::Alias { name, .. } => name.module_path(),
+    }
+}
+
+fn collect_tree_module_imports(
+    node: &ApiSpecNode<OperationLoweredNames>,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    match node {
+        ApiSpecNode::Leaf(leaf) => collect_spec_module_imports(&leaf.spec, imports),
+        ApiSpecNode::Branch(branch) => {
+            for child in branch.children.values() {
+                collect_tree_module_imports(child, imports);
+            }
+        }
+    }
+}
+
+fn collect_spec_module_imports(
+    spec: &ApiSpec<OperationLoweredNames>,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    for service in &spec.services {
+        for operation in &service.operations {
+            collect_type_module_imports(&spec.module_path, operation.input_type(), imports);
+            collect_type_module_imports(&spec.module_path, operation.output_type(), imports);
+        }
+        for resource in &service.resources {
+            for field in &resource.fields {
+                collect_type_module_imports(&spec.module_path, Some(&field.field_type), imports);
+            }
+            for method in &resource.methods {
+                for field in &method.params {
+                    collect_type_module_imports(
+                        &spec.module_path,
+                        Some(&field.field_type),
+                        imports,
+                    );
+                }
+                if let Some(result) = &method.result {
+                    collect_type_module_imports(
+                        &spec.module_path,
+                        Some(&result.result_type),
+                        imports,
+                    );
+                }
+            }
+        }
+    }
+    for decl in spec.types.values() {
+        match decl {
+            TypeDeclSpec::External(binding) => {
+                collect_external_type_module_imports(
+                    &spec.module_path,
+                    &binding.external_type,
+                    imports,
+                );
+                if let Some(authored_type) = &binding.authored_type {
+                    collect_type_module_imports(&spec.module_path, Some(authored_type), imports);
+                }
+            }
+            TypeDeclSpec::Record(record) => {
+                if let Some(source_type) = &record.source_type {
+                    collect_external_type_module_imports(&spec.module_path, source_type, imports);
+                }
+                for field in record.fields.values() {
+                    collect_type_module_imports(
+                        &spec.module_path,
+                        Some(&field.field_type),
+                        imports,
+                    );
+                    if let Some(function) = &field.function {
+                        if let Some(alternate) = &function.alternate_type {
+                            collect_type_module_imports(
+                                &spec.module_path,
+                                Some(alternate),
+                                imports,
+                            );
+                        }
+                        collect_function_args_module_imports(
+                            &spec.module_path,
+                            &function.args,
+                            imports,
+                        );
+                        if let Some(result) = &function.result_type_parameter {
+                            let _ = result;
+                        }
+                    }
+                }
+            }
+            TypeDeclSpec::Variant(variant) => {
+                for case in &variant.cases {
+                    if let Some(payload) = &case.payload {
+                        collect_type_module_imports(&spec.module_path, Some(payload), imports);
+                    }
+                }
+            }
+            TypeDeclSpec::Enum(_) | TypeDeclSpec::Flags(_) => {}
+        }
+    }
+}
+
+fn collect_function_args_module_imports(
+    source_module: &ModulePath,
+    args: &FunctionArgsSpec<OperationLoweredNames>,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    let args = match args {
+        FunctionArgsSpec::Varargs { prefix, .. } => prefix.as_slice(),
+        FunctionArgsSpec::Fixed(args) => args.as_slice(),
+    };
+    for arg in args {
+        collect_type_module_imports(source_module, Some(&arg.field_type), imports);
+    }
+}
+
+fn collect_type_module_imports(
+    source_module: &ModulePath,
+    ty: Option<&TypeSpec<OperationLoweredNames>>,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    let Some(ty) = ty else {
+        return;
+    };
+    match ty {
+        TypeSpec::Record(symbol)
+        | TypeSpec::Enum(symbol)
+        | TypeSpec::Flags(symbol)
+        | TypeSpec::Variant(symbol) => {
+            collect_symbol_module_import(source_module, symbol, imports);
+        }
+        TypeSpec::Resource(resource) => {
+            collect_resource_symbol_module_import(source_module, resource, imports)
+        }
+        TypeSpec::External(external) => {
+            collect_external_type_module_imports(source_module, external, imports)
+        }
+        TypeSpec::Option(inner) | TypeSpec::List(inner) => {
+            collect_type_module_imports(source_module, Some(inner), imports);
+        }
+        TypeSpec::Tuple(items) => {
+            for item in items {
+                collect_type_module_imports(source_module, Some(item), imports);
+            }
+        }
+        TypeSpec::Map(key, value) => {
+            collect_type_module_imports(source_module, Some(key), imports);
+            collect_type_module_imports(source_module, Some(value), imports);
+        }
+        TypeSpec::Result { ok, err } => {
+            collect_type_module_imports(source_module, ok.as_deref(), imports);
+            collect_type_module_imports(source_module, err.as_deref(), imports);
+        }
+        _ => {}
+    }
+}
+
+fn collect_external_type_module_imports(
+    source_module: &ModulePath,
+    external: &ExternalTypeSpec<OperationLoweredNames>,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    match external {
+        ExternalTypeSpec::Proto(symbol) => {
+            collect_symbol_module_import(source_module, symbol, imports)
+        }
+        ExternalTypeSpec::Json(json_type) => {
+            collect_symbol_module_import(source_module, &json_type.name, imports)
+        }
+        ExternalTypeSpec::Alias { name, target, .. } => {
+            collect_symbol_module_import(source_module, name, imports);
+            collect_type_module_imports(source_module, Some(target), imports);
+        }
+    }
+}
+
+fn collect_resource_symbol_module_import(
+    source_module: &ModulePath,
+    resource: &AuthoredResourceType,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    collect_symbol_module_import(source_module, &resource.name, imports);
+    if let Some(wire_type) = &resource.wire_type {
+        collect_authored_external_type_module_imports(source_module, wire_type, imports);
+    }
+}
+
+fn collect_authored_external_type_module_imports(
+    source_module: &ModulePath,
+    external: &ExternalTypeSpec,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    match external {
+        ExternalTypeSpec::Proto(symbol) => {
+            collect_symbol_module_import(source_module, symbol, imports)
+        }
+        ExternalTypeSpec::Json(json_type) => {
+            collect_symbol_module_import(source_module, &json_type.name, imports)
+        }
+        ExternalTypeSpec::Alias { name, target, .. } => {
+            collect_symbol_module_import(source_module, name, imports);
+            collect_authored_type_module_imports(source_module, target, imports);
+        }
+    }
+}
+
+fn collect_authored_type_module_imports(
+    source_module: &ModulePath,
+    ty: &TypeSpec,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    match ty {
+        TypeSpec::Record(symbol)
+        | TypeSpec::Enum(symbol)
+        | TypeSpec::Flags(symbol)
+        | TypeSpec::Variant(symbol) => collect_symbol_module_import(source_module, symbol, imports),
+        TypeSpec::Resource(resource) => {
+            collect_resource_symbol_module_import(source_module, resource, imports)
+        }
+        TypeSpec::External(external) => {
+            collect_authored_external_type_module_imports(source_module, external, imports)
+        }
+        TypeSpec::Option(inner) | TypeSpec::List(inner) => {
+            collect_authored_type_module_imports(source_module, inner, imports)
+        }
+        TypeSpec::Tuple(items) => {
+            for item in items {
+                collect_authored_type_module_imports(source_module, item, imports);
+            }
+        }
+        TypeSpec::Map(key, value) => {
+            collect_authored_type_module_imports(source_module, key, imports);
+            collect_authored_type_module_imports(source_module, value, imports);
+        }
+        TypeSpec::Result { ok, err } => {
+            if let Some(ok) = ok {
+                collect_authored_type_module_imports(source_module, ok, imports);
+            }
+            if let Some(err) = err {
+                collect_authored_type_module_imports(source_module, err, imports);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_symbol_module_import(
+    source_module: &ModulePath,
+    symbol: &Symbol,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    let Some(target_module) = symbol.module_path() else {
+        return;
+    };
+    if target_module == source_module {
+        return;
+    }
+    imports
+        .entry(source_module.clone())
+        .or_default()
+        .entry(target_module.clone())
+        .or_default()
+        .insert(symbol.local_name().to_string());
+}
 
 use super::*;
 use crate::spec::{FunctionTypeDescriptorSpec, OperationOutputTransformSpec, ResourceResultSpec};
@@ -47,7 +346,7 @@ impl ApiSpecTransform<OperationLoweredNames, PlannedTypeFamily> for TypePlanning
             .record(name.as_str())
             .unwrap_or_else(|| panic!("record `{name}` should resolve during planning"));
         self.planner
-            .plan_record_type(record, ModelWireCapabilities::default())
+            .plan_record_type(record, record_wire_capabilities(record))
     }
 
     fn map_enum(&mut self, name: Symbol) -> PlannedEnumType {
@@ -117,7 +416,11 @@ impl ApiSpecTransform<OperationLoweredNames, PlannedTypeFamily> for TypePlanning
 
     fn map_service_data(&mut self, _name: &str, _data: ()) {}
 
-    fn map_record_data(&mut self, full_name: &str, _data: ()) -> PlannedRecordData {
+    fn map_record_data(
+        &mut self,
+        full_name: &str,
+        _data: OperationLoweredRecordData,
+    ) -> PlannedRecordData {
         self.planner
             .record_plans
             .get(full_name)
@@ -347,11 +650,7 @@ impl<'a> TypePlanningContext<'a> {
                     })?;
                 Ok(Some(TypeSpec::Record(self.plan_record_type(
                     &record,
-                    if record.full_name.starts_with("__generated.") {
-                        self.operation_proto_output_capabilities()
-                    } else {
-                        ModelWireCapabilities::default()
-                    },
+                    record_wire_capabilities(&record),
                 ))))
             }
             Some(TypeSpec::Resource(resource_name)) => Err(Error::InvalidWit {
@@ -407,7 +706,7 @@ impl<'a> TypePlanningContext<'a> {
                     })?;
                 Ok(Some(TypeSpec::Record(self.plan_record_type(
                     &record,
-                    ModelWireCapabilities::default(),
+                    record_wire_capabilities(&record),
                 ))))
             }
             Some(TypeSpec::Resource(resource_name)) => Ok(Some(TypeSpec::Resource(
@@ -1082,6 +1381,14 @@ fn root_model_capabilities(
     Ok(capabilities)
 }
 
+fn record_wire_capabilities(record: &RecordSpec<OperationLoweredNames>) -> ModelWireCapabilities {
+    if record.data.is_operation_output_intermediate {
+        ModelWireCapabilities::BIDIRECTIONAL
+    } else {
+        ModelWireCapabilities::default()
+    }
+}
+
 fn plan_operation_resource_return(
     output_resource_return: Option<&ResolvedResourceReturnSpec>,
 ) -> Option<PlannedOperationResourceReturn> {
@@ -1186,7 +1493,9 @@ impl ApiSpecTransform<SelectedNames, OperationLoweredNames> for SelectedToOperat
         value
     }
     fn map_service_data(&mut self, _: &str, _: ()) {}
-    fn map_record_data(&mut self, _: &str, _: ()) {}
+    fn map_record_data(&mut self, _: &str, _: ()) -> OperationLoweredRecordData {
+        OperationLoweredRecordData::default()
+    }
     fn map_resource_data(&mut self, _: &str, _: ()) -> OperationBoundResource {
         OperationBoundResource { resolved: None }
     }

@@ -15,8 +15,41 @@ use crate::spec::{
 };
 
 use super::{
-    OperationBoundNames, OperationLoweredNames, ResolvedResourceBindingSource, SelectedTextSpec,
+    OperationBoundNames, OperationBoundOperation, OperationBoundResource,
+    ResolvedResourceBindingSource, SelectedSupportSpec, SelectedTextSpec,
 };
+
+/// Metadata attached to records after operation lowering.
+///
+/// A marked record is the intermediate, wire-facing output for an operation
+/// whose authored return is a proto-backed resource.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct OperationLoweredRecordData {
+    pub(crate) is_operation_output_intermediate: bool,
+}
+
+/// Operation-bound IR after resource-return structures become explicit records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OperationLoweredNames;
+
+impl crate::spec::TypeNameFamily for OperationLoweredNames {
+    type SpecData = ();
+    type Record = Symbol;
+    type Enum = Symbol;
+    type Flags = Symbol;
+    type Variant = Symbol;
+    type Resource = AuthoredResourceType;
+    type Proto = Symbol;
+    type Json = JsonModelSpec<Symbol>;
+    type Alias = Symbol;
+    type ServiceData = ();
+    type RecordData = OperationLoweredRecordData;
+    type ResourceData = OperationBoundResource;
+    type OperationData = OperationBoundOperation;
+    type FieldData = ();
+    type Text = SelectedTextSpec;
+    type Support = SelectedSupportSpec;
+}
 
 pub(crate) struct OperationLoweringPass;
 
@@ -63,7 +96,9 @@ impl CompilerPass<OperationBoundNames, OperationLoweredNames> for OperationLower
                         experimental: operation.experimental,
                         flatten_in_api: false,
                         fields: resource_result_fields(resource_return),
-                        data: (),
+                        data: OperationLoweredRecordData {
+                            is_operation_output_intermediate: true,
+                        },
                     },
                 ));
             }
@@ -146,7 +181,9 @@ impl ApiSpecTransform<OperationBoundNames, OperationLoweredNames> for OperationL
         value
     }
     fn map_service_data(&mut self, _: &str, _: ()) {}
-    fn map_record_data(&mut self, _: &str, _: ()) {}
+    fn map_record_data(&mut self, _: &str, _: ()) -> OperationLoweredRecordData {
+        OperationLoweredRecordData::default()
+    }
     fn map_resource_data(
         &mut self,
         _: &str,

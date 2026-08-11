@@ -154,7 +154,13 @@ fn enqueue_declaration_references(
 ) {
     match declaration {
         TypeDeclSpec::Record(record) => {
-            pending.extend(record.fields.values().map(|field| field.field_type.clone()));
+            pending.extend(
+                record
+                    .fields
+                    .values()
+                    .filter(|field| field.visibility != RecordFieldVisibility::Omitted)
+                    .map(|field| field.field_type.clone()),
+            );
         }
         TypeDeclSpec::Variant(variant) => {
             pending.extend(variant.cases.iter().filter_map(|case| case.payload.clone()));

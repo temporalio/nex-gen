@@ -6,6 +6,40 @@
 
 use super::*;
 
+/// Semantic operation and resource relationships after resource resolution.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OperationBoundOperation {
+    pub(crate) output_resource_return: Option<ResolvedResourceReturnSpec>,
+    pub(crate) direct_return: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OperationBoundResource {
+    pub(crate) resolved: Option<ResolvedResourceSpec>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OperationBoundNames;
+
+impl TypeNameFamily for OperationBoundNames {
+    type SpecData = ();
+    type Record = Symbol;
+    type Enum = Symbol;
+    type Flags = Symbol;
+    type Variant = Symbol;
+    type Resource = AuthoredResourceType;
+    type Proto = Symbol;
+    type Json = JsonModelSpec<Symbol>;
+    type Alias = Symbol;
+    type ServiceData = ();
+    type RecordData = ();
+    type ResourceData = OperationBoundResource;
+    type OperationData = OperationBoundOperation;
+    type FieldData = ();
+    type Text = SelectedTextSpec;
+    type Support = SelectedSupportSpec;
+}
+
 pub(crate) struct OperationBindingPass;
 
 impl OperationBindingPass {
