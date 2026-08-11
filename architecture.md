@@ -77,26 +77,18 @@ flowchart LR
     reachable --> reachableForEmission
 ```
 
-The concrete orchestration lives in `compile_tree_to_files`: validate authored
-IR, select language metadata, run the planning passes, resolve emitted names,
-then generate files. Passes may use descriptors and the selected target
-language as immutable inputs, but they do not exchange side tables or mutable
-planner objects.
+## Passes
 
-`ResourceResolutionPass` resolves resource-method and resource-return facts;
-`OperationBindingPass` attaches those facts to the operations and resources
-that own them; `OperationLoweringPass` turns wire-backed resource returns into
-explicit generated result records; `TypePlanningPass` produces target-ready type metadata;
-`ReachabilityPass` walks that planned graph to remove declarations outside the
-generated surface; and `EmittedNameResolutionPass` fixes final JSON model
-identifiers before backend dispatch.
-
-## Invariants
-
-- Parsers retain authored defaults and language-specific overrides; they do not
-  select an output language.
-- `LanguageSelectionPass` applies override precedence exactly once.
-- Selected and planned IR must not carry language-indexed strings or support
-  fragment maps.
-- Generators consume only planned IR and render it; they do not select metadata
-  or mutate planning data.
+- `AuthoredValidationPass` validates authored API intent and source-format
+  constraints.
+- `LanguageSelectionPass` selects the target-language values from authored
+  language maps.
+- `ResourceResolutionPass` resolves resource-method and resource-return facts
+  from the API spec and descriptors.
+- `OperationBindingPass` attaches resolved resource facts to their owning
+  operations and resources.
+- `OperationLoweringPass` turns wire-backed resource returns into explicit
+  result records.
+- `TypePlanningPass` materializes target-ready type metadata.
+- `ReachabilityPass` removes declarations outside the generated surface.
+- `EmittedNameResolutionPass` resolves final emitted JSON model identifiers.
