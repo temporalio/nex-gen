@@ -131,49 +131,6 @@ class StartWorkflowResult:
     run_id: str | None = None
 
 
-class _RestartWorkflowResultTransferTypeConverter(
-    temporalio.converter.TransferTypeConverter[
-        "RestartWorkflowResult",
-        temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
-    ]
-):
-    transfer_type: (
-        type[
-            temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
-        ]
-        | None
-    ) = temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse
-
-    @typing_extensions.override
-    def from_transfer_type(
-        self,
-        value: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
-        type_hint: type["RestartWorkflowResult"],
-    ) -> "RestartWorkflowResult":
-        proto = value
-        return RestartWorkflowResult(
-            run_id=proto.run_id if bool(proto.run_id) else None,
-        )
-
-    @typing_extensions.override
-    def to_transfer_type(
-        self,
-        value: "RestartWorkflowResult",
-    ) -> temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse:
-        message = temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse()
-        if value.run_id is not None:
-            message.run_id = value.run_id
-        return message
-
-
-@temporalio.converter.transfer_type_convertible(
-    _RestartWorkflowResultTransferTypeConverter
-)
-@dataclasses.dataclass(slots=True)
-class RestartWorkflowResult:
-    run_id: str | None = None
-
-
 class _CancelWorkflowRequestTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
         "CancelWorkflowRequest",

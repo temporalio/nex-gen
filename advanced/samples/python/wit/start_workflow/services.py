@@ -6,7 +6,6 @@ from nexusrpc import Operation, service
 from .models import (
     CancelWorkflowRequest,
     CancelWorkflowResponse,
-    RestartWorkflowResult,
     StartWorkflowRequest,
     StartWorkflowResult,
 )
@@ -21,7 +20,7 @@ class StartWorkflowService:
 
     restart_workflow: Operation[
         StartWorkflowRequest,
-        RestartWorkflowResult,
+        StartWorkflowResult,
     ] = Operation(name="RestartWorkflow")
 
     cancel_workflow: Operation[

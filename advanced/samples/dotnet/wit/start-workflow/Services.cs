@@ -22,7 +22,7 @@ namespace Nexgen.StartWorkflowService
 
         [GeneratedCode("nexgen", null)]
         [NexusOperation("RestartWorkflow")]
-        RestartWorkflowResult RestartWorkflow(StartWorkflowRequest request);
+        StartWorkflowResult RestartWorkflow(StartWorkflowRequest request);
 
         [GeneratedCode("nexgen", null)]
         [NexusOperation("CancelWorkflow")]

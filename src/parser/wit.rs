@@ -2868,9 +2868,27 @@ fn find_operation_type_spec(
     if let Some(resource_name) = find_owned_resource_name_for_type(resolve, ty) {
         let wire_type = find_proto_name_for_type(resolve, ty, path, context)?
             .map(|proto_name| ExternalTypeSpec::Proto(Symbol::new(proto_name)));
+        let alias = match ty {
+            Type::Id(type_id)
+                if resolve.types[*type_id].name.is_some()
+                    && !matches!(resolve.types[*type_id].kind, TypeDefKind::Resource) =>
+            {
+                let type_def = &resolve.types[*type_id];
+                Some(DeclaredTypeName {
+                    name: type_def
+                        .name
+                        .as_deref()
+                        .expect("type name checked above")
+                        .to_upper_camel_case(),
+                    full_name: wit_type_full_name(resolve, *type_id),
+                })
+            }
+            _ => None,
+        };
         return Ok(Some(TypeSpec::Resource(AuthoredResourceType {
             name: Symbol::new(resource_name),
             wire_type,
+            alias,
         })));
     }
     if let Some(proto_name) = find_proto_name_for_type(resolve, ty, path, context)? {
@@ -3434,8 +3452,8 @@ mod tests {
     use crate::spec::CompilerPass;
 
     use super::{
-        ApiSpec, AuthoredResourceType, ExternalTypeSpec, FunctionArgSpec, FunctionArgsSpec, Symbol,
-        TypeSpec, directive, parse_directives,
+        ApiSpec, AuthoredResourceType, DeclaredTypeName, ExternalTypeSpec, FunctionArgSpec,
+        FunctionArgsSpec, Symbol, TypeSpec, directive, parse_directives,
     };
 
     fn root() -> PathBuf {
@@ -4328,6 +4346,10 @@ interface user-service {
                 wire_type: Some(ExternalTypeSpec::Proto(Symbol::new(
                     "acme.users.v1.UserResult"
                 ))),
+                alias: Some(DeclaredTypeName {
+                    name: "UserResult".to_string(),
+                    full_name: "user-service.user-result".to_string(),
+                }),
             }))
         );
         assert_eq!(
@@ -4352,7 +4374,14 @@ interface user-service {
         let resource_input = service.operation("ResourceInput").unwrap();
         assert_eq!(
             resource_input.input,
-            Some(TypeSpec::Resource(AuthoredResourceType::new("user")))
+            Some(TypeSpec::Resource(AuthoredResourceType {
+                name: Symbol::new("user"),
+                wire_type: None,
+                alias: Some(DeclaredTypeName {
+                    name: "UserInput".to_string(),
+                    full_name: "user-service.user-input".to_string(),
+                }),
+            }))
         );
     }
 

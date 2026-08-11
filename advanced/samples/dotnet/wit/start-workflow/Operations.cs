@@ -90,7 +90,7 @@ namespace Nexgen.StartWorkflowService
         private static async Task<StartedWorkflow> RestartWorkflowAsync(StartWorkflowRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
-            var result = await client.ExecuteNexusOperationAsync<RestartWorkflowResult>(svc => svc.RestartWorkflow(request)).ConfigureAwait(true);
+            var result = await client.ExecuteNexusOperationAsync<StartWorkflowResult>(svc => svc.RestartWorkflow(request)).ConfigureAwait(true);
             return new StartedWorkflow(request.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
         }
 

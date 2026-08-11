@@ -81,14 +81,23 @@ impl CompilerPass<OperationBoundNames, OperationLoweredNames> for OperationLower
                     continue;
                 }
 
-                let record_name = format!("{}Result", operation.name.to_upper_camel_case());
-                let record_full_name = format!("__generated.{}.{}", service.name, record_name);
+                let (record_name, record_full_name) = resource
+                    .alias
+                    .as_ref()
+                    .map(|alias| (alias.name.clone(), alias.full_name.clone()))
+                    .unwrap_or_else(|| {
+                        let record_name = format!("{}Result", operation.name.to_upper_camel_case());
+                        (
+                            record_name.clone(),
+                            format!("__generated.{}.{}", service.name, record_name),
+                        )
+                    });
                 operation.output = Some(TypeSpec::Record(Symbol::new(record_full_name.clone())));
                 generated_records.push((
-                    record_full_name,
+                    record_full_name.clone(),
                     RecordSpec {
                         name: record_name.clone(),
-                        full_name: format!("__generated.{}.{}", service.name, record_name),
+                        full_name: record_full_name.clone(),
                         doc: SelectedTextSpec::default(),
                         source_type: Some(ExternalTypeSpec::Proto(Symbol::new(
                             resource_return.output_message_name.clone(),

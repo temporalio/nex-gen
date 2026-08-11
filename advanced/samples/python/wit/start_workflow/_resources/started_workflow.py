@@ -9,8 +9,8 @@ import temporalio.workflow
 from ..models import (
     CancelWorkflowRequest,
     CancelWorkflowResponse,
-    RestartWorkflowResult,
     StartWorkflowRequest,
+    StartWorkflowResult,
     WorkflowExecution,
 )
 
@@ -88,7 +88,7 @@ async def _restart_workflow(
     handle = await nexus_client.start_operation(
         operation="RestartWorkflow",
         input=request,
-        output_type=RestartWorkflowResult,
+        output_type=StartWorkflowResult,
     )
     result = await handle
     return StartedWorkflow(

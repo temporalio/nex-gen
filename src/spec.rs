@@ -96,6 +96,12 @@ impl std::fmt::Display for Symbol {
 pub struct AuthoredResourceType {
     pub name: Symbol,
     pub wire_type: Option<ExternalTypeSpec<AuthoredNames>>,
+    /// The named type alias through which this resource is referenced.
+    ///
+    /// A resource return is lowered into its wire-facing result model. Keeping
+    /// the alias here lets that model retain its authored name and be shared
+    /// by every operation that returns the same alias.
+    pub alias: Option<DeclaredTypeName>,
 }
 
 impl AuthoredResourceType {
@@ -103,12 +109,23 @@ impl AuthoredResourceType {
         Self {
             name: Symbol::new(name),
             wire_type: None,
+            alias: None,
         }
     }
 
     pub fn as_str(&self) -> &str {
         self.name.as_str()
     }
+}
+
+/// The authored and canonical names of a declared type.
+///
+/// `name` is used for generated code while `full_name` is the stable identity
+/// used to correlate references to the declaration.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DeclaredTypeName {
+    pub name: String,
+    pub full_name: String,
 }
 
 impl AsRef<str> for AuthoredResourceType {

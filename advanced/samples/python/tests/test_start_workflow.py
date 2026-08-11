@@ -56,14 +56,14 @@ class StartWorkflowServiceHandler:
         self,
         _ctx: StartOperationContext,
         input: start_workflow_models.StartWorkflowRequest,
-    ) -> start_workflow_models.RestartWorkflowResult:
+    ) -> start_workflow_models.StartWorkflowResult:
         self.calls.append(("RestartWorkflow", input))
         assert input.namespace == "default"
         assert input.workflow_id == "workflow-id"
         assert input.workflow == "ExampleWorkflow"
         assert input.task_queue == TASK_QUEUE
 
-        return start_workflow_models.RestartWorkflowResult(run_id="run-456")
+        return start_workflow_models.StartWorkflowResult(run_id="run-456")
 
     @sync_operation
     async def cancel_workflow(
