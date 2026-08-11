@@ -15,31 +15,61 @@ successor; no pass receives planner state saved by an earlier pass.
 
 ```mermaid
 flowchart LR
-    input[WIT or JSON Schema input]
-    detect[Detect input format]
-    wit[WIT parser]
-    json[JSON Schema parser]
-    authored[ApiSpec&lt;AuthoredNames&gt;]
-    validate[AuthoredValidationPass]
-    select[Select target language]
-    selected[ApiSpec&lt;SelectedNames&gt;]
-    resources[ResourceResolutionPass]
-    bound[ApiSpec&lt;ResourceBoundNames&gt;]
-    operations[OperationBindingPass]
-    operationBound[ApiSpec&lt;OperationBoundNames&gt;]
-    lower[OperationLoweringPass]
-    operationLowered[ApiSpec&lt;OperationLoweredNames&gt;]
-    types[TypePlanningPass]
-    reachability[ReachabilityPass]
-    planned[ApiSpec&lt;PlannedTypeFamily&gt;]
-    names[EmittedNameResolutionPass]
-    generate[Language backend]
-    output[Generated files]
+    subgraph parse["Input & Parsing"]
+        direction TB
+        input[WIT or JSON Schema input]
+        authored[ApiSpec&lt;AuthoredNames&gt;]
 
-    input --> detect
-    detect --> wit --> authored
-    detect --> json --> authored
-    authored --> validate --> select --> selected --> resources --> bound --> operations --> operationBound --> lower --> operationLowered --> types --> reachability --> planned --> names --> generate --> output
+        input -->|Detect format and parse WIT| authored
+        input -->|Detect format and parse JSON Schema| authored
+    end
+
+    subgraph select["Validation & Selection"]
+        direction TB
+        authoredForBinding[ApiSpec&lt;AuthoredNames&gt;]
+        validated[Validated ApiSpec&lt;AuthoredNames&gt;]
+        selected[ApiSpec&lt;SelectedNames&gt;]
+
+        authoredForBinding -->|AuthoredValidationPass| validated
+        validated -->|LanguageSelectionPass| selected
+    end
+
+    subgraph bind["Resource & Operation Binding"]
+        direction TB
+        selectedForBinding[ApiSpec&lt;SelectedNames&gt;]
+        resourceBound[ApiSpec&lt;ResourceBoundNames&gt;]
+        operationBound[ApiSpec&lt;OperationBoundNames&gt;]
+
+        selectedForBinding -->|ResourceResolutionPass| resourceBound
+        resourceBound -->|OperationBindingPass| operationBound
+    end
+
+    subgraph plan["Lowering & Type Planning"]
+        direction TB
+        operationBoundForPlanning[ApiSpec&lt;OperationBoundNames&gt;]
+        operationLowered[ApiSpec&lt;OperationLoweredNames&gt;]
+        planned[ApiSpec&lt;PlannedTypeFamily&gt;]
+        reachable[Reachable ApiSpec&lt;PlannedTypeFamily&gt;]
+
+        operationBoundForPlanning -->|OperationLoweringPass| operationLowered
+        operationLowered -->|TypePlanningPass| planned
+        planned -->|ReachabilityPass| reachable
+    end
+
+    subgraph emit["Emission"]
+        direction TB
+        reachableForEmission[Reachable ApiSpec&lt;PlannedTypeFamily&gt;]
+        generatorReady[Generator-ready ApiSpec&lt;PlannedTypeFamily&gt;]
+        output[Generated files]
+
+        reachableForEmission -->|EmittedNameResolutionPass| generatorReady
+        generatorReady -->|Language backend| output
+    end
+
+    authored --> authoredForBinding
+    selected --> selectedForBinding
+    operationBound --> operationBoundForPlanning
+    reachable --> reachableForEmission
 ```
 
 The concrete orchestration lives in `compile_tree_to_files`: validate authored
