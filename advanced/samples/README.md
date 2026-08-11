@@ -82,3 +82,9 @@ cargo build-examples                 # WIT examples, all languages
 cargo build-examples --lang go       # a single language
 cargo build-json-examples            # JSON Schema outputs (definitions + api)
 ```
+
+Each example's output directory is deleted before it is regenerated, so a file
+whose definition was renamed or removed never lingers — and nothing
+hand-written belongs in one. The per-language tests live in the sibling
+`tests/` directories. (The `nexgen` CLI itself never deletes: it writes into an
+existing `--output` directory and leaves everything already there alone.)

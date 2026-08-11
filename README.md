@@ -70,6 +70,12 @@ Generate TypeScript bindings from one schema:
 nexgen ts samples/schemas/showcase.nexusrpc.yaml --output ./gen
 ```
 
+The `--output` directory is created if missing and written into if it already
+exists — nothing there is deleted, so hand-written files can live alongside the
+generated ones. Generated files are overwritten in place, which also means a
+file from an earlier run whose definition has since been renamed or removed
+stays behind until you delete it.
+
 Generate Go, TypeScript, and Python:
 
 ```bash

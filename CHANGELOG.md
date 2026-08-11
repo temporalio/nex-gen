@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Generating into an existing `--output` directory no longer deletes it first.
+  The directory is written into instead, so pre-existing files and
+  subdirectories are preserved; generated files are still overwritten in place.
+  A file left over from an earlier run whose definition has since been renamed
+  or removed now stays behind until it is deleted. The `build-examples` and
+  `build-json-examples` maintenance commands, which own the directories they
+  write, delete each example's output directory before regenerating it, so the
+  checked-in samples stay free of stale files.
+
 ### Deprecated
 
 ### Breaking Changes

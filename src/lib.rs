@@ -58,10 +58,10 @@ pub struct BuildExamplesRequest {
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
-    // `write_generated_files` removes an existing output directory before
-    // writing, so a resolved output path with no name at all (the
-    // filesystem root, or `..` past it) must be rejected up front rather
-    // than risking `fs::remove_dir_all` on it.
+    // A resolved output path with no name at all (the filesystem root, or
+    // `..` past it) is never a real output directory: Go and Java derive
+    // package names from its basename, and for every language it means the
+    // caller pointed `--output` somewhere unintended.
     if absolute_output_path(&request.output_path)?
         .file_name()
         .is_none()
@@ -305,6 +305,14 @@ fn print_warnings(generated: &GeneratedFiles) {
     }
 }
 
+/// Writes the generated files into `output_path`, creating directories as
+/// needed. Nothing already on disk is deleted: an existing output directory is
+/// written into rather than replaced, so hand-written files living alongside
+/// generated ones survive. Generated files themselves are overwritten in
+/// place, which also means a file left over from a previous run whose source
+/// definition has since been renamed or removed stays until it is deleted —
+/// the checked-in examples get that pruning from
+/// `reset_example_output_directory`, which the sample builders run first.
 fn write_generated_files(output_path: &Path, generated: &GeneratedFiles) -> Result<()> {
     match generated.layout {
         GeneratedOutputLayout::SingleFile => {
@@ -330,12 +338,6 @@ fn write_generated_files(output_path: &Path, generated: &GeneratedFiles) -> Resu
                 return Err(error::Error::OutputPathExists {
                     path: output_path.to_path_buf(),
                 });
-            }
-            if output_path.exists() {
-                fs::remove_dir_all(output_path).map_err(|source| error::Error::WriteFile {
-                    path: output_path.to_path_buf(),
-                    source,
-                })?;
             }
             fs::create_dir_all(output_path).map_err(|source| error::Error::WriteFile {
                 path: output_path.to_path_buf(),
@@ -638,12 +640,51 @@ fn ensure_typescript_dependencies(cwd: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Deletes an example's output directory so its rebuild starts from an empty
+/// tree. Generation itself never deletes anything (see `write_generated_files`),
+/// which would leave a file behind after the definition that produced it is
+/// renamed or removed; the checked-in example directories hold nothing but
+/// generated code — their hand-written tests live in sibling `tests/`
+/// directories — so the builders that own them clear them up front instead.
+///
+/// `language_root` is the sample root the output path was built from
+/// (`samples/<lang>` or `advanced/samples/<lang>`). Only a path strictly below
+/// it is removed: were an example's directory name ever to come out empty, the
+/// output path would collapse onto that shared root and take the whole sample
+/// project with it.
+fn reset_example_output_directory(language_root: &Path, output_path: &Path) -> Result<()> {
+    let is_below_root = output_path
+        .strip_prefix(language_root)
+        .is_ok_and(|relative| {
+            let mut components = relative.components().peekable();
+            components.peek().is_some()
+                && components.all(|component| matches!(component, std::path::Component::Normal(_)))
+        });
+    if !is_below_root {
+        return Err(error::Error::ExampleOutputPathOutsideRoot {
+            path: output_path.to_path_buf(),
+            root: language_root.to_path_buf(),
+        });
+    }
+
+    match fs::remove_dir_all(output_path) {
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(error::Error::WriteFile {
+            path: output_path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
 fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Result<()> {
     let descriptor_path = repo_root.join("advanced/samples/descriptors/temporal_api.bin");
     let input_path = example_input_path(repo_root, example_id);
     let mut input_paths = vec![input_path];
     input_paths.extend(example_linked_input_paths(repo_root));
     let output_path = example_output_path(repo_root, language, example_id);
+    let language_root = advanced_language_root(repo_root, language);
+    reset_example_output_directory(&language_root, &output_path)?;
 
     generate_to_file(&GenerateRequest {
         language,
@@ -657,11 +698,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
             .then(|| example_directory_name(language, example_id)),
         ts_date_time_types: Default::default(),
     })?;
-    format_example_output(
-        &advanced_language_root(repo_root, language),
-        language,
-        &output_path,
-    )?;
+    format_example_output(&language_root, language, &output_path)?;
 
     println!("Built {} with nexgen", output_path.display());
     Ok(())
@@ -713,12 +750,15 @@ fn build_json_example_variant(
 ) -> Result<()> {
     let input_path = json_example_input_path(repo_root, input_id);
     let dir_name = example_directory_name(language, output_id);
+    let samples_root = samples_language_root(repo_root, language);
+    let advanced_root = advanced_language_root(repo_root, language);
     let definitions_output_path = json_example_output_path(
         repo_root,
         language,
         output_id,
         GenerationMode::DefinitionsOnly,
     );
+    reset_example_output_directory(&samples_root, &definitions_output_path)?;
 
     generate_to_file(&GenerateRequest {
         language,
@@ -732,16 +772,13 @@ fn build_json_example_variant(
             .then(|| json_example_java_package(&dir_name, GenerationMode::DefinitionsOnly)),
         ts_date_time_types,
     })?;
-    format_example_output(
-        &samples_language_root(repo_root, language),
-        language,
-        &definitions_output_path,
-    )?;
+    format_example_output(&samples_root, language, &definitions_output_path)?;
 
     println!("Built {} with nexgen", definitions_output_path.display());
 
     let api_output_path =
         json_example_output_path(repo_root, language, output_id, GenerationMode::NativeApi);
+    reset_example_output_directory(&advanced_root, &api_output_path)?;
     generate_to_file(&GenerateRequest {
         language,
         input_paths: vec![input_path],
@@ -754,11 +791,7 @@ fn build_json_example_variant(
             .then(|| json_example_java_package(&dir_name, GenerationMode::NativeApi)),
         ts_date_time_types,
     })?;
-    format_example_output(
-        &advanced_language_root(repo_root, language),
-        language,
-        &api_output_path,
-    )?;
+    format_example_output(&advanced_root, language, &api_output_path)?;
 
     println!("Built {} with nexgen", api_output_path.display());
 
@@ -967,9 +1000,20 @@ mod tests {
 
     use super::{
         GenerateRequest, format_formatter_command, formatter_command, infer_dotnet_namespace,
-        output_dir_name, resolve_java_package,
+        output_dir_name, reset_example_output_directory, resolve_java_package,
     };
     use crate::language::Language;
+
+    /// A unique scratch directory standing in for a language's sample root.
+    fn temp_language_root(label: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("nexgen-{label}-{}-{counter}", std::process::id()));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
 
     fn java_request(output_path: &str, java_package_name: Option<&str>) -> GenerateRequest {
         GenerateRequest {
@@ -1047,6 +1091,66 @@ mod tests {
             output_dir_name(Path::new("/")).unwrap_err(),
             crate::error::Error::OutputPathIsRoot { path } if path == Path::new("/")
         ));
+    }
+
+    #[test]
+    fn reset_example_output_directory_clears_the_example_directory() {
+        // The sample builders run this before generating, so an output file
+        // whose definition has since been renamed or removed does not survive
+        // the rebuild. Everything else under the sample root is untouched.
+        let language_root = temp_language_root("reset-example-output");
+        let output_path = language_root.join("chat");
+        std::fs::create_dir_all(output_path.join("nested")).unwrap();
+        std::fs::write(output_path.join("stale.go"), "stale\n").unwrap();
+        std::fs::write(output_path.join("nested/stale.go"), "stale\n").unwrap();
+        std::fs::write(language_root.join("go.mod"), "module sample\n").unwrap();
+
+        reset_example_output_directory(&language_root, &output_path).unwrap();
+
+        assert!(!output_path.exists());
+        assert!(language_root.join("go.mod").is_file());
+        std::fs::remove_dir_all(&language_root).unwrap();
+    }
+
+    #[test]
+    fn reset_example_output_directory_accepts_a_missing_directory() {
+        let language_root = temp_language_root("reset-example-output-missing");
+
+        reset_example_output_directory(&language_root, &language_root.join("chat")).unwrap();
+
+        std::fs::remove_dir_all(&language_root).unwrap();
+    }
+
+    #[test]
+    fn reset_example_output_directory_refuses_the_language_root_itself() {
+        // An empty example directory name would collapse the output path onto
+        // the shared sample root; deleting it would take the whole sample
+        // project (`go.mod`, `tests/`, every other example) with it.
+        let language_root = temp_language_root("reset-example-output-root");
+        std::fs::write(language_root.join("go.mod"), "module sample\n").unwrap();
+
+        assert!(matches!(
+            reset_example_output_directory(&language_root, &language_root).unwrap_err(),
+            crate::error::Error::ExampleOutputPathOutsideRoot { path, root }
+                if path == language_root && root == language_root
+        ));
+        assert!(language_root.join("go.mod").is_file());
+        std::fs::remove_dir_all(&language_root).unwrap();
+    }
+
+    #[test]
+    fn reset_example_output_directory_refuses_a_path_outside_the_root() {
+        let language_root = temp_language_root("reset-example-output-outside");
+        let outside = language_root.join("../escaped");
+        std::fs::create_dir_all(&outside).unwrap();
+
+        assert!(matches!(
+            reset_example_output_directory(&language_root, &outside).unwrap_err(),
+            crate::error::Error::ExampleOutputPathOutsideRoot { .. }
+        ));
+        assert!(outside.is_dir());
+        std::fs::remove_dir_all(&outside).unwrap();
+        std::fs::remove_dir_all(&language_root).unwrap();
     }
 
     #[test]

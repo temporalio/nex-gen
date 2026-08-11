@@ -31,3 +31,7 @@ cargo build-json-examples --lang go  # a single language
 ```
 
 The generated definitions are checked in and snapshot-tested by `cargo test`.
+Each example's output directory is deleted before it is regenerated, so nothing
+hand-written belongs in one — the tests live in the sibling `tests/` directory.
+(The `nexgen` CLI itself never deletes: it writes into an existing `--output`
+directory and leaves everything already there alone.)

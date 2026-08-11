@@ -48,6 +48,11 @@ pub enum Error {
     #[error("output path `{path}`'s final component is not valid UTF-8")]
     OutputPathNotUtf8 { path: PathBuf },
 
+    #[error(
+        "refusing to delete example output path `{path}`: it is not a directory inside `{root}`"
+    )]
+    ExampleOutputPathOutsideRoot { path: PathBuf, root: PathBuf },
+
     #[error("failed to run formatter `{command}` for `{path}`: {source}")]
     RunFormatter {
         path: PathBuf,
