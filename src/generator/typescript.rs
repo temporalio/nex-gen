@@ -15,10 +15,10 @@ use crate::generator::render_request_plan;
 use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode, TsDateTimeTypes};
 use crate::language::Language;
 use crate::planning::{
-    PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedProtoType,
-    PlannedProtoTypeInfo, PlannedRecordType, PlannedResource, PlannedResourceMethod,
-    PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedSpec, PlannedType,
-    PlannedTypeFamily, operation_input_model, operation_output_direct_result,
+    PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
+    PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
+    PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
+    PlannedSpec, PlannedType, operation_input_model, operation_output_direct_result,
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
@@ -34,9 +34,9 @@ const TYPESCRIPT_FORMAT_LINE_LENGTH: usize = 88;
 const EXPERIMENTAL_WARNING: &str = "This API is experimental and subject to change.";
 const WIRE_VALUE_EXPR: &str = "{wire}";
 
-type PlannedOperation = OperationSpec<PlannedTypeFamily>;
+type PlannedOperation = OperationSpec<PlannedFamily>;
 type PlannedFlags = FlagsSpec;
-type PlannedVariant = VariantSpec<PlannedTypeFamily>;
+type PlannedVariant = VariantSpec<PlannedFamily>;
 
 #[derive(Debug, Default)]
 pub(in crate::generator) struct RenderedExternalModelFragments {
@@ -66,7 +66,7 @@ impl RenderedExternalModelFragments {
 }
 
 pub(crate) fn render_tree_support_files(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
 ) -> BTreeMap<PathBuf, String> {
     if !branch_has_json_models(branch) {
         return BTreeMap::new();
@@ -79,7 +79,7 @@ pub(crate) fn render_tree_support_files(
 }
 
 fn generate_tree(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
@@ -109,7 +109,7 @@ fn generate_tree(
 }
 
 fn generate_tree_node(
-    node: &ApiSpecNode<PlannedTypeFamily>,
+    node: &ApiSpecNode<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
@@ -145,7 +145,7 @@ fn generate_tree_node(
 
 fn insert_branch_index_file(
     files: &mut BTreeMap<PathBuf, String>,
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
     has_json_runtime_module: bool,
 ) -> Result<()> {
     let mut path = branch.module_path.to_path_buf();
@@ -204,7 +204,7 @@ fn support_fragments_for_plan(
     }
 }
 
-fn branch_has_json_models(branch: &ApiSpecBranch<PlannedTypeFamily>) -> bool {
+fn branch_has_json_models(branch: &ApiSpecBranch<PlannedFamily>) -> bool {
     branch.children.values().any(|node| match node {
         ApiSpecNode::Leaf(leaf) => leaf
             .spec
@@ -233,7 +233,7 @@ impl TypeScriptExternalModels {
         &self,
         output: &mut String,
         model: &RenderedModel,
-        planned_record: &RecordSpec<PlannedTypeFamily>,
+        planned_record: &RecordSpec<PlannedFamily>,
     ) -> bool {
         self.proto
             .render_model_wire_functions(output, model, planned_record)
@@ -289,7 +289,7 @@ impl ExternalModelBackend for TypeScriptExternalModels {
     fn wire_conversion(
         &self,
         model_type: &PlannedType,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         match model_type {
             PlannedType::External(ExternalTypeSpec::Proto(_)) => {
@@ -830,9 +830,9 @@ impl<'a> ApiPlanner<'a> {
 
     fn build_field(
         &mut self,
-        record: &RecordSpec<PlannedTypeFamily>,
+        record: &RecordSpec<PlannedFamily>,
         field_name: &str,
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
     ) -> RenderedField {
         let generated_field_name = typescript_generated_field_name(&field.name);
         let wire_field_name = typescript_generated_field_name(field_name);
@@ -849,9 +849,9 @@ impl<'a> ApiPlanner<'a> {
 
     fn build_field_with_wire_expr(
         &mut self,
-        record: &RecordSpec<PlannedTypeFamily>,
+        record: &RecordSpec<PlannedFamily>,
         field_name: &str,
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
         generated_field_name: &str,
         wire_field_name: &str,
         wire_field_expr: &str,
@@ -1113,9 +1113,9 @@ impl<'a> ApiPlanner<'a> {
 
     fn build_flattened_message_field(
         &mut self,
-        _record: &RecordSpec<PlannedTypeFamily>,
+        _record: &RecordSpec<PlannedFamily>,
         _field_name: &str,
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
         generated_field_name: &str,
         wire_field_name: &str,
     ) -> Option<RenderedField> {
@@ -1218,7 +1218,7 @@ impl<'a> ApiPlanner<'a> {
     fn build_sourced_field(
         &mut self,
         field_name: &str,
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
         source_expr: &str,
     ) -> RenderedSourcedField {
         let field_name = typescript_generated_field_name(field_name);
@@ -1251,7 +1251,7 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn typescript_field_annotation(
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
         default_annotation: String,
     ) -> String {
         let annotation = field
@@ -1580,7 +1580,7 @@ fn required_from_wire_expr(
     owner_name: &str,
     wire_value_expr: &str,
     generated_field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
 ) -> String {
     let wire_value_expr = if field_has_presence(field) {
         wire_value_expr.to_string()
@@ -1749,7 +1749,7 @@ fn optional_function_args_to_wire_expr(
     format!("requestArgsToPayloads(model.{field_name})")
 }
 
-fn field_has_presence(field: &RecordFieldSpec<PlannedTypeFamily>) -> bool {
+fn field_has_presence(field: &RecordFieldSpec<PlannedFamily>) -> bool {
     field.data.has_presence.unwrap_or(!field.required)
 }
 
@@ -1800,7 +1800,7 @@ impl PlannedOperationExt for PlannedOperation {
 }
 
 pub(crate) fn generate(
-    tree: &crate::spec::ApiSpecTree<PlannedTypeFamily>,
+    tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
@@ -2071,7 +2071,7 @@ fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<Langua
 }
 
 fn collect_function_imports(
-    function: &FunctionFieldSpec<PlannedTypeFamily>,
+    function: &FunctionFieldSpec<PlannedFamily>,
     imports: &mut BTreeSet<LanguageImportSpec>,
 ) {
     if let FunctionResultSpec::Annotation(result) = &function.result {
@@ -2088,7 +2088,7 @@ fn collect_function_imports(
 }
 
 fn collect_function_args_imports(
-    args: &FunctionArgsSpec<PlannedTypeFamily>,
+    args: &FunctionArgsSpec<PlannedFamily>,
     imports: &mut BTreeSet<LanguageImportSpec>,
 ) {
     let fields = match args {
@@ -2229,7 +2229,7 @@ fn reject_support_namespaces(
 }
 
 fn model_type_parameters(
-    model: &RecordSpec<PlannedTypeFamily>,
+    model: &RecordSpec<PlannedFamily>,
     api_plan: &PlannedSpec,
 ) -> Vec<RenderedTypeParameter> {
     if model.is_empty_model() {
@@ -2313,7 +2313,7 @@ fn model_type_parameters(
     model_parameters
 }
 
-fn typescript_function_result_annotation(result: &FunctionResultSpec<PlannedTypeFamily>) -> String {
+fn typescript_function_result_annotation(result: &FunctionResultSpec<PlannedFamily>) -> String {
     match result {
         FunctionResultSpec::Annotation(annotation) => annotation
             .for_language(Language::TypeScript)
@@ -2484,7 +2484,7 @@ fn function_type_parameter_stem(field_name: &str) -> &str {
         .unwrap_or(field_name)
 }
 
-fn function_constraint(function: &FunctionFieldSpec<PlannedTypeFamily>) -> String {
+fn function_constraint(function: &FunctionFieldSpec<PlannedFamily>) -> String {
     typescript_function_constraint(
         &typescript_function_args(&function.args),
         &typescript_function_result_annotation(&function.result),
@@ -2498,7 +2498,7 @@ struct RenderedFunctionTypeDescriptor {
 }
 
 fn typescript_function_type_descriptor(
-    function: &FunctionFieldSpec<PlannedTypeFamily>,
+    function: &FunctionFieldSpec<PlannedFamily>,
 ) -> Option<RenderedFunctionTypeDescriptor> {
     let descriptor = function.type_descriptor.as_ref()?;
     Some(RenderedFunctionTypeDescriptor {
@@ -2540,7 +2540,7 @@ fn typescript_function_constraint(args: &RenderedFunctionArgs, result_annotation
     }
 }
 
-fn typescript_function_args(args: &FunctionArgsSpec<PlannedTypeFamily>) -> RenderedFunctionArgs {
+fn typescript_function_args(args: &FunctionArgsSpec<PlannedFamily>) -> RenderedFunctionArgs {
     match args {
         FunctionArgsSpec::Varargs {
             prefix,
@@ -5019,7 +5019,7 @@ fn typescript_resource_method_result_annotation(method: &PlannedResourceMethod) 
 fn typescript_resource_field_annotation(
     kind: &PlannedType,
     optional: bool,
-    function: Option<&FunctionFieldSpec<PlannedTypeFamily>>,
+    function: Option<&FunctionFieldSpec<PlannedFamily>>,
 ) -> String {
     let base = if let Some(function) = function {
         typescript_function_value_annotation(

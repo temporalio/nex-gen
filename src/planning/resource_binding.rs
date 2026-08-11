@@ -9,22 +9,22 @@ use prost_types::field_descriptor_proto::Type;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ApiSpecTransform, AuthoredNames, AuthoredResourceType, ExternalTypeSpec,
+    ApiSpec, ApiSpecTransform, AuthoredFamily, AuthoredResourceType, ExternalTypeSpec,
     JsonModelSpec, OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
-    ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec, ResourceSpec, SelectedNames,
-    SelectedSupportSpec, SelectedTextSpec, ServiceSpec, Symbol, TypeNameFamily, TypeSpec,
+    ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec, ResourceSpec, SelectedFamily,
+    SelectedSupportSpec, SelectedTextSpec, ServiceSpec, Symbol, TypeFamily, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 /// Selected IR after resource-method and resource-return bindings are resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ResourceBoundNames;
+pub(crate) struct ResourceBoundFamily;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResourceBoundData {
     pub(crate) bindings: BTreeMap<String, ResolvedServiceResources>,
 }
 
-impl TypeNameFamily for ResourceBoundNames {
+impl TypeFamily for ResourceBoundFamily {
     type SpecData = ResourceBoundData;
     type Record = Symbol;
     type Enum = Symbol;
@@ -47,7 +47,7 @@ struct ResourceBindingMapper {
     data: ResourceBoundData,
 }
 
-impl ApiSpecTransform<SelectedNames, ResourceBoundNames> for ResourceBindingMapper {
+impl ApiSpecTransform<SelectedFamily, ResourceBoundFamily> for ResourceBindingMapper {
     fn map_spec_data(&mut self, _: ()) -> ResourceBoundData {
         self.data.clone()
     }
@@ -97,15 +97,15 @@ pub(crate) struct ResolvedServiceResources {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedResourceSpec {
     pub(crate) name: String,
-    pub(crate) fields: Vec<ResourceFieldSpec<SelectedNames>>,
+    pub(crate) fields: Vec<ResourceFieldSpec<SelectedFamily>>,
     pub(crate) methods: Vec<ResolvedResourceMethodSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedResourceMethodSpec {
     pub(crate) name: String,
-    pub(crate) params: Vec<ResourceFieldSpec<SelectedNames>>,
-    pub(crate) result: Option<ResourceResultSpec<SelectedNames>>,
+    pub(crate) params: Vec<ResourceFieldSpec<SelectedFamily>>,
+    pub(crate) result: Option<ResourceResultSpec<SelectedFamily>>,
     pub(crate) binding: ResolvedResourceMethodBinding,
 }
 
@@ -176,8 +176,8 @@ struct MessageFieldInfo {
 }
 
 pub(crate) fn resolve_service_resources(
-    spec: &ApiSpec<SelectedNames>,
-    service: &ServiceSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
+    service: &ServiceSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
 ) -> Result<ResolvedServiceResources> {
     let resources = service
@@ -285,9 +285,9 @@ pub(crate) fn resolve_service_resources(
 }
 
 fn resolve_resource_methods(
-    spec: &ApiSpec<SelectedNames>,
-    service: &ServiceSpec<SelectedNames>,
-    resource: &ResourceSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
+    service: &ServiceSpec<SelectedFamily>,
+    resource: &ResourceSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
 ) -> Result<ResolvedResourceSpec> {
     let methods = resource
@@ -303,10 +303,10 @@ fn resolve_resource_methods(
 }
 
 fn resolve_resource_method(
-    spec: &ApiSpec<SelectedNames>,
-    service: &ServiceSpec<SelectedNames>,
-    resource: &ResourceSpec<SelectedNames>,
-    method: &ResourceMethodSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
+    service: &ServiceSpec<SelectedFamily>,
+    resource: &ResourceSpec<SelectedFamily>,
+    method: &ResourceMethodSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
 ) -> Result<ResolvedResourceMethodSpec> {
     let mut environment = BTreeMap::new();
@@ -418,9 +418,9 @@ fn resolve_resource_method(
 }
 
 fn resource_method_result_matches_operation(
-    service: &ServiceSpec<SelectedNames>,
-    method: &ResourceMethodSpec<SelectedNames>,
-    operation: &OperationSpec<SelectedNames>,
+    service: &ServiceSpec<SelectedFamily>,
+    method: &ResourceMethodSpec<SelectedFamily>,
+    operation: &OperationSpec<SelectedFamily>,
 ) -> bool {
     let Some(result) = &method.result else {
         return true;
@@ -438,9 +438,9 @@ fn resource_method_result_matches_operation(
 }
 
 fn synthesize_operation_request_plan(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
-    operation: &OperationSpec<SelectedNames>,
+    operation: &OperationSpec<SelectedFamily>,
     environment: &BTreeMap<String, RequestPlanSource>,
 ) -> Result<Option<RequestPlan>> {
     if let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_ref))) = operation.input_type() {
@@ -453,7 +453,7 @@ fn synthesize_operation_request_plan(
 }
 
 fn bind_resource_return_field(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     service_name: &str,
     resource_name: &str,
     descriptors: &DescriptorIndex,
@@ -486,7 +486,7 @@ fn bind_resource_return_field(
 }
 
 fn synthesize_request_plan(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
     message_name: &str,
     environment: &BTreeMap<String, RequestPlanSource>,
@@ -526,7 +526,7 @@ fn synthesize_request_plan(
 }
 
 fn synthesize_record_request_plan(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
     record_name: &str,
     environment: &BTreeMap<String, RequestPlanSource>,
@@ -578,7 +578,7 @@ fn synthesize_record_request_plan(
 }
 
 fn visible_message_fields(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
     message_name: &str,
 ) -> Result<Vec<MessageFieldInfo>> {
@@ -589,7 +589,7 @@ fn visible_message_fields(
 }
 
 fn visible_record_fields(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     record_name: &str,
 ) -> Result<Vec<MessageFieldInfo>> {
     Ok(all_record_fields(spec, record_name)?
@@ -599,7 +599,7 @@ fn visible_record_fields(
 }
 
 fn find_visible_message_field(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
     message_name: &str,
     field_name: &str,
@@ -610,7 +610,7 @@ fn find_visible_message_field(
 }
 
 fn find_message_field(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
     message_name: &str,
     field_name: &str,
@@ -621,7 +621,7 @@ fn find_message_field(
 }
 
 fn all_message_fields(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
     message_name: &str,
 ) -> Result<Vec<MessageFieldInfo>> {
@@ -641,7 +641,7 @@ fn all_message_fields(
 }
 
 fn all_record_fields(
-    spec: &ApiSpec<SelectedNames>,
+    spec: &ApiSpec<SelectedFamily>,
     record_name: &str,
 ) -> Result<Vec<MessageFieldInfo>> {
     let record = spec
@@ -659,8 +659,8 @@ fn all_record_fields(
 
 fn build_record_field_info(
     field_name: &str,
-    field: &RecordFieldSpec<SelectedNames>,
-    spec: &ApiSpec<SelectedNames>,
+    field: &RecordFieldSpec<SelectedFamily>,
+    spec: &ApiSpec<SelectedFamily>,
 ) -> Result<MessageFieldInfo> {
     let api_name = field.name.clone();
     let required = field.required;
@@ -676,8 +676,8 @@ fn build_record_field_info(
 }
 
 fn api_field_message_name(
-    field_type: &TypeSpec<SelectedNames>,
-    spec: &ApiSpec<SelectedNames>,
+    field_type: &TypeSpec<SelectedFamily>,
+    spec: &ApiSpec<SelectedFamily>,
 ) -> Option<String> {
     match field_type.without_option() {
         TypeSpec::Record(record_name) => Some(record_name.as_str().to_string()),
@@ -692,7 +692,7 @@ fn api_field_message_name(
 
 fn build_message_field_info(
     field: &FieldDescriptorProto,
-    record: Option<&RecordSpec<SelectedNames>>,
+    record: Option<&RecordSpec<SelectedFamily>>,
     descriptors: &DescriptorIndex,
 ) -> Result<MessageFieldInfo> {
     let proto_name = field
@@ -730,7 +730,7 @@ fn field_message_name(
 }
 
 fn operation_input_message_name<'a>(
-    operation: &'a OperationSpec<SelectedNames>,
+    operation: &'a OperationSpec<SelectedFamily>,
     descriptors: &DescriptorIndex,
 ) -> Option<&'a str> {
     let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_ref))) = operation.input_type()
@@ -743,8 +743,8 @@ fn operation_input_message_name<'a>(
 }
 
 fn operation_output_resource_name<'a>(
-    service: &'a ServiceSpec<SelectedNames>,
-    operation: &'a OperationSpec<SelectedNames>,
+    service: &'a ServiceSpec<SelectedFamily>,
+    operation: &'a OperationSpec<SelectedFamily>,
 ) -> Option<&'a str> {
     let TypeSpec::Resource(resource_name) = operation.output_type()? else {
         return None;
@@ -754,12 +754,12 @@ fn operation_output_resource_name<'a>(
         .map(|_| resource_name.as_str())
 }
 
-fn operation_output_ref(operation: &OperationSpec<SelectedNames>) -> Option<&str> {
+fn operation_output_ref(operation: &OperationSpec<SelectedFamily>) -> Option<&str> {
     operation.output_type()?.reference()
 }
 
 fn operation_output_resource_message_name(
-    operation: &OperationSpec<SelectedNames>,
+    operation: &OperationSpec<SelectedFamily>,
 ) -> Option<&str> {
     let Some(ExternalTypeSpec::Proto(type_name)) = operation_output_resource_wire_type(operation)
     else {
@@ -769,8 +769,8 @@ fn operation_output_resource_message_name(
 }
 
 fn operation_output_resource_wire_type(
-    operation: &OperationSpec<SelectedNames>,
-) -> Option<&ExternalTypeSpec<AuthoredNames>> {
+    operation: &OperationSpec<SelectedFamily>,
+) -> Option<&ExternalTypeSpec<AuthoredFamily>> {
     let TypeSpec::Resource(resource_name) = operation.output_type()? else {
         return None;
     };
@@ -791,8 +791,8 @@ impl<'a> ResourceResolutionPass<'a> {
 
     pub(super) fn bind_spec(
         &self,
-        spec: ApiSpec<SelectedNames>,
-    ) -> Result<ApiSpec<super::ResourceBoundNames>> {
+        spec: ApiSpec<SelectedFamily>,
+    ) -> Result<ApiSpec<super::ResourceBoundFamily>> {
         ensure_unique_resource_names(&spec)?;
         let bindings = if self.mode == super::PlanningMode::NativeApi {
             spec.services
@@ -811,7 +811,7 @@ impl<'a> ResourceResolutionPass<'a> {
     }
 }
 
-fn ensure_unique_resource_names(spec: &ApiSpec<SelectedNames>) -> Result<()> {
+fn ensure_unique_resource_names(spec: &ApiSpec<SelectedFamily>) -> Result<()> {
     let mut seen_names = BTreeSet::new();
     for service in &spec.services {
         for resource in &service.resources {
@@ -828,13 +828,13 @@ fn ensure_unique_resource_names(spec: &ApiSpec<SelectedNames>) -> Result<()> {
     Ok(())
 }
 
-impl CompilerPass<SelectedNames, super::ResourceBoundNames> for ResourceResolutionPass<'_> {
+impl CompilerPass<SelectedFamily, super::ResourceBoundFamily> for ResourceResolutionPass<'_> {
     type Error = Error;
 
     fn transform_leaf(
         &mut self,
-        leaf: ApiSpecLeaf<SelectedNames>,
-    ) -> Result<ApiSpecLeaf<super::ResourceBoundNames>> {
+        leaf: ApiSpecLeaf<SelectedFamily>,
+    ) -> Result<ApiSpecLeaf<super::ResourceBoundFamily>> {
         Ok(ApiSpecLeaf {
             module_path: leaf.module_path,
             source_root: leaf.source_root,
@@ -852,7 +852,7 @@ mod tests {
 
     use crate::descriptors::DescriptorIndex;
     use crate::language::Language;
-    use crate::spec::{ApiSpec, SelectedNames};
+    use crate::spec::{ApiSpec, SelectedFamily};
 
     use super::{
         RequestPlan, RequestPlanSource, ResolvedResourceMethodBinding, resolve_service_resources,
@@ -870,7 +870,7 @@ mod tests {
         DescriptorIndex::from_descriptor_set(FileDescriptorSet { file: Vec::new() }).unwrap()
     }
 
-    fn parse(language: Language, wit: &str) -> ApiSpec<SelectedNames> {
+    fn parse(language: Language, wit: &str) -> ApiSpec<SelectedFamily> {
         let temporal_types_input =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("advanced/samples/inputs/deps");
         let authored = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(

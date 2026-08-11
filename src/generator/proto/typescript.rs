@@ -10,7 +10,7 @@ use crate::generator::typescript::{
 };
 use crate::language::Language;
 use crate::planning::{
-    PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec, PlannedType, PlannedTypeFamily,
+    PlannedFamily, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec, PlannedType,
     relative_descriptor_name,
 };
 use crate::spec::{ExternalTypeSpec, RecordSpec, TypeReplacementSpec};
@@ -59,7 +59,7 @@ impl ExternalModelBackend for ModelBackend {
     fn wire_conversion(
         &self,
         model_type: &PlannedType,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         enum_wire_conversion(model_type)
             .or_else(|| message_override_conversion(model_type))
@@ -74,7 +74,7 @@ impl ModelBackend {
         &self,
         output: &mut String,
         model: &RenderedModel,
-        planned_record: &RecordSpec<PlannedTypeFamily>,
+        planned_record: &RecordSpec<PlannedFamily>,
     ) -> bool {
         let mut wrote_conversion = false;
         if let Some(function_name) = model.from_wire_function_name.as_deref() {
@@ -254,7 +254,7 @@ pub(in crate::generator) fn message_override_conversion(
 
 fn generated_wire_conversion(
     model_type: &PlannedType,
-    planned_model: &RecordSpec<PlannedTypeFamily>,
+    planned_model: &RecordSpec<PlannedFamily>,
 ) -> Option<WireValueConversion> {
     let model_name = if planned_model.data.proto.is_some() {
         planned_model.name.clone()
@@ -334,7 +334,7 @@ fn enum_wire_conversion(value_type: &PlannedType) -> Option<WireValueConversion>
 
 fn rendered_model_wire_annotation(
     model: &RenderedModel,
-    planned_record: &RecordSpec<PlannedTypeFamily>,
+    planned_record: &RecordSpec<PlannedFamily>,
 ) -> String {
     planned_record
         .data
@@ -347,7 +347,7 @@ fn rendered_model_wire_annotation(
 fn render_model_to_proto_function(
     output: &mut String,
     model: &RenderedModel,
-    planned_record: &RecordSpec<PlannedTypeFamily>,
+    planned_record: &RecordSpec<PlannedFamily>,
     function_name: &str,
 ) {
     let wire_annotation = rendered_model_wire_annotation(model, planned_record);
@@ -404,7 +404,7 @@ fn render_model_to_proto_function(
 fn render_model_from_proto_function(
     output: &mut String,
     model: &RenderedModel,
-    planned_record: &RecordSpec<PlannedTypeFamily>,
+    planned_record: &RecordSpec<PlannedFamily>,
     function_name: &str,
 ) {
     let wire_annotation = rendered_model_wire_annotation(model, planned_record);

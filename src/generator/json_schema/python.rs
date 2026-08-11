@@ -18,7 +18,7 @@ use crate::generator::python::{
 };
 use crate::language::Language;
 use crate::parser::NameManifest;
-use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
+use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
@@ -250,7 +250,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
     fn wire_conversion(
         &self,
         json_type: &PlannedJsonType,
-        _planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        _planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         Some(WireValueConversion {
             annotation: model_type_ref(json_type),
@@ -298,7 +298,7 @@ struct JsonModelHoistPlan {
 }
 
 impl JsonModelHoistPlan {
-    fn for_tree(branch: &ApiSpecBranch<PlannedTypeFamily>) -> Self {
+    fn for_tree(branch: &ApiSpecBranch<PlannedFamily>) -> Self {
         let mut models = BTreeMap::<String, (ModulePath, PlannedJsonType)>::new();
         collect_tree_json_models(branch, &mut models);
 
@@ -367,7 +367,7 @@ impl JsonModelHoistPlan {
 }
 
 pub(in crate::generator) fn tree_model_hoists(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
 ) -> Result<PythonModelHoists> {
     let plan = JsonModelHoistPlan::for_tree(branch);
     let mut hoists = PythonModelHoists::default();
@@ -458,7 +458,7 @@ fn render_hoisted_models_module(hoists: &JsonModelHoistPlan) -> Result<String> {
 }
 
 fn collect_tree_json_models(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
     models: &mut BTreeMap<String, (ModulePath, PlannedJsonType)>,
 ) {
     for node in branch.children.values() {

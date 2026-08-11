@@ -6,7 +6,7 @@ use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata};
 use crate::generator::ModelWireCapabilities;
 use crate::spec::{ApiSpec, ExternalTypeSpec, IntSpec, RecordSpec, TypeSpec};
 
-use super::OperationLoweredNames;
+use super::OperationLoweredFamily;
 
 use super::type_planning::TypePlanningContext;
 use super::{
@@ -15,7 +15,7 @@ use super::{
 };
 
 impl PlannedProtoTypeInfo {
-    fn from_message(message: &MessageMetadata, spec: &ApiSpec<OperationLoweredNames>) -> Self {
+    fn from_message(message: &MessageMetadata, spec: &ApiSpec<OperationLoweredFamily>) -> Self {
         Self {
             full_name: message.full_name.clone(),
             package: message.package.clone(),
@@ -32,7 +32,7 @@ impl PlannedProtoTypeInfo {
         }
     }
 
-    fn from_enum(enumeration: &EnumMetadata, spec: &ApiSpec<OperationLoweredNames>) -> Self {
+    fn from_enum(enumeration: &EnumMetadata, spec: &ApiSpec<OperationLoweredFamily>) -> Self {
         Self {
             full_name: enumeration.full_name.clone(),
             package: enumeration.package.clone(),
@@ -61,7 +61,7 @@ pub(crate) fn message_model_name(full_name: &str) -> String {
 
 fn planned_proto_model_name(
     message: &MessageMetadata,
-    spec: &ApiSpec<OperationLoweredNames>,
+    spec: &ApiSpec<OperationLoweredFamily>,
 ) -> String {
     spec.record_for_proto(&message.full_name)
         .map(|record| record.name.clone())
@@ -148,7 +148,7 @@ pub(super) fn planned_message_reference(
 
 pub(super) fn planned_enum_reference(
     enumeration: &EnumMetadata,
-    spec: &ApiSpec<OperationLoweredNames>,
+    spec: &ApiSpec<OperationLoweredFamily>,
 ) -> PlannedProtoEnumType {
     let replacement = spec
         .external_type_binding(&enumeration.full_name)
@@ -162,8 +162,8 @@ pub(super) fn planned_enum_reference(
 }
 
 pub(super) fn record_proto_info(
-    record: &RecordSpec<OperationLoweredNames>,
-    spec: &ApiSpec<OperationLoweredNames>,
+    record: &RecordSpec<OperationLoweredFamily>,
+    spec: &ApiSpec<OperationLoweredFamily>,
     descriptors: &DescriptorIndex,
 ) -> Option<PlannedProtoTypeInfo> {
     let proto_name = record_proto_name(record)?;
@@ -173,7 +173,7 @@ pub(super) fn record_proto_info(
 }
 
 pub(super) fn record_field_has_presence(
-    record: &RecordSpec<OperationLoweredNames>,
+    record: &RecordSpec<OperationLoweredFamily>,
     field_name: &str,
     descriptors: &DescriptorIndex,
 ) -> Option<bool> {
@@ -184,7 +184,7 @@ pub(super) fn record_field_has_presence(
 }
 
 pub(super) fn planned_record_field_type(
-    record: &RecordSpec<OperationLoweredNames>,
+    record: &RecordSpec<OperationLoweredFamily>,
     field_name: &str,
     requested_capabilities: ModelWireCapabilities,
     planner: &mut TypePlanningContext<'_>,
@@ -195,7 +195,7 @@ pub(super) fn planned_record_field_type(
     Some(planned_field_type(field, requested_capabilities, planner))
 }
 
-fn record_proto_name(record: &RecordSpec<OperationLoweredNames>) -> Option<&str> {
+fn record_proto_name(record: &RecordSpec<OperationLoweredFamily>) -> Option<&str> {
     let Some(ExternalTypeSpec::Proto(proto_name)) = record.source_type.as_ref() else {
         return None;
     };
@@ -215,7 +215,7 @@ fn descriptor_field_by_name<'a>(
 }
 
 pub(super) fn planned_type_from_authored_proto(
-    authored_type: &TypeSpec<OperationLoweredNames>,
+    authored_type: &TypeSpec<OperationLoweredFamily>,
     planner: &mut TypePlanningContext<'_>,
 ) -> Option<PlannedType> {
     let TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) = authored_type else {

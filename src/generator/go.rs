@@ -10,10 +10,9 @@ use crate::generator::render_request_plan;
 use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
-    PlannedProtoType, PlannedProtoTypeInfo, PlannedResource,
+    PlannedFamily, PlannedProtoType, PlannedProtoTypeInfo, PlannedResource,
     PlannedResourceMethodBindingSpec as PlannedResourceMethodBinding,
     PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedType,
-    PlannedTypeFamily,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 use crate::spec::{
@@ -26,10 +25,10 @@ use crate::spec::{
 use super::json_schema::go as json;
 use super::proto::go as proto;
 
-type FunctionArgsSpec = GenericFunctionArgsSpec<PlannedTypeFamily>;
-type FunctionFieldSpec = GenericFunctionFieldSpec<PlannedTypeFamily>;
-type FunctionResultSpec = GenericFunctionResultSpec<PlannedTypeFamily>;
-type PlannedOperation = OperationSpec<PlannedTypeFamily>;
+type FunctionArgsSpec = GenericFunctionArgsSpec<PlannedFamily>;
+type FunctionFieldSpec = GenericFunctionFieldSpec<PlannedFamily>;
+type FunctionResultSpec = GenericFunctionResultSpec<PlannedFamily>;
+type PlannedOperation = OperationSpec<PlannedFamily>;
 pub(in crate::generator) type PlannedTypeInfo = PlannedProtoTypeInfo;
 
 /// Header comment inserted at the top of every generated Go file.
@@ -281,7 +280,7 @@ pub(in crate::generator) fn planned_message_type(
     }
 }
 
-fn planned_message_type_for_record(record: &RecordSpec<PlannedTypeFamily>) -> PlannedMessageType {
+fn planned_message_type_for_record(record: &RecordSpec<PlannedFamily>) -> PlannedMessageType {
     if let Some(proto) = &record.data.proto {
         PlannedMessageType {
             info: proto.clone(),
@@ -301,7 +300,7 @@ fn planned_message_type_for_record(record: &RecordSpec<PlannedTypeFamily>) -> Pl
     }
 }
 
-fn record_message_key(record: &RecordSpec<PlannedTypeFamily>) -> &str {
+fn record_message_key(record: &RecordSpec<PlannedFamily>) -> &str {
     record
         .data
         .proto
@@ -313,14 +312,14 @@ fn record_message_key(record: &RecordSpec<PlannedTypeFamily>) -> &str {
 fn record_for_message<'a>(
     api_plan: &'a PlannedSpec,
     message: &PlannedMessageType,
-) -> Option<&'a RecordSpec<PlannedTypeFamily>> {
+) -> Option<&'a RecordSpec<PlannedFamily>> {
     record_for_model_key(api_plan, &message.info.full_name)
 }
 
 pub(in crate::generator) fn record_for_model_key<'a>(
     api_plan: &'a PlannedSpec,
     full_name: &str,
-) -> Option<&'a RecordSpec<PlannedTypeFamily>> {
+) -> Option<&'a RecordSpec<PlannedFamily>> {
     api_plan
         .records()
         .map(|(_, record)| record)
@@ -328,9 +327,9 @@ pub(in crate::generator) fn record_for_model_key<'a>(
 }
 
 pub(in crate::generator) fn planned_field(
-    record: &RecordSpec<PlannedTypeFamily>,
+    record: &RecordSpec<PlannedFamily>,
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     spec: &PlannedSpec,
 ) -> PlannedField {
     let role = if let Some(function) = &field.function {
@@ -382,7 +381,7 @@ fn planned_flags(flags: &FlagsSpec) -> PlannedFlags {
     }
 }
 
-fn planned_variant(variant: &VariantSpec<PlannedTypeFamily>, spec: &PlannedSpec) -> PlannedVariant {
+fn planned_variant(variant: &VariantSpec<PlannedFamily>, spec: &PlannedSpec) -> PlannedVariant {
     PlannedVariant {
         info: local_type_info(&variant.full_name),
         name: variant.name.clone(),
@@ -627,7 +626,7 @@ pub(crate) fn generate(
 }
 
 pub(crate) fn generate_tree(
-    tree: &ApiSpecTree<PlannedTypeFamily>,
+    tree: &ApiSpecTree<PlannedFamily>,
     support: &SupportFiles,
     options: &GoOptions,
     mode: GenerationMode,
@@ -643,7 +642,7 @@ pub(crate) fn generate_tree(
 /// flattened layout -- the schema-independent runtime lives in its own
 /// `definitions.go` alongside the one model file, rather than inlined into it.
 fn generate_single_leaf(
-    leaf: &ApiSpecLeaf<PlannedTypeFamily>,
+    leaf: &ApiSpecLeaf<PlannedFamily>,
     support: &SupportFiles,
     options: &GoOptions,
     mode: GenerationMode,
@@ -661,7 +660,7 @@ fn generate_single_leaf(
 }
 
 fn generate_branch_tree(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
     support: &SupportFiles,
     options: &GoOptions,
     mode: GenerationMode,
@@ -748,7 +747,7 @@ fn go_flat_module_file_name(module_path: &ModulePath) -> PathBuf {
     PathBuf::from(format!("{stem}.go"))
 }
 
-fn go_tree_has_json_models(leaves: &[&ApiSpecLeaf<PlannedTypeFamily>]) -> bool {
+fn go_tree_has_json_models(leaves: &[&ApiSpecLeaf<PlannedFamily>]) -> bool {
     leaves.iter().any(|leaf| {
         leaf.spec
             .external_types()
@@ -780,7 +779,7 @@ fn insert_generated_file(
 }
 
 fn support_fragments_for_plans(
-    plans: &[&ApiSpecLeaf<PlannedTypeFamily>],
+    plans: &[&ApiSpecLeaf<PlannedFamily>],
     support: &SupportFiles,
 ) -> Vec<SupportFragmentSpec> {
     if !support.fragments.is_empty() {
@@ -794,8 +793,8 @@ fn support_fragments_for_plans(
 }
 
 fn collect_leaf_specs<'a>(
-    branch: &'a ApiSpecBranch<PlannedTypeFamily>,
-    leaves: &mut Vec<&'a ApiSpecLeaf<PlannedTypeFamily>>,
+    branch: &'a ApiSpecBranch<PlannedFamily>,
+    leaves: &mut Vec<&'a ApiSpecLeaf<PlannedFamily>>,
 ) {
     for child in branch.children.values() {
         match child {

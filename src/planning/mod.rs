@@ -11,9 +11,9 @@ use crate::language::Language;
 use crate::spec::{
     ApiSpec, ApiSpecTransform, AuthoredResourceType, ExternalTypeSpec, FunctionArgSpec,
     FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, JsonModelSpec, LanguageStringSpec,
-    ModulePath, OperationSpec, RecordFieldVisibility, RecordSpec, ResourceFieldSpec, SelectedNames,
-    SelectedSupportSpec, SelectedTextSpec, ServiceSpec, SupportSpec, Symbol, TypeDeclSpec,
-    TypeNameFamily, TypeReplacementSpec, TypeSpec,
+    ModulePath, OperationSpec, RecordFieldVisibility, RecordSpec, ResourceFieldSpec,
+    SelectedFamily, SelectedSupportSpec, SelectedTextSpec, ServiceSpec, SupportSpec, Symbol,
+    TypeDeclSpec, TypeFamily, TypeReplacementSpec, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, ApiSpecNode, ApiSpecTree, CompilerPass};
 
@@ -31,16 +31,16 @@ pub(crate) use authored_validation::AuthoredValidationPass;
 pub(crate) use emitted_names::EmittedNameResolutionPass;
 pub(crate) use emitted_names::build_json_name_manifest;
 pub(crate) use operation_binding::{
-    OperationBindingPass, OperationBoundNames, OperationBoundOperation, OperationBoundResource,
+    OperationBindingPass, OperationBoundFamily, OperationBoundOperation, OperationBoundResource,
 };
 pub(crate) use operation_lowering::{
-    OperationLoweredNames, OperationLoweredRecordData, OperationLoweringPass,
+    OperationLoweredFamily, OperationLoweredRecordData, OperationLoweringPass,
 };
 pub(crate) use proto::{message_model_name, relative_descriptor_name};
 pub(crate) use reachability::ReachabilityPass;
 pub(crate) use resource_binding::{
     RequestPlan, RequestPlanSource, ResolvedResourceBindingSource, ResolvedResourceMethodBinding,
-    ResolvedResourceReturnSpec, ResolvedResourceSpec, ResourceBoundData, ResourceBoundNames,
+    ResolvedResourceReturnSpec, ResolvedResourceSpec, ResourceBoundData, ResourceBoundFamily,
     ResourceResolutionPass,
 };
 pub(crate) use selection::LanguageSelectionPass;
@@ -49,9 +49,9 @@ pub(crate) use selection::select_spec;
 pub(crate) use type_planning::TypePlanningPass;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct PlannedTypeFamily;
+pub(crate) struct PlannedFamily;
 
-impl TypeNameFamily for PlannedTypeFamily {
+impl TypeFamily for PlannedFamily {
     type SpecData = PlannedSpecData;
     type Record = PlannedRecordType;
     type Enum = PlannedEnumType;
@@ -73,8 +73,8 @@ impl TypeNameFamily for PlannedTypeFamily {
     type Support = SupportSpec;
 }
 
-pub(crate) type PlannedSpec = ApiSpec<PlannedTypeFamily>;
-pub(crate) type PlannedType = TypeSpec<PlannedTypeFamily>;
+pub(crate) type PlannedSpec = ApiSpec<PlannedFamily>;
+pub(crate) type PlannedType = TypeSpec<PlannedFamily>;
 
 pub(super) fn materialize_selected_text(text: &SelectedTextSpec) -> LanguageStringSpec {
     LanguageStringSpec {
@@ -85,7 +85,7 @@ pub(super) fn materialize_selected_text(text: &SelectedTextSpec) -> LanguageStri
 }
 
 pub(super) fn materialize_selected_replacement(
-    replacement: &TypeReplacementSpec<OperationLoweredNames>,
+    replacement: &TypeReplacementSpec<OperationLoweredFamily>,
 ) -> TypeReplacementSpec {
     TypeReplacementSpec {
         type_name: materialize_selected_text(&replacement.type_name),
@@ -95,7 +95,7 @@ pub(super) fn materialize_selected_replacement(
 }
 
 pub(crate) fn operation_input_model(
-    operation: &OperationSpec<PlannedTypeFamily>,
+    operation: &OperationSpec<PlannedFamily>,
 ) -> Option<&PlannedType> {
     match operation.input_type() {
         Some(input) if planned_type_is_model_shaped(input) => Some(input),
@@ -113,7 +113,7 @@ pub(crate) fn planned_type_is_model_shaped(planned_type: &PlannedType) -> bool {
     )
 }
 
-pub(crate) fn operation_output_direct_result(operation: &OperationSpec<PlannedTypeFamily>) -> bool {
+pub(crate) fn operation_output_direct_result(operation: &OperationSpec<PlannedFamily>) -> bool {
     matches!(
         operation.output_type(),
         Some(TypeSpec::Resource(PlannedResourceType {
@@ -155,7 +155,7 @@ pub(crate) struct PlannedResourceField {
     pub(crate) name: String,
     pub(crate) optional: bool,
     pub(crate) kind: PlannedType,
-    pub(crate) function: Option<FunctionFieldSpec<PlannedTypeFamily>>,
+    pub(crate) function: Option<FunctionFieldSpec<PlannedFamily>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -299,7 +299,7 @@ impl AsRef<str> for PlannedRecordType {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlannedResourceType {
     pub(crate) type_name: String,
-    pub(crate) wire_type: Option<ExternalTypeSpec<PlannedTypeFamily>>,
+    pub(crate) wire_type: Option<ExternalTypeSpec<PlannedFamily>>,
 }
 
 impl AsRef<str> for PlannedResourceType {

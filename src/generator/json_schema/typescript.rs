@@ -17,7 +17,7 @@ use crate::generator::{ExternalModelBackend, TsDateTimeTypes};
 use crate::json_schema::format::TemporalKind;
 use crate::language::Language;
 use crate::parser::NameManifest;
-use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
+use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
 thread_local! {
@@ -1015,7 +1015,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
     fn wire_conversion(
         &self,
         json_type: &PlannedJsonType,
-        _planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        _planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         Some(WireValueConversion {
             annotation: model_type_ref(json_type),

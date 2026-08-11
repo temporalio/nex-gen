@@ -15,7 +15,7 @@ use crate::generator::go::{
 use crate::generator::json_schema::build_json_name_manifest;
 use crate::language::Language;
 use crate::parser::NameManifest;
-use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
+use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
 use crate::spec::{ExternalTypeSpec, OperationSpec, RecordSpec, TypeSpec};
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -818,7 +818,7 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
     fn wire_conversion(
         &self,
         _model_type: &PlannedValueType,
-        _planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        _planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<()> {
         None
     }
@@ -926,7 +926,7 @@ impl ModelBackend {
 /// The emitted Go identifier for an operation: the verbatim per-language
 /// `x-<lang>-name` override when present, else the derived field name. Mirrors
 /// the service `code_name` handling; never affects the wire name.
-fn go_operation_field(operation: &crate::spec::OperationSpec<PlannedTypeFamily>) -> String {
+fn go_operation_field(operation: &crate::spec::OperationSpec<PlannedFamily>) -> String {
     operation
         .code_name
         .for_language(crate::language::Language::Go)
@@ -936,7 +936,7 @@ fn go_operation_field(operation: &crate::spec::OperationSpec<PlannedTypeFamily>)
 
 fn render_service_client(
     output: &mut String,
-    service: &crate::spec::ServiceSpec<PlannedTypeFamily>,
+    service: &crate::spec::ServiceSpec<PlannedFamily>,
     api_plan: &PlannedSpec,
     package: &GoPackageContext,
     backend: &ModelBackend,
@@ -1017,7 +1017,7 @@ fn render_service_client(
 
 fn render_operation_reference_type(
     output: &mut String,
-    operation: &OperationSpec<PlannedTypeFamily>,
+    operation: &OperationSpec<PlannedFamily>,
     api_plan: &PlannedSpec,
     package: &GoPackageContext,
     backend: &ModelBackend,
@@ -1041,7 +1041,7 @@ fn render_operation_reference_type(
 }
 
 fn operation_io_type(
-    ty: Option<&TypeSpec<PlannedTypeFamily>>,
+    ty: Option<&TypeSpec<PlannedFamily>>,
     api_plan: &PlannedSpec,
     package: &GoPackageContext,
     backend: &ModelBackend,

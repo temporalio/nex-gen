@@ -13,7 +13,7 @@ use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::python;
 use crate::language::Language;
 use crate::spec::{
-    ApiSpec, AuthoredNames, ExternalTypeBindingSpec, ExternalTypeSpec, FunctionArgsSpec,
+    ApiSpec, AuthoredFamily, ExternalTypeBindingSpec, ExternalTypeSpec, FunctionArgsSpec,
     FunctionResultSpec, RecordFieldVisibility, RecordSpec, ServiceSpec, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
@@ -182,13 +182,13 @@ impl<'a> AuthoredValidationPass<'a> {
     }
 }
 
-impl CompilerPass<AuthoredNames, AuthoredNames> for AuthoredValidationPass<'_> {
+impl CompilerPass<AuthoredFamily, AuthoredFamily> for AuthoredValidationPass<'_> {
     type Error = Error;
 
     fn transform_leaf(
         &mut self,
-        leaf: ApiSpecLeaf<AuthoredNames>,
-    ) -> Result<ApiSpecLeaf<AuthoredNames>> {
+        leaf: ApiSpecLeaf<AuthoredFamily>,
+    ) -> Result<ApiSpecLeaf<AuthoredFamily>> {
         self.validate_spec(&leaf.spec)?;
         validate_generic_model_semantics(&leaf.spec, &leaf.source_path, self.language)?;
         Ok(leaf)

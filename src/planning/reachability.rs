@@ -14,13 +14,13 @@ impl ReachabilityPass {
     }
 }
 
-impl CompilerPass<PlannedTypeFamily, PlannedTypeFamily> for ReachabilityPass {
+impl CompilerPass<PlannedFamily, PlannedFamily> for ReachabilityPass {
     type Error = Error;
 
     fn transform_leaf(
         &mut self,
-        mut leaf: ApiSpecLeaf<PlannedTypeFamily>,
-    ) -> Result<ApiSpecLeaf<PlannedTypeFamily>> {
+        mut leaf: ApiSpecLeaf<PlannedFamily>,
+    ) -> Result<ApiSpecLeaf<PlannedFamily>> {
         prune(&mut leaf.spec);
         Ok(leaf)
     }
@@ -126,7 +126,7 @@ fn enqueue_type_references(
 
 fn enqueue_external_type(
     spec: &PlannedSpec,
-    external: &ExternalTypeSpec<PlannedTypeFamily>,
+    external: &ExternalTypeSpec<PlannedFamily>,
     reachable: &mut BTreeSet<String>,
     pending: &mut Vec<PlannedType>,
 ) {
@@ -149,7 +149,7 @@ fn add_name(spec: &PlannedSpec, name: &str, reachable: &mut BTreeSet<String>) {
 }
 
 fn enqueue_declaration_references(
-    declaration: &TypeDeclSpec<PlannedTypeFamily>,
+    declaration: &TypeDeclSpec<PlannedFamily>,
     pending: &mut Vec<PlannedType>,
 ) {
     match declaration {

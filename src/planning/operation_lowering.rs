@@ -15,7 +15,7 @@ use crate::spec::{
 };
 
 use super::{
-    OperationBoundNames, OperationBoundOperation, OperationBoundResource,
+    OperationBoundFamily, OperationBoundOperation, OperationBoundResource,
     ResolvedResourceBindingSource, SelectedSupportSpec, SelectedTextSpec,
 };
 
@@ -30,9 +30,9 @@ pub(crate) struct OperationLoweredRecordData {
 
 /// Operation-bound IR after resource-return structures become explicit records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct OperationLoweredNames;
+pub(crate) struct OperationLoweredFamily;
 
-impl crate::spec::TypeNameFamily for OperationLoweredNames {
+impl crate::spec::TypeFamily for OperationLoweredFamily {
     type SpecData = ();
     type Record = Symbol;
     type Enum = Symbol;
@@ -59,13 +59,13 @@ impl OperationLoweringPass {
     }
 }
 
-impl CompilerPass<OperationBoundNames, OperationLoweredNames> for OperationLoweringPass {
+impl CompilerPass<OperationBoundFamily, OperationLoweredFamily> for OperationLoweringPass {
     type Error = Error;
 
     fn transform_leaf(
         &mut self,
-        leaf: ApiSpecLeaf<OperationBoundNames>,
-    ) -> Result<ApiSpecLeaf<OperationLoweredNames>> {
+        leaf: ApiSpecLeaf<OperationBoundFamily>,
+    ) -> Result<ApiSpecLeaf<OperationLoweredFamily>> {
         let mut spec = leaf.spec.map_names(OperationLoweringMapper);
         let mut generated_records = Vec::new();
 
@@ -130,7 +130,7 @@ impl CompilerPass<OperationBoundNames, OperationLoweredNames> for OperationLower
 
 fn resource_result_fields(
     resource_return: &super::ResolvedResourceReturnSpec,
-) -> IndexMap<String, RecordFieldSpec<OperationLoweredNames>> {
+) -> IndexMap<String, RecordFieldSpec<OperationLoweredFamily>> {
     resource_return
         .bindings
         .iter()
@@ -163,7 +163,7 @@ fn resource_result_fields(
 
 struct OperationLoweringMapper;
 
-impl ApiSpecTransform<OperationBoundNames, OperationLoweredNames> for OperationLoweringMapper {
+impl ApiSpecTransform<OperationBoundFamily, OperationLoweredFamily> for OperationLoweringMapper {
     fn map_spec_data(&mut self, _: ()) {}
     fn map_record(&mut self, value: Symbol) -> Symbol {
         value

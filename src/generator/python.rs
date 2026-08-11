@@ -13,10 +13,11 @@ use crate::generator::{
 };
 use crate::language::Language;
 use crate::planning::{
-    PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn, PlannedProtoType,
-    PlannedProtoTypeInfo, PlannedRecordType, PlannedResource, PlannedResourceMethod,
-    PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedSpec, PlannedType,
-    PlannedTypeFamily, message_model_name, operation_input_model, operation_output_direct_result,
+    PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
+    PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
+    PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
+    PlannedSpec, PlannedType, message_model_name, operation_input_model,
+    operation_output_direct_result,
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
@@ -32,7 +33,7 @@ const PYTHON_FORMAT_LINE_LENGTH: usize = 88;
 const EXPERIMENTAL_WARNING: &str = "This API is experimental and subject to change.";
 
 pub(crate) fn generate(
-    tree: &crate::spec::ApiSpecTree<PlannedTypeFamily>,
+    tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
@@ -70,7 +71,7 @@ fn generate_leaf_with_model_hoists(
 }
 
 fn generate_tree(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
@@ -100,7 +101,7 @@ fn generate_tree(
 }
 
 fn generate_tree_node(
-    node: &ApiSpecNode<PlannedTypeFamily>,
+    node: &ApiSpecNode<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
     model_hoists: &PythonModelHoists,
@@ -157,7 +158,7 @@ fn insert_generated_file(
 
 fn insert_branch_index_file(
     files: &mut BTreeMap<PathBuf, String>,
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
     model_hoists: &PythonModelHoists,
     mode: GenerationMode,
 ) -> Result<()> {
@@ -204,7 +205,7 @@ fn insert_branch_index_file(
 }
 
 fn node_export_names(
-    node: &ApiSpecNode<PlannedTypeFamily>,
+    node: &ApiSpecNode<PlannedFamily>,
     model_hoists: &PythonModelHoists,
     mode: GenerationMode,
 ) -> BTreeSet<String> {
@@ -215,7 +216,7 @@ fn node_export_names(
 }
 
 fn branch_export_names(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
     model_hoists: &PythonModelHoists,
     mode: GenerationMode,
 ) -> BTreeSet<String> {
@@ -432,7 +433,7 @@ impl PythonExternalModels {
     fn render_record_wire_block(
         &self,
         model: &RenderedModel,
-        planned_model: &RecordSpec<PlannedTypeFamily>,
+        planned_model: &RecordSpec<PlannedFamily>,
     ) -> Option<RenderedRecordWireBlock> {
         self.proto.render_record_wire_block(model, planned_model)
     }
@@ -481,7 +482,7 @@ impl ExternalModelBackend for PythonExternalModels {
     fn wire_conversion(
         &self,
         model_type: &PlannedType,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         match model_type {
             PlannedType::External(ExternalTypeSpec::Proto(_)) | PlannedType::Record(_) => {
@@ -990,7 +991,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         kind: &PlannedType,
         optional: bool,
-        function: Option<&FunctionFieldSpec<PlannedTypeFamily>>,
+        function: Option<&FunctionFieldSpec<PlannedFamily>>,
     ) -> String {
         let base = if let Some(function) = function {
             python_function_field_annotation(
@@ -1103,7 +1104,7 @@ impl<'a> ApiPlanner<'a> {
 
     fn resolve_operation<'operation>(
         &mut self,
-        operation: &'operation OperationSpec<PlannedTypeFamily>,
+        operation: &'operation OperationSpec<PlannedFamily>,
     ) -> Result<RenderedOperation<'operation>> {
         let output_resource_return = operation.data.output_resource_return.clone();
         let input = operation_input_model(operation);
@@ -1455,7 +1456,7 @@ impl<'a> ApiPlanner<'a> {
 
     fn build_flattened_message(
         &self,
-        planned_field: &RecordFieldSpec<PlannedTypeFamily>,
+        planned_field: &RecordFieldSpec<PlannedFamily>,
         rendered_field: &RenderedField,
     ) -> Option<RenderedFlattenedMessage> {
         let model_type = &planned_field.field_type;
@@ -1591,7 +1592,7 @@ impl<'a> ApiPlanner<'a> {
             });
     }
 
-    fn ensure_rendered_variant(&mut self, variant_spec: &VariantSpec<PlannedTypeFamily>) {
+    fn ensure_rendered_variant(&mut self, variant_spec: &VariantSpec<PlannedFamily>) {
         if self.variants.contains_key(&variant_spec.full_name) {
             return;
         }
@@ -1624,9 +1625,9 @@ impl<'a> ApiPlanner<'a> {
 
     fn build_field(
         &mut self,
-        record: &RecordSpec<PlannedTypeFamily>,
+        record: &RecordSpec<PlannedFamily>,
         field_name: &str,
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
     ) -> RenderedField {
         let attr_name = python_field_name(&field.name);
 
@@ -1727,9 +1728,9 @@ impl<'a> ApiPlanner<'a> {
 
     fn build_public_sourced_field(
         &mut self,
-        record: &RecordSpec<PlannedTypeFamily>,
+        record: &RecordSpec<PlannedFamily>,
         field_name: &str,
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
         source_expr: &str,
     ) -> RenderedField {
         let mut rendered = self.build_field(record, field_name, field);
@@ -2227,7 +2228,7 @@ fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<Langua
 }
 
 fn collect_function_imports(
-    function: &FunctionFieldSpec<PlannedTypeFamily>,
+    function: &FunctionFieldSpec<PlannedFamily>,
     imports: &mut BTreeSet<LanguageImportSpec>,
 ) {
     if let FunctionResultSpec::Annotation(result) = &function.result {
@@ -2244,7 +2245,7 @@ fn collect_function_imports(
 }
 
 fn collect_function_args_imports(
-    args: &FunctionArgsSpec<PlannedTypeFamily>,
+    args: &FunctionArgsSpec<PlannedFamily>,
     imports: &mut BTreeSet<LanguageImportSpec>,
 ) {
     let fields = match args {
@@ -2693,7 +2694,7 @@ impl RenderedModelFragments {
 }
 
 pub(crate) fn render_tree_support_files(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
 ) -> BTreeMap<PathBuf, String> {
     if !branch_has_json_models(branch) {
         return BTreeMap::new();
@@ -2752,12 +2753,12 @@ impl PythonModelHoists {
 }
 
 pub(crate) fn tree_model_hoists(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
 ) -> Result<PythonModelHoists> {
     python_json::tree_model_hoists(branch)
 }
 
-fn branch_has_json_models(branch: &ApiSpecBranch<PlannedTypeFamily>) -> bool {
+fn branch_has_json_models(branch: &ApiSpecBranch<PlannedFamily>) -> bool {
     branch.children.values().any(|node| match node {
         ApiSpecNode::Leaf(leaf) => leaf
             .spec
@@ -2768,7 +2769,7 @@ fn branch_has_json_models(branch: &ApiSpecBranch<PlannedTypeFamily>) -> bool {
     })
 }
 
-fn python_function_result_annotation(result: &FunctionResultSpec<PlannedTypeFamily>) -> String {
+fn python_function_result_annotation(result: &FunctionResultSpec<PlannedFamily>) -> String {
     match result {
         FunctionResultSpec::Annotation(annotation) => annotation
             .for_language(Language::Python)
@@ -2903,7 +2904,7 @@ fn python_erased_generic_record_annotation(
     }
 }
 
-fn python_function_args(args: &FunctionArgsSpec<PlannedTypeFamily>) -> RenderedFunctionArgs {
+fn python_function_args(args: &FunctionArgsSpec<PlannedFamily>) -> RenderedFunctionArgs {
     match args {
         FunctionArgsSpec::Varargs { prefix, .. } => RenderedFunctionArgs::Varargs {
             prefix: prefix
@@ -2926,7 +2927,7 @@ fn python_function_args(args: &FunctionArgsSpec<PlannedTypeFamily>) -> RenderedF
     }
 }
 
-fn python_function_args_field_annotation(args: &FunctionArgsSpec<PlannedTypeFamily>) -> String {
+fn python_function_args_field_annotation(args: &FunctionArgsSpec<PlannedFamily>) -> String {
     match python_function_args(args) {
         RenderedFunctionArgs::Varargs { .. } => "list[typing.Any]".to_string(),
         RenderedFunctionArgs::Typed { parameters } => python_function_args_list_annotation(
@@ -2940,7 +2941,7 @@ fn python_function_args_field_annotation(args: &FunctionArgsSpec<PlannedTypeFami
 }
 
 fn python_function_arg_field_annotation(
-    function: &FunctionFieldSpec<PlannedTypeFamily>,
+    function: &FunctionFieldSpec<PlannedFamily>,
     field_name: &str,
 ) -> String {
     match &function.args {
@@ -2978,10 +2979,7 @@ fn python_result_annotation(ok: Option<String>, err: Option<String>) -> String {
     format!("{ok_case} | {err_case}")
 }
 
-fn planned_record<'a>(
-    api_plan: &'a PlannedSpec,
-    full_name: &str,
-) -> &'a RecordSpec<PlannedTypeFamily> {
+fn planned_record<'a>(api_plan: &'a PlannedSpec, full_name: &str) -> &'a RecordSpec<PlannedFamily> {
     api_plan
         .record(full_name)
         .unwrap_or_else(|| panic!("planned record should exist for {full_name}"))
@@ -3005,9 +3003,9 @@ fn register_unpacked_parameter_name(
 }
 
 fn python_field_annotation(
-    record: &RecordSpec<PlannedTypeFamily>,
+    record: &RecordSpec<PlannedFamily>,
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     default_base_annotation: String,
     is_optional: bool,
 ) -> String {
@@ -3054,7 +3052,7 @@ fn python_field_annotation(
 }
 
 fn python_function_field_annotation(
-    function: &FunctionFieldSpec<PlannedTypeFamily>,
+    function: &FunctionFieldSpec<PlannedFamily>,
     alternate_annotation: Option<String>,
 ) -> String {
     let result_annotation = erase_python_type_parameters(
@@ -6220,8 +6218,8 @@ fn operation_input_wire_expr<'a>(operation: &'a RenderedOperation<'_>) -> &'a st
 
 fn planned_record_for_external_source<'a>(
     api_plan: &'a PlannedSpec,
-    external: &ExternalTypeSpec<PlannedTypeFamily>,
-) -> Option<&'a RecordSpec<PlannedTypeFamily>> {
+    external: &ExternalTypeSpec<PlannedFamily>,
+) -> Option<&'a RecordSpec<PlannedFamily>> {
     api_plan.records().map(|(_, record)| record).find(|record| {
         record
             .source_type
@@ -6231,8 +6229,8 @@ fn planned_record_for_external_source<'a>(
 }
 
 fn planned_external_sources_match(
-    left: &ExternalTypeSpec<PlannedTypeFamily>,
-    right: &ExternalTypeSpec<PlannedTypeFamily>,
+    left: &ExternalTypeSpec<PlannedFamily>,
+    right: &ExternalTypeSpec<PlannedFamily>,
 ) -> bool {
     match (left, right) {
         (
@@ -6258,7 +6256,7 @@ fn planned_external_sources_match(
     }
 }
 
-fn planned_record_type(record: &RecordSpec<PlannedTypeFamily>) -> PlannedType {
+fn planned_record_type(record: &RecordSpec<PlannedFamily>) -> PlannedType {
     PlannedType::Record(PlannedRecordType {
         full_name: record.full_name.clone(),
         model_name: record.name.clone(),

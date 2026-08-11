@@ -1,7 +1,7 @@
 //! `OperationBindingPass` attaches resolved operation/resource relationships
 //! to their owning nodes.
 //!
-//! It consumes resource-bound IR and produces `OperationBoundNames`. This is
+//! It consumes resource-bound IR and produces `OperationBoundFamily`. This is
 //! deliberately semantic only: type materialization belongs to a later pass.
 
 use super::*;
@@ -19,9 +19,9 @@ pub(crate) struct OperationBoundResource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct OperationBoundNames;
+pub(crate) struct OperationBoundFamily;
 
-impl TypeNameFamily for OperationBoundNames {
+impl TypeFamily for OperationBoundFamily {
     type SpecData = ();
     type Record = Symbol;
     type Enum = Symbol;
@@ -48,13 +48,13 @@ impl OperationBindingPass {
     }
 }
 
-impl CompilerPass<ResourceBoundNames, OperationBoundNames> for OperationBindingPass {
+impl CompilerPass<ResourceBoundFamily, OperationBoundFamily> for OperationBindingPass {
     type Error = Error;
 
     fn transform_leaf(
         &mut self,
-        leaf: ApiSpecLeaf<ResourceBoundNames>,
-    ) -> Result<ApiSpecLeaf<OperationBoundNames>> {
+        leaf: ApiSpecLeaf<ResourceBoundFamily>,
+    ) -> Result<ApiSpecLeaf<OperationBoundFamily>> {
         let bindings = leaf.spec.data.bindings.clone();
         let mut spec = leaf.spec.map_names(OperationBindingMapper);
 
@@ -98,7 +98,7 @@ impl CompilerPass<ResourceBoundNames, OperationBoundNames> for OperationBindingP
 
 struct OperationBindingMapper;
 
-impl ApiSpecTransform<ResourceBoundNames, OperationBoundNames> for OperationBindingMapper {
+impl ApiSpecTransform<ResourceBoundFamily, OperationBoundFamily> for OperationBindingMapper {
     fn map_spec_data(&mut self, _: ResourceBoundData) {}
     fn map_record(&mut self, value: Symbol) -> Symbol {
         value

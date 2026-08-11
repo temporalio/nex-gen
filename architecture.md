@@ -13,12 +13,17 @@ collapses language-specific values once; the remaining passes enrich the same
 structural `ApiSpecTree` family. Each pass returns a complete IR for its
 successor; no pass receives planner state saved by an earlier pass.
 
+Each IR box in the diagram names the `TypeFamily` parameter of the
+`ApiSpecTree<F>` produced at that point. A family may appear more than once
+where the same tree crosses a logical phase boundary or a pass refines its
+contents without changing its family.
+
 ```mermaid
 flowchart LR
     subgraph parse["Input & Parsing"]
         direction TB
         input[WIT or JSON Schema input]
-        authored[ApiSpec&lt;AuthoredNames&gt;]
+        authored[AuthoredFamily]
 
         input -->|Detect format and parse WIT| authored
         input -->|Detect format and parse JSON Schema| authored
@@ -26,9 +31,9 @@ flowchart LR
 
     subgraph select["Validation & Selection"]
         direction TB
-        authoredForBinding[ApiSpec&lt;AuthoredNames&gt;]
-        validated[Validated ApiSpec&lt;AuthoredNames&gt;]
-        selected[ApiSpec&lt;SelectedNames&gt;]
+        authoredForBinding[AuthoredFamily]
+        validated[AuthoredFamily<br/>validated]
+        selected[SelectedFamily]
 
         authoredForBinding -->|AuthoredValidationPass| validated
         validated -->|LanguageSelectionPass| selected
@@ -36,9 +41,9 @@ flowchart LR
 
     subgraph bind["Resource & Operation Binding"]
         direction TB
-        selectedForBinding[ApiSpec&lt;SelectedNames&gt;]
-        resourceBound[ApiSpec&lt;ResourceBoundNames&gt;]
-        operationBound[ApiSpec&lt;OperationBoundNames&gt;]
+        selectedForBinding[SelectedFamily]
+        resourceBound[ResourceBoundFamily]
+        operationBound[OperationBoundFamily]
 
         selectedForBinding -->|ResourceResolutionPass| resourceBound
         resourceBound -->|OperationBindingPass| operationBound
@@ -46,10 +51,10 @@ flowchart LR
 
     subgraph plan["Lowering & Type Planning"]
         direction TB
-        operationBoundForPlanning[ApiSpec&lt;OperationBoundNames&gt;]
-        operationLowered[ApiSpec&lt;OperationLoweredNames&gt;]
-        planned[ApiSpec&lt;PlannedTypeFamily&gt;]
-        reachable[Reachable ApiSpec&lt;PlannedTypeFamily&gt;]
+        operationBoundForPlanning[OperationBoundFamily]
+        operationLowered[OperationLoweredFamily]
+        planned[PlannedFamily]
+        reachable[PlannedFamily<br/>reachable]
 
         operationBoundForPlanning -->|OperationLoweringPass| operationLowered
         operationLowered -->|TypePlanningPass| planned
@@ -58,8 +63,8 @@ flowchart LR
 
     subgraph emit["Emission"]
         direction TB
-        reachableForEmission[Reachable ApiSpec&lt;PlannedTypeFamily&gt;]
-        generatorReady[Generator-ready ApiSpec&lt;PlannedTypeFamily&gt;]
+        reachableForEmission[PlannedFamily<br/>reachable]
+        generatorReady[PlannedFamily<br/>generator-ready]
         output[Generated files]
 
         reachableForEmission -->|EmittedNameResolutionPass| generatorReady

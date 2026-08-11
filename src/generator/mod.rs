@@ -14,7 +14,7 @@ use crate::SupportFiles;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
-use crate::planning::{PlannedSpec, PlannedType, PlannedTypeFamily};
+use crate::planning::{PlannedFamily, PlannedSpec, PlannedType};
 use crate::spec::{ApiSpec, RecordSpec};
 use crate::spec::{ApiSpecNode, ApiSpecTree};
 
@@ -111,7 +111,7 @@ pub(crate) trait ExternalModelBackend<ModelType = PlannedType> {
     fn wire_conversion(
         &self,
         model_type: &ModelType,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<Self::WireConversion>;
 }
 
@@ -162,7 +162,7 @@ pub(crate) fn generate_files_for_tree_with_mode_and_options(
 
 pub(crate) fn generate_files_from_planned_tree(
     language: Language,
-    tree: &ApiSpecTree<PlannedTypeFamily>,
+    tree: &ApiSpecTree<PlannedFamily>,
     support: &SupportFiles,
     mode: GenerationMode,
     options: GenerateFilesOptions,
@@ -186,7 +186,7 @@ pub(crate) fn generate_files_from_planned_tree(
 }
 
 fn generate_go_tree(
-    tree: &ApiSpecTree<PlannedTypeFamily>,
+    tree: &ApiSpecTree<PlannedFamily>,
     support: &SupportFiles,
     mode: GenerationMode,
     options: GenerateFilesOptions,
@@ -268,8 +268,8 @@ fn generation_warnings(plan: &PlannedSpec) -> Vec<String> {
         .collect()
 }
 
-fn generation_warnings_for_tree(tree: &ApiSpecTree<PlannedTypeFamily>) -> Vec<String> {
-    fn collect(node: &ApiSpecNode<PlannedTypeFamily>, warnings: &mut Vec<String>) {
+fn generation_warnings_for_tree(tree: &ApiSpecTree<PlannedFamily>) -> Vec<String> {
+    fn collect(node: &ApiSpecNode<PlannedFamily>, warnings: &mut Vec<String>) {
         match node {
             ApiSpecNode::Leaf(leaf) => warnings.extend(generation_warnings(&leaf.spec)),
             ApiSpecNode::Branch(branch) => {

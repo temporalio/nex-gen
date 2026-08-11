@@ -7,14 +7,14 @@ use crate::error::{Error, Result};
 use crate::generator::json_schema::java as java_json;
 use crate::generator::json_schema::java::JavaContext;
 use crate::generator::{GeneratedFiles, GeneratedOutputLayout, GenerationMode};
-use crate::planning::{PlannedJsonType, PlannedTypeFamily};
+use crate::planning::{PlannedFamily, PlannedJsonType};
 use crate::spec::{ApiSpecLeaf, ApiSpecNode};
 use crate::spec::{ExternalTypeSpec, ModulePath, ServiceSpec, TypeSpec};
 
 const DEFAULT_PACKAGE: &str = "generated";
 
 pub(crate) fn generate(
-    tree: &crate::spec::ApiSpecTree<PlannedTypeFamily>,
+    tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     _support: &crate::SupportFiles,
     _mode: GenerationMode,
     base_package: Option<&str>,
@@ -147,8 +147,8 @@ pub(crate) fn generate(
 }
 
 fn collect_leaves<'a>(
-    node: &'a ApiSpecNode<PlannedTypeFamily>,
-    leaves: &mut Vec<&'a ApiSpecLeaf<PlannedTypeFamily>>,
+    node: &'a ApiSpecNode<PlannedFamily>,
+    leaves: &mut Vec<&'a ApiSpecLeaf<PlannedFamily>>,
 ) {
     match node {
         ApiSpecNode::Leaf(leaf) => leaves.push(leaf),
@@ -172,7 +172,7 @@ fn insert_file(
 }
 
 fn render_service_file(
-    service: &ServiceSpec<PlannedTypeFamily>,
+    service: &ServiceSpec<PlannedFamily>,
     module: &ModulePath,
     base_package: &str,
 ) -> Result<String> {
@@ -251,7 +251,7 @@ fn render_service_file(
 }
 
 fn io_type(
-    ty: Option<&TypeSpec<PlannedTypeFamily>>,
+    ty: Option<&TypeSpec<PlannedFamily>>,
     module: &ModulePath,
     base_package: &str,
 ) -> Option<(String, String)> {

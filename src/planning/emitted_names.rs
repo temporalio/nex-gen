@@ -10,7 +10,7 @@ use crate::parser::{ManifestModel, ManifestService, NameManifest, build_name_man
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 use crate::spec::{ExternalTypeSpec, ModulePath, TypeDeclSpec};
 
-use super::{PlannedSpec, PlannedTypeFamily};
+use super::{PlannedFamily, PlannedSpec};
 
 pub(crate) struct EmittedNameResolutionPass {
     language: Language,
@@ -22,13 +22,13 @@ impl EmittedNameResolutionPass {
     }
 }
 
-impl CompilerPass<PlannedTypeFamily, PlannedTypeFamily> for EmittedNameResolutionPass {
+impl CompilerPass<PlannedFamily, PlannedFamily> for EmittedNameResolutionPass {
     type Error = Error;
 
     fn transform_leaf(
         &mut self,
-        mut leaf: ApiSpecLeaf<PlannedTypeFamily>,
-    ) -> Result<ApiSpecLeaf<PlannedTypeFamily>> {
+        mut leaf: ApiSpecLeaf<PlannedFamily>,
+    ) -> Result<ApiSpecLeaf<PlannedFamily>> {
         resolve_emitted_json_names(&mut leaf.spec, self.language)?;
         Ok(leaf)
     }

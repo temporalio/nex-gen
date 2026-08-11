@@ -9,7 +9,7 @@ use crate::generator::python::{
 };
 use crate::language::Language;
 use crate::planning::{
-    PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec, PlannedType, PlannedTypeFamily,
+    PlannedFamily, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec, PlannedType,
     relative_descriptor_name,
 };
 use crate::spec::{ExternalTypeSpec, RecordFieldSpec, RecordSpec, TypeReplacementSpec};
@@ -77,7 +77,7 @@ impl ExternalModelBackend for ModelBackend {
     fn wire_conversion(
         &self,
         model_type: &PlannedType,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         enum_wire_conversion(model_type)
             .or_else(|| message_override_conversion(model_type))
@@ -91,7 +91,7 @@ impl ModelBackend {
     pub(in crate::generator) fn render_record_wire_block(
         &self,
         model: &RenderedModel,
-        planned_model: &RecordSpec<PlannedTypeFamily>,
+        planned_model: &RecordSpec<PlannedFamily>,
     ) -> Option<RenderedRecordWireBlock> {
         render_record_wire_block(model, planned_model)
     }
@@ -146,7 +146,7 @@ pub(crate) fn external_message_python_ref(model_type: &PlannedType) -> Option<Py
     }
 }
 
-fn record_python_ref(planned_model: &RecordSpec<PlannedTypeFamily>) -> Option<PythonReference> {
+fn record_python_ref(planned_model: &RecordSpec<PlannedFamily>) -> Option<PythonReference> {
     planned_model
         .data
         .proto
@@ -189,7 +189,7 @@ fn message_override_conversion(model_type: &PlannedType) -> Option<WireValueConv
 
 fn generated_message_model_name(
     model_type: &PlannedType,
-    planned_model: &RecordSpec<PlannedTypeFamily>,
+    planned_model: &RecordSpec<PlannedFamily>,
 ) -> Option<String> {
     if planned_model.data.proto.is_some() {
         return Some(planned_model.name.clone());
@@ -204,7 +204,7 @@ fn generated_message_model_name(
 
 fn generated_wire_conversion(
     model_type: &PlannedType,
-    planned_model: &RecordSpec<PlannedTypeFamily>,
+    planned_model: &RecordSpec<PlannedFamily>,
 ) -> Option<WireValueConversion> {
     if let Some(model_name) = generated_message_model_name(model_type, planned_model) {
         return Some(WireValueConversion {
@@ -295,7 +295,7 @@ fn enum_wire_conversion(value_type: &PlannedType) -> Option<WireValueConversion>
 fn field_read(
     proto_name: &str,
     attr_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     resolved_value_type: &ResolvedFieldType,
     policy: WireReadPolicy,
 ) -> RenderedWireRead {
@@ -335,7 +335,7 @@ fn field_read(
 
 fn field_write(
     proto_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     value_expr: &str,
     resolved_value_type: &ResolvedFieldType,
     optional_guard: bool,
@@ -354,7 +354,7 @@ fn field_write(
 
 fn function_field_write(
     proto_name: &str,
-    _field: &RecordFieldSpec<PlannedTypeFamily>,
+    _field: &RecordFieldSpec<PlannedFamily>,
     value_expr: &str,
     converter: &str,
     resolved_type: &ResolvedFieldType,
@@ -375,12 +375,12 @@ fn function_field_write(
     RenderedWireWrite { lines }
 }
 
-fn field_has_proto_presence(field: &RecordFieldSpec<PlannedTypeFamily>) -> bool {
+fn field_has_proto_presence(field: &RecordFieldSpec<PlannedFamily>) -> bool {
     field.data.has_presence.unwrap_or(!field.required)
 }
 
 fn optional_from_proto_expr(
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     resolved_type: &ResolvedFieldType,
     proto_name: &str,
     value_expr: String,
@@ -397,7 +397,7 @@ fn optional_from_proto_expr(
 }
 
 fn no_presence_default_value_present_expr(
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     resolved_type: &ResolvedFieldType,
     proto_name: &str,
 ) -> Option<String> {
@@ -415,7 +415,7 @@ fn no_presence_default_value_present_expr(
 }
 
 fn defaulted_from_proto_expr(
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     proto_name: &str,
     value_expr: String,
     default_expr: String,
@@ -630,7 +630,7 @@ pub(crate) fn python_replacement_type_name(replacement: &TypeReplacementSpec) ->
 
 fn render_record_wire_block(
     model: &RenderedModel,
-    planned_model: &RecordSpec<PlannedTypeFamily>,
+    planned_model: &RecordSpec<PlannedFamily>,
 ) -> Option<RenderedRecordWireBlock> {
     if !model.capabilities.from_wire && !model.capabilities.to_wire {
         return None;
@@ -813,7 +813,7 @@ fn field_read_policy(model_name: &str, rendered_field: &RenderedField) -> WireRe
 
 fn field_write_for_rendered_field(
     field_name: &str,
-    planned_field: &RecordFieldSpec<PlannedTypeFamily>,
+    planned_field: &RecordFieldSpec<PlannedFamily>,
     rendered_field: &RenderedField,
     value_expr: &str,
 ) -> RenderedWireWrite {

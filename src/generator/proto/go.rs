@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::generator::{ExternalModelBackend, ModelWireCapabilities};
 use crate::language::Language;
 use crate::planning::ResolvedResourceBindingSource;
-use crate::planning::{PlannedResource, PlannedResourceField, PlannedSpec, PlannedTypeFamily};
+use crate::planning::{PlannedFamily, PlannedResource, PlannedResourceField, PlannedSpec};
 use crate::spec::{RecordFieldSpec, RecordSpec};
 
 use crate::generator::go::{
@@ -219,7 +219,7 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
     fn wire_conversion(
         &self,
         model_type: &PlannedValueType,
-        _planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        _planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<GoConversionResult<GoValueConversion>> {
         match model_type {
             PlannedValueType::Scalar(_) => Some(Ok(GoValueConversion {
@@ -1373,7 +1373,7 @@ fn resource_return_local_name(field_name: &str) -> String {
 /// Builds per-field conversion metadata for a proto-backed model, in field
 /// declaration order (matching the rendered struct fields).
 fn build_field_conversions(
-    planned_model: &RecordSpec<PlannedTypeFamily>,
+    planned_model: &RecordSpec<PlannedFamily>,
     native_field_types: &[String],
     api_plan: &PlannedSpec,
     backend: &ModelBackend,
@@ -1507,7 +1507,7 @@ fn build_field_conversion(
 
 /// Builds `ToProto` lines for sourced (write-only) fields.
 fn build_sourced_conversions(
-    planned_model: &RecordSpec<PlannedTypeFamily>,
+    planned_model: &RecordSpec<PlannedFamily>,
     api_plan: &PlannedSpec,
     backend: &ModelBackend,
 ) -> Result<Vec<RenderedSourcedField>> {
@@ -1526,7 +1526,7 @@ fn build_sourced_conversions(
 
 fn build_sourced_conversion(
     proto_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     source_expr: &str,
     api_plan: &PlannedSpec,
     backend: &ModelBackend,

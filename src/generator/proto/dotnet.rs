@@ -5,8 +5,8 @@ use crate::generator::dotnet::{
 };
 use crate::language::Language;
 use crate::planning::{
-    PlannedProtoMessageType, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec, PlannedType,
-    PlannedTypeFamily,
+    PlannedFamily, PlannedProtoMessageType, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec,
+    PlannedType,
 };
 use crate::spec::{ExternalTypeSpec, RecordFieldSpec, RecordSpec, TypeReplacementSpec};
 
@@ -51,7 +51,7 @@ impl ModelBackend {
     pub(in crate::generator) fn wire_conversion(
         &self,
         model_type: &PlannedType,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         let annotation = match model_type {
             PlannedType::External(ExternalTypeSpec::Proto(proto_type)) => {
@@ -111,7 +111,7 @@ impl ModelBackend {
 
     pub(in crate::generator) fn function_args_authored_type<'a>(
         &self,
-        field: &'a RecordFieldSpec<PlannedTypeFamily>,
+        field: &'a RecordFieldSpec<PlannedFamily>,
     ) -> Option<&'a PlannedType> {
         match &field.field_type {
             PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
@@ -126,7 +126,7 @@ impl ModelBackend {
     pub(in crate::generator) fn wire_type_annotation(
         &self,
         model_type: &PlannedType,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<String> {
         if let Some(record) = planned_record
             && let Some(proto) = &record.data.proto
@@ -144,7 +144,7 @@ impl ModelBackend {
 
     pub(in crate::generator) fn model_needs_wire_method(
         &self,
-        model: &RecordSpec<PlannedTypeFamily>,
+        model: &RecordSpec<PlannedFamily>,
     ) -> bool {
         model.data.capabilities.to_wire
             && model.data.proto.as_ref().is_some_and(|proto| {
@@ -154,7 +154,7 @@ impl ModelBackend {
 
     pub(in crate::generator) fn model_wire_interface(
         &self,
-        model: &RecordSpec<PlannedTypeFamily>,
+        model: &RecordSpec<PlannedFamily>,
         support_namespace: Option<&str>,
     ) -> Option<String> {
         if !self.model_needs_wire_method(model) {
@@ -168,7 +168,7 @@ impl ModelBackend {
     pub(in crate::generator) fn render_model_wire_methods(
         &self,
         output: &mut String,
-        model: &RecordSpec<PlannedTypeFamily>,
+        model: &RecordSpec<PlannedFamily>,
         api_plan: &PlannedSpec,
         support_namespace: Option<&str>,
     ) -> bool {
@@ -181,7 +181,7 @@ impl ModelBackend {
 
     pub(in crate::generator) fn model_uses_support_extensions(
         &self,
-        model: &RecordSpec<PlannedTypeFamily>,
+        model: &RecordSpec<PlannedFamily>,
         api_plan: &PlannedSpec,
     ) -> bool {
         model.sourced_fields().any(|(_, field, _)| {
@@ -223,7 +223,7 @@ impl ModelBackend {
         value: &PlannedType,
         source_expr: &str,
         optional: bool,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
         api_plan: Option<&PlannedSpec>,
         support_namespace: Option<&str>,
         payload_converter_expr: Option<&str>,
@@ -437,7 +437,7 @@ pub(crate) fn dotnet_from_proto_converter(model_type: &PlannedType) -> Option<&s
 
 fn render_model_to_proto_method(
     output: &mut String,
-    model: &RecordSpec<PlannedTypeFamily>,
+    model: &RecordSpec<PlannedFamily>,
     api_plan: &PlannedSpec,
     support_namespace: Option<&str>,
 ) {
@@ -485,7 +485,7 @@ fn render_model_to_proto_method(
 
 fn render_model_from_wire_method(
     output: &mut String,
-    model: &RecordSpec<PlannedTypeFamily>,
+    model: &RecordSpec<PlannedFamily>,
     api_plan: &PlannedSpec,
     support_namespace: Option<&str>,
     raw_type: &str,
@@ -549,9 +549,9 @@ fn render_model_from_wire_method(
 }
 
 fn field_from_wire_expr(
-    model: &RecordSpec<PlannedTypeFamily>,
+    model: &RecordSpec<PlannedFamily>,
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     source_expr: &str,
     api_plan: &PlannedSpec,
     support_namespace: Option<&str>,
@@ -712,9 +712,9 @@ fn optional_presence_from_wire_expr(source_expr: &str, converted_expr: &str) -> 
 
 fn render_field_to_proto_assignment(
     output: &mut String,
-    model: &RecordSpec<PlannedTypeFamily>,
+    model: &RecordSpec<PlannedFamily>,
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     api_plan: &PlannedSpec,
     support_namespace: Option<&str>,
 ) {
@@ -757,9 +757,9 @@ fn render_field_to_proto_assignment(
 }
 
 fn field_to_proto_expr(
-    model: &RecordSpec<PlannedTypeFamily>,
+    model: &RecordSpec<PlannedFamily>,
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     source_expr: &str,
     api_plan: &PlannedSpec,
     support_namespace: Option<&str>,
@@ -786,9 +786,9 @@ fn field_to_proto_expr(
 }
 
 fn function_args_field_uses_logical_storage(
-    model: &RecordSpec<PlannedTypeFamily>,
+    model: &RecordSpec<PlannedFamily>,
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
 ) -> bool {
     model.function_for_args_field(field_name).is_some()
         && function_args_field_stores_proto(field)
@@ -800,14 +800,14 @@ fn function_args_field_uses_logical_storage(
         .is_some()
 }
 
-fn function_args_field_stores_proto(field: &RecordFieldSpec<PlannedTypeFamily>) -> bool {
+fn function_args_field_stores_proto(field: &RecordFieldSpec<PlannedFamily>) -> bool {
     matches!(
         &field.field_type,
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
     )
 }
 
-fn function_args_to_proto_converter(field: &RecordFieldSpec<PlannedTypeFamily>) -> Option<&str> {
+fn function_args_to_proto_converter(field: &RecordFieldSpec<PlannedFamily>) -> Option<&str> {
     match &field.field_type {
         model_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
             _,
@@ -816,7 +816,7 @@ fn function_args_to_proto_converter(field: &RecordFieldSpec<PlannedTypeFamily>) 
     }
 }
 
-fn function_args_from_proto_converter(field: &RecordFieldSpec<PlannedTypeFamily>) -> Option<&str> {
+fn function_args_from_proto_converter(field: &RecordFieldSpec<PlannedFamily>) -> Option<&str> {
     match &field.field_type {
         model_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(
             _,

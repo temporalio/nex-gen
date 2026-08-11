@@ -9,9 +9,9 @@ use crate::generator::proto::dotnet as dotnet_proto;
 use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
-    PlannedOperationResourceFieldBinding, PlannedProtoType, PlannedResource, PlannedResourceMethod,
-    PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedSpec, PlannedType,
-    PlannedTypeFamily, operation_input_model,
+    PlannedFamily, PlannedOperationResourceFieldBinding, PlannedProtoType, PlannedResource,
+    PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
+    PlannedSpec, PlannedType, operation_input_model,
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
@@ -25,11 +25,11 @@ const GENERATED_CODE_ATTRIBUTE: &str = "[GeneratedCode(\"nexgen\", null)]";
 const EXPERIMENTAL_WARNING: &str =
     "WARNING: This API is experimental and may change in the future.";
 
-type PlannedOperation = OperationSpec<PlannedTypeFamily>;
-type PlannedService = ServiceSpec<PlannedTypeFamily>;
-type PlannedModel = RecordSpec<PlannedTypeFamily>;
+type PlannedOperation = OperationSpec<PlannedFamily>;
+type PlannedService = ServiceSpec<PlannedFamily>;
+type PlannedModel = RecordSpec<PlannedFamily>;
 type PlannedFlags = FlagsSpec;
-type PlannedVariant = VariantSpec<PlannedTypeFamily>;
+type PlannedVariant = VariantSpec<PlannedFamily>;
 trait PlannedOperationExt {
     fn input_model(&self) -> &PlannedType;
 }
@@ -1382,7 +1382,7 @@ impl<'a> ApiPlanner<'a> {
         }
     }
 
-    fn field_type(&self, field: &RecordFieldSpec<PlannedTypeFamily>) -> String {
+    fn field_type(&self, field: &RecordFieldSpec<PlannedFamily>) -> String {
         let base = self.high_level_field_kind_type(&field.field_type);
         if field.required {
             base
@@ -1395,7 +1395,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         model: &PlannedModel,
         field_name: &str,
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
     ) -> String {
         if model.function_for_args_field(field_name).is_some()
             && let Some(base) = function_args_parameter_type(
@@ -1592,7 +1592,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         model: &PlannedModel,
         field_name: &str,
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
         mode: FlattenedFunctionMode,
     ) -> String {
         if matches!(mode, FlattenedFunctionMode::Expression)
@@ -1620,7 +1620,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         model: &PlannedModel,
         field_name: &str,
-        field: &RecordFieldSpec<PlannedTypeFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
     ) -> String {
         if let Some(annotation) = model
             .field_flattened_annotation(field_name)
@@ -1665,7 +1665,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(&options_type_name);
         self.render_operation_model_type_parameters(output, operation);
         output.push_str("\n{\n");
-        let mut option_fields = Vec::<(&RecordFieldSpec<PlannedTypeFamily>, String, bool)>::new();
+        let mut option_fields = Vec::<(&RecordFieldSpec<PlannedFamily>, String, bool)>::new();
         for (field_name, field) in model.public_fields() {
             if let Some(nested_model) = flattened_nested_model(field, self.api_plan) {
                 let _ = field_name;
@@ -1888,7 +1888,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         output: &mut String,
         model: &PlannedModel,
-        function_field: &RecordFieldSpec<PlannedTypeFamily>,
+        function_field: &RecordFieldSpec<PlannedFamily>,
         has_parameters: &mut bool,
     ) {
         let Some(function) = &function_field.function else {
@@ -1955,7 +1955,7 @@ impl DotNetExternalModels {
 
     fn function_args_authored_type<'b>(
         &self,
-        field: &'b RecordFieldSpec<PlannedTypeFamily>,
+        field: &'b RecordFieldSpec<PlannedFamily>,
     ) -> Option<&'b PlannedType> {
         match &field.field_type {
             PlannedType::External(ExternalTypeSpec::Proto(_)) => {
@@ -2026,7 +2026,7 @@ impl DotNetExternalModels {
     fn wire_type_annotation(
         &self,
         model_type: &PlannedType,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<String> {
         match model_type {
             PlannedType::External(ExternalTypeSpec::Proto(_)) | PlannedType::Record(_) => {
@@ -2114,7 +2114,7 @@ impl ExternalModelBackend for DotNetExternalModels {
     fn wire_conversion(
         &self,
         model_type: &PlannedType,
-        planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         match model_type {
             PlannedType::External(ExternalTypeSpec::Proto(_)) | PlannedType::Record(_) => {
@@ -2129,7 +2129,7 @@ impl ExternalModelBackend for DotNetExternalModels {
 }
 
 pub(crate) fn generate(
-    tree: &crate::spec::ApiSpecTree<PlannedTypeFamily>,
+    tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
@@ -2194,7 +2194,7 @@ fn generate_leaf(
 }
 
 fn generate_tree(
-    branch: &ApiSpecBranch<PlannedTypeFamily>,
+    branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
@@ -2211,7 +2211,7 @@ fn generate_tree(
 }
 
 fn generate_tree_node(
-    node: &ApiSpecNode<PlannedTypeFamily>,
+    node: &ApiSpecNode<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
     files: &mut BTreeMap<PathBuf, String>,
@@ -2533,11 +2533,7 @@ fn render_operation_summary_xml_doc(
     );
 }
 
-fn render_field_xml_doc(
-    output: &mut String,
-    indent: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
-) {
+fn render_field_xml_doc(output: &mut String, indent: &str, field: &RecordFieldSpec<PlannedFamily>) {
     render_xml_summary(
         output,
         indent,
@@ -2758,7 +2754,7 @@ fn flattened_method_parameter_docs(
 
 fn push_field_parameter_doc(
     params: &mut Vec<(String, String)>,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
 ) {
     params.push((
         csharp_parameter_name(&field.name),
@@ -2771,14 +2767,14 @@ fn push_field_parameter_doc(
     ));
 }
 
-fn fallback_parameter_doc(field: &RecordFieldSpec<PlannedTypeFamily>) -> String {
+fn fallback_parameter_doc(field: &RecordFieldSpec<PlannedFamily>) -> String {
     format!("The {} value.", csharp_parameter_name(&field.name))
 }
 
 fn push_function_args_parameter_docs(
     params: &mut Vec<(String, String)>,
     model: &PlannedModel,
-    function_field: &RecordFieldSpec<PlannedTypeFamily>,
+    function_field: &RecordFieldSpec<PlannedFamily>,
 ) {
     let Some(function) = &function_field.function else {
         return;
@@ -2945,7 +2941,7 @@ fn render_flattened_method_body(
 
 fn flattened_request_field_expr(
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     model: &PlannedModel,
     api_plan: &PlannedSpec,
     overload: &FlattenedOverload,
@@ -2985,7 +2981,7 @@ fn flattened_request_field_expr(
 }
 
 fn function_name_expression(
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     support_namespace: Option<&str>,
 ) -> String {
     let method_var = csharp_parameter_name(&format!("{}Method", field.name));
@@ -3010,7 +3006,7 @@ fn function_args_field_mode(
 }
 
 fn flattened_nested_model<'a>(
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     api_plan: &'a PlannedSpec,
 ) -> Option<&'a PlannedModel> {
     let PlannedType::Record(record) = &field.field_type else {
@@ -3023,7 +3019,7 @@ fn flattened_nested_model<'a>(
 fn render_operation_options_constructor(
     output: &mut String,
     type_name: &str,
-    option_fields: &[(&RecordFieldSpec<PlannedTypeFamily>, String, bool)],
+    option_fields: &[(&RecordFieldSpec<PlannedFamily>, String, bool)],
 ) {
     let required_fields = option_fields
         .iter()
@@ -3091,13 +3087,13 @@ fn model_options_required(model: &PlannedModel, api_plan: &PlannedSpec) -> bool 
 fn field_is_options_field(
     model: &PlannedModel,
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
 ) -> bool {
     field.function.is_none() && model.function_for_args_field(field_name).is_none()
 }
 
 fn nested_model_init_expr(
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
     model: &PlannedModel,
     options_required: bool,
 ) -> String {
@@ -3138,7 +3134,7 @@ fn nested_model_init_expr(
 
 fn model_init_expr(
     type_name: &str,
-    field_exprs: Vec<(&RecordFieldSpec<PlannedTypeFamily>, String)>,
+    field_exprs: Vec<(&RecordFieldSpec<PlannedFamily>, String)>,
 ) -> String {
     let constructor_args = field_exprs
         .iter()
@@ -3161,7 +3157,7 @@ fn model_init_expr(
     expr
 }
 
-fn option_field_expr(field: &RecordFieldSpec<PlannedTypeFamily>, options_required: bool) -> String {
+fn option_field_expr(field: &RecordFieldSpec<PlannedFamily>, options_required: bool) -> String {
     if options_required || field.required {
         format!("options.{}", field_property_name(field))
     } else {
@@ -3170,8 +3166,8 @@ fn option_field_expr(field: &RecordFieldSpec<PlannedTypeFamily>, options_require
 }
 
 fn option_nested_field_expr(
-    field: &RecordFieldSpec<PlannedTypeFamily>,
-    nested_field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
+    nested_field: &RecordFieldSpec<PlannedFamily>,
     options_required: bool,
 ) -> String {
     if options_required || (field.required && nested_field.required) {
@@ -3181,7 +3177,7 @@ fn option_nested_field_expr(
     }
 }
 
-fn function_has_result_type_parameter(function: &FunctionFieldSpec<PlannedTypeFamily>) -> bool {
+fn function_has_result_type_parameter(function: &FunctionFieldSpec<PlannedFamily>) -> bool {
     function.result_type_parameter.is_some()
 }
 
@@ -3644,7 +3640,7 @@ fn resource_method_request_field_exprs(
 fn resource_method_request_source_expr(
     source_exprs: &BTreeMap<String, String>,
     field_name: &str,
-    field: &RecordFieldSpec<PlannedTypeFamily>,
+    field: &RecordFieldSpec<PlannedFamily>,
 ) -> Option<String> {
     source_exprs
         .get(&field.name)
@@ -3887,7 +3883,7 @@ fn dotnet_authored_type(wit_type: &PlannedType) -> String {
     }
 }
 
-fn function_expression_type(function: &FunctionFieldSpec<PlannedTypeFamily>) -> String {
+fn function_expression_type(function: &FunctionFieldSpec<PlannedFamily>) -> String {
     if function_has_result_type_parameter(function) {
         "Expression<Func<TWorkflow, Task<TResult>>>".to_string()
     } else {
@@ -3995,9 +3991,7 @@ fn service_endpoint_constant_name(service: &PlannedService) -> String {
     csharp_type_name(&format!("{}-endpoint", service.name))
 }
 
-pub(in crate::generator) fn field_property_name(
-    field: &RecordFieldSpec<PlannedTypeFamily>,
-) -> String {
+pub(in crate::generator) fn field_property_name(field: &RecordFieldSpec<PlannedFamily>) -> String {
     csharp_type_name(&field.name)
 }
 

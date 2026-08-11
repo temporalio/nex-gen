@@ -1,8 +1,8 @@
 //! `LanguageSelectionPass` converts authored API metadata into target-selected
 //! IR by resolving language defaults and overrides exactly once.
 //!
-//! It consumes `ApiSpecTree<AuthoredNames>` and produces
-//! `ApiSpecTree<SelectedNames>`.
+//! It consumes `ApiSpecTree<AuthoredFamily>` and produces
+//! `ApiSpecTree<SelectedFamily>`.
 //!
 //! Target selection is the boundary between authored API metadata and the
 //! language-specific compiler pipeline.
@@ -12,13 +12,13 @@
 
 use crate::language::Language;
 use crate::spec::{
-    ApiSpec, ApiSpecTransform, AuthoredNames, AuthoredResourceType, JsonModelSpec,
-    LanguageStringSpec, SelectedNames, SelectedSupportSpec, SelectedTextSpec, SupportSpec, Symbol,
+    ApiSpec, ApiSpecTransform, AuthoredFamily, AuthoredResourceType, JsonModelSpec,
+    LanguageStringSpec, SelectedFamily, SelectedSupportSpec, SelectedTextSpec, SupportSpec, Symbol,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 
 /// Produce the structurally identical selected IR.
-pub(crate) fn select_spec(spec: ApiSpec, language: Language) -> ApiSpec<SelectedNames> {
+pub(crate) fn select_spec(spec: ApiSpec, language: Language) -> ApiSpec<SelectedFamily> {
     spec.map_names(Selector { language })
 }
 
@@ -26,7 +26,7 @@ struct Selector {
     language: Language,
 }
 
-impl ApiSpecTransform<AuthoredNames, SelectedNames> for Selector {
+impl ApiSpecTransform<AuthoredFamily, SelectedFamily> for Selector {
     fn map_spec_data(&mut self, _data: ()) {}
     fn map_record(&mut self, name: Symbol) -> Symbol {
         name
@@ -88,13 +88,13 @@ impl LanguageSelectionPass {
     }
 }
 
-impl CompilerPass<AuthoredNames, SelectedNames> for LanguageSelectionPass {
+impl CompilerPass<AuthoredFamily, SelectedFamily> for LanguageSelectionPass {
     type Error = std::convert::Infallible;
 
     fn transform_leaf(
         &mut self,
-        leaf: ApiSpecLeaf<AuthoredNames>,
-    ) -> Result<ApiSpecLeaf<SelectedNames>, Self::Error> {
+        leaf: ApiSpecLeaf<AuthoredFamily>,
+    ) -> Result<ApiSpecLeaf<SelectedFamily>, Self::Error> {
         Ok(ApiSpecLeaf {
             module_path: leaf.module_path,
             source_root: leaf.source_root,

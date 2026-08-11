@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use crate::language::Language;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ApiSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct ApiSpec<F: TypeFamily = AuthoredFamily> {
     pub module_path: ModulePath,
     pub data: F::SpecData,
     pub version: String,
@@ -95,7 +95,7 @@ impl std::fmt::Display for Symbol {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthoredResourceType {
     pub name: Symbol,
-    pub wire_type: Option<ExternalTypeSpec<AuthoredNames>>,
+    pub wire_type: Option<ExternalTypeSpec<AuthoredFamily>>,
     /// The named type alias through which this resource is referenced.
     ///
     /// A resource return is lowered into its wire-facing result model. Keeping
@@ -140,7 +140,7 @@ impl std::fmt::Display for AuthoredResourceType {
     }
 }
 
-pub trait TypeNameFamily {
+pub trait TypeFamily {
     type SpecData: std::fmt::Debug + Clone + PartialEq;
     type Record: std::fmt::Debug + Clone + PartialEq;
     type Enum: std::fmt::Debug + Clone + PartialEq;
@@ -173,9 +173,9 @@ pub trait SupportSpecFamily: std::fmt::Debug + Clone + PartialEq {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AuthoredNames;
+pub struct AuthoredFamily;
 
-impl TypeNameFamily for AuthoredNames {
+impl TypeFamily for AuthoredFamily {
     type SpecData = ();
     type Record = Symbol;
     type Enum = Symbol;
@@ -197,9 +197,9 @@ impl TypeNameFamily for AuthoredNames {
 /// Name family after target-language selection. It preserves the `ApiSpec<F>`
 /// shape while making per-language maps unrepresentable in selected IR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SelectedNames;
+pub(crate) struct SelectedFamily;
 
-impl TypeNameFamily for SelectedNames {
+impl TypeFamily for SelectedFamily {
     type SpecData = ();
     type Record = Symbol;
     type Enum = Symbol;
@@ -222,7 +222,7 @@ impl TypeNameFamily for SelectedNames {
 ///
 /// This is intentionally broader than names: a family transform also maps the
 /// pass-specific data attached to specs, declarations, operations, and fields.
-pub trait ApiSpecTransform<From: TypeNameFamily, To: TypeNameFamily> {
+pub trait ApiSpecTransform<From: TypeFamily, To: TypeFamily> {
     fn map_spec_data(&mut self, data: From::SpecData) -> To::SpecData;
     fn map_record(&mut self, name: From::Record) -> To::Record;
     fn map_enum(&mut self, name: From::Enum) -> To::Enum;
@@ -263,10 +263,10 @@ pub enum LanguageImportStyle {
     Named,
 }
 
-pub type AuthoredApiSpec = ApiSpec<AuthoredNames>;
-pub type AuthoredTypeSpec = TypeSpec<AuthoredNames>;
+pub type AuthoredApiSpec = ApiSpec<AuthoredFamily>;
+pub type AuthoredTypeSpec = TypeSpec<AuthoredFamily>;
 
-impl<F: TypeNameFamily> ApiSpec<F> {
+impl<F: TypeFamily> ApiSpec<F> {
     pub fn external_type_binding(&self, type_name: &str) -> Option<&ExternalTypeBindingSpec<F>> {
         match self.types.get(type_name.trim_start_matches('.')) {
             Some(TypeDeclSpec::External(binding)) => Some(binding),
@@ -339,7 +339,7 @@ impl<F: TypeNameFamily> ApiSpec<F> {
 
     pub fn map_names<G, M>(self, mut map: M) -> ApiSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         self.map_names_with(&mut map)
@@ -347,7 +347,7 @@ impl<F: TypeNameFamily> ApiSpec<F> {
 
     fn map_names_with<G, M>(self, map: &mut M) -> ApiSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         ApiSpec {
@@ -371,7 +371,7 @@ impl<F: TypeNameFamily> ApiSpec<F> {
 
 impl<F> ApiSpec<F>
 where
-    F: TypeNameFamily,
+    F: TypeFamily,
     F::Proto: AsRef<str>,
 {
     pub fn record_for_proto(&self, proto_name: &str) -> Option<&RecordSpec<F>> {
@@ -391,7 +391,7 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TypeDeclSpec<F: TypeNameFamily = AuthoredNames> {
+pub enum TypeDeclSpec<F: TypeFamily = AuthoredFamily> {
     External(ExternalTypeBindingSpec<F>),
     Record(RecordSpec<F>),
     Enum(EnumSpec),
@@ -399,10 +399,10 @@ pub enum TypeDeclSpec<F: TypeNameFamily = AuthoredNames> {
     Variant(VariantSpec<F>),
 }
 
-impl<F: TypeNameFamily> TypeDeclSpec<F> {
+impl<F: TypeFamily> TypeDeclSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> TypeDeclSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         match self {
@@ -416,7 +416,7 @@ impl<F: TypeNameFamily> TypeDeclSpec<F> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ServiceSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct ServiceSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     /// A per-language verbatim override of the emitted service code identifier
     /// (`x-<lang>-name` on a JSON-schema `services:` entry). Empty for a language
@@ -435,7 +435,7 @@ pub struct ServiceSpec<F: TypeNameFamily = AuthoredNames> {
     pub data: F::ServiceData,
 }
 
-impl<F: TypeNameFamily> ServiceSpec<F> {
+impl<F: TypeFamily> ServiceSpec<F> {
     pub fn operation(&self, name: &str) -> Option<&OperationSpec<F>> {
         self.operations
             .iter()
@@ -448,7 +448,7 @@ impl<F: TypeNameFamily> ServiceSpec<F> {
 
     fn map_names_with<G, M>(self, map: &mut M) -> ServiceSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         let data = map.map_service_data(&self.name, self.data);
@@ -516,7 +516,7 @@ pub struct SupportFragmentSpec {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct OperationSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     /// A per-language verbatim override of the emitted operation code identifier
     /// (`x-<lang>-name` on a JSON-schema `operations:` entry). Empty for a
@@ -534,7 +534,7 @@ pub struct OperationSpec<F: TypeNameFamily = AuthoredNames> {
     pub data: F::OperationData,
 }
 
-impl<F: TypeNameFamily> OperationSpec<F> {
+impl<F: TypeFamily> OperationSpec<F> {
     pub fn input_type(&self) -> Option<&TypeSpec<F>> {
         self.input.as_ref()
     }
@@ -549,7 +549,7 @@ impl<F: TypeNameFamily> OperationSpec<F> {
 
     fn map_names_with<G, M>(self, map: &mut M) -> OperationSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         let data = map.map_operation_data(&self.name, self.data);
@@ -572,7 +572,7 @@ impl<F: TypeNameFamily> OperationSpec<F> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResourceSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct ResourceSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub fields: Vec<ResourceFieldSpec<F>>,
     pub methods: Vec<ResourceMethodSpec<F>>,
@@ -580,7 +580,7 @@ pub struct ResourceSpec<F: TypeNameFamily = AuthoredNames> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResourceFieldSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct ResourceFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub optional: bool,
     pub field_type: TypeSpec<F>,
@@ -588,7 +588,7 @@ pub struct ResourceFieldSpec<F: TypeNameFamily = AuthoredNames> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResourceMethodSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct ResourceMethodSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub params: Vec<ResourceFieldSpec<F>>,
     pub result: Option<ResourceResultSpec<F>>,
@@ -596,14 +596,14 @@ pub struct ResourceMethodSpec<F: TypeNameFamily = AuthoredNames> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResourceResultSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct ResourceResultSpec<F: TypeFamily = AuthoredFamily> {
     pub result_type: TypeSpec<F>,
 }
 
-impl<F: TypeNameFamily> ResourceSpec<F> {
+impl<F: TypeFamily> ResourceSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ResourceSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         let data = map.map_resource_data(&self.name, self.data);
@@ -624,10 +624,10 @@ impl<F: TypeNameFamily> ResourceSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> ResourceFieldSpec<F> {
+impl<F: TypeFamily> ResourceFieldSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ResourceFieldSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         ResourceFieldSpec {
@@ -639,10 +639,10 @@ impl<F: TypeNameFamily> ResourceFieldSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> ResourceMethodSpec<F> {
+impl<F: TypeFamily> ResourceMethodSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ResourceMethodSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         ResourceMethodSpec {
@@ -658,10 +658,10 @@ impl<F: TypeNameFamily> ResourceMethodSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> ResourceResultSpec<F> {
+impl<F: TypeFamily> ResourceResultSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ResourceResultSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         ResourceResultSpec {
@@ -671,7 +671,7 @@ impl<F: TypeNameFamily> ResourceResultSpec<F> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RecordSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct RecordSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub doc: F::Text,
@@ -683,7 +683,7 @@ pub struct RecordSpec<F: TypeNameFamily = AuthoredNames> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RecordFieldSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub doc: Option<F::Text>,
     pub annotation: Option<F::Text>,
@@ -731,22 +731,22 @@ pub struct FlagSpec {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct VariantSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct VariantSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub cases: Vec<VariantCaseSpec<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct VariantCaseSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct VariantCaseSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub payload: Option<TypeSpec<F>>,
 }
 
-impl<F: TypeNameFamily> RecordSpec<F> {
+impl<F: TypeFamily> RecordSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> RecordSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         let full_name = self.full_name;
@@ -880,7 +880,7 @@ impl<F: TypeNameFamily> RecordSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> RecordFieldSpec<F> {
+impl<F: TypeFamily> RecordFieldSpec<F> {
     fn map_names_with<G, M>(
         self,
         record_full_name: &str,
@@ -888,7 +888,7 @@ impl<F: TypeNameFamily> RecordFieldSpec<F> {
         map: &mut M,
     ) -> RecordFieldSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         let data = map.map_field_data(record_full_name, field_name, self.data);
@@ -918,10 +918,10 @@ impl<F: TypeNameFamily> RecordFieldSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> VariantSpec<F> {
+impl<F: TypeFamily> VariantSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> VariantSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         VariantSpec {
@@ -936,10 +936,10 @@ impl<F: TypeNameFamily> VariantSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> VariantCaseSpec<F> {
+impl<F: TypeFamily> VariantCaseSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> VariantCaseSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         VariantCaseSpec {
@@ -950,13 +950,13 @@ impl<F: TypeNameFamily> VariantCaseSpec<F> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OperationOutputTransformSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct OperationOutputTransformSpec<F: TypeFamily = AuthoredFamily> {
     pub type_name: F::Text,
     pub transform: F::Text,
 }
 
-impl<F: TypeNameFamily> OperationOutputTransformSpec<F> {
-    fn map_names_with<G: TypeNameFamily, M: ApiSpecTransform<F, G>>(
+impl<F: TypeFamily> OperationOutputTransformSpec<F> {
+    fn map_names_with<G: TypeFamily, M: ApiSpecTransform<F, G>>(
         self,
         map: &mut M,
     ) -> OperationOutputTransformSpec<G> {
@@ -1030,7 +1030,7 @@ impl TextSpec for SelectedTextSpec {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExternalTypeBindingSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct ExternalTypeBindingSpec<F: TypeFamily = AuthoredFamily> {
     pub external_type: ExternalTypeSpec<F>,
     pub reference: F::Text,
     pub type_name: F::Text,
@@ -1038,7 +1038,7 @@ pub struct ExternalTypeBindingSpec<F: TypeNameFamily = AuthoredNames> {
     pub authored_type: Option<TypeSpec<F>>,
 }
 
-impl<F: TypeNameFamily> ExternalTypeBindingSpec<F> {
+impl<F: TypeFamily> ExternalTypeBindingSpec<F> {
     pub fn type_name(&self) -> &F::Text {
         &self.type_name
     }
@@ -1053,7 +1053,7 @@ impl<F: TypeNameFamily> ExternalTypeBindingSpec<F> {
 
     fn map_names_with<G, M>(self, map: &mut M) -> ExternalTypeBindingSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         ExternalTypeBindingSpec {
@@ -1071,16 +1071,16 @@ impl<F: TypeNameFamily> ExternalTypeBindingSpec<F> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeReplacementSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct TypeReplacementSpec<F: TypeFamily = AuthoredFamily> {
     pub type_name: F::Text,
     pub from_proto: F::Text,
     pub to_proto: F::Text,
 }
 
-impl<F: TypeNameFamily> TypeReplacementSpec<F> {
+impl<F: TypeFamily> TypeReplacementSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> TypeReplacementSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         TypeReplacementSpec {
@@ -1127,7 +1127,7 @@ pub struct TypeParameterUsage {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TypeSpec<F: TypeNameFamily = AuthoredNames> {
+pub enum TypeSpec<F: TypeFamily = AuthoredFamily> {
     Bool,
     Int(IntSpec),
     Float,
@@ -1157,7 +1157,7 @@ pub enum IntSpec {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ExternalTypeSpec<F: TypeNameFamily = AuthoredNames> {
+pub enum ExternalTypeSpec<F: TypeFamily = AuthoredFamily> {
     Proto(F::Proto),
     Json(F::Json),
     Alias {
@@ -1167,10 +1167,10 @@ pub enum ExternalTypeSpec<F: TypeNameFamily = AuthoredNames> {
     },
 }
 
-impl<F: TypeNameFamily> TypeSpec<F> {
+impl<F: TypeFamily> TypeSpec<F> {
     pub fn map_names<G, M>(self, mut map: M) -> TypeSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         self.map_names_with(&mut map)
@@ -1178,7 +1178,7 @@ impl<F: TypeNameFamily> TypeSpec<F> {
 
     fn map_names_with<G, M>(self, map: &mut M) -> TypeSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         match self {
@@ -1230,7 +1230,7 @@ impl<F: TypeNameFamily> TypeSpec<F> {
 
 impl<F> TypeSpec<F>
 where
-    F: TypeNameFamily,
+    F: TypeFamily,
     F::Record: AsRef<str>,
     F::Enum: AsRef<str>,
     F::Flags: AsRef<str>,
@@ -1294,10 +1294,10 @@ where
     }
 }
 
-impl<F: TypeNameFamily> ExternalTypeSpec<F> {
+impl<F: TypeFamily> ExternalTypeSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> ExternalTypeSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         match self {
@@ -1318,7 +1318,7 @@ impl<F: TypeNameFamily> ExternalTypeSpec<F> {
 
 impl<F> ExternalTypeSpec<F>
 where
-    F: TypeNameFamily,
+    F: TypeFamily,
     F::Proto: AsRef<str>,
     F::Json: AsRef<str>,
     F::Alias: AsRef<str>,
@@ -1338,7 +1338,7 @@ where
 
 impl<F> ApiSpec<F>
 where
-    F: TypeNameFamily,
+    F: TypeFamily,
     F::Record: AsRef<str>,
     F::Variant: AsRef<str>,
 {
@@ -1496,7 +1496,7 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunctionFieldSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct FunctionFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub primary: bool,
     pub result: FunctionResultSpec<F>,
     pub args_field: String,
@@ -1511,7 +1511,7 @@ pub struct FunctionFieldSpec<F: TypeNameFamily = AuthoredNames> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FunctionArgsSpec<F: TypeNameFamily = AuthoredNames> {
+pub enum FunctionArgsSpec<F: TypeFamily = AuthoredFamily> {
     Varargs {
         prefix: Vec<FunctionArgSpec<F>>,
         typescript_drop_prefix: bool,
@@ -1520,27 +1520,27 @@ pub enum FunctionArgsSpec<F: TypeNameFamily = AuthoredNames> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunctionArgSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct FunctionArgSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub field_type: TypeSpec<F>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FunctionResultSpec<F: TypeNameFamily = AuthoredNames> {
+pub enum FunctionResultSpec<F: TypeFamily = AuthoredFamily> {
     Authored(TypeSpec<F>),
     Annotation(F::Text),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FunctionTypeDescriptorSpec<F: TypeNameFamily = AuthoredNames> {
+pub struct FunctionTypeDescriptorSpec<F: TypeFamily = AuthoredFamily> {
     pub value_type: F::Text,
     pub args_type: F::Text,
 }
 
-impl<F: TypeNameFamily> FunctionTypeDescriptorSpec<F> {
+impl<F: TypeFamily> FunctionTypeDescriptorSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> FunctionTypeDescriptorSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         FunctionTypeDescriptorSpec {
@@ -1550,10 +1550,10 @@ impl<F: TypeNameFamily> FunctionTypeDescriptorSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> FunctionFieldSpec<F> {
+impl<F: TypeFamily> FunctionFieldSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> FunctionFieldSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         FunctionFieldSpec {
@@ -1576,10 +1576,10 @@ impl<F: TypeNameFamily> FunctionFieldSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> FunctionArgsSpec<F> {
+impl<F: TypeFamily> FunctionArgsSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> FunctionArgsSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         match self {
@@ -1602,10 +1602,10 @@ impl<F: TypeNameFamily> FunctionArgsSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> FunctionArgSpec<F> {
+impl<F: TypeFamily> FunctionArgSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> FunctionArgSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         FunctionArgSpec {
@@ -1615,10 +1615,10 @@ impl<F: TypeNameFamily> FunctionArgSpec<F> {
     }
 }
 
-impl<F: TypeNameFamily> FunctionResultSpec<F> {
+impl<F: TypeFamily> FunctionResultSpec<F> {
     fn map_names_with<G, M>(self, map: &mut M) -> FunctionResultSpec<G>
     where
-        G: TypeNameFamily,
+        G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         match self {
@@ -1636,7 +1636,7 @@ impl<F: TypeNameFamily> FunctionResultSpec<F> {
 ///
 /// The shared tree traversal retains module structure and source metadata;
 /// implementations provide the leaf-level transformation for the pass.
-pub trait CompilerPass<From: TypeNameFamily, To: TypeNameFamily> {
+pub trait CompilerPass<From: TypeFamily, To: TypeFamily> {
     type Error;
 
     fn transform_leaf(&mut self, leaf: ApiSpecLeaf<From>) -> Result<ApiSpecLeaf<To>, Self::Error>;
@@ -1652,11 +1652,11 @@ pub trait CompilerPass<From: TypeNameFamily, To: TypeNameFamily> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ApiSpecTree<F: TypeNameFamily = AuthoredNames> {
+pub struct ApiSpecTree<F: TypeFamily = AuthoredFamily> {
     pub root: ApiSpecNode<F>,
 }
 
-impl ApiSpecTree<AuthoredNames> {
+impl ApiSpecTree<AuthoredFamily> {
     pub fn single(spec: ApiSpec) -> Self {
         Self {
             root: ApiSpecNode::Leaf(ApiSpecLeaf {
@@ -1677,19 +1677,19 @@ impl ApiSpecTree<AuthoredNames> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ApiSpecNode<F: TypeNameFamily = AuthoredNames> {
+pub enum ApiSpecNode<F: TypeFamily = AuthoredFamily> {
     Leaf(ApiSpecLeaf<F>),
     Branch(ApiSpecBranch<F>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ApiSpecBranch<F: TypeNameFamily = AuthoredNames> {
+pub struct ApiSpecBranch<F: TypeFamily = AuthoredFamily> {
     pub module_path: ModulePath,
     pub children: BTreeMap<String, ApiSpecNode<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ApiSpecLeaf<F: TypeNameFamily = AuthoredNames> {
+pub struct ApiSpecLeaf<F: TypeFamily = AuthoredFamily> {
     pub module_path: ModulePath,
     pub source_root: PathBuf,
     pub source_path: PathBuf,
@@ -1698,8 +1698,8 @@ pub struct ApiSpecLeaf<F: TypeNameFamily = AuthoredNames> {
 
 fn transform_tree<F, G, P>(tree: ApiSpecTree<F>, pass: &mut P) -> Result<ApiSpecTree<G>, P::Error>
 where
-    F: TypeNameFamily,
-    G: TypeNameFamily,
+    F: TypeFamily,
+    G: TypeFamily,
     P: CompilerPass<F, G>,
 {
     fn transform_node<F, G, P>(
@@ -1707,8 +1707,8 @@ where
         pass: &mut P,
     ) -> Result<ApiSpecNode<G>, P::Error>
     where
-        F: TypeNameFamily,
-        G: TypeNameFamily,
+        F: TypeFamily,
+        G: TypeFamily,
         P: CompilerPass<F, G>,
     {
         match node {

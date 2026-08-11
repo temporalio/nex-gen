@@ -11,7 +11,7 @@ use crate::generator::ExternalModelBackend;
 use crate::generator::dotnet::{
     WireValueConversion, csharp_parameter_name, csharp_string_literal, csharp_type_name,
 };
-use crate::planning::{PlannedJsonType, PlannedSpec, PlannedTypeFamily};
+use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
 use crate::spec::{ExternalTypeSpec, RecordSpec};
 
 const GENERATED_CODE_ATTRIBUTE: &str = "[GeneratedCode(\"nexgen\", null)]";
@@ -84,7 +84,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
     fn wire_conversion(
         &self,
         json_type: &PlannedJsonType,
-        _planned_record: Option<&RecordSpec<PlannedTypeFamily>>,
+        _planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         Some(WireValueConversion {
             annotation: model_type_ref(json_type),

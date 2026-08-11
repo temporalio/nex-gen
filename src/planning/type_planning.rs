@@ -1,16 +1,16 @@
 //! `TypePlanningPass` turns operation-lowered selected types into planned types.
 //!
 //! Its analysis is local to the pass. The output is a self-contained
-//! `PlannedTypeFamily`, never a saved planner state for a later pass.
+//! `PlannedFamily`, never a saved planner state for a later pass.
 fn module_import_index(
-    tree: &ApiSpecTree<OperationLoweredNames>,
+    tree: &ApiSpecTree<OperationLoweredFamily>,
 ) -> BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>> {
     let mut imports = BTreeMap::<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>::new();
     collect_tree_module_imports(&tree.root, &mut imports);
     imports
 }
 
-fn module_export_names(spec: &ApiSpec<OperationLoweredNames>) -> BTreeSet<String> {
+fn module_export_names(spec: &ApiSpec<OperationLoweredFamily>) -> BTreeSet<String> {
     spec.types
         .iter()
         .filter_map(|(name, decl)| {
@@ -32,7 +32,7 @@ fn module_export_names(spec: &ApiSpec<OperationLoweredNames>) -> BTreeSet<String
 }
 
 fn external_type_module_path(
-    external: &ExternalTypeSpec<OperationLoweredNames>,
+    external: &ExternalTypeSpec<OperationLoweredFamily>,
 ) -> Option<&ModulePath> {
     match external {
         ExternalTypeSpec::Proto(symbol) => symbol.module_path(),
@@ -42,7 +42,7 @@ fn external_type_module_path(
 }
 
 fn collect_tree_module_imports(
-    node: &ApiSpecNode<OperationLoweredNames>,
+    node: &ApiSpecNode<OperationLoweredFamily>,
     imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
 ) {
     match node {
@@ -56,7 +56,7 @@ fn collect_tree_module_imports(
 }
 
 fn collect_spec_module_imports(
-    spec: &ApiSpec<OperationLoweredNames>,
+    spec: &ApiSpec<OperationLoweredFamily>,
     imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
 ) {
     for service in &spec.services {
@@ -141,7 +141,7 @@ fn collect_spec_module_imports(
 
 fn collect_function_args_module_imports(
     source_module: &ModulePath,
-    args: &FunctionArgsSpec<OperationLoweredNames>,
+    args: &FunctionArgsSpec<OperationLoweredFamily>,
     imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
 ) {
     let args = match args {
@@ -155,7 +155,7 @@ fn collect_function_args_module_imports(
 
 fn collect_type_module_imports(
     source_module: &ModulePath,
-    ty: Option<&TypeSpec<OperationLoweredNames>>,
+    ty: Option<&TypeSpec<OperationLoweredFamily>>,
     imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
 ) {
     let Some(ty) = ty else {
@@ -196,7 +196,7 @@ fn collect_type_module_imports(
 
 fn collect_external_type_module_imports(
     source_module: &ModulePath,
-    external: &ExternalTypeSpec<OperationLoweredNames>,
+    external: &ExternalTypeSpec<OperationLoweredFamily>,
     imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
 ) {
     match external {
@@ -306,7 +306,7 @@ use super::*;
 use crate::spec::{FunctionTypeDescriptorSpec, OperationOutputTransformSpec, ResourceResultSpec};
 
 pub(super) struct TypePlanningContext<'a> {
-    pub(super) spec: ApiSpec<OperationLoweredNames>,
+    pub(super) spec: ApiSpec<OperationLoweredFamily>,
     spec_data: PlannedSpecData,
     language: Language,
     pub(super) descriptors: &'a DescriptorIndex,
@@ -316,12 +316,12 @@ pub(super) struct TypePlanningContext<'a> {
 }
 
 struct PlannedServiceBuild {
-    operations: Vec<OperationSpec<PlannedTypeFamily>>,
+    operations: Vec<OperationSpec<PlannedFamily>>,
 }
 
 /// Planned operation metadata before it is written into the planned graph.
 struct PlannedOperations {
-    operations: IndexMap<String, Vec<OperationSpec<PlannedTypeFamily>>>,
+    operations: IndexMap<String, Vec<OperationSpec<PlannedFamily>>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -331,11 +331,11 @@ struct OperationBindingInfo<'a> {
 }
 
 struct TypePlanningMapper<'a, 'descriptors> {
-    source_spec: &'a ApiSpec<OperationLoweredNames>,
+    source_spec: &'a ApiSpec<OperationLoweredFamily>,
     planner: &'a mut TypePlanningContext<'descriptors>,
 }
 
-impl ApiSpecTransform<OperationLoweredNames, PlannedTypeFamily> for TypePlanningMapper<'_, '_> {
+impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMapper<'_, '_> {
     fn map_spec_data(&mut self, _data: ()) -> PlannedSpecData {
         self.planner.spec_data.clone()
     }
@@ -477,7 +477,7 @@ impl ApiSpecTransform<OperationLoweredNames, PlannedTypeFamily> for TypePlanning
 
 impl<'a> TypePlanningContext<'a> {
     fn new(
-        spec: ApiSpec<OperationLoweredNames>,
+        spec: ApiSpec<OperationLoweredFamily>,
         spec_data: PlannedSpecData,
         descriptors: &'a DescriptorIndex,
         language: Language,
@@ -494,7 +494,7 @@ impl<'a> TypePlanningContext<'a> {
         })
     }
 
-    fn plan_spec(&mut self, spec: ApiSpec<OperationLoweredNames>) -> PlannedSpec {
+    fn plan_spec(&mut self, spec: ApiSpec<OperationLoweredFamily>) -> PlannedSpec {
         let source_spec = spec.clone();
         let mut planned_spec = spec.map_names(TypePlanningMapper {
             source_spec: &source_spec,
@@ -506,7 +506,7 @@ impl<'a> TypePlanningContext<'a> {
 
     fn resolve_planned_record_field_types(
         &mut self,
-        source_spec: &ApiSpec<OperationLoweredNames>,
+        source_spec: &ApiSpec<OperationLoweredFamily>,
         planned_spec: &mut PlannedSpec,
     ) {
         for (record_name, planned_decl) in &mut planned_spec.types {
@@ -539,7 +539,7 @@ impl<'a> TypePlanningContext<'a> {
 
     fn plan_service(
         &mut self,
-        service: &ServiceSpec<OperationLoweredNames>,
+        service: &ServiceSpec<OperationLoweredFamily>,
     ) -> Result<PlannedServiceBuild> {
         let operation_builds = service
             .operations
@@ -580,9 +580,9 @@ impl<'a> TypePlanningContext<'a> {
 
     fn plan_operation(
         &mut self,
-        service: &ServiceSpec<OperationLoweredNames>,
-        operation: &OperationSpec<OperationLoweredNames>,
-    ) -> Result<OperationSpec<PlannedTypeFamily>> {
+        service: &ServiceSpec<OperationLoweredFamily>,
+        operation: &OperationSpec<OperationLoweredFamily>,
+    ) -> Result<OperationSpec<PlannedFamily>> {
         let input = self.plan_operation_input(service, operation)?;
         let output = self.plan_operation_output(service, operation)?;
 
@@ -612,8 +612,8 @@ impl<'a> TypePlanningContext<'a> {
 
     fn plan_operation_input(
         &mut self,
-        service: &ServiceSpec<OperationLoweredNames>,
-        operation: &OperationSpec<OperationLoweredNames>,
+        service: &ServiceSpec<OperationLoweredFamily>,
+        operation: &OperationSpec<OperationLoweredFamily>,
     ) -> Result<Option<PlannedType>> {
         match operation.input_type() {
             None => Ok(None),
@@ -669,8 +669,8 @@ impl<'a> TypePlanningContext<'a> {
 
     fn plan_operation_output(
         &mut self,
-        service: &ServiceSpec<OperationLoweredNames>,
-        operation: &OperationSpec<OperationLoweredNames>,
+        service: &ServiceSpec<OperationLoweredFamily>,
+        operation: &OperationSpec<OperationLoweredFamily>,
     ) -> Result<Option<PlannedType>> {
         match operation.output_type() {
             Some(TypeSpec::External(ExternalTypeSpec::Proto(output_proto))) => {
@@ -722,8 +722,8 @@ impl<'a> TypePlanningContext<'a> {
 
     fn plan_operation_resource_type(
         &mut self,
-        service: &ServiceSpec<OperationLoweredNames>,
-        operation: &OperationSpec<OperationLoweredNames>,
+        service: &ServiceSpec<OperationLoweredFamily>,
+        operation: &OperationSpec<OperationLoweredFamily>,
         resource: &AuthoredResourceType,
     ) -> Result<PlannedResourceType> {
         let Some(output_type) = resource.wire_type.as_ref() else {
@@ -783,7 +783,7 @@ impl<'a> TypePlanningContext<'a> {
 
     fn plan_resource(
         &mut self,
-        service: &ServiceSpec<OperationLoweredNames>,
+        service: &ServiceSpec<OperationLoweredFamily>,
         resource: &ResolvedResourceSpec,
         operations: &[OperationBindingInfo<'_>],
     ) -> Result<PlannedResource> {
@@ -846,7 +846,7 @@ impl<'a> TypePlanningContext<'a> {
 
     fn planned_resource_method_result(
         &mut self,
-        result: &ResourceResultSpec<SelectedNames>,
+        result: &ResourceResultSpec<SelectedFamily>,
     ) -> PlannedResourceMethodResult {
         let optional = matches!(result.result_type, TypeSpec::Option(_));
         let kind = match result.result_type.without_option() {
@@ -862,7 +862,7 @@ impl<'a> TypePlanningContext<'a> {
 
     fn planned_resource_field(
         &mut self,
-        field: &ResourceFieldSpec<SelectedNames>,
+        field: &ResourceFieldSpec<SelectedFamily>,
     ) -> PlannedResourceField {
         let kind = self.planned_selected_type_from_authored(&field.field_type);
         PlannedResourceField {
@@ -878,7 +878,7 @@ impl<'a> TypePlanningContext<'a> {
 
     pub(super) fn plan_record_type(
         &mut self,
-        record: &RecordSpec<OperationLoweredNames>,
+        record: &RecordSpec<OperationLoweredFamily>,
         requested_capabilities: ModelWireCapabilities,
     ) -> PlannedRecordType {
         let planned_record = PlannedRecordType {
@@ -891,7 +891,7 @@ impl<'a> TypePlanningContext<'a> {
 
     fn ensure_record_model_plan(
         &mut self,
-        record: &RecordSpec<OperationLoweredNames>,
+        record: &RecordSpec<OperationLoweredFamily>,
         requested_capabilities: ModelWireCapabilities,
     ) {
         if let Some(existing) = self.record_plans.get_mut(&record.full_name) {
@@ -917,7 +917,7 @@ impl<'a> TypePlanningContext<'a> {
 
     fn ensure_record_field_capabilities(
         &mut self,
-        record: &RecordSpec<OperationLoweredNames>,
+        record: &RecordSpec<OperationLoweredFamily>,
         requested_capabilities: ModelWireCapabilities,
     ) {
         let field_types = record
@@ -990,7 +990,7 @@ impl<'a> TypePlanningContext<'a> {
     fn planned_external_type_from_resource(
         &mut self,
         authored_type: &ExternalTypeSpec,
-    ) -> ExternalTypeSpec<PlannedTypeFamily> {
+    ) -> ExternalTypeSpec<PlannedFamily> {
         match authored_type {
             ExternalTypeSpec::Proto(proto_name) => {
                 let planned_proto = if let Some(message) =
@@ -1094,7 +1094,7 @@ impl<'a> TypePlanningContext<'a> {
 
     pub(super) fn planned_type_from_authored(
         &mut self,
-        authored_type: &TypeSpec<OperationLoweredNames>,
+        authored_type: &TypeSpec<OperationLoweredFamily>,
     ) -> PlannedType {
         if let Some(kind) = proto::planned_type_from_authored_proto(authored_type, self) {
             return kind;
@@ -1115,7 +1115,7 @@ impl<'a> TypePlanningContext<'a> {
 
     fn planned_selected_type_from_authored(
         &mut self,
-        authored_type: &TypeSpec<SelectedNames>,
+        authored_type: &TypeSpec<SelectedFamily>,
     ) -> PlannedType {
         self.planned_type_from_authored(
             &authored_type
@@ -1126,8 +1126,8 @@ impl<'a> TypePlanningContext<'a> {
 
     fn planned_selected_function_from_authored(
         &mut self,
-        function: &FunctionFieldSpec<SelectedNames>,
-    ) -> FunctionFieldSpec<PlannedTypeFamily> {
+        function: &FunctionFieldSpec<SelectedFamily>,
+    ) -> FunctionFieldSpec<PlannedFamily> {
         FunctionFieldSpec {
             primary: function.primary,
             result: match &function.result {
@@ -1182,7 +1182,7 @@ impl<'a> TypePlanningContext<'a> {
 
     pub(super) fn planned_authored_type_override_from_authored(
         &mut self,
-        authored_type: &TypeSpec<OperationLoweredNames>,
+        authored_type: &TypeSpec<OperationLoweredFamily>,
     ) -> PlannedType {
         match authored_type {
             TypeSpec::Option(inner) => TypeSpec::Option(Box::new(
@@ -1229,7 +1229,7 @@ impl<'a> TypePlanningContext<'a> {
 
     fn planned_value_type_from_authored(
         &mut self,
-        authored_type: &TypeSpec<OperationLoweredNames>,
+        authored_type: &TypeSpec<OperationLoweredFamily>,
     ) -> PlannedType {
         match authored_type {
             TypeSpec::Bool => TypeSpec::Bool,
@@ -1346,7 +1346,7 @@ impl<'a> TypePlanningContext<'a> {
 }
 
 fn root_model_capabilities(
-    spec: &ApiSpec<OperationLoweredNames>,
+    spec: &ApiSpec<OperationLoweredFamily>,
     descriptors: &DescriptorIndex,
     language: Language,
 ) -> Result<BTreeMap<String, ModelWireCapabilities>> {
@@ -1381,7 +1381,7 @@ fn root_model_capabilities(
     Ok(capabilities)
 }
 
-fn record_wire_capabilities(record: &RecordSpec<OperationLoweredNames>) -> ModelWireCapabilities {
+fn record_wire_capabilities(record: &RecordSpec<OperationLoweredFamily>) -> ModelWireCapabilities {
     if record.data.is_operation_output_intermediate {
         ModelWireCapabilities::BIDIRECTIONAL
     } else {
@@ -1414,7 +1414,7 @@ pub(crate) struct TypePlanningPass<'a> {
 
 impl<'a> TypePlanningPass<'a> {
     pub(crate) fn new(
-        tree: &ApiSpecTree<OperationLoweredNames>,
+        tree: &ApiSpecTree<OperationLoweredFamily>,
         descriptors: &'a DescriptorIndex,
         language: Language,
     ) -> Self {
@@ -1426,13 +1426,13 @@ impl<'a> TypePlanningPass<'a> {
     }
 }
 
-impl CompilerPass<OperationLoweredNames, PlannedTypeFamily> for TypePlanningPass<'_> {
+impl CompilerPass<OperationLoweredFamily, PlannedFamily> for TypePlanningPass<'_> {
     type Error = Error;
 
     fn transform_leaf(
         &mut self,
-        leaf: ApiSpecLeaf<OperationLoweredNames>,
-    ) -> Result<ApiSpecLeaf<PlannedTypeFamily>> {
+        leaf: ApiSpecLeaf<OperationLoweredFamily>,
+    ) -> Result<ApiSpecLeaf<PlannedFamily>> {
         let spec_data = PlannedSpecData {
             module_imports: self
                 .imports
@@ -1466,7 +1466,7 @@ impl CompilerPass<OperationLoweredNames, PlannedTypeFamily> for TypePlanningPass
 
 struct SelectedToOperationLoweredMapper;
 
-impl ApiSpecTransform<SelectedNames, OperationLoweredNames> for SelectedToOperationLoweredMapper {
+impl ApiSpecTransform<SelectedFamily, OperationLoweredFamily> for SelectedToOperationLoweredMapper {
     fn map_spec_data(&mut self, _: ()) {}
     fn map_record(&mut self, value: Symbol) -> Symbol {
         value
