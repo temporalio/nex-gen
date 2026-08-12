@@ -11,6 +11,20 @@ use common::json_input_path;
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A property whose union has one inline structured object branch (named
+/// `<Union>Object`) and one scalar branch.
+const INLINE_OBJECT_BRANCH_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  payload:
+    oneOf:
+      - type: object
+        required: [text]
+        properties:
+          text: { type: string, minLength: 1 }
+      - { type: string }
+"#;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -106,6 +120,31 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
             assert!(all.contains("private final @Nullable String legacyIdJava;"));
             assert!(all.contains("public @Nullable String getLegacyIdJava() {"));
             assert!(all.contains("gen.writeStringField(\"legacyId\", value.legacyIdJava);"));
+            // An inline free-form object branch: the union declares a nested
+            // wrapper holding the members verbatim (a named free-form model gets
+            // the same catch-all on its POJO).
+            assert!(all.contains("public static final class PayloadObject implements Payload {"));
+            assert!(all.contains("private final Map<String, JsonNode> value;"));
+            assert!(all.contains("public final class Extras {"));
+            // A tagged union whose branches are written inline: each branch names
+            // itself with `x-java-name` and implements the union interface.
+            assert!(all.contains("public final class TextNote implements Note {"));
+            assert!(all.contains("public final class LinkNote implements Note {"));
+            // A structured inline object branch of a *property* union: the branch
+            // is an ordinary POJO implementing the interface nested in the
+            // declaring class, and the union parses through `fromNode` exactly as
+            // a named union def does.
+            assert!(
+                all.contains(
+                    "public final class ShowcaseDetailObject implements Showcase.Detail {"
+                )
+            );
+            assert!(
+                all.contains("return context.readTreeAsValue(node, ShowcaseDetailObject.class);")
+            );
+            assert!(
+                all.contains("detail = Detail.fromNode(field, \"detail\", violations, context);")
+            );
         }
         fs::remove_dir_all(temp_dir).unwrap();
     }
@@ -119,4 +158,56 @@ fn java_json_example_generation_matches_checked_in_output() {
 #[test]
 fn java_json_api_example_generation_matches_checked_in_output() {
     assert_regeneration_matches("api", true);
+}
+
+/// A structured inline object branch of a property-level union is named
+/// `<Union>Object` by the load and emitted as an ordinary POJO — implementing the
+/// union interface nested in the declaring class, so the interface's `fromNode`
+/// dispatcher (the same one a named union def carries) delegates to the branch's
+/// own deserializer. See `specs/json-schema/features/oneOf.md`.
+#[test]
+fn java_json_names_inline_object_union_branch() {
+    let temp_dir = unique_output_path("java-json-inline-branch");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("detail.yaml");
+    fs::write(&input_path, INLINE_OBJECT_BRANCH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("detail");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("detail".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let branch = &rendered[&PathBuf::from("DetailPayloadObject.java")];
+    assert!(
+        branch.contains("public final class DetailPayloadObject implements Detail.Payload {"),
+        "{branch}"
+    );
+    // The branch is an ordinary model: its own constraints and catch-all.
+    assert!(branch.contains("must have length >= 1"), "{branch}");
+    assert!(
+        branch.contains("private final Map<String, JsonNode> additionalProperties;"),
+        "{branch}"
+    );
+
+    let declaring = &rendered[&PathBuf::from("Detail.java")];
+    for expected in [
+        "public interface Payload {",
+        "static @Nullable Payload fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {",
+        "return context.readTreeAsValue(node, DetailPayloadObject.class);",
+        "public static final class PayloadString implements Payload {",
+        "payload = Payload.fromNode(field, \"payload\", violations, context);",
+    ] {
+        assert!(declaring.contains(expected), "{expected}\n{declaring}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
 }

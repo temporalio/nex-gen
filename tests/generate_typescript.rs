@@ -21,6 +21,20 @@ const START_WORKFLOW_EXAMPLE_ID: &str = "start-workflow";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A property whose union has one inline structured object branch (named
+/// `<Union>Object`) and one scalar branch.
+const INLINE_OBJECT_BRANCH_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  payload:
+    oneOf:
+      - type: object
+        required: [text]
+        properties:
+          text: { type: string, minLength: 1 }
+      - { type: string }
+"#;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -312,6 +326,22 @@ fn typescript_json_example_generation_matches_checked_in_output() {
             assert!(all.contains("legacyIdTs?: string;"));
             assert!(all.contains("legacyIdTs = raw.legacyId;"));
             assert!(all.contains("out.legacyId = value.legacyIdTs;"));
+            // A free-form object stays an anonymous `Record` — narrowed on the
+            // object token as a union branch, and the sole member of the named
+            // `Extras` interface.
+            assert!(all.contains("payload?: Record<string, unknown> | string;"));
+            assert!(all.contains("export interface Extras {"));
+            assert!(all.contains("additionalProperties: Record<string, unknown>;"));
+            // A tagged union whose branches are written inline: each branch names
+            // itself with `x-ts-name` and is emitted as an interface + mapper.
+            assert!(all.contains("export type Note = TextNote | LinkNote;"));
+            assert!(all.contains("export interface TextNote {"));
+            assert!(all.contains("export class LinkNoteMapper {"));
+            // The lone inline object branch of a property union derives its name
+            // from the union it belongs to.
+            assert!(all.contains("detail?: ShowcaseDetailObject | string;"));
+            assert!(all.contains("export interface ShowcaseDetailObject {"));
+            assert!(all.contains("out.detail = serializeShowcaseDetail(value.detail);"));
         }
         fs::remove_dir_all(output_path).unwrap();
     }
@@ -644,4 +674,43 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     );
     assert!(type_roundtrip_rendered.contains("retryPolicy: common.RetryPolicy;"));
     assert!(!type_roundtrip_rendered.contains("retryPolicyOperation"));
+}
+
+/// An inline **structured** object `oneOf` branch on a property: the branch is
+/// named `<Union>Object` and emitted as an interface with its own mapper, and the
+/// union's serialize side routes through it (the in-memory `additionalProperties`
+/// member must not reach the wire).
+/// See `specs/json-schema/features/oneOf.md` ("Object branches").
+#[test]
+fn typescript_json_names_inline_object_union_branch() {
+    let temp_dir = unique_output_path("ts-json-inline-branch");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("detail.yaml");
+    fs::write(&input_path, INLINE_OBJECT_BRANCH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("detail");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    assert!(rendered.contains("payload?: DetailPayloadObject | string;"));
+    assert!(rendered.contains("export interface DetailPayloadObject {"));
+    assert!(rendered.contains("export class DetailPayloadObjectMapper {"));
+    // Parse and serialize both route the object token through the branch mapper.
+    assert!(rendered.contains("new DetailPayloadObjectMapper().fromIntermediate(raw.payload)"));
+    assert!(rendered.contains(
+        "function serializeDetailPayload(value: DetailPayloadObject | string): unknown {"
+    ));
+    assert!(rendered.contains("out.payload = serializeDetailPayload(value.payload);"));
+    fs::remove_dir_all(temp_dir).unwrap();
 }

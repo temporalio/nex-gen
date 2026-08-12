@@ -59,7 +59,11 @@ Distilled:
   `array`, `object`}: every non-`object` kind holds **at most one** branch
   (type-token separable), and the `object` kind, if it holds **two or
   more** branches, is separated by a shared **`const`-tag discriminator**
-  (below).
+  (below);
+- every **object** branch has a **determinate type name**: a `$ref` brings
+  its definition's name, a lone inline object branch derives `<Union>Object`,
+  and two or more inline object branches must name themselves with
+  `x-<lang>-name` (below).
 
 Selection is layered. The outer selector is the wire token (`{`→object,
 `[`→array, `"`→string, number→the numeric branch, `true`/`false`→boolean,
@@ -81,6 +85,58 @@ This is why mixed-kind unions (`object | array`, `object | string`,
 supported. The [[nullability]] pattern `oneOf:[{T},{null}]` is the
 **degenerate two-kind instance** of the type-token layer (the `null` token
 is the selector); it remains owned by [[nullability]].
+
+### Object branches — naming the inline shape
+
+An object branch is admitted whatever its shape (declared [[properties]], a
+typed map, a free-form object, member-count bounds). The constraint is not
+the shape, it is the **name**: every target has to materialize a *type* for a
+**structured** object branch — Go a defined type to carry the marker method,
+Java a class to `implement` the interface, Python a `BaseModel` for Pydantic
+to select, TS an interface plus the mapper that validates its members — and a
+type needs a name. So every object branch must resolve to a determinate name:
+
+- **`$ref` to a named definition** — the definition's name *is* the branch
+  type, already emitted with its own validation. The recommended form for
+  any shape that is worth naming or is reused.
+- **one inline object branch** — synthesizes `<Union>Object`, by the same
+  rule the other inline branch kinds use (`<Union><Kind>`, [[properties]]
+  §"Synthesized type names"). The name is determinate because the
+  type-token layer admits a single object branch unless the branches are
+  `const`-tagged. **P15** remains the backstop if `<Union>Object` collides
+  with another emitted type: reject, with `x-<lang>-name` as the escape
+  hatch — the same treatment every other synthesized name gets.
+- **two or more inline object branches** (a `const`-tagged union written
+  inline) — every branch would derive the same `Object` name, and there is
+  nothing in a JSON Schema branch to derive a *distinguishing* name from:
+  the discriminator's `const` value is a wire value, not an identifier, and
+  ordinal names (`Object1`, `Object2`) reorder silently when a branch is
+  inserted. So each branch must name itself with the Stage 4 override
+  ([[properties]]) — `x-go-name` / `x-ts-name` / `x-py-name` /
+  `x-java-name`, the key of whichever target is being generated — and is
+  rejected naming the missing key otherwise.
+
+A named branch is emitted as **the same named model an authored definition of
+that shape would produce**: the load moves the branch into `$defs` under its
+resolved name and rewrites the branch to a `$ref` at it, so there is one
+object-model emitter per target rather than a second, inline one. Everything
+downstream follows from that — the branch validates, resolves, collides
+(**P15**), and joins the module's exported surface exactly like an authored
+definition. It also means the inline form and the `$ref` form emit *identical*
+code; the choice between them is only where the shape reads best.
+
+Note what the multi-branch case costs: an override key per branch is more
+typing than a `$defs` entry per branch, which also gives every target a
+better name than a union-derived one. Inline multi-object branches are
+admitted for completeness, not recommended; the diagnostic on a missing
+override points at both remedies.
+
+The **free-form object** (`type: object` with `additionalProperties: true`
+and no declared `properties`) is the exception that needs no name at all: it
+declares no shape to emit, so TS and Python express it structurally
+(`Record<string, unknown>` / `dict[str, Any]`) and only Go and Java wrap it —
+as `<Union>Object` over the verbatim member map ([[additionalProperties]],
+**P13**). It is left inline rather than hoisted.
 
 ### Discriminated object unions — the `const`-tag
 
@@ -190,6 +246,21 @@ Loader behavior:
   (exactly one shared required-`const` property, pairwise-distinct values);
   zero such properties or more than one qualifying → reject (no
   discriminator / ambiguous).
+- An **inline** structured object branch (declared `properties`, or a typed
+  `additionalProperties`) → resolve its name (below), move it into `$defs`
+  under that name, and rewrite the branch to a `$ref` at it. From that point
+  it is an ordinary model. The free-form object is left inline.
+- Two or more **inline** structured object branches without a per-branch
+  `x-<lang>-name` for the target being generated → reject: the synthesized
+  `<Union>Object` name is not determinate. The diagnostic names the missing
+  key and points at `$defs` + `$ref` as the shorter remedy.
+- A synthesized branch name already declared in `$defs`, or colliding with
+  another emitted type → reject per **P15**, `x-<lang>-name` as the escape
+  hatch (as for every synthesized name).
+- An **inline** object branch in a position with no derivable name (inside
+  `items`, `additionalProperties`, or a nested inline object) → reject unless
+  it is the free-form object, which needs none; the diagnostic points at
+  `$defs` + `$ref`.
 - Two or more branches of the same **non-object** kind (two strings, two
   integers) → reject: a scalar same-kind choice is an [[enum]] (or `const`
   union), not a `oneOf` — diagnostic points at [[enum]].
@@ -250,6 +321,26 @@ The type-token selector maps 1:1 onto TS's built-in narrowing primitives
 literal property). This is the best-fit target: the acceptance rule is
 *exactly* what TS narrows without hand-written type guards (**P2**).
 
+An inline object branch is the one place TS does need a name: the branch's
+members have to be validated, and that validation lives in a `Mapper` class
+keyed to a type. A **structured** inline branch is therefore emitted as the
+interface + mapper pair a named definition gets (`<Union>Object`, or the
+branch's `x-ts-name`) and enters the union under that name; the union still
+narrows structurally, on the object token or the discriminant literal. Only the
+**free-form** branch stays anonymous — it has no members to validate:
+
+```ts
+export interface FooObject { kind: "a"; value: string; additionalProperties: Record<string, unknown>; }
+export type Foo = FooObject | string;                      // structured inline branch
+export type Bar = Record<string, unknown> | string;        // free-form inline branch
+```
+
+A property-level (anonymous) union whose members need a transform gets one
+module-private `serialize<Union>` function — the same dispatch a named union's
+`Mapper.toIntermediate` performs — so an object member is written through its
+branch mapper rather than emitted with its in-memory `additionalProperties`
+member intact.
+
 ### Python
 
 A `Union` (PEP 604 `X | Y` on 3.10+, `Union[...]` alias otherwise); a
@@ -264,6 +355,17 @@ For an object tagged union, the const tag becomes a `Literal` field
 ([[const]]) and the union carries `Field(discriminator=...)` — Pydantic's
 native discriminated-union feature, which gives O(1) selection and precise
 errors (see "Discriminated object unions" below).
+
+Python inlines the union but **not** a structured object branch's shape:
+Pydantic selects on a model, so such a branch becomes a module-level
+`BaseModel` named by the rule above (`<Union>Object`, or the branch's
+`x-py-name`) and enters the union under that name. The free-form object is
+the exception — `dict[str, Any]` needs no class.
+
+```python
+class FooObject(BaseModel): ...           # the inline object branch
+Foo = Union[FooObject, str]
+```
 
 ### Go
 
@@ -295,8 +397,27 @@ The marker method is unexported, so **only generator-emitted types
 implement the interface** — the set is closed by construction. Any branch
 that is (or `$ref`s) a named Go type implements the marker directly; an
 inline scalar/array/object branch synthesizes a variant type named
-`<Union><Kind>` (Go has no nested types → flat, P15-backstopped). Because
-at most one branch occupies each kind, `<Union><Kind>` is unambiguous.
+`<Union><Kind>` (Go has no nested types → flat, P15-backstopped, or the
+branch's `x-go-name` when it carries one). Because at most one branch
+occupies each kind, `<Union><Kind>` is unambiguous.
+
+An inline **object** branch synthesizes `<Union>Object` as a **struct** —
+the same struct a named definition of that shape gets, fields and validation
+included — rather than a defined type over a map, because the interface
+requires the standard `Validate`/`UnmarshalJSON`/`MarshalJSON` surface:
+
+```go
+type FooObject struct {                      // a structured inline branch
+    Kind  FooObjectKind `json:"kind"`
+    Value string        `json:"value"`
+}
+func (FooObject) isFoo() {}
+
+type BarObject struct {                      // a free-form inline branch
+    AdditionalProperties map[string]json.RawMessage
+}
+func (BarObject) isBar() {}
+```
 
 Both the interface type and each synthesized `<Union><Kind>` variant are
 exported, so both carry a name-led doc comment (PRINCIPLES.md, Go §1): the
@@ -309,22 +430,55 @@ wrapped kind it belongs to. The unexported marker method needs none.
 ### Java
 
 Java 8 baseline (**PRINCIPLES Java §1**) has no sealed interfaces, so the
-union is a **plain interface, sealed by convention** — the collecting
-deserializer (§5) only ever constructs the known variants:
+union is a **plain interface, sealed by convention** — the `fromNode`
+dispatcher it carries only ever constructs the known variants:
 
 ```java
-public interface Foo {}                       // sealed by convention (no Java-8 `sealed`)
-// Widget implements Foo (object branch — the POJO gains `implements Foo`)
-public final class FooString implements Foo { private final String value; /* ctor, getter */ }
-public final class FooArray  implements Foo { private final List<Double> value; /* … */ }
+public interface Foo {
+    // The collecting dispatcher (§5): reads one JsonNode into a variant, or
+    // records a Violation and returns null.
+    static @Nullable Foo fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) { … }
+
+    // Widget implements Foo (object branch — the POJO gains `implements Foo`)
+    public static final class FooString implements Foo { private final String value; /* ctor, @JsonValue getter */ }
+    public static final class FooArray  implements Foo { private final List<Double> value; /* … */ }
+}
 ```
 
 Java has no union type: an object `$ref` branch just gains `implements
 Foo` on its existing POJO, while a **scalar/array branch must be wrapped**
 in a variant class (`String` can't implement an interface). This wrapping
 is the cost only of the *tagless token-based* form (mixed kinds); a pure
-object tagged union has no wrappers — every branch is already a POJO. The
-verbosity is hidden behind the POJO style (**P2**).
+object tagged union of `$ref` branches has no wrappers — every branch is
+already a POJO. The verbosity is hidden behind the POJO style (**P2**).
+
+The wrapper's `getValue()` carries Jackson's `@JsonValue`, so a wrapper writes
+back as the value it holds rather than as a bean around it; that makes the
+serialize side a single runtime-class dispatch for every branch kind (an object
+branch writes through its POJO's serializer, a wrapper through `@JsonValue`).
+
+An inline object branch has no POJO to gain `implements`, so one is emitted for
+it, named by the rule above (`<Union>Object`, or the branch's `x-java-name`). A
+**structured** branch becomes a top-level POJO like any definition, taking part
+in the interface's `fromNode` dispatch. A **free-form** branch instead becomes a
+wrapper class over the catch-all member type an open POJO uses
+([[additionalProperties]]), so its members round-trip verbatim:
+
+```java
+public final class FooObject implements Foo { /* declared members + collecting (de)serializer */ }
+public static final class BarObject implements Bar { private final Map<String, JsonNode> value; /* … */ }
+```
+
+A **property-level** union is the same interface — `fromNode`, wrappers and all —
+declared *nested in the enclosing POJO* (`Showcase.Detail`) rather than in its own
+file, and the enclosing deserializer reads the member with the identical
+`Detail.fromNode(…)` call a named union def gets. A structured branch of such a
+union is still a top-level POJO; it names the nested interface through its
+declaring class:
+
+```java
+public final class ShowcaseDetailObject implements Showcase.Detail { /* … */ }
+```
 
 ### Nullable unions
 
@@ -407,7 +561,7 @@ then delegate**, never a trial-all-branches loop.
 | Go | The container's collecting `UnmarshalJSON` (shadow `*json.RawMessage` layout, **PRINCIPLES Go** / [[nullability]]) peeks the field's first non-space token, routes to the branch of that kind (`{`→object; `[`→array: `FooArray`; `"`→string: `FooString`; number→the numeric branch via `parseSpecInteger`/spec-number so `1.5` still yields a `Violation`). For an object token with 2+ object branches it further reads the discriminator property and selects the branch with that `const`. It then runs that branch's shared `Validate` and assigns the concrete type to the interface field. No matching kind / unknown discriminator value → `Violation` collected into the single `ValidationError`. |
 | TypeScript | `fromIntermediate` is the `typeof`/`Array.isArray` chain shown above; for an object it switches on the discriminant literal (`raw.kind`) and delegates to that branch's converter (e.g. `CatTypeHint.fromIntermediate`); the fall-through pushes one `Violation`. Plain checks only (**PRINCIPLES TS §1** — no runtime schema lib). |
 | Python | Pydantic v2 strict `Union` selects by kind; an object tagged union uses `Field(discriminator=...)` for O(1) selection. Zero matches / unknown discriminator raise, aggregated into `pydantic.ValidationError`. |
-| Java | The per-POJO collecting deserializer (**PRINCIPLES Java §5**) switches on the `JsonNode` kind (`isObject`/`isArray`/`isTextual`/`isNumber`/`isBoolean`); for an object with 2+ object branches it peeks the discriminator node and dispatches to the matching POJO's collecting deserializer. On no match / unknown discriminator it pushes a `Violation` into the single `ValidationException`. |
+| Java | The union interface's static `fromNode` (called by the enclosing POJO's collecting deserializer, **PRINCIPLES Java §5**) switches on the `JsonNode` kind (`isObject`/`isArray`/`isTextual`/`isNumber`/`isBoolean`); for an object with 2+ object branches it peeks the discriminator node and dispatches to the matching POJO's collecting deserializer. On no match / unknown discriminator it pushes a `Violation` into the single `ValidationException` and returns `null`. One dispatcher serves both positions: a named union def and a union written inline on a property. |
 
 Reason strings name **what was expected** — the set of admissible kinds/
 branch types (`expected Widget, string, or number[]`), never a bare
@@ -444,6 +598,9 @@ than being written (real teeth where construction is unchecked).
 | Tagged union mixed with a scalar kind | `{oneOf:[{$ref:"#/$defs/Cat"},{$ref:"#/$defs/Dog"},{type:string}]}` (token picks object-vs-string; `const` picks Cat-vs-Dog) |
 | Two-branch `[T,null]` | owned by [[nullability]] — the degenerate type-token case |
 | Nullable union — `null` among 3+ disjoint kinds | `{oneOf:[{$ref:"#/$defs/Widget"},{type:array,items:{type:number}},{type:"null"}]}` |
+| Inline free-form object ∪ scalar | `{oneOf:[{type:object,additionalProperties:true},{type:string}]}` |
+| Inline structured object ∪ scalar (branch type named `<Union>Object`) | `{oneOf:[{type:object,properties:{a:{type:string}}},{type:string}]}` |
+| Inline tagged object branches, each self-named | `{oneOf:[{Cat…, x-go-name: Cat},{Dog…, x-go-name: Dog}]}` (the key of the target being generated) |
 
 ### Rejected at load time (negative)
 
@@ -452,7 +609,10 @@ than being written (real teeth where construction is unchecked).
 | Single-branch wrapper (P7.1) | `{oneOf:[{type:string}]}` |
 | Empty array (invalid schema) | `{oneOf:[]}` |
 | Branch with no classifiable kind | `{oneOf:[{type:string},{minLength:3}]}`, `…{oneOf:[{type:string},true]}`, `…[{type:string},{}]` |
-| Object branches with no shared required-`const` (no discriminator) | `{oneOf:[{type:object,properties:{a:{…}}},{type:object,properties:{b:{…}}}]}` |
+| Object branches with no shared required-`const` (no discriminator) | `{oneOf:[{$ref:"#/$defs/A"},{$ref:"#/$defs/B"}]}`, neither carrying a `const` tag |
+| Two or more inline object branches missing a per-branch `x-<lang>-name` | `{oneOf:[{type:object,required:[kind],properties:{kind:{const:cat}…}},{…kind:{const:dog}…}]}` — both derive `<Union>Object` |
+| Synthesized `<Union>Object` collides with another emitted type (P15) | a `$defs.FooObject` alongside an inline object branch of the `Foo` union |
+| Inline structured object branch with no derivable name | `{items:{oneOf:[{type:object,properties:{a:{…}}},{type:string}]}}` — a branch inside `items` |
 | Discriminator `const` not `required` in a branch | `{oneOf:[{Cat with kind required},{Dog with kind optional}]}` |
 | Non-distinct discriminator values | `{oneOf:[{kind:{const:"x"}…},{kind:{const:"x"}…}]}` |
 | Ambiguous discriminator (2+ qualifying properties) | two object branches sharing both `kind` and `variant` as required-`const` |
@@ -475,6 +635,8 @@ than being written (real teeth where construction is unchecked).
   rejected by the spec-number rule (**P12** parse adapter), not truncated.
 - Object with `kind:"cat"` against `Cat | Dog` → bound to `Cat`; extra
   unknown keys on the object are **preserved** (branch stays open, **P13**).
+- Object against a free-form object branch → every member preserved
+  verbatim, large integers untruncated, and re-emitted unchanged (**P13**).
 - Object with `kind:"fish"` (unknown discriminator) → one `Violation`
   naming the admissible values (`cat`, `dog`) — closed value set (**P13.1**),
   not preserved.
@@ -516,7 +678,10 @@ than being written (real teeth where construction is unchecked).
   same-kind object branches need an explicit `const` tag — extra keys never
   disqualify a structural match. The tag closes selection *across* branches
   while each branch stays open *within* (unknown members preserved), so the
-  two concerns coexist: closed discriminator, open payload.
+  two concerns coexist: closed discriminator, open payload. It also supplies
+  the **free-form object** — the one inline branch shape that needs no name at
+  all (it declares nothing to emit) — and the per-language member
+  representation its Go/Java wrapper reuses.
 - **[[required]]**: the discriminator property **must** be `required` in
   every object branch — otherwise a payload could omit it and be
   unselectable. Separately, whether the whole union-typed member is present
@@ -555,7 +720,9 @@ than being written (real teeth where construction is unchecked).
 - [[ref]] — `$ref` branches; the resolved type implements the Go/Java
   union marker directly.
 - [[additionalProperties]] — object openness (**P13**) is why object
-  branches need an explicit `const` tag; branches stay open within.
+  branches need an explicit `const` tag; branches stay open within. Also the
+  free-form object (the one inline branch shape that needs no name) and the
+  member representation its Go/Java wrapper reuses.
 - [[required]] — the discriminator must be required in each branch; also
   the union member's own presence, distinct from branch selection.
 - [[allOf]] — the other admitted applicator; intersection collapses to

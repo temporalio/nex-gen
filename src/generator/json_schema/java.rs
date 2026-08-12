@@ -903,6 +903,15 @@ struct JavaUnionVariant {
     /// The member's canonical `full_name` (object `$ref` members only), for
     /// wiring `implements` on the member POJO.
     member_full_name: Option<String>,
+    /// The member POJO's package (object `$ref` members only), so a union
+    /// declared in another module still imports the member class.
+    member_package: Option<String>,
+    /// True for an **inline** object member: the union declares the wrapper class
+    /// itself (`<Interface>Object`), because there is no named POJO to implement
+    /// the interface. Only the free-form object stays inline (every structured
+    /// shape is named and `$ref`ed by the loader), so `Map<String, JsonNode>`
+    /// expresses the member in full.
+    owned_object: bool,
     label: String,
 }
 
@@ -974,22 +983,23 @@ fn classify_java_union(
     let mut variants: Vec<JavaUnionVariant> = Vec::new();
     let mut object_schemas: Vec<Schema> = Vec::new();
     for branch in branches {
-        let (member_schema, object_class, member_full) = if let Some(reference) = &branch.reference
-        {
-            let full = strip_ref(reference).to_string();
-            let member_schema = all_models
-                .get(&full)
-                .and_then(|model| decode_schema(model).ok())
-                .unwrap_or_else(|| branch.clone());
-            let (_package, class) = context.resolve_ref(reference);
-            (member_schema, Some(class), Some(full))
-        } else {
-            (branch.clone(), None, None)
-        };
+        let (member_schema, object_class, member_full, member_package) =
+            if let Some(reference) = &branch.reference {
+                let full = strip_ref(reference).to_string();
+                let member_schema = all_models
+                    .get(&full)
+                    .and_then(|model| decode_schema(model).ok())
+                    .unwrap_or_else(|| branch.clone());
+                let (package, class) = context.resolve_ref(reference);
+                (member_schema, Some(class), Some(full), Some(package))
+            } else {
+                (branch.clone(), None, None, None)
+            };
         let ty = member_schema.ty.as_ref().and_then(Value::as_str);
         match ty {
             Some("null") => nullable = true,
             Some("object") => {
+                let owned_object = object_class.is_none();
                 let class = object_class.unwrap_or_else(|| format!("{interface}Object"));
                 object_schemas.push(member_schema.clone());
                 variants.push(JavaUnionVariant {
@@ -999,7 +1009,13 @@ fn classify_java_union(
                     node_test: "isObject",
                     discriminant_value: None,
                     member_full_name: member_full,
-                    label: class,
+                    member_package,
+                    owned_object,
+                    label: if owned_object {
+                        "object".to_string()
+                    } else {
+                        class
+                    },
                 });
             }
             Some("string") => variants.push(JavaUnionVariant {
@@ -1009,6 +1025,8 @@ fn classify_java_union(
                 node_test: "isTextual",
                 discriminant_value: None,
                 member_full_name: None,
+                member_package: None,
+                owned_object: false,
                 label: "string".to_string(),
             }),
             Some("integer") => variants.push(JavaUnionVariant {
@@ -1018,6 +1036,8 @@ fn classify_java_union(
                 node_test: "isNumber",
                 discriminant_value: None,
                 member_full_name: None,
+                member_package: None,
+                owned_object: false,
                 label: "integer".to_string(),
             }),
             Some("number") => variants.push(JavaUnionVariant {
@@ -1027,6 +1047,8 @@ fn classify_java_union(
                 node_test: "isNumber",
                 discriminant_value: None,
                 member_full_name: None,
+                member_package: None,
+                owned_object: false,
                 label: "number".to_string(),
             }),
             Some("boolean") => variants.push(JavaUnionVariant {
@@ -1036,6 +1058,8 @@ fn classify_java_union(
                 node_test: "isBoolean",
                 discriminant_value: None,
                 member_full_name: None,
+                member_package: None,
+                owned_object: false,
                 label: "boolean".to_string(),
             }),
             Some("array") => {
@@ -1051,6 +1075,8 @@ fn classify_java_union(
                     node_test: "isArray",
                     discriminant_value: None,
                     member_full_name: None,
+                    member_package: None,
+                    owned_object: false,
                     label: "array".to_string(),
                 });
             }
@@ -1486,43 +1512,64 @@ pub(in crate::generator) fn render_model_file(
 
     let kind = resolve_model_kind(&schema, &context, all_models)?;
 
-    // Interfaces this POJO implements: every named union def with this model as
-    // an object member.
+    let mut body = String::new();
+    let mut refs = BTreeSet::new();
+
+    // Interfaces this POJO implements: every union with this model as an object
+    // member — a named union def (`Shape`), or a union written inline on another
+    // model's property, whose interface is nested in that model (`Showcase.Note`).
     let mut implements: Vec<String> = Vec::new();
     for other in all_models.values() {
         let Ok(other_schema) = decode_schema(other) else {
             continue;
         };
-        if !is_java_union_schema(&other_schema) {
-            continue;
-        }
         let other_context = JavaContext {
             base_package,
             module,
             registry: &resolved_registry,
         };
-        let other_interface = manifest
+        let other_class = manifest
             .type_name(&other.full_name)
             .unwrap_or(&other.model_name);
-        if let Some(union) = classify_java_union(
-            other_interface,
-            false,
-            &other_schema,
-            all_models,
-            &other_context,
-        ) && union
-            .variants
-            .iter()
-            .any(|variant| variant.member_full_name.as_deref() == Some(model.full_name.as_str()))
-        {
-            implements.push(other_interface.to_string());
+        let holds_this_model = |union: &JavaUnion| {
+            union.variants.iter().any(|variant| {
+                variant.member_full_name.as_deref() == Some(model.full_name.as_str())
+            })
+        };
+        if is_java_union_schema(&other_schema) {
+            if let Some(union) = classify_java_union(
+                other_class,
+                false,
+                &other_schema,
+                all_models,
+                &other_context,
+            ) && holds_this_model(&union)
+            {
+                implements.push(other_class.to_string());
+            }
+            continue;
+        }
+        for (json_name, property) in other_schema.properties.iter().flatten() {
+            if property.one_of.is_none() || !is_java_union_schema(property) {
+                continue;
+            }
+            let interface = json_name.to_upper_camel_case();
+            if let Some(union) =
+                classify_java_union(&interface, true, property, all_models, &other_context)
+                && holds_this_model(&union)
+            {
+                implements.push(format!("{other_class}.{interface}"));
+                // The nested interface is reached through its declaring class, so
+                // that class is imported when it lives in another module.
+                let (other_package, _) =
+                    other_context.resolve_ref(&format!("#/$defs/{}", other.full_name));
+                refs.insert((other_package, other_class.to_string()));
+            }
         }
     }
     implements.sort();
     implements.dedup();
 
-    let mut body = String::new();
-    let mut refs = BTreeSet::new();
     match &kind {
         ModelKind::Object { open, fields } => {
             render_object_class(
@@ -1558,6 +1605,11 @@ fn render_union_interface(
         if let Some(underlying) = &variant.underlying {
             underlying.collect_refs(refs);
         }
+        // An object member is named by `X.class` in the dispatcher; import it
+        // when the member POJO lives in another module.
+        if let Some(package) = &variant.member_package {
+            refs.insert((package.clone(), variant.class.clone()));
+        }
     }
     render_java_schema_doc(
         output,
@@ -1568,12 +1620,14 @@ fn render_union_interface(
         "type",
     );
     output.push_str(&format!("public interface {} {{\n", union.interface));
-    output.push_str(&format!(
-        "    static @Nullable {} fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {{\n",
-        union.interface
-    ));
-    render_union_dispatch_body(output, union, "node", "path", "        ");
-    output.push_str("    }\n");
+    render_union_from_node(output, union, "    ");
+    let mut wrappers = String::new();
+    render_union_wrapper_classes(&mut wrappers, union, "    ");
+    if !wrappers.is_empty() {
+        output.push('\n');
+        output.push_str(wrappers.trim_end());
+        output.push('\n');
+    }
     output.push_str("}\n");
 }
 
@@ -1664,6 +1718,21 @@ fn render_union_read_object(
     path: &str,
     indent: &str,
 ) {
+    // The free-form object member has no POJO: the wrapper carries the wire
+    // members verbatim, exactly like an open POJO's catch-all (P13).
+    if variant.owned_object {
+        output.push_str(&format!(
+            "{indent}{JAVA_JSON_MAP_TYPE} members = new LinkedHashMap<>();\n"
+        ));
+        output.push_str(&format!(
+            "{indent}Iterator<String> memberNames = {node}.fieldNames();\n"
+        ));
+        output.push_str(&format!(
+            "{indent}while (memberNames.hasNext()) {{\n{indent}    String memberName = memberNames.next();\n{indent}    members.put(memberName, {node}.get(memberName));\n{indent}}}\n"
+        ));
+        output.push_str(&format!("{indent}return new {}(members);\n", variant.class));
+        return;
+    }
     output.push_str(&format!("{indent}try {{\n"));
     output.push_str(&format!(
         "{indent}    return context.readTreeAsValue({node}, {}.class);\n",
@@ -1716,59 +1785,119 @@ fn render_union_read_scalar(
                 variant.class
             ));
         }
+        Some(JavaType::List(item)) => {
+            output.push_str(&format!(
+                "{indent}List<{}> items = new ArrayList<>();\n",
+                item.boxed_name()
+            ));
+            output.push_str(&format!(
+                "{indent}for (int index = 0; index < {node}.size(); index++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    JsonNode element = {node}.get(index);\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    String elementPath = {path} + \"[\" + index + \"]\";\n"
+            ));
+            render_parse_element(
+                output,
+                item,
+                "items",
+                "element",
+                "elementPath",
+                &format!("{indent}    "),
+            );
+            output.push_str(&format!("{indent}}}\n"));
+            output.push_str(&format!("{indent}return new {}(items);\n", variant.class));
+        }
         _ => {
             output.push_str(&format!("{indent}return null;\n"));
         }
     }
 }
 
-/// Renders an inline union's nested interface and scalar/array wrapper classes
-/// inside the enclosing POJO.
+/// The Java type carrying a free-form object's members verbatim — the same shape
+/// an open POJO's catch-all uses, so unknown members survive a round-trip (P13).
+const JAVA_JSON_MAP_TYPE: &str = "Map<String, JsonNode>";
+
+/// Renders a property-level union's interface — carrying the same static
+/// `fromNode` dispatcher a named union def does — and its wrapper classes,
+/// nested inside the enclosing POJO.
 fn render_nested_union(output: &mut String, union: &JavaUnion) {
+    output.push_str(&format!("    public interface {} {{\n", union.interface));
+    render_union_from_node(output, union, "        ");
+    output.push_str("    }\n\n");
+    render_union_wrapper_classes(output, union, "    ");
+}
+
+/// Emits the `fromNode` collecting dispatcher every union interface carries, so
+/// a union parses identically whether it is a named def or written inline on a
+/// property.
+fn render_union_from_node(output: &mut String, union: &JavaUnion, indent: &str) {
     output.push_str(&format!(
-        "    public interface {} {{}}\n\n",
+        "{indent}static @Nullable {} fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {{\n",
         union.interface
     ));
+    render_union_dispatch_body(output, union, "node", "path", &format!("{indent}    "));
+    output.push_str(&format!("{indent}}}\n"));
+}
+
+/// Renders the wrapper class carrying each non-object member (and the free-form
+/// object member, which has no POJO of its own). A `$ref` object member is
+/// already a POJO and implements the interface directly, so it gets no wrapper.
+fn render_union_wrapper_classes(output: &mut String, union: &JavaUnion, indent: &str) {
+    let inner = format!("{indent}    ");
     for variant in &union.variants {
-        let Some(underlying) = &variant.underlying else {
-            continue;
-        };
-        let (field_type, getter_type) = match underlying {
-            JavaType::Long => ("long".to_string(), "long".to_string()),
-            JavaType::Double => ("double".to_string(), "double".to_string()),
-            JavaType::Boolean => ("boolean".to_string(), "boolean".to_string()),
-            other => (other.boxed_name(), other.boxed_name()),
+        let (field_type, getter_type) = match &variant.underlying {
+            Some(JavaType::Long) => ("long".to_string(), "long".to_string()),
+            Some(JavaType::Double) => ("double".to_string(), "double".to_string()),
+            Some(JavaType::Boolean) => ("boolean".to_string(), "boolean".to_string()),
+            Some(other) => (other.boxed_name(), other.boxed_name()),
+            // An inline free-form object member: the wrapper holds the wire
+            // members verbatim, exactly like an open POJO's catch-all (P13).
+            None if variant.owned_object => (
+                JAVA_JSON_MAP_TYPE.to_string(),
+                JAVA_JSON_MAP_TYPE.to_string(),
+            ),
+            // A `$ref` object member is its own POJO; it implements the
+            // interface instead of being wrapped.
+            None => continue,
         };
         output.push_str(&format!(
-            "    public static final class {} implements {} {{\n",
+            "{indent}public static final class {} implements {} {{\n",
             variant.class, union.interface
         ));
-        output.push_str(&format!("        private final {field_type} value;\n\n"));
+        output.push_str(&format!("{inner}private final {field_type} value;\n\n"));
         output.push_str(&format!(
-            "        public {}({field_type} value) {{\n            this.value = value;\n        }}\n\n",
+            "{inner}public {}({field_type} value) {{\n{inner}    this.value = value;\n{inner}}}\n\n",
             variant.class
         ));
+        // `@JsonValue` is what writes the member back to the wire: a union field
+        // serializes by runtime class, so the wrapper must render as the value it
+        // holds rather than as a bean around it.
         output.push_str(&format!(
-            "        public {getter_type} getValue() {{\n            return value;\n        }}\n\n"
+            "{inner}@JsonValue\n{inner}public {getter_type} getValue() {{\n{inner}    return value;\n{inner}}}\n\n"
         ));
         // equals/hashCode/toString over the single value.
-        output.push_str("        @Override\n        public boolean equals(Object other) {\n");
         output.push_str(&format!(
-            "            if (this == other) {{\n                return true;\n            }}\n            if (!(other instanceof {})) {{\n                return false;\n            }}\n",
+            "{inner}@Override\n{inner}public boolean equals(Object other) {{\n"
+        ));
+        output.push_str(&format!(
+            "{inner}    if (this == other) {{\n{inner}        return true;\n{inner}    }}\n{inner}    if (!(other instanceof {})) {{\n{inner}        return false;\n{inner}    }}\n",
             variant.class
         ));
         output.push_str(&format!(
-            "            return Objects.equals(value, (({}) other).value);\n        }}\n\n",
+            "{inner}    return Objects.equals(value, (({}) other).value);\n{inner}}}\n\n",
             variant.class
         ));
-        output.push_str(
-            "        @Override\n        public int hashCode() {\n            return Objects.hash(value);\n        }\n\n",
-        );
         output.push_str(&format!(
-            "        @Override\n        public String toString() {{\n            return \"{}[\" + value + \"]\";\n        }}\n",
+            "{inner}@Override\n{inner}public int hashCode() {{\n{inner}    return Objects.hash(value);\n{inner}}}\n\n"
+        ));
+        output.push_str(&format!(
+            "{inner}@Override\n{inner}public String toString() {{\n{inner}    return \"{}[\" + value + \"]\";\n{inner}}}\n",
             variant.class
         ));
-        output.push_str("    }\n\n");
+        output.push_str(&format!("{indent}}}\n\n"));
     }
 }
 
@@ -2425,41 +2554,6 @@ fn render_field_serialize(output: &mut String, field: &FieldPlan) {
     let json = java_string_literal(&field.json_name);
     let accessor = format!("value.{}", field.java_name);
 
-    // An inline union serializes its held wrapper via runtime-class dispatch; a
-    // named-union `$ref` field is a Ref type handled by the normal path below.
-    if let Some(union) = &field.union
-        && union.nested
-    {
-        output.push_str(&format!("            if ({accessor} != null) {{\n"));
-        for variant in &union.variants {
-            let write = match variant.underlying.as_ref() {
-                Some(JavaType::String) => format!(
-                    "gen.writeStringField({json}, (({}) {accessor}).getValue());",
-                    variant.class
-                ),
-                Some(JavaType::Long | JavaType::Double) => format!(
-                    "gen.writeNumberField({json}, (({}) {accessor}).getValue());",
-                    variant.class
-                ),
-                Some(JavaType::Boolean) => format!(
-                    "gen.writeBooleanField({json}, (({}) {accessor}).getValue());",
-                    variant.class
-                ),
-                Some(JavaType::List(_)) => format!(
-                    "gen.writeFieldName({json});\n                    serializers.defaultSerializeValue((({}) {accessor}).getValue(), gen);",
-                    variant.class
-                ),
-                _ => continue,
-            };
-            output.push_str(&format!(
-                "                if ({accessor} instanceof {}) {{\n                    {write}\n                }}\n",
-                variant.class
-            ));
-        }
-        output.push_str("            }\n");
-        return;
-    }
-
     let write = write_value_statement(&field.ty, &json, &accessor, "                ");
 
     if field.is_primitive() {
@@ -2662,8 +2756,9 @@ fn render_field_deserialize(output: &mut String, field: &FieldPlan) {
     output.push_str(&format!("{indent}}}\n"));
 }
 
-/// Assigns a union-typed field from the wire `field` node: a named-union `$ref`
-/// delegates to `<Interface>.fromNode`; an inline union dispatches on the token.
+/// Assigns a union-typed field from the wire `field` node by delegating to the
+/// union interface's `fromNode` — the same call whether the interface is a named
+/// def or nested in this POJO.
 fn render_union_field_parse(
     output: &mut String,
     union: &JavaUnion,
@@ -2671,49 +2766,10 @@ fn render_union_field_parse(
     json: &str,
     indent: &str,
 ) {
-    if !union.nested {
-        output.push_str(&format!(
-            "{indent}{target} = {}.fromNode(field, {json}, violations, context);\n",
-            union.interface
-        ));
-        return;
-    }
-    let mut first = true;
-    for variant in &union.variants {
-        let keyword = if first { "if" } else { "} else if" };
-        first = false;
-        output.push_str(&format!(
-            "{indent}{keyword} (field.{}()) {{\n",
-            variant.node_test
-        ));
-        match variant.underlying.as_ref() {
-            Some(JavaType::String) => output.push_str(&format!(
-                "{indent}    {target} = new {}(field.textValue());\n",
-                variant.class
-            )),
-            Some(JavaType::Boolean) => output.push_str(&format!(
-                "{indent}    {target} = new {}(field.booleanValue());\n",
-                variant.class
-            )),
-            Some(JavaType::Long) => output.push_str(&format!(
-                "{indent}    Long parsed = SpecNumbers.specLong(field, {json}, violations);\n{indent}    if (parsed != null) {{\n{indent}        {target} = new {}(parsed);\n{indent}    }}\n",
-                variant.class
-            )),
-            Some(JavaType::Double) => output.push_str(&format!(
-                "{indent}    {target} = new {}(field.doubleValue());\n",
-                variant.class
-            )),
-            _ => {}
-        }
-    }
-    if !first {
-        output.push_str(&format!("{indent}}} else {{\n"));
-        output.push_str(&format!(
-            "{indent}    violations.add(new Violation({json}, {}));\n",
-            java_string_literal(&format!("expected one of: {}", union.admissible()))
-        ));
-        output.push_str(&format!("{indent}}}\n"));
-    }
+    output.push_str(&format!(
+        "{indent}{target} = {}.fromNode(field, {json}, violations, context);\n",
+        union.interface
+    ));
 }
 
 fn render_parse_value(

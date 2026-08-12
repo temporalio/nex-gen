@@ -20,13 +20,13 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A square branch of the Shape and shapeOrName tagged unions.
+ * A text note branch, named inline.
  */
-@JsonSerialize(using = Square.Serializer.class)
-@JsonDeserialize(using = Square.Deserializer.class)
-public final class Square implements Shape, Showcase.ShapeOrName {
+@JsonSerialize(using = TextNote.Serializer.class)
+@JsonDeserialize(using = TextNote.Deserializer.class)
+public final class TextNote implements Note {
     public static final class Kind {
-        public static final Kind KIND = new Kind("square");
+        public static final Kind KIND = new Kind("text");
 
         private final String value;
 
@@ -39,10 +39,10 @@ public final class Square implements Shape, Showcase.ShapeOrName {
             if (value == null) {
                 return null;
             }
-            if ("square".equals(value)) {
+            if ("text".equals(value)) {
                 return KIND;
             }
-            throw new IllegalArgumentException("must equal \"square\", got \"" + value + "\"");
+            throw new IllegalArgumentException("must equal \"text\", got \"" + value + "\"");
         }
 
         @JsonValue
@@ -74,12 +74,12 @@ public final class Square implements Shape, Showcase.ShapeOrName {
     }
 
     private final Kind kind;
-    private final double side;
+    private final String body;
     private final Map<String, JsonNode> additionalProperties;
 
-    public Square(Kind kind, double side, Map<String, JsonNode> additionalProperties) {
+    public TextNote(Kind kind, String body, Map<String, JsonNode> additionalProperties) {
         this.kind = kind;
-        this.side = side;
+        this.body = body;
         this.additionalProperties = additionalProperties;
     }
 
@@ -87,8 +87,8 @@ public final class Square implements Shape, Showcase.ShapeOrName {
         return kind;
     }
 
-    public double getSide() {
-        return side;
+    public String getBody() {
+        return body;
     }
 
     public Map<String, JsonNode> getAdditionalProperties() {
@@ -100,38 +100,49 @@ public final class Square implements Shape, Showcase.ShapeOrName {
         if (this == other) {
             return true;
         }
-        if (!(other instanceof Square)) {
+        if (!(other instanceof TextNote)) {
             return false;
         }
-        Square that = (Square) other;
+        TextNote that = (TextNote) other;
         return Objects.equals(this.kind, that.kind)
-            && this.side == that.side
+            && Objects.equals(this.body, that.body)
             && Objects.equals(this.additionalProperties, that.additionalProperties);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, side, additionalProperties);
+        return Objects.hash(kind, body, additionalProperties);
     }
 
     @Override
     public String toString() {
-        return "Square{"
+        return "TextNote{"
             + "kind=" + kind
-            + ", side=" + side
+            + ", body=" + body
             + ", additionalProperties=" + additionalProperties
             + "}";
     }
 
-    public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Square> {
+    public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<TextNote> {
         @Override
-        public void serialize(Square value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+        public void serialize(TextNote value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
+            if (value.body != null) {
+                int length = value.body.codePointCount(0, value.body.length());
+                if (length < 1) {
+                    violations.add(new Violation("body", "must have length >= 1, got " + length));
+                }
+            }
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
             gen.writeStartObject();
             if (value.kind != null) {
                 gen.writeStringField("kind", value.kind.getValue());
             }
-            gen.writeNumberField("side", value.side);
-
+            if (value.body != null) {
+                gen.writeStringField("body", value.body);
+            }
             if (value.additionalProperties != null) {
                 for (Map.Entry<String, JsonNode> entry : value.additionalProperties.entrySet()) {
                     gen.writeFieldName(entry.getKey());
@@ -142,9 +153,9 @@ public final class Square implements Shape, Showcase.ShapeOrName {
         }
     }
 
-    public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Square> {
+    public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<TextNote> {
         @Override
-        public Square deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+        public TextNote deserialize(JsonParser parser, DeserializationContext context) throws IOException {
             JsonNode node = parser.readValueAsTree();
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
@@ -156,8 +167,8 @@ public final class Square implements Shape, Showcase.ShapeOrName {
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
                 switch (key) {
+                    case "body":
                     case "kind":
-                    case "side":
                         break;
                     default:
                         additionalProperties.put(key, node.get(key));
@@ -175,33 +186,37 @@ public final class Square implements Shape, Showcase.ShapeOrName {
                         violations.add(new Violation("kind", "expected string"));
                     } else {
                         String kindValue = field.textValue();
-                        if ("square".equals(kindValue)) {
+                        if ("text".equals(kindValue)) {
                             kind = Kind.KIND;
                         } else {
-                            violations.add(new Violation("kind", "must equal \"square\""));
+                            violations.add(new Violation("kind", "must equal \"text\""));
                         }
                     }
                 }
             }
-            double side = 0.0;
+            String body = null;
             {
-                JsonNode field = node.get("side");
+                JsonNode field = node.get("body");
                 if (field == null) {
-                    violations.add(new Violation("side", "required"));
+                    violations.add(new Violation("body", "required"));
                 } else if (field.isNull()) {
-                    violations.add(new Violation("side", "explicit null not allowed"));
+                    violations.add(new Violation("body", "explicit null not allowed"));
                 } else {
-                    if (!field.isNumber()) {
-                        violations.add(new Violation("side", "expected number"));
+                    if (!field.isTextual()) {
+                        violations.add(new Violation("body", "expected string"));
                     } else {
-                        side = field.doubleValue();
+                        body = field.textValue();
+                        int length = body.codePointCount(0, body.length());
+                        if (length < 1) {
+                            violations.add(new Violation("body", "must have length >= 1, got " + length));
+                        }
                     }
                 }
             }
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Square(kind, side, additionalProperties);
+            return new TextNote(kind, body, additionalProperties);
         }
     }
 }

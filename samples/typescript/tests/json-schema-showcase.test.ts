@@ -7,12 +7,16 @@ import {
   DEFAULT_DEBUG,
   DEFAULT_GREETING,
   DEFAULT_RETRIES,
+  ExtrasMapper,
   LabelsMapper,
   SettingsMapper,
   ShowcaseMapper,
   ValidationError,
   WidgetMapper,
+  type LinkNote,
   type Showcase,
+  type ShowcaseDetailObject,
+  type TextNote,
   type Widget,
 } from "../showcase/index.ts";
 import {
@@ -462,6 +466,227 @@ describe("json-schema showcase generated definitions", () => {
         shape: { kind: "triangle" },
       }),
     ).toThrow(/unknown discriminator kind triangle/);
+  });
+
+  test("round-trips the free-form object as a union branch and a named model", () => {
+    // The inline object branch of the `payload` union, and the named `Extras`
+    // model: members are carried verbatim in both.
+    const asObject = expectRoundTrip("showcase-freeform.json", new ShowcaseMapper());
+    expect(asObject.payload).toEqual({ note: "free-form", big: 9007199254740992 });
+    expect(asObject.extras?.additionalProperties).toEqual({ note: "free-form" });
+
+    // The same union's string branch, selected by the wire token.
+    const asString = expectRoundTrip(
+      "showcase-freeform-string.json",
+      new ShowcaseMapper(),
+    );
+    expect(asString.payload).toBe("text");
+
+    // The named free-form model round-trips standalone, nested members included.
+    const extras = expectRoundTrip("extras.json", new ExtrasMapper());
+    expect(extras.additionalProperties.nested).toEqual({ a: 1 });
+
+    // maxProperties over the member set is enforced on parse…
+    expect(() =>
+      new ExtrasMapper().fromIntermediate({ a: 1, b: 2, c: 3, d: 4, e: 5 }),
+    ).toThrow(/must have at most 4 properties/);
+
+    // …and on serialize (P12).
+    expect(() =>
+      new ExtrasMapper().toIntermediate({
+        additionalProperties: { a: 1, b: 2, c: 3, d: 4, e: 5 },
+      }),
+    ).toThrow(/must have at most 4 properties/);
+
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+
+    // An unmatchable wire token (boolean) names the admissible kinds.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, payload: true }),
+    ).toThrow(/expected one of: object, string/);
+  });
+
+  test("round-trips a tagged union whose object branches are written inline", () => {
+    // Each `note` branch is named by its `x-ts-name` override and emitted as an
+    // interface with its own mapper, so the union narrows on the `kind` literal.
+    const text = expectRoundTrip("showcase-note-text.json", new ShowcaseMapper());
+    const note = text.note as TextNote;
+    expect(note.kind).toBe("text");
+    expect(note.body).toBe("remember the milk");
+    // The branch stays open: an unknown member is preserved (P13).
+    expect(note.additionalProperties).toEqual({ pinned: true });
+
+    const link = expectRoundTrip("showcase-note-link.json", new ShowcaseMapper());
+    expect((link.note as LinkNote).href).toBe("https://example.test/notes/1");
+
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+
+    // The selected branch's own constraints are enforced.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        note: { kind: "text", body: "" },
+      }),
+    ).toThrow(/must have length >= 1/);
+
+    // An unknown tag value matches no branch.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, note: { kind: "audio" } }),
+    ).toThrow(/unknown discriminator kind/);
+
+    // Serialize dispatches on the tag and re-runs that branch's constraints (P12).
+    expect(() =>
+      new ShowcaseMapper().toIntermediate({
+        ...link,
+        note: { kind: "link", href: "", additionalProperties: {} },
+      }),
+    ).toThrow(/must have length >= 1/);
+  });
+
+  test("round-trips a union written inline on a property with an object branch", () => {
+    // `detail`'s lone structured object branch derives `ShowcaseDetailObject` from
+    // the union it belongs to and gets an interface + mapper, so its members keep
+    // their constraints while the string branch selects on its own token.
+    const object = expectRoundTrip("showcase-detail-object.json", new ShowcaseMapper());
+    const detail = object.detail as ShowcaseDetailObject;
+    expect(detail.code).toBe("E_LIMIT");
+    expect(detail.hint).toBe("retry later");
+    // The branch stays open: an unknown member is preserved (P13).
+    expect(detail.additionalProperties).toEqual({ retryAfterMs: 250 });
+
+    const text = expectRoundTrip("showcase-detail-string.json", new ShowcaseMapper());
+    expect(text.detail).toBe("E_LIMIT");
+
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+
+    // The object branch's own constraints are enforced.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, detail: { code: "" } }),
+    ).toThrow(/must have length >= 1/);
+
+    // A value admitted by no branch names the admissible ones.
+    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, detail: 7 })).toThrow(
+      /expected one of: ShowcaseDetailObject, string/,
+    );
+
+    // Serialize picks the object branch by shape and re-runs its constraints (P12).
+    expect(() =>
+      new ShowcaseMapper().toIntermediate({
+        ...object,
+        detail: { code: "", additionalProperties: {} },
+      }),
+    ).toThrow(/must have length >= 1/);
+  });
+
+  test("round-trips a tagged object union mixed with a scalar branch", () => {
+    // `shapeOrName` composes both selector layers: the JSON token picks
+    // object-vs-string, then the `kind` const picks Circle-vs-Square. Circle and
+    // Square are the same branch types the `shape` union uses.
+    const square = expectRoundTrip(
+      "showcase-shape-or-name-square.json",
+      new ShowcaseMapper(),
+    );
+    expect(square.shapeOrName).toMatchObject({ kind: "square", side: 4 });
+
+    const named = expectRoundTrip(
+      "showcase-shape-or-name-string.json",
+      new ShowcaseMapper(),
+    );
+    expect(named.shapeOrName).toBe("unit-square");
+
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+
+    // The object token still routes through the discriminator, so an unknown tag
+    // is rejected rather than falling back to the string branch.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        shapeOrName: { kind: "triangle" },
+      }),
+    ).toThrow(/unknown discriminator kind triangle/);
+
+    // A token matching no branch names all admissible ones.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, shapeOrName: 7 }),
+    ).toThrow(/expected one of: Circle, Square, string/);
+  });
+
+  test("round-trips a union with an array branch", () => {
+    // `measurements` is `number[] | string`: TypeScript carries the array branch
+    // structurally (no synthesized variant type) and narrows with Array.isArray.
+    const list = expectRoundTrip(
+      "showcase-measurements-array.json",
+      new ShowcaseMapper(),
+    );
+    expect(list.measurements).toEqual([1.5, 2.5, 3.75]);
+
+    const preset = expectRoundTrip(
+      "showcase-measurements-string.json",
+      new ShowcaseMapper(),
+    );
+    expect(preset.measurements).toBe("auto");
+
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+
+    // A token matching neither branch names both admissible kinds.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, measurements: true }),
+    ).toThrow(/expected one of: number\[\], string/);
   });
 
   test("rejects invalid in-memory values on serialize (P12, both directions)", () => {

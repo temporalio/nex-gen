@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"encoding/json"
 	"testing"
 
 	showcase "samples/go/showcase"
@@ -580,4 +581,210 @@ func TestJSONSchemaShowcaseUnions(t *testing.T) {
 	err = dc.FromPayload(jsonPayload([]byte(base+`,"shape":{"radius":1}}`)), &out)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "shape")
+}
+
+// TestJSONSchemaShowcaseFreeFormObject round-trips the free-form object in both
+// positions: the named `Extras` model and the inline object branch of the
+// `payload` union. Members are carried verbatim, so a large integer survives
+// untruncated, and the member-count bound on `Extras` is enforced both
+// directions.
+func TestJSONSchemaShowcaseFreeFormObject(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+
+	// Union branch selected by the object token: members kept verbatim.
+	object := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-freeform.json")
+	payload, ok := object.Payload.(showcase.ShowcasePayloadObject)
+	require.True(t, ok, "payload should be the object branch")
+	require.Equal(t, "9007199254740992", string(payload.AdditionalProperties["big"]))
+	require.NotNil(t, object.Extras)
+	require.Equal(t, `"free-form"`, string(object.Extras.AdditionalProperties["note"]))
+
+	// The same union's string branch, selected by the string token.
+	text := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-freeform-string.json")
+	require.Equal(t, showcase.ShowcasePayloadString("text"), text.Payload)
+
+	// The named free-form model round-trips standalone, nested members included.
+	extras := roundTripJSONEq[showcase.Extras](t, dc, "showcase", "extras.json")
+	require.JSONEq(t, `{"a":1}`, string(extras.AdditionalProperties["nested"]))
+	require.Equal(t, "9007199254740992", string(extras.AdditionalProperties["count"]))
+
+	// maxProperties over the member set is enforced on parse…
+	var tooMany showcase.Extras
+	err := dc.FromPayload(jsonPayload([]byte(`{"a":1,"b":2,"c":3,"d":4,"e":5}`)), &tooMany)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at most 4 properties")
+
+	// …and on serialize (P12).
+	_, err = dc.ToPayload(showcase.Extras{AdditionalProperties: map[string]json.RawMessage{
+		"a": json.RawMessage("1"),
+		"b": json.RawMessage("2"),
+		"c": json.RawMessage("3"),
+		"d": json.RawMessage("4"),
+		"e": json.RawMessage("5"),
+	}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at most 4 properties")
+
+	// An unmatchable token for the union is rejected naming the admissible kinds.
+	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
+	var out showcase.Showcase
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"payload":true}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "payload")
+	require.Contains(t, err.Error(), "ShowcasePayloadObject")
+}
+
+// TestJSONSchemaShowcaseInlineObjectUnion round-trips the `note` tagged union,
+// whose branches are written inline in the schema and named by their
+// `x-go-name` overrides: each is emitted as a full model (fields, constraints,
+// verbatim extras) that implements the union interface.
+func TestJSONSchemaShowcaseInlineObjectUnion(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+
+	text := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-note-text.json")
+	note, ok := text.Note.(showcase.TextNote)
+	require.True(t, ok, "note should be a TextNote")
+	require.Equal(t, showcase.TextNoteKindText, note.Kind)
+	require.Equal(t, "remember the milk", note.Body)
+	// The branch stays open: an unknown member is preserved (P13).
+	require.Equal(t, "true", string(note.AdditionalProperties["pinned"]))
+
+	link := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-note-link.json")
+	href, ok := link.Note.(showcase.LinkNote)
+	require.True(t, ok, "note should be a LinkNote")
+	require.Equal(t, "https://example.test/notes/1", href.Href)
+
+	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
+	var out showcase.Showcase
+
+	// The branch's own constraints are enforced once the tag selects it.
+	err := dc.FromPayload(jsonPayload([]byte(base+`,"note":{"kind":"text","body":""}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "note.body")
+	require.Contains(t, err.Error(), "length >= 1")
+
+	// An unknown tag value is rejected naming the admissible values.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"note":{"kind":"audio"}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "note")
+	require.Contains(t, err.Error(), "audio")
+
+	// Serialize re-runs the selected branch's constraints (P12).
+	invalid := link
+	invalid.Note = showcase.LinkNote{Kind: showcase.LinkNoteKindLink, Href: ""}
+	_, err = dc.ToPayload(invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "note.href")
+}
+
+// TestJSONSchemaShowcasePropertyInlineObjectUnion round-trips `detail`, a union
+// written inline on a property whose lone object branch is structured: the branch
+// derives `ShowcaseDetailObject` from the union it belongs to and is emitted as an
+// ordinary model, while the string branch still selects on its own token.
+func TestJSONSchemaShowcasePropertyInlineObjectUnion(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+
+	object := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-detail-object.json")
+	detail, ok := object.Detail.(showcase.ShowcaseDetailObject)
+	require.True(t, ok, "detail should be a ShowcaseDetailObject")
+	require.Equal(t, "E_LIMIT", detail.Code)
+	require.Equal(t, "retry later", *detail.Hint)
+	// The branch stays open: an unknown member is preserved (P13).
+	require.Equal(t, "250", string(detail.AdditionalProperties["retryAfterMs"]))
+
+	text := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-detail-string.json")
+	require.Equal(t, showcase.ShowcaseDetailString("E_LIMIT"), text.Detail)
+
+	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
+	var out showcase.Showcase
+
+	// The object branch's own constraints are enforced.
+	err := dc.FromPayload(jsonPayload([]byte(base+`,"detail":{"code":""}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "detail.code")
+	require.Contains(t, err.Error(), "length >= 1")
+
+	// A token admitted by no branch names the admissible ones.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"detail":7}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "detail")
+	require.Contains(t, err.Error(), "ShowcaseDetailObject")
+
+	// Serialize re-runs the selected branch's constraints (P12).
+	invalid := object
+	invalid.Detail = showcase.ShowcaseDetailObject{Code: ""}
+	_, err = dc.ToPayload(invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "detail.code")
+}
+
+// TestJSONSchemaShowcaseTaggedUnionWithScalarBranch round-trips `shapeOrName`, a
+// union whose two selector layers compose: the wire token picks object-vs-string
+// and, for the object token, the shared required `kind` const picks
+// Circle-vs-Square. Circle and Square belong to the `shape` union as well, so
+// each carries a second marker method.
+func TestJSONSchemaShowcaseTaggedUnionWithScalarBranch(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+
+	square := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-shape-or-name-square.json")
+	sq, ok := square.ShapeOrName.(showcase.Square)
+	require.True(t, ok, "shapeOrName should be a Square")
+	require.Equal(t, showcase.SquareKindSquare, sq.Kind)
+	require.Equal(t, float64(4), sq.Side)
+
+	named := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-shape-or-name-string.json")
+	require.Equal(t, showcase.ShowcaseShapeOrNameString("unit-square"), named.ShapeOrName)
+
+	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
+	var out showcase.Showcase
+
+	// The object token routes through the discriminator, so an unknown tag is
+	// rejected rather than falling back to the string branch.
+	err := dc.FromPayload(jsonPayload([]byte(base+`,"shapeOrName":{"kind":"triangle"}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shapeOrName")
+	require.Contains(t, err.Error(), "triangle")
+	require.Contains(t, err.Error(), "square")
+
+	// A token admitted by no branch names all admissible ones.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"shapeOrName":7}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shapeOrName")
+	require.Contains(t, err.Error(), "Circle, Square, string")
+
+	// Serialize re-runs the selected branch's constraints (P12).
+	invalid := square
+	invalid.ShapeOrName = showcase.Square{Kind: showcase.SquareKind("hexagon")}
+	_, err = dc.ToPayload(invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shapeOrName.kind")
+}
+
+// TestJSONSchemaShowcaseArrayBranchUnion round-trips `measurements`, a union with
+// an array branch: the array has no definition to take a name from, so Go emits
+// it as the synthesized `ShowcaseMeasurementsArray` variant alongside the string
+// variant, both selected by the wire token.
+func TestJSONSchemaShowcaseArrayBranchUnion(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+
+	values := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-measurements-array.json")
+	require.Equal(t, showcase.ShowcaseMeasurementsArray{1.5, 2.5, 3.75}, values.Measurements)
+
+	preset := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-measurements-string.json")
+	require.Equal(t, showcase.ShowcaseMeasurementsString("auto"), preset.Measurements)
+
+	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
+	var out showcase.Showcase
+
+	// A token admitted by neither branch names both admissible kinds.
+	err := dc.FromPayload(jsonPayload([]byte(base+`,"measurements":true}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "measurements")
+	require.Contains(t, err.Error(), "[]float64, string")
+
+	// The array branch's element type is enforced: a string element is not a
+	// number.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"measurements":["x"]}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "measurements")
 }

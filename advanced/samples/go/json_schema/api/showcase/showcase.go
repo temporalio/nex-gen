@@ -45,6 +45,12 @@ type CircleKind string
 // CircleKindCircle is the CircleKind value "circle".
 const CircleKindCircle CircleKind = "circle"
 
+// LinkNoteKind is the closed value set for LinkNote.kind.
+type LinkNoteKind string
+
+// LinkNoteKindLink is the LinkNoteKind value "link".
+const LinkNoteKindLink LinkNoteKind = "link"
+
 // ShowcaseKind Discriminator; always "showcase".
 type ShowcaseKind string
 
@@ -103,6 +109,58 @@ type SquareKind string
 // SquareKindSquare is the SquareKind value "square".
 const SquareKindSquare SquareKind = "square"
 
+// TextNoteKind is the closed value set for TextNote.kind.
+type TextNoteKind string
+
+// TextNoteKindText is the TextNoteKind value "text".
+const TextNoteKindText TextNoteKind = "text"
+
+// Note A tagged union whose object branches are written **inline** rather than `$ref`ed: each branch is emitted as a named type, so each names itself with the per-language `x-<lang>-name` override (two or more inline object branches cannot derive distinguishing names — the discriminator `const` is a wire value, not an identifier). Selection reads the shared required `kind` const, and each branch keeps its own constraints and stays open to unknown members.
+type Note interface {
+	isNote()
+	Validate() error
+}
+
+func (TextNote) isNote() {}
+
+func (LinkNote) isNote() {}
+
+func unmarshalNote(raw json.RawMessage, path string, errs *[]Violation) (Note, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		*errs = append(*errs, Violation{path, "expected one of: TextNote, LinkNote"})
+		return nil, false
+	}
+	switch trimmed[0] {
+	case '{':
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &obj); err != nil {
+			*errs = append(*errs, Violation{path, "expected object"})
+			return nil, false
+		}
+		discRaw, ok := obj["kind"]
+		if !ok {
+			*errs = append(*errs, Violation{path, "discriminator \"kind\" is required"})
+			return nil, false
+		}
+		switch string(bytes.TrimSpace(discRaw)) {
+		case "\"text\"":
+			var v TextNote
+			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
+			return v, true
+		case "\"link\"":
+			var v LinkNote
+			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
+			return v, true
+		default:
+			*errs = append(*errs, Violation{path, fmt.Sprintf("unknown discriminator kind %s: expected one of [\"text\", \"link\"]", string(bytes.TrimSpace(discRaw)))})
+			return nil, false
+		}
+	}
+	*errs = append(*errs, Violation{path, "expected one of: TextNote, LinkNote"})
+	return nil, false
+}
+
 // Shape A closed sum type (discriminated union) of Circle | Square, tagged by the shared required `kind` const. Selection reads `kind` and routes to the matching branch; an unknown tag is a Violation.
 type Shape interface {
 	isShape()
@@ -146,6 +204,54 @@ func unmarshalShape(raw json.RawMessage, path string, errs *[]Violation) (Shape,
 		}
 	}
 	*errs = append(*errs, Violation{path, "expected one of: Circle, Square"})
+	return nil, false
+}
+
+// ShowcaseDetail is one of: ShowcaseDetailObject, string.
+type ShowcaseDetail interface {
+	isShowcaseDetail()
+	Validate() error
+}
+
+func (ShowcaseDetailObject) isShowcaseDetail() {}
+
+// ShowcaseDetailString wraps a string value admissible in the ShowcaseDetail union.
+type ShowcaseDetailString string
+
+func (ShowcaseDetailString) isShowcaseDetail() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseDetailString) Validate() error {
+	var errs []Violation
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+func unmarshalShowcaseDetail(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseDetail, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		*errs = append(*errs, Violation{path, "expected one of: ShowcaseDetailObject, string"})
+		return nil, false
+	}
+	switch trimmed[0] {
+	case '{':
+		var v ShowcaseDetailObject
+		mergeNested(errs, path, json.Unmarshal(trimmed, &v))
+		return v, true
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			*errs = append(*errs, Violation{path, "expected string"})
+			return nil, false
+		}
+		v := ShowcaseDetailString(s)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	}
+	*errs = append(*errs, Violation{path, "expected one of: ShowcaseDetailObject, string"})
 	return nil, false
 }
 
@@ -219,6 +325,237 @@ func unmarshalShowcaseIdOrName(raw json.RawMessage, path string, errs *[]Violati
 		return v, true
 	}
 	*errs = append(*errs, Violation{path, "expected one of: string, integer"})
+	return nil, false
+}
+
+// ShowcaseMeasurements is one of: []float64, string.
+type ShowcaseMeasurements interface {
+	isShowcaseMeasurements()
+	Validate() error
+}
+
+// ShowcaseMeasurementsArray wraps a []float64 value admissible in the ShowcaseMeasurements union.
+type ShowcaseMeasurementsArray []float64
+
+func (ShowcaseMeasurementsArray) isShowcaseMeasurements() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseMeasurementsArray) Validate() error {
+	var errs []Violation
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// ShowcaseMeasurementsString wraps a string value admissible in the ShowcaseMeasurements union.
+type ShowcaseMeasurementsString string
+
+func (ShowcaseMeasurementsString) isShowcaseMeasurements() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseMeasurementsString) Validate() error {
+	var errs []Violation
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+func unmarshalShowcaseMeasurements(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseMeasurements, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		*errs = append(*errs, Violation{path, "expected one of: []float64, string"})
+		return nil, false
+	}
+	switch trimmed[0] {
+	case '[':
+		var arr []float64
+		if err := json.Unmarshal(trimmed, &arr); err != nil {
+			*errs = append(*errs, Violation{path, "expected array"})
+			return nil, false
+		}
+		v := ShowcaseMeasurementsArray(arr)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			*errs = append(*errs, Violation{path, "expected string"})
+			return nil, false
+		}
+		v := ShowcaseMeasurementsString(s)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	}
+	*errs = append(*errs, Violation{path, "expected one of: []float64, string"})
+	return nil, false
+}
+
+// ShowcasePayload is one of: ShowcasePayloadObject, string.
+type ShowcasePayload interface {
+	isShowcasePayload()
+	Validate() error
+}
+
+// ShowcasePayloadObject wraps the object admissible in the ShowcasePayload union.
+type ShowcasePayloadObject struct {
+	// AdditionalProperties holds every member of this map-shaped object.
+	AdditionalProperties map[string]json.RawMessage
+}
+
+func (ShowcasePayloadObject) isShowcasePayload() {}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m ShowcasePayloadObject) Validate() error {
+	var errs []Violation
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *ShowcasePayloadObject) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var errs []Violation
+	m.AdditionalProperties = make(map[string]json.RawMessage, len(raw))
+	for k, v := range raw {
+		m.AdditionalProperties[k] = v
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m ShowcasePayloadObject) MarshalJSON() ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]json.RawMessage, len(m.AdditionalProperties))
+	for k, v := range m.AdditionalProperties {
+		out[k] = v
+	}
+	return json.Marshal(out)
+}
+
+// ShowcasePayloadString wraps a string value admissible in the ShowcasePayload union.
+type ShowcasePayloadString string
+
+func (ShowcasePayloadString) isShowcasePayload() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcasePayloadString) Validate() error {
+	var errs []Violation
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+func unmarshalShowcasePayload(raw json.RawMessage, path string, errs *[]Violation) (ShowcasePayload, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		*errs = append(*errs, Violation{path, "expected one of: ShowcasePayloadObject, string"})
+		return nil, false
+	}
+	switch trimmed[0] {
+	case '{':
+		var v ShowcasePayloadObject
+		mergeNested(errs, path, json.Unmarshal(trimmed, &v))
+		return v, true
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			*errs = append(*errs, Violation{path, "expected string"})
+			return nil, false
+		}
+		v := ShowcasePayloadString(s)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	}
+	*errs = append(*errs, Violation{path, "expected one of: ShowcasePayloadObject, string"})
+	return nil, false
+}
+
+// ShowcaseShapeOrName is one of: Circle, Square, string.
+type ShowcaseShapeOrName interface {
+	isShowcaseShapeOrName()
+	Validate() error
+}
+
+func (Circle) isShowcaseShapeOrName() {}
+
+func (Square) isShowcaseShapeOrName() {}
+
+// ShowcaseShapeOrNameString wraps a string value admissible in the ShowcaseShapeOrName union.
+type ShowcaseShapeOrNameString string
+
+func (ShowcaseShapeOrNameString) isShowcaseShapeOrName() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseShapeOrNameString) Validate() error {
+	var errs []Violation
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+func unmarshalShowcaseShapeOrName(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseShapeOrName, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		*errs = append(*errs, Violation{path, "expected one of: Circle, Square, string"})
+		return nil, false
+	}
+	switch trimmed[0] {
+	case '{':
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &obj); err != nil {
+			*errs = append(*errs, Violation{path, "expected object"})
+			return nil, false
+		}
+		discRaw, ok := obj["kind"]
+		if !ok {
+			*errs = append(*errs, Violation{path, "discriminator \"kind\" is required"})
+			return nil, false
+		}
+		switch string(bytes.TrimSpace(discRaw)) {
+		case "\"circle\"":
+			var v Circle
+			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
+			return v, true
+		case "\"square\"":
+			var v Square
+			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
+			return v, true
+		default:
+			*errs = append(*errs, Violation{path, fmt.Sprintf("unknown discriminator kind %s: expected one of [\"circle\", \"square\"]", string(bytes.TrimSpace(discRaw)))})
+			return nil, false
+		}
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			*errs = append(*errs, Violation{path, "expected string"})
+			return nil, false
+		}
+		v := ShowcaseShapeOrNameString(s)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	}
+	*errs = append(*errs, Violation{path, "expected one of: Circle, Square, string"})
 	return nil, false
 }
 
@@ -349,6 +686,7 @@ func (m Address) MarshalJSON() ([]byte, error) {
 
 // Attributes A string map with member-count and key-shape constraints: 1 to 3 entries, each key at most 8 code points (minProperties/maxProperties/propertyNames on a map-shaped object).
 type Attributes struct {
+	// AdditionalProperties holds every member of this map-shaped object.
 	AdditionalProperties map[string]string
 }
 
@@ -383,16 +721,9 @@ func (m *Attributes) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]string, len(raw))
 	for k, v := range raw {
-		if isNull(v) {
-			errs = append(errs, Violation{k, "explicit null not allowed"})
-			continue
+		if value, ok := parseStringField(&v, k, true, false, &errs); ok {
+			m.AdditionalProperties[k] = value
 		}
-		var s string
-		if err := json.Unmarshal(v, &s); err != nil {
-			errs = append(errs, Violation{k, "expected string"})
-			continue
-		}
-		m.AdditionalProperties[k] = s
 	}
 	if n := len(raw); n < 1 {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at least 1 properties, got %d", n)})
@@ -424,7 +755,7 @@ func (m Attributes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Circle A circle branch of the Shape tagged union.
+// Circle A circle branch of the Shape and shapeOrName tagged unions.
 type Circle struct {
 	// Kind corresponds to the "kind" JSON property.
 	Kind CircleKind `json:"kind"`
@@ -610,8 +941,62 @@ func (m ContactGo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// Extras A free-form object (`additionalProperties: true` with no declared properties): every member is carried verbatim, bounded to at most 4 members. Members keep their wire form, so large integers survive a round-trip untruncated.
+type Extras struct {
+	// AdditionalProperties holds every member of this map-shaped object.
+	AdditionalProperties map[string]json.RawMessage
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m Extras) Validate() error {
+	var errs []Violation
+	if n := len(m.AdditionalProperties); n > 4 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 4 properties, got %d", n)})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *Extras) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var errs []Violation
+	m.AdditionalProperties = make(map[string]json.RawMessage, len(raw))
+	for k, v := range raw {
+		m.AdditionalProperties[k] = v
+	}
+	if n := len(raw); n > 4 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 4 properties, got %d", n)})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m Extras) MarshalJSON() ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]json.RawMessage, len(m.AdditionalProperties))
+	for k, v := range m.AdditionalProperties {
+		out[k] = v
+	}
+	return json.Marshal(out)
+}
+
 // Labels Arbitrary string key/value labels (typed map).
 type Labels struct {
+	// AdditionalProperties holds every member of this map-shaped object.
 	AdditionalProperties map[string]string
 }
 
@@ -638,16 +1023,9 @@ func (m *Labels) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]string, len(raw))
 	for k, v := range raw {
-		if isNull(v) {
-			errs = append(errs, Violation{k, "explicit null not allowed"})
-			continue
+		if value, ok := parseStringField(&v, k, true, false, &errs); ok {
+			m.AdditionalProperties[k] = value
 		}
-		var s string
-		if err := json.Unmarshal(v, &s); err != nil {
-			errs = append(errs, Violation{k, "expected string"})
-			continue
-		}
-		m.AdditionalProperties[k] = s
 	}
 	if n := len(raw); n > 50 {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 50 properties, got %d", n)})
@@ -667,6 +1045,92 @@ func (m Labels) MarshalJSON() ([]byte, error) {
 	out := make(map[string]string, len(m.AdditionalProperties))
 	for k, v := range m.AdditionalProperties {
 		out[k] = v
+	}
+	return json.Marshal(out)
+}
+
+// LinkNote A link note branch, named inline.
+type LinkNote struct {
+	// Kind corresponds to the "kind" JSON property.
+	Kind LinkNoteKind `json:"kind"`
+	// Href corresponds to the "href" JSON property.
+	Href string `json:"href"`
+	// AdditionalProperties holds unknown members verbatim.
+	AdditionalProperties map[string]json.RawMessage `json:"-"`
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m LinkNote) Validate() error {
+	var errs []Violation
+	if m.Kind != LinkNoteKindLink {
+		errs = append(errs, Violation{"kind", "must equal \"link\""})
+	}
+	if n := utf8.RuneCountInString(m.Href); n < 1 {
+		errs = append(errs, Violation{"href", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *LinkNote) UnmarshalJSON(data []byte) error {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	var errs []Violation
+	m.AdditionalProperties = map[string]json.RawMessage{}
+	for k, v := range all {
+		switch k {
+		case "kind", "href":
+		default:
+			m.AdditionalProperties[k] = v
+		}
+	}
+	get := func(k string) *json.RawMessage {
+		if v, ok := all[k]; ok {
+			return &v
+		}
+		return nil
+	}
+	_ = get
+	if v, ok := parseStringField(get("kind"), "kind", true, false, &errs); ok {
+		typed := LinkNoteKind(v)
+		if typed != LinkNoteKindLink {
+			errs = append(errs, Violation{"kind", "must equal \"link\""})
+		} else {
+			m.Kind = typed
+		}
+	}
+	if v, ok := parseStringField(get("href"), "href", true, false, &errs); ok {
+		m.Href = v
+		if n := utf8.RuneCountInString(v); n < 1 {
+			errs = append(errs, Violation{"href", fmt.Sprintf("must have length >= 1, got %d", n)})
+		}
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m LinkNote) MarshalJSON() ([]byte, error) {
+	var errs []Violation
+	addViolations(&errs, m.Validate())
+	out := map[string]json.RawMessage{}
+	for k, v := range m.AdditionalProperties {
+		out[k] = v
+	}
+	marshalField(out, "kind", m.Kind, &errs)
+	marshalField(out, "href", m.Href, &errs)
+	if len(errs) > 0 {
+		return nil, &ValidationError{Violations: errs}
 	}
 	return json.Marshal(out)
 }
@@ -833,8 +1297,20 @@ type Showcase struct {
 	Roles []string `json:"roles,omitempty"`
 	// IdOrName Disjoint-kind union (oneOf sum type): the wire value is either a string or an integer, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector.
 	IdOrName ShowcaseIdOrName `json:"idOrName,omitempty"`
+	// Payload Mixed-kind union whose object branch is an inline free-form object: the wire value is either an arbitrary object (members carried verbatim) or a string, selected by its JSON token. The free-form object is the one object branch that needs no type name — TypeScript and Python carry it structurally, Go and Java wrap it as `<Union>Object`.
+	Payload ShowcasePayload `json:"payload,omitempty"`
+	// Detail Mixed-kind union whose object branch is an inline *structured* object, written directly on the property rather than in `$defs`. It is the only object branch of this union, so it derives its name from the union it belongs to — `ShowcaseDetailObject` — and is emitted as an ordinary model: its members keep their own constraints and it stays open to unknown ones.
+	Detail ShowcaseDetail `json:"detail,omitempty"`
+	// ShapeOrName Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface).
+	ShapeOrName ShowcaseShapeOrName `json:"shapeOrName,omitempty"`
+	// Measurements Mixed-kind union with an array branch: the wire value is either a list of numbers or a string, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`.
+	Measurements ShowcaseMeasurements `json:"measurements,omitempty"`
+	// Extras corresponds to the "extras" JSON property.
+	Extras *Extras `json:"extras,omitempty"`
 	// Shape corresponds to the "shape" JSON property.
 	Shape Shape `json:"shape,omitempty"`
+	// Note corresponds to the "note" JSON property.
+	Note Note `json:"note,omitempty"`
 	// Address corresponds to the "address" JSON property.
 	Address *Address `json:"address,omitempty"`
 	// Labels corresponds to the "labels" JSON property.
@@ -1033,8 +1509,26 @@ func (m Showcase) Validate() error {
 	if m.IdOrName != nil {
 		mergeNested(&errs, "idOrName", m.IdOrName.Validate())
 	}
+	if m.Payload != nil {
+		mergeNested(&errs, "payload", m.Payload.Validate())
+	}
+	if m.Detail != nil {
+		mergeNested(&errs, "detail", m.Detail.Validate())
+	}
+	if m.ShapeOrName != nil {
+		mergeNested(&errs, "shapeOrName", m.ShapeOrName.Validate())
+	}
+	if m.Measurements != nil {
+		mergeNested(&errs, "measurements", m.Measurements.Validate())
+	}
+	if m.Extras != nil {
+		mergeNested(&errs, "extras", m.Extras.Validate())
+	}
 	if m.Shape != nil {
 		mergeNested(&errs, "shape", m.Shape.Validate())
+	}
+	if m.Note != nil {
+		mergeNested(&errs, "note", m.Note.Validate())
 	}
 	if m.Address != nil {
 		mergeNested(&errs, "address", m.Address.Validate())
@@ -1067,7 +1561,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	for k := range all {
 		switch k {
-		case "kind", "revision", "enabled", "status", "tier", "scale", "name", "count", "active", "nickname", "code", "sku", "phrase", "requestId", "contactEmail", "host", "homepage", "gateway", "blob", "urlBlob", "retries", "verbose", "greeting", "debug", "legacyId", "middleName", "category", "priority", "level", "ratio", "step", "tags", "aliases", "roles", "idOrName", "shape", "address", "labels", "settings", "attributes", "contact":
+		case "kind", "revision", "enabled", "status", "tier", "scale", "name", "count", "active", "nickname", "code", "sku", "phrase", "requestId", "contactEmail", "host", "homepage", "gateway", "blob", "urlBlob", "retries", "verbose", "greeting", "debug", "legacyId", "middleName", "category", "priority", "level", "ratio", "step", "tags", "aliases", "roles", "idOrName", "payload", "detail", "shapeOrName", "measurements", "extras", "shape", "note", "address", "labels", "settings", "attributes", "contact":
 		default:
 			errs = append(errs, Violation{k, "unknown field"})
 		}
@@ -1320,11 +1814,52 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	} else if v, ok := unmarshalShowcaseIdOrName(*raw, "idOrName", &errs); ok {
 		m.IdOrName = v
 	}
+	if raw := get("payload"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"payload", "explicit null not allowed"})
+	} else if v, ok := unmarshalShowcasePayload(*raw, "payload", &errs); ok {
+		m.Payload = v
+	}
+	if raw := get("detail"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"detail", "explicit null not allowed"})
+	} else if v, ok := unmarshalShowcaseDetail(*raw, "detail", &errs); ok {
+		m.Detail = v
+	}
+	if raw := get("shapeOrName"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"shapeOrName", "explicit null not allowed"})
+	} else if v, ok := unmarshalShowcaseShapeOrName(*raw, "shapeOrName", &errs); ok {
+		m.ShapeOrName = v
+	}
+	if raw := get("measurements"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"measurements", "explicit null not allowed"})
+	} else if v, ok := unmarshalShowcaseMeasurements(*raw, "measurements", &errs); ok {
+		m.Measurements = v
+	}
+	if raw := get("extras"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"extras", "explicit null not allowed"})
+	} else {
+		var tmp Extras
+		if err := json.Unmarshal(*raw, &tmp); err != nil {
+			mergeNested(&errs, "extras", err)
+		} else {
+			m.Extras = &tmp
+		}
+	}
 	if raw := get("shape"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"shape", "explicit null not allowed"})
 	} else if v, ok := unmarshalShape(*raw, "shape", &errs); ok {
 		m.Shape = v
+	}
+	if raw := get("note"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"note", "explicit null not allowed"})
+	} else if v, ok := unmarshalNote(*raw, "note", &errs); ok {
+		m.Note = v
 	}
 	if raw := get("address"); raw == nil {
 	} else if isNull(*raw) {
@@ -1482,8 +2017,26 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	if m.IdOrName != nil {
 		marshalField(out, "idOrName", m.IdOrName, &errs)
 	}
+	if m.Payload != nil {
+		marshalField(out, "payload", m.Payload, &errs)
+	}
+	if m.Detail != nil {
+		marshalField(out, "detail", m.Detail, &errs)
+	}
+	if m.ShapeOrName != nil {
+		marshalField(out, "shapeOrName", m.ShapeOrName, &errs)
+	}
+	if m.Measurements != nil {
+		marshalField(out, "measurements", m.Measurements, &errs)
+	}
+	if m.Extras != nil {
+		marshalField(out, "extras", *m.Extras, &errs)
+	}
 	if m.Shape != nil {
 		marshalField(out, "shape", m.Shape, &errs)
+	}
+	if m.Note != nil {
+		marshalField(out, "note", m.Note, &errs)
 	}
 	if m.Address != nil {
 		marshalField(out, "address", *m.Address, &errs)
@@ -1499,6 +2052,86 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	}
 	if m.Contact != nil {
 		marshalField(out, "contact", *m.Contact, &errs)
+	}
+	if len(errs) > 0 {
+		return nil, &ValidationError{Violations: errs}
+	}
+	return json.Marshal(out)
+}
+
+// ShowcaseDetailObject is generated from the corresponding JSON Schema definition.
+type ShowcaseDetailObject struct {
+	// Code corresponds to the "code" JSON property.
+	Code string `json:"code"`
+	// Hint corresponds to the "hint" JSON property.
+	Hint *string `json:"hint,omitempty"`
+	// AdditionalProperties holds unknown members verbatim.
+	AdditionalProperties map[string]json.RawMessage `json:"-"`
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m ShowcaseDetailObject) Validate() error {
+	var errs []Violation
+	if n := utf8.RuneCountInString(m.Code); n < 1 {
+		errs = append(errs, Violation{"code", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *ShowcaseDetailObject) UnmarshalJSON(data []byte) error {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	var errs []Violation
+	m.AdditionalProperties = map[string]json.RawMessage{}
+	for k, v := range all {
+		switch k {
+		case "code", "hint":
+		default:
+			m.AdditionalProperties[k] = v
+		}
+	}
+	get := func(k string) *json.RawMessage {
+		if v, ok := all[k]; ok {
+			return &v
+		}
+		return nil
+	}
+	_ = get
+	if v, ok := parseStringField(get("code"), "code", true, false, &errs); ok {
+		m.Code = v
+		if n := utf8.RuneCountInString(v); n < 1 {
+			errs = append(errs, Violation{"code", fmt.Sprintf("must have length >= 1, got %d", n)})
+		}
+	}
+	if v, ok := parseStringField(get("hint"), "hint", false, false, &errs); ok {
+		m.Hint = &v
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m ShowcaseDetailObject) MarshalJSON() ([]byte, error) {
+	var errs []Violation
+	addViolations(&errs, m.Validate())
+	out := map[string]json.RawMessage{}
+	for k, v := range m.AdditionalProperties {
+		out[k] = v
+	}
+	marshalField(out, "code", m.Code, &errs)
+	if m.Hint != nil {
+		marshalField(out, "hint", *m.Hint, &errs)
 	}
 	if len(errs) > 0 {
 		return nil, &ValidationError{Violations: errs}
@@ -1566,7 +2199,7 @@ func (m GetShowcaseInput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Square A square branch of the Shape tagged union.
+// Square A square branch of the Shape and shapeOrName tagged unions.
 type Square struct {
 	// Kind corresponds to the "kind" JSON property.
 	Kind SquareKind `json:"kind"`
@@ -1640,6 +2273,92 @@ func (m Square) MarshalJSON() ([]byte, error) {
 	}
 	marshalField(out, "kind", m.Kind, &errs)
 	marshalField(out, "side", m.Side, &errs)
+	if len(errs) > 0 {
+		return nil, &ValidationError{Violations: errs}
+	}
+	return json.Marshal(out)
+}
+
+// TextNote A text note branch, named inline.
+type TextNote struct {
+	// Kind corresponds to the "kind" JSON property.
+	Kind TextNoteKind `json:"kind"`
+	// Body corresponds to the "body" JSON property.
+	Body string `json:"body"`
+	// AdditionalProperties holds unknown members verbatim.
+	AdditionalProperties map[string]json.RawMessage `json:"-"`
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m TextNote) Validate() error {
+	var errs []Violation
+	if m.Kind != TextNoteKindText {
+		errs = append(errs, Violation{"kind", "must equal \"text\""})
+	}
+	if n := utf8.RuneCountInString(m.Body); n < 1 {
+		errs = append(errs, Violation{"body", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *TextNote) UnmarshalJSON(data []byte) error {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	var errs []Violation
+	m.AdditionalProperties = map[string]json.RawMessage{}
+	for k, v := range all {
+		switch k {
+		case "kind", "body":
+		default:
+			m.AdditionalProperties[k] = v
+		}
+	}
+	get := func(k string) *json.RawMessage {
+		if v, ok := all[k]; ok {
+			return &v
+		}
+		return nil
+	}
+	_ = get
+	if v, ok := parseStringField(get("kind"), "kind", true, false, &errs); ok {
+		typed := TextNoteKind(v)
+		if typed != TextNoteKindText {
+			errs = append(errs, Violation{"kind", "must equal \"text\""})
+		} else {
+			m.Kind = typed
+		}
+	}
+	if v, ok := parseStringField(get("body"), "body", true, false, &errs); ok {
+		m.Body = v
+		if n := utf8.RuneCountInString(v); n < 1 {
+			errs = append(errs, Violation{"body", fmt.Sprintf("must have length >= 1, got %d", n)})
+		}
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m TextNote) MarshalJSON() ([]byte, error) {
+	var errs []Violation
+	addViolations(&errs, m.Validate())
+	out := map[string]json.RawMessage{}
+	for k, v := range m.AdditionalProperties {
+		out[k] = v
+	}
+	marshalField(out, "kind", m.Kind, &errs)
+	marshalField(out, "body", m.Body, &errs)
 	if len(errs) > 0 {
 		return nil, &ValidationError{Violations: errs}
 	}

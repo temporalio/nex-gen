@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- JSON Schema: An object `oneOf` branch may now be written **inline**, whatever
+  its shape. A structured branch (declared `properties`, or a typed
+  `additionalProperties`) is named — `<Union>Object` for a lone branch, or the
+  branch's own `x-<lang>-name` — and emitted as the same named model an authored
+  `$defs` definition of that shape produces, so it validates, exports, and
+  round-trips identically in all four languages. Two or more inline object
+  branches must each carry the target's `x-<lang>-name`: every branch would
+  otherwise derive the same name, and a discriminator `const` is a wire value,
+  not an identifier.
+- JSON Schema: The free-form object (`type: object` with
+  `additionalProperties: true` and no `properties`) is now supported as a `oneOf`
+  branch. Its members are carried verbatim in every language: Go and Java
+  synthesize the wrapper the union needs (`<Union>Object`), TypeScript and Python
+  inline it as `Record<string, unknown>` / `dict[str, Any]`.
+
 ### Changed
 
 - Generating into an existing `--output` directory no longer deletes it first.
@@ -19,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `build-json-examples` maintenance commands, which own the directories they
   write, delete each example's output directory before regenerating it, so the
   checked-in samples stay free of stale files.
+- Java: A `oneOf` union now carries its `JsonNode` dispatcher as a static
+  `fromNode` on the union interface in **both** positions — a named `$defs` union
+  and a union written inline on a property (whose interface is nested in the
+  declaring class). The enclosing deserializer reads the member with one
+  delegating call instead of an inlined token chain, and a union member
+  serializes by runtime class: object branches through their POJO's serializer,
+  scalar/array wrappers through Jackson's `@JsonValue` on `getValue()`.
 
 ### Deprecated
 
@@ -33,6 +55,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[GeneratedCode]` attribute now read `nexgen`.
 
 ### Fixed
+
+- JSON Schema: A `oneOf` with an inline object branch generated uncompilable Go
+  (a marker method on an undeclared `<Union>Object` type) and uncompilable
+  TypeScript (`new Record<string, unknown>Mapper()`); Java bound the branch to
+  `null` without a violation.
+- Java: An object branch of a union written inline on a property was silently
+  dropped — the branch's class implemented nothing, and the parse arm for the
+  object token was empty. The branch class now implements the nested union
+  interface (`implements <DeclaringClass>.<Union>`) and parses through it.
+- Java: A named `oneOf` union def with a scalar, array, or free-form-object
+  branch generated uncompilable code — its `fromNode` referenced wrapper classes
+  (`<Union>String`, `<Union>Array`, `<Union>Object`) that were never declared.
+  The wrappers are now declared inside the union interface.
+- Java: An array branch of a `oneOf` union parsed to `null` without a violation;
+  its items are now parsed and validated elementwise.
+- JSON Schema: A free-form object *definition* generated an empty Go struct that
+  rejected every member as an unknown field, and an empty TypeScript interface
+  that dropped every member.
+- JSON Schema: A typed map whose members are not strings (for example
+  `additionalProperties: {type: integer}`) generated uncompilable Go — a
+  `map[string]int64` member decoded as `map[string]string`, with the member
+  values never parsed.
+- JSON Schema: `minProperties`/`maxProperties`/`propertyNames` on a free-form
+  object were dropped in Go, TypeScript, and Python; they are now enforced in
+  both directions (P12).
+- JSON Schema: TypeScript serialized an object member of a property-level union
+  by copying the in-memory value, so the model's `additionalProperties` member
+  reached the wire as a literal key and its extras were never spread back out.
+  The union now serializes through the branch's mapper.
+- JSON Schema: TypeScript's serializer for a mixed-kind union returned the lone
+  object branch unconditionally, making the scalar/array branches unreachable;
+  the object branch is now guarded by the object token, matching the parse side.
 
 ### Security
 

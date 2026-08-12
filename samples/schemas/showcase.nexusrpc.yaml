@@ -276,8 +276,62 @@ $defs:
         oneOf:
           - { type: string }
           - { type: integer }
+      payload:
+        description: >-
+          Mixed-kind union whose object branch is an inline free-form object: the
+          wire value is either an arbitrary object (members carried verbatim) or
+          a string, selected by its JSON token. The free-form object is the one
+          object branch that needs no type name — TypeScript and Python carry it
+          structurally, Go and Java wrap it as `<Union>Object`.
+        oneOf:
+          - { type: object, additionalProperties: true }
+          - { type: string }
+      detail:
+        description: >-
+          Mixed-kind union whose object branch is an inline *structured* object,
+          written directly on the property rather than in `$defs`. It is the only
+          object branch of this union, so it derives its name from the union it
+          belongs to — `ShowcaseDetailObject` — and is emitted as an ordinary
+          model: its members keep their own constraints and it stays open to
+          unknown ones.
+        oneOf:
+          - type: object
+            required: [code]
+            properties:
+              code: { type: string, minLength: 1 }
+              hint: { type: string }
+          - { type: string }
+      shapeOrName:
+        description: >-
+          Tagged object union mixed with a scalar kind: the two selector layers
+          compose — the JSON token picks object-vs-string, and, for an object,
+          the shared required `kind` const picks Circle-vs-Square. Written
+          inline on the property, so the union itself is named after its
+          position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and
+          it reuses the `Circle`/`Square` branches of `shape` — a branch type
+          may belong to more than one union (Go gains a second marker method,
+          Java a second implemented interface).
+        oneOf:
+          - { $ref: "#/$defs/Circle" }
+          - { $ref: "#/$defs/Square" }
+          - { type: string }
+      measurements:
+        description: >-
+          Mixed-kind union with an array branch: the wire value is either a list
+          of numbers or a string, selected by its JSON token. An array branch has
+          no definition to take a name from, so Go and Java emit it as the
+          synthesized `<Union>Array` variant (a defined type / a `@JsonValue`
+          wrapper) while TypeScript and Python carry it structurally as
+          `number[]` / `list[float]`.
+        oneOf:
+          - { type: array, items: { type: number } }
+          - { type: string }
+      extras:
+        $ref: "#/$defs/Extras"
       shape:
         $ref: "#/$defs/Shape"
+      note:
+        $ref: "#/$defs/Note"
       address:
         $ref: "#/$defs/Address"
       labels:
@@ -290,14 +344,14 @@ $defs:
         $ref: "#/$defs/Contact"
     required: [kind, revision, enabled, status, tier, scale, name, count, active, category]
   Circle:
-    description: A circle branch of the Shape tagged union.
+    description: A circle branch of the Shape and shapeOrName tagged unions.
     type: object
     required: [kind, radius]
     properties:
       kind: { type: string, const: circle }
       radius: { type: number }
   Square:
-    description: A square branch of the Shape tagged union.
+    description: A square branch of the Shape and shapeOrName tagged unions.
     type: object
     required: [kind, side]
     properties:
@@ -311,6 +365,36 @@ $defs:
     oneOf:
       - { $ref: "#/$defs/Circle" }
       - { $ref: "#/$defs/Square" }
+  Note:
+    description: >-
+      A tagged union whose object branches are written **inline** rather than
+      `$ref`ed: each branch is emitted as a named type, so each names itself with
+      the per-language `x-<lang>-name` override (two or more inline object
+      branches cannot derive distinguishing names — the discriminator `const` is
+      a wire value, not an identifier). Selection reads the shared required
+      `kind` const, and each branch keeps its own constraints and stays open to
+      unknown members.
+    oneOf:
+      - type: object
+        description: A text note branch, named inline.
+        required: [kind, body]
+        properties:
+          kind: { type: string, const: text }
+          body: { type: string, minLength: 1 }
+        x-go-name: TextNote
+        x-ts-name: TextNote
+        x-py-name: TextNote
+        x-java-name: TextNote
+      - type: object
+        description: A link note branch, named inline.
+        required: [kind, href]
+        properties:
+          kind: { type: string, const: link }
+          href: { type: string, minLength: 1 }
+        x-go-name: LinkNote
+        x-ts-name: LinkNote
+        x-py-name: LinkNote
+        x-java-name: LinkNote
   Address:
     description: A nested object, open to forward-compatible extension.
     type: object
@@ -324,6 +408,15 @@ $defs:
     type: object
     additionalProperties: { type: string }
     maxProperties: 50
+  Extras:
+    description: >-
+      A free-form object (`additionalProperties: true` with no declared
+      properties): every member is carried verbatim, bounded to at most 4
+      members. Members keep their wire form, so large integers survive a
+      round-trip untruncated.
+    type: object
+    additionalProperties: true
+    maxProperties: 4
   Settings:
     description: A closed object; unknown members are rejected.
     type: object

@@ -14,10 +14,12 @@ export function requiredField<T>(
 }
 
 const CIRCLE_KIND_CONST = "circle";
+const LINK_NOTE_KIND_CONST = "link";
 const SHOWCASE_KIND_CONST = "showcase";
 const REVISION_CONST = 1;
 const ENABLED_CONST = true;
 const SQUARE_KIND_CONST = "square";
+const TEXT_NOTE_KIND_CONST = "text";
 export const DEFAULT_RETRIES = 3;
 export const DEFAULT_GREETING = "hello";
 export const DEFAULT_DEBUG = false;
@@ -66,7 +68,7 @@ export interface Attributes {
 }
 
 /**
- * A circle branch of the Shape tagged union.
+ * A circle branch of the Shape and shapeOrName tagged unions.
  */
 export interface Circle {
   readonly kind: "circle";
@@ -85,11 +87,32 @@ export interface ContactTs {
 }
 
 /**
+ * A free-form object (`additionalProperties: true` with no declared properties): every member is carried verbatim, bounded to at most 4 members. Members keep their wire form, so large integers survive a round-trip untruncated.
+ */
+export interface Extras {
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
  * Arbitrary string key/value labels (typed map).
  */
 export interface Labels {
   additionalProperties: Record<string, string>;
 }
+
+/**
+ * A link note branch, named inline.
+ */
+export interface LinkNote {
+  readonly kind: "link";
+  href: string;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A tagged union whose object branches are written **inline** rather than `$ref`ed: each branch is emitted as a named type, so each names itself with the per-language `x-<lang>-name` override (two or more inline object branches cannot derive distinguishing names — the discriminator `const` is a wire value, not an identifier). Selection reads the shared required `kind` const, and each branch keeps its own constraints and stays open to unknown members.
+ */
+export type Note = TextNote | LinkNote;
 
 /**
  * A closed object; unknown members are rejected.
@@ -251,7 +274,25 @@ export interface Showcase {
    * Disjoint-kind union (oneOf sum type): the wire value is either a string or an integer, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector.
    */
   idOrName?: string | number;
+  /**
+   * Mixed-kind union whose object branch is an inline free-form object: the wire value is either an arbitrary object (members carried verbatim) or a string, selected by its JSON token. The free-form object is the one object branch that needs no type name — TypeScript and Python carry it structurally, Go and Java wrap it as `<Union>Object`.
+   */
+  payload?: Record<string, unknown> | string;
+  /**
+   * Mixed-kind union whose object branch is an inline *structured* object, written directly on the property rather than in `$defs`. It is the only object branch of this union, so it derives its name from the union it belongs to — `ShowcaseDetailObject` — and is emitted as an ordinary model: its members keep their own constraints and it stays open to unknown ones.
+   */
+  detail?: ShowcaseDetailObject | string;
+  /**
+   * Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface).
+   */
+  shapeOrName?: Circle | Square | string;
+  /**
+   * Mixed-kind union with an array branch: the wire value is either a list of numbers or a string, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`.
+   */
+  measurements?: number[] | string;
+  extras?: Extras;
   shape?: Shape;
+  note?: Note;
   address?: Address;
   labels?: Labels;
   settings?: Settings;
@@ -259,16 +300,31 @@ export interface Showcase {
   contact?: ContactTs;
 }
 
+export interface ShowcaseDetailObject {
+  code: string;
+  hint?: string;
+  additionalProperties: Record<string, unknown>;
+}
+
 export interface GetShowcaseInput {
   id: string;
 }
 
 /**
- * A square branch of the Shape tagged union.
+ * A square branch of the Shape and shapeOrName tagged unions.
  */
 export interface Square {
   readonly kind: "square";
   side: number;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A text note branch, named inline.
+ */
+export interface TextNote {
+  readonly kind: "text";
+  body: string;
   additionalProperties: Record<string, unknown>;
 }
 
@@ -293,6 +349,35 @@ export interface WidgetBase {
   id: string;
   kind?: string;
   additionalProperties: Record<string, unknown>;
+}
+
+function serializeShowcaseDetail(value: ShowcaseDetailObject | string): unknown {
+  if (__nexgenDefinitions.isPlainObject(value)) {
+    return new ShowcaseDetailObjectMapper().toIntermediate(
+      value as unknown as ShowcaseDetailObject,
+    );
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  throw new __nexgenDefinitions.ValidationError([
+    { path: "", reason: "expected one of: ShowcaseDetailObject, string" },
+  ]);
+}
+
+function serializeShowcaseShapeOrName(value: Circle | Square | string): unknown {
+  if ((value as unknown as Record<string, unknown>)["kind"] === "circle") {
+    return new CircleMapper().toIntermediate(value as Circle);
+  }
+  if ((value as unknown as Record<string, unknown>)["kind"] === "square") {
+    return new SquareMapper().toIntermediate(value as Square);
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  throw new __nexgenDefinitions.ValidationError([
+    { path: "", reason: "expected one of: Circle, Square, string" },
+  ]);
 }
 
 const ADDRESS_DECLARED = new Set(["street", "city", "zip"]);
@@ -653,6 +738,52 @@ export class ContactTsMapper {
   }
 }
 
+export class ExtrasMapper {
+  public fromIntermediate(raw: unknown): Extras {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    if (keys.length > 4) {
+      violations.push({
+        path: "",
+        reason: `must have at most 4 properties, got ${keys.length}`,
+      });
+    }
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of keys) {
+      additionalProperties[key] = raw[key];
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Extras): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    const keys = Object.keys(out);
+    if (keys.length > 4) {
+      violations.push({
+        path: "",
+        reason: `must have at most 4 properties, got ${keys.length}`,
+      });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
 export class LabelsMapper {
   public fromIntermediate(raw: unknown): Labels {
     const violations: __nexgenDefinitions.Violation[] = [];
@@ -704,6 +835,133 @@ export class LabelsMapper {
       throw new __nexgenDefinitions.ValidationError(violations);
     }
     return out;
+  }
+}
+
+const LINK_NOTE_DECLARED = new Set(["kind", "href"]);
+
+export class LinkNoteMapper {
+  public fromIntermediate(raw: unknown): LinkNote {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let kind: "link" = undefined as unknown as "link";
+    if (raw.kind === undefined || raw.kind === null) {
+      violations.push({ path: "kind", reason: "required" });
+    } else {
+      if (typeof raw.kind !== "string") {
+        violations.push({ path: "kind", reason: "expected string" });
+      } else if (raw.kind !== LINK_NOTE_KIND_CONST) {
+        violations.push({ path: "kind", reason: `must equal "link"` });
+      } else {
+        kind = raw.kind as "link";
+      }
+    }
+
+    let href: string = undefined as unknown as string;
+    if (raw.href === undefined || raw.href === null) {
+      violations.push({ path: "href", reason: "required" });
+    } else {
+      if (typeof raw.href !== "string") {
+        violations.push({ path: "href", reason: "expected string" });
+      } else {
+        href = raw.href;
+        if ([...raw.href].length < 1) {
+          violations.push({
+            path: "href",
+            reason: `must have length >= 1, got ${[...raw.href].length}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!LINK_NOTE_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: LinkNote = { kind, href, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: LinkNote): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if (value.kind !== "link") {
+      violations.push({ path: "kind", reason: `must equal "link"` });
+    }
+    out.kind = value.kind;
+    if ([...value.href].length < 1) {
+      violations.push({
+        path: "href",
+        reason: `must have length >= 1, got ${[...value.href].length}`,
+      });
+    }
+    out.href = value.href;
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+export class NoteMapper {
+  public fromIntermediate(raw: unknown): Note {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    let out: Note = undefined as unknown as Note;
+    if (__nexgenDefinitions.isPlainObject(raw)) {
+      switch ((raw as Record<string, unknown>)["kind"]) {
+        case "text":
+          try {
+            out = new TextNoteMapper().fromIntermediate(raw);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "", error);
+          }
+          break;
+        case "link":
+          try {
+            out = new LinkNoteMapper().fromIntermediate(raw);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "", error);
+          }
+          break;
+        default:
+          violations.push({
+            path: "",
+            reason: `unknown discriminator kind ${String((raw as Record<string, unknown>)["kind"])}: expected one of ["text", "link"]`,
+          });
+      }
+    } else {
+      violations.push({ path: "", reason: "expected one of: TextNote, LinkNote" });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+
+  public toIntermediate(value: Note): unknown {
+    if ((value as unknown as Record<string, unknown>)["kind"] === "text") {
+      return new TextNoteMapper().toIntermediate(value as TextNote);
+    }
+    if ((value as unknown as Record<string, unknown>)["kind"] === "link") {
+      return new LinkNoteMapper().toIntermediate(value as LinkNote);
+    }
+    throw new __nexgenDefinitions.ValidationError([
+      { path: "", reason: "expected one of: TextNote, LinkNote" },
+    ]);
   }
 }
 
@@ -1449,6 +1707,115 @@ export class ShowcaseMapper {
       }
     }
 
+    let payload: Record<string, unknown> | string | undefined = undefined as unknown as
+      | Record<string, unknown>
+      | string
+      | undefined;
+    if (raw.payload === null) {
+      violations.push({ path: "payload", reason: "explicit null not allowed" });
+    } else if (raw.payload !== undefined) {
+      if (__nexgenDefinitions.isPlainObject(raw.payload)) {
+        payload = raw.payload as Record<string, unknown>;
+      } else if (typeof raw.payload === "string") {
+        payload = raw.payload as string;
+      } else {
+        violations.push({ path: "payload", reason: "expected one of: object, string" });
+      }
+    }
+
+    let detail: ShowcaseDetailObject | string | undefined = undefined as unknown as
+      | ShowcaseDetailObject
+      | string
+      | undefined;
+    if (raw.detail === null) {
+      violations.push({ path: "detail", reason: "explicit null not allowed" });
+    } else if (raw.detail !== undefined) {
+      if (__nexgenDefinitions.isPlainObject(raw.detail)) {
+        try {
+          detail = new ShowcaseDetailObjectMapper().fromIntermediate(raw.detail);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "detail", error);
+        }
+      } else if (typeof raw.detail === "string") {
+        detail = raw.detail as string;
+      } else {
+        violations.push({
+          path: "detail",
+          reason: "expected one of: ShowcaseDetailObject, string",
+        });
+      }
+    }
+
+    let shapeOrName: Circle | Square | string | undefined = undefined as unknown as
+      | Circle
+      | Square
+      | string
+      | undefined;
+    if (raw.shapeOrName === null) {
+      violations.push({ path: "shapeOrName", reason: "explicit null not allowed" });
+    } else if (raw.shapeOrName !== undefined) {
+      if (__nexgenDefinitions.isPlainObject(raw.shapeOrName)) {
+        switch ((raw.shapeOrName as Record<string, unknown>)["kind"]) {
+          case "circle":
+            try {
+              shapeOrName = new CircleMapper().fromIntermediate(raw.shapeOrName);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, "shapeOrName", error);
+            }
+            break;
+          case "square":
+            try {
+              shapeOrName = new SquareMapper().fromIntermediate(raw.shapeOrName);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, "shapeOrName", error);
+            }
+            break;
+          default:
+            violations.push({
+              path: "shapeOrName",
+              reason: `unknown discriminator kind ${String((raw.shapeOrName as Record<string, unknown>)["kind"])}: expected one of ["circle", "square"]`,
+            });
+        }
+      } else if (typeof raw.shapeOrName === "string") {
+        shapeOrName = raw.shapeOrName as string;
+      } else {
+        violations.push({
+          path: "shapeOrName",
+          reason: "expected one of: Circle, Square, string",
+        });
+      }
+    }
+
+    let measurements: number[] | string | undefined = undefined as unknown as
+      | number[]
+      | string
+      | undefined;
+    if (raw.measurements === null) {
+      violations.push({ path: "measurements", reason: "explicit null not allowed" });
+    } else if (raw.measurements !== undefined) {
+      if (Array.isArray(raw.measurements)) {
+        measurements = raw.measurements as number[];
+      } else if (typeof raw.measurements === "string") {
+        measurements = raw.measurements as string;
+      } else {
+        violations.push({
+          path: "measurements",
+          reason: "expected one of: number[], string",
+        });
+      }
+    }
+
+    let extras: Extras | undefined = undefined as unknown as Extras | undefined;
+    if (raw.extras === null) {
+      violations.push({ path: "extras", reason: "explicit null not allowed" });
+    } else if (raw.extras !== undefined) {
+      try {
+        extras = new ExtrasMapper().fromIntermediate(raw.extras);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "extras", error);
+      }
+    }
+
     let shape: Shape | undefined = undefined as unknown as Shape | undefined;
     if (raw.shape === null) {
       violations.push({ path: "shape", reason: "explicit null not allowed" });
@@ -1457,6 +1824,17 @@ export class ShowcaseMapper {
         shape = new ShapeMapper().fromIntermediate(raw.shape);
       } catch (error) {
         __nexgenDefinitions.collect(violations, "shape", error);
+      }
+    }
+
+    let note: Note | undefined = undefined as unknown as Note | undefined;
+    if (raw.note === null) {
+      violations.push({ path: "note", reason: "explicit null not allowed" });
+    } else if (raw.note !== undefined) {
+      try {
+        note = new NoteMapper().fromIntermediate(raw.note);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "note", error);
       }
     }
 
@@ -1554,7 +1932,13 @@ export class ShowcaseMapper {
         key !== "aliases" &&
         key !== "roles" &&
         key !== "idOrName" &&
+        key !== "payload" &&
+        key !== "detail" &&
+        key !== "shapeOrName" &&
+        key !== "measurements" &&
+        key !== "extras" &&
         key !== "shape" &&
+        key !== "note" &&
         key !== "address" &&
         key !== "labels" &&
         key !== "settings" &&
@@ -1655,8 +2039,26 @@ export class ShowcaseMapper {
     if (idOrName !== undefined) {
       out.idOrName = idOrName;
     }
+    if (payload !== undefined) {
+      out.payload = payload;
+    }
+    if (detail !== undefined) {
+      out.detail = detail;
+    }
+    if (shapeOrName !== undefined) {
+      out.shapeOrName = shapeOrName;
+    }
+    if (measurements !== undefined) {
+      out.measurements = measurements;
+    }
+    if (extras !== undefined) {
+      out.extras = extras;
+    }
     if (shape !== undefined) {
       out.shape = shape;
+    }
+    if (note !== undefined) {
+      out.note = note;
     }
     if (address !== undefined) {
       out.address = address;
@@ -1940,8 +2342,26 @@ export class ShowcaseMapper {
     if (value.idOrName !== undefined) {
       out.idOrName = value.idOrName;
     }
+    if (value.payload !== undefined) {
+      out.payload = value.payload;
+    }
+    if (value.detail !== undefined) {
+      out.detail = serializeShowcaseDetail(value.detail);
+    }
+    if (value.shapeOrName !== undefined) {
+      out.shapeOrName = serializeShowcaseShapeOrName(value.shapeOrName);
+    }
+    if (value.measurements !== undefined) {
+      out.measurements = value.measurements;
+    }
+    if (value.extras !== undefined) {
+      out.extras = new ExtrasMapper().toIntermediate(value.extras);
+    }
     if (value.shape !== undefined) {
       out.shape = new ShapeMapper().toIntermediate(value.shape);
+    }
+    if (value.note !== undefined) {
+      out.note = new NoteMapper().toIntermediate(value.note);
     }
     if (value.address !== undefined) {
       out.address = new AddressMapper().toIntermediate(value.address);
@@ -1957,6 +2377,85 @@ export class ShowcaseMapper {
     }
     if (value.contact !== undefined) {
       out.contact = new ContactTsMapper().toIntermediate(value.contact);
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_DETAIL_OBJECT_DECLARED = new Set(["code", "hint"]);
+
+export class ShowcaseDetailObjectMapper {
+  public fromIntermediate(raw: unknown): ShowcaseDetailObject {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let code: string = undefined as unknown as string;
+    if (raw.code === undefined || raw.code === null) {
+      violations.push({ path: "code", reason: "required" });
+    } else {
+      if (typeof raw.code !== "string") {
+        violations.push({ path: "code", reason: "expected string" });
+      } else {
+        code = raw.code;
+        if ([...raw.code].length < 1) {
+          violations.push({
+            path: "code",
+            reason: `must have length >= 1, got ${[...raw.code].length}`,
+          });
+        }
+      }
+    }
+
+    let hint: string | undefined = undefined as unknown as string | undefined;
+    if (raw.hint === null) {
+      violations.push({ path: "hint", reason: "explicit null not allowed" });
+    } else if (raw.hint !== undefined) {
+      if (typeof raw.hint !== "string") {
+        violations.push({ path: "hint", reason: "expected string" });
+      } else {
+        hint = raw.hint;
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_DETAIL_OBJECT_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseDetailObject = { code, additionalProperties };
+    if (hint !== undefined) {
+      out.hint = hint;
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseDetailObject): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if ([...value.code].length < 1) {
+      violations.push({
+        path: "code",
+        reason: `must have length >= 1, got ${[...value.code].length}`,
+      });
+    }
+    out.code = value.code;
+    if (value.hint !== undefined) {
+      out.hint = value.hint;
+    }
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
     }
     if (violations.length) {
       throw new __nexgenDefinitions.ValidationError(violations);
@@ -2062,6 +2561,85 @@ export class SquareMapper {
     }
     out.kind = value.kind;
     out.side = value.side;
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const TEXT_NOTE_DECLARED = new Set(["kind", "body"]);
+
+export class TextNoteMapper {
+  public fromIntermediate(raw: unknown): TextNote {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let kind: "text" = undefined as unknown as "text";
+    if (raw.kind === undefined || raw.kind === null) {
+      violations.push({ path: "kind", reason: "required" });
+    } else {
+      if (typeof raw.kind !== "string") {
+        violations.push({ path: "kind", reason: "expected string" });
+      } else if (raw.kind !== TEXT_NOTE_KIND_CONST) {
+        violations.push({ path: "kind", reason: `must equal "text"` });
+      } else {
+        kind = raw.kind as "text";
+      }
+    }
+
+    let body: string = undefined as unknown as string;
+    if (raw.body === undefined || raw.body === null) {
+      violations.push({ path: "body", reason: "required" });
+    } else {
+      if (typeof raw.body !== "string") {
+        violations.push({ path: "body", reason: "expected string" });
+      } else {
+        body = raw.body;
+        if ([...raw.body].length < 1) {
+          violations.push({
+            path: "body",
+            reason: `must have length >= 1, got ${[...raw.body].length}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!TEXT_NOTE_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: TextNote = { kind, body, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: TextNote): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if (value.kind !== "text") {
+      violations.push({ path: "kind", reason: `must equal "text"` });
+    }
+    out.kind = value.kind;
+    if ([...value.body].length < 1) {
+      violations.push({
+        path: "body",
+        reason: `must have length >= 1, got ${[...value.body].length}`,
+      });
+    }
+    out.body = value.body;
     for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
       out[key] = entry;
     }

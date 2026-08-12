@@ -1,0 +1,8 @@
+{
+  "note": "free-form",
+  "count": 9007199254740992,
+  "nested": {
+    "a": 1
+  },
+  "flag": true
+}

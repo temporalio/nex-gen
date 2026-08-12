@@ -1361,6 +1361,12 @@ struct GoUnionVariant {
     /// True when the concrete type has its own `Validate`/`UnmarshalJSON` (an
     /// object branch); false for a synthesized scalar/array wrapper.
     is_object: bool,
+    /// Set for an **inline** object branch: the map shape this union declares as
+    /// `<Union>Object` (Go needs a named type to carry the marker method). `None`
+    /// for a `$ref` object branch, whose named model already exists. The loader
+    /// admits only the free-form object inline, so a struct wrapping
+    /// `AdditionalProperties` expresses the branch in full.
+    owned_map: Option<GoMapShape>,
 }
 
 /// A Go closed sum type emitted as a sealed interface.
@@ -1457,6 +1463,12 @@ fn classify_go_union(
                 nullable = true;
             }
             Some("object") => {
+                // An inline branch has no named model, so the union declares the
+                // variant type itself (`<Union>Object`).
+                let owned_map = match &branch.reference {
+                    Some(_) => None,
+                    None => go_map_shape(&resolved, model_names).ok().flatten(),
+                };
                 let go_type = branch
                     .reference
                     .as_ref()
@@ -1470,6 +1482,7 @@ fn classify_go_union(
                     discriminant_value: None,
                     schema: resolved,
                     is_object: true,
+                    owned_map,
                 });
             }
             Some("string") => variants.push(GoUnionVariant {
@@ -1480,6 +1493,7 @@ fn classify_go_union(
                 discriminant_value: None,
                 schema: resolved,
                 is_object: false,
+                owned_map: None,
             }),
             Some("integer") => variants.push(GoUnionVariant {
                 go_type: format!("{union_name}Integer"),
@@ -1489,6 +1503,7 @@ fn classify_go_union(
                 discriminant_value: None,
                 schema: resolved,
                 is_object: false,
+                owned_map: None,
             }),
             Some("number") => variants.push(GoUnionVariant {
                 go_type: format!("{union_name}Number"),
@@ -1498,6 +1513,7 @@ fn classify_go_union(
                 discriminant_value: None,
                 schema: resolved,
                 is_object: false,
+                owned_map: None,
             }),
             Some("boolean") => variants.push(GoUnionVariant {
                 go_type: format!("{union_name}Boolean"),
@@ -1507,6 +1523,7 @@ fn classify_go_union(
                 discriminant_value: None,
                 schema: resolved,
                 is_object: false,
+                owned_map: None,
             }),
             Some("array") => {
                 let item = resolved
@@ -1525,6 +1542,7 @@ fn classify_go_union(
                     discriminant_value: None,
                     schema: resolved,
                     is_object: false,
+                    owned_map: None,
                 });
             }
             _ => {}
@@ -1688,16 +1706,40 @@ fn render_go_unions(
                 output.push_str(underlying);
                 output.push_str("\n\n");
             }
+            // An inline object branch: declare the map-shaped struct the union
+            // owns, with the same (de)serialize/validate surface a named
+            // map-shaped model gets.
+            if let Some(shape) = &variant.owned_map {
+                render_go_schema_doc(
+                    output,
+                    "",
+                    &variant.go_type,
+                    &variant.schema,
+                    "type",
+                    &format!(
+                        "{} wraps the object admissible in the {} union.",
+                        variant.go_type, union.name
+                    ),
+                );
+                output.push_str("type ");
+                output.push_str(&variant.go_type);
+                output.push_str(" struct {\n");
+                render_go_map_field(output, shape);
+                output.push_str("}\n\n");
+            }
             // Marker method.
             output.push_str("func (");
             output.push_str(&variant.go_type);
             output.push_str(") ");
             output.push_str(&union.marker_method());
             output.push_str("() {}\n\n");
-            // A synthesized wrapper needs its own Validate (an object branch
-            // already has one on its POJO).
+            // A synthesized wrapper needs its own Validate (a `$ref` object
+            // branch already has one on its named model).
             if variant.synthesized.is_some() {
                 render_go_variant_validate(output, variant);
+            }
+            if let Some(shape) = &variant.owned_map {
+                render_go_map_methods(output, &variant.go_type, &variant.schema, shape);
             }
         }
         render_go_union_dispatch(output, union);
@@ -1901,12 +1943,10 @@ fn render_model(
     output.push_str("type ");
     output.push_str(&model.model_name);
     output.push_str(" struct {\n");
-    if let Some(value_schema) = typed_map_value_schema(&schema)? {
-        output.push_str("\tAdditionalProperties map[string]");
-        output.push_str(&go_type_annotation(&value_schema, "", model_names)?);
-        output.push('\n');
+    if let Some(shape) = go_map_shape(&schema, model_names)? {
+        render_go_map_field(output, &shape);
         output.push_str("}\n\n");
-        render_typed_map_methods(output, model, &schema, &value_schema, model_names)?;
+        render_go_map_methods(output, &model.model_name, &schema, &shape);
         return Ok(());
     }
 
@@ -2780,34 +2820,85 @@ fn render_temporal_property_marshal(
     output.push('\n');
 }
 
-fn render_typed_map_methods(
+/// Emits the `AdditionalProperties map[string]T` member of a map-shaped model.
+/// The caller has already opened the struct declaration.
+fn render_go_map_field(output: &mut String, shape: &GoMapShape) {
+    output.push_str("\t// AdditionalProperties holds every member of this map-shaped object.\n");
+    output.push_str("\tAdditionalProperties map[string]");
+    output.push_str(&shape.element_type);
+    output.push('\n');
+}
+
+/// Emits `Validate`/`UnmarshalJSON`/`MarshalJSON` for a map-shaped model: the
+/// member-count and key-shape constraints apply to the whole map, and each
+/// member decodes through its element type's parse adapter (P12).
+fn render_go_map_methods(
     output: &mut String,
-    model: &PlannedJsonType,
+    type_name: &str,
     schema: &Schema,
-    value_schema: &Schema,
-    _model_names: &BTreeMap<String, String>,
-) -> Result<()> {
+    shape: &GoMapShape,
+) {
+    let element_type = shape.element_type.as_str();
     output
         .push_str("// Validate checks m against every constraint and returns a *ValidationError\n");
     output.push_str("// listing any violations.\n");
     output.push_str("func (m ");
-    output.push_str(&model.model_name);
+    output.push_str(type_name);
     output.push_str(") Validate() error {\n\tvar errs []Violation\n");
     render_go_property_count_checks(output, "len(m.AdditionalProperties)", schema, "\t");
     if let Some(subschema) = &schema.property_names {
         render_go_property_name_checks(output, "m.AdditionalProperties", subschema, "\t");
     }
+    // A named member type carries its own constraints; re-run them before emit.
+    if shape.element == GoMapElement::Model {
+        output.push_str(
+            "\tfor k, v := range m.AdditionalProperties {\n\t\tmergeNested(&errs, k, v.Validate())\n\t}\n",
+        );
+    }
     output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+
     output.push_str("// UnmarshalJSON parses data into m and validates it, returning a\n");
     output.push_str("// *ValidationError listing any violations.\n");
     output.push_str("func (m *");
-    output.push_str(&model.model_name);
+    output.push_str(type_name);
     output.push_str(") UnmarshalJSON(data []byte) error {\n");
     output.push_str("\tvar raw map[string]json.RawMessage\n\tif err := json.Unmarshal(data, &raw); err != nil {\n\t\treturn err\n\t}\n\tvar errs []Violation\n");
-    output.push_str("\tm.AdditionalProperties = make(map[string]string, len(raw))\n");
-    output.push_str("\tfor k, v := range raw {\n\t\tif isNull(v) {\n\t\t\terrs = append(errs, Violation{k, \"explicit null not allowed\"})\n\t\t\tcontinue\n\t\t}\n");
-    if value_schema.ty.as_ref().and_then(Value::as_str) == Some("string") {
-        output.push_str("\t\tvar s string\n\t\tif err := json.Unmarshal(v, &s); err != nil {\n\t\t\terrs = append(errs, Violation{k, \"expected string\"})\n\t\t\tcontinue\n\t\t}\n\t\tm.AdditionalProperties[k] = s\n");
+    output.push_str("\tm.AdditionalProperties = make(map[string]");
+    output.push_str(element_type);
+    output.push_str(", len(raw))\n");
+    output.push_str("\tfor k, v := range raw {\n");
+    let nullable = shape.value_schema.as_ref().is_some_and(allows_null);
+    match shape.element {
+        // Untyped members are preserved byte-for-byte, `null` included (P13).
+        GoMapElement::Raw => {
+            output.push_str("\t\tm.AdditionalProperties[k] = v\n");
+        }
+        GoMapElement::String
+        | GoMapElement::Integer
+        | GoMapElement::Number
+        | GoMapElement::Boolean => {
+            let helper = match shape.element {
+                GoMapElement::String => "parseStringField",
+                GoMapElement::Integer => "parseIntegerField",
+                GoMapElement::Number => "parseNumberField",
+                _ => "parseBoolField",
+            };
+            output.push_str("\t\tif value, ok := ");
+            output.push_str(helper);
+            output.push_str("(&v, k, true, ");
+            output.push_str(if nullable { "true" } else { "false" });
+            output.push_str(", &errs); ok {\n");
+            output.push_str("\t\t\tm.AdditionalProperties[k] = value\n\t\t}\n");
+        }
+        GoMapElement::Model | GoMapElement::Other => {
+            if !nullable {
+                output.push_str("\t\tif isNull(v) {\n\t\t\terrs = append(errs, Violation{k, \"explicit null not allowed\"})\n\t\t\tcontinue\n\t\t}\n");
+            }
+            output.push_str("\t\tvar value ");
+            output.push_str(element_type);
+            output.push_str("\n\t\tif err := json.Unmarshal(v, &value); err != nil {\n\t\t\tmergeNested(&errs, k, err)\n\t\t\tcontinue\n\t\t}\n");
+            output.push_str("\t\tm.AdditionalProperties[k] = value\n");
+        }
     }
     output.push_str("\t}\n");
     // Object member-count and key-shape constraints over the wire member set.
@@ -2816,12 +2907,14 @@ fn render_typed_map_methods(
         render_go_property_name_checks(output, "raw", subschema, "\t");
     }
     output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+
     output.push_str("// MarshalJSON validates m, then serializes it to JSON, returning a\n");
     output.push_str("// *ValidationError if validation fails.\n");
     output.push_str("func (m ");
-    output.push_str(&model.model_name);
-    output.push_str(") MarshalJSON() ([]byte, error) {\n\tif err := m.Validate(); err != nil {\n\t\treturn nil, err\n\t}\n\tout := make(map[string]string, len(m.AdditionalProperties))\n\tfor k, v := range m.AdditionalProperties {\n\t\tout[k] = v\n\t}\n\treturn json.Marshal(out)\n}\n\n");
-    Ok(())
+    output.push_str(type_name);
+    output.push_str(") MarshalJSON() ([]byte, error) {\n\tif err := m.Validate(); err != nil {\n\t\treturn nil, err\n\t}\n\tout := make(map[string]");
+    output.push_str(element_type);
+    output.push_str(", len(m.AdditionalProperties))\n\tfor k, v := range m.AdditionalProperties {\n\t\tout[k] = v\n\t}\n\treturn json.Marshal(out)\n}\n\n");
 }
 
 /// True when the model has any materialized temporal `format` property.
@@ -3138,6 +3231,85 @@ fn typed_map_value_schema(schema: &Schema) -> Result<Option<Schema>> {
             }),
         _ => Ok(None),
     }
+}
+
+/// How a map-shaped model's members decode: the wire kind of its
+/// `additionalProperties` element type, which selects the parse helper and the
+/// `Validate` recursion.
+#[derive(Debug, Clone, PartialEq)]
+enum GoMapElement {
+    /// Untyped members (`additionalProperties: true`), kept verbatim as
+    /// `json.RawMessage` so numbers and precision survive a round-trip (P13).
+    Raw,
+    String,
+    Integer,
+    Number,
+    Boolean,
+    /// A `$ref` to a named model: its own `UnmarshalJSON`/`Validate` carry the
+    /// member's constraints.
+    Model,
+    /// Any other typed element (an array, a nested map): decoded by
+    /// `encoding/json` into the element type.
+    Other,
+}
+
+/// A map-shaped object model — no declared `properties`, members governed by
+/// `additionalProperties` — emitted as a struct wrapping a single
+/// `AdditionalProperties map[string]T` member (specs/json-schema/features/additionalProperties.md).
+#[derive(Debug, Clone)]
+struct GoMapShape {
+    /// The declared member schema; `None` for untyped members.
+    value_schema: Option<Schema>,
+    /// The Go element type `T` of `AdditionalProperties map[string]T`.
+    element_type: String,
+    element: GoMapElement,
+}
+
+/// Classifies a schema as map-shaped, i.e. an object with no declared
+/// `properties` whose members are open (`additionalProperties` either typed or
+/// `true`). A closed empty object (`additionalProperties: false`) is not
+/// map-shaped — it admits no members at all and stays an empty struct.
+fn go_map_shape(
+    schema: &Schema,
+    model_names: &BTreeMap<String, String>,
+) -> Result<Option<GoMapShape>> {
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("object") {
+        return Ok(None);
+    }
+    if schema
+        .properties
+        .as_ref()
+        .is_some_and(|properties| !properties.is_empty())
+    {
+        return Ok(None);
+    }
+    if let Some(value_schema) = typed_map_value_schema(schema)? {
+        let element_type = go_type_annotation(&value_schema, "", model_names)?;
+        let element = if value_schema.reference.is_some() {
+            GoMapElement::Model
+        } else {
+            match value_schema.ty.as_ref().and_then(Value::as_str) {
+                Some("string") if temporal_kind(&value_schema).is_none() => GoMapElement::String,
+                Some("integer") => GoMapElement::Integer,
+                Some("number") => GoMapElement::Number,
+                Some("boolean") => GoMapElement::Boolean,
+                _ => GoMapElement::Other,
+            }
+        };
+        return Ok(Some(GoMapShape {
+            value_schema: Some(value_schema),
+            element_type,
+            element,
+        }));
+    }
+    if schema.additional_properties.as_ref() == Some(&Value::Bool(false)) {
+        return Ok(None);
+    }
+    Ok(Some(GoMapShape {
+        value_schema: None,
+        element_type: "json.RawMessage".to_string(),
+        element: GoMapElement::Raw,
+    }))
 }
 
 fn go_property_type(

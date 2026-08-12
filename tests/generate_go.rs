@@ -16,6 +16,20 @@ use common::json_input_path;
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A property whose union has one inline structured object branch (named
+/// `<Union>Object`) and one scalar branch.
+const INLINE_OBJECT_BRANCH_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  payload:
+    oneOf:
+      - type: object
+        required: [text]
+        properties:
+          text: { type: string, minLength: 1 }
+      - { type: string }
+"#;
+
 fn generate_to_string_with_inputs(
     language: nexgen::language::Language,
     input_paths: &[PathBuf],
@@ -698,6 +712,31 @@ fn go_json_generation_matches_checked_in_output() {
                         // constants while the wire values stay `1` / "active".
                         assert!(generated.contains("RevisionGo ShowcaseRevision = 1"));
                         assert!(generated.contains("ActiveGo ShowcaseStatus = \"active\""));
+                        // An inline free-form object branch: the union declares
+                        // the variant struct, whose sole member carries the wire
+                        // members verbatim (a named free-form model gets the same
+                        // shape).
+                        assert!(generated.contains("type ShowcasePayloadObject struct"));
+                        assert!(
+                            generated
+                                .contains("func (ShowcasePayloadObject) isShowcasePayload() {}")
+                        );
+                        assert!(generated.contains("type Extras struct"));
+                        // A tagged union whose branches are written inline: each
+                        // branch names itself with `x-go-name` and is emitted as a
+                        // full model implementing the union interface.
+                        assert!(generated.contains("type TextNote struct"));
+                        assert!(generated.contains("func (TextNote) isNote() {}"));
+                        assert!(generated.contains("func (LinkNote) isNote() {}"));
+                        // The lone inline object branch of a property union
+                        // derives its name from the union it belongs to.
+                        assert!(generated.contains("type ShowcaseDetailObject struct"));
+                        assert!(
+                            generated.contains("func (ShowcaseDetailObject) isShowcaseDetail() {}")
+                        );
+                        assert!(
+                            generated.contains("AdditionalProperties map[string]json.RawMessage")
+                        );
                         // Type-level override: `Contact` emits as `ContactGo`
                         // at its declaration and at every `$ref`.
                         assert!(generated.contains("type ContactGo struct"));
@@ -1583,4 +1622,42 @@ fn generate_formatted_go_json_output(
         .status()
         .unwrap();
     assert!(format_status.success());
+}
+
+/// An inline **structured** object `oneOf` branch on a property: the branch is
+/// named `<Union>Object` and emitted as a full model (struct, `Validate`,
+/// (de)serialize) that implements the union's marker method, so the union's
+/// object token has a concrete type to decode into.
+/// See `specs/json-schema/features/oneOf.md` ("Object branches").
+#[test]
+fn go_json_names_inline_object_union_branch() {
+    let temp_dir = unique_output_path("go-json-inline-branch");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("detail.yaml");
+    fs::write(&input_path, INLINE_OBJECT_BRANCH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("detail");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("detail.go")).unwrap();
+
+    assert!(rendered.contains("Payload DetailPayload `json:\"payload,omitempty\"`"));
+    assert!(rendered.contains("type DetailPayloadObject struct {"));
+    assert!(rendered.contains("Text string `json:\"text\"`"));
+    assert!(rendered.contains("func (DetailPayloadObject) isDetailPayload() {}"));
+    // The branch decodes through its own model, so its constraints apply.
+    assert!(rendered.contains("var v DetailPayloadObject"));
+    assert!(rendered.contains("func (m DetailPayloadObject) Validate() error {"));
+    assert!(rendered.contains("func (m *DetailPayloadObject) UnmarshalJSON(data []byte) error {"));
+    fs::remove_dir_all(temp_dir).unwrap();
 }

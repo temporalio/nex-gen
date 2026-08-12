@@ -1188,9 +1188,18 @@ fn render_model(
     output.push_str(&python_string_literal(extra));
     output.push_str(")\n");
 
-    if let Some(value_schema) = typed_map_value_schema(&schema)? {
-        render_typed_map_model_methods(output, &schema, &value_schema);
-        *needs_pydantic_core = true;
+    if is_python_map_model(&schema) {
+        // A map-shaped model has no declared fields: its members live in
+        // Pydantic's `model_extra`, validated by the generated model validator.
+        let value_schema = typed_map_value_schema(&schema)?;
+        if value_schema.is_some()
+            || schema.min_properties.is_some()
+            || schema.max_properties.is_some()
+            || schema.property_names.is_some()
+        {
+            render_map_model_methods(output, &schema, value_schema.as_ref());
+            *needs_pydantic_core = true;
+        }
         return Ok(());
     }
 
@@ -1372,12 +1381,29 @@ fn typed_map_value_schema(schema: &Schema) -> Result<Option<Schema>> {
     }
 }
 
-fn render_typed_map_model_methods(output: &mut String, schema: &Schema, value_schema: &Schema) {
+/// True when the model is map-shaped: an object with no declared `properties`
+/// whose members are open (typed via `additionalProperties`, or free-form for
+/// `true`). A closed empty object (`additionalProperties: false`) admits no
+/// members and is not map-shaped.
+fn is_python_map_model(schema: &Schema) -> bool {
+    schema.ty.as_ref().and_then(Value::as_str) == Some("object")
+        && schema
+            .properties
+            .as_ref()
+            .is_none_or(|properties| properties.is_empty())
+        && schema.additional_properties.as_ref() != Some(&Value::Bool(false))
+}
+
+/// Emits a map-shaped model's `_validate_extras` validator: the member type
+/// check (typed maps only) plus the member-count and key-shape constraints.
+fn render_map_model_methods(output: &mut String, schema: &Schema, value_schema: Option<&Schema>) {
     output.push_str("\n    @pydantic.model_validator(mode=\"after\")\n");
     output.push_str("    def _validate_extras(self) -> typing.Any:\n");
     output.push_str("        extra = typing.cast(dict[str, object], self.model_extra or {})\n");
     output.push_str("        errors: list[pydantic_core.InitErrorDetails] = []\n");
-    render_typed_map_value_validator(output, value_schema);
+    if let Some(value_schema) = value_schema {
+        render_typed_map_value_validator(output, value_schema);
+    }
     // `len(extra)` is the distinct wire-key count for a map (no declared
     // fields), counted as one number (never a declared + extras sum).
     if let Some(min) = schema.min_properties {

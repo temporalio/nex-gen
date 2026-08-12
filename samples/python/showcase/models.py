@@ -136,7 +136,7 @@ class Attributes(pydantic.BaseModel):
 
 
 class Circle(pydantic.BaseModel):
-    """A circle branch of the Shape tagged union."""
+    """A circle branch of the Shape and shapeOrName tagged unions."""
 
     model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
         strict=True, populate_by_name=True, extra="allow"
@@ -261,6 +261,48 @@ class ContactPy(pydantic.BaseModel):
         return _emit_set_fields(self, handler)
 
 
+class Extras(pydantic.BaseModel):
+    """A free-form object (`additionalProperties: true` with no declared properties): every
+    member is carried verbatim, bounded to at most 4 members. Members keep their wire
+    form, so large integers survive a round-trip untruncated.
+    """
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    @pydantic.model_validator(mode="after")
+    def _validate_extras(self) -> typing.Any:
+        extra = typing.cast(dict[str, object], self.model_extra or {})
+        errors: list[pydantic_core.InitErrorDetails] = []
+        if len(extra) > 4:
+            errors.append(
+                pydantic_core.InitErrorDetails(
+                    type=pydantic_core.PydanticCustomError(
+                        "too_many_properties",
+                        typing.cast(
+                            typing.Any,
+                            f"must have at most 4 properties, got {len(extra)}",
+                        ),
+                    ),
+                    loc=(),
+                    input=len(extra),
+                )
+            )
+        if errors:
+            raise pydantic.ValidationError.from_exception_data(
+                title=type(self).__name__, line_errors=errors
+            )
+        return self
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return dict(typing.cast(dict[str, object], self.model_extra or {}))
+
+
 class Labels(pydantic.BaseModel):
     """Arbitrary string key/value labels (typed map)."""
 
@@ -309,6 +351,41 @@ class Labels(pydantic.BaseModel):
         _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
         return dict(typing.cast(dict[str, object], self.model_extra or {}))
+
+
+class LinkNote(pydantic.BaseModel):
+    """A link note branch, named inline."""
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    kind: typing.Literal["link"] = pydantic.Field(default="link")
+
+    href: str = pydantic.Field(min_length=1)
+
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def _inject_const_kind(
+        cls,
+        data: object,
+    ) -> object:
+        if isinstance(data, dict):
+            values = typing.cast(dict[str, object], data)
+            if "kind" not in values:
+                data = {**values, "kind": "link"}
+            elif values.get("kind", values.get("kind")) != "link":
+                raise pydantic_core.PydanticCustomError(
+                    "const", 'kind must equal "link"'
+                )
+        return typing.cast(object, data)
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return _emit_set_fields(self, handler)
 
 
 class Settings(pydantic.BaseModel):
@@ -591,7 +668,47 @@ class Showcase(pydantic.BaseModel):
     token itself is the selector.
     """
 
+    payload: dict[str, typing.Any] | str | None = pydantic.Field(default=None)
+    """Mixed-kind union whose object branch is an inline free-form object: the wire value
+    is either an arbitrary object (members carried verbatim) or a string, selected by
+    its JSON token. The free-form object is the one object branch that needs no type
+    name — TypeScript and Python carry it structurally, Go and Java wrap it as
+    `<Union>Object`.
+    """
+
+    detail: ShowcaseDetailObject | str | None = pydantic.Field(default=None)
+    """Mixed-kind union whose object branch is an inline *structured* object, written
+    directly on the property rather than in `$defs`. It is the only object branch of
+    this union, so it derives its name from the union it belongs to —
+    `ShowcaseDetailObject` — and is emitted as an ordinary model: its members keep their
+    own constraints and it stays open to unknown ones.
+    """
+
+    shape_or_name: Circle | Square | str | None = pydantic.Field(
+        default=None, alias="shapeOrName"
+    )
+    """Tagged object union mixed with a scalar kind: the two selector layers compose — the
+    JSON token picks object-vs-string, and, for an object, the shared required `kind`
+    const picks Circle-vs-Square. Written inline on the property, so the union itself is
+    named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`),
+    and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong
+    to more than one union (Go gains a second marker method, Java a second implemented
+    interface).
+    """
+
+    measurements: list[float] | str | None = pydantic.Field(default=None)
+    """Mixed-kind union with an array branch: the wire value is either a list of numbers or
+    a string, selected by its JSON token. An array branch has no definition to take a
+    name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a
+    defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it
+    structurally as `number[]` / `list[float]`.
+    """
+
+    extras: Extras | None = pydantic.Field(default=None)
+
     shape: Shape | None = pydantic.Field(default=None)
+
+    note: Note | None = pydantic.Field(default=None)
 
     address: Address | None = pydantic.Field(default=None)
 
@@ -773,6 +890,8 @@ class Showcase(pydantic.BaseModel):
             "contact",
             "contactEmail",
             "contact_email",
+            "detail",
+            "extras",
             "gateway",
             "homepage",
             "host",
@@ -782,7 +901,10 @@ class Showcase(pydantic.BaseModel):
             "legacyId",
             "legacy_id_py",
             "level",
+            "measurements",
             "nickname",
+            "note",
+            "payload",
             "phrase",
             "priority",
             "ratio",
@@ -791,6 +913,8 @@ class Showcase(pydantic.BaseModel):
             "roles",
             "settings",
             "shape",
+            "shapeOrName",
+            "shape_or_name",
             "sku",
             "step",
             "tags",
@@ -799,6 +923,34 @@ class Showcase(pydantic.BaseModel):
             "verbose",
         }
     )
+
+    @pydantic.model_validator(mode="wrap")
+    @classmethod
+    def _reject_null(
+        cls,
+        data: object,
+        handler: typing.Callable[[object], typing.Any],
+    ) -> typing.Any:
+        return _reject_explicit_null(cls, data, handler)
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return _emit_set_fields(self, handler)
+
+
+class ShowcaseDetailObject(pydantic.BaseModel):
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    code: str = pydantic.Field(min_length=1)
+
+    hint: str | None = pydantic.Field(default=None)
+
+    _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset({"hint"})
 
     @pydantic.model_validator(mode="wrap")
     @classmethod
@@ -833,7 +985,7 @@ class GetShowcaseInput(pydantic.BaseModel):
 
 
 class Square(pydantic.BaseModel):
-    """A square branch of the Shape tagged union."""
+    """A square branch of the Shape and shapeOrName tagged unions."""
 
     model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
         strict=True, populate_by_name=True, extra="allow"
@@ -856,6 +1008,41 @@ class Square(pydantic.BaseModel):
             elif values.get("kind", values.get("kind")) != "square":
                 raise pydantic_core.PydanticCustomError(
                     "const", 'kind must equal "square"'
+                )
+        return typing.cast(object, data)
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return _emit_set_fields(self, handler)
+
+
+class TextNote(pydantic.BaseModel):
+    """A text note branch, named inline."""
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    kind: typing.Literal["text"] = pydantic.Field(default="text")
+
+    body: str = pydantic.Field(min_length=1)
+
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def _inject_const_kind(
+        cls,
+        data: object,
+    ) -> object:
+        if isinstance(data, dict):
+            values = typing.cast(dict[str, object], data)
+            if "kind" not in values:
+                data = {**values, "kind": "text"}
+            elif values.get("kind", values.get("kind")) != "text":
+                raise pydantic_core.PydanticCustomError(
+                    "const", 'kind must equal "text"'
                 )
         return typing.cast(object, data)
 
@@ -939,6 +1126,16 @@ class WidgetBase(pydantic.BaseModel):
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
         return _emit_set_fields(self, handler)
+
+
+"""A tagged union whose object branches are written **inline** rather than `$ref`ed: each
+branch is emitted as a named type, so each names itself with the per-language
+`x-<lang>-name` override (two or more inline object branches cannot derive
+distinguishing names — the discriminator `const` is a wire value, not an identifier).
+Selection reads the shared required `kind` const, and each branch keeps its own
+constraints and stays open to unknown members.
+"""
+Note: typing.TypeAlias = TextNote | LinkNote
 
 
 """A closed sum type (discriminated union) of Circle | Square, tagged by the shared

@@ -20,13 +20,13 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A square branch of the Shape and shapeOrName tagged unions.
+ * A link note branch, named inline.
  */
-@JsonSerialize(using = Square.Serializer.class)
-@JsonDeserialize(using = Square.Deserializer.class)
-public final class Square implements Shape, Showcase.ShapeOrName {
+@JsonSerialize(using = LinkNote.Serializer.class)
+@JsonDeserialize(using = LinkNote.Deserializer.class)
+public final class LinkNote implements Note {
     public static final class Kind {
-        public static final Kind KIND = new Kind("square");
+        public static final Kind KIND = new Kind("link");
 
         private final String value;
 
@@ -39,10 +39,10 @@ public final class Square implements Shape, Showcase.ShapeOrName {
             if (value == null) {
                 return null;
             }
-            if ("square".equals(value)) {
+            if ("link".equals(value)) {
                 return KIND;
             }
-            throw new IllegalArgumentException("must equal \"square\", got \"" + value + "\"");
+            throw new IllegalArgumentException("must equal \"link\", got \"" + value + "\"");
         }
 
         @JsonValue
@@ -74,12 +74,12 @@ public final class Square implements Shape, Showcase.ShapeOrName {
     }
 
     private final Kind kind;
-    private final double side;
+    private final String href;
     private final Map<String, JsonNode> additionalProperties;
 
-    public Square(Kind kind, double side, Map<String, JsonNode> additionalProperties) {
+    public LinkNote(Kind kind, String href, Map<String, JsonNode> additionalProperties) {
         this.kind = kind;
-        this.side = side;
+        this.href = href;
         this.additionalProperties = additionalProperties;
     }
 
@@ -87,8 +87,8 @@ public final class Square implements Shape, Showcase.ShapeOrName {
         return kind;
     }
 
-    public double getSide() {
-        return side;
+    public String getHref() {
+        return href;
     }
 
     public Map<String, JsonNode> getAdditionalProperties() {
@@ -100,38 +100,49 @@ public final class Square implements Shape, Showcase.ShapeOrName {
         if (this == other) {
             return true;
         }
-        if (!(other instanceof Square)) {
+        if (!(other instanceof LinkNote)) {
             return false;
         }
-        Square that = (Square) other;
+        LinkNote that = (LinkNote) other;
         return Objects.equals(this.kind, that.kind)
-            && this.side == that.side
+            && Objects.equals(this.href, that.href)
             && Objects.equals(this.additionalProperties, that.additionalProperties);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, side, additionalProperties);
+        return Objects.hash(kind, href, additionalProperties);
     }
 
     @Override
     public String toString() {
-        return "Square{"
+        return "LinkNote{"
             + "kind=" + kind
-            + ", side=" + side
+            + ", href=" + href
             + ", additionalProperties=" + additionalProperties
             + "}";
     }
 
-    public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Square> {
+    public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<LinkNote> {
         @Override
-        public void serialize(Square value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+        public void serialize(LinkNote value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
+            if (value.href != null) {
+                int length = value.href.codePointCount(0, value.href.length());
+                if (length < 1) {
+                    violations.add(new Violation("href", "must have length >= 1, got " + length));
+                }
+            }
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
             gen.writeStartObject();
             if (value.kind != null) {
                 gen.writeStringField("kind", value.kind.getValue());
             }
-            gen.writeNumberField("side", value.side);
-
+            if (value.href != null) {
+                gen.writeStringField("href", value.href);
+            }
             if (value.additionalProperties != null) {
                 for (Map.Entry<String, JsonNode> entry : value.additionalProperties.entrySet()) {
                     gen.writeFieldName(entry.getKey());
@@ -142,9 +153,9 @@ public final class Square implements Shape, Showcase.ShapeOrName {
         }
     }
 
-    public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Square> {
+    public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<LinkNote> {
         @Override
-        public Square deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+        public LinkNote deserialize(JsonParser parser, DeserializationContext context) throws IOException {
             JsonNode node = parser.readValueAsTree();
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
@@ -156,8 +167,8 @@ public final class Square implements Shape, Showcase.ShapeOrName {
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
                 switch (key) {
+                    case "href":
                     case "kind":
-                    case "side":
                         break;
                     default:
                         additionalProperties.put(key, node.get(key));
@@ -175,33 +186,37 @@ public final class Square implements Shape, Showcase.ShapeOrName {
                         violations.add(new Violation("kind", "expected string"));
                     } else {
                         String kindValue = field.textValue();
-                        if ("square".equals(kindValue)) {
+                        if ("link".equals(kindValue)) {
                             kind = Kind.KIND;
                         } else {
-                            violations.add(new Violation("kind", "must equal \"square\""));
+                            violations.add(new Violation("kind", "must equal \"link\""));
                         }
                     }
                 }
             }
-            double side = 0.0;
+            String href = null;
             {
-                JsonNode field = node.get("side");
+                JsonNode field = node.get("href");
                 if (field == null) {
-                    violations.add(new Violation("side", "required"));
+                    violations.add(new Violation("href", "required"));
                 } else if (field.isNull()) {
-                    violations.add(new Violation("side", "explicit null not allowed"));
+                    violations.add(new Violation("href", "explicit null not allowed"));
                 } else {
-                    if (!field.isNumber()) {
-                        violations.add(new Violation("side", "expected number"));
+                    if (!field.isTextual()) {
+                        violations.add(new Violation("href", "expected string"));
                     } else {
-                        side = field.doubleValue();
+                        href = field.textValue();
+                        int length = href.codePointCount(0, href.length());
+                        if (length < 1) {
+                            violations.add(new Violation("href", "must have length >= 1, got " + length));
+                        }
                     }
                 }
             }
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Square(kind, side, additionalProperties);
+            return new LinkNote(kind, href, additionalProperties);
         }
     }
 }

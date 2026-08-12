@@ -22,6 +22,20 @@ const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A property whose union has one inline structured object branch (named
+/// `<Union>Object`) and one scalar branch.
+const INLINE_OBJECT_BRANCH_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  payload:
+    oneOf:
+      - type: object
+        required: [text]
+        properties:
+          text: { type: string, minLength: 1 }
+      - { type: string }
+"#;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -335,6 +349,19 @@ fn python_json_example_generation_matches_checked_in_output() {
             // while the wire name is pinned by `Field(alias="legacyId")`.
             assert!(all.contains("legacy_id_py:"));
             assert!(all.contains("alias=\"legacyId\""));
+            // A free-form object inlines as a mapping — both as a union branch
+            // and (extra="allow" + a member-count validator) as a named model.
+            assert!(all.contains("payload: dict[str, typing.Any] | str | None"));
+            assert!(all.contains("class Extras(pydantic.BaseModel):"));
+            // A tagged union whose branches are written inline: each branch names
+            // itself with `x-py-name` and becomes a model Pydantic selects on.
+            assert!(all.contains("class TextNote(pydantic.BaseModel):"));
+            assert!(all.contains("Note: typing.TypeAlias = TextNote | LinkNote"));
+            // The lone inline object branch of a property union derives its name
+            // from the union it belongs to.
+            assert!(all.contains("class ShowcaseDetailObject(pydantic.BaseModel):"));
+            assert!(all.contains("detail: ShowcaseDetailObject | str | None"));
+            assert!(all.contains("must have at most 4 properties"));
         }
         fs::remove_dir_all(output_path).unwrap();
     }
@@ -690,4 +717,39 @@ fn python_rejects_support_namespace() {
     )
     .unwrap_err();
     assert!(err.to_string().contains("support namespace"));
+}
+
+/// An inline **structured** object `oneOf` branch on a property: the branch is
+/// named `<Union>Object` and emitted as a module-level `BaseModel`, which is what
+/// Pydantic selects on for the object member of the union.
+/// See `specs/json-schema/features/oneOf.md` ("Object branches").
+#[test]
+fn python_json_names_inline_object_union_branch() {
+    let temp_dir = unique_output_path("py-json-inline-branch");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("detail.yaml");
+    fs::write(&input_path, INLINE_OBJECT_BRANCH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("detail");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.py")).unwrap();
+
+    assert!(rendered.contains("payload: DetailPayloadObject | str | None"));
+    assert!(rendered.contains("class DetailPayloadObject(pydantic.BaseModel):"));
+    assert!(rendered.contains("text: str"));
+    // The branch model is part of the module surface, like any named definition.
+    let exports = fs::read_to_string(output_path.join("__init__.py")).unwrap();
+    assert!(exports.contains("DetailPayloadObject"));
+    fs::remove_dir_all(temp_dir).unwrap();
 }

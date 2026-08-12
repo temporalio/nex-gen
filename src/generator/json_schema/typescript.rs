@@ -777,6 +777,8 @@ fn model_needs_serialize_validation(schema: &Schema) -> Result<bool> {
     {
         return Ok(true);
     }
+    // A map-shaped model's members are the wire object itself, so the
+    // object-level checks above already cover it — typed or free-form.
     if let Some(properties) = &schema.properties {
         for property in properties.values() {
             if field_needs_serialize_check(property) {
@@ -1056,6 +1058,8 @@ fn render_external_models(
         output.push('\n');
         render_model_interface(&mut output, model)?;
     }
+
+    render_ts_inline_union_serializers(&mut output, json_models)?;
 
     for model in json_models {
         output.push('\n');
@@ -1657,21 +1661,39 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
         match ty {
             Some("null") => nullable = true,
             Some("object") => {
-                let name = branch
-                    .reference
-                    .as_ref()
-                    .map(|reference| reference_model_name(reference))
-                    .unwrap_or_else(|| "Record<string, unknown>".to_string());
+                // A `$ref` branch is the named model (parsed by its mapper); an
+                // inline branch is the free-form object (loader-enforced), so it
+                // stays an anonymous `Record` carried verbatim — TS needs no
+                // synthesized name to narrow on the object token.
+                let (name, mapper, label) = match &branch.reference {
+                    Some(reference) => {
+                        let name = reference_model_name(reference);
+                        let mapper = mapper_class_name(&name);
+                        (name.clone(), Some(mapper), name)
+                    }
+                    None => {
+                        let value = ts_map_shape(&resolved)
+                            .ok()
+                            .flatten()
+                            .map(|shape| shape.value_annotation)
+                            .unwrap_or_else(|| "unknown".to_string());
+                        (
+                            format!("Record<string, {value}>"),
+                            None,
+                            "object".to_string(),
+                        )
+                    }
+                };
                 object_schemas.push(resolved.clone());
                 variants.push(TsUnionVariant {
-                    ts_type: name.clone(),
+                    ts_type: name,
                     is_object: true,
-                    mapper: Some(mapper_class_name(&name)),
+                    mapper,
                     discriminant_value: None,
                     typeof_guard: None,
                     is_integer: false,
                     is_array: false,
-                    label: name,
+                    label,
                 });
             }
             Some("string") => variants.push(TsUnionVariant {
@@ -1855,21 +1877,33 @@ fn render_ts_union_parse(
             output.push_str("  }\n");
         } else {
             let variant = object_variants[0];
-            output.push_str(indent);
-            output.push_str("  try {\n");
-            output.push_str(indent);
-            output.push_str(&format!(
-                "    {target} = new {}().fromIntermediate({raw_expr});\n",
-                variant.mapper.as_deref().unwrap_or("")
-            ));
-            output.push_str(indent);
-            output.push_str("  } catch (error) {\n");
-            output.push_str(indent);
-            output.push_str(&format!(
-                "    {DEFINITIONS_NAMESPACE}.collect(violations, {path_expr}, error);\n"
-            ));
-            output.push_str(indent);
-            output.push_str("  }\n");
+            match variant.mapper.as_deref() {
+                Some(mapper) => {
+                    output.push_str(indent);
+                    output.push_str("  try {\n");
+                    output.push_str(indent);
+                    output.push_str(&format!(
+                        "    {target} = new {mapper}().fromIntermediate({raw_expr});\n"
+                    ));
+                    output.push_str(indent);
+                    output.push_str("  } catch (error) {\n");
+                    output.push_str(indent);
+                    output.push_str(&format!(
+                        "    {DEFINITIONS_NAMESPACE}.collect(violations, {path_expr}, error);\n"
+                    ));
+                    output.push_str(indent);
+                    output.push_str("  }\n");
+                }
+                // An inline map-shaped branch has no mapper: the wire object is
+                // already the in-memory value.
+                None => {
+                    output.push_str(indent);
+                    output.push_str(&format!(
+                        "  {target} = {raw_expr} as {};\n",
+                        variant.ts_type
+                    ));
+                }
+            }
         }
     }
 
@@ -1915,8 +1949,15 @@ fn render_ts_union_parse(
 fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &str) {
     for variant in &union.variants {
         if variant.is_object {
-            let mapper = variant.mapper.as_deref().unwrap_or("");
             let member = &variant.ts_type;
+            let Some(mapper) = variant.mapper.as_deref() else {
+                // An inline map-shaped branch: the in-memory value is the wire
+                // object already.
+                output.push_str(&format!(
+                    "  if ({DEFINITIONS_NAMESPACE}.isPlainObject({value_expr})) {{\n    return {value_expr};\n  }}\n"
+                ));
+                continue;
+            };
             if let (Some(discriminant), Some(value)) =
                 (&union.discriminant, &variant.discriminant_value)
             {
@@ -1927,8 +1968,11 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
                     typescript_string_literal(discriminant)
                 ));
             } else {
+                // The lone object branch of a mixed-kind union: guard on the
+                // object token so a scalar/array member still reaches its own
+                // branch below (the token is the selector, both directions).
                 output.push_str(&format!(
-                    "  return new {mapper}().toIntermediate({value_expr} as {member});\n"
+                    "  if ({DEFINITIONS_NAMESPACE}.isPlainObject({value_expr})) {{\n    return new {mapper}().toIntermediate({value_expr} as unknown as {member});\n  }}\n"
                 ));
             }
         } else if variant.is_array {
@@ -1956,6 +2000,63 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
     ));
 }
 
+/// The module-private serializer function an **inline** (property-level) union
+/// needs when a member's in-memory form differs from its wire form — an object
+/// branch, whose mapper spreads `additionalProperties` back out. A union of
+/// scalars, arrays, and free-form objects needs none: the member already *is* the
+/// wire value, so the property is assigned verbatim.
+fn ts_inline_union_serializer(
+    model_name: &str,
+    json_name: &str,
+    property: &Schema,
+    models: &[&PlannedJsonType],
+) -> Option<(String, TsUnion)> {
+    if property.one_of.is_none() {
+        return None;
+    }
+    let union = classify_ts_union(property, models)?;
+    if !union
+        .variants
+        .iter()
+        .any(|variant| variant.mapper.is_some())
+    {
+        return None;
+    }
+    // Named off the union itself (`<Model><Property>`, the synthesized-name rule)
+    // in the module's value namespace, which no generated type occupies.
+    let name = format!("serialize{model_name}{}", json_name.to_upper_camel_case());
+    Some((name, union))
+}
+
+/// Emits the inline-union serializers a module's models reference (see
+/// [`ts_inline_union_serializer`]). A named `$defs` union needs none — its own
+/// `Mapper.toIntermediate` is the same dispatch.
+fn render_ts_inline_union_serializers(
+    output: &mut String,
+    models: &[&PlannedJsonType],
+) -> Result<()> {
+    for model in models {
+        let schema = decode_schema(model)?;
+        let Some(properties) = &schema.properties else {
+            continue;
+        };
+        for (json_name, property) in properties {
+            let Some((name, union)) =
+                ts_inline_union_serializer(&model.model_name, json_name, property, models)
+            else {
+                continue;
+            };
+            output.push_str(&format!(
+                "\nfunction {name}(value: {}): unknown {{\n",
+                type_annotation(property)?
+            ));
+            render_ts_union_serialize(output, &union, "value");
+            output.push_str("}\n");
+        }
+    }
+    Ok(())
+}
+
 fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Result<()> {
     let schema = decode_schema(model)?;
     if is_ts_union(&schema) {
@@ -1972,9 +2073,9 @@ fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Resul
     output.push_str(&model.model_name);
     output.push_str(" {\n");
 
-    if let Some(value_schema) = typed_map_value_schema(&schema)? {
+    if let Some(shape) = ts_map_shape(&schema)? {
         output.push_str("  additionalProperties: Record<string, ");
-        output.push_str(&type_annotation(&value_schema)?);
+        output.push_str(&shape.value_annotation);
         output.push_str(">;\n");
         output.push_str("}\n");
         return Ok(());
@@ -2067,7 +2168,7 @@ fn render_model_mapper(
     output.push_str("): unknown {\n");
 
     let mut serializer_body = String::new();
-    render_model_serializer_body(&mut serializer_body, model, &schema)?;
+    render_model_serializer_body(&mut serializer_body, model, &schema, models)?;
     push_indented(output, &serializer_body, "  ");
 
     output.push_str("  }\n");
@@ -2092,8 +2193,8 @@ fn render_model_parser_body(
     ));
     output.push_str("  }\n\n");
 
-    if let Some(value_schema) = typed_map_value_schema(&schema)? {
-        render_typed_map_parser_body(output, &schema, &value_schema);
+    if let Some(shape) = ts_map_shape(schema)? {
+        render_map_parser_body(output, schema, &shape);
         return Ok(());
     }
 
@@ -2166,8 +2267,9 @@ fn render_model_parser_body(
 
 fn render_model_serializer_body(
     output: &mut String,
-    _model: &PlannedJsonType,
+    model: &PlannedJsonType,
     schema: &Schema,
+    models: &[&PlannedJsonType],
 ) -> Result<()> {
     // Serialize-side (P12): re-run the shared field validation over the
     // in-memory model and throw the aggregated `ValidationError` before emitting
@@ -2181,7 +2283,7 @@ fn render_model_serializer_body(
     }
     output.push_str("  const out: Record<string, unknown> = {};\n");
 
-    if typed_map_value_schema(&schema)?.is_some() {
+    if ts_map_shape(&schema)?.is_some() {
         output.push_str(
             "  for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {\n",
         );
@@ -2207,7 +2309,14 @@ fn render_model_serializer_body(
     if let Some(properties) = &schema.properties {
         for (json_name, property) in properties {
             let field_name = property.ts_member_name(json_name);
-            let assignment = serialize_expr(property, &format!("value.{field_name}"));
+            let value_expr = format!("value.{field_name}");
+            // A union whose members need a transform goes through the module's
+            // inline-union serializer; everything else is a plain expression.
+            let assignment =
+                match ts_inline_union_serializer(&model.model_name, json_name, property, models) {
+                    Some((name, _)) => format!("{name}({value_expr})"),
+                    None => serialize_expr(property, &value_expr),
+                };
             if required.contains(json_name) {
                 render_ts_serialize_property_check(output, json_name, property, "  ");
                 output.push_str("  out.");
@@ -2251,31 +2360,40 @@ fn render_model_serializer_body(
     Ok(())
 }
 
-fn render_typed_map_parser_body(output: &mut String, schema: &Schema, value_schema: &Schema) {
+/// Emits the parse body of a map-shaped model: the member-count/key-shape
+/// checks, then every wire member into `additionalProperties` (through the
+/// member type's parse adapter when the members are typed).
+fn render_map_parser_body(output: &mut String, schema: &Schema, shape: &TsMapShape) {
     output.push_str("  const keys = Object.keys(raw);\n");
     render_ts_property_count_checks(output, "keys.length", schema, "  ");
     if let Some(subschema) = &schema.property_names {
         render_ts_property_name_checks(output, "keys", subschema, "  ");
     }
     output.push_str("  const additionalProperties: Record<string, ");
-    output.push_str(&type_annotation(value_schema).unwrap_or_else(|_| "unknown".to_string()));
+    output.push_str(&shape.value_annotation);
     output.push_str("> = {};\n");
     output.push_str("  for (const key of keys) {\n");
-    output.push_str("    let entry: ");
-    output.push_str(&type_annotation(value_schema).unwrap_or_else(|_| "unknown".to_string()));
-    output.push_str(" | undefined = undefined;\n");
-    render_value_parser(
-        output,
-        value_schema,
-        "raw[key]",
-        "entry",
-        "key",
-        "    ",
-        true,
-    );
-    output.push_str("    if (entry !== undefined) {\n");
-    output.push_str("      additionalProperties[key] = entry;\n");
-    output.push_str("    }\n");
+    match &shape.value_schema {
+        // Untyped members are carried verbatim, `null` included (P13).
+        None => output.push_str("    additionalProperties[key] = raw[key];\n"),
+        Some(value_schema) => {
+            output.push_str("    let entry: ");
+            output.push_str(&shape.value_annotation);
+            output.push_str(" | undefined = undefined;\n");
+            render_value_parser(
+                output,
+                value_schema,
+                "raw[key]",
+                "entry",
+                "key",
+                "    ",
+                true,
+            );
+            output.push_str("    if (entry !== undefined) {\n");
+            output.push_str("      additionalProperties[key] = entry;\n");
+            output.push_str("    }\n");
+        }
+    }
     output.push_str("  }\n");
     output.push_str("  if (violations.length) {\n");
     output.push_str(&format!(
@@ -3065,6 +3183,48 @@ fn typed_map_value_schema(schema: &Schema) -> Result<Option<Schema>> {
         }),
         _ => Ok(None),
     }
+}
+
+/// A map-shaped object model — no declared `properties`, members governed by
+/// `additionalProperties` — emitted as an interface wrapping a single
+/// `additionalProperties` member (specs/json-schema/features/additionalProperties.md).
+#[derive(Debug, Clone)]
+struct TsMapShape {
+    /// The declared member schema; `None` for untyped members
+    /// (`additionalProperties: true`), which are carried verbatim as `unknown`.
+    value_schema: Option<Schema>,
+    /// The TypeScript element type of `Record<string, …>`.
+    value_annotation: String,
+}
+
+/// Classifies a schema as map-shaped: an object with no declared `properties`
+/// whose members are open. A closed empty object (`additionalProperties: false`)
+/// admits no members and is not map-shaped.
+fn ts_map_shape(schema: &Schema) -> Result<Option<TsMapShape>> {
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("object") {
+        return Ok(None);
+    }
+    if schema
+        .properties
+        .as_ref()
+        .is_some_and(|properties| !properties.is_empty())
+    {
+        return Ok(None);
+    }
+    if let Some(value_schema) = typed_map_value_schema(schema)? {
+        let value_annotation = type_annotation(&value_schema)?;
+        return Ok(Some(TsMapShape {
+            value_schema: Some(value_schema),
+            value_annotation,
+        }));
+    }
+    if schema.additional_properties.as_ref() == Some(&Value::Bool(false)) {
+        return Ok(None);
+    }
+    Ok(Some(TsMapShape {
+        value_schema: None,
+        value_annotation: "unknown".to_string(),
+    }))
 }
 
 fn type_annotation(schema: &Schema) -> Result<String> {

@@ -290,6 +290,13 @@ unambiguous in both directions.
   the full member set including preserved extras.
 - **[[required]]**: a closed struct still permits required members; it
   only forbids *unknown* ones.
+- **[[oneOf]]**: `additionalProperties: true` with no `properties` — the
+  free-form object — is the one object shape a `oneOf` branch can carry
+  **inline** without a type name: it declares nothing to emit, so TypeScript
+  and Python express it structurally (`Record<string, unknown>` /
+  `dict[str, Any]`) and Go and Java wrap it as the union's `<Union>Object`
+  variant, in the map-shaped form from the table above. Any *structured*
+  inline branch is named and emitted as an ordinary model instead.
 
 ## Ecosystem variance
 
@@ -303,6 +310,8 @@ unambiguous in both directions.
 ## See also
 
 - [[properties]] — declares the matched members this keyword excludes.
+- [[oneOf]] — the free-form object as an inline union branch: structural in
+  TS/Python, wrapped in the map-shaped form above in Go/Java.
 - [[patternProperties]] — temporarily unsupported; typed-map alternative.
 - [[unevaluatedProperties]] — rejected per **P6**; this is the subset.
 - [[type]] — requires an explicit open/closed choice for bare objects.
