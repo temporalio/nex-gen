@@ -78,6 +78,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema: A typed map's members were validated against their type *token*
+  only, so every constraint the member type declared was silently dropped — a
+  string's `minLength`/`maxLength`/`pattern`/`format`, a number's bounds and
+  `multipleOf`, an array's `minItems`/`uniqueItems`/`contains`, a `const`/`enum`
+  value set. Every member is now held to everything its type declares, in both
+  directions, with the member's key as the violation path. Python additionally
+  validated only that a member was a *string*, leaving an object, union, or
+  numeric member unchecked and unmaterialized; members now validate and
+  materialize through the member type's own annotation, so `model_extra` holds the
+  declared type (an `Inner`, an `int` parsed from `1.0`, a `datetime`, `bytes`) and
+  re-encodes through it on the way out. TypeScript checked members on the way in
+  but not on the way out, and dropped a nullable value's constraints in both
+  positions (a member's *and* a declared field's).
+- JSON Schema: A **nullable** typed-map member (`additionalProperties` as the
+  nullability `oneOf`) was mishandled: Go typed the member `T` and dropped a
+  `null` member from the map entirely, and Java rejected it. A null member is now
+  kept as a null member — Go `map[string]*T`, Java `Map<String, @Nullable T>` —
+  matching TypeScript's `Record<string, T | null>` and Python's `T | None`.
+- Java: A **nested array** (`items` inside `items`) and an **array-valued typed
+  map member** both bound to the placeholder violation `"unsupported nested
+  array"` at runtime, though `items.md` accepts them. Both now decode elementwise,
+  one loop per level, with each level's index in the violation path
+  (`grid[1][0]`).
+- Java: A materialized temporal `format` or `contentEncoding` in an array element
+  or a typed map member emitted `var` for the parsed value, which does not compile
+  at the Java 8 baseline the generated code targets.
+- TypeScript: A nested array's element loop reused the enclosing loop's variable
+  names, so it emitted `item!.push(item)` — which does not compile — and reported
+  the inner index twice in the violation path. Each level now carries its own
+  element, index, and item bindings.
+- TypeScript: A `pattern` or `format` on anything but a declared property — a
+  typed map's member, an array element, a key-shape subschema — emitted a check
+  referencing an undeclared `PATTERN_…` const, throwing `ReferenceError` at
+  validation time. Every string position's regex is now declared.
 - JSON Schema: An object written **inline** in a value position — a property, an
   array element at any depth, a typed `additionalProperties` member — had its
   declared shape silently discarded. Go, TypeScript, and Python typed the member

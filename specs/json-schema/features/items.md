@@ -144,7 +144,10 @@ comes from [[type]]'s `"array"` row.
   can locate the offending element unambiguously (**P11**).
 - **Element recursion.** Each element validates recursively — an array of
   objects runs each object's own `Validate`, an array of arrays recurses
-  again, an array of `$ref` follows the reference (see [[ref]]).
+  again, an array of `$ref` follows the reference (see [[ref]]). A nested
+  array decodes one loop per level, each level's loop variables carrying
+  their depth so an inner element never shadows the level above it, and each
+  level appending its own index to the path (`matrix[1][2]`).
 - **Empty array.** The element loop is vacuous; an empty `[]` passes the
   `items` check (array-length floors, when supported, live in their own
   specs — see Interactions).

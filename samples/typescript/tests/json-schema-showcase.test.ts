@@ -9,8 +9,11 @@ import {
   DEFAULT_RETRIES,
   ExtrasMapper,
   LabelsMapper,
+  NicknamesMapper,
+  QuotasMapper,
   SettingsMapper,
   ShowcaseMapper,
+  TokensMapper,
   ValidationError,
   WidgetMapper,
   type LinkNote,
@@ -859,5 +862,90 @@ describe("json-schema showcase generated definitions", () => {
     expect(() =>
       new ShowcaseMapper().fromIntermediate({ ...base, urlBlob: "aGk=" }),
     ).toThrow(/must be base64url-encoded, got "aGk="/);
+  });
+
+  test("round-trips object shapes written inline", () => {
+    // An object written inline in a value position is named after that position
+    // and emitted as an ordinary model: a property (`location`, with its own
+    // nested `geo`), a nullable property (`audit`), an array element (`rows`), a
+    // map and its member (`ledger`), and a free-form bag (`metadata`). The same
+    // fixture covers a typed map's member constraints (`quotas`, `tokens`,
+    // `nicknames`) and a nested array (`grid`).
+    const value = expectRoundTrip("showcase-inline-shapes.json", new ShowcaseMapper());
+
+    expect(value.grid).toEqual([[1, 2], [3]]);
+    expect(value.location).toEqual({
+      city: "Springfield",
+      geo: { lat: 39.8, lon: -89.6, additionalProperties: {} },
+      additionalProperties: {},
+    });
+    expect(value.audit).toEqual({ by: "alice", additionalProperties: {} });
+    expect(value.rows?.[0]).toEqual({ cell: "a1", additionalProperties: {} });
+    // The member override renamed the member (`ledgerTs`); the hoisted types keep
+    // their position-derived names.
+    expect(value.ledgerTs?.additionalProperties.opening).toEqual({
+      amount: 100,
+      additionalProperties: {},
+    });
+    expect(value.metadata?.additionalProperties).toEqual({
+      source: "import",
+      batch: 7,
+    });
+    expect(value.quotas?.additionalProperties).toEqual({ cpu: 20, memory: 100 });
+    // A null member of a nullable map is a member, not a violation.
+    expect(value.nicknames?.additionalProperties).toEqual({ short: "al", none: null });
+
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+
+    // A hoisted shape validates like any other model, at the nested path.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, location: { city: "" } }),
+    ).toThrow(/location\.city/);
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, rows: [{ cell: "ok" }, {}] }),
+    ).toThrow(/rows\[1\]\.cell/);
+    // A nested array reports the failing element at its own two-dimensional index.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, grid: [[1], [2, 1.5]] }),
+    ).toThrow(/grid\[1\]\[1\]/);
+    // A typed map's member constraints are enforced, keyed by the member.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, quotas: { cpu: 7 } }),
+    ).toThrow(/cpu/);
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, tokens: { primary: "AB" } }),
+    ).toThrow(/primary/);
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, nicknames: { tiny: "a" } }),
+    ).toThrow(/tiny/);
+    // The free-form bag's member-count bound rides with the hoisted type.
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        metadata: { a: 1, b: 2, c: 3, d: 4 },
+      }),
+    ).toThrow(/at most 3/);
+
+    // Serialize re-runs every member's own constraints before emitting (P12).
+    expect(() =>
+      new QuotasMapper().toIntermediate({ additionalProperties: { cpu: 7 } }),
+    ).toThrow(/cpu/);
+    expect(() =>
+      new TokensMapper().toIntermediate({ additionalProperties: { primary: "AB" } }),
+    ).toThrow(/primary/);
+    expect(() =>
+      new NicknamesMapper().toIntermediate({ additionalProperties: { tiny: "a" } }),
+    ).toThrow(/tiny/);
   });
 });

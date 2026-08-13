@@ -358,6 +358,89 @@ $defs:
           oneOf:
             - { type: string }
             - { type: "null" }
+      grid:
+        description: >-
+          A nested array: `items` at depth two. Each level decodes elementwise, so
+          a bad element is reported at its own two-dimensional index
+          (`grid[1][0]`).
+        type: array
+        items:
+          type: array
+          items: { type: integer }
+      location:
+        description: >-
+          An object written **inline** on the property rather than in `$defs`. It
+          is named after the position it occupies — `ShowcaseLocation` — moved
+          into `$defs`, and the property becomes a `$ref` at it, so it emits as
+          the ordinary named model an authored definition would produce, member
+          constraints and all. Its own nested inline object is named against that
+          name in turn (`ShowcaseLocationGeo`), so nesting needs no `$defs`
+          boilerplate at any depth.
+        type: object
+        required: [city]
+        properties:
+          city: { type: string, minLength: 1 }
+          geo:
+            type: object
+            properties:
+              lat: { type: number }
+              lon: { type: number }
+      audit:
+        description: >-
+          A nullable inline object. The nullability wrapper emits no type of its
+          own, so the object inside it takes the property's name —
+          `ShowcaseAudit`, the same name it would take written plainly: adding or
+          removing nullability never renames the type.
+        oneOf:
+          - type: object
+            required: [by]
+            properties:
+              by: { type: string, minLength: 1 }
+          - { type: "null" }
+      rows:
+        description: >-
+          A list whose element is an inline object, named after its position
+          (`ShowcaseRowsItem`) exactly as an inline element *union* is.
+        type: array
+        items:
+          type: object
+          required: [cell]
+          properties:
+            cell: { type: string, minLength: 1 }
+      ledger:
+        description: >-
+          A typed map written inline on the property: the map itself is named
+          `ShowcaseLedger` and its inline member shape `ShowcaseLedgerValue`, so
+          both the map and its members are ordinary named models. Also exercises
+          the member-name override on a hoisted property — `x-<lang>-name` keeps
+          naming the *member* (Go `LedgerGo`, TS `ledgerTs`, Python `ledger_py`,
+          Java `ledgerJava`) while the type keeps its position-derived name.
+        type: object
+        additionalProperties:
+          type: object
+          required: [amount]
+          properties:
+            amount: { type: integer, minimum: 0 }
+        x-go-name: LedgerGo
+        x-ts-name: ledgerTs
+        x-py-name: ledger_py
+        x-java-name: ledgerJava
+      metadata:
+        description: >-
+          A free-form object written inline. Even this is named
+          (`ShowcaseMetadata`): every object emits as a named aggregate holding
+          its members in a catch-all, so adding `properties` to it later only
+          adds fields rather than changing the emitted type's kind, and its
+          member-count bound rides along with it.
+        type: object
+        additionalProperties: true
+        maxProperties: 3
+      quotas:
+        $ref: "#/$defs/Quotas"
+      tokens:
+        $ref: "#/$defs/Tokens"
+      nicknames:
+        $ref: "#/$defs/Nicknames"
       choices:
         $ref: "#/$defs/Choices"
       extras:
@@ -442,6 +525,39 @@ $defs:
     type: object
     additionalProperties: { type: string }
     maxProperties: 50
+  Quotas:
+    description: >-
+      A typed map whose members carry their own constraints: every member is a
+      non-negative multiple of 5, at most 100. A member is held to exactly what a
+      declared field of that type is held to, in both directions, with the
+      offending member's key as the violation path.
+    type: object
+    additionalProperties:
+      type: integer
+      minimum: 0
+      maximum: 100
+      multipleOf: 5
+  Tokens:
+    description: >-
+      A typed map with a refined *string* member: 2 to 8 code points of lowercase
+      ASCII. Exercises the member-level `minLength`/`maxLength`/`pattern` in every
+      language.
+    type: object
+    additionalProperties:
+      type: string
+      minLength: 2
+      maxLength: 8
+      pattern: "^[a-z]+$"
+  Nicknames:
+    description: >-
+      A typed map of **nullable** members: a member may be an explicit null,
+      which is kept as a null member rather than dropped from the map, while a
+      present member still carries its own constraint.
+    type: object
+    additionalProperties:
+      oneOf:
+        - { type: string, minLength: 2 }
+        - { type: "null" }
   Choices:
     description: >-
       A map whose *member* type is a union written inline in

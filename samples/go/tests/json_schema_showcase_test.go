@@ -864,3 +864,88 @@ func TestJSONSchemaShowcaseElementUnions(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "shapes[0].kind")
 }
+
+// TestJSONSchemaShowcaseInlineShapes round-trips the object shapes the schema
+// writes **inline** rather than in `$defs` — a property (`location`, with its own
+// nested `geo`), a nullable property (`audit`), an array element (`rows`), a map
+// and its member (`ledger`), and a free-form bag (`metadata`) — each of which the
+// loader names after the position it occupies and emits as an ordinary model. It
+// also covers the constraints a typed map's members carry (`quotas`, `tokens`,
+// `nicknames`) and a nested array (`grid`), both directions.
+func TestJSONSchemaShowcaseInlineShapes(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+
+	value := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-inline-shapes.json")
+
+	require.Equal(t, [][]int64{{1, 2}, {3}}, value.Grid)
+	require.NotNil(t, value.Location)
+	require.Equal(t, "Springfield", value.Location.City)
+	require.NotNil(t, value.Location.Geo)
+	require.Equal(t, 39.8, *value.Location.Geo.Lat)
+	require.NotNil(t, value.Audit)
+	require.Equal(t, "alice", value.Audit.By)
+	require.Len(t, value.Rows, 2)
+	require.Equal(t, "a1", value.Rows[0].Cell)
+	// The member override renamed the member (`LedgerGo`); the hoisted types keep
+	// their position-derived names (`ShowcaseLedger`, `ShowcaseLedgerValue`).
+	require.NotNil(t, value.LedgerGo)
+	require.Equal(t, int64(100), value.LedgerGo.AdditionalProperties["opening"].Amount)
+	require.NotNil(t, value.Metadata)
+	require.Len(t, value.Metadata.AdditionalProperties, 2)
+	require.NotNil(t, value.Quotas)
+	require.Equal(t, int64(20), value.Quotas.AdditionalProperties["cpu"])
+	require.NotNil(t, value.Nicknames)
+	require.Equal(t, "al", *value.Nicknames.AdditionalProperties["short"])
+	require.Nil(t, value.Nicknames.AdditionalProperties["none"])
+
+	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
+	var out showcase.Showcase
+
+	// A hoisted shape validates like any other model: its member constraints and
+	// its required members are enforced, at the nested path.
+	err := dc.FromPayload(jsonPayload([]byte(base+`,"location":{"city":""}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "location.city")
+
+	// An element's own model validates too. Go decodes the array as a whole, so
+	// the failure is reported at the array rather than at `rows[1].cell` — the
+	// element type is materialized either way, and elementwise dispatch for a
+	// model element is tracked with the item-constraint work.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"rows":[{"cell":"ok"},{}]}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rows")
+
+	// A typed map's member constraints are enforced, keyed by the member.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"quotas":{"cpu":7}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cpu")
+	require.Contains(t, err.Error(), "multiple of 5")
+
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"tokens":{"primary":"AB"}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "primary")
+
+	// A null member of a nullable map is a member, not a violation; a present one
+	// still carries its constraint.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"nicknames":{"tiny":"a"}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tiny")
+
+	// The free-form bag's member-count bound rides with the hoisted type.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"metadata":{"a":1,"b":2,"c":3,"d":4}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at most 3")
+
+	// Serialize re-runs every member's own constraints before emitting (P12).
+	invalid := value
+	invalid.Quotas = &showcase.Quotas{AdditionalProperties: map[string]int64{"cpu": 7}}
+	_, err = dc.ToPayload(invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cpu")
+
+	invalid = value
+	invalid.Tokens = &showcase.Tokens{AdditionalProperties: map[string]string{"primary": "AB"}}
+	_, err = dc.ToPayload(invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "primary")
+}

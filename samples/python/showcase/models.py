@@ -67,17 +67,21 @@ class Attributes(pydantic.BaseModel):
     def _validate_extras(self) -> typing.Any:
         extra = typing.cast(dict[str, object], self.model_extra or {})
         errors: list[pydantic_core.InitErrorDetails] = []
-        for key, value in extra.items():
-            if not isinstance(value, str):
-                errors.append(
-                    pydantic_core.InitErrorDetails(
-                        type=pydantic_core.PydanticCustomError(
-                            "string_type", "expected string value"
-                        ),
-                        loc=(key,),
-                        input=value,
+        for key, value in list(extra.items()):
+            try:
+                extra[key] = _ATTRIBUTES_MEMBER.validate_python(value)
+            except pydantic.ValidationError as error:
+                for detail in error.errors():
+                    errors.append(
+                        pydantic_core.InitErrorDetails(
+                            type=pydantic_core.PydanticCustomError(
+                                typing.cast(typing.Any, detail["type"]),
+                                typing.cast(typing.Any, detail["msg"]),
+                            ),
+                            loc=(key, *detail["loc"]),
+                            input=detail["input"],
+                        )
                     )
-                )
         if len(extra) < 1:
             errors.append(
                 pydantic_core.InitErrorDetails(
@@ -132,7 +136,12 @@ class Attributes(pydantic.BaseModel):
         self,
         _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return dict(typing.cast(dict[str, object], self.model_extra or {}))
+        return {
+            key: _ATTRIBUTES_MEMBER.dump_python(value, mode="json", by_alias=True)
+            for key, value in typing.cast(
+                dict[str, object], self.model_extra or {}
+            ).items()
+        }
 
 
 class Choices(pydantic.BaseModel):
@@ -148,7 +157,23 @@ class Choices(pydantic.BaseModel):
 
     @pydantic.model_validator(mode="after")
     def _validate_extras(self) -> typing.Any:
+        extra = typing.cast(dict[str, object], self.model_extra or {})
         errors: list[pydantic_core.InitErrorDetails] = []
+        for key, value in list(extra.items()):
+            try:
+                extra[key] = _CHOICES_MEMBER.validate_python(value)
+            except pydantic.ValidationError as error:
+                for detail in error.errors():
+                    errors.append(
+                        pydantic_core.InitErrorDetails(
+                            type=pydantic_core.PydanticCustomError(
+                                typing.cast(typing.Any, detail["type"]),
+                                typing.cast(typing.Any, detail["msg"]),
+                            ),
+                            loc=(key, *detail["loc"]),
+                            input=detail["input"],
+                        )
+                    )
         if errors:
             raise pydantic.ValidationError.from_exception_data(
                 title=type(self).__name__, line_errors=errors
@@ -160,7 +185,12 @@ class Choices(pydantic.BaseModel):
         self,
         _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return dict(typing.cast(dict[str, object], self.model_extra or {}))
+        return {
+            key: _CHOICES_MEMBER.dump_python(value, mode="json", by_alias=True)
+            for key, value in typing.cast(
+                dict[str, object], self.model_extra or {}
+            ).items()
+        }
 
 
 class Circle(pydantic.BaseModel):
@@ -342,17 +372,21 @@ class Labels(pydantic.BaseModel):
     def _validate_extras(self) -> typing.Any:
         extra = typing.cast(dict[str, object], self.model_extra or {})
         errors: list[pydantic_core.InitErrorDetails] = []
-        for key, value in extra.items():
-            if not isinstance(value, str):
-                errors.append(
-                    pydantic_core.InitErrorDetails(
-                        type=pydantic_core.PydanticCustomError(
-                            "string_type", "expected string value"
-                        ),
-                        loc=(key,),
-                        input=value,
+        for key, value in list(extra.items()):
+            try:
+                extra[key] = _LABELS_MEMBER.validate_python(value)
+            except pydantic.ValidationError as error:
+                for detail in error.errors():
+                    errors.append(
+                        pydantic_core.InitErrorDetails(
+                            type=pydantic_core.PydanticCustomError(
+                                typing.cast(typing.Any, detail["type"]),
+                                typing.cast(typing.Any, detail["msg"]),
+                            ),
+                            loc=(key, *detail["loc"]),
+                            input=detail["input"],
+                        )
                     )
-                )
         if len(extra) > 50:
             errors.append(
                 pydantic_core.InitErrorDetails(
@@ -378,7 +412,12 @@ class Labels(pydantic.BaseModel):
         self,
         _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return dict(typing.cast(dict[str, object], self.model_extra or {}))
+        return {
+            key: _LABELS_MEMBER.dump_python(value, mode="json", by_alias=True)
+            for key, value in typing.cast(
+                dict[str, object], self.model_extra or {}
+            ).items()
+        }
 
 
 class LinkNote(pydantic.BaseModel):
@@ -414,6 +453,103 @@ class LinkNote(pydantic.BaseModel):
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
         return _emit_set_fields(self, handler)
+
+
+class Nicknames(pydantic.BaseModel):
+    """A typed map of **nullable** members: a member may be an explicit null, which is kept
+    as a null member rather than dropped from the map, while a present member still
+    carries its own constraint.
+    """
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    @pydantic.model_validator(mode="after")
+    def _validate_extras(self) -> typing.Any:
+        extra = typing.cast(dict[str, object], self.model_extra or {})
+        errors: list[pydantic_core.InitErrorDetails] = []
+        for key, value in list(extra.items()):
+            try:
+                extra[key] = _NICKNAMES_MEMBER.validate_python(value)
+            except pydantic.ValidationError as error:
+                for detail in error.errors():
+                    errors.append(
+                        pydantic_core.InitErrorDetails(
+                            type=pydantic_core.PydanticCustomError(
+                                typing.cast(typing.Any, detail["type"]),
+                                typing.cast(typing.Any, detail["msg"]),
+                            ),
+                            loc=(key, *detail["loc"]),
+                            input=detail["input"],
+                        )
+                    )
+        if errors:
+            raise pydantic.ValidationError.from_exception_data(
+                title=type(self).__name__, line_errors=errors
+            )
+        return self
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return {
+            key: _NICKNAMES_MEMBER.dump_python(value, mode="json", by_alias=True)
+            for key, value in typing.cast(
+                dict[str, object], self.model_extra or {}
+            ).items()
+        }
+
+
+class Quotas(pydantic.BaseModel):
+    """A typed map whose members carry their own constraints: every member is a
+    non-negative multiple of 5, at most 100. A member is held to exactly what a declared
+    field of that type is held to, in both directions, with the offending member's key
+    as the violation path.
+    """
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    @pydantic.model_validator(mode="after")
+    def _validate_extras(self) -> typing.Any:
+        extra = typing.cast(dict[str, object], self.model_extra or {})
+        errors: list[pydantic_core.InitErrorDetails] = []
+        for key, value in list(extra.items()):
+            try:
+                extra[key] = _QUOTAS_MEMBER.validate_python(value)
+            except pydantic.ValidationError as error:
+                for detail in error.errors():
+                    errors.append(
+                        pydantic_core.InitErrorDetails(
+                            type=pydantic_core.PydanticCustomError(
+                                typing.cast(typing.Any, detail["type"]),
+                                typing.cast(typing.Any, detail["msg"]),
+                            ),
+                            loc=(key, *detail["loc"]),
+                            input=detail["input"],
+                        )
+                    )
+        if errors:
+            raise pydantic.ValidationError.from_exception_data(
+                title=type(self).__name__, line_errors=errors
+            )
+        return self
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return {
+            key: _QUOTAS_MEMBER.dump_python(value, mode="json", by_alias=True)
+            for key, value in typing.cast(
+                dict[str, object], self.model_extra or {}
+            ).items()
+        }
 
 
 class Settings(pydantic.BaseModel):
@@ -753,6 +889,34 @@ class Showcase(pydantic.BaseModel):
     stays a list.
     """
 
+    grid: list[list[SpecInt]] | None = pydantic.Field(default=None)
+    """A nested array: `items` at depth two. Each level decodes elementwise, so a bad
+    element is reported at its own two-dimensional index (`grid[1][0]`).
+    """
+
+    location: ShowcaseLocation | None = pydantic.Field(default=None)
+
+    audit: ShowcaseAudit | None = pydantic.Field(default=None)
+    """A nullable inline object. The nullability wrapper emits no type of its own, so the
+    object inside it takes the property's name — `ShowcaseAudit`, the same name it would
+    take written plainly: adding or removing nullability never renames the type.
+    """
+
+    rows: list[ShowcaseRowsItem] | None = pydantic.Field(default=None)
+    """A list whose element is an inline object, named after its position
+    (`ShowcaseRowsItem`) exactly as an inline element *union* is.
+    """
+
+    ledger_py: ShowcaseLedger | None = pydantic.Field(default=None, alias="ledger")
+
+    metadata: ShowcaseMetadata | None = pydantic.Field(default=None)
+
+    quotas: Quotas | None = pydantic.Field(default=None)
+
+    tokens: Tokens | None = pydantic.Field(default=None)
+
+    nicknames: Nicknames | None = pydantic.Field(default=None)
+
     choices: Choices | None = pydantic.Field(default=None)
 
     extras: Extras | None = pydantic.Field(default=None)
@@ -945,24 +1109,32 @@ class Showcase(pydantic.BaseModel):
             "detail",
             "extras",
             "gateway",
+            "grid",
             "homepage",
             "host",
             "idOrName",
             "id_or_name",
             "labels",
+            "ledger",
+            "ledger_py",
             "legacyId",
             "legacy_id_py",
             "level",
+            "location",
             "measurements",
+            "metadata",
             "nickname",
+            "nicknames",
             "note",
             "payload",
             "phrase",
             "priority",
+            "quotas",
             "ratio",
             "requestId",
             "request_id",
             "roles",
+            "rows",
             "segments",
             "settings",
             "shape",
@@ -973,6 +1145,7 @@ class Showcase(pydantic.BaseModel):
             "slots",
             "step",
             "tags",
+            "tokens",
             "urlBlob",
             "url_blob",
             "verbose",
@@ -987,6 +1160,21 @@ class Showcase(pydantic.BaseModel):
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
         return _reject_explicit_null(cls, data, handler)
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return _emit_set_fields(self, handler)
+
+
+class ShowcaseAudit(pydantic.BaseModel):
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    by: str = pydantic.Field(min_length=1)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
@@ -1015,6 +1203,196 @@ class ShowcaseDetailObject(pydantic.BaseModel):
         handler: typing.Callable[[object], typing.Any],
     ) -> typing.Any:
         return _reject_explicit_null(cls, data, handler)
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return _emit_set_fields(self, handler)
+
+
+class ShowcaseLedger(pydantic.BaseModel):
+    """A typed map written inline on the property: the map itself is named `ShowcaseLedger`
+    and its inline member shape `ShowcaseLedgerValue`, so both the map and its members
+    are ordinary named models. Also exercises the member-name override on a hoisted
+    property — `x-<lang>-name` keeps naming the *member* (Go `LedgerGo`, TS `ledgerTs`,
+    Python `ledger_py`, Java `ledgerJava`) while the type keeps its position-derived
+    name.
+    """
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    @pydantic.model_validator(mode="after")
+    def _validate_extras(self) -> typing.Any:
+        extra = typing.cast(dict[str, object], self.model_extra or {})
+        errors: list[pydantic_core.InitErrorDetails] = []
+        for key, value in list(extra.items()):
+            try:
+                extra[key] = _SHOWCASE_LEDGER_MEMBER.validate_python(value)
+            except pydantic.ValidationError as error:
+                for detail in error.errors():
+                    errors.append(
+                        pydantic_core.InitErrorDetails(
+                            type=pydantic_core.PydanticCustomError(
+                                typing.cast(typing.Any, detail["type"]),
+                                typing.cast(typing.Any, detail["msg"]),
+                            ),
+                            loc=(key, *detail["loc"]),
+                            input=detail["input"],
+                        )
+                    )
+        if errors:
+            raise pydantic.ValidationError.from_exception_data(
+                title=type(self).__name__, line_errors=errors
+            )
+        return self
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return {
+            key: _SHOWCASE_LEDGER_MEMBER.dump_python(value, mode="json", by_alias=True)
+            for key, value in typing.cast(
+                dict[str, object], self.model_extra or {}
+            ).items()
+        }
+
+
+class ShowcaseLedgerValue(pydantic.BaseModel):
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    amount: SpecInt = pydantic.Field(ge=0)
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return _emit_set_fields(self, handler)
+
+
+class ShowcaseLocation(pydantic.BaseModel):
+    """An object written **inline** on the property rather than in `$defs`. It is named
+    after the position it occupies — `ShowcaseLocation` — moved into `$defs`, and the
+    property becomes a `$ref` at it, so it emits as the ordinary named model an authored
+    definition would produce, member constraints and all. Its own nested inline object
+    is named against that name in turn (`ShowcaseLocationGeo`), so nesting needs no
+    `$defs` boilerplate at any depth.
+    """
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    city: str = pydantic.Field(min_length=1)
+
+    geo: ShowcaseLocationGeo | None = pydantic.Field(default=None)
+
+    _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset({"geo"})
+
+    @pydantic.model_validator(mode="wrap")
+    @classmethod
+    def _reject_null(
+        cls,
+        data: object,
+        handler: typing.Callable[[object], typing.Any],
+    ) -> typing.Any:
+        return _reject_explicit_null(cls, data, handler)
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return _emit_set_fields(self, handler)
+
+
+class ShowcaseLocationGeo(pydantic.BaseModel):
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    lat: float | None = pydantic.Field(default=None)
+
+    lon: float | None = pydantic.Field(default=None)
+
+    _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
+        {"lat", "lon"}
+    )
+
+    @pydantic.model_validator(mode="wrap")
+    @classmethod
+    def _reject_null(
+        cls,
+        data: object,
+        handler: typing.Callable[[object], typing.Any],
+    ) -> typing.Any:
+        return _reject_explicit_null(cls, data, handler)
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return _emit_set_fields(self, handler)
+
+
+class ShowcaseMetadata(pydantic.BaseModel):
+    """A free-form object written inline. Even this is named (`ShowcaseMetadata`): every
+    object emits as a named aggregate holding its members in a catch-all, so adding
+    `properties` to it later only adds fields rather than changing the emitted type's
+    kind, and its member-count bound rides along with it.
+    """
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    @pydantic.model_validator(mode="after")
+    def _validate_extras(self) -> typing.Any:
+        extra = typing.cast(dict[str, object], self.model_extra or {})
+        errors: list[pydantic_core.InitErrorDetails] = []
+        if len(extra) > 3:
+            errors.append(
+                pydantic_core.InitErrorDetails(
+                    type=pydantic_core.PydanticCustomError(
+                        "too_many_properties",
+                        typing.cast(
+                            typing.Any,
+                            f"must have at most 3 properties, got {len(extra)}",
+                        ),
+                    ),
+                    loc=(),
+                    input=len(extra),
+                )
+            )
+        if errors:
+            raise pydantic.ValidationError.from_exception_data(
+                title=type(self).__name__, line_errors=errors
+            )
+        return self
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return dict(typing.cast(dict[str, object], self.model_extra or {}))
+
+
+class ShowcaseRowsItem(pydantic.BaseModel):
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    cell: str = pydantic.Field(min_length=1)
 
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
@@ -1107,6 +1485,53 @@ class TextNote(pydantic.BaseModel):
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
         return _emit_set_fields(self, handler)
+
+
+class Tokens(pydantic.BaseModel):
+    """A typed map with a refined *string* member: 2 to 8 code points of lowercase ASCII.
+    Exercises the member-level `minLength`/`maxLength`/`pattern` in every language.
+    """
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    @pydantic.model_validator(mode="after")
+    def _validate_extras(self) -> typing.Any:
+        extra = typing.cast(dict[str, object], self.model_extra or {})
+        errors: list[pydantic_core.InitErrorDetails] = []
+        for key, value in list(extra.items()):
+            try:
+                extra[key] = _TOKENS_MEMBER.validate_python(value)
+            except pydantic.ValidationError as error:
+                for detail in error.errors():
+                    errors.append(
+                        pydantic_core.InitErrorDetails(
+                            type=pydantic_core.PydanticCustomError(
+                                typing.cast(typing.Any, detail["type"]),
+                                typing.cast(typing.Any, detail["msg"]),
+                            ),
+                            loc=(key, *detail["loc"]),
+                            input=detail["input"],
+                        )
+                    )
+        if errors:
+            raise pydantic.ValidationError.from_exception_data(
+                title=type(self).__name__, line_errors=errors
+            )
+        return self
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return {
+            key: _TOKENS_MEMBER.dump_python(value, mode="json", by_alias=True)
+            for key, value in typing.cast(
+                dict[str, object], self.model_extra or {}
+            ).items()
+        }
 
 
 class Widget(pydantic.BaseModel):
@@ -1208,3 +1633,30 @@ ShowcaseSegmentsItem: typing.TypeAlias = str | SpecInt
 
 _ = Choices.model_rebuild()
 _ = Showcase.model_rebuild()
+_ATTRIBUTES_MEMBER: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(
+    str, config=pydantic.ConfigDict(strict=True)
+)
+_CHOICES_MEMBER: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(
+    ChoicesValue, config=pydantic.ConfigDict(strict=True)
+)
+_LABELS_MEMBER: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(
+    str, config=pydantic.ConfigDict(strict=True)
+)
+_NICKNAMES_MEMBER: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(
+    typing.Annotated[str | None, pydantic.Field(min_length=2)],
+    config=pydantic.ConfigDict(strict=True),
+)
+_QUOTAS_MEMBER: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(
+    typing.Annotated[SpecInt, pydantic.Field(ge=0, le=100, multiple_of=5)],
+    config=pydantic.ConfigDict(strict=True),
+)
+_SHOWCASE_LEDGER_MEMBER: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(
+    ShowcaseLedgerValue
+)
+_TOKENS_MEMBER: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(
+    typing.Annotated[
+        typing.Annotated[str, pydantic.Field(min_length=2, max_length=8)],
+        pydantic.AfterValidator(_check_pattern("^[a-z]+\\Z")),
+    ],
+    config=pydantic.ConfigDict(strict=True),
+)

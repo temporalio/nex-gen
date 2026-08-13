@@ -39,17 +39,21 @@ class Labels(pydantic.BaseModel):
     def _validate_extras(self) -> typing.Any:
         extra = typing.cast(dict[str, object], self.model_extra or {})
         errors: list[pydantic_core.InitErrorDetails] = []
-        for key, value in extra.items():
-            if not isinstance(value, str):
-                errors.append(
-                    pydantic_core.InitErrorDetails(
-                        type=pydantic_core.PydanticCustomError(
-                            "string_type", "expected string value"
-                        ),
-                        loc=(key,),
-                        input=value,
+        for key, value in list(extra.items()):
+            try:
+                extra[key] = _LABELS_MEMBER.validate_python(value)
+            except pydantic.ValidationError as error:
+                for detail in error.errors():
+                    errors.append(
+                        pydantic_core.InitErrorDetails(
+                            type=pydantic_core.PydanticCustomError(
+                                typing.cast(typing.Any, detail["type"]),
+                                typing.cast(typing.Any, detail["msg"]),
+                            ),
+                            loc=(key, *detail["loc"]),
+                            input=detail["input"],
+                        )
                     )
-                )
         if len(extra) > 50:
             errors.append(
                 pydantic_core.InitErrorDetails(
@@ -75,7 +79,12 @@ class Labels(pydantic.BaseModel):
         self,
         _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
-        return dict(typing.cast(dict[str, object], self.model_extra or {}))
+        return {
+            key: _LABELS_MEMBER.dump_python(value, mode="json", by_alias=True)
+            for key, value in typing.cast(
+                dict[str, object], self.model_extra or {}
+            ).items()
+        }
 
 
 class Message(pydantic.BaseModel):
@@ -191,3 +200,8 @@ class SendMessageOutput(pydantic.BaseModel):
         handler: typing.Callable[[pydantic.BaseModel], typing.Any],
     ) -> dict[str, object]:
         return _emit_set_fields(self, handler)
+
+
+_LABELS_MEMBER: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(
+    str, config=pydantic.ConfigDict(strict=True)
+)

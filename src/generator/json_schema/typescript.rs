@@ -441,38 +441,64 @@ fn render_ts_pattern_check(
 /// distinct `pattern` across `models`' string fields — compiled once per module.
 /// The pattern is the loader-normalized form; TS keeps `$`.
 fn render_pattern_regexes(output: &mut String, models: &[&PlannedJsonType]) -> Result<()> {
+    let mut patterns = Vec::new();
+    for model in models {
+        collect_schema_patterns(&decode_schema(model)?, &mut patterns);
+    }
     let mut seen = std::collections::BTreeSet::new();
     let mut emitted = false;
-    for model in models {
-        let schema = decode_schema(model)?;
-        let Some(properties) = &schema.properties else {
+    for pattern in patterns {
+        let name = ts_pattern_const_name(&pattern);
+        if !seen.insert(name.clone()) {
             continue;
-        };
-        for property in properties.values() {
-            let mut emit_const = |pattern: &str| {
-                let name = ts_pattern_const_name(pattern);
-                if seen.insert(name.clone()) {
-                    if !emitted {
-                        output.push('\n');
-                        emitted = true;
-                    }
-                    output.push_str(&format!(
-                        "const {name} = new RegExp({}, \"u\");\n",
-                        typescript_string_literal(pattern)
-                    ));
-                }
-            };
-            if let Some(pattern) = &property.pattern {
-                emit_const(pattern);
-            }
-            if let Some(format) = &property.format
-                && let Some(check) = crate::json_schema::format::check_for(format)
-            {
-                emit_const(&check.pattern);
-            }
         }
+        if !emitted {
+            output.push('\n');
+            emitted = true;
+        }
+        output.push_str(&format!(
+            "const {name} = new RegExp({}, \"u\");\n",
+            typescript_string_literal(&pattern)
+        ));
     }
     Ok(())
+}
+
+/// Collects every compiled-regex source a model's checks reference, in every
+/// string position it can occur: a declared property, an array element at any
+/// depth, a typed map's member, a key-shape subschema, and a nullability
+/// wrapper's branch. Missing one leaves the emitted check referencing an
+/// undeclared `PATTERN_…` const.
+fn collect_schema_patterns(schema: &Schema, patterns: &mut Vec<String>) {
+    if let Some(pattern) = &schema.pattern {
+        patterns.push(pattern.clone());
+    }
+    if let Some(format) = &schema.format
+        && let Some(check) = crate::json_schema::format::check_for(format)
+    {
+        patterns.push(check.pattern.to_string());
+    }
+    for property in schema
+        .properties
+        .iter()
+        .flat_map(|entries| entries.values())
+    {
+        collect_schema_patterns(property, patterns);
+    }
+    if let Some(items) = &schema.items {
+        collect_schema_patterns(items, patterns);
+    }
+    for branch in schema.one_of.iter().flatten() {
+        collect_schema_patterns(branch, patterns);
+    }
+    if let Some(names) = &schema.property_names {
+        collect_schema_patterns(names, patterns);
+    }
+    if let Some(Value::Object(members)) = &schema.additional_properties
+        && let Ok(member) = serde_json::from_value::<Schema>(Value::Object(members.clone()))
+    {
+        collect_schema_patterns(&member, patterns);
+    }
 }
 
 /// Emits the object member-count predicates (`minProperties`/`maxProperties`)
@@ -750,6 +776,11 @@ fn render_ts_array_checks(
 /// re-check over the in-memory value (P12, both directions). Mirrors the
 /// dispatch in `render_ts_field_checks`.
 fn field_needs_serialize_check(schema: &Schema) -> bool {
+    // A nullability wrapper declares nothing itself; its non-null branch carries
+    // the constraints, checked under a `!== null` guard.
+    if let Some(non_null) = nullable_non_null_schema(schema) {
+        return field_needs_serialize_check(non_null);
+    }
     if schema.const_value.is_some() || schema.enum_values.is_some() {
         return true;
     }
@@ -828,6 +859,12 @@ fn render_ts_field_checks(
     path_expr: &str,
     indent: &str,
 ) {
+    // A nullability wrapper's constraints live on its non-null branch; the caller
+    // has already guarded the value against `null`.
+    if let Some(non_null) = nullable_non_null_schema(schema) {
+        render_ts_field_checks(output, non_null, value_expr, path_expr, indent);
+        return;
+    }
     if let Some(const_value) = &schema.const_value {
         let literal =
             typescript_value_literal(const_value).unwrap_or_else(|_| "undefined".to_string());
@@ -867,6 +904,40 @@ fn render_ts_field_checks(
             render_ts_array_checks(output, value_expr, path_expr, schema, indent);
         }
         _ => {}
+    }
+}
+
+/// Emits the serialize-side validation for one typed-map member against its
+/// in-memory value, keyed by the member's own key. The member counterpart of
+/// [`render_ts_serialize_property_check`]: same predicates, same nullable guard
+/// ([[additionalProperties]] §"Serialize-side" — a catch-all mutated to an
+/// invalid value fails serialization rather than emitting bad data).
+fn render_ts_member_check(
+    output: &mut String,
+    value_schema: &Schema,
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+) {
+    let guard_null = allows_null(value_schema);
+    let body_indent = if guard_null {
+        format!("{indent}  ")
+    } else {
+        indent.to_string()
+    };
+    let mut body = String::new();
+    render_ts_field_checks(&mut body, value_schema, value_expr, path_expr, &body_indent);
+    if body.is_empty() {
+        return;
+    }
+    if guard_null {
+        output.push_str(indent);
+        output.push_str(&format!("if ({value_expr} !== null) {{\n"));
+        output.push_str(&body);
+        output.push_str(indent);
+        output.push_str("}\n");
+    } else {
+        output.push_str(&body);
     }
 }
 
@@ -2287,6 +2358,11 @@ fn render_model_serializer_body(
         output.push_str(
             "  for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {\n",
         );
+        // Every member is re-checked against `T` before emit (P12), keyed by its
+        // own key — the same predicates the parse side ran.
+        if let Some(value_schema) = &shape.value_schema {
+            render_ts_member_check(output, value_schema, "entry", "key", "    ");
+        }
         // A typed member re-serializes through its own mapper; an untyped one
         // (`additionalProperties: true`) is carried verbatim (P13).
         let entry = match &shape.value_schema {
@@ -2296,10 +2372,14 @@ fn render_model_serializer_body(
         output.push_str(&format!("    out[key] = {entry};\n"));
         output.push_str("  }\n");
         if needs_validation {
-            output.push_str("  const keys = Object.keys(out);\n");
-            render_ts_property_count_checks(output, "keys.length", &schema, "  ");
+            let mut checks = String::new();
+            render_ts_property_count_checks(&mut checks, "keys.length", &schema, "  ");
             if let Some(subschema) = &schema.property_names {
-                render_ts_property_name_checks(output, "keys", subschema, "  ");
+                render_ts_property_name_checks(&mut checks, "keys", subschema, "  ");
+            }
+            if !checks.is_empty() {
+                output.push_str("  const keys = Object.keys(out);\n");
+                output.push_str(&checks);
             }
             output.push_str("  if (violations.length) {\n");
             output.push_str(&format!(
@@ -2527,6 +2607,31 @@ fn render_value_parser(
     path_expr: &str,
     indent: &str,
     target_optional: bool,
+) {
+    render_value_parser_at_depth(
+        output,
+        schema,
+        raw_expr,
+        target,
+        path_expr,
+        indent,
+        target_optional,
+        0,
+    );
+}
+
+/// The value parser, carrying the array nesting `depth`: an array's loop
+/// variables are suffixed with their level so a nested array (`T[][]`) never
+/// shadows the element, index, or item of the array above it.
+fn render_value_parser_at_depth(
+    output: &mut String,
+    schema: &Schema,
+    raw_expr: &str,
+    target: &str,
+    path_expr: &str,
+    indent: &str,
+    target_optional: bool,
+    depth: usize,
 ) {
     if let Some(reference) = &schema.reference {
         let model_name = reference_model_name(reference);
@@ -2767,7 +2872,9 @@ fn render_value_parser(
             output.push_str(indent);
             output.push_str("}\n");
         }
-        Some("array") => render_array_parser(output, schema, raw_expr, target, path_expr, indent),
+        Some("array") => {
+            render_array_parser(output, schema, raw_expr, target, path_expr, indent, depth)
+        }
         Some("object") => {
             output.push_str(indent);
             output.push_str(target);
@@ -2964,7 +3071,17 @@ fn render_array_parser(
     target: &str,
     path_expr: &str,
     indent: &str,
+    depth: usize,
 ) {
+    // Level 0 keeps the unsuffixed names; every nested level suffixes its own.
+    let suffix = if depth == 0 {
+        String::new()
+    } else {
+        depth.to_string()
+    };
+    let element = format!("element{suffix}");
+    let index = format!("index{suffix}");
+    let item = format!("item{suffix}");
     let item_annotation = schema
         .items
         .as_ref()
@@ -2987,22 +3104,24 @@ fn render_array_parser(
     output.push_str(indent);
     output.push_str("  ");
     output.push_str(raw_expr);
-    output.push_str(".forEach((element: unknown, index: number) => {\n");
+    output.push_str(&format!(
+        ".forEach(({element}: unknown, {index}: number) => {{\n"
+    ));
     output.push_str(indent);
-    output.push_str("    let item: ");
+    output.push_str(&format!("    let {item}: "));
     output.push_str(&item_annotation);
     output.push_str(" = undefined as unknown as ");
     output.push_str(&item_annotation);
     output.push_str(";\n");
-    if let Some(item) = &schema.items {
+    if let Some(element_schema) = &schema.items {
         let item_path_expr = if let Some(field_name) = string_literal_value(path_expr) {
-            format!("`{field_name}[${{index}}]`")
+            format!("`{field_name}[${{{index}}}]`")
         } else {
-            format!("`${{{path_expr}}}[${{index}}]`")
+            format!("`${{{path_expr}}}[${{{index}}}]`")
         };
-        if item.ty.as_ref().and_then(Value::as_str) == Some("string") {
+        if element_schema.ty.as_ref().and_then(Value::as_str) == Some("string") {
             output.push_str(indent);
-            output.push_str("    if (typeof element !== 'string') {\n");
+            output.push_str(&format!("    if (typeof {element} !== 'string') {{\n"));
             output.push_str(indent);
             output.push_str("      violations.push({ path: ");
             output.push_str(&item_path_expr);
@@ -3010,31 +3129,32 @@ fn render_array_parser(
             output.push_str(indent);
             output.push_str("    } else {\n");
             output.push_str(indent);
-            output.push_str("      item = element;\n");
+            output.push_str(&format!("      {item} = {element};\n"));
             output.push_str(indent);
             output.push_str("    }\n");
         } else {
-            render_value_parser(
+            render_value_parser_at_depth(
                 output,
-                item,
-                "element",
-                "item",
+                element_schema,
+                &element,
+                &item,
                 &item_path_expr,
                 &format!("{indent}    "),
                 false,
+                depth + 1,
             );
         }
     } else {
         output.push_str(indent);
-        output.push_str("    item = element as unknown;\n");
+        output.push_str(&format!("    {item} = {element} as unknown;\n"));
     }
     output.push_str(indent);
     output.push_str("    ");
-    output.push_str("if (item !== undefined) {\n");
+    output.push_str(&format!("if ({item} !== undefined) {{\n"));
     output.push_str(indent);
     output.push_str("      ");
     output.push_str(target);
-    output.push_str("!.push(item);\n");
+    output.push_str(&format!("!.push({item});\n"));
     output.push_str(indent);
     output.push_str("    }\n");
     output.push_str(indent);

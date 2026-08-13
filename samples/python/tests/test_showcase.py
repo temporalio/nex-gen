@@ -18,6 +18,7 @@ from showcase import (
     Settings,
     Showcase,
     ShowcaseDetailObject,
+    ShowcaseLedgerValue,
     Square,
     TextNote,
     Widget,
@@ -770,13 +771,13 @@ def test_element_position_unions_roundtrip_and_reject() -> None:
     # Element nullability is the element's own concern: `list[str | None]`, so
     # an explicit null is a member rather than a violation.
     assert value.slots == ["first", None, "third"]
-    # A map's members live in Pydantic's extras bag and round-trip verbatim.
-    # Python does not yet materialize a typed map's members into their declared
-    # member type (true of every non-scalar member type, not just a union), so
-    # this asserts the wire round-trip rather than a `Circle` instance.
+    # A map's members live in Pydantic's extras bag, materialized into their
+    # declared member type — here the union each member is routed to.
     assert value.choices is not None
     assert value.choices.model_extra is not None
-    assert value.choices.model_extra["primary"] == {"kind": "circle", "radius": 1}
+    primary = value.choices.model_extra["primary"]
+    assert isinstance(primary, Circle)
+    assert primary.radius == 1
 
     base = {
         "kind": "showcase",
@@ -835,3 +836,83 @@ def test_content_encoding_roundtrip_and_reject() -> None:
     with pytest.raises(ValidationError) as excinfo:
         _ = Showcase.model_validate({**base, "urlBlob": "aGk="})
     assert "must be base64url-encoded" in str(excinfo.value)
+
+
+def test_inline_object_shapes_roundtrip_and_reject() -> None:
+    # An object written inline in a value position is named after that position
+    # and emitted as an ordinary model: a property (`location`, with its own
+    # nested `geo`), a nullable property (`audit`), an array element (`rows`), a
+    # map and its member (`ledger`), and a free-form bag (`metadata`). The same
+    # fixture covers a typed map's member constraints (`quotas`, `tokens`,
+    # `nicknames`) and a nested array (`grid`).
+    value = typing.cast(
+        Showcase, roundtrip_fixture("showcase-inline-shapes.json", Showcase)
+    )
+    assert value.grid == [[1, 2], [3]]
+    assert value.location is not None
+    assert value.location.city == "Springfield"
+    assert value.location.geo is not None
+    assert value.location.geo.lat == 39.8
+    assert value.audit is not None
+    assert value.audit.by == "alice"
+    assert value.rows is not None
+    assert value.rows[0].cell == "a1"
+    # The member override renamed the member (`ledger_py`); the hoisted types keep
+    # their position-derived names. A map's members are materialized into their
+    # declared member type.
+    assert value.ledger_py is not None
+    opening = (value.ledger_py.model_extra or {})["opening"]
+    assert isinstance(opening, ShowcaseLedgerValue)
+    assert opening.amount == 100
+    assert value.metadata is not None
+    assert (value.metadata.model_extra or {}) == {"source": "import", "batch": 7}
+    assert value.quotas is not None
+    assert (value.quotas.model_extra or {}) == {"cpu": 20, "memory": 100}
+    # A null member of a nullable map is a member, not a violation.
+    assert value.nicknames is not None
+    assert (value.nicknames.model_extra or {}) == {"short": "al", "none": None}
+
+    base = {
+        "kind": "showcase",
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+    }
+
+    # A hoisted shape validates like any other model, at the nested path.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "location": {"city": ""}})
+    assert "location.city" in str(excinfo.value)
+
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "rows": [{"cell": "ok"}, {}]})
+    assert "rows.1.cell" in str(excinfo.value)
+
+    # A nested array reports the failing element at its own two-dimensional index.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "grid": [[1], [2, 1.5]]})
+    assert "grid.1.1" in str(excinfo.value)
+
+    # A typed map's member constraints are enforced, keyed by the member.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "quotas": {"cpu": 7}})
+    assert "cpu" in str(excinfo.value)
+
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "tokens": {"primary": "AB"}})
+    assert "primary" in str(excinfo.value)
+
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "nicknames": {"tiny": "a"}})
+    assert "tiny" in str(excinfo.value)
+
+    # The free-form bag's member-count bound rides with the hoisted type.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate(
+            {**base, "metadata": {"a": 1, "b": 2, "c": 3, "d": 4}}
+        )
+    assert "at most 3 properties" in str(excinfo.value)

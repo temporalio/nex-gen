@@ -1856,6 +1856,7 @@ fn render_union_read_scalar(
                 "element",
                 "elementPath",
                 variant.nullable_items,
+                0,
                 &format!("{indent}    "),
             );
             output.push_str(&format!("{indent}}}\n"));
@@ -2991,6 +2992,7 @@ fn render_parse_value(
                 "element",
                 "elementPath",
                 nullable_items,
+                0,
                 &format!("{indent}        "),
             );
             output.push_str(&format!("{indent}    }}\n"));
@@ -3042,6 +3044,7 @@ fn render_parse_element(
     element: &str,
     path_var: &str,
     nullable: bool,
+    depth: usize,
     indent: &str,
 ) {
     // A nullable element ([[nullability]] `oneOf` in `items`) admits a wire
@@ -3127,11 +3130,44 @@ fn render_parse_element(
             ));
             output.push_str(&format!("{indent}}}\n"));
         }
-        JavaType::List(_) => {
-            // Nested arrays are outside the supported subset.
+        // A nested array decodes elementwise in turn, one loop per level. The
+        // loop variables carry the nesting depth so an inner level never shadows
+        // the element, index, or path of the level above it ([[items]] admits
+        // `items` at any depth).
+        JavaType::List(inner) => {
+            let level = depth + 1;
+            let nested = format!("items{level}");
+            output.push_str(&format!("{indent}if (!{element}.isArray()) {{\n"));
             output.push_str(&format!(
-                "{indent}violations.add(new Violation({path_var}, \"unsupported nested array\"));\n"
+                "{indent}    violations.add(new Violation({path_var}, \"expected array\"));\n"
             ));
+            output.push_str(&format!("{indent}}} else {{\n"));
+            output.push_str(&format!(
+                "{indent}    List<{}> {nested} = new ArrayList<>();\n",
+                element_declaration(inner, false)
+            ));
+            output.push_str(&format!(
+                "{indent}    for (int index{level} = 0; index{level} < {element}.size(); index{level}++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}        JsonNode element{level} = {element}.get(index{level});\n"
+            ));
+            output.push_str(&format!(
+                "{indent}        String path{level} = {path_var} + \"[\" + index{level} + \"]\";\n"
+            ));
+            render_parse_element(
+                output,
+                inner,
+                &nested,
+                &format!("element{level}"),
+                &format!("path{level}"),
+                false,
+                level,
+                &format!("{indent}        "),
+            );
+            output.push_str(&format!("{indent}    }}\n"));
+            output.push_str(&format!("{indent}    {list}.add({nested});\n"));
+            output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Union { .. } => {
             output.push_str(&format!(
@@ -3140,13 +3176,14 @@ fn render_parse_element(
         }
         JavaType::Temporal(kind) => {
             let parse_fn = java_temporal_parse_fn(*kind);
+            let parsed_type = java_temporal_type(*kind);
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
             output.push_str(&format!(
                 "{indent}    violations.add(new Violation({path_var}, \"expected string\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
-                "{indent}    var parsed = TemporalSupport.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
+                "{indent}    {parsed_type} parsed = TemporalSupport.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {list}.add(parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
@@ -3159,7 +3196,7 @@ fn render_parse_element(
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
-                "{indent}    var parsed = Base64Support.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
+                "{indent}    byte[] parsed = Base64Support.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {list}.add(parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
@@ -3178,8 +3215,21 @@ fn render_parse_map_value(
     map: &str,
     element: &str,
     key_var: &str,
+    member: Option<&Schema>,
     indent: &str,
 ) {
+    // The member's own constraints run over the decoded value, keyed by its key.
+    let checks = |output: &mut String, value_expr: &str, indent: &str| {
+        if let Some(member) = member {
+            render_java_member_checks(output, value_expr, key_var, member, ty, indent);
+        }
+    };
+    // A member with nothing to check needs no local for the decoded value.
+    let has_checks = {
+        let mut probe = String::new();
+        checks(&mut probe, "value", "");
+        !probe.is_empty()
+    };
     match ty {
         JavaType::String => {
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
@@ -3187,9 +3237,17 @@ fn render_parse_map_value(
                 "{indent}    violations.add(new Violation({key_var}, \"expected string value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
-            output.push_str(&format!(
-                "{indent}    {map}.put({key_var}, {element}.textValue());\n"
-            ));
+            if has_checks {
+                output.push_str(&format!(
+                    "{indent}    String value = {element}.textValue();\n"
+                ));
+                checks(output, "value", &format!("{indent}    "));
+                output.push_str(&format!("{indent}    {map}.put({key_var}, value);\n"));
+            } else {
+                output.push_str(&format!(
+                    "{indent}    {map}.put({key_var}, {element}.textValue());\n"
+                ));
+            }
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Long => {
@@ -3197,6 +3255,7 @@ fn render_parse_map_value(
                 "{indent}Long parsed = SpecNumbers.specLong({element}, {key_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}if (parsed != null) {{\n"));
+            checks(output, "parsed", &format!("{indent}    "));
             output.push_str(&format!("{indent}    {map}.put({key_var}, parsed);\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
@@ -3206,9 +3265,17 @@ fn render_parse_map_value(
                 "{indent}    violations.add(new Violation({key_var}, \"expected number value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
-            output.push_str(&format!(
-                "{indent}    {map}.put({key_var}, {element}.doubleValue());\n"
-            ));
+            if has_checks {
+                output.push_str(&format!(
+                    "{indent}    double value = {element}.doubleValue();\n"
+                ));
+                checks(output, "value", &format!("{indent}    "));
+                output.push_str(&format!("{indent}    {map}.put({key_var}, value);\n"));
+            } else {
+                output.push_str(&format!(
+                    "{indent}    {map}.put({key_var}, {element}.doubleValue());\n"
+                ));
+            }
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Boolean => {
@@ -3256,10 +3323,42 @@ fn render_parse_map_value(
             ));
             output.push_str(&format!("{indent}}}\n"));
         }
-        JavaType::List(_) => {
+        // An array-valued member decodes elementwise, like an array-typed field;
+        // its own `items` constraints then run over the decoded list, keyed by the
+        // member's key.
+        JavaType::List(inner) => {
+            output.push_str(&format!("{indent}if (!{element}.isArray()) {{\n"));
             output.push_str(&format!(
-                "{indent}violations.add(new Violation({key_var}, \"unsupported nested array\"));\n"
+                "{indent}    violations.add(new Violation({key_var}, \"expected array value\"));\n"
             ));
+            output.push_str(&format!("{indent}}} else {{\n"));
+            output.push_str(&format!(
+                "{indent}    List<{}> items = new ArrayList<>();\n",
+                element_declaration(inner, false)
+            ));
+            output.push_str(&format!(
+                "{indent}    for (int index = 0; index < {element}.size(); index++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}        JsonNode item = {element}.get(index);\n"
+            ));
+            output.push_str(&format!(
+                "{indent}        String itemPath = {key_var} + \"[\" + index + \"]\";\n"
+            ));
+            render_parse_element(
+                output,
+                inner,
+                "items",
+                "item",
+                "itemPath",
+                false,
+                0,
+                &format!("{indent}        "),
+            );
+            output.push_str(&format!("{indent}    }}\n"));
+            checks(output, "items", &format!("{indent}    "));
+            output.push_str(&format!("{indent}    {map}.put({key_var}, items);\n"));
+            output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Union { .. } => {
             output.push_str(&format!(
@@ -3268,13 +3367,14 @@ fn render_parse_map_value(
         }
         JavaType::Temporal(kind) => {
             let parse_fn = java_temporal_parse_fn(*kind);
+            let parsed_type = java_temporal_type(*kind);
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
             output.push_str(&format!(
                 "{indent}    violations.add(new Violation({key_var}, \"expected string value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
-                "{indent}    var parsed = TemporalSupport.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
+                "{indent}    {parsed_type} parsed = TemporalSupport.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {map}.put({key_var}, parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
@@ -3287,7 +3387,7 @@ fn render_parse_map_value(
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
-                "{indent}    var parsed = Base64Support.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
+                "{indent}    byte[] parsed = Base64Support.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {map}.put({key_var}, parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
@@ -3297,6 +3397,120 @@ fn render_parse_map_value(
         JavaType::ClosedValue { .. } => {
             unreachable!("closed value cannot be a typed-map value")
         }
+    }
+}
+
+/// The Java identifier a typed map's member contributes to a synthesized name —
+/// the static `Pattern` fields its `pattern`/`format` compile into. Matches the
+/// `Value` position name the loader gives an inline member shape.
+const MAP_MEMBER_POSITION: &str = "value";
+
+/// Emits the predicates a typed map's member schema declares, over `value_expr`
+/// (the decoded member in scope) keyed by `key_expr` (the member's own key, which
+/// becomes the violation path) — the same predicates, and the same reasons, a
+/// declared field of that type carries. See
+/// `specs/json-schema/features/additionalProperties.md` §"Validator mapping"
+/// (per-member `T` validation).
+fn render_java_member_checks(
+    output: &mut String,
+    value_expr: &str,
+    key_expr: &str,
+    member: &Schema,
+    ty: &JavaType,
+    indent: &str,
+) {
+    if let Some(values) = closed_member_values(member) {
+        let condition = values
+            .iter()
+            .map(|value| format!("!({})", java_equals_term(value, value_expr, ty)))
+            .collect::<Vec<_>>()
+            .join(" && ");
+        let reason = java_string_literal(&format!(
+            "must be one of [{}], got ",
+            java_closed_set_display(&values)
+        ));
+        output.push_str(&format!(
+            "{indent}if ({condition}) {{\n{indent}    violations.add(new Violation({key_expr}, {reason} + {value_expr}));\n{indent}}}\n"
+        ));
+    }
+    match member.ty.as_ref().and_then(Value::as_str) {
+        Some("string") if matches!(ty, JavaType::String) => {
+            let constraints = StringLengthConstraints::from_schema(member);
+            if !constraints.is_empty() {
+                render_java_string_checks(
+                    output,
+                    value_expr,
+                    key_expr,
+                    MAP_MEMBER_POSITION,
+                    &constraints,
+                    indent,
+                );
+            }
+        }
+        Some(kind @ ("integer" | "number")) => {
+            let constraints = NumericConstraints::from_schema(member);
+            if !constraints.is_empty() {
+                render_java_numeric_checks(
+                    output,
+                    value_expr,
+                    key_expr,
+                    &constraints,
+                    kind == "integer",
+                    indent,
+                );
+            }
+        }
+        Some("array") => {
+            let constraints = ArrayConstraints::from_schema(member);
+            if !constraints.is_empty()
+                && let JavaType::List(element) = ty
+            {
+                render_java_array_checks(
+                    output,
+                    value_expr,
+                    key_expr,
+                    element,
+                    &constraints,
+                    indent,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The admissible values of a closed member value set (`const`/`enum`). A map
+/// member has no field to hang Java's value class off, so its closedness lives in
+/// the validator alone; the accepted value set is identical to every other
+/// target's.
+fn closed_member_values(member: &Schema) -> Option<Vec<Value>> {
+    if let Some(value) = &member.const_value {
+        return Some(vec![value.clone()]);
+    }
+    member.enum_values.clone()
+}
+
+/// True when a map-shaped schema admits an explicit `null` member (its
+/// `additionalProperties` is the nullability `oneOf` wrapper).
+fn map_member_allows_null(schema: &Schema) -> bool {
+    let Some(Value::Object(members)) = &schema.additional_properties else {
+        return false;
+    };
+    serde_json::from_value::<Schema>(Value::Object(members.clone()))
+        .map(|member| allows_null(&member))
+        .unwrap_or(false)
+}
+
+/// A map-shaped schema's declared member schema, with any nullability `oneOf`
+/// wrapper looked through so the constraints it carries are the member's own.
+fn map_member_schema(schema: &Schema) -> Option<Schema> {
+    let Some(Value::Object(members)) = &schema.additional_properties else {
+        return None;
+    };
+    let member: Schema = serde_json::from_value(Value::Object(members.clone())).ok()?;
+    match nullable_non_null_schema(&member) {
+        Some(non_null) => Some(non_null.clone()),
+        None => Some(member),
     }
 }
 
@@ -3320,7 +3534,30 @@ fn render_typed_map_class(
     output.push_str(&format!(
         "@JsonSerialize(using = {class}.Serializer.class)\n@JsonDeserialize(using = {class}.Deserializer.class)\npublic final class {class} {{\n"
     ));
-    let value_type = value.boxed_name();
+    // A nullable member takes the TYPE_USE annotation, so the map stays non-null
+    // while its members may be null — the rule [[items]] applies to an element.
+    let nullable_members = map_member_allows_null(schema);
+    let value_type = element_declaration(value, nullable_members);
+    let member = map_member_schema(schema);
+    // Compiled member `pattern`/`format` regexes (compiled once at class init),
+    // the map counterpart of a POJO's per-field `Pattern` statics.
+    if let Some(member) = &member {
+        let constraints = StringLengthConstraints::from_schema(member);
+        if let Some(pattern) = &constraints.pattern {
+            output.push_str(&format!(
+                "    private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n\n",
+                java_pattern_field_name(MAP_MEMBER_POSITION),
+                java_string_literal(pattern),
+            ));
+        }
+        if let Some(format) = &constraints.format {
+            output.push_str(&format!(
+                "    private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n\n",
+                java_format_field_name(MAP_MEMBER_POSITION),
+                java_string_literal(&format.pattern),
+            ));
+        }
+    }
     // The catch-all is always the named `additionalProperties` member, matching
     // the struct-shaped POJOs — see `specs/json-schema/features/additionalProperties.md`.
     output.push_str(&format!(
@@ -3358,11 +3595,24 @@ fn render_typed_map_class(
     ));
 
     // Serialize-side (P12): member-count and key-shape constraints over the
-    // in-memory map, thrown as an aggregated `ValidationException` before
-    // emitting — matching the deserializer.
+    // in-memory map, plus each member re-checked against `T`, thrown as an
+    // aggregated `ValidationException` before emitting — matching the
+    // deserializer.
+    let mut member_checks = String::new();
+    if let Some(member) = &member {
+        render_java_member_checks(
+            &mut member_checks,
+            "entry.getValue()",
+            "entry.getKey()",
+            member,
+            value,
+            "                ",
+        );
+    }
     let map_needs_validation = schema.min_properties.is_some()
         || schema.max_properties.is_some()
-        || schema.property_names.is_some();
+        || schema.property_names.is_some()
+        || !member_checks.is_empty();
     if map_needs_validation {
         output.push_str("            List<Violation> violations = new ArrayList<>();\n");
         render_java_property_count_checks(
@@ -3379,6 +3629,17 @@ fn render_typed_map_class(
                 "            ",
             );
         }
+        if !member_checks.is_empty() {
+            output.push_str(&format!(
+                "            for (Map.Entry<String, {value_type}> entry : value.additionalProperties.entrySet()) {{\n"
+            ));
+            if nullable_members {
+                output.push_str("                if (entry.getValue() == null) {\n");
+                output.push_str("                    continue;\n                }\n");
+            }
+            output.push_str(&member_checks);
+            output.push_str("            }\n");
+        }
         output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
     }
 
@@ -3386,6 +3647,11 @@ fn render_typed_map_class(
     output.push_str(&format!(
         "            for (Map.Entry<String, {value_type}> entry : value.additionalProperties.entrySet()) {{\n"
     ));
+    if nullable_members {
+        output.push_str("                if (entry.getValue() == null) {\n");
+        output.push_str("                    gen.writeNullField(entry.getKey());\n");
+        output.push_str("                    continue;\n                }\n");
+    }
     output.push_str(&write_map_value(value));
     output.push_str("            }\n");
     output.push_str("            gen.writeEndObject();\n");
@@ -3412,15 +3678,24 @@ fn render_typed_map_class(
     output.push_str("                String key = fieldNames.next();\n");
     output.push_str("                JsonNode element = node.get(key);\n");
     output.push_str("                if (element.isNull()) {\n");
-    output.push_str(
-        "                    violations.add(new Violation(key, \"explicit null not allowed\"));\n                    continue;\n                }\n",
-    );
+    if nullable_members {
+        // A `null` member of a nullable map is kept as a null member, so the key
+        // survives the round trip ([[nullability]]).
+        output.push_str(
+            "                    additionalProperties.put(key, null);\n                    continue;\n                }\n",
+        );
+    } else {
+        output.push_str(
+            "                    violations.add(new Violation(key, \"explicit null not allowed\"));\n                    continue;\n                }\n",
+        );
+    }
     render_parse_map_value(
         output,
         value,
         "additionalProperties",
         "element",
         "key",
+        member.as_ref(),
         "                ",
     );
     output.push_str("            }\n");

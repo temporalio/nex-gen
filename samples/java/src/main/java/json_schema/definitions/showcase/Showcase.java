@@ -896,6 +896,24 @@ public final class Showcase {
      * A list of **nullable elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list stays a list.
      */
     private final @Nullable List<@Nullable String> slots;
+    /**
+     * A nested array: `items` at depth two. Each level decodes elementwise, so a bad element is reported at its own two-dimensional index (`grid[1][0]`).
+     */
+    private final @Nullable List<List<Long>> grid;
+    private final @Nullable ShowcaseLocation location;
+    /**
+     * A nullable inline object. The nullability wrapper emits no type of its own, so the object inside it takes the property's name — `ShowcaseAudit`, the same name it would take written plainly: adding or removing nullability never renames the type.
+     */
+    private final @Nullable ShowcaseAudit audit;
+    /**
+     * A list whose element is an inline object, named after its position (`ShowcaseRowsItem`) exactly as an inline element *union* is.
+     */
+    private final @Nullable List<ShowcaseRowsItem> rows;
+    private final @Nullable ShowcaseLedger ledgerJava;
+    private final @Nullable ShowcaseMetadata metadata;
+    private final @Nullable Quotas quotas;
+    private final @Nullable Tokens tokens;
+    private final @Nullable Nicknames nicknames;
     private final @Nullable Choices choices;
     private final @Nullable Extras extras;
     private final @Nullable Shape shape;
@@ -906,7 +924,7 @@ public final class Showcase {
     private final @Nullable Attributes attributes;
     private final @Nullable ContactJava contact;
 
-    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Payload payload, @Nullable Detail detail, @Nullable ShapeOrName shapeOrName, @Nullable Measurements measurements, @Nullable List<Shape> shapes, @Nullable List<ShowcaseSegmentsItem> segments, @Nullable List<@Nullable String> slots, @Nullable Choices choices, @Nullable Extras extras, @Nullable Shape shape, @Nullable Note note, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
+    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Payload payload, @Nullable Detail detail, @Nullable ShapeOrName shapeOrName, @Nullable Measurements measurements, @Nullable List<Shape> shapes, @Nullable List<ShowcaseSegmentsItem> segments, @Nullable List<@Nullable String> slots, @Nullable List<List<Long>> grid, @Nullable ShowcaseLocation location, @Nullable ShowcaseAudit audit, @Nullable List<ShowcaseRowsItem> rows, @Nullable ShowcaseLedger ledgerJava, @Nullable ShowcaseMetadata metadata, @Nullable Quotas quotas, @Nullable Tokens tokens, @Nullable Nicknames nicknames, @Nullable Choices choices, @Nullable Extras extras, @Nullable Shape shape, @Nullable Note note, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
         this.kind = kind;
         this.revision = revision;
         this.enabled = enabled;
@@ -949,6 +967,15 @@ public final class Showcase {
         this.shapes = shapes;
         this.segments = segments;
         this.slots = slots;
+        this.grid = grid;
+        this.location = location;
+        this.audit = audit;
+        this.rows = rows;
+        this.ledgerJava = ledgerJava;
+        this.metadata = metadata;
+        this.quotas = quotas;
+        this.tokens = tokens;
+        this.nicknames = nicknames;
         this.choices = choices;
         this.extras = extras;
         this.shape = shape;
@@ -1144,6 +1171,42 @@ public final class Showcase {
         return slots;
     }
 
+    public @Nullable List<List<Long>> getGrid() {
+        return grid;
+    }
+
+    public @Nullable ShowcaseLocation getLocation() {
+        return location;
+    }
+
+    public @Nullable ShowcaseAudit getAudit() {
+        return audit;
+    }
+
+    public @Nullable List<ShowcaseRowsItem> getRows() {
+        return rows;
+    }
+
+    public @Nullable ShowcaseLedger getLedgerJava() {
+        return ledgerJava;
+    }
+
+    public @Nullable ShowcaseMetadata getMetadata() {
+        return metadata;
+    }
+
+    public @Nullable Quotas getQuotas() {
+        return quotas;
+    }
+
+    public @Nullable Tokens getTokens() {
+        return tokens;
+    }
+
+    public @Nullable Nicknames getNicknames() {
+        return nicknames;
+    }
+
     public @Nullable Choices getChoices() {
         return choices;
     }
@@ -1231,6 +1294,15 @@ public final class Showcase {
             && Objects.equals(this.shapes, that.shapes)
             && Objects.equals(this.segments, that.segments)
             && Objects.equals(this.slots, that.slots)
+            && Objects.equals(this.grid, that.grid)
+            && Objects.equals(this.location, that.location)
+            && Objects.equals(this.audit, that.audit)
+            && Objects.equals(this.rows, that.rows)
+            && Objects.equals(this.ledgerJava, that.ledgerJava)
+            && Objects.equals(this.metadata, that.metadata)
+            && Objects.equals(this.quotas, that.quotas)
+            && Objects.equals(this.tokens, that.tokens)
+            && Objects.equals(this.nicknames, that.nicknames)
             && Objects.equals(this.choices, that.choices)
             && Objects.equals(this.extras, that.extras)
             && Objects.equals(this.shape, that.shape)
@@ -1244,7 +1316,7 @@ public final class Showcase {
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, shapes, segments, slots, choices, extras, shape, note, address, labels, settings, attributes, contact);
+        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
     }
 
     @Override
@@ -1292,6 +1364,15 @@ public final class Showcase {
             + ", shapes=" + shapes
             + ", segments=" + segments
             + ", slots=" + slots
+            + ", grid=" + grid
+            + ", location=" + location
+            + ", audit=" + audit
+            + ", rows=" + rows
+            + ", ledgerJava=" + ledgerJava
+            + ", metadata=" + metadata
+            + ", quotas=" + quotas
+            + ", tokens=" + tokens
+            + ", nicknames=" + nicknames
             + ", choices=" + choices
             + ", extras=" + extras
             + ", shape=" + shape
@@ -1568,6 +1649,42 @@ public final class Showcase {
                 gen.writeFieldName("slots");
                 serializers.defaultSerializeValue(value.slots, gen);
             }
+            if (value.grid != null) {
+                gen.writeFieldName("grid");
+                serializers.defaultSerializeValue(value.grid, gen);
+            }
+            if (value.location != null) {
+                gen.writeFieldName("location");
+                serializers.defaultSerializeValue(value.location, gen);
+            }
+            if (value.audit != null) {
+                gen.writeFieldName("audit");
+                serializers.defaultSerializeValue(value.audit, gen);
+            }
+            if (value.rows != null) {
+                gen.writeFieldName("rows");
+                serializers.defaultSerializeValue(value.rows, gen);
+            }
+            if (value.ledgerJava != null) {
+                gen.writeFieldName("ledger");
+                serializers.defaultSerializeValue(value.ledgerJava, gen);
+            }
+            if (value.metadata != null) {
+                gen.writeFieldName("metadata");
+                serializers.defaultSerializeValue(value.metadata, gen);
+            }
+            if (value.quotas != null) {
+                gen.writeFieldName("quotas");
+                serializers.defaultSerializeValue(value.quotas, gen);
+            }
+            if (value.tokens != null) {
+                gen.writeFieldName("tokens");
+                serializers.defaultSerializeValue(value.tokens, gen);
+            }
+            if (value.nicknames != null) {
+                gen.writeFieldName("nicknames");
+                serializers.defaultSerializeValue(value.nicknames, gen);
+            }
             if (value.choices != null) {
                 gen.writeFieldName("choices");
                 serializers.defaultSerializeValue(value.choices, gen);
@@ -1625,6 +1742,7 @@ public final class Showcase {
                     case "address":
                     case "aliases":
                     case "attributes":
+                    case "audit":
                     case "blob":
                     case "category":
                     case "choices":
@@ -1638,26 +1756,33 @@ public final class Showcase {
                     case "extras":
                     case "gateway":
                     case "greeting":
+                    case "grid":
                     case "homepage":
                     case "host":
                     case "idOrName":
                     case "kind":
                     case "labels":
+                    case "ledger":
                     case "legacyId":
                     case "level":
+                    case "location":
                     case "measurements":
+                    case "metadata":
                     case "middleName":
                     case "name":
                     case "nickname":
+                    case "nicknames":
                     case "note":
                     case "payload":
                     case "phrase":
                     case "priority":
+                    case "quotas":
                     case "ratio":
                     case "requestId":
                     case "retries":
                     case "revision":
                     case "roles":
+                    case "rows":
                     case "scale":
                     case "segments":
                     case "settings":
@@ -1670,6 +1795,7 @@ public final class Showcase {
                     case "step":
                     case "tags":
                     case "tier":
+                    case "tokens":
                     case "urlBlob":
                     case "verbose":
                         break;
@@ -2431,6 +2557,192 @@ public final class Showcase {
                     }
                 }
             }
+            List<List<Long>> grid = null;
+            {
+                JsonNode field = node.get("grid");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("grid", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("grid", "expected array"));
+                    } else {
+                        List<List<Long>> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "grid" + "[" + index + "]";
+                            if (!element.isArray()) {
+                                violations.add(new Violation(elementPath, "expected array"));
+                            } else {
+                                List<Long> items1 = new ArrayList<>();
+                                for (int index1 = 0; index1 < element.size(); index1++) {
+                                    JsonNode element1 = element.get(index1);
+                                    String path1 = elementPath + "[" + index1 + "]";
+                                    Long parsed = SpecNumbers.specLong(element1, path1, violations);
+                                    if (parsed != null) {
+                                        items1.add(parsed);
+                                    }
+                                }
+                                items.add(items1);
+                            }
+                        }
+                        grid = items;
+                    }
+                }
+            }
+            ShowcaseLocation location = null;
+            {
+                JsonNode field = node.get("location");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("location", "explicit null not allowed"));
+                } else {
+                    try {
+                        location = context.readTreeAsValue(field, ShowcaseLocation.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("location"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("location", nested.getMessage()));
+                    }
+                }
+            }
+            ShowcaseAudit audit = null;
+            {
+                JsonNode field = node.get("audit");
+                if (field == null) {
+                } else if (field.isNull()) {
+                } else {
+                    try {
+                        audit = context.readTreeAsValue(field, ShowcaseAudit.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("audit"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("audit", nested.getMessage()));
+                    }
+                }
+            }
+            List<ShowcaseRowsItem> rows = null;
+            {
+                JsonNode field = node.get("rows");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("rows", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("rows", "expected array"));
+                    } else {
+                        List<ShowcaseRowsItem> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "rows" + "[" + index + "]";
+                            try {
+                                items.add(context.readTreeAsValue(element, ShowcaseRowsItem.class));
+                            } catch (ValidationException nested) {
+                                for (Violation violation : nested.getViolations()) {
+                                    violations.add(violation.withPathPrefix(elementPath));
+                                }
+                            } catch (IOException nested) {
+                                violations.add(new Violation(elementPath, nested.getMessage()));
+                            }
+                        }
+                        rows = items;
+                    }
+                }
+            }
+            ShowcaseLedger ledgerJava = null;
+            {
+                JsonNode field = node.get("ledger");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("ledger", "explicit null not allowed"));
+                } else {
+                    try {
+                        ledgerJava = context.readTreeAsValue(field, ShowcaseLedger.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("ledger"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("ledger", nested.getMessage()));
+                    }
+                }
+            }
+            ShowcaseMetadata metadata = null;
+            {
+                JsonNode field = node.get("metadata");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("metadata", "explicit null not allowed"));
+                } else {
+                    try {
+                        metadata = context.readTreeAsValue(field, ShowcaseMetadata.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("metadata"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("metadata", nested.getMessage()));
+                    }
+                }
+            }
+            Quotas quotas = null;
+            {
+                JsonNode field = node.get("quotas");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("quotas", "explicit null not allowed"));
+                } else {
+                    try {
+                        quotas = context.readTreeAsValue(field, Quotas.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("quotas"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("quotas", nested.getMessage()));
+                    }
+                }
+            }
+            Tokens tokens = null;
+            {
+                JsonNode field = node.get("tokens");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("tokens", "explicit null not allowed"));
+                } else {
+                    try {
+                        tokens = context.readTreeAsValue(field, Tokens.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("tokens"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("tokens", nested.getMessage()));
+                    }
+                }
+            }
+            Nicknames nicknames = null;
+            {
+                JsonNode field = node.get("nicknames");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("nicknames", "explicit null not allowed"));
+                } else {
+                    try {
+                        nicknames = context.readTreeAsValue(field, Nicknames.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("nicknames"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("nicknames", nested.getMessage()));
+                    }
+                }
+            }
             Choices choices = null;
             {
                 JsonNode field = node.get("choices");
@@ -2580,7 +2892,7 @@ public final class Showcase {
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, shapes, segments, slots, choices, extras, shape, note, address, labels, settings, attributes, contact);
+            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
         }
     }
 }

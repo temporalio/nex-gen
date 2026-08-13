@@ -223,6 +223,42 @@ violation aggregates.
 | Python | `extra='allow'` — extras land in `model_extra`, **round-trip via `model_dump_json`** (verified, `/tmp/pyd_extra_probe.py`) | `extra='allow'` + a post-init validator checks each `model_extra` value is `T`, aggregating per-key failures (verified, `/tmp/pyd_typed_extra.py`) | `extra='forbid'` — Pydantic raises `extra_forbidden` per extra key, aggregated (verified) |
 | Java | the per-POJO collecting deserializer (Java §5) routes parsed-tree keys not in the declared set into the `additionalProperties` map; the matching serializer spreads them back | same routing, but each extra value is validated as `T` (bad keys → `Violation{path:key}`) | the collecting deserializer pushes a `Violation{path:key, "unknown property \"" + key + "\""}` per undeclared tree key into the single `ValidationException` — no fail-fast `ignoreUnknown=false`/`UnrecognizedPropertyException` |
 
+### Per-member `T` validation
+
+"Validated as `T`" is literal and symmetric: a member is held to **everything**
+its declared type declares — the spec-strict integer parse and the integer cap,
+numeric bounds and `multipleOf`, string length / `pattern` / `format`, a
+materialized temporal or `contentEncoding` construct, array `minItems` /
+`maxItems` / `uniqueItems` / `contains`, a `const`/`enum` value set, and a
+referenced model's or union's own validation — with the **member's key as the
+violation path** (`labels.env`, `entries.a.street`), and in **both directions**
+(**P12**): a catch-all mutated to an invalid value fails serialization rather
+than reaching the wire.
+
+Per language, the mechanism is the one that position already uses:
+
+- **Go / TypeScript / Java** run the same check emitters a *property* of that
+  type runs, over the decoded member inside the member loop — one set of
+  predicates, two call sites.
+- **Python** validates and **materializes** each member through a module-level
+  `pydantic.TypeAdapter` over the member's annotation (declared after the classes
+  so a referenced model resolves), then re-encodes each member through that same
+  adapter on the way out. So `model_extra` holds the *declared* member type — an
+  `Inner` instance, an `int` parsed from `1.0`, a `datetime`, `bytes` — rather
+  than the raw wire value.
+- A **closed member value set** (`const`/`enum`) is a validator-only closedness
+  in Go and Java: a member has no field to hang a defined type or value class
+  off, so the admissible set is checked against wire literals instead. The
+  accepted value set is identical in all four languages (TypeScript and Python
+  additionally close the *type*, as `Record<string, "a" | "b">` /
+  `Literal["a","b"]`).
+
+A member may be **nullable** — `additionalProperties` is the [[nullability]]
+`oneOf` — in which case an explicit `null` is *kept as a null member* rather than
+dropped from the map or rejected: Go `map[string]*T`, Java
+`Map<String, @Nullable T>`, TypeScript `Record<string, T | null>`, Python
+`T | None`. A present member still carries its own constraints.
+
 Empirical notes (Pydantic 2.13):
 - `extra='allow'` + `strict=True` coexist: declared fields stay strict
   (`"1"` rejected for an `int`) while extras are preserved.
@@ -284,6 +320,13 @@ unambiguous in both directions.
   aggregated with declared-field errors.
 - Typed map / typed extras + value of wrong type → rejected with
   `path = key`; multiple bad extras reported in one shot (P11).
+- Typed map + a member violating a *constraint* of its type (a string under
+  `minLength`, an integer off its `multipleOf`, an array under `minItems`, a
+  value outside a `const`/`enum` set) → rejected with `path = key`, on both
+  deserialize and serialize.
+- Nullable member (`additionalProperties: {oneOf:[{T},{"type":"null"}]}`) +
+  an explicit `null` → accepted and preserved as a null member; a present
+  member still validates against `T`.
 - Typed extras + good value → validated and round-trips.
 - Open opaque map round-trips arbitrary nested JSON unchanged.
 - Pure map (all four languages) decodes into the wrapper's catch-all

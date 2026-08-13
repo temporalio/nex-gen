@@ -38,6 +38,7 @@ const PATTERN_F5FB862A44510B9D = new RegExp(
   "^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$",
   "u",
 );
+const PATTERN_C182F89FDB221836 = new RegExp("^[a-z]+$", "u");
 
 /**
  * A nested object, open to forward-compatible extension.
@@ -108,9 +109,23 @@ export interface LinkNote {
 }
 
 /**
+ * A typed map of **nullable** members: a member may be an explicit null, which is kept as a null member rather than dropped from the map, while a present member still carries its own constraint.
+ */
+export interface Nicknames {
+  additionalProperties: Record<string, string | null>;
+}
+
+/**
  * A tagged union whose object branches are written **inline** rather than `$ref`ed: each branch is emitted as a named type, so each names itself with the per-language `x-<lang>-name` override (two or more inline object branches cannot derive distinguishing names — the discriminator `const` is a wire value, not an identifier). Selection reads the shared required `kind` const, and each branch keeps its own constraints and stays open to unknown members.
  */
 export type Note = TextNote | LinkNote;
+
+/**
+ * A typed map whose members carry their own constraints: every member is a non-negative multiple of 5, at most 100. A member is held to exactly what a declared field of that type is held to, in both directions, with the offending member's key as the violation path.
+ */
+export interface Quotas {
+  additionalProperties: Record<string, number>;
+}
 
 /**
  * A closed object; unknown members are rejected.
@@ -300,6 +315,24 @@ export interface Showcase {
    * A list of **nullable elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list stays a list.
    */
   slots?: (string | null)[];
+  /**
+   * A nested array: `items` at depth two. Each level decodes elementwise, so a bad element is reported at its own two-dimensional index (`grid[1][0]`).
+   */
+  grid?: number[][];
+  location?: ShowcaseLocation;
+  /**
+   * A nullable inline object. The nullability wrapper emits no type of its own, so the object inside it takes the property's name — `ShowcaseAudit`, the same name it would take written plainly: adding or removing nullability never renames the type.
+   */
+  audit?: ShowcaseAudit | null;
+  /**
+   * A list whose element is an inline object, named after its position (`ShowcaseRowsItem`) exactly as an inline element *union* is.
+   */
+  rows?: ShowcaseRowsItem[];
+  ledgerTs?: ShowcaseLedger;
+  metadata?: ShowcaseMetadata;
+  quotas?: Quotas;
+  tokens?: Tokens;
+  nicknames?: Nicknames;
   choices?: Choices;
   extras?: Extras;
   shape?: Shape;
@@ -311,9 +344,53 @@ export interface Showcase {
   contact?: ContactTs;
 }
 
+export interface ShowcaseAudit {
+  by: string;
+  additionalProperties: Record<string, unknown>;
+}
+
 export interface ShowcaseDetailObject {
   code: string;
   hint?: string;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A typed map written inline on the property: the map itself is named `ShowcaseLedger` and its inline member shape `ShowcaseLedgerValue`, so both the map and its members are ordinary named models. Also exercises the member-name override on a hoisted property — `x-<lang>-name` keeps naming the *member* (Go `LedgerGo`, TS `ledgerTs`, Python `ledger_py`, Java `ledgerJava`) while the type keeps its position-derived name.
+ */
+export interface ShowcaseLedger {
+  additionalProperties: Record<string, ShowcaseLedgerValue>;
+}
+
+export interface ShowcaseLedgerValue {
+  amount: number;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * An object written **inline** on the property rather than in `$defs`. It is named after the position it occupies — `ShowcaseLocation` — moved into `$defs`, and the property becomes a `$ref` at it, so it emits as the ordinary named model an authored definition would produce, member constraints and all. Its own nested inline object is named against that name in turn (`ShowcaseLocationGeo`), so nesting needs no `$defs` boilerplate at any depth.
+ */
+export interface ShowcaseLocation {
+  city: string;
+  geo?: ShowcaseLocationGeo;
+  additionalProperties: Record<string, unknown>;
+}
+
+export interface ShowcaseLocationGeo {
+  lat?: number;
+  lon?: number;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A free-form object written inline. Even this is named (`ShowcaseMetadata`): every object emits as a named aggregate holding its members in a catch-all, so adding `properties` to it later only adds fields rather than changing the emitted type's kind, and its member-count bound rides along with it.
+ */
+export interface ShowcaseMetadata {
+  additionalProperties: Record<string, unknown>;
+}
+
+export interface ShowcaseRowsItem {
+  cell: string;
   additionalProperties: Record<string, unknown>;
 }
 
@@ -339,6 +416,13 @@ export interface TextNote {
   readonly kind: "text";
   body: string;
   additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A typed map with a refined *string* member: 2 to 8 code points of lowercase ASCII. Exercises the member-level `minLength`/`maxLength`/`pattern` in every language.
+ */
+export interface Tokens {
+  additionalProperties: Record<string, string>;
 }
 
 /**
@@ -1015,6 +1099,65 @@ export class LinkNoteMapper {
   }
 }
 
+export class NicknamesMapper {
+  public fromIntermediate(raw: unknown): Nicknames {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, string | null> = {};
+    for (const key of keys) {
+      let entry: string | null | undefined = undefined;
+      if (raw[key] === null) {
+        entry = null;
+      } else {
+        if (typeof raw[key] !== "string") {
+          violations.push({ path: key, reason: "expected string" });
+        } else {
+          entry = raw[key];
+          if ([...raw[key]].length < 2) {
+            violations.push({
+              path: key,
+              reason: `must have length >= 2, got ${[...raw[key]].length}`,
+            });
+          }
+        }
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Nicknames): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (entry !== null) {
+        if ([...entry].length < 2) {
+          violations.push({
+            path: key,
+            reason: `must have length >= 2, got ${[...entry].length}`,
+          });
+        }
+      }
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
 export class NoteMapper {
   public fromIntermediate(raw: unknown): Note {
     const violations: __nexgenDefinitions.Violation[] = [];
@@ -1060,6 +1203,68 @@ export class NoteMapper {
     throw new __nexgenDefinitions.ValidationError([
       { path: "", reason: "expected one of: TextNote, LinkNote" },
     ]);
+  }
+}
+
+export class QuotasMapper {
+  public fromIntermediate(raw: unknown): Quotas {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, number> = {};
+    for (const key of keys) {
+      let entry: number | undefined = undefined;
+      if (typeof raw[key] !== "number" || !Number.isSafeInteger(raw[key])) {
+        violations.push({ path: key, reason: "expected integer" });
+      } else {
+        entry = raw[key];
+        if (raw[key] < 0) {
+          violations.push({ path: key, reason: `must be >= 0, got ${raw[key]}` });
+        }
+        if (raw[key] > 100) {
+          violations.push({ path: key, reason: `must be <= 100, got ${raw[key]}` });
+        }
+        if (raw[key] % 5 !== 0) {
+          violations.push({
+            path: key,
+            reason: `must be a multiple of 5, got ${raw[key]}`,
+          });
+        }
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Quotas): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (entry < 0) {
+        violations.push({ path: key, reason: `must be >= 0, got ${entry}` });
+      }
+      if (entry > 100) {
+        violations.push({ path: key, reason: `must be <= 100, got ${entry}` });
+      }
+      if (entry % 5 !== 0) {
+        violations.push({ path: key, reason: `must be a multiple of 5, got ${entry}` });
+      }
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
   }
 }
 
@@ -1977,6 +2182,156 @@ export class ShowcaseMapper {
       }
     }
 
+    let grid: number[][] | undefined = undefined as unknown as number[][] | undefined;
+    if (raw.grid === null) {
+      violations.push({ path: "grid", reason: "explicit null not allowed" });
+    } else if (raw.grid !== undefined) {
+      if (!Array.isArray(raw.grid)) {
+        violations.push({ path: "grid", reason: "expected array" });
+      } else {
+        grid = [];
+        raw.grid.forEach((element: unknown, index: number) => {
+          let item: number[] = undefined as unknown as number[];
+          if (!Array.isArray(element)) {
+            violations.push({ path: `grid[${index}]`, reason: "expected array" });
+          } else {
+            item = [];
+            element.forEach((element1: unknown, index1: number) => {
+              let item1: number = undefined as unknown as number;
+              if (typeof element1 !== "number" || !Number.isSafeInteger(element1)) {
+                violations.push({
+                  path: `${`grid[${index}]`}[${index1}]`,
+                  reason: "expected integer",
+                });
+              } else {
+                item1 = element1;
+              }
+              if (item1 !== undefined) {
+                item!.push(item1);
+              }
+            });
+          }
+          if (item !== undefined) {
+            grid!.push(item);
+          }
+        });
+      }
+    }
+
+    let location: ShowcaseLocation | undefined = undefined as unknown as
+      | ShowcaseLocation
+      | undefined;
+    if (raw.location === null) {
+      violations.push({ path: "location", reason: "explicit null not allowed" });
+    } else if (raw.location !== undefined) {
+      try {
+        location = new ShowcaseLocationMapper().fromIntermediate(raw.location);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "location", error);
+      }
+    }
+
+    let audit: ShowcaseAudit | null | undefined = undefined as unknown as
+      | ShowcaseAudit
+      | null
+      | undefined;
+    if (raw.audit !== undefined) {
+      if (raw.audit === null) {
+        audit = null;
+      } else {
+        try {
+          audit = new ShowcaseAuditMapper().fromIntermediate(raw.audit);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "audit", error);
+        }
+      }
+    }
+
+    let rows: ShowcaseRowsItem[] | undefined = undefined as unknown as
+      | ShowcaseRowsItem[]
+      | undefined;
+    if (raw.rows === null) {
+      violations.push({ path: "rows", reason: "explicit null not allowed" });
+    } else if (raw.rows !== undefined) {
+      if (!Array.isArray(raw.rows)) {
+        violations.push({ path: "rows", reason: "expected array" });
+      } else {
+        rows = [];
+        raw.rows.forEach((element: unknown, index: number) => {
+          let item: ShowcaseRowsItem = undefined as unknown as ShowcaseRowsItem;
+          try {
+            item = new ShowcaseRowsItemMapper().fromIntermediate(element);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, `rows[${index}]`, error);
+          }
+          if (item !== undefined) {
+            rows!.push(item);
+          }
+        });
+      }
+    }
+
+    let ledgerTs: ShowcaseLedger | undefined = undefined as unknown as
+      | ShowcaseLedger
+      | undefined;
+    if (raw.ledger === null) {
+      violations.push({ path: "ledger", reason: "explicit null not allowed" });
+    } else if (raw.ledger !== undefined) {
+      try {
+        ledgerTs = new ShowcaseLedgerMapper().fromIntermediate(raw.ledger);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "ledger", error);
+      }
+    }
+
+    let metadata: ShowcaseMetadata | undefined = undefined as unknown as
+      | ShowcaseMetadata
+      | undefined;
+    if (raw.metadata === null) {
+      violations.push({ path: "metadata", reason: "explicit null not allowed" });
+    } else if (raw.metadata !== undefined) {
+      try {
+        metadata = new ShowcaseMetadataMapper().fromIntermediate(raw.metadata);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "metadata", error);
+      }
+    }
+
+    let quotas: Quotas | undefined = undefined as unknown as Quotas | undefined;
+    if (raw.quotas === null) {
+      violations.push({ path: "quotas", reason: "explicit null not allowed" });
+    } else if (raw.quotas !== undefined) {
+      try {
+        quotas = new QuotasMapper().fromIntermediate(raw.quotas);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "quotas", error);
+      }
+    }
+
+    let tokens: Tokens | undefined = undefined as unknown as Tokens | undefined;
+    if (raw.tokens === null) {
+      violations.push({ path: "tokens", reason: "explicit null not allowed" });
+    } else if (raw.tokens !== undefined) {
+      try {
+        tokens = new TokensMapper().fromIntermediate(raw.tokens);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "tokens", error);
+      }
+    }
+
+    let nicknames: Nicknames | undefined = undefined as unknown as
+      | Nicknames
+      | undefined;
+    if (raw.nicknames === null) {
+      violations.push({ path: "nicknames", reason: "explicit null not allowed" });
+    } else if (raw.nicknames !== undefined) {
+      try {
+        nicknames = new NicknamesMapper().fromIntermediate(raw.nicknames);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "nicknames", error);
+      }
+    }
+
     let choices: Choices | undefined = undefined as unknown as Choices | undefined;
     if (raw.choices === null) {
       violations.push({ path: "choices", reason: "explicit null not allowed" });
@@ -2122,6 +2477,15 @@ export class ShowcaseMapper {
         key !== "shapes" &&
         key !== "segments" &&
         key !== "slots" &&
+        key !== "grid" &&
+        key !== "location" &&
+        key !== "audit" &&
+        key !== "rows" &&
+        key !== "ledger" &&
+        key !== "metadata" &&
+        key !== "quotas" &&
+        key !== "tokens" &&
+        key !== "nicknames" &&
         key !== "choices" &&
         key !== "extras" &&
         key !== "shape" &&
@@ -2246,6 +2610,33 @@ export class ShowcaseMapper {
     }
     if (slots !== undefined) {
       out.slots = slots;
+    }
+    if (grid !== undefined) {
+      out.grid = grid;
+    }
+    if (location !== undefined) {
+      out.location = location;
+    }
+    if (audit !== undefined) {
+      out.audit = audit;
+    }
+    if (rows !== undefined) {
+      out.rows = rows;
+    }
+    if (ledgerTs !== undefined) {
+      out.ledgerTs = ledgerTs;
+    }
+    if (metadata !== undefined) {
+      out.metadata = metadata;
+    }
+    if (quotas !== undefined) {
+      out.quotas = quotas;
+    }
+    if (tokens !== undefined) {
+      out.tokens = tokens;
+    }
+    if (nicknames !== undefined) {
+      out.nicknames = nicknames;
     }
     if (choices !== undefined) {
       out.choices = choices;
@@ -2566,6 +2957,38 @@ export class ShowcaseMapper {
     if (value.slots !== undefined) {
       out.slots = value.slots;
     }
+    if (value.grid !== undefined) {
+      out.grid = value.grid;
+    }
+    if (value.location !== undefined) {
+      out.location = new ShowcaseLocationMapper().toIntermediate(value.location);
+    }
+    if (value.audit !== undefined) {
+      out.audit =
+        value.audit === null
+          ? null
+          : new ShowcaseAuditMapper().toIntermediate(value.audit);
+    }
+    if (value.rows !== undefined) {
+      out.rows = value.rows.map((element) =>
+        new ShowcaseRowsItemMapper().toIntermediate(element),
+      );
+    }
+    if (value.ledgerTs !== undefined) {
+      out.ledger = new ShowcaseLedgerMapper().toIntermediate(value.ledgerTs);
+    }
+    if (value.metadata !== undefined) {
+      out.metadata = new ShowcaseMetadataMapper().toIntermediate(value.metadata);
+    }
+    if (value.quotas !== undefined) {
+      out.quotas = new QuotasMapper().toIntermediate(value.quotas);
+    }
+    if (value.tokens !== undefined) {
+      out.tokens = new TokensMapper().toIntermediate(value.tokens);
+    }
+    if (value.nicknames !== undefined) {
+      out.nicknames = new NicknamesMapper().toIntermediate(value.nicknames);
+    }
     if (value.choices !== undefined) {
       out.choices = new ChoicesMapper().toIntermediate(value.choices);
     }
@@ -2592,6 +3015,68 @@ export class ShowcaseMapper {
     }
     if (value.contact !== undefined) {
       out.contact = new ContactTsMapper().toIntermediate(value.contact);
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_AUDIT_DECLARED = new Set(["by"]);
+
+export class ShowcaseAuditMapper {
+  public fromIntermediate(raw: unknown): ShowcaseAudit {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let by: string = undefined as unknown as string;
+    if (raw.by === undefined || raw.by === null) {
+      violations.push({ path: "by", reason: "required" });
+    } else {
+      if (typeof raw.by !== "string") {
+        violations.push({ path: "by", reason: "expected string" });
+      } else {
+        by = raw.by;
+        if ([...raw.by].length < 1) {
+          violations.push({
+            path: "by",
+            reason: `must have length >= 1, got ${[...raw.by].length}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_AUDIT_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseAudit = { by, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseAudit): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if ([...value.by].length < 1) {
+      violations.push({
+        path: "by",
+        reason: `must have length >= 1, got ${[...value.by].length}`,
+      });
+    }
+    out.by = value.by;
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
     }
     if (violations.length) {
       throw new __nexgenDefinitions.ValidationError(violations);
@@ -2669,6 +3154,359 @@ export class ShowcaseDetailObjectMapper {
     if (value.hint !== undefined) {
       out.hint = value.hint;
     }
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+export class ShowcaseLedgerMapper {
+  public fromIntermediate(raw: unknown): ShowcaseLedger {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, ShowcaseLedgerValue> = {};
+    for (const key of keys) {
+      let entry: ShowcaseLedgerValue | undefined = undefined;
+      try {
+        entry = new ShowcaseLedgerValueMapper().fromIntermediate(raw[key]);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, key, error);
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: ShowcaseLedger): unknown {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = new ShowcaseLedgerValueMapper().toIntermediate(entry);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_LEDGER_VALUE_DECLARED = new Set(["amount"]);
+
+export class ShowcaseLedgerValueMapper {
+  public fromIntermediate(raw: unknown): ShowcaseLedgerValue {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let amount: number = undefined as unknown as number;
+    if (raw.amount === undefined || raw.amount === null) {
+      violations.push({ path: "amount", reason: "required" });
+    } else {
+      if (typeof raw.amount !== "number" || !Number.isSafeInteger(raw.amount)) {
+        violations.push({ path: "amount", reason: "expected integer" });
+      } else {
+        amount = raw.amount;
+        if (raw.amount < 0) {
+          violations.push({
+            path: "amount",
+            reason: `must be >= 0, got ${raw.amount}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_LEDGER_VALUE_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseLedgerValue = { amount, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseLedgerValue): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if (value.amount < 0) {
+      violations.push({ path: "amount", reason: `must be >= 0, got ${value.amount}` });
+    }
+    out.amount = value.amount;
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_LOCATION_DECLARED = new Set(["city", "geo"]);
+
+export class ShowcaseLocationMapper {
+  public fromIntermediate(raw: unknown): ShowcaseLocation {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let city: string = undefined as unknown as string;
+    if (raw.city === undefined || raw.city === null) {
+      violations.push({ path: "city", reason: "required" });
+    } else {
+      if (typeof raw.city !== "string") {
+        violations.push({ path: "city", reason: "expected string" });
+      } else {
+        city = raw.city;
+        if ([...raw.city].length < 1) {
+          violations.push({
+            path: "city",
+            reason: `must have length >= 1, got ${[...raw.city].length}`,
+          });
+        }
+      }
+    }
+
+    let geo: ShowcaseLocationGeo | undefined = undefined as unknown as
+      | ShowcaseLocationGeo
+      | undefined;
+    if (raw.geo === null) {
+      violations.push({ path: "geo", reason: "explicit null not allowed" });
+    } else if (raw.geo !== undefined) {
+      try {
+        geo = new ShowcaseLocationGeoMapper().fromIntermediate(raw.geo);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "geo", error);
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_LOCATION_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseLocation = { city, additionalProperties };
+    if (geo !== undefined) {
+      out.geo = geo;
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseLocation): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if ([...value.city].length < 1) {
+      violations.push({
+        path: "city",
+        reason: `must have length >= 1, got ${[...value.city].length}`,
+      });
+    }
+    out.city = value.city;
+    if (value.geo !== undefined) {
+      out.geo = new ShowcaseLocationGeoMapper().toIntermediate(value.geo);
+    }
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_LOCATION_GEO_DECLARED = new Set(["lat", "lon"]);
+
+export class ShowcaseLocationGeoMapper {
+  public fromIntermediate(raw: unknown): ShowcaseLocationGeo {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let lat: number | undefined = undefined as unknown as number | undefined;
+    if (raw.lat === null) {
+      violations.push({ path: "lat", reason: "explicit null not allowed" });
+    } else if (raw.lat !== undefined) {
+      if (typeof raw.lat !== "number") {
+        violations.push({ path: "lat", reason: "expected number" });
+      } else {
+        lat = raw.lat;
+      }
+    }
+
+    let lon: number | undefined = undefined as unknown as number | undefined;
+    if (raw.lon === null) {
+      violations.push({ path: "lon", reason: "explicit null not allowed" });
+    } else if (raw.lon !== undefined) {
+      if (typeof raw.lon !== "number") {
+        violations.push({ path: "lon", reason: "expected number" });
+      } else {
+        lon = raw.lon;
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_LOCATION_GEO_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseLocationGeo = { additionalProperties };
+    if (lat !== undefined) {
+      out.lat = lat;
+    }
+    if (lon !== undefined) {
+      out.lon = lon;
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseLocationGeo): unknown {
+    const out: Record<string, unknown> = {};
+    if (value.lat !== undefined) {
+      out.lat = value.lat;
+    }
+    if (value.lon !== undefined) {
+      out.lon = value.lon;
+    }
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    return out;
+  }
+}
+
+export class ShowcaseMetadataMapper {
+  public fromIntermediate(raw: unknown): ShowcaseMetadata {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    if (keys.length > 3) {
+      violations.push({
+        path: "",
+        reason: `must have at most 3 properties, got ${keys.length}`,
+      });
+    }
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of keys) {
+      additionalProperties[key] = raw[key];
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: ShowcaseMetadata): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    const keys = Object.keys(out);
+    if (keys.length > 3) {
+      violations.push({
+        path: "",
+        reason: `must have at most 3 properties, got ${keys.length}`,
+      });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_ROWS_ITEM_DECLARED = new Set(["cell"]);
+
+export class ShowcaseRowsItemMapper {
+  public fromIntermediate(raw: unknown): ShowcaseRowsItem {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let cell: string = undefined as unknown as string;
+    if (raw.cell === undefined || raw.cell === null) {
+      violations.push({ path: "cell", reason: "required" });
+    } else {
+      if (typeof raw.cell !== "string") {
+        violations.push({ path: "cell", reason: "expected string" });
+      } else {
+        cell = raw.cell;
+        if ([...raw.cell].length < 1) {
+          violations.push({
+            path: "cell",
+            reason: `must have length >= 1, got ${[...raw.cell].length}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_ROWS_ITEM_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseRowsItem = { cell, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseRowsItem): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if ([...value.cell].length < 1) {
+      violations.push({
+        path: "cell",
+        reason: `must have length >= 1, got ${[...value.cell].length}`,
+      });
+    }
+    out.cell = value.cell;
     for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
       out[key] = entry;
     }
@@ -2886,6 +3724,83 @@ export class TextNoteMapper {
     }
     out.body = value.body;
     for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+export class TokensMapper {
+  public fromIntermediate(raw: unknown): Tokens {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, string> = {};
+    for (const key of keys) {
+      let entry: string | undefined = undefined;
+      if (typeof raw[key] !== "string") {
+        violations.push({ path: key, reason: "expected string" });
+      } else {
+        entry = raw[key];
+        if ([...raw[key]].length < 2) {
+          violations.push({
+            path: key,
+            reason: `must have length >= 2, got ${[...raw[key]].length}`,
+          });
+        }
+        if ([...raw[key]].length > 8) {
+          violations.push({
+            path: key,
+            reason: `must have length <= 8, got ${[...raw[key]].length}`,
+          });
+        }
+        if (!PATTERN_C182F89FDB221836.test(raw[key])) {
+          violations.push({
+            path: key,
+            reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(raw[key])}`,
+          });
+        }
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Tokens): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if ([...entry].length < 2) {
+        violations.push({
+          path: key,
+          reason: `must have length >= 2, got ${[...entry].length}`,
+        });
+      }
+      if ([...entry].length > 8) {
+        violations.push({
+          path: key,
+          reason: `must have length <= 8, got ${[...entry].length}`,
+        });
+      }
+      if (!PATTERN_C182F89FDB221836.test(entry)) {
+        violations.push({
+          path: key,
+          reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(entry)}`,
+        });
+      }
       out[key] = entry;
     }
     if (violations.length) {
