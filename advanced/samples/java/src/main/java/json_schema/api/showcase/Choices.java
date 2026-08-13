@@ -23,14 +23,14 @@ import org.jspecify.annotations.Nullable;
 @JsonSerialize(using = Choices.Serializer.class)
 @JsonDeserialize(using = Choices.Deserializer.class)
 public final class Choices {
-    private final Map<String, ChoicesValue> values;
+    private final Map<String, ChoicesValue> additionalProperties;
 
-    public Choices(Map<String, ChoicesValue> values) {
-        this.values = values;
+    public Choices(Map<String, ChoicesValue> additionalProperties) {
+        this.additionalProperties = additionalProperties;
     }
 
-    public Map<String, ChoicesValue> getValues() {
-        return values;
+    public Map<String, ChoicesValue> getAdditionalProperties() {
+        return additionalProperties;
     }
 
     @Override
@@ -41,24 +41,26 @@ public final class Choices {
         if (!(other instanceof Choices)) {
             return false;
         }
-        return Objects.equals(this.values, ((Choices) other).values);
+        return Objects.equals(this.additionalProperties, ((Choices) other).additionalProperties);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(values);
+        return Objects.hash(additionalProperties);
     }
 
     @Override
     public String toString() {
-        return "Choices{values=" + values + "}";
+        return "Choices{"
+            + "additionalProperties=" + additionalProperties
+            + "}";
     }
 
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Choices> {
         @Override
         public void serialize(Choices value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             gen.writeStartObject();
-            for (Map.Entry<String, ChoicesValue> entry : value.values.entrySet()) {
+            for (Map.Entry<String, ChoicesValue> entry : value.additionalProperties.entrySet()) {
                 gen.writeFieldName(entry.getKey());
                 serializers.defaultSerializeValue(entry.getValue(), gen);
             }
@@ -75,7 +77,7 @@ public final class Choices {
                 violations.add(new Violation("", "expected object"));
                 throw new ValidationException(violations);
             }
-            Map<String, ChoicesValue> values = new LinkedHashMap<>();
+            Map<String, ChoicesValue> additionalProperties = new LinkedHashMap<>();
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
@@ -84,15 +86,15 @@ public final class Choices {
                     violations.add(new Violation(key, "explicit null not allowed"));
                     continue;
                 }
-                ChoicesValue parsedValues = ChoicesValue.fromNode(element, key, violations, context);
-                if (parsedValues != null) {
-                    values.put(key, parsedValues);
+                ChoicesValue parsedAdditionalProperties = ChoicesValue.fromNode(element, key, violations, context);
+                if (parsedAdditionalProperties != null) {
+                    additionalProperties.put(key, parsedAdditionalProperties);
                 }
             }
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Choices(values);
+            return new Choices(additionalProperties);
         }
     }
 }

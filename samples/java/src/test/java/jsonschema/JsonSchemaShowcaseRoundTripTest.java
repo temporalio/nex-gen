@@ -123,7 +123,7 @@ final class JsonSchemaShowcaseRoundTripTest {
         assertEquals("1 Main St", full.getAddress().getStreet());
         assertTrue(full.getAddress().getAdditionalProperties().containsKey("region"));
         assertNotNull(full.getLabels());
-        assertEquals("prod", full.getLabels().getValues().get("env"));
+        assertEquals("prod", full.getLabels().getAdditionalProperties().get("env"));
         assertNotNull(full.getSettings());
         assertEquals(14L, full.getSettings().getFontSize());
 
@@ -139,8 +139,8 @@ final class JsonSchemaShowcaseRoundTripTest {
         assertTrue(address.getAdditionalProperties().containsKey("x-extra"));
 
         Labels labels = roundTrip("labels.json", Labels.class);
-        assertEquals("prod", labels.getValues().get("env"));
-        assertEquals("core", labels.getValues().get("team"));
+        assertEquals("prod", labels.getAdditionalProperties().get("env"));
+        assertEquals("core", labels.getAdditionalProperties().get("team"));
 
         Settings settings = roundTrip("settings.json", Settings.class);
         assertEquals("dark", settings.getTheme());
@@ -459,8 +459,8 @@ final class JsonSchemaShowcaseRoundTripTest {
     void objectConstraintsRoundTripAndReject() throws IOException {
         // Valid map and object round-trip.
         Attributes attributes = roundTrip("attributes.json", Attributes.class);
-        assertEquals("a", attributes.getValues().get("host"));
-        assertEquals("8080", attributes.getValues().get("port"));
+        assertEquals("a", attributes.getAdditionalProperties().get("host"));
+        assertEquals("8080", attributes.getAdditionalProperties().get("port"));
 
         ContactJava contact = roundTrip("contact.json", ContactJava.class);
         assertEquals("1 Main St", contact.getShippingStreet());
@@ -870,7 +870,7 @@ final class JsonSchemaShowcaseRoundTripTest {
         assertEquals(java.util.Arrays.asList("first", null, "third"), value.getSlots());
 
         assertNotNull(value.getChoices());
-        assertTrue(value.getChoices().getValues().get("primary") instanceof Circle);
+        assertTrue(value.getChoices().getAdditionalProperties().get("primary") instanceof Circle);
 
         String base =
                 "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","

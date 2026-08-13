@@ -2526,7 +2526,7 @@ fn render_java_serialize_dependent_required(
 }
 
 /// Emits the `propertyNames` key-shape predicate over the keys of a typed map's
-/// in-memory `values` for the serialize path. See
+/// in-memory `additionalProperties` for the serialize path. See
 /// `specs/json-schema/features/propertyNames.md`.
 fn render_java_serialize_property_name_checks(
     output: &mut String,
@@ -3321,14 +3321,16 @@ fn render_typed_map_class(
         "@JsonSerialize(using = {class}.Serializer.class)\n@JsonDeserialize(using = {class}.Deserializer.class)\npublic final class {class} {{\n"
     ));
     let value_type = value.boxed_name();
+    // The catch-all is always the named `additionalProperties` member, matching
+    // the struct-shaped POJOs — see `specs/json-schema/features/additionalProperties.md`.
     output.push_str(&format!(
-        "    private final Map<String, {value_type}> values;\n\n"
+        "    private final Map<String, {value_type}> additionalProperties;\n\n"
     ));
     output.push_str(&format!(
-        "    public {class}(Map<String, {value_type}> values) {{\n        this.values = values;\n    }}\n\n"
+        "    public {class}(Map<String, {value_type}> additionalProperties) {{\n        this.additionalProperties = additionalProperties;\n    }}\n\n"
     ));
     output.push_str(&format!(
-        "    public Map<String, {value_type}> getValues() {{\n        return values;\n    }}\n\n"
+        "    public Map<String, {value_type}> getAdditionalProperties() {{\n        return additionalProperties;\n    }}\n\n"
     ));
 
     // equals/hashCode/toString
@@ -3338,13 +3340,13 @@ fn render_typed_map_class(
         "        if (!(other instanceof {class})) {{\n            return false;\n        }}\n"
     ));
     output.push_str(&format!(
-        "        return Objects.equals(this.values, (({class}) other).values);\n    }}\n\n"
+        "        return Objects.equals(this.additionalProperties, (({class}) other).additionalProperties);\n    }}\n\n"
     ));
     output.push_str(
-        "    @Override\n    public int hashCode() {\n        return Objects.hash(values);\n    }\n\n",
+        "    @Override\n    public int hashCode() {\n        return Objects.hash(additionalProperties);\n    }\n\n",
     );
     output.push_str(&format!(
-        "    @Override\n    public String toString() {{\n        return \"{class}{{values=\" + values + \"}}\";\n    }}\n\n"
+        "    @Override\n    public String toString() {{\n        return \"{class}{{\"\n            + \"additionalProperties=\" + additionalProperties\n            + \"}}\";\n    }}\n\n"
     ));
 
     // Serializer
@@ -3363,11 +3365,16 @@ fn render_typed_map_class(
         || schema.property_names.is_some();
     if map_needs_validation {
         output.push_str("            List<Violation> violations = new ArrayList<>();\n");
-        render_java_property_count_checks(output, "value.values.size()", schema, "            ");
+        render_java_property_count_checks(
+            output,
+            "value.additionalProperties.size()",
+            schema,
+            "            ",
+        );
         if let Some(subschema) = &schema.property_names {
             render_java_serialize_property_name_checks(
                 output,
-                "value.values.keySet()",
+                "value.additionalProperties.keySet()",
                 subschema,
                 "            ",
             );
@@ -3377,7 +3384,7 @@ fn render_typed_map_class(
 
     output.push_str("            gen.writeStartObject();\n");
     output.push_str(&format!(
-        "            for (Map.Entry<String, {value_type}> entry : value.values.entrySet()) {{\n"
+        "            for (Map.Entry<String, {value_type}> entry : value.additionalProperties.entrySet()) {{\n"
     ));
     output.push_str(&write_map_value(value));
     output.push_str("            }\n");
@@ -3398,7 +3405,7 @@ fn render_typed_map_class(
         "                violations.add(new Violation(\"\", \"expected object\"));\n                throw new ValidationException(violations);\n            }\n",
     );
     output.push_str(&format!(
-        "            Map<String, {value_type}> values = new LinkedHashMap<>();\n"
+        "            Map<String, {value_type}> additionalProperties = new LinkedHashMap<>();\n"
     ));
     output.push_str("            Iterator<String> fieldNames = node.fieldNames();\n");
     output.push_str("            while (fieldNames.hasNext()) {\n");
@@ -3411,7 +3418,7 @@ fn render_typed_map_class(
     render_parse_map_value(
         output,
         value,
-        "values",
+        "additionalProperties",
         "element",
         "key",
         "                ",
@@ -3425,7 +3432,9 @@ fn render_typed_map_class(
         render_java_property_name_checks(output, "node", subschema, "            ");
     }
     output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
-    output.push_str(&format!("            return new {class}(values);\n"));
+    output.push_str(&format!(
+        "            return new {class}(additionalProperties);\n"
+    ));
     output.push_str("        }\n    }\n}\n");
 }
 

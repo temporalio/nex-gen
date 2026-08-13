@@ -292,8 +292,8 @@ fn java_json_decodes_element_position_unions() {
 
     let map = &rendered[&PathBuf::from("Entries.java")];
     for expected in [
-        "Map<String, EntriesValue> values",
-        "EntriesValue parsedValues = EntriesValue.fromNode(element, key, violations, context);",
+        "Map<String, EntriesValue> additionalProperties",
+        "EntriesValue parsedAdditionalProperties = EntriesValue.fromNode(element, key, violations, context);",
     ] {
         assert!(map.contains(expected), "{expected}\n{map}");
     }

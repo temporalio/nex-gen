@@ -54,6 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+- Java: A map-shaped model (a pure typed map — `additionalProperties` with no
+  declared `properties`) now names its catch-all member `additionalProperties`,
+  matching the struct-shaped POJOs and the other languages (Go
+  `AdditionalProperties`, TypeScript `additionalProperties`) as
+  `additionalProperties.md` specifies. The generated accessor is
+  `getAdditionalProperties()` (was `getValues()`); the constructor keeps its
+  single positional map parameter, so only getter call sites need updating. The
+  wire form is unchanged.
 - Renamed the project to `nexgen`. The crate is published as `nexgen` (was
   `nex-gen`), generated .NET code uses the `Nexgen.*` namespaces and the
   `NexgenClient`/`RequireNexgenClient` members (were `NexGen.*` and

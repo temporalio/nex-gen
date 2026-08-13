@@ -23,14 +23,14 @@ import org.jspecify.annotations.Nullable;
 @JsonSerialize(using = Attributes.Serializer.class)
 @JsonDeserialize(using = Attributes.Deserializer.class)
 public final class Attributes {
-    private final Map<String, String> values;
+    private final Map<String, String> additionalProperties;
 
-    public Attributes(Map<String, String> values) {
-        this.values = values;
+    public Attributes(Map<String, String> additionalProperties) {
+        this.additionalProperties = additionalProperties;
     }
 
-    public Map<String, String> getValues() {
-        return values;
+    public Map<String, String> getAdditionalProperties() {
+        return additionalProperties;
     }
 
     @Override
@@ -41,30 +41,32 @@ public final class Attributes {
         if (!(other instanceof Attributes)) {
             return false;
         }
-        return Objects.equals(this.values, ((Attributes) other).values);
+        return Objects.equals(this.additionalProperties, ((Attributes) other).additionalProperties);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(values);
+        return Objects.hash(additionalProperties);
     }
 
     @Override
     public String toString() {
-        return "Attributes{values=" + values + "}";
+        return "Attributes{"
+            + "additionalProperties=" + additionalProperties
+            + "}";
     }
 
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Attributes> {
         @Override
         public void serialize(Attributes value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
-            if (value.values.size() < 1) {
-                violations.add(new Violation("", "must have at least 1 properties, got " + value.values.size()));
+            if (value.additionalProperties.size() < 1) {
+                violations.add(new Violation("", "must have at least 1 properties, got " + value.additionalProperties.size()));
             }
-            if (value.values.size() > 3) {
-                violations.add(new Violation("", "must have at most 3 properties, got " + value.values.size()));
+            if (value.additionalProperties.size() > 3) {
+                violations.add(new Violation("", "must have at most 3 properties, got " + value.additionalProperties.size()));
             }
-            for (String pnKey : value.values.keySet()) {
+            for (String pnKey : value.additionalProperties.keySet()) {
                 int pnLength = pnKey.codePointCount(0, pnKey.length());
                 if (pnLength > 8) {
                     violations.add(new Violation(pnKey, "invalid property name \"" + pnKey + "\": must have length <= 8, got " + pnLength));
@@ -74,7 +76,7 @@ public final class Attributes {
                 throw new ValidationException(violations);
             }
             gen.writeStartObject();
-            for (Map.Entry<String, String> entry : value.values.entrySet()) {
+            for (Map.Entry<String, String> entry : value.additionalProperties.entrySet()) {
                 gen.writeStringField(entry.getKey(), entry.getValue());
             }
             gen.writeEndObject();
@@ -90,7 +92,7 @@ public final class Attributes {
                 violations.add(new Violation("", "expected object"));
                 throw new ValidationException(violations);
             }
-            Map<String, String> values = new LinkedHashMap<>();
+            Map<String, String> additionalProperties = new LinkedHashMap<>();
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
@@ -102,7 +104,7 @@ public final class Attributes {
                 if (!element.isTextual()) {
                     violations.add(new Violation(key, "expected string value"));
                 } else {
-                    values.put(key, element.textValue());
+                    additionalProperties.put(key, element.textValue());
                 }
             }
             if (node.size() < 1) {
@@ -122,7 +124,7 @@ public final class Attributes {
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Attributes(values);
+            return new Attributes(additionalProperties);
         }
     }
 }
