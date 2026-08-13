@@ -14,7 +14,7 @@
     <Compile Include="../wit/workflow-service/Models.cs" Link="GeneratedWorkflowService/Models.cs" />
     <Compile Include="../wit/workflow-service/Operations.cs" Link="GeneratedWorkflowService/Operations.cs" />
     <Compile Include="../wit/workflow-service/Services.cs" Link="GeneratedWorkflowService/Services.cs" />
-    <Compile Include="../wit/workflow-service/Support/TemporalSupport.cs" Link="GeneratedWorkflowService/Support/TemporalSupport.cs" />
+    <Compile Include="../wit/workflow-service/Support/*.cs" Link="GeneratedWorkflowService/Support/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

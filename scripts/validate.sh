@@ -32,4 +32,5 @@ for tier in samples advanced/samples; do
   run_in "$tier/typescript" npm exec -- prettier --check .
   run_in "$tier/go" bash -c 'unformatted="$(gofmt -l .)"; if [ -n "$unformatted" ]; then echo "gofmt required for:" >&2; echo "$unformatted" >&2; exit 1; fi'
   run_in "$tier/go" go test ./...
+  run_in "$tier/dotnet" dotnet test tests/ --nologo
 done
