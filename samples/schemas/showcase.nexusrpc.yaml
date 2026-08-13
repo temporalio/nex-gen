@@ -326,6 +326,40 @@ $defs:
         oneOf:
           - { type: array, items: { type: number } }
           - { type: string }
+      shapes:
+        description: >-
+          A list whose element type is a named union: every element is routed to
+          exactly one branch by the union's own selector, and its index carries
+          into the violation path (`shapes[1]`). Go and Java cannot decode a
+          sealed interface as a whole, so the element decodes through the
+          union's dispatcher one at a time.
+        type: array
+        items: { $ref: "#/$defs/Shape" }
+      segments:
+        description: >-
+          A list whose element union is written **inline**. An element has no
+          name of its own, so the union is named after its position —
+          `ShowcaseSegmentsItem` — moved into `$defs`, and the element becomes a
+          `$ref` at it; from there it is an ordinary named union in every
+          language.
+        type: array
+        items:
+          oneOf:
+            - { type: string }
+            - { type: integer }
+      slots:
+        description: >-
+          A list of **nullable elements** — the two-branch nullability `oneOf`
+          rather than a sum type, so nothing is named: the elements themselves
+          become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`,
+          `List<@Nullable String>`) while the list stays a list.
+        type: array
+        items:
+          oneOf:
+            - { type: string }
+            - { type: "null" }
+      choices:
+        $ref: "#/$defs/Choices"
       extras:
         $ref: "#/$defs/Extras"
       shape:
@@ -408,6 +442,18 @@ $defs:
     type: object
     additionalProperties: { type: string }
     maxProperties: 50
+  Choices:
+    description: >-
+      A map whose *member* type is a union written inline in
+      `additionalProperties`. Like an element union it has no name of its own,
+      so it is named after its position — `ChoicesValue` — and moved into
+      `$defs`; each member then decodes through that union's selector, with the
+      member key carrying into the violation path.
+    type: object
+    additionalProperties:
+      oneOf:
+        - { $ref: "#/$defs/Circle" }
+        - { $ref: "#/$defs/Square" }
   Extras:
     description: >-
       A free-form object (`additionalProperties: true` with no declared

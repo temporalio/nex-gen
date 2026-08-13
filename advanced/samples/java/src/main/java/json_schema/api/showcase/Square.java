@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
  */
 @JsonSerialize(using = Square.Serializer.class)
 @JsonDeserialize(using = Square.Deserializer.class)
-public final class Square implements Shape, Showcase.ShapeOrName {
+public final class Square implements ChoicesValue, Shape, Showcase.ShapeOrName {
     public static final class Kind {
         public static final Kind KIND = new Kind("square");
 

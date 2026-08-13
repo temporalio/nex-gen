@@ -923,6 +923,18 @@ impl ModelBackend {
     }
 }
 
+/// The rendered Go source with its comment lines dropped, for deciding which
+/// standard-library packages the file actually uses. Every generated comment is
+/// a whole line (a doc comment above the declaration it documents), so dropping
+/// those lines leaves the code that a package qualifier can appear in.
+fn go_code_without_comments(output: &str) -> String {
+    output
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// The emitted Go identifier for an operation: the verbatim per-language
 /// `x-<lang>-name` override when present, else the derived field name. Mirrors
 /// the service `code_name` handling; never affects the wire name.
@@ -1079,7 +1091,7 @@ fn render_external_models(
     let unions = collect_go_unions(models, model_names)?;
     if !unions.is_empty() {
         output.push('\n');
-        render_go_unions(&mut output, &unions, models)?;
+        render_go_unions(&mut output, &unions, models, model_names)?;
     }
     if models.iter().any(|model| model_uses_temporal(model)) {
         output.push('\n');
@@ -1096,34 +1108,38 @@ fn render_external_models(
         output.push('\n');
         render_model(&mut output, model, models, model_names, &unions)?;
     }
-    if output.contains("bytes.") {
+    // Package use is read off the emitted *code*: a doc comment carries the
+    // schema's own prose, and an unused import is a Go compile error, so a
+    // description ending a sentence with "at a time." must not pull in `time`.
+    let code = go_code_without_comments(&output);
+    if code.contains("bytes.") {
         imports.insert("bytes".to_string());
     }
-    if output.contains("fmt.") {
+    if code.contains("fmt.") {
         imports.insert("fmt".to_string());
     }
-    if output.contains("math.") {
+    if code.contains("math.") {
         imports.insert("math".to_string());
     }
-    if output.contains("utf8.") {
+    if code.contains("utf8.") {
         imports.insert("unicode/utf8".to_string());
     }
-    if output.contains("regexp.") {
+    if code.contains("regexp.") {
         imports.insert("regexp".to_string());
     }
-    if output.contains("base64.") {
+    if code.contains("base64.") {
         imports.insert("encoding/base64".to_string());
     }
-    if output.contains("time.") {
+    if code.contains("time.") {
         imports.insert("time".to_string());
     }
-    if output.contains("strconv.") {
+    if code.contains("strconv.") {
         imports.insert("strconv".to_string());
     }
-    if output.contains("strings.") {
+    if code.contains("strings.") {
         imports.insert("strings".to_string());
     }
-    if output.contains("nexus.") {
+    if code.contains("nexus.") {
         imports.insert("github.com/nexus-rpc/sdk-go/nexus".to_string());
     }
     Ok(ModelFragments {
@@ -1638,6 +1654,42 @@ fn collect_go_unions(
     Ok(unions)
 }
 
+/// The union a `$ref` schema points at, if any.
+fn union_reference_name(
+    schema: &Schema,
+    model_names: &BTreeMap<String, String>,
+    unions: &BTreeMap<String, GoUnion>,
+) -> Option<String> {
+    let reference = schema.reference.as_ref()?;
+    let name = reference_model_name(reference, model_names);
+    unions.contains_key(&name).then_some(name)
+}
+
+/// The union an array's elements hold, with the number of array levels above it
+/// — `[]Choice` → `(1, Choice)`, `[][]Choice` → `(2, Choice)`. `None` unless the
+/// schema is an array bottoming out in a union.
+///
+/// `encoding/json` cannot decode into a sealed interface, so an array of unions
+/// needs an elementwise decode through the union's dispatcher rather than the
+/// single `json.Unmarshal` every other element type takes
+/// (`specs/json-schema/features/oneOf.md` §"Unions in element positions").
+fn array_union_element(
+    schema: &Schema,
+    model_names: &BTreeMap<String, String>,
+    unions: &BTreeMap<String, GoUnion>,
+) -> Option<(usize, String)> {
+    let mut depth = 0;
+    let mut node = schema;
+    while node.ty.as_ref().and_then(Value::as_str) == Some("array") {
+        depth += 1;
+        node = node.items.as_deref()?;
+    }
+    if depth == 0 {
+        return None;
+    }
+    union_reference_name(node, model_names, unions).map(|name| (depth, name))
+}
+
 /// The union type name a property carries, if any: an inline `oneOf` union named
 /// `<Model><Field>`, or a `$ref` to a named union model.
 fn property_union_name(
@@ -1665,6 +1717,7 @@ fn render_go_unions(
     output: &mut String,
     unions: &BTreeMap<String, GoUnion>,
     models: &[&PlannedJsonType],
+    model_names: &BTreeMap<String, String>,
 ) -> Result<()> {
     for union in unions.values() {
         let union_schema = models
@@ -1739,10 +1792,10 @@ fn render_go_unions(
                 render_go_variant_validate(output, variant);
             }
             if let Some(shape) = &variant.owned_map {
-                render_go_map_methods(output, &variant.go_type, &variant.schema, shape);
+                render_go_map_methods(output, &variant.go_type, &variant.schema, shape, unions);
             }
         }
-        render_go_union_dispatch(output, union);
+        render_go_union_dispatch(output, union, model_names, unions);
     }
     Ok(())
 }
@@ -1782,7 +1835,12 @@ fn render_go_variant_validate(output: &mut String, variant: &GoUnionVariant) {
 /// Emits `unmarshal<Union>`: peeks the wire token (then, for a tagged object
 /// union, the discriminant) and routes to exactly one branch, or records a
 /// Violation naming the admissible members.
-fn render_go_union_dispatch(output: &mut String, union: &GoUnion) {
+fn render_go_union_dispatch(
+    output: &mut String,
+    union: &GoUnion,
+    model_names: &BTreeMap<String, String>,
+    unions: &BTreeMap<String, GoUnion>,
+) {
     let admissible = union.admissible();
     output.push_str("func unmarshal");
     output.push_str(&union.name);
@@ -1855,7 +1913,7 @@ fn render_go_union_dispatch(output: &mut String, union: &GoUnion) {
             .collect::<Vec<_>>()
             .join(", ");
         output.push_str(&format!("\tcase {cases}:\n"));
-        render_go_scalar_variant_decode(output, variant);
+        render_go_scalar_variant_decode(output, variant, model_names, unions);
     }
 
     output.push_str("\t}\n");
@@ -1876,7 +1934,12 @@ fn go_rune_literal(token: char) -> String {
     }
 }
 
-fn render_go_scalar_variant_decode(output: &mut String, variant: &GoUnionVariant) {
+fn render_go_scalar_variant_decode(
+    output: &mut String,
+    variant: &GoUnionVariant,
+    model_names: &BTreeMap<String, String>,
+    unions: &BTreeMap<String, GoUnion>,
+) {
     let underlying = variant.synthesized.as_deref().unwrap_or("");
     match underlying {
         "string" => {
@@ -1903,7 +1966,27 @@ fn render_go_scalar_variant_decode(output: &mut String, variant: &GoUnionVariant
         }
         other if other.starts_with("[]") => {
             output.push_str(&format!("\t\tvar arr {other}\n"));
-            output.push_str("\t\tif err := json.Unmarshal(trimmed, &arr); err != nil {\n\t\t\t*errs = append(*errs, Violation{path, \"expected array\"})\n\t\t\treturn nil, false\n\t\t}\n");
+            // An array branch over a union decodes elementwise, like any other
+            // array of a sealed interface.
+            if let Some((depth, element_union)) =
+                array_union_element(&variant.schema, model_names, unions)
+            {
+                render_go_union_array_unmarshal(
+                    output,
+                    "\t\t",
+                    "trimmed",
+                    "path",
+                    "arr",
+                    other,
+                    depth,
+                    &element_union,
+                    unions,
+                    0,
+                    &GoErrsBinding::BY_POINTER,
+                );
+            } else {
+                output.push_str("\t\tif err := json.Unmarshal(trimmed, &arr); err != nil {\n\t\t\t*errs = append(*errs, Violation{path, \"expected array\"})\n\t\t\treturn nil, false\n\t\t}\n");
+            }
             output.push_str(&format!("\t\tv := {}(arr)\n", variant.go_type));
         }
         _ => {
@@ -1946,7 +2029,7 @@ fn render_model(
     if let Some(shape) = go_map_shape(&schema, model_names)? {
         render_go_map_field(output, &shape);
         output.push_str("}\n\n");
-        render_go_map_methods(output, &model.model_name, &schema, &shape);
+        render_go_map_methods(output, &model.model_name, &schema, &shape, unions);
         return Ok(());
     }
 
@@ -2240,6 +2323,19 @@ fn render_validate(
                     output.push_str("\t}\n");
                 }
             }
+            // Union elements carry their branch's own constraints, which the
+            // serialize side re-runs before emitting a byte (P12); a `$ref`
+            // element runs its model's `MarshalJSON` instead.
+            if let Some((depth, _)) = array_union_element(property, model_names, unions) {
+                render_go_union_array_validate(
+                    output,
+                    "\t",
+                    &field,
+                    &go_string_literal(json_name),
+                    depth,
+                    0,
+                );
+            }
             if property.reference.is_some() {
                 if required_fields(schema).contains(json_name) {
                     output.push_str("\tmergeNested(&errs, ");
@@ -2330,6 +2426,7 @@ fn render_unmarshal_json(
                 property,
                 required.contains(json_name),
                 model_names,
+                unions,
             )?;
         }
     }
@@ -2382,6 +2479,7 @@ fn render_property_unmarshal(
     property: &Schema,
     required: bool,
     model_names: &BTreeMap<String, String>,
+    unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
     let field = property.go_member_name(json_name);
     // A materialized temporal: read the wire string, then parse into the native
@@ -2562,9 +2660,32 @@ fn render_property_unmarshal(
         }
         output.push_str("\t} else if isNull(*raw) {\n\t\terrs = append(errs, Violation{");
         output.push_str(&go_string_literal(json_name));
-        output.push_str(
-            ", \"explicit null not allowed\"})\n\t} else if err := json.Unmarshal(*raw, &m.",
-        );
+        output.push_str(", \"explicit null not allowed\"})\n");
+        // Elements holding a sealed interface decode one by one through the
+        // union's dispatcher; every other element type decodes as a whole.
+        if let Some((depth, union_name)) = array_union_element(property, model_names, unions) {
+            output.push_str("\t} else {\n");
+            let element_type = go_type_annotation(property, json_name, model_names)?;
+            render_go_union_array_unmarshal(
+                output,
+                "\t\t",
+                "*raw",
+                &go_string_literal(json_name),
+                &format!("m.{field}"),
+                &element_type,
+                depth,
+                &union_name,
+                unions,
+                0,
+                &GoErrsBinding::BY_VALUE,
+            );
+            if property.has_array_constraints() {
+                render_go_array_checks(output, &format!("m.{field}"), json_name, property, "\t\t");
+            }
+            output.push_str("\t}\n");
+            return Ok(());
+        }
+        output.push_str("\t} else if err := json.Unmarshal(*raw, &m.");
         output.push_str(&field);
         output.push_str("); err != nil {\n\t\terrs = append(errs, Violation{");
         output.push_str(&go_string_literal(json_name));
@@ -2590,6 +2711,137 @@ fn render_property_unmarshal(
         output.push_str(" = &v\n\t}\n");
     }
     Ok(())
+}
+
+/// Re-runs each union element's own `Validate` (P12), threading the element
+/// index into the violation path. A `nil` member is skipped — a nullable union
+/// admits it, and presence of the array itself is the field's own concern.
+fn render_go_union_array_validate(
+    output: &mut String,
+    indent: &str,
+    target: &str,
+    path: &str,
+    depth: usize,
+    level: usize,
+) {
+    let index = format!("i{level}");
+    let element = format!("v{level}");
+    let element_path = format!("p{level}");
+    let inner = format!("{indent}\t");
+    output.push_str(&format!(
+        "{indent}for {index}, {element} := range {target} {{\n"
+    ));
+    output.push_str(&format!(
+        "{inner}{element_path} := fmt.Sprintf(\"%s[%d]\", {path}, {index})\n"
+    ));
+    if depth > 1 {
+        render_go_union_array_validate(
+            output,
+            &inner,
+            &element,
+            &element_path,
+            depth - 1,
+            level + 1,
+        );
+    } else {
+        output.push_str(&format!(
+            "{inner}if {element} != nil {{\n{inner}\tmergeNested(&errs, {element_path}, {element}.Validate())\n{inner}}}\n"
+        ));
+    }
+    output.push_str(&format!("{indent}}}\n"));
+}
+
+/// How the enclosing scope names its violation accumulator: a model's
+/// (de)serializer holds `errs` by value, a union dispatcher by pointer.
+struct GoErrsBinding {
+    /// The accumulator as an addressable `[]Violation` (`errs` / `*errs`).
+    value: &'static str,
+    /// The accumulator as a `*[]Violation` argument (`&errs` / `errs`).
+    pointer: &'static str,
+}
+
+impl GoErrsBinding {
+    const BY_VALUE: Self = Self {
+        value: "errs",
+        pointer: "&errs",
+    };
+    const BY_POINTER: Self = Self {
+        value: "*errs",
+        pointer: "errs",
+    };
+}
+
+/// Emits the elementwise decode of an array whose elements are (arrays of) a
+/// union. `encoding/json` cannot allocate a sealed interface, so the wire array
+/// is read as `[]json.RawMessage` and each element routed through
+/// `unmarshal<Union>`, with its index threaded into the violation path
+/// (`tags[2]`, `matrix[1][2]` — [[items]] §"Path convention"). An element that
+/// fails is dropped from the slice, its violations already collected.
+#[allow(clippy::too_many_arguments)]
+fn render_go_union_array_unmarshal(
+    output: &mut String,
+    indent: &str,
+    raw: &str,
+    path: &str,
+    target: &str,
+    slice_type: &str,
+    depth: usize,
+    union_name: &str,
+    unions: &BTreeMap<String, GoUnion>,
+    level: usize,
+    errs: &GoErrsBinding,
+) {
+    let elems = format!("elems{level}");
+    let index = format!("i{level}");
+    let element = format!("e{level}");
+    let inner = format!("{indent}\t");
+    let (errs_value, errs_ref) = (errs.value, errs.pointer);
+    output.push_str(&format!("{indent}var {elems} []json.RawMessage\n"));
+    output.push_str(&format!(
+        "{indent}if err := json.Unmarshal({raw}, &{elems}); err != nil {{\n{inner}{errs_value} = append({errs_value}, Violation{{{path}, \"expected array\"}})\n{indent}}} else {{\n"
+    ));
+    output.push_str(&format!(
+        "{inner}{target} = make({slice_type}, 0, len({elems}))\n"
+    ));
+    output.push_str(&format!(
+        "{inner}for {index}, {element} := range {elems} {{\n"
+    ));
+    let body = format!("{inner}\t");
+    let element_path = format!("p{level}");
+    output.push_str(&format!(
+        "{body}{element_path} := fmt.Sprintf(\"%s[%d]\", {path}, {index})\n"
+    ));
+    if depth > 1 {
+        let row = format!("row{level}");
+        let row_type = slice_type
+            .strip_prefix("[]")
+            .expect("an array element type starts with `[]`");
+        output.push_str(&format!("{body}var {row} {row_type}\n"));
+        render_go_union_array_unmarshal(
+            output,
+            &body,
+            &element,
+            &element_path,
+            &row,
+            row_type,
+            depth - 1,
+            union_name,
+            unions,
+            level + 1,
+            errs,
+        );
+        output.push_str(&format!("{body}{target} = append({target}, {row})\n"));
+    } else {
+        if unions.get(union_name).is_some_and(|union| union.nullable) {
+            output.push_str(&format!(
+                "{body}if isNull({element}) {{\n{body}\t{target} = append({target}, nil)\n{body}\tcontinue\n{body}}}\n"
+            ));
+        }
+        output.push_str(&format!(
+            "{body}if v, ok := unmarshal{union_name}({element}, {element_path}, {errs_ref}); ok {{\n{body}\t{target} = append({target}, v)\n{body}}}\n"
+        ));
+    }
+    output.push_str(&format!("{inner}}}\n{indent}}}\n"));
 }
 
 /// Decodes a materialized temporal field: read the wire `string` (presence /
@@ -2837,6 +3089,7 @@ fn render_go_map_methods(
     type_name: &str,
     schema: &Schema,
     shape: &GoMapShape,
+    unions: &BTreeMap<String, GoUnion>,
 ) {
     let element_type = shape.element_type.as_str();
     output
@@ -2894,10 +3147,20 @@ fn render_go_map_methods(
             if !nullable {
                 output.push_str("\t\tif isNull(v) {\n\t\t\terrs = append(errs, Violation{k, \"explicit null not allowed\"})\n\t\t\tcontinue\n\t\t}\n");
             }
-            output.push_str("\t\tvar value ");
-            output.push_str(element_type);
-            output.push_str("\n\t\tif err := json.Unmarshal(v, &value); err != nil {\n\t\t\tmergeNested(&errs, k, err)\n\t\t\tcontinue\n\t\t}\n");
-            output.push_str("\t\tm.AdditionalProperties[k] = value\n");
+            // A union member is a sealed interface `encoding/json` cannot
+            // allocate; it decodes through the union's dispatcher instead.
+            if unions.contains_key(element_type) {
+                output.push_str("\t\tif value, ok := unmarshal");
+                output.push_str(element_type);
+                output.push_str(
+                    "(v, k, &errs); ok {\n\t\t\tm.AdditionalProperties[k] = value\n\t\t}\n",
+                );
+            } else {
+                output.push_str("\t\tvar value ");
+                output.push_str(element_type);
+                output.push_str("\n\t\tif err := json.Unmarshal(v, &value); err != nil {\n\t\t\tmergeNested(&errs, k, err)\n\t\t\tcontinue\n\t\t}\n");
+                output.push_str("\t\tm.AdditionalProperties[k] = value\n");
+            }
         }
     }
     output.push_str("\t}\n");
@@ -3371,7 +3634,7 @@ fn go_type_annotation(
             let item = schema
                 .items
                 .as_ref()
-                .map(|item| go_type_annotation(item, json_name, model_names))
+                .map(|item| go_element_type_annotation(item, json_name, model_names))
                 .transpose()?
                 .unwrap_or_else(|| "any".to_string());
             Ok(format!("[]{item}"))
@@ -3379,6 +3642,27 @@ fn go_type_annotation(
         Some("object") => Ok("map[string]json.RawMessage".to_string()),
         _ => Ok("any".to_string()),
     }
+}
+
+/// An array element's Go type. Element nullability is the element's own
+/// concern ([[items]]): a `oneOf:[T, null]` element is a `*T`, so a wire `null`
+/// decodes to `nil` instead of silently landing on `T`'s zero value. A slice
+/// element is already nil-able, and a sealed interface (a nullable union) holds
+/// `nil` itself.
+fn go_element_type_annotation(
+    schema: &Schema,
+    json_name: &str,
+    model_names: &BTreeMap<String, String>,
+) -> Result<String> {
+    let annotation = go_type_annotation(schema, json_name, model_names)?;
+    if allows_null(schema)
+        && schema.one_of.is_some()
+        && !annotation.starts_with('*')
+        && !annotation.starts_with("[]")
+    {
+        return Ok(format!("*{annotation}"));
+    }
+    Ok(annotation)
 }
 
 fn reference_model_name(reference: &str, model_names: &BTreeMap<String, String>) -> String {

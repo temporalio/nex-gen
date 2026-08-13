@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
  */
 @JsonSerialize(using = Circle.Serializer.class)
 @JsonDeserialize(using = Circle.Deserializer.class)
-public final class Circle implements Shape, Showcase.ShapeOrName {
+public final class Circle implements ChoicesValue, Shape, Showcase.ShapeOrName {
     public static final class Kind {
         public static final Kind KIND = new Kind("circle");
 

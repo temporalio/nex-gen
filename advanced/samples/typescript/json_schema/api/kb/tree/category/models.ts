@@ -108,7 +108,9 @@ export class CategoryMapper {
     out.id = value.id;
     out.name = value.name;
     if (value.children !== undefined) {
-      out.children = value.children;
+      out.children = value.children.map((element) =>
+        new CategoryMapper().toIntermediate(element),
+      );
     }
     return out;
   }

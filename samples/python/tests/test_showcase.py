@@ -753,6 +753,55 @@ def test_array_branch_union_roundtrip_and_reject() -> None:
         _ = Showcase.model_validate({**base, "measurements": True})
 
 
+def test_element_position_unions_roundtrip_and_reject() -> None:
+    # Unions in positions with no property of their own: an array element at a
+    # named union (`shapes`), an array element at an inline union the loader
+    # names `ShowcaseSegmentsItem`, and a map member at an inline union named
+    # `ChoicesValue`. Pydantic selects the branch per element/member.
+    value = typing.cast(
+        Showcase, roundtrip_fixture("showcase-element-unions.json", Showcase)
+    )
+    assert value.shapes is not None
+    assert isinstance(value.shapes[0], Circle)
+    assert value.shapes[0].radius == 2.5
+    assert isinstance(value.shapes[1], Square)
+    assert value.shapes[1].side == 4
+    assert value.segments == ["alpha", 7]
+    # Element nullability is the element's own concern: `list[str | None]`, so
+    # an explicit null is a member rather than a violation.
+    assert value.slots == ["first", None, "third"]
+    # A map's members live in Pydantic's extras bag and round-trip verbatim.
+    # Python does not yet materialize a typed map's members into their declared
+    # member type (true of every non-scalar member type, not just a union), so
+    # this asserts the wire round-trip rather than a `Circle` instance.
+    assert value.choices is not None
+    assert value.choices.model_extra is not None
+    assert value.choices.model_extra["primary"] == {"kind": "circle", "radius": 1}
+
+    base = {
+        "kind": "showcase",
+        "revision": 1,
+        "enabled": True,
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+    }
+
+    # An element admitted by no branch is rejected, at its own index.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate(
+            {**base, "shapes": [{"kind": "circle", "radius": 1}, True]}
+        )
+    assert "shapes" in str(excinfo.value)
+
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "segments": ["ok", 1.5]})
+
+
 def test_content_encoding_roundtrip_and_reject() -> None:
     # blob (base64) and urlBlob (base64url) round-trip: JSON string on the wire,
     # native `bytes` in the model, re-encoded byte-identically. The same bytes

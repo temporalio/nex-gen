@@ -104,7 +104,16 @@ Notes:
   `list[Optional[T]]` (Python), `List<@Nullable T>` (Java) — distinct
   from the array field itself being optional/nullable, which wraps the
   whole collection. The two axes compose (an optional array of nullable
-  elements is legal).
+  elements is legal), and neither implies the other: an optional array of
+  nullable elements is `list[T | None] | None`, not `list[T | None]`.
+- **A union element is named.** An element schema that is a `oneOf` *sum
+  type* (two or more non-`null` branches) is named after its position at
+  load — `<EnclosingType><Property>Item`, `…ItemItem` for a nested array —
+  moved into `$defs`, and the element rewritten to a `$ref`, so the element
+  type is an ordinary named union in every target (see [[oneOf]] §"Unions in
+  element positions"). Go and Java decode such an element through the
+  union's dispatcher one value at a time — neither can allocate a sealed
+  interface from a whole-collection decode.
 - **Java** uses `List<T>` (interface type; the concrete `ArrayList` is an
   implementation detail of the deserializer). `List<T>` is a reference
   type, so it carries a non-null validator rather than boxing (see
@@ -171,6 +180,7 @@ of the value and is preserved).
 | Nested array | `{type:array, items:{type:array, items:{type:integer}}}` |
 | Element with assertions | `{type:array, items:{type:string, minLength:1}}` |
 | Nullable elements | `{type:array, items:{oneOf:[{type:string},{type:null}]}}` |
+| Union elements (named after the position) | `{type:array, items:{oneOf:[{type:string},{type:integer}]}}` |
 | Array member of a struct | `{type:object, properties:{tags:{type:array, items:{type:string}}}}` |
 | Self-reference via `items`, **required** OK (see [[ref]]) | tree node — the empty array terminates the recursion: `{type:object, properties:{value:{type:string}, children:{type:array, items:{$ref:"#"}}}}` with `children` required |
 

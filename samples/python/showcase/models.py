@@ -135,6 +135,34 @@ class Attributes(pydantic.BaseModel):
         return dict(typing.cast(dict[str, object], self.model_extra or {}))
 
 
+class Choices(pydantic.BaseModel):
+    """A map whose *member* type is a union written inline in `additionalProperties`. Like
+    an element union it has no name of its own, so it is named after its position —
+    `ChoicesValue` — and moved into `$defs`; each member then decodes through that
+    union's selector, with the member key carrying into the violation path.
+    """
+
+    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
+        strict=True, populate_by_name=True, extra="allow"
+    )
+
+    @pydantic.model_validator(mode="after")
+    def _validate_extras(self) -> typing.Any:
+        errors: list[pydantic_core.InitErrorDetails] = []
+        if errors:
+            raise pydantic.ValidationError.from_exception_data(
+                title=type(self).__name__, line_errors=errors
+            )
+        return self
+
+    @pydantic.model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
+    ) -> dict[str, object]:
+        return dict(typing.cast(dict[str, object], self.model_extra or {}))
+
+
 class Circle(pydantic.BaseModel):
     """A circle branch of the Shape and shapeOrName tagged unions."""
 
@@ -704,6 +732,29 @@ class Showcase(pydantic.BaseModel):
     structurally as `number[]` / `list[float]`.
     """
 
+    shapes: list[Shape] | None = pydantic.Field(default=None)
+    """A list whose element type is a named union: every element is routed to exactly one
+    branch by the union's own selector, and its index carries into the violation path
+    (`shapes[1]`). Go and Java cannot decode a sealed interface as a whole, so the
+    element decodes through the union's dispatcher one at a time.
+    """
+
+    segments: list[ShowcaseSegmentsItem] | None = pydantic.Field(default=None)
+    """A list whose element union is written **inline**. An element has no name of its own,
+    so the union is named after its position — `ShowcaseSegmentsItem` — moved into
+    `$defs`, and the element becomes a `$ref` at it; from there it is an ordinary named
+    union in every language.
+    """
+
+    slots: list[str | None] | None = pydantic.Field(default=None)
+    """A list of **nullable elements** — the two-branch nullability `oneOf` rather than a
+    sum type, so nothing is named: the elements themselves become nullable (`[]*string`,
+    `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list
+    stays a list.
+    """
+
+    choices: Choices | None = pydantic.Field(default=None)
+
     extras: Extras | None = pydantic.Field(default=None)
 
     shape: Shape | None = pydantic.Field(default=None)
@@ -886,6 +937,7 @@ class Showcase(pydantic.BaseModel):
             "aliases",
             "attributes",
             "blob",
+            "choices",
             "code",
             "contact",
             "contactEmail",
@@ -911,11 +963,14 @@ class Showcase(pydantic.BaseModel):
             "requestId",
             "request_id",
             "roles",
+            "segments",
             "settings",
             "shape",
             "shapeOrName",
             "shape_or_name",
+            "shapes",
             "sku",
+            "slots",
             "step",
             "tags",
             "urlBlob",
@@ -1128,6 +1183,9 @@ class WidgetBase(pydantic.BaseModel):
         return _emit_set_fields(self, handler)
 
 
+ChoicesValue: typing.TypeAlias = Circle | Square
+
+
 """A tagged union whose object branches are written **inline** rather than `$ref`ed: each
 branch is emitted as a named type, so each names itself with the per-language
 `x-<lang>-name` override (two or more inline object branches cannot derive
@@ -1145,4 +1203,8 @@ unknown tag is a Violation.
 Shape: typing.TypeAlias = Circle | Square
 
 
+ShowcaseSegmentsItem: typing.TypeAlias = str | SpecInt
+
+
+_ = Choices.model_rebuild()
 _ = Showcase.model_rebuild()

@@ -651,6 +651,9 @@ pub(in crate::generator) struct JavaContext<'a> {
     /// Maps a planned model's `full_name` (the canonical string that appears in
     /// planned `$ref` values) to its `(package, class)` pair.
     pub(in crate::generator) registry: &'a BTreeMap<String, (String, String)>,
+    /// The `full_name` of every definition that is a `oneOf` union, so a `$ref`
+    /// at one can be told apart from a `$ref` at a POJO.
+    pub(in crate::generator) union_defs: &'a BTreeSet<String>,
 }
 
 impl JavaContext<'_> {
@@ -667,6 +670,12 @@ impl JavaContext<'_> {
 
     fn current_package(&self) -> String {
         Self::package_for_module(self.base_package, &self.module.0)
+    }
+
+    /// True when a `$ref` points at a named `oneOf` union definition.
+    fn ref_is_union(&self, reference: &str) -> bool {
+        self.union_defs
+            .contains(reference.strip_prefix("#/$defs/").unwrap_or(reference))
     }
 
     /// Resolve a `$ref` string to the target (package, class) pair.
@@ -734,6 +743,11 @@ enum JavaType {
     Ref {
         package: String,
         class: String,
+        /// True when the target definition is a `oneOf` union — a sealed
+        /// interface Jackson cannot instantiate, so a value in this position
+        /// decodes through the interface's static `fromNode` dispatcher rather
+        /// than `readTreeAsValue`.
+        union: bool,
     },
     List(Box<JavaType>),
     /// A `oneOf` sum type — a sealed-by-convention interface. `class` is the
@@ -793,7 +807,7 @@ impl JavaType {
 
     fn collect_refs(&self, refs: &mut BTreeSet<(String, String)>) {
         match self {
-            JavaType::Ref { package, class } => {
+            JavaType::Ref { package, class, .. } => {
                 refs.insert((package.clone(), class.clone()));
             }
             JavaType::List(inner) => inner.collect_refs(refs),
@@ -912,6 +926,8 @@ struct JavaUnionVariant {
     /// shape is named and `$ref`ed by the loader), so `Map<String, JsonNode>`
     /// expresses the member in full.
     owned_object: bool,
+    /// True for an array wrapper whose *elements* are nullable ([[items]]).
+    nullable_items: bool,
     label: String,
 }
 
@@ -1011,6 +1027,7 @@ fn classify_java_union(
                     member_full_name: member_full,
                     member_package,
                     owned_object,
+                    nullable_items: false,
                     label: if owned_object {
                         "object".to_string()
                     } else {
@@ -1027,6 +1044,7 @@ fn classify_java_union(
                 member_full_name: None,
                 member_package: None,
                 owned_object: false,
+                nullable_items: false,
                 label: "string".to_string(),
             }),
             Some("integer") => variants.push(JavaUnionVariant {
@@ -1038,6 +1056,7 @@ fn classify_java_union(
                 member_full_name: None,
                 member_package: None,
                 owned_object: false,
+                nullable_items: false,
                 label: "integer".to_string(),
             }),
             Some("number") => variants.push(JavaUnionVariant {
@@ -1049,6 +1068,7 @@ fn classify_java_union(
                 member_full_name: None,
                 member_package: None,
                 owned_object: false,
+                nullable_items: false,
                 label: "number".to_string(),
             }),
             Some("boolean") => variants.push(JavaUnionVariant {
@@ -1060,6 +1080,7 @@ fn classify_java_union(
                 member_full_name: None,
                 member_package: None,
                 owned_object: false,
+                nullable_items: false,
                 label: "boolean".to_string(),
             }),
             Some("array") => {
@@ -1077,6 +1098,7 @@ fn classify_java_union(
                     member_full_name: None,
                     member_package: None,
                     owned_object: false,
+                    nullable_items: member_schema.items.as_deref().is_some_and(allows_null),
                     label: "array".to_string(),
                 });
             }
@@ -1197,6 +1219,11 @@ struct FieldPlan {
     numeric: NumericConstraints,
     string_length: StringLengthConstraints,
     array: ArrayConstraints,
+    /// True when the array's *elements* are nullable — the `items` subschema is
+    /// the [[nullability]] `oneOf` pattern. Distinct from `nullable`, which
+    /// wraps the whole collection ([[items]] §"Element nullability is the
+    /// element's own concern").
+    nullable_items: bool,
     /// A `oneOf` sum type carried by this field (an inline union or a `$ref` to
     /// a named union def).
     union: Option<JavaUnion>,
@@ -1221,6 +1248,12 @@ impl FieldPlan {
     fn field_type(&self) -> String {
         if self.is_primitive() {
             self.ty.primitive_name().expect("primitive").to_string()
+        } else if let JavaType::List(item) = &self.ty
+            && self.nullable_items
+        {
+            // A TYPE_USE annotation on the element, not the collection: the
+            // list itself is non-null, its members may be null.
+            format!("List<{}>", element_declaration(item, true))
         } else {
             self.ty.boxed_name()
         }
@@ -1323,10 +1356,23 @@ fn nullable_non_null_schema(schema: &Schema) -> Option<&Schema> {
     })
 }
 
+/// The `full_name` of every model that is a named `oneOf` union definition.
+fn union_def_names(all_models: &BTreeMap<String, PlannedJsonType>) -> BTreeSet<String> {
+    all_models
+        .iter()
+        .filter(|(_, model)| decode_schema(model).is_ok_and(|schema| is_java_union_schema(&schema)))
+        .map(|(full_name, _)| full_name.clone())
+        .collect()
+}
+
 fn java_type_for(schema: &Schema, context: &JavaContext) -> Result<JavaType> {
     if let Some(reference) = &schema.reference {
         let (package, class) = context.resolve_ref(reference);
-        return Ok(JavaType::Ref { package, class });
+        return Ok(JavaType::Ref {
+            package,
+            class,
+            union: context.ref_is_union(reference),
+        });
     }
     if let Some(non_null) = nullable_non_null_schema(schema) {
         return java_type_for(non_null, context);
@@ -1455,6 +1501,7 @@ fn resolve_model_kind(
                 numeric: NumericConstraints::from_schema(property),
                 string_length: StringLengthConstraints::from_schema(property),
                 array: ArrayConstraints::from_schema(property),
+                nullable_items: property.items.as_deref().is_some_and(allows_null),
                 union,
             });
         }
@@ -1488,10 +1535,12 @@ pub(in crate::generator) fn render_model_file(
             (key.clone(), (package.clone(), class))
         })
         .collect();
+    let union_defs = union_def_names(all_models);
     let context = JavaContext {
         base_package,
         module,
         registry: &resolved_registry,
+        union_defs: &union_defs,
     };
     let package = context.current_package();
     let class_name = manifest
@@ -1527,6 +1576,7 @@ pub(in crate::generator) fn render_model_file(
             base_package,
             module,
             registry: &resolved_registry,
+            union_defs: &union_defs,
         };
         let other_class = manifest
             .type_name(&other.full_name)
@@ -1788,7 +1838,7 @@ fn render_union_read_scalar(
         Some(JavaType::List(item)) => {
             output.push_str(&format!(
                 "{indent}List<{}> items = new ArrayList<>();\n",
-                item.boxed_name()
+                element_declaration(item, variant.nullable_items)
             ));
             output.push_str(&format!(
                 "{indent}for (int index = 0; index < {node}.size(); index++) {{\n"
@@ -1805,6 +1855,7 @@ fn render_union_read_scalar(
                 "items",
                 "element",
                 "elementPath",
+                variant.nullable_items,
                 &format!("{indent}    "),
             );
             output.push_str(&format!("{indent}}}\n"));
@@ -2749,6 +2800,7 @@ fn render_field_deserialize(output: &mut String, field: &FieldPlan) {
             &field.numeric,
             &field.string_length,
             &field.array,
+            field.nullable_items,
             &format!("{indent}        "),
         );
     }
@@ -2783,6 +2835,7 @@ fn render_parse_value(
     numeric: &NumericConstraints,
     string_length: &StringLengthConstraints,
     array: &ArrayConstraints,
+    nullable_items: bool,
     indent: &str,
 ) {
     if let JavaType::ClosedValue { class, wire } = ty {
@@ -2920,7 +2973,7 @@ fn render_parse_value(
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
                 "{indent}    List<{}> items = new ArrayList<>();\n",
-                inner.boxed_name()
+                element_declaration(inner, nullable_items)
             ));
             output.push_str(&format!(
                 "{indent}    for (int index = 0; index < field.size(); index++) {{\n"
@@ -2937,6 +2990,7 @@ fn render_parse_value(
                 "items",
                 "element",
                 "elementPath",
+                nullable_items,
                 &format!("{indent}        "),
             );
             output.push_str(&format!("{indent}    }}\n"));
@@ -2965,14 +3019,39 @@ fn render_parse_value(
     }
 }
 
+/// An element type as it is written inside `List<…>`: a nullable element takes
+/// the TYPE_USE annotation, so the collection stays non-null while its members
+/// may be null ([[items]]).
+fn element_declaration(ty: &JavaType, nullable: bool) -> String {
+    if !nullable {
+        return ty.boxed_name();
+    }
+    // A `byte[]` takes the array-level annotation (`byte @Nullable []`);
+    // `@Nullable byte[]` would (wrongly) annotate the primitive component type,
+    // as for a field of that type (see `FieldPlan::declared_type`).
+    if matches!(ty, JavaType::Bytes(_)) {
+        return "byte @Nullable []".to_string();
+    }
+    format!("@Nullable {}", ty.boxed_name())
+}
+
 fn render_parse_element(
     output: &mut String,
     ty: &JavaType,
     list: &str,
     element: &str,
     path_var: &str,
+    nullable: bool,
     indent: &str,
 ) {
+    // A nullable element ([[nullability]] `oneOf` in `items`) admits a wire
+    // `null` as a null member; the element type's own parse handles the rest.
+    if nullable {
+        output.push_str(&format!("{indent}if ({element}.isNull()) {{\n"));
+        output.push_str(&format!("{indent}    {list}.add(null);\n"));
+        output.push_str(&format!("{indent}    continue;\n"));
+        output.push_str(&format!("{indent}}}\n"));
+    }
     match ty {
         JavaType::String => {
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
@@ -3011,6 +3090,20 @@ fn render_parse_element(
             output.push_str(&format!(
                 "{indent}    {list}.add({element}.booleanValue());\n"
             ));
+            output.push_str(&format!("{indent}}}\n"));
+        }
+        // A union element is a sealed interface: Jackson cannot instantiate it,
+        // so it decodes through the interface's own token dispatcher, which
+        // collects its violations under the element path itself.
+        JavaType::Ref {
+            class, union: true, ..
+        } => {
+            let parsed = format!("parsed{}", upper_first(list));
+            output.push_str(&format!(
+                "{indent}{class} {parsed} = {class}.fromNode({element}, {path_var}, violations, context);\n"
+            ));
+            output.push_str(&format!("{indent}if ({parsed} != null) {{\n"));
+            output.push_str(&format!("{indent}    {list}.add({parsed});\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Ref { class, .. } => {
@@ -3127,6 +3220,19 @@ fn render_parse_map_value(
             output.push_str(&format!(
                 "{indent}    {map}.put({key_var}, {element}.booleanValue());\n"
             ));
+            output.push_str(&format!("{indent}}}\n"));
+        }
+        // A union member decodes through the interface's token dispatcher —
+        // Jackson cannot instantiate a sealed interface.
+        JavaType::Ref {
+            class, union: true, ..
+        } => {
+            let parsed = format!("parsed{}", upper_first(map));
+            output.push_str(&format!(
+                "{indent}{class} {parsed} = {class}.fromNode({element}, {key_var}, violations, context);\n"
+            ));
+            output.push_str(&format!("{indent}if ({parsed} != null) {{\n"));
+            output.push_str(&format!("{indent}    {map}.put({key_var}, {parsed});\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Ref { class, .. } => {

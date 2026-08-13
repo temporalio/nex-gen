@@ -884,6 +884,19 @@ public final class Showcase {
      * Mixed-kind union with an array branch: the wire value is either a list of numbers or a string, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`.
      */
     private final @Nullable Measurements measurements;
+    /**
+     * A list whose element type is a named union: every element is routed to exactly one branch by the union's own selector, and its index carries into the violation path (`shapes[1]`). Go and Java cannot decode a sealed interface as a whole, so the element decodes through the union's dispatcher one at a time.
+     */
+    private final @Nullable List<Shape> shapes;
+    /**
+     * A list whose element union is written **inline**. An element has no name of its own, so the union is named after its position — `ShowcaseSegmentsItem` — moved into `$defs`, and the element becomes a `$ref` at it; from there it is an ordinary named union in every language.
+     */
+    private final @Nullable List<ShowcaseSegmentsItem> segments;
+    /**
+     * A list of **nullable elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list stays a list.
+     */
+    private final @Nullable List<@Nullable String> slots;
+    private final @Nullable Choices choices;
     private final @Nullable Extras extras;
     private final @Nullable Shape shape;
     private final @Nullable Note note;
@@ -893,7 +906,7 @@ public final class Showcase {
     private final @Nullable Attributes attributes;
     private final @Nullable ContactJava contact;
 
-    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Payload payload, @Nullable Detail detail, @Nullable ShapeOrName shapeOrName, @Nullable Measurements measurements, @Nullable Extras extras, @Nullable Shape shape, @Nullable Note note, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
+    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Payload payload, @Nullable Detail detail, @Nullable ShapeOrName shapeOrName, @Nullable Measurements measurements, @Nullable List<Shape> shapes, @Nullable List<ShowcaseSegmentsItem> segments, @Nullable List<@Nullable String> slots, @Nullable Choices choices, @Nullable Extras extras, @Nullable Shape shape, @Nullable Note note, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
         this.kind = kind;
         this.revision = revision;
         this.enabled = enabled;
@@ -933,6 +946,10 @@ public final class Showcase {
         this.detail = detail;
         this.shapeOrName = shapeOrName;
         this.measurements = measurements;
+        this.shapes = shapes;
+        this.segments = segments;
+        this.slots = slots;
+        this.choices = choices;
         this.extras = extras;
         this.shape = shape;
         this.note = note;
@@ -1115,6 +1132,22 @@ public final class Showcase {
         return measurements;
     }
 
+    public @Nullable List<Shape> getShapes() {
+        return shapes;
+    }
+
+    public @Nullable List<ShowcaseSegmentsItem> getSegments() {
+        return segments;
+    }
+
+    public @Nullable List<@Nullable String> getSlots() {
+        return slots;
+    }
+
+    public @Nullable Choices getChoices() {
+        return choices;
+    }
+
     public @Nullable Extras getExtras() {
         return extras;
     }
@@ -1195,6 +1228,10 @@ public final class Showcase {
             && Objects.equals(this.detail, that.detail)
             && Objects.equals(this.shapeOrName, that.shapeOrName)
             && Objects.equals(this.measurements, that.measurements)
+            && Objects.equals(this.shapes, that.shapes)
+            && Objects.equals(this.segments, that.segments)
+            && Objects.equals(this.slots, that.slots)
+            && Objects.equals(this.choices, that.choices)
             && Objects.equals(this.extras, that.extras)
             && Objects.equals(this.shape, that.shape)
             && Objects.equals(this.note, that.note)
@@ -1207,7 +1244,7 @@ public final class Showcase {
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, extras, shape, note, address, labels, settings, attributes, contact);
+        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, shapes, segments, slots, choices, extras, shape, note, address, labels, settings, attributes, contact);
     }
 
     @Override
@@ -1252,6 +1289,10 @@ public final class Showcase {
             + ", detail=" + detail
             + ", shapeOrName=" + shapeOrName
             + ", measurements=" + measurements
+            + ", shapes=" + shapes
+            + ", segments=" + segments
+            + ", slots=" + slots
+            + ", choices=" + choices
             + ", extras=" + extras
             + ", shape=" + shape
             + ", note=" + note
@@ -1515,6 +1556,22 @@ public final class Showcase {
                 gen.writeFieldName("measurements");
                 serializers.defaultSerializeValue(value.measurements, gen);
             }
+            if (value.shapes != null) {
+                gen.writeFieldName("shapes");
+                serializers.defaultSerializeValue(value.shapes, gen);
+            }
+            if (value.segments != null) {
+                gen.writeFieldName("segments");
+                serializers.defaultSerializeValue(value.segments, gen);
+            }
+            if (value.slots != null) {
+                gen.writeFieldName("slots");
+                serializers.defaultSerializeValue(value.slots, gen);
+            }
+            if (value.choices != null) {
+                gen.writeFieldName("choices");
+                serializers.defaultSerializeValue(value.choices, gen);
+            }
             if (value.extras != null) {
                 gen.writeFieldName("extras");
                 serializers.defaultSerializeValue(value.extras, gen);
@@ -1570,6 +1627,7 @@ public final class Showcase {
                     case "attributes":
                     case "blob":
                     case "category":
+                    case "choices":
                     case "code":
                     case "contact":
                     case "contactEmail":
@@ -1601,10 +1659,13 @@ public final class Showcase {
                     case "revision":
                     case "roles":
                     case "scale":
+                    case "segments":
                     case "settings":
                     case "shape":
                     case "shapeOrName":
+                    case "shapes":
                     case "sku":
+                    case "slots":
                     case "status":
                     case "step":
                     case "tags":
@@ -2296,6 +2357,98 @@ public final class Showcase {
                     measurements = Measurements.fromNode(field, "measurements", violations, context);
                 }
             }
+            List<Shape> shapes = null;
+            {
+                JsonNode field = node.get("shapes");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("shapes", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("shapes", "expected array"));
+                    } else {
+                        List<Shape> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "shapes" + "[" + index + "]";
+                            Shape parsedItems = Shape.fromNode(element, elementPath, violations, context);
+                            if (parsedItems != null) {
+                                items.add(parsedItems);
+                            }
+                        }
+                        shapes = items;
+                    }
+                }
+            }
+            List<ShowcaseSegmentsItem> segments = null;
+            {
+                JsonNode field = node.get("segments");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("segments", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("segments", "expected array"));
+                    } else {
+                        List<ShowcaseSegmentsItem> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "segments" + "[" + index + "]";
+                            ShowcaseSegmentsItem parsedItems = ShowcaseSegmentsItem.fromNode(element, elementPath, violations, context);
+                            if (parsedItems != null) {
+                                items.add(parsedItems);
+                            }
+                        }
+                        segments = items;
+                    }
+                }
+            }
+            List<@Nullable String> slots = null;
+            {
+                JsonNode field = node.get("slots");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("slots", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("slots", "expected array"));
+                    } else {
+                        List<@Nullable String> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "slots" + "[" + index + "]";
+                            if (element.isNull()) {
+                                items.add(null);
+                                continue;
+                            }
+                            if (!element.isTextual()) {
+                                violations.add(new Violation(elementPath, "expected string"));
+                            } else {
+                                items.add(element.textValue());
+                            }
+                        }
+                        slots = items;
+                    }
+                }
+            }
+            Choices choices = null;
+            {
+                JsonNode field = node.get("choices");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("choices", "explicit null not allowed"));
+                } else {
+                    try {
+                        choices = context.readTreeAsValue(field, Choices.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("choices"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("choices", nested.getMessage()));
+                    }
+                }
+            }
             Extras extras = null;
             {
                 JsonNode field = node.get("extras");
@@ -2427,7 +2580,7 @@ public final class Showcase {
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, extras, shape, note, address, labels, settings, attributes, contact);
+            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, shapes, segments, slots, choices, extras, shape, note, address, labels, settings, attributes, contact);
         }
     }
 }

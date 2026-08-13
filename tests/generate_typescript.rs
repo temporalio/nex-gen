@@ -23,6 +23,40 @@ static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A property whose union has one inline structured object branch (named
 /// `<Union>Object`) and one scalar branch.
+/// Unions in positions with no property of their own: an array element (inline
+/// and `$ref`), a map member (inline), plus a nullable element for contrast.
+const ELEMENT_UNION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  segments:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+  choices:
+    type: array
+    items: { $ref: "#/$defs/Choice" }
+  entries: { $ref: "#/$defs/Entries" }
+  slots:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: "null" }
+$defs:
+  Choice:
+    oneOf:
+      - { type: string }
+      - { type: boolean }
+  Entries:
+    type: object
+    additionalProperties:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+"##;
+
 const INLINE_OBJECT_BRANCH_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
 type: object
 properties:
@@ -712,5 +746,45 @@ fn typescript_json_names_inline_object_union_branch() {
         "function serializeDetailPayload(value: DetailPayloadObject | string): unknown {"
     ));
     assert!(rendered.contains("out.payload = serializeDetailPayload(value.payload);"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A union in an element position: the loader names it, so TypeScript emits an
+/// ordinary union alias plus mapper and runs it per element/member — including
+/// on the serialize side, where an element model's catch-all bag would otherwise
+/// reach the wire. A nullable element parenthesizes (`(T | null)[]`), which
+/// `T | null[]` would silently misread.
+/// See `specs/json-schema/features/oneOf.md` ("Unions in element positions").
+#[test]
+fn typescript_json_maps_element_position_unions() {
+    let temp_dir = unique_output_path("ts-json-element-union");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bag.yaml");
+    fs::write(&input_path, ELEMENT_UNION_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bag");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    assert!(rendered.contains("export type BagSegmentsItem = string | number;"));
+    assert!(rendered.contains("segments?: BagSegmentsItem[];"));
+    assert!(rendered.contains("new BagSegmentsItemMapper().fromIntermediate(element)"));
+    assert!(rendered.contains("new ChoiceMapper().fromIntermediate(element)"));
+    // A map member runs the member mapper in both directions.
+    assert!(rendered.contains("new EntriesValueMapper().fromIntermediate(raw[key])"));
+    assert!(rendered.contains("out[key] = new EntriesValueMapper().toIntermediate(entry);"));
+    // Element nullability is the element's own concern, and parenthesized.
+    assert!(rendered.contains("slots?: (string | null)[];"));
     fs::remove_dir_all(temp_dir).unwrap();
 }

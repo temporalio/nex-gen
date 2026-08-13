@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   branches must each carry the target's `x-<lang>-name`: every branch would
   otherwise derive the same name, and a discriminator `const` is a wire value,
   not an identifier.
+- JSON Schema: A `oneOf` sum type may now be written in an **element
+  position** — an array's `items` (at any depth) or an object's typed
+  `additionalProperties`. It is named after its position (`<Enclosing>Item` /
+  `<Enclosing>Value`, or its own `x-<lang>-name`), moved into `$defs`, and the
+  position rewritten to a `$ref`, so the element type is an ordinary named union
+  in all four languages — including any inline object branch it carries, which is
+  named in turn. Previously such a union was silently collapsed to one branch
+  (Go, Java) or distributed over the array (TypeScript).
 - JSON Schema: The free-form object (`type: object` with
   `additionalProperties: true` and no `properties`) is now supported as a `oneOf`
   branch. Its members are carried verbatim in every language: Go and Java
@@ -56,6 +64,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema: A union-typed array element or map member decoded through the
+  whole-collection path, which cannot allocate a sealed interface: Go failed at
+  runtime on `[]Union` / `map[string]Union` (`json.Unmarshal` into an interface)
+  and Java on `List<Union>` / `Map<String, Union>`
+  (`readTreeAsValue(node, Union.class)` on an abstract type). Each element/member
+  is now routed through the union's own dispatcher, with its index or key in the
+  violation path (`shapes[1]`, `choices.primary`), and the serialize side re-runs
+  each element's branch constraints (P12).
+- JSON Schema: A **nullable** array element (`items: {oneOf: [{T}, {null}]}`) was
+  mishandled in every language: Go typed it `[]T` and silently decoded a wire
+  `null` to `T`'s zero value, TypeScript emitted `T | null[]` (an unparenthesized
+  union under `[]` — "a T or an array of nulls"), Python dropped the *field's*
+  own `| None` because the element annotation already contained one, and Java
+  rejected a null element outright. All four now follow `items.md`: `[]*T`,
+  `(T | null)[]`, `list[T | None]`, `List<@Nullable T>`.
+- TypeScript: An array of models or unions serialized its elements verbatim, so
+  an element's in-memory `additionalProperties` bag reached the wire as a literal
+  member (and an element's temporal/bytes members were never re-encoded). Each
+  element now re-serializes through its own mapper, as does a typed map's member.
+- Go: A schema `description` ending a sentence with a package-like word ("one at
+  a time.") added that package to the import block, and an unused import is a Go
+  compile error. Package use is now read off the emitted code, not the doc
+  comments.
 - JSON Schema: A `oneOf` with an inline object branch generated uncompilable Go
   (a marker method on an undeclared `<Union>Object` type) and uncompilable
   TypeScript (`new Record<string, unknown>Mapper()`); Java bound the branch to

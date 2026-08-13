@@ -32,6 +32,7 @@ import json_schema.definitions.showcase.LinkNote;
 import json_schema.definitions.showcase.Settings;
 import json_schema.definitions.showcase.Showcase;
 import json_schema.definitions.showcase.ShowcaseDetailObject;
+import json_schema.definitions.showcase.ShowcaseSegmentsItem;
 import json_schema.definitions.showcase.Square;
 import json_schema.definitions.showcase.TextNote;
 import json_schema.definitions.showcase.Widget;
@@ -835,6 +836,89 @@ final class JsonSchemaShowcaseRoundTripTest {
     }
 
     /**
+     * Unions in positions with no property of their own: an array element at a
+     * named union ({@code shapes}), an array element at an inline union the loader
+     * names {@code ShowcaseSegmentsItem}, and a map member at an inline union
+     * named {@code ChoicesValue}. Jackson cannot instantiate the sealed
+     * interface, so each element/member is routed through the interface's own
+     * {@code fromNode} dispatcher, which reports under the element index or the
+     * member key.
+     */
+    @Test
+    void elementPositionUnionsRoundTripAndReject() throws IOException {
+        Showcase value = roundTrip("showcase-element-unions.json", Showcase.class);
+
+        assertNotNull(value.getShapes());
+        assertEquals(2, value.getShapes().size());
+        assertTrue(value.getShapes().get(0) instanceof Circle);
+        assertEquals(2.5, ((Circle) value.getShapes().get(0)).getRadius());
+        assertTrue(value.getShapes().get(1) instanceof Square);
+        assertEquals(4.0, ((Square) value.getShapes().get(1)).getSide());
+
+        assertNotNull(value.getSegments());
+        assertEquals(
+                "alpha",
+                ((ShowcaseSegmentsItem.ShowcaseSegmentsItemString) value.getSegments().get(0))
+                        .getValue());
+        assertEquals(
+                7L,
+                ((ShowcaseSegmentsItem.ShowcaseSegmentsItemInteger) value.getSegments().get(1))
+                        .getValue());
+
+        // Element nullability is the element's own concern: the list stays a
+        // list, its members are @Nullable, and an explicit null is a member.
+        assertEquals(java.util.Arrays.asList("first", null, "third"), value.getSlots());
+
+        assertNotNull(value.getChoices());
+        assertTrue(value.getChoices().getValues().get("primary") instanceof Circle);
+
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // A bad element is reported at its own index, not at the array.
+        RuntimeException badElement = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"shapes\":[{\"kind\":\"circle\",\"radius\":1},true]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badElement).contains("shapes[1]"), messageChain(badElement));
+
+        // An unknown discriminator inside an element is still routed by tag.
+        RuntimeException badTag = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"shapes\":[{\"kind\":\"triangle\"}]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badTag).contains("triangle"), messageChain(badTag));
+
+        // The inline element union is a closed sum type like any other.
+        RuntimeException badSegment = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"segments\":[\"ok\",1.5]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badSegment).contains("segments[1]"), messageChain(badSegment));
+
+        // A map member's violation carries its key.
+        RuntimeException badMember = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"choices\":{\"primary\":\"circle\"}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badMember).contains("primary"), messageChain(badMember));
+    }
+
+    /**
      * Builds a Showcase with all required members valid, varying only the members
      * under serialize-side test; every other optional member is left unset.
      */
@@ -855,7 +939,7 @@ final class JsonSchemaShowcaseRoundTripTest {
                 null, null, null, null, null, null, null, null, "tools",
                 priority, null, null, null, null, aliases, null, null, null,
                 null, null, null, null, null, null, null, null, null, null,
-                null);
+                null, null, null, null, null);
     }
 
     /**

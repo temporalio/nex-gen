@@ -30,6 +30,40 @@ properties:
       - { type: string }
 "#;
 
+/// Unions in positions with no property of their own: an array element (inline
+/// and `$ref`), a map member (inline), plus a nullable element for contrast.
+const ELEMENT_UNION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  segments:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+  choices:
+    type: array
+    items: { $ref: "#/$defs/Choice" }
+  entries: { $ref: "#/$defs/Entries" }
+  slots:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: "null" }
+$defs:
+  Choice:
+    oneOf:
+      - { type: string }
+      - { type: boolean }
+  Entries:
+    type: object
+    additionalProperties:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+"##;
+
 fn generate_to_string_with_inputs(
     language: nexgen::language::Language,
     input_paths: &[PathBuf],
@@ -1659,5 +1693,90 @@ fn go_json_names_inline_object_union_branch() {
     assert!(rendered.contains("var v DetailPayloadObject"));
     assert!(rendered.contains("func (m DetailPayloadObject) Validate() error {"));
     assert!(rendered.contains("func (m *DetailPayloadObject) UnmarshalJSON(data []byte) error {"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A union in an **element position** — an array's `items` and a map's
+/// `additionalProperties` — is named by the loader and emitted as an ordinary
+/// named union, and each element decodes through the union's dispatcher rather
+/// than `json.Unmarshal` (which cannot allocate a sealed interface).
+/// See `specs/json-schema/features/oneOf.md` ("Unions in element positions").
+#[test]
+fn go_json_decodes_element_position_unions() {
+    let temp_dir = unique_output_path("go-json-element-union");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bag.yaml");
+    fs::write(&input_path, ELEMENT_UNION_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bag");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("bag.go")).unwrap();
+
+    // The inline element union is named after its position.
+    assert!(rendered.contains("type BagSegmentsItem interface {"));
+    assert!(rendered.contains("Segments []BagSegmentsItem `json:\"segments,omitempty\"`"));
+    // Elements decode one at a time, with the index in the violation path.
+    assert!(rendered.contains("p0 := fmt.Sprintf(\"%s[%d]\", \"segments\", i0)"));
+    assert!(rendered.contains("if v, ok := unmarshalBagSegmentsItem(e0, p0, &errs); ok {"));
+    // A named union in element position takes the same path.
+    assert!(rendered.contains("Choices []Choice `json:\"choices,omitempty\"`"));
+    assert!(rendered.contains("if v, ok := unmarshalChoice(e0, p0, &errs); ok {"));
+    // Serialize re-runs each element's own branch constraints (P12).
+    assert!(rendered.contains("mergeNested(&errs, p0, v0.Validate())"));
+    // A map member routes through the dispatcher under its key.
+    assert!(rendered.contains("AdditionalProperties map[string]EntriesValue"));
+    assert!(rendered.contains("if value, ok := unmarshalEntriesValue(v, k, &errs); ok {"));
+    // Element nullability stays the element's own concern.
+    assert!(rendered.contains("Slots []*string `json:\"slots,omitempty\"`"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A description that ends a sentence with a package-like word must not pull in
+/// an import: an unused import is a Go compile error.
+#[test]
+fn go_json_ignores_package_names_in_doc_comments() {
+    let temp_dir = unique_output_path("go-json-comment-import");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("note.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  label:
+    description: Processed one at a time.
+    type: string
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("note");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("note.go")).unwrap();
+
+    assert!(rendered.contains("one at a time."));
+    assert!(!rendered.contains("\t\"time\"\n"));
     fs::remove_dir_all(temp_dir).unwrap();
 }

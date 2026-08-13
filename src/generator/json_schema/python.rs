@@ -1397,19 +1397,19 @@ fn is_python_map_model(schema: &Schema) -> bool {
 /// Emits a map-shaped model's `_validate_extras` validator: the member type
 /// check (typed maps only) plus the member-count and key-shape constraints.
 fn render_map_model_methods(output: &mut String, schema: &Schema, value_schema: Option<&Schema>) {
-    output.push_str("\n    @pydantic.model_validator(mode=\"after\")\n");
-    output.push_str("    def _validate_extras(self) -> typing.Any:\n");
-    output.push_str("        extra = typing.cast(dict[str, object], self.model_extra or {})\n");
-    output.push_str("        errors: list[pydantic_core.InitErrorDetails] = []\n");
+    // The checks are rendered first so the `extra` binding is only emitted when
+    // one of them reads it: an unused local is a type-checker diagnostic, and a
+    // map may carry no constraint at all (an unconstrained member type).
+    let mut checks = String::new();
     if let Some(value_schema) = value_schema {
-        render_typed_map_value_validator(output, value_schema);
+        render_typed_map_value_validator(&mut checks, value_schema);
     }
     // `len(extra)` is the distinct wire-key count for a map (no declared
     // fields), counted as one number (never a declared + extras sum).
     if let Some(min) = schema.min_properties {
-        output.push_str(&format!("        if len(extra) < {min}:\n"));
+        checks.push_str(&format!("        if len(extra) < {min}:\n"));
         render_py_count_violation(
-            output,
+            &mut checks,
             "too_few_properties",
             &format!("must have at least {min} properties, got {{len(extra)}}"),
             "len(extra)",
@@ -1417,9 +1417,9 @@ fn render_map_model_methods(output: &mut String, schema: &Schema, value_schema: 
         );
     }
     if let Some(max) = schema.max_properties {
-        output.push_str(&format!("        if len(extra) > {max}:\n"));
+        checks.push_str(&format!("        if len(extra) > {max}:\n"));
         render_py_count_violation(
-            output,
+            &mut checks,
             "too_many_properties",
             &format!("must have at most {max} properties, got {{len(extra)}}"),
             "len(extra)",
@@ -1427,8 +1427,16 @@ fn render_map_model_methods(output: &mut String, schema: &Schema, value_schema: 
         );
     }
     if let Some(subschema) = &schema.property_names {
-        render_py_property_name_validator(output, subschema);
+        render_py_property_name_validator(&mut checks, subschema);
     }
+
+    output.push_str("\n    @pydantic.model_validator(mode=\"after\")\n");
+    output.push_str("    def _validate_extras(self) -> typing.Any:\n");
+    if checks.contains("extra") {
+        output.push_str("        extra = typing.cast(dict[str, object], self.model_extra or {})\n");
+    }
+    output.push_str("        errors: list[pydantic_core.InitErrorDetails] = []\n");
+    output.push_str(&checks);
     output.push_str("        if errors:\n");
     output.push_str("            raise pydantic.ValidationError.from_exception_data(\n");
     output.push_str("                title=type(self).__name__, line_errors=errors\n");
@@ -2314,11 +2322,41 @@ fn object_annotation(schema: &Schema) -> Result<String> {
 }
 
 fn optional_annotation(annotation: &str) -> String {
-    if annotation.contains(" | None") || annotation == "None" {
+    if admits_none(annotation) {
         annotation.to_string()
     } else {
         format!("{annotation} | None")
     }
+}
+
+/// True when the annotation itself already admits `None` — a `None` member of
+/// the *top-level* union. A nested one does not count: in `list[str | None]`
+/// the elements are nullable while the list is not, so an optional field of
+/// that type still needs its own `| None` ([[items]] §"Element nullability is
+/// the element's own concern").
+fn admits_none(annotation: &str) -> bool {
+    split_top_level_union(annotation).contains(&"None")
+}
+
+/// Splits a type annotation on its top-level `|`, ignoring any inside a
+/// subscript (`list[str | None]` is one member, not two).
+fn split_top_level_union(annotation: &str) -> Vec<&str> {
+    let mut members = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, character) in annotation.char_indices() {
+        match character {
+            '[' | '(' => depth += 1,
+            ']' | ')' => depth = depth.saturating_sub(1),
+            '|' if depth == 0 => {
+                members.push(annotation[start..index].trim());
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    members.push(annotation[start..].trim());
+    members
 }
 
 fn reference_model_name(reference: &str) -> String {

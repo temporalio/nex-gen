@@ -2992,7 +2992,7 @@ fn hoist_inline_object_branches(
                     return Err(Error::InvalidJsonSchema {
                         path: path.to_path_buf(),
                         reason: format!(
-                            "the name `{name}` synthesized for an inline object `oneOf` branch is already declared in `$defs`; rename either one, or name the branch with an `{}` override (P15 — the generator never auto-mangles)",
+                            "the name `{name}` synthesized for an inline `oneOf` shape is already declared in `$defs`; rename either one, or name the inline shape with an `{}` override (P15 — the generator never auto-mangles)",
                             lang_name_keyword(language).unwrap_or("x-<lang>-name"),
                         ),
                     });
@@ -3004,9 +3004,11 @@ fn hoist_inline_object_branches(
     Ok(())
 }
 
-/// Hoists the inline object branches of the unions a model declares: its own
-/// (a named `$defs` union) and each object property's (an anonymous union, named
-/// `<Model><Property>` — the [[properties]] synthesized-name rule).
+/// Hoists the inline shapes a model declares that need a name: the object
+/// branches of its unions — its own (a named `$defs` union) and each object
+/// property's (an anonymous union, named `<Model><Property>` — the
+/// [[properties]] synthesized-name rule) — and every union written inline in a
+/// subschema position ([`hoist_subschema_unions`]).
 fn hoist_model_object_branches(
     language: Language,
     path: &Path,
@@ -3018,22 +3020,159 @@ fn hoist_model_object_branches(
     if let Some(branches) = schema.one_of.as_mut() {
         // The model *is* the union, so the union carries its own name.
         hoist_union_object_branches(language, path, model_name, context, branches, hoisted)?;
+        // An array branch (`<Union>Array`) is a subschema position of its own.
+        for branch in branches.iter_mut() {
+            hoist_subschema_unions(
+                language,
+                path,
+                &format!("{model_name}Array"),
+                &format!("{context}.oneOf"),
+                branch,
+                hoisted,
+            )?;
+        }
     }
     if let Some(properties) = schema.properties.as_mut() {
         for (json_name, property) in properties.iter_mut() {
+            let property_name = format!("{model_name}{}", json_name.to_upper_camel_case());
+            let property_context = format!("{context}.properties.{json_name}");
             if let Some(branches) = property.one_of.as_mut() {
                 hoist_union_object_branches(
                     language,
                     path,
-                    &format!("{model_name}{}", json_name.to_upper_camel_case()),
-                    &format!("{context}.properties.{json_name}"),
+                    &property_name,
+                    &property_context,
                     branches,
                     hoisted,
                 )?;
             }
+            hoist_subschema_unions(
+                language,
+                path,
+                &property_name,
+                &property_context,
+                property,
+                hoisted,
+            )?;
         }
     }
+    // The model's own element positions: a map-shaped model's members, or a
+    // struct's typed catch-all.
+    hoist_subschema_unions(language, path, model_name, context, schema, hoisted)?;
     Ok(())
+}
+
+/// Names and hoists every `oneOf` sum type written inline in a **subschema
+/// position** — an array's `items` (at any depth) or an object's typed
+/// `additionalProperties` — the same way [`hoist_union_object_branches`] names
+/// an inline object branch, and for the same reason: Go and Java need a *type*
+/// for the element (a sealed interface with its dispatcher), so the union needs
+/// a name, and a named `$defs` union is what every target already emits. The
+/// synthesized name is the enclosing name plus the position — `<Enclosing>Item`
+/// for `items`, `<Enclosing>Value` for `additionalProperties` — or the union's
+/// own `x-<lang>-name`. See `specs/json-schema/features/oneOf.md` §"Unions in
+/// element positions".
+///
+/// The walk deliberately stops at a nested inline object's `properties`: that
+/// shape is not materialized (see [[properties]]), so a union inside it has no
+/// emitted type to belong to and stays an inline-branch reject.
+fn hoist_subschema_unions(
+    language: Language,
+    path: &Path,
+    base_name: &str,
+    context: &str,
+    schema: &mut Schema,
+    hoisted: &mut Vec<(String, Schema)>,
+) -> Result<()> {
+    if let Some(items) = schema.items.as_mut() {
+        hoist_subschema_union(
+            language,
+            path,
+            &format!("{base_name}Item"),
+            &format!("{context}.items"),
+            items,
+            hoisted,
+        )?;
+    }
+    if let Some(Value::Object(members)) = &schema.additional_properties {
+        let mut value: Schema =
+            serde_json::from_value(Value::Object(members.clone())).map_err(|error| {
+                Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!("{context}.additionalProperties is invalid: {error}"),
+                }
+            })?;
+        hoist_subschema_union(
+            language,
+            path,
+            &format!("{base_name}Value"),
+            &format!("{context}.additionalProperties"),
+            &mut value,
+            hoisted,
+        )?;
+        schema.additional_properties =
+            Some(
+                serde_json::to_value(&value).map_err(|error| Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!("{context}: failed to preserve additionalProperties: {error}"),
+                })?,
+            );
+    }
+    Ok(())
+}
+
+/// Hoists one subschema slot: the union itself when the slot *is* a sum type,
+/// otherwise recursing into the slot's own element positions (a nested array, a
+/// map).
+fn hoist_subschema_union(
+    language: Language,
+    path: &Path,
+    name: &str,
+    context: &str,
+    slot: &mut Schema,
+    hoisted: &mut Vec<(String, Schema)>,
+) -> Result<()> {
+    if !is_sum_type_union(slot) {
+        return hoist_subschema_unions(language, path, name, context, slot, hoisted);
+    }
+    let name = match (lang_name_keyword(language), override_name(language, slot)) {
+        (Some(keyword), Some(value)) => {
+            validate_override(
+                language,
+                keyword,
+                &Value::String(value.to_string()),
+                context,
+            )?;
+            value.to_string()
+        }
+        _ => name.to_string(),
+    };
+    let union = std::mem::take(slot);
+    *slot = Schema {
+        reference: Some(format!("#/$defs/{name}")),
+        ..Schema::default()
+    };
+    hoisted.push((name, union));
+    Ok(())
+}
+
+/// True when a `oneOf` node is a **sum type** — two or more non-`null` branches
+/// — as opposed to the degenerate nullability pattern (`oneOf: [T, null]`),
+/// which every target expresses structurally on the element itself and which
+/// therefore needs no name.
+fn is_sum_type_union(schema: &Schema) -> bool {
+    schema.one_of.as_ref().is_some_and(|branches| {
+        branches
+            .iter()
+            .filter(|branch| !schema_type_is_null(branch))
+            .count()
+            >= 2
+    })
+}
+
+/// True when a schema's `type` is exactly `"null"`.
+fn schema_type_is_null(schema: &Schema) -> bool {
+    schema.ty.as_ref().and_then(Value::as_str) == Some("null")
 }
 
 /// Names and hoists one union's inline object branches. A lone branch derives
@@ -7800,10 +7939,13 @@ properties:
     }
 
     #[test]
-    fn rejects_inline_structured_object_one_of_branch_inside_items() {
-        // `items` is not a position the hoist names, so a structured object
-        // branch there has no derivable name.
-        let error = union_reject(
+    fn hoists_inline_union_inside_items() {
+        // The element union is named `<Model><Property>Item` and moved into
+        // `$defs`; its own inline object branch is then named in turn, so the
+        // element position needs no `$defs` + `$ref` boilerplate from the
+        // author (specs/json-schema/features/oneOf.md §"Unions in element
+        // positions").
+        let spec = union_doc_result(
             r#"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
@@ -7815,9 +7957,118 @@ properties:
         - { type: object, properties: { a: { type: string } } }
         - { type: string }
 "#,
+        )
+        .expect("an inline element union should load");
+        let root = loaded_model_schema(&spec, "Api");
+        assert_eq!(
+            root["properties"]["values"]["items"]["$ref"],
+            Value::String("#/$defs/ApiValuesItem".to_string())
+        );
+        let element = loaded_model_schema(&spec, "ApiValuesItem");
+        assert_eq!(
+            element["oneOf"][0]["$ref"],
+            Value::String("#/$defs/ApiValuesItemObject".to_string())
+        );
+        assert_eq!(
+            loaded_model_schema(&spec, "ApiValuesItemObject")["properties"]["a"]["type"],
+            Value::String("string".to_string())
+        );
+    }
+
+    #[test]
+    fn hoists_inline_union_inside_additional_properties() {
+        let spec = union_doc_result(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  entries: { $ref: "#/$defs/Entries" }
+$defs:
+  Entries:
+    type: object
+    additionalProperties:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+"##,
+        )
+        .expect("an inline map-value union should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Entries")["additionalProperties"]["$ref"],
+            Value::String("#/$defs/EntriesValue".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "EntriesValue")["oneOf"].is_array());
+    }
+
+    #[test]
+    fn names_an_inline_element_union_with_a_type_override() {
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  values:
+    type: array
+    items:
+      x-py-name: Element
+      oneOf:
+        - { type: string }
+        - { type: integer }
+"#,
+        )
+        .expect("an overridden element union should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Api")["properties"]["values"]["items"]["$ref"],
+            Value::String("#/$defs/Element".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "Element")["oneOf"].is_array());
+    }
+
+    #[test]
+    fn leaves_a_nullable_element_inline() {
+        // Two branches, one of them `null`, is the nullability pattern rather
+        // than a sum type: every target expresses it on the element itself, so
+        // there is nothing to name.
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  values:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: "null" }
+"#,
+        )
+        .expect("a nullable element should load");
+        let root = loaded_model_schema(&spec, "Api");
+        assert!(root["properties"]["values"]["items"]["oneOf"].is_array());
+    }
+
+    #[test]
+    fn rejects_an_element_union_name_colliding_with_a_definition() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  values:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+$defs:
+  ApiValuesItem:
+    type: object
+    properties:
+      a: { type: string }
+"#,
         );
         assert!(
-            error.contains("inline object `oneOf` branch") && error.contains("$ref"),
+            error.contains("ApiValuesItem") && error.contains("already declared in `$defs`"),
             "{error}"
         );
     }

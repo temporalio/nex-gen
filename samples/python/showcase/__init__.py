@@ -5,6 +5,8 @@ from __future__ import annotations
 from .models import (
     Address,
     Attributes,
+    Choices,
+    ChoicesValue,
     Circle,
     ContactPy,
     Extras,
@@ -16,6 +18,7 @@ from .models import (
     Shape,
     Showcase,
     ShowcaseDetailObject,
+    ShowcaseSegmentsItem,
     Square,
     TextNote,
     Widget,
@@ -26,6 +29,8 @@ from .services import ShowcaseServicePy
 __all__ = [
     "Address",
     "Attributes",
+    "Choices",
+    "ChoicesValue",
     "Circle",
     "ContactPy",
     "Extras",
@@ -37,6 +42,7 @@ __all__ = [
     "Shape",
     "Showcase",
     "ShowcaseDetailObject",
+    "ShowcaseSegmentsItem",
     "Square",
     "TextNote",
     "Widget",

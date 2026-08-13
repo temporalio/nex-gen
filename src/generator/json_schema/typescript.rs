@@ -2283,11 +2283,17 @@ fn render_model_serializer_body(
     }
     output.push_str("  const out: Record<string, unknown> = {};\n");
 
-    if ts_map_shape(&schema)?.is_some() {
+    if let Some(shape) = ts_map_shape(&schema)? {
         output.push_str(
             "  for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {\n",
         );
-        output.push_str("    out[key] = entry;\n");
+        // A typed member re-serializes through its own mapper; an untyped one
+        // (`additionalProperties: true`) is carried verbatim (P13).
+        let entry = match &shape.value_schema {
+            Some(value_schema) => serialize_expr(value_schema, "entry"),
+            None => "entry".to_string(),
+        };
+        output.push_str(&format!("    out[key] = {entry};\n"));
         output.push_str("  }\n");
         if needs_validation {
             output.push_str("  const keys = Object.keys(out);\n");
@@ -3147,6 +3153,18 @@ fn serialize_expr(schema: &Schema, value_expr: &str) -> String {
             );
         }
     }
+    // An array whose elements need a transform re-serializes elementwise: an
+    // element model's own `toIntermediate` flattens its catch-all bag onto the
+    // wire object and re-encodes its temporal/bytes members, none of which the
+    // in-memory value carries in wire form.
+    if schema.ty.as_ref().and_then(Value::as_str) == Some("array")
+        && let Some(items) = schema.items.as_deref()
+    {
+        let element = serialize_expr(items, "element");
+        if element != "element" {
+            return format!("{value_expr}.map((element) => {element})");
+        }
+    }
     value_expr.to_string()
 }
 
@@ -3278,12 +3296,44 @@ fn type_annotation(schema: &Schema) -> Result<String> {
                 .map(|item| type_annotation(item))
                 .transpose()?
                 .unwrap_or_else(|| "unknown".to_string());
-            Ok(format!("{item}[]"))
+            Ok(format!("{}[]", element_annotation(&item)))
         }
         Some("object") => object_annotation(schema),
         Some("null") => Ok("null".to_string()),
         _ => Ok("unknown".to_string()),
     }
+}
+
+/// An element type as it appears under the `[]` array suffix. A top-level union
+/// has to be parenthesized: `string | null[]` is "a string or an array of
+/// nulls", not the array of nullable strings the element schema declares.
+fn element_annotation(annotation: &str) -> String {
+    if split_top_level_union(annotation).len() > 1 {
+        format!("({annotation})")
+    } else {
+        annotation.to_string()
+    }
+}
+
+/// Splits a type annotation on its top-level `|`, ignoring any inside a type
+/// argument list (`Record<string, A | B>` is one member, not two).
+fn split_top_level_union(annotation: &str) -> Vec<&str> {
+    let mut members = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, character) in annotation.char_indices() {
+        match character {
+            '<' | '(' | '[' | '{' => depth += 1,
+            '>' | ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            '|' if depth == 0 => {
+                members.push(annotation[start..index].trim());
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    members.push(annotation[start..].trim());
+    members
 }
 
 fn object_annotation(schema: &Schema) -> Result<String> {

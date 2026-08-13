@@ -81,6 +81,13 @@ Rationale (citing [[PRINCIPLES.md]]):
 - The extras schema must be a **supported subschema** (`{type:T}` with a
   recognized shape). `additionalProperties:{type:object}` with no shape
   is rejected per **P7.1**, same as anywhere else.
+- The extras schema may be a [[oneOf]] **sum type**. Like an array element it
+  is named after its position at load — `<EnclosingType>Value` — moved into
+  `$defs`, and the extras schema rewritten to a `$ref`, so the member type is
+  an ordinary named union in every target ([[oneOf]] §"Unions in element
+  positions"). Go and Java decode each member through the union's dispatcher,
+  keyed violations included; a whole-map decode cannot allocate a sealed
+  interface.
 
 ### Catch-all representation: always a named field
 

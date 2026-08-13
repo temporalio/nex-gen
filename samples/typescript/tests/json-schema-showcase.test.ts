@@ -689,6 +689,64 @@ describe("json-schema showcase generated definitions", () => {
     ).toThrow(/expected one of: number\[\], string/);
   });
 
+  test("round-trips unions in element positions", () => {
+    // Three positions with no property of their own: an array element at a
+    // named union (`shapes`), an array element at an inline union the loader
+    // names `ShowcaseSegmentsItem`, and a map member at an inline union named
+    // `ChoicesValue`. Each element runs its union's own mapper, so a bad value
+    // is reported at its index / key.
+    const value = expectRoundTrip("showcase-element-unions.json", new ShowcaseMapper());
+
+    expect(value.shapes).toEqual([
+      { kind: "circle", radius: 2.5, additionalProperties: {} },
+      { kind: "square", side: 4, additionalProperties: {} },
+    ]);
+    expect(value.segments).toEqual(["alpha", 7]);
+    // Element nullability is the element's own concern: `(string | null)[]`,
+    // so an explicit null is a member rather than a violation.
+    expect(value.slots).toEqual(["first", null, "third"]);
+    expect(value.choices?.additionalProperties.primary).toEqual({
+      kind: "circle",
+      radius: 1,
+      additionalProperties: {},
+    });
+
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        shapes: [{ kind: "circle", radius: 1 }, true],
+      }),
+    ).toThrow(/shapes\[1\]/);
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        shapes: [{ kind: "triangle" }],
+      }),
+    ).toThrow(/triangle/);
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({ ...base, segments: ["ok", 1.5] }),
+    ).toThrow(/segments\[1\]/);
+    expect(() =>
+      new ShowcaseMapper().fromIntermediate({
+        ...base,
+        choices: { primary: "circle" },
+      }),
+    ).toThrow(/primary/);
+  });
+
   test("rejects invalid in-memory values on serialize (P12, both directions)", () => {
     // A valid model round-trips; mutating a single field to an out-of-spec value
     // and re-serializing (toIntermediate) is rejected before any wire object is

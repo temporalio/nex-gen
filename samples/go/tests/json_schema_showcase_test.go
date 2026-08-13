@@ -788,3 +788,79 @@ func TestJSONSchemaShowcaseArrayBranchUnion(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "measurements")
 }
+
+// TestJSONSchemaShowcaseElementUnions round-trips the union positions that are
+// not a property of their own: an array element (`shapes` at a named union,
+// `segments` at an inline one the loader names `ShowcaseSegmentsItem`) and a map
+// member (`choices`, whose inline member union is named `ChoicesValue`).
+// `encoding/json` cannot decode into a sealed interface, so each of these is
+// dispatched one value at a time, with the element index / member key threaded
+// into the violation path.
+func TestJSONSchemaShowcaseElementUnions(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+
+	value := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-element-unions.json")
+
+	require.Len(t, value.Shapes, 2)
+	circle, ok := value.Shapes[0].(showcase.Circle)
+	require.True(t, ok, "shapes[0] should be a Circle")
+	require.Equal(t, 2.5, circle.Radius)
+	square, ok := value.Shapes[1].(showcase.Square)
+	require.True(t, ok, "shapes[1] should be a Square")
+	require.Equal(t, float64(4), square.Side)
+
+	require.Equal(
+		t,
+		[]showcase.ShowcaseSegmentsItem{
+			showcase.ShowcaseSegmentsItemString("alpha"),
+			showcase.ShowcaseSegmentsItemInteger(7),
+		},
+		value.Segments,
+	)
+
+	// Element nullability is the element's own concern: the slice stays a
+	// slice, its members become pointers, and an explicit null decodes to nil.
+	require.Len(t, value.Slots, 3)
+	require.Equal(t, "first", *value.Slots[0])
+	require.Nil(t, value.Slots[1])
+	require.Equal(t, "third", *value.Slots[2])
+
+	require.NotNil(t, value.Choices)
+	require.Len(t, value.Choices.AdditionalProperties, 2)
+	primary, ok := value.Choices.AdditionalProperties["primary"].(showcase.Circle)
+	require.True(t, ok, "choices[primary] should be a Circle")
+	require.Equal(t, float64(1), primary.Radius)
+
+	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
+	var out showcase.Showcase
+
+	// A bad element is reported at its own index, not at the array.
+	err := dc.FromPayload(jsonPayload([]byte(base+`,"shapes":[{"kind":"circle","radius":1},true]}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shapes[1]")
+	require.Contains(t, err.Error(), "Circle, Square")
+
+	// An unknown discriminator inside an element is still routed by tag.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"shapes":[{"kind":"triangle"}]}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shapes[0]")
+	require.Contains(t, err.Error(), "triangle")
+
+	// The inline element union is a closed sum type like any other.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"segments":["ok",1.5]}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "segments[1]")
+
+	// A map member's violation carries its key.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"choices":{"primary":"circle"}}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "primary")
+	require.Contains(t, err.Error(), "Circle, Square")
+
+	// Serialize re-runs each element's own branch constraints (P12).
+	invalid := value
+	invalid.Shapes = []showcase.Shape{showcase.Square{Kind: showcase.SquareKind("hexagon")}}
+	_, err = dc.ToPayload(invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shapes[0].kind")
+}

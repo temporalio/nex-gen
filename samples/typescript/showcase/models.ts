@@ -57,6 +57,15 @@ export interface Attributes {
 }
 
 /**
+ * A map whose *member* type is a union written inline in `additionalProperties`. Like an element union it has no name of its own, so it is named after its position — `ChoicesValue` — and moved into `$defs`; each member then decodes through that union's selector, with the member key carrying into the violation path.
+ */
+export interface Choices {
+  additionalProperties: Record<string, ChoicesValue>;
+}
+
+export type ChoicesValue = Circle | Square;
+
+/**
  * A circle branch of the Shape and shapeOrName tagged unions.
  */
 export interface Circle {
@@ -279,6 +288,19 @@ export interface Showcase {
    * Mixed-kind union with an array branch: the wire value is either a list of numbers or a string, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`.
    */
   measurements?: number[] | string;
+  /**
+   * A list whose element type is a named union: every element is routed to exactly one branch by the union's own selector, and its index carries into the violation path (`shapes[1]`). Go and Java cannot decode a sealed interface as a whole, so the element decodes through the union's dispatcher one at a time.
+   */
+  shapes?: Shape[];
+  /**
+   * A list whose element union is written **inline**. An element has no name of its own, so the union is named after its position — `ShowcaseSegmentsItem` — moved into `$defs`, and the element becomes a `$ref` at it; from there it is an ordinary named union in every language.
+   */
+  segments?: ShowcaseSegmentsItem[];
+  /**
+   * A list of **nullable elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list stays a list.
+   */
+  slots?: (string | null)[];
+  choices?: Choices;
   extras?: Extras;
   shape?: Shape;
   note?: Note;
@@ -294,6 +316,8 @@ export interface ShowcaseDetailObject {
   hint?: string;
   additionalProperties: Record<string, unknown>;
 }
+
+export type ShowcaseSegmentsItem = string | number;
 
 export interface GetShowcaseInput {
   id: string;
@@ -528,6 +552,91 @@ export class AttributesMapper {
       throw new __nexgenDefinitions.ValidationError(violations);
     }
     return out;
+  }
+}
+
+export class ChoicesMapper {
+  public fromIntermediate(raw: unknown): Choices {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, ChoicesValue> = {};
+    for (const key of keys) {
+      let entry: ChoicesValue | undefined = undefined;
+      try {
+        entry = new ChoicesValueMapper().fromIntermediate(raw[key]);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, key, error);
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Choices): unknown {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = new ChoicesValueMapper().toIntermediate(entry);
+    }
+    return out;
+  }
+}
+
+export class ChoicesValueMapper {
+  public fromIntermediate(raw: unknown): ChoicesValue {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    let out: ChoicesValue = undefined as unknown as ChoicesValue;
+    if (__nexgenDefinitions.isPlainObject(raw)) {
+      switch ((raw as Record<string, unknown>)["kind"]) {
+        case "circle":
+          try {
+            out = new CircleMapper().fromIntermediate(raw);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "", error);
+          }
+          break;
+        case "square":
+          try {
+            out = new SquareMapper().fromIntermediate(raw);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "", error);
+          }
+          break;
+        default:
+          violations.push({
+            path: "",
+            reason: `unknown discriminator kind ${String((raw as Record<string, unknown>)["kind"])}: expected one of ["circle", "square"]`,
+          });
+      }
+    } else {
+      violations.push({ path: "", reason: "expected one of: Circle, Square" });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ChoicesValue): unknown {
+    if ((value as unknown as Record<string, unknown>)["kind"] === "circle") {
+      return new CircleMapper().toIntermediate(value as Circle);
+    }
+    if ((value as unknown as Record<string, unknown>)["kind"] === "square") {
+      return new SquareMapper().toIntermediate(value as Square);
+    }
+    throw new __nexgenDefinitions.ValidationError([
+      { path: "", reason: "expected one of: Circle, Square" },
+    ]);
   }
 }
 
@@ -1794,6 +1903,91 @@ export class ShowcaseMapper {
       }
     }
 
+    let shapes: Shape[] | undefined = undefined as unknown as Shape[] | undefined;
+    if (raw.shapes === null) {
+      violations.push({ path: "shapes", reason: "explicit null not allowed" });
+    } else if (raw.shapes !== undefined) {
+      if (!Array.isArray(raw.shapes)) {
+        violations.push({ path: "shapes", reason: "expected array" });
+      } else {
+        shapes = [];
+        raw.shapes.forEach((element: unknown, index: number) => {
+          let item: Shape = undefined as unknown as Shape;
+          try {
+            item = new ShapeMapper().fromIntermediate(element);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, `shapes[${index}]`, error);
+          }
+          if (item !== undefined) {
+            shapes!.push(item);
+          }
+        });
+      }
+    }
+
+    let segments: ShowcaseSegmentsItem[] | undefined = undefined as unknown as
+      | ShowcaseSegmentsItem[]
+      | undefined;
+    if (raw.segments === null) {
+      violations.push({ path: "segments", reason: "explicit null not allowed" });
+    } else if (raw.segments !== undefined) {
+      if (!Array.isArray(raw.segments)) {
+        violations.push({ path: "segments", reason: "expected array" });
+      } else {
+        segments = [];
+        raw.segments.forEach((element: unknown, index: number) => {
+          let item: ShowcaseSegmentsItem = undefined as unknown as ShowcaseSegmentsItem;
+          try {
+            item = new ShowcaseSegmentsItemMapper().fromIntermediate(element);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, `segments[${index}]`, error);
+          }
+          if (item !== undefined) {
+            segments!.push(item);
+          }
+        });
+      }
+    }
+
+    let slots: (string | null)[] | undefined = undefined as unknown as
+      | (string | null)[]
+      | undefined;
+    if (raw.slots === null) {
+      violations.push({ path: "slots", reason: "explicit null not allowed" });
+    } else if (raw.slots !== undefined) {
+      if (!Array.isArray(raw.slots)) {
+        violations.push({ path: "slots", reason: "expected array" });
+      } else {
+        slots = [];
+        raw.slots.forEach((element: unknown, index: number) => {
+          let item: string | null = undefined as unknown as string | null;
+          if (element === null) {
+            item = null;
+          } else {
+            if (typeof element !== "string") {
+              violations.push({ path: `slots[${index}]`, reason: "expected string" });
+            } else {
+              item = element;
+            }
+          }
+          if (item !== undefined) {
+            slots!.push(item);
+          }
+        });
+      }
+    }
+
+    let choices: Choices | undefined = undefined as unknown as Choices | undefined;
+    if (raw.choices === null) {
+      violations.push({ path: "choices", reason: "explicit null not allowed" });
+    } else if (raw.choices !== undefined) {
+      try {
+        choices = new ChoicesMapper().fromIntermediate(raw.choices);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "choices", error);
+      }
+    }
+
     let extras: Extras | undefined = undefined as unknown as Extras | undefined;
     if (raw.extras === null) {
       violations.push({ path: "extras", reason: "explicit null not allowed" });
@@ -1925,6 +2119,10 @@ export class ShowcaseMapper {
         key !== "detail" &&
         key !== "shapeOrName" &&
         key !== "measurements" &&
+        key !== "shapes" &&
+        key !== "segments" &&
+        key !== "slots" &&
+        key !== "choices" &&
         key !== "extras" &&
         key !== "shape" &&
         key !== "note" &&
@@ -2039,6 +2237,18 @@ export class ShowcaseMapper {
     }
     if (measurements !== undefined) {
       out.measurements = measurements;
+    }
+    if (shapes !== undefined) {
+      out.shapes = shapes;
+    }
+    if (segments !== undefined) {
+      out.segments = segments;
+    }
+    if (slots !== undefined) {
+      out.slots = slots;
+    }
+    if (choices !== undefined) {
+      out.choices = choices;
     }
     if (extras !== undefined) {
       out.extras = extras;
@@ -2343,6 +2553,22 @@ export class ShowcaseMapper {
     if (value.measurements !== undefined) {
       out.measurements = value.measurements;
     }
+    if (value.shapes !== undefined) {
+      out.shapes = value.shapes.map((element) =>
+        new ShapeMapper().toIntermediate(element),
+      );
+    }
+    if (value.segments !== undefined) {
+      out.segments = value.segments.map((element) =>
+        new ShowcaseSegmentsItemMapper().toIntermediate(element),
+      );
+    }
+    if (value.slots !== undefined) {
+      out.slots = value.slots;
+    }
+    if (value.choices !== undefined) {
+      out.choices = new ChoicesMapper().toIntermediate(value.choices);
+    }
     if (value.extras !== undefined) {
       out.extras = new ExtrasMapper().toIntermediate(value.extras);
     }
@@ -2450,6 +2676,36 @@ export class ShowcaseDetailObjectMapper {
       throw new __nexgenDefinitions.ValidationError(violations);
     }
     return out;
+  }
+}
+
+export class ShowcaseSegmentsItemMapper {
+  public fromIntermediate(raw: unknown): ShowcaseSegmentsItem {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    let out: ShowcaseSegmentsItem = undefined as unknown as ShowcaseSegmentsItem;
+    if (typeof raw === "string") {
+      out = raw as string;
+    } else if (typeof raw === "number" && Number.isSafeInteger(raw)) {
+      out = raw as number;
+    } else {
+      violations.push({ path: "", reason: "expected one of: string, integer" });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseSegmentsItem): unknown {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (typeof value === "number" && Number.isSafeInteger(value)) {
+      return value;
+    }
+    throw new __nexgenDefinitions.ValidationError([
+      { path: "", reason: "expected one of: string, integer" },
+    ]);
   }
 }
 
