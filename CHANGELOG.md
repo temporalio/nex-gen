@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Protobuf-backed models now consistently generate conversions in both
+  directions whenever they are reachable. Go and TypeScript emit previously
+  suppressed complementary helpers, operation-free exported models receive the
+  same validation as operation-used models, and Java now reports its existing
+  lack of protobuf model support instead of silently dropping protobuf
+  operation types.
 - Generating into an existing `--output` directory no longer deletes it first.
   The directory is written into instead, so pre-existing files and
   subdirectories are preserved; generated files are still overwritten in place.

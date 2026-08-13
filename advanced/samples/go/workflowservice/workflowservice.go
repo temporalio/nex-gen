@@ -155,6 +155,131 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 	return message, nil
 }
 
+func signalWithStartWorkflowRequestFromProto(ctx workflow.Context, proto *workflowservice.SignalWithStartWorkflowExecutionRequest) (signalWithStartWorkflowRequest, error) {
+	value := signalWithStartWorkflowRequest{}
+	{
+		converted, err := workflowTypeFromProto(ctx, proto.GetWorkflowType())
+		if err != nil {
+			return value, err
+		}
+		if converted != nil {
+			value.Workflow = *converted
+		}
+	}
+	{
+		converted, err := payloadsFromProto(ctx, proto.GetInput())
+		if err != nil {
+			return value, err
+		}
+		value.Args = converted
+	}
+	value.Id = proto.GetWorkflowId()
+	{
+		converted, err := taskQueueFromProto(ctx, proto.GetTaskQueue())
+		if err != nil {
+			return value, err
+		}
+		if converted != nil {
+			value.TaskQueue = *converted
+		}
+	}
+	value.Signal = proto.GetSignalName()
+	{
+		converted, err := payloadsFromProto(ctx, proto.GetSignalInput())
+		if err != nil {
+			return value, err
+		}
+		value.SignalArgs = converted
+	}
+	{
+		converted, err := durationFromProto(ctx, proto.GetWorkflowExecutionTimeout())
+		if err != nil {
+			return value, err
+		}
+		value.WorkflowExecutionTimeout = converted
+	}
+	{
+		converted, err := durationFromProto(ctx, proto.GetWorkflowRunTimeout())
+		if err != nil {
+			return value, err
+		}
+		value.WorkflowRunTimeout = converted
+	}
+	{
+		converted, err := durationFromProto(ctx, proto.GetWorkflowTaskTimeout())
+		if err != nil {
+			return value, err
+		}
+		value.WorkflowTaskTimeout = converted
+	}
+	{
+		converted := enums.WorkflowIdReusePolicy(int32(proto.GetWorkflowIdReusePolicy()))
+		value.WorkflowIdReusePolicy = &converted
+	}
+	{
+		converted := enums.WorkflowIdConflictPolicy(int32(proto.GetWorkflowIdConflictPolicy()))
+		value.WorkflowIdConflictPolicy = &converted
+	}
+	{
+		converted, err := retryPolicyFromProto(ctx, proto.GetRetryPolicy())
+		if err != nil {
+			return value, err
+		}
+		value.RetryPolicy = converted
+	}
+	{
+		converted := proto.GetCronSchedule()
+		value.CronSchedule = &converted
+	}
+	{
+		converted, err := memoFromProto(ctx, proto.GetMemo())
+		if err != nil {
+			return value, err
+		}
+		value.Memo = converted
+	}
+	{
+		converted, err := searchAttributesFromProto(ctx, proto.GetSearchAttributes())
+		if err != nil {
+			return value, err
+		}
+		if converted != nil {
+			value.TypedSearchAttributes = *converted
+		}
+	}
+	{
+		converted, err := priorityFromProto(ctx, proto.GetPriority())
+		if err != nil {
+			return value, err
+		}
+		value.Priority = converted
+	}
+	{
+		converted, err := versioningOverrideFromProto(ctx, proto.GetVersioningOverride())
+		if err != nil {
+			return value, err
+		}
+		if converted != nil {
+			value.VersioningOverride = *converted
+		}
+	}
+	{
+		converted, err := durationFromProto(ctx, proto.GetWorkflowStartDelay())
+		if err != nil {
+			return value, err
+		}
+		value.StartDelay = converted
+	}
+	if proto.GetUserMetadata() != nil {
+		converted, err := userMetadataFromProto(ctx, proto.GetUserMetadata())
+		if err != nil {
+			return value, err
+		}
+		value.UserMetadata = &converted
+	}
+	return value, nil
+}
+
 // --- Operations (internal) ---
 
 func signalWithStartWorkflow(ctx workflow.Context, request signalWithStartWorkflowRequest) workflow.Future {

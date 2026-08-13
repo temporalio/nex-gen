@@ -1,19 +1,19 @@
 use heck::ToLowerCamelCase;
 use prost_types::FieldDescriptorProto;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::typescript::{
-    RenderedExternalModelFragments, RenderedModel, WireValueConversion, generic_model_annotation,
-    render_named_generic_function_start, typescript_authored_type_annotation,
-    typescript_generated_field_name, typescript_ident,
+    RenderedExternalModelFragments, RenderedModel, WireFunctionNames, WireValueConversion,
+    generic_model_annotation, render_named_generic_function_start,
+    typescript_authored_type_annotation, typescript_generated_field_name, typescript_ident,
 };
 use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec, PlannedType,
-    relative_descriptor_name,
+    PlannedWireFieldBinding, relative_descriptor_name,
 };
-use crate::spec::{ExternalTypeSpec, RecordSpec, TypeReplacementSpec};
+use crate::spec::{ExternalTypeSpec, RecordFieldVisibility, RecordSpec, TypeReplacementSpec};
 
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend;
@@ -22,7 +22,10 @@ impl ExternalModelBackend for ModelBackend {
     type ModelFragments = RenderedExternalModelFragments;
     type WireConversion = WireValueConversion;
 
-    fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
+    fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+        for (_, record) in api_plan.records() {
+            validate_record_conversion(record)?;
+        }
         Ok(())
     }
 
@@ -69,6 +72,53 @@ impl ExternalModelBackend for ModelBackend {
     }
 }
 
+fn validate_record_conversion(record: &RecordSpec<PlannedFamily>) -> Result<()> {
+    let Some(proto) = &record.data.proto else {
+        return Ok(());
+    };
+    for (field_name, field) in record
+        .fields
+        .iter()
+        .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+    {
+        match &field.data.wire_binding {
+            Some(PlannedWireFieldBinding::VariantMembers { wire_name, .. }) => {
+                return Err(Error::UnsupportedProtoOneofConversion {
+                    language: Language::TypeScript,
+                    message: proto.full_name.clone(),
+                    oneof: wire_name.clone(),
+                });
+            }
+            Some(PlannedWireFieldBinding::Value { wire_type, .. })
+                if matches!(
+                    field.field_type.validation_type(),
+                    PlannedType::TypeParameter(_)
+                ) && is_proto_generic_carrier(wire_type) =>
+            {
+                return Err(Error::UnsupportedProtoGenericCarrierConversion {
+                    language: Language::TypeScript,
+                    message: proto.full_name.clone(),
+                    field: field_name.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn is_proto_generic_carrier(kind: &PlannedType) -> bool {
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) =
+        kind.validation_type()
+    else {
+        return false;
+    };
+    matches!(
+        message.proto.full_name.as_str(),
+        "temporal.api.common.v1.Payload" | "temporal.api.common.v1.Payloads"
+    )
+}
+
 impl ModelBackend {
     pub(in crate::generator) fn render_model_wire_functions(
         &self,
@@ -76,19 +126,13 @@ impl ModelBackend {
         model: &RenderedModel,
         planned_record: &RecordSpec<PlannedFamily>,
     ) -> bool {
-        let mut wrote_conversion = false;
-        if let Some(function_name) = model.from_wire_function_name.as_deref() {
-            render_model_from_proto_function(output, model, planned_record, function_name);
-            wrote_conversion = true;
-        }
-        if let Some(function_name) = model.to_wire_function_name.as_deref() {
-            if wrote_conversion {
-                output.push('\n');
-            }
-            render_model_to_proto_function(output, model, planned_record, function_name);
-            wrote_conversion = true;
-        }
-        wrote_conversion
+        let Some(names) = &model.wire_function_names else {
+            return false;
+        };
+        render_model_from_proto_function(output, model, planned_record, &names.from_wire);
+        output.push('\n');
+        render_model_to_proto_function(output, model, planned_record, &names.to_wire);
+        true
     }
 }
 
@@ -224,8 +268,7 @@ pub(in crate::generator) fn message_override_conversion(
                 "{}({{name}})",
                 typescript_to_proto_converter(&proto.proto.full_name, language_override)
             )),
-            from_wire_function_name: None,
-            to_wire_function_name: None,
+            wire_function_names: None,
             uses_rendered_model_annotation: false,
         });
     }
@@ -244,8 +287,7 @@ pub(in crate::generator) fn message_override_conversion(
                 "{}({{name}})",
                 typescript_default_to_proto_name(&proto.proto.full_name)
             )),
-            from_wire_function_name: None,
-            to_wire_function_name: None,
+            wire_function_names: None,
             uses_rendered_model_annotation: false,
         });
     }
@@ -275,8 +317,10 @@ fn generated_wire_conversion(
         function_name_to_wire: Some(format!(
             "{to_wire_function_name}({{ name: {{name}} }}) ?? {{}}"
         )),
-        from_wire_function_name: Some(from_wire_function_name),
-        to_wire_function_name: Some(to_wire_function_name),
+        wire_function_names: Some(WireFunctionNames {
+            from_wire: from_wire_function_name,
+            to_wire: to_wire_function_name,
+        }),
         uses_rendered_model_annotation: true,
     })
 }
@@ -323,8 +367,7 @@ fn enum_wire_conversion(value_type: &PlannedType) -> Option<WireValueConversion>
                 typescript_to_proto_converter(&enum_type.proto.full_name, replacement)
             ),
             function_name_to_wire: None,
-            from_wire_function_name: None,
-            to_wire_function_name: None,
+            wire_function_names: None,
             uses_rendered_model_annotation: false,
         });
     }

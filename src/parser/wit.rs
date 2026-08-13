@@ -98,7 +98,16 @@ fn api_spec_from_wit(
             continue;
         };
         let interface = &resolve.interfaces[*id];
-        services.push(build_service(resolve, key, interface, &path, language)?);
+        let service = build_service(resolve, key, interface, &path, language)?;
+        if service.operations.is_empty() && service.resources.is_empty() {
+            for type_id in interface.types.values() {
+                let full_name = wit_type_full_name(resolve, *type_id);
+                if let Some(entry) = types.get_mut(&full_name) {
+                    entry.module_exported = true;
+                }
+            }
+        }
+        services.push(service);
     }
 
     let spec = ApiSpec {
@@ -755,7 +764,7 @@ fn collect_interface_types(
     interface: &Interface,
     path: &Path,
     language: Language,
-    types: &mut BTreeMap<String, TypeDeclSpec>,
+    types: &mut BTreeMap<String, TypeDeclEntry>,
 ) -> Result<()> {
     let interface_name = interface
         .name
@@ -769,7 +778,10 @@ fn collect_interface_types(
             build_wit_record_spec(resolve, *type_id, type_def, path, &interface_name, language)?
         {
             if types
-                .insert(record.full_name.clone(), TypeDeclSpec::Record(record))
+                .insert(
+                    record.full_name.clone(),
+                    TypeDeclEntry::new(TypeDeclSpec::Record(record)),
+                )
                 .is_some()
             {
                 return Err(Error::InvalidWit {
@@ -785,7 +797,7 @@ fn collect_interface_types(
             if types
                 .insert(
                     enumeration.full_name.clone(),
-                    TypeDeclSpec::Enum(enumeration),
+                    TypeDeclEntry::new(TypeDeclSpec::Enum(enumeration)),
                 )
                 .is_some()
             {
@@ -800,7 +812,10 @@ fn collect_interface_types(
         }
         if let Some(flag_set) = build_wit_flags_spec(resolve, *type_id, type_def) {
             if types
-                .insert(flag_set.full_name.clone(), TypeDeclSpec::Flags(flag_set))
+                .insert(
+                    flag_set.full_name.clone(),
+                    TypeDeclEntry::new(TypeDeclSpec::Flags(flag_set)),
+                )
                 .is_some()
             {
                 return Err(Error::InvalidWit {
@@ -815,7 +830,10 @@ fn collect_interface_types(
         if let Some(variant) = build_wit_variant_spec(resolve, *type_id, type_def, path, language)?
         {
             if types
-                .insert(variant.full_name.clone(), TypeDeclSpec::Variant(variant))
+                .insert(
+                    variant.full_name.clone(),
+                    TypeDeclEntry::new(TypeDeclSpec::Variant(variant)),
+                )
                 .is_some()
             {
                 return Err(Error::InvalidWit {
@@ -833,7 +851,10 @@ fn collect_interface_types(
             continue;
         };
         if types
-            .insert(proto_name.clone(), TypeDeclSpec::External(external_type))
+            .insert(
+                proto_name.clone(),
+                TypeDeclEntry::new(TypeDeclSpec::External(external_type)),
+            )
             .is_some()
         {
             return Err(Error::InvalidWit {
@@ -961,6 +982,7 @@ fn build_wit_variant_spec(
                 .transpose()?;
             Ok(VariantCaseSpec {
                 name: case.name.clone(),
+                wire_name: case.name.to_snake_case(),
                 payload,
             })
         })
@@ -2524,13 +2546,7 @@ fn build_service(
         delay_load_temporalio_workflow,
         operations,
         resources,
-        data: AuthoredServiceData {
-            declared_type_names: interface
-                .types
-                .values()
-                .map(|type_id| wit_type_full_name(resolve, *type_id))
-                .collect(),
-        },
+        data: (),
     })
 }
 
@@ -3508,6 +3524,42 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("nexgen-{label}-{unique}"))
+    }
+
+    #[test]
+    fn records_public_variant_tags_wire_names_and_operation_free_exports() {
+        let spec = parse(
+            Language::Python,
+            r#"
+package test:exports@1.0.0;
+world system { export types; }
+interface types {
+  variant choice {
+    some-value(string),
+    %type(string),
+  }
+}
+"#,
+        );
+        let variant = spec.variant("types.choice").expect("variant should parse");
+        assert_eq!(variant.cases[0].name, "some-value");
+        assert_eq!(variant.cases[0].wire_name, "some_value");
+        assert_eq!(variant.cases[1].name, "type");
+        assert_eq!(variant.cases[1].wire_name, "type");
+        assert!(spec.types["types.choice"].module_exported);
+
+        let service = parse(
+            Language::Python,
+            r#"
+package test:exports@1.0.0;
+world system { export api; }
+interface api {
+  record request { value: string, }
+  call: func(request: request);
+}
+"#,
+        );
+        assert!(service.types.values().all(|entry| !entry.module_exported));
     }
 
     const GENERIC_WIT: &str = r#"

@@ -11,7 +11,8 @@ use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelSpec, LanguageStringSpec,
-    ModulePath, OperationSpec, ServiceSpec, SupportSpec, Symbol, TypeDeclSpec, TypeSpec,
+    ModulePath, OperationSpec, ServiceSpec, SupportSpec, Symbol, TypeDeclEntry, TypeDeclSpec,
+    TypeSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
@@ -543,16 +544,39 @@ fn api_spec_from_parsed_json_documents(
         }
     }
 
+    let owned_module_paths = canonical_paths
+        .iter()
+        .filter_map(|path| module_paths.and_then(|paths| paths.get(path)))
+        .collect::<BTreeSet<_>>();
+    let types = external_types
+        .into_iter()
+        .map(|(name, binding)| {
+            let ExternalTypeSpec::Json(json_type) = &binding.external_type else {
+                return (name, TypeDeclEntry::new(TypeDeclSpec::External(binding)));
+            };
+            let module_exported = module_paths.is_none()
+                || json_type
+                    .name
+                    .module_path()
+                    .is_some_and(|path| owned_module_paths.contains(path));
+            let declaration = TypeDeclSpec::External(binding);
+            (
+                name,
+                if module_exported {
+                    TypeDeclEntry::module_export(declaration)
+                } else {
+                    TypeDeclEntry::new(declaration)
+                },
+            )
+        })
+        .collect();
     let spec = ApiSpec {
         module_path: ModulePath::default(),
         data: (),
         version: "0.0.0".to_string(),
         support: SupportSpec::default(),
         services,
-        types: external_types
-            .into_iter()
-            .map(|(name, binding)| (name, TypeDeclSpec::External(binding)))
-            .collect(),
+        types,
     };
     validate_identifier_namespace(language, &spec)?;
     Ok(spec)
@@ -3074,7 +3098,7 @@ fn build_service(
         delay_load_temporalio_workflow: false,
         operations,
         resources: Vec::new(),
-        data: crate::spec::AuthoredServiceData::default(),
+        data: (),
     })
 }
 
@@ -5376,6 +5400,25 @@ mod tests {
             PathBuf::from("api.yaml"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn marks_each_source_root_and_defs_as_module_exports() {
+        let spec = parse(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  nested: { $ref: "#/$defs/Nested" }
+$defs:
+  Nested:
+    type: object
+    properties:
+      value: { type: string }
+"##,
+        );
+        assert!(spec.types.values().all(|entry| entry.module_exported));
+        assert_eq!(spec.types.len(), 2);
     }
 
     #[test]

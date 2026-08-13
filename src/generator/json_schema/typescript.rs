@@ -1022,8 +1022,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
             from_wire: "{wire}".to_string(),
             to_wire: "{value}".to_string(),
             function_name_to_wire: None,
-            from_wire_function_name: None,
-            to_wire_function_name: None,
+            wire_function_names: None,
             uses_rendered_model_annotation: false,
         })
     }

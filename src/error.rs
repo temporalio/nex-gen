@@ -135,6 +135,18 @@ pub enum Error {
         oneof: String,
     },
 
+    #[error(
+        "{language} protobuf conversion does not yet support generic carrier field `{message}.{field}`"
+    )]
+    UnsupportedProtoGenericCarrierConversion {
+        language: Language,
+        message: String,
+        field: String,
+    },
+
+    #[error("Java code generation does not support protobuf-backed model `{message}`")]
+    UnsupportedJavaProtoModel { message: String },
+
     #[error("{language} support namespace `{namespace}` is not supported")]
     UnsupportedSupportNamespace {
         language: Language,

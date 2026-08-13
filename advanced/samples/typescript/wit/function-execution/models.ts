@@ -28,6 +28,15 @@ function configuredPayloadConverter(): common.PayloadConverter {
   return activator.payloadConverter;
 }
 
+function requestArgsFromPayloads(
+  payloads: temporal.api.common.v1.IPayloads | null | undefined,
+): unknown[] | undefined {
+  if (payloads == null) {
+    return undefined;
+  }
+  return common.arrayFromPayloads(configuredPayloadConverter(), payloads.payloads);
+}
+
 function requestArgsToPayloads(
   args: ReadonlyArray<unknown> | undefined,
 ): temporal.api.common.v1.IPayloads | undefined {

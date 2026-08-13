@@ -631,7 +631,6 @@ pub(crate) fn generate_tree(
     options: &GoOptions,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
-    crate::generator::proto::ensure_supported_oneof_conversions(tree, Language::Go)?;
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => generate_single_leaf(leaf, support, options, mode),
         ApiSpecNode::Branch(branch) => generate_branch_tree(branch, support, options, mode),
@@ -1001,6 +1000,10 @@ impl<'a> ApiPlanner<'a> {
             for resource in &service.resources {
                 self.ensure_resource_field_types(resource)?;
             }
+        }
+
+        for record in self.api_plan.records().map(|(_, record)| record) {
+            self.ensure_rendered_model(&planned_message_type_for_record(record))?;
         }
 
         let visibility = compute_go_visibility(

@@ -4,19 +4,29 @@ import * as common from "@temporalio/common";
 import type * as workflow from "@temporalio/workflow";
 import type { temporal } from "@temporalio/proto";
 import {
+  retryPolicyFromProto,
   retryPolicyToProto,
+  workflowTypeFromProto,
   workflowTypeToProto,
   signalFunctionName,
+  taskQueueFromProto,
   taskQueueToProto,
   workflowNamespace,
   payloadFromProto,
   payloadToProto,
+  memoFromProto,
   memoToProto,
+  durationFromProto,
   durationToProto,
+  searchAttributesFromProto,
   searchAttributesToProto,
+  priorityFromProto,
   priorityToProto,
+  versioningOverrideFromProto,
   versioningOverrideToProto,
+  workflowIdReusePolicyFromProto,
   workflowIdReusePolicyToProto,
+  workflowIdConflictPolicyFromProto,
   workflowIdConflictPolicyToProto,
 } from "./support";
 
@@ -45,6 +55,15 @@ function configuredPayloadConverter(): common.PayloadConverter {
   return activator.payloadConverter;
 }
 
+function requestArgsFromPayloads(
+  payloads: temporal.api.common.v1.IPayloads | null | undefined,
+): unknown[] | undefined {
+  if (payloads == null) {
+    return undefined;
+  }
+  return common.arrayFromPayloads(configuredPayloadConverter(), payloads.payloads);
+}
+
 function requestArgsToPayloads(
   args: ReadonlyArray<unknown> | undefined,
 ): temporal.api.common.v1.IPayloads | undefined {
@@ -61,6 +80,21 @@ function requestArgsToPayloads(
 export interface SignalWithStartWorkflowResponse {
   runId?: string;
   started?: boolean;
+}
+
+export function signalWithStartWorkflowResponseFromProto(
+  proto:
+    | temporal.api.workflowservice.v1.ISignalWithStartWorkflowExecutionResponse
+    | null
+    | undefined,
+): SignalWithStartWorkflowResponse | undefined {
+  if (proto == null) {
+    return undefined;
+  }
+  return {
+    runId: proto.runId ?? undefined,
+    started: proto.started ?? undefined,
+  };
 }
 
 export function signalWithStartWorkflowResponseToProto(
@@ -252,6 +286,131 @@ export type SignalWithStartWorkflowRequest<
     )
 >;
 
+export function signalWithStartWorkflowRequestFromProto<
+  WorkflowFn extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  SignalValue extends workflow.SignalDefinition<any[]> = workflow.SignalDefinition<
+    any[]
+  >,
+  SignalArgs extends any[] = SignalValue extends workflow.SignalDefinition<
+    infer Args,
+    any
+  >
+    ? Args
+    : never,
+>(
+  proto:
+    | temporal.api.workflowservice.v1.ISignalWithStartWorkflowExecutionRequest
+    | null
+    | undefined,
+): SignalWithStartWorkflowRequest<WorkflowFn, SignalValue, SignalArgs> | undefined {
+  if (proto == null) {
+    return undefined;
+  }
+  return {
+    workflow: requiredField(
+      workflowTypeFromProto(
+        requiredField(proto.workflowType, "SignalWithStartWorkflowRequest", "workflow"),
+      ) as string,
+      "SignalWithStartWorkflowRequest",
+      "workflow",
+    ) as string,
+    args: requestArgsFromPayloads(proto.input) as any,
+    id: requiredField(
+      proto.workflowId === "" ? undefined : proto.workflowId,
+      "SignalWithStartWorkflowRequest",
+      "id",
+    ),
+    taskQueue: requiredField(
+      taskQueueFromProto(
+        requiredField(proto.taskQueue, "SignalWithStartWorkflowRequest", "taskQueue"),
+      ) as string,
+      "SignalWithStartWorkflowRequest",
+      "taskQueue",
+    ),
+    signal: requiredField(
+      proto.signalName === "" ? undefined : proto.signalName,
+      "SignalWithStartWorkflowRequest",
+      "signal",
+    ) as string,
+    signalArgs: requestArgsFromPayloads(proto.signalInput) as any,
+    executionTimeout:
+      proto.workflowExecutionTimeout == null
+        ? undefined
+        : (durationFromProto(proto.workflowExecutionTimeout) as common.Duration),
+    runTimeout:
+      proto.workflowRunTimeout == null
+        ? undefined
+        : (durationFromProto(proto.workflowRunTimeout) as common.Duration),
+    taskTimeout:
+      proto.workflowTaskTimeout == null
+        ? undefined
+        : (durationFromProto(proto.workflowTaskTimeout) as common.Duration),
+    idReusePolicy:
+      proto.workflowIdReusePolicy == null
+        ? common.WorkflowIdReusePolicy.ALLOW_DUPLICATE
+        : workflowIdReusePolicyFromProto(proto.workflowIdReusePolicy),
+    idConflictPolicy:
+      proto.workflowIdConflictPolicy == null
+        ? undefined
+        : workflowIdConflictPolicyFromProto(proto.workflowIdConflictPolicy),
+    retryPolicy:
+      proto.retryPolicy == null
+        ? undefined
+        : (retryPolicyFromProto(proto.retryPolicy) as common.RetryPolicy),
+    cronSchedule: proto.cronSchedule ?? undefined,
+    memo:
+      proto.memo == null
+        ? undefined
+        : (memoFromProto(proto.memo) as Record<string, unknown>),
+    searchAttributes:
+      proto.searchAttributes == null
+        ? undefined
+        : (searchAttributesFromProto(
+            proto.searchAttributes,
+          ) as common.TypedSearchAttributes),
+    priority:
+      proto.priority == null
+        ? undefined
+        : (priorityFromProto(proto.priority) as common.Priority),
+    versioningOverride:
+      proto.versioningOverride == null
+        ? undefined
+        : (versioningOverrideFromProto(
+            proto.versioningOverride,
+          ) as common.VersioningOverride),
+    startDelay:
+      proto.workflowStartDelay == null
+        ? undefined
+        : (durationFromProto(proto.workflowStartDelay) as common.Duration),
+    staticSummary:
+      proto.userMetadata == null
+        ? undefined
+        : proto.userMetadata.summary == null
+          ? undefined
+          : (payloadFromProto(proto.userMetadata.summary) as common.Payload) == null
+            ? undefined
+            : configuredPayloadConverter().fromPayload<string>(
+                (proto.userMetadata.summary == null
+                  ? undefined
+                  : (payloadFromProto(proto.userMetadata.summary) as common.Payload))!,
+              ),
+    staticDetails:
+      proto.userMetadata == null
+        ? undefined
+        : proto.userMetadata.details == null
+          ? undefined
+          : (payloadFromProto(proto.userMetadata.details) as common.Payload) == null
+            ? undefined
+            : configuredPayloadConverter().fromPayload<string>(
+                (proto.userMetadata.details == null
+                  ? undefined
+                  : (payloadFromProto(proto.userMetadata.details) as common.Payload))!,
+              ),
+  };
+}
+
 export function signalWithStartWorkflowRequestToProto<
   WorkflowFn extends (...args: any[]) => Promise<any> = (
     ...args: any[]
@@ -359,8 +518,14 @@ export function userMetadataFromProto(
     return undefined;
   }
   return {
-    staticSummary: proto.summary == null ? undefined : payloadFromProto(proto.summary),
-    staticDetails: proto.details == null ? undefined : payloadFromProto(proto.details),
+    staticSummary:
+      proto.summary == null
+        ? undefined
+        : (payloadFromProto(proto.summary) as common.Payload),
+    staticDetails:
+      proto.details == null
+        ? undefined
+        : (payloadFromProto(proto.details) as common.Payload),
   };
 }
 

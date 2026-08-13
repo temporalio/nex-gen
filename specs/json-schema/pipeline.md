@@ -8,6 +8,13 @@ first — the two file modes and the `nexusrpc` / `$schema` root rules —
 live in [[input-files]]. See [PRINCIPLES.md](PRINCIPLES.md) and
 `features/<keyword>.md` for detail.
 
+During Parse, each source marks its exported type declarations: its file-root
+model when present, every model in its `$defs`, and source-owned models
+synthesized for inline operation inputs or outputs. This neutral declaration
+metadata travels with the shared IR into reachability. Later shared passes do
+not identify JSON Schema declarations or infer a source's public surface from
+external-type kind.
+
 ```mermaid
 flowchart TD
     F["JSON Schema files (2020-12)<br/>one or more"]

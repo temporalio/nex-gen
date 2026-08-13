@@ -8,16 +8,14 @@ use crate::error::{Error, Result};
 use crate::generator::json_schema::python as python_json;
 use crate::generator::proto::python as python_proto;
 use crate::generator::render_request_plan;
-use crate::generator::{
-    ExternalModelBackend, GeneratedFiles, GenerationMode, ModelWireCapabilities,
-};
+use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
-    PlannedProtoGenericCarrier, PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType,
-    PlannedResource, PlannedResourceMethod, PlannedResourceMethodBindingSpec,
-    PlannedResourceMethodResultKind, PlannedSpec, PlannedType, message_model_name,
-    operation_input_model, operation_output_direct_result,
+    PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
+    PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
+    PlannedSpec, PlannedType, message_model_name, operation_input_model,
+    operation_output_direct_result,
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
@@ -305,10 +303,10 @@ fn leaf_export_names(
 }
 
 fn planned_module_export_model_names(plan: &PlannedSpec) -> BTreeSet<String> {
-    plan.data
-        .module_exports
-        .iter()
-        .filter_map(|full_name| match plan.types.get(full_name)? {
+    plan.types
+        .values()
+        .filter(|entry| entry.module_exported)
+        .filter_map(|entry| match &entry.declaration {
             TypeDeclSpec::Record(record) => Some(record.name.clone()),
             TypeDeclSpec::Enum(enumeration) => Some(enumeration.name.clone()),
             TypeDeclSpec::Flags(flags) => Some(flags.name.clone()),
@@ -576,7 +574,7 @@ impl<'a> ApiPlanner<'a> {
 
         for service in &services {
             for resource in &service.resources {
-                self.ensure_resource_field_types(resource);
+                self.ensure_resource_field_types(resource)?;
             }
         }
         for record in api_plan.records().map(|(_, record)| record) {
@@ -584,7 +582,7 @@ impl<'a> ApiPlanner<'a> {
                 full_name: record.full_name.clone(),
                 model_name: record.name.clone(),
             });
-            self.resolve_message_value_conversion(&model_type);
+            self.resolve_message_value_conversion(&model_type)?;
         }
         let model_refs = self.models.values().collect::<Vec<_>>();
         let model_fragments = self.render_model_fragments(model_refs.as_slice())?;
@@ -1098,30 +1096,32 @@ impl<'a> ApiPlanner<'a> {
         }
     }
 
-    fn ensure_resource_field_types(&mut self, resource: &PlannedResource) {
+    fn ensure_resource_field_types(&mut self, resource: &PlannedResource) -> Result<()> {
         for field in &resource.fields {
-            self.ensure_resource_field_type(&field.kind);
+            self.ensure_resource_field_type(&field.kind)?;
         }
         for method in &resource.methods {
             for param in &method.params {
-                self.ensure_resource_field_type(&param.kind);
+                self.ensure_resource_field_type(&param.kind)?;
             }
         }
+        Ok(())
     }
 
-    fn ensure_resource_field_type(&mut self, kind: &PlannedType) {
+    fn ensure_resource_field_type(&mut self, kind: &PlannedType) -> Result<()> {
         match kind {
             PlannedType::List(value) => {
-                self.resolve_planned_value_type(value);
+                self.resolve_planned_value_type(value)?;
             }
             PlannedType::Map(key, value) => {
-                self.resolve_planned_value_type(key);
-                self.resolve_planned_value_type(value);
+                self.resolve_planned_value_type(key)?;
+                self.resolve_planned_value_type(value)?;
             }
             value => {
-                self.resolve_planned_value_type(value);
+                self.resolve_planned_value_type(value)?;
             }
         }
+        Ok(())
     }
 
     fn resolve_operation<'operation>(
@@ -1130,36 +1130,38 @@ impl<'a> ApiPlanner<'a> {
     ) -> Result<RenderedOperation<'operation>> {
         let output_resource_return = operation.data.output_resource_return.clone();
         let input = operation_input_model(operation);
-        let rendered_input = input.map(|input| {
-            let (type_ref, module_path) =
-                self.external_models
-                    .service_model_ref(input, "models", self.api_plan);
-            let input_conversion = self.resolve_message_value_conversion(input);
-            let annotation = if let PlannedType::Record(record) = input {
-                let parameters = self
-                    .api_plan
-                    .record_type_parameters(&record.full_name, Language::Python);
-                python_generic_record_annotation(&input_conversion.annotation, &parameters)
-            } else {
-                input_conversion.annotation.clone()
-            };
-            RenderedOperationInput {
-                descriptor_type_ref: if let PlannedType::Record(record) = input {
-                    python_erased_generic_record_annotation(
-                        &type_ref,
-                        &self
-                            .api_plan
-                            .record_type_parameters(&record.full_name, Language::Python),
-                    )
+        let rendered_input = input
+            .map(|input| -> Result<_> {
+                let (type_ref, module_path) =
+                    self.external_models
+                        .service_model_ref(input, "models", self.api_plan);
+                let input_conversion = self.resolve_message_value_conversion(input)?;
+                let annotation = if let PlannedType::Record(record) = input {
+                    let parameters = self
+                        .api_plan
+                        .record_type_parameters(&record.full_name, Language::Python);
+                    python_generic_record_annotation(&input_conversion.annotation, &parameters)
                 } else {
-                    type_ref.clone()
-                },
-                type_ref,
-                module_path,
-                annotation,
-                supports_unpacked: input_conversion.supports_unpacked_input(),
-            }
-        });
+                    input_conversion.annotation.clone()
+                };
+                Ok(RenderedOperationInput {
+                    descriptor_type_ref: if let PlannedType::Record(record) = input {
+                        python_erased_generic_record_annotation(
+                            &type_ref,
+                            &self
+                                .api_plan
+                                .record_type_parameters(&record.full_name, Language::Python),
+                        )
+                    } else {
+                        type_ref.clone()
+                    },
+                    type_ref,
+                    module_path,
+                    annotation,
+                    supports_unpacked: input_conversion.supports_unpacked_input(),
+                })
+            })
+            .transpose()?;
         let output_transform = operation.output_transform.as_ref();
         let output_direct_result = operation_output_direct_result(operation);
         let (output_ref, output_module_path, output_annotation_default) = match operation
@@ -1180,9 +1182,9 @@ impl<'a> ApiPlanner<'a> {
                     && !output_direct_result
                     && matches!(output_model, PlannedType::Record(_))
                 {
-                    self.resolve_message_value_conversion(output_model);
+                    self.resolve_message_value_conversion(output_model)?;
                 }
-                let annotation = self.resolve_output_annotation(output_model);
+                let annotation = self.resolve_output_annotation(output_model)?;
                 (output_ref, output_module_path, annotation)
             }
             Some(PlannedType::Resource(resource)) => {
@@ -1193,7 +1195,7 @@ impl<'a> ApiPlanner<'a> {
                     let (output_ref, output_module_path) =
                         self.external_models
                             .service_model_ref(&output, "models", self.api_plan);
-                    let conversion = self.resolve_message_value_conversion(&output);
+                    let conversion = self.resolve_message_value_conversion(&output)?;
                     (output_ref, output_module_path, conversion.annotation)
                 } else {
                     (
@@ -1321,21 +1323,21 @@ impl<'a> ApiPlanner<'a> {
         })
     }
 
-    fn resolve_output_annotation(&mut self, model_type: &PlannedType) -> String {
+    fn resolve_output_annotation(&mut self, model_type: &PlannedType) -> Result<String> {
         match model_type {
             PlannedType::External(ExternalTypeSpec::Proto(_))
-            | PlannedType::External(ExternalTypeSpec::Json(_)) => self
+            | PlannedType::External(ExternalTypeSpec::Json(_)) => Ok(self
                 .external_models
                 .model_type_annotation(model_type)
-                .expect("external model annotation should exist"),
+                .expect("external model annotation should exist")),
             PlannedType::Record(record) => {
-                let conversion = self.resolve_message_value_conversion(model_type);
-                python_generic_record_annotation(
+                let conversion = self.resolve_message_value_conversion(model_type)?;
+                Ok(python_generic_record_annotation(
                     &conversion.annotation,
                     &self
                         .api_plan
                         .record_type_parameters(&record.full_name, Language::Python),
-                )
+                ))
             }
             _ => panic!("operation output annotation should be model-shaped"),
         }
@@ -1344,7 +1346,7 @@ impl<'a> ApiPlanner<'a> {
     fn resolve_message_value_conversion(
         &mut self,
         model_type: &PlannedType,
-    ) -> WireValueConversion {
+    ) -> Result<WireValueConversion> {
         let planned_record = match model_type {
             PlannedType::Record(record) => self.api_plan.record(&record.full_name),
             _ => None,
@@ -1354,9 +1356,9 @@ impl<'a> ApiPlanner<'a> {
             .wire_conversion(model_type, planned_record)
         {
             if matches!(model_type, PlannedType::Record(_)) {
-                self.ensure_rendered_model(model_type);
+                self.ensure_rendered_model(model_type)?;
             }
-            return conversion;
+            return Ok(conversion);
         }
         panic!("message conversion should be model-shaped")
     }
@@ -1535,7 +1537,7 @@ impl<'a> ApiPlanner<'a> {
         })
     }
 
-    fn ensure_rendered_model(&mut self, model_type: &PlannedType) {
+    fn ensure_rendered_model(&mut self, model_type: &PlannedType) -> Result<()> {
         let PlannedType::Record(record) = model_type else {
             panic!("rendered model should be a record");
         };
@@ -1544,7 +1546,7 @@ impl<'a> ApiPlanner<'a> {
         let planned_model = planned_record(api_plan, full_name);
 
         if self.models.contains_key(full_name) {
-            return;
+            return Ok(());
         }
 
         self.models.insert(
@@ -1557,7 +1559,6 @@ impl<'a> ApiPlanner<'a> {
                     .into_iter()
                     .map(|usage| usage.parameter.name)
                     .collect(),
-                capabilities: planned_model.data.capabilities,
                 experimental: planned_model.experimental,
                 fields: Vec::new(),
             },
@@ -1574,12 +1575,13 @@ impl<'a> ApiPlanner<'a> {
                     self.build_field(planned_model, field_name, field)
                 }
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         self.models
             .get_mut(full_name)
             .expect("model should be inserted before recursive field resolution")
             .fields = fields;
+        Ok(())
     }
 
     fn ensure_rendered_enum(&mut self, enum_spec: &EnumSpec) {
@@ -1614,22 +1616,28 @@ impl<'a> ApiPlanner<'a> {
             });
     }
 
-    fn ensure_rendered_variant(&mut self, variant_spec: &VariantSpec<PlannedFamily>) {
+    fn ensure_rendered_variant(&mut self, variant_spec: &VariantSpec<PlannedFamily>) -> Result<()> {
         if self.variants.contains_key(&variant_spec.full_name) {
-            return;
+            return Ok(());
         }
 
         let cases = variant_spec
             .cases
             .iter()
-            .map(|case| RenderedVariantCase {
-                name: case.name.clone(),
-                payload_annotation: case
-                    .payload
-                    .as_ref()
-                    .map(|payload| self.resolve_planned_value_type(payload).annotation),
+            .map(|case| -> Result<_> {
+                Ok(RenderedVariantCase {
+                    name: case.name.clone(),
+                    payload_annotation: case
+                        .payload
+                        .as_ref()
+                        .map(|payload| {
+                            self.resolve_planned_value_type(payload)
+                                .map(|resolved| resolved.annotation)
+                        })
+                        .transpose()?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         self.variants.insert(
             variant_spec.full_name.clone(),
             RenderedVariant {
@@ -1643,6 +1651,7 @@ impl<'a> ApiPlanner<'a> {
                 cases,
             },
         );
+        Ok(())
     }
 
     fn build_field(
@@ -1650,15 +1659,19 @@ impl<'a> ApiPlanner<'a> {
         record: &RecordSpec<PlannedFamily>,
         field_name: &str,
         field: &RecordFieldSpec<PlannedFamily>,
-    ) -> RenderedField {
+    ) -> Result<RenderedField> {
         let attr_name = python_field_name(&field.name);
+        let proto_field_plan =
+            self.external_models
+                .proto
+                .field_plan(self.api_plan, record, field)?;
 
         if let PlannedType::Map(key, value) = &field.field_type {
-            let key_type = self.resolve_planned_value_type(key);
-            let value_type = self.resolve_planned_value_type(value);
+            let key_type = self.resolve_planned_value_type(key)?;
+            let value_type = self.resolve_planned_value_type(value)?;
             let mut imports = key_type.imports.clone();
             imports.extend(&value_type.imports);
-            return RenderedField {
+            return Ok(RenderedField {
                 attr_name: attr_name.clone(),
                 annotation: python_field_annotation(
                     record,
@@ -1672,18 +1685,18 @@ impl<'a> ApiPlanner<'a> {
                 wire_value_type: value_type,
                 imports,
                 proto_oneof: None,
-                proto_generic_carrier: field.data.generic_carrier,
-            };
+                proto_generic_carrier: proto_field_plan.generic_carrier,
+            });
         }
 
         let (resolved_type, repeated) = match &field.field_type {
-            PlannedType::List(value) => (self.resolve_planned_value_type(value), true),
+            PlannedType::List(value) => (self.resolve_planned_value_type(value)?, true),
             PlannedType::Map(_, _) => unreachable!("handled above"),
-            value => (self.resolve_planned_value_type(value), false),
+            value => (self.resolve_planned_value_type(value)?, false),
         };
 
         if repeated {
-            return RenderedField {
+            return Ok(RenderedField {
                 attr_name: attr_name.clone(),
                 annotation: python_field_annotation(
                     record,
@@ -1697,11 +1710,11 @@ impl<'a> ApiPlanner<'a> {
                 wire_value_type: resolved_type.clone(),
                 imports: resolved_type.imports,
                 proto_oneof: None,
-                proto_generic_carrier: field.data.generic_carrier,
-            };
+                proto_generic_carrier: proto_field_plan.generic_carrier,
+            });
         }
 
-        let proto_oneof = self.build_proto_oneof(field);
+        let proto_oneof = self.build_proto_oneof(proto_field_plan.oneof.as_ref())?;
         let mut imports = resolved_type.imports.clone();
         if let Some(oneof) = &proto_oneof {
             for case in &oneof.cases {
@@ -1711,7 +1724,7 @@ impl<'a> ApiPlanner<'a> {
 
         if let Some(default_value) = &field.default_value {
             let default_expr = enum_default_expr(&resolved_type, &default_value.enum_case);
-            return RenderedField {
+            return Ok(RenderedField {
                 attr_name: attr_name.clone(),
                 annotation: python_field_annotation(
                     record,
@@ -1725,12 +1738,12 @@ impl<'a> ApiPlanner<'a> {
                 wire_value_type: resolved_type.clone(),
                 imports,
                 proto_oneof,
-                proto_generic_carrier: field.data.generic_carrier,
-            };
+                proto_generic_carrier: proto_field_plan.generic_carrier,
+            });
         }
 
         if field.required {
-            return RenderedField {
+            return Ok(RenderedField {
                 attr_name: attr_name.clone(),
                 annotation: python_field_annotation(
                     record,
@@ -1744,11 +1757,11 @@ impl<'a> ApiPlanner<'a> {
                 wire_value_type: resolved_type.clone(),
                 imports,
                 proto_oneof,
-                proto_generic_carrier: field.data.generic_carrier,
-            };
+                proto_generic_carrier: proto_field_plan.generic_carrier,
+            });
         }
 
-        RenderedField {
+        Ok(RenderedField {
             attr_name: attr_name.clone(),
             annotation: python_field_annotation(
                 record,
@@ -1762,40 +1775,33 @@ impl<'a> ApiPlanner<'a> {
             wire_value_type: resolved_type.clone(),
             imports,
             proto_oneof,
-            proto_generic_carrier: field.data.generic_carrier,
-        }
+            proto_generic_carrier: proto_field_plan.generic_carrier,
+        })
     }
 
     fn build_proto_oneof(
         &mut self,
-        field: &RecordFieldSpec<PlannedFamily>,
-    ) -> Option<RenderedProtoOneof> {
-        let metadata = field.data.oneof.as_ref()?;
-        let PlannedType::Variant(variant_type) = &field.field_type else {
-            return None;
+        plan: Option<&python_proto::ProtoOneofPlan>,
+    ) -> Result<Option<RenderedProtoOneof>> {
+        let Some(plan) = plan else {
+            return Ok(None);
         };
-        let variant = self.api_plan.variant(&variant_type.full_name)?.clone();
-        let cases = metadata
+        let cases = plan
             .cases
             .iter()
-            .filter_map(|metadata_case| {
-                let variant_case = variant
-                    .cases
-                    .iter()
-                    .find(|case| case.name == metadata_case.wit_name)?;
-                let payload = variant_case.payload.as_ref()?;
-                Some(RenderedProtoOneofCase {
-                    wit_name: metadata_case.wit_name.clone(),
-                    proto_name: metadata_case.proto_name.clone(),
-                    payload_type: self.resolve_planned_value_type(payload),
-                    generic_carrier: metadata_case.generic_carrier,
+            .map(|case| -> Result<_> {
+                Ok(RenderedProtoOneofCase {
+                    tag: case.tag.clone(),
+                    proto_name: case.proto_name.clone(),
+                    payload_type: self.resolve_planned_value_type(&case.payload)?,
+                    generic_carrier: case.generic_carrier,
                 })
             })
-            .collect();
-        Some(RenderedProtoOneof {
-            name: metadata.name.clone(),
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Some(RenderedProtoOneof {
+            name: plan.name.clone(),
             cases,
-        })
+        }))
     }
 
     fn build_public_sourced_field(
@@ -1804,16 +1810,19 @@ impl<'a> ApiPlanner<'a> {
         field_name: &str,
         field: &RecordFieldSpec<PlannedFamily>,
         source_expr: &str,
-    ) -> RenderedField {
-        let mut rendered = self.build_field(record, field_name, field);
+    ) -> Result<RenderedField> {
+        let mut rendered = self.build_field(record, field_name, field)?;
         rendered.default_kind = PythonFieldDefaultKind::Expression(source_expr.to_string());
         rendered.default_expr = Some(python_dataclass_source_default_expr(source_expr));
-        rendered
+        Ok(rendered)
     }
 
-    fn resolve_planned_value_type(&mut self, value_type: &PlannedType) -> ResolvedFieldType {
+    fn resolve_planned_value_type(
+        &mut self,
+        value_type: &PlannedType,
+    ) -> Result<ResolvedFieldType> {
         let api_plan = self.api_plan;
-        match value_type {
+        let resolved = match value_type {
             PlannedType::TypeParameter(parameter) => ResolvedFieldType {
                 annotation: parameter.name.clone(),
                 imports: PythonImports::default(),
@@ -1880,7 +1889,7 @@ impl<'a> ApiPlanner<'a> {
             }
             PlannedType::Variant(variant_type) => {
                 if let Some(variant_spec) = api_plan.variant(&variant_type.full_name) {
-                    self.ensure_rendered_variant(variant_spec);
+                    self.ensure_rendered_variant(variant_spec)?;
                 }
                 ResolvedFieldType {
                     annotation: python_generic_record_annotation(
@@ -1897,7 +1906,7 @@ impl<'a> ApiPlanner<'a> {
                 PlannedProtoType::Message(_),
             ))
             | PlannedType::Record(_)) => {
-                let conversion = self.resolve_message_value_conversion(message_type);
+                let conversion = self.resolve_message_value_conversion(message_type)?;
                 let annotation = if let PlannedType::Record(record) = message_type {
                     python_generic_record_annotation(
                         &conversion.annotation,
@@ -1924,7 +1933,7 @@ impl<'a> ApiPlanner<'a> {
                 wire_conversion: None,
             },
             PlannedType::Option(inner) | PlannedType::List(inner) => {
-                let inner = self.resolve_planned_value_type(inner);
+                let inner = self.resolve_planned_value_type(inner)?;
                 ResolvedFieldType {
                     annotation: format!("list[{}]", inner.annotation),
                     imports: inner.imports,
@@ -1933,8 +1942,8 @@ impl<'a> ApiPlanner<'a> {
                 }
             }
             PlannedType::Map(key, value) => {
-                let key = self.resolve_planned_value_type(key);
-                let value = self.resolve_planned_value_type(value);
+                let key = self.resolve_planned_value_type(key)?;
+                let value = self.resolve_planned_value_type(value)?;
                 let mut imports = key.imports;
                 imports.extend(&value.imports);
                 ResolvedFieldType {
@@ -1944,22 +1953,30 @@ impl<'a> ApiPlanner<'a> {
                     wire_conversion: None,
                 }
             }
-            PlannedType::Tuple(items) => ResolvedFieldType {
-                annotation: format!(
-                    "tuple[{}]",
-                    items
-                        .iter()
-                        .map(|item| self.resolve_planned_value_type(item).annotation)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                wire_conversion: None,
-            },
+            PlannedType::Tuple(items) => {
+                let items = items
+                    .iter()
+                    .map(|item| {
+                        self.resolve_planned_value_type(item)
+                            .map(|resolved| resolved.annotation)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                ResolvedFieldType {
+                    annotation: format!("tuple[{}]", items.join(", ")),
+                    imports: PythonImports::default(),
+                    kind: ResolvedFieldKind::Scalar,
+                    wire_conversion: None,
+                }
+            }
             PlannedType::Result { ok, err } => {
-                let ok = ok.as_ref().map(|ok| self.resolve_planned_value_type(ok));
-                let err = err.as_ref().map(|err| self.resolve_planned_value_type(err));
+                let ok = ok
+                    .as_ref()
+                    .map(|ok| self.resolve_planned_value_type(ok))
+                    .transpose()?;
+                let err = err
+                    .as_ref()
+                    .map(|err| self.resolve_planned_value_type(err))
+                    .transpose()?;
                 let mut imports = PythonImports::default();
                 if let Some(ok) = &ok {
                     imports.extend(&ok.imports);
@@ -1980,13 +1997,14 @@ impl<'a> ApiPlanner<'a> {
             PlannedType::External(ExternalTypeSpec::Alias {
                 type_name, target, ..
             }) => {
-                let mut resolved = self.resolve_planned_value_type(target);
+                let mut resolved = self.resolve_planned_value_type(target)?;
                 if let Some(annotation) = type_name.for_language(Language::Python) {
                     resolved.annotation = annotation.to_string();
                 }
                 resolved
             }
-        }
+        };
+        Ok(resolved)
     }
 }
 
@@ -2576,7 +2594,6 @@ pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) full_name: String,
     pub(in crate::generator) name: String,
     pub(in crate::generator) type_parameters: Vec<String>,
-    pub(in crate::generator) capabilities: ModelWireCapabilities,
     pub(in crate::generator) experimental: bool,
     pub(in crate::generator) fields: Vec<RenderedField>,
 }
@@ -2590,7 +2607,7 @@ pub(in crate::generator) struct RenderedField {
     pub(in crate::generator) wire_value_type: ResolvedFieldType,
     pub(in crate::generator) imports: PythonImports,
     pub(in crate::generator) proto_oneof: Option<RenderedProtoOneof>,
-    pub(in crate::generator) proto_generic_carrier: Option<PlannedProtoGenericCarrier>,
+    pub(in crate::generator) proto_generic_carrier: Option<python_proto::ProtoGenericCarrier>,
 }
 
 #[derive(Debug, Clone)]
@@ -2601,10 +2618,10 @@ pub(in crate::generator) struct RenderedProtoOneof {
 
 #[derive(Debug, Clone)]
 pub(in crate::generator) struct RenderedProtoOneofCase {
-    pub(in crate::generator) wit_name: String,
+    pub(in crate::generator) tag: String,
     pub(in crate::generator) proto_name: String,
     pub(in crate::generator) payload_type: ResolvedFieldType,
-    pub(in crate::generator) generic_carrier: Option<PlannedProtoGenericCarrier>,
+    pub(in crate::generator) generic_carrier: Option<python_proto::ProtoGenericCarrier>,
 }
 
 #[derive(Debug, Default)]

@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use heck::ToKebabCase;
 use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
 
@@ -38,12 +37,6 @@ fn validate_generic_model_semantics(spec: &ApiSpec, path: &Path, language: Langu
                     usage.parameter.full_name, usage.parameter.name
                 )));
             }
-        }
-        if language != Language::Python && record.source_type.is_some() && !parameters.is_empty() {
-            return Err(invalid(format!(
-                "proto-backed record `{}` cannot contain generic type parameters",
-                record.full_name
-            )));
         }
         for (field_name, function) in record.functions() {
             let uses_parameter = match &function.result {
@@ -348,7 +341,7 @@ fn validate_oneof_model_config(
                     property: "oneof",
                     reason: format!(
                         "protobuf oneof member must be represented by grouped field `{}`",
-                        oneof.name.to_kebab_case()
+                        oneof.name
                     ),
                 });
             }
@@ -420,7 +413,7 @@ fn validate_oneof_model_config(
                 message: message_name.to_string(),
                 field: oneof.name.to_string(),
                 property: "type",
-                reason: format!("unknown WIT variant `{variant_name}`"),
+                reason: format!("unknown variant `{variant_name}`"),
             });
         };
 
@@ -437,14 +430,17 @@ fn validate_oneof_model_config(
                 .name
                 .as_deref()
                 .expect("descriptor fields should be named");
-            let wit_case_name = member_name.to_kebab_case();
-            let Some(case) = variant.cases.iter().find(|case| case.name == wit_case_name) else {
+            let Some(case) = variant
+                .cases
+                .iter()
+                .find(|case| case.wire_name == member_name)
+            else {
                 return Err(Error::InvalidTypeOverrideField {
                     message: message_name.to_string(),
                     field: oneof.name.to_string(),
                     property: "type",
                     reason: format!(
-                        "WIT variant `{}` is missing case `{wit_case_name}`",
+                        "variant `{}` is missing wire case `{member_name}`",
                         variant.name
                     ),
                 });
@@ -455,7 +451,8 @@ fn validate_oneof_model_config(
                     field: oneof.name.to_string(),
                     property: "type",
                     reason: format!(
-                        "WIT variant case `{wit_case_name}` must carry the protobuf member value"
+                        "variant case `{}` must carry the protobuf member value",
+                        case.name
                     ),
                 });
             };
@@ -465,27 +462,24 @@ fn validate_oneof_model_config(
                     field: oneof.name.to_string(),
                     property: "type",
                     reason: format!(
-                        "WIT variant case `{wit_case_name}` payload `{}` does not match protobuf member `{member_name}`",
+                        "variant case `{}` payload `{}` does not match protobuf member `{member_name}`",
+                        case.name,
                         payload.to_type_string()
                     ),
                 });
             }
         }
         for case in &variant.cases {
-            let proto_name = case.name.replace('-', "_");
             if !oneof
                 .fields
                 .iter()
-                .any(|(_, member)| member.name.as_deref() == Some(proto_name.as_str()))
+                .any(|(_, member)| member.name.as_deref() == Some(case.wire_name.as_str()))
             {
                 return Err(Error::InvalidTypeOverrideField {
                     message: message_name.to_string(),
                     field: oneof.name.to_string(),
                     property: "type",
-                    reason: format!(
-                        "WIT variant `{}` has extra case `{}`",
-                        variant.name, case.name
-                    ),
+                    reason: format!("variant `{}` has extra case `{}`", variant.name, case.name),
                 });
             }
         }
@@ -1292,7 +1286,7 @@ interface generic-service {
 "#;
 
     #[test]
-    fn rejects_generic_resources_and_proto_backed_records() {
+    fn rejects_generic_resources() {
         let resource = GENERIC_WIT.replace(
             "record inner { value: context-t, }",
             "resource holder { constructor(value: context-t); }\n  record inner { value: context-t, }",
@@ -1302,23 +1296,6 @@ interface generic-service {
                 .unwrap_err()
                 .to_string()
                 .contains("resource")
-        );
-
-        let proto_backed = GENERIC_WIT
-            .replace(
-                "record inner { value: context-t, }",
-                "record inner { value: context-t, }\n  variant wrapped { inner(inner), }",
-            )
-            .replace("nested: inner,", "nested: wrapped,")
-            .replace(
-                "record request {",
-                "/// @nexus.proto \"example.GenericRequest\"\n  record request {",
-            );
-        assert!(
-            validate(Language::Dotnet, &proto_backed)
-                .unwrap_err()
-                .to_string()
-                .contains("proto-backed record")
         );
     }
 

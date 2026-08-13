@@ -46,6 +46,37 @@ func (m startWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.St
 	return message, nil
 }
 
+func startWorkflowRequestFromProto(ctx workflow.Context, proto *workflowservice.StartWorkflowExecutionRequest) (startWorkflowRequest, error) {
+	value := startWorkflowRequest{}
+	{
+		converted, err := workflowTypeFromProto(ctx, proto.GetWorkflowType())
+		if err != nil {
+			return value, err
+		}
+		if converted != nil {
+			value.Workflow = *converted
+		}
+	}
+	value.WorkflowId = proto.GetWorkflowId()
+	{
+		converted, err := taskQueueFromProto(ctx, proto.GetTaskQueue())
+		if err != nil {
+			return value, err
+		}
+		if converted != nil {
+			value.TaskQueue = *converted
+		}
+	}
+	{
+		converted, err := durationFromProto(ctx, proto.GetWorkflowStartDelay())
+		if err != nil {
+			return value, err
+		}
+		value.WorkflowStartDelay = converted
+	}
+	return value, nil
+}
+
 type cancelWorkflowRequest struct {
 	WorkflowExecution WorkflowExecution
 	Reason            *string
@@ -65,6 +96,43 @@ func (m cancelWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.R
 	}
 	message.Namespace = workflow.GetInfo(ctx).Namespace
 	return message, nil
+}
+
+func cancelWorkflowRequestFromProto(ctx workflow.Context, proto *workflowservice.RequestCancelWorkflowExecutionRequest) (cancelWorkflowRequest, error) {
+	value := cancelWorkflowRequest{}
+	{
+		converted, err := workflowExecutionFromProto(ctx, proto.GetWorkflowExecution())
+		if err != nil {
+			return value, err
+		}
+		value.WorkflowExecution = converted
+	}
+	{
+		converted := proto.GetReason()
+		value.Reason = &converted
+	}
+	return value, nil
+}
+
+type startWorkflowResult struct {
+	RunId *string
+}
+
+func (m startWorkflowResult) toProto(ctx workflow.Context) (*workflowservice.StartWorkflowExecutionResponse, error) {
+	message := &workflowservice.StartWorkflowExecutionResponse{}
+	if m.RunId != nil {
+		message.RunId = (*m.RunId)
+	}
+	return message, nil
+}
+
+func startWorkflowResultFromProto(ctx workflow.Context, proto *workflowservice.StartWorkflowExecutionResponse) (startWorkflowResult, error) {
+	value := startWorkflowResult{}
+	{
+		converted := proto.GetRunId()
+		value.RunId = &converted
+	}
+	return value, nil
 }
 
 // --- Resources ---

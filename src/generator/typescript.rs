@@ -18,7 +18,8 @@ use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
     PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
-    PlannedSpec, PlannedType, operation_input_model, operation_output_direct_result,
+    PlannedSpec, PlannedType, PlannedWireFieldBinding, operation_input_model,
+    operation_output_direct_result,
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
@@ -608,8 +609,7 @@ impl<'a> ApiPlanner<'a> {
                 from_wire: "{wire}".to_string(),
                 to_wire: "{value}".to_string(),
                 function_name_to_wire: None,
-                from_wire_function_name: None,
-                to_wire_function_name: None,
+                wire_function_names: None,
                 uses_rendered_model_annotation: true,
             }
         } else {
@@ -636,28 +636,16 @@ impl<'a> ApiPlanner<'a> {
         let wire_conversion = self
             .external_models
             .wire_conversion(model_type, Some(&planned_model));
-        let from_wire_function_name = if planned_model.data.capabilities.from_wire {
-            wire_conversion
-                .as_ref()
-                .and_then(|conversion| conversion.from_wire_function_name.clone())
-        } else {
-            None
-        };
-        let to_wire_function_name = if planned_model.data.capabilities.to_wire {
-            wire_conversion
-                .as_ref()
-                .and_then(|conversion| conversion.to_wire_function_name.clone())
-        } else {
-            None
-        };
+        let wire_function_names = wire_conversion
+            .as_ref()
+            .and_then(|conversion| conversion.wire_function_names.clone());
 
         self.models.insert(
             full_name.to_string(),
             RenderedModel {
                 full_name: planned_model.full_name.clone(),
                 name: planned_model.name.clone(),
-                from_wire_function_name,
-                to_wire_function_name,
+                wire_function_names,
                 experimental: planned_model.experimental,
                 type_parameters: model_type_parameters(&planned_model, self.api_plan),
                 fields: Vec::new(),
@@ -916,6 +904,14 @@ impl<'a> ApiPlanner<'a> {
                 .expect("checked that function is present");
             let function_name_extractor = function.name_extractor.as_deref();
             let function_converter = function.converter.as_deref();
+            let from_wire_expr = function_field_from_wire_expr(
+                &resolved_type,
+                &owner_name,
+                wire_field_expr,
+                &generated_field_name,
+                field,
+                function,
+            );
             return RenderedField {
                 name: generated_field_name.to_string(),
                 wire_name: wire_field_name.to_string(),
@@ -925,17 +921,7 @@ impl<'a> ApiPlanner<'a> {
                 ),
                 doc,
                 optional: !field.required,
-                from_wire_expr: if field.required {
-                    required_from_wire_expr(
-                        &resolved_type,
-                        &owner_name,
-                        wire_field_expr,
-                        &generated_field_name,
-                        field,
-                    )
-                } else {
-                    optional_from_wire_expr(&resolved_type, wire_field_expr)
-                },
+                from_wire_expr,
                 to_wire_expr: match (field.required, function_name_extractor, function_converter) {
                     (true, Some(extractor), _) => required_function_name_to_wire_expr(
                         &resolved_type,
@@ -968,9 +954,15 @@ impl<'a> ApiPlanner<'a> {
             };
         }
 
-        if let Some(function_field) = &field.function
-            && let Some(converter) = function_field.converter.as_deref()
-        {
+        if let Some(function_field) = &field.function {
+            let from_wire_expr = function_field_from_wire_expr(
+                &resolved_type,
+                &owner_name,
+                wire_field_expr,
+                &generated_field_name,
+                field,
+                function_field,
+            );
             return RenderedField {
                 name: generated_field_name.to_string(),
                 wire_name: wire_field_name.to_string(),
@@ -980,21 +972,20 @@ impl<'a> ApiPlanner<'a> {
                 ),
                 doc,
                 optional: !field.required,
-                from_wire_expr: if field.required {
-                    required_from_wire_expr(
-                        &resolved_type,
+                from_wire_expr,
+                to_wire_expr: match (field.required, function_field.converter.as_deref()) {
+                    (true, Some(converter)) => required_function_to_wire_expr(
                         &owner_name,
-                        wire_field_expr,
                         &generated_field_name,
-                        field,
-                    )
-                } else {
-                    optional_from_wire_expr(&resolved_type, wire_field_expr)
-                },
-                to_wire_expr: if field.required {
-                    required_function_to_wire_expr(&owner_name, &generated_field_name, converter)
-                } else {
-                    optional_function_to_wire_expr(&generated_field_name, converter)
+                        converter,
+                    ),
+                    (false, Some(converter)) => {
+                        optional_function_to_wire_expr(&generated_field_name, converter)
+                    }
+                    (true, None) => {
+                        required_to_wire_expr(&resolved_type, &owner_name, &generated_field_name)
+                    }
+                    (false, None) => optional_to_wire_expr(&resolved_type, &generated_field_name),
                 },
                 requirements: resolved_type.requirements,
                 flattened_fields: Vec::new(),
@@ -1008,17 +999,7 @@ impl<'a> ApiPlanner<'a> {
                 annotation: resolved_type.annotation.clone(),
                 doc,
                 optional: !field.required,
-                from_wire_expr: if field.required {
-                    required_from_wire_expr(
-                        &resolved_type,
-                        &owner_name,
-                        wire_field_expr,
-                        &generated_field_name,
-                        field,
-                    )
-                } else {
-                    optional_from_wire_expr(&resolved_type, wire_field_expr)
-                },
+                from_wire_expr: format!("requestArgsFromPayloads({wire_field_expr}) as any"),
                 to_wire_expr: if field.required {
                     required_to_wire_expr(&resolved_type, &owner_name, &generated_field_name)
                 } else {
@@ -1072,6 +1053,13 @@ impl<'a> ApiPlanner<'a> {
         }
 
         if field.required {
+            let from_wire_expr = required_from_wire_expr(
+                &resolved_type,
+                &owner_name,
+                wire_field_expr,
+                &generated_field_name,
+                field,
+            );
             return RenderedField {
                 name: generated_field_name.to_string(),
                 wire_name: wire_field_name.to_string(),
@@ -1081,13 +1069,7 @@ impl<'a> ApiPlanner<'a> {
                 ),
                 doc,
                 optional: false,
-                from_wire_expr: required_from_wire_expr(
-                    &resolved_type,
-                    &owner_name,
-                    wire_field_expr,
-                    &generated_field_name,
-                    field,
-                ),
+                from_wire_expr: annotated_from_wire_expr(field, &resolved_type, from_wire_expr),
                 to_wire_expr: required_to_wire_expr(
                     &resolved_type,
                     &owner_name,
@@ -1098,13 +1080,14 @@ impl<'a> ApiPlanner<'a> {
             };
         }
 
+        let from_wire_expr = optional_from_wire_expr(&resolved_type, wire_field_expr);
         RenderedField {
             name: generated_field_name.to_string(),
             wire_name: wire_field_name.to_string(),
             annotation: Self::typescript_field_annotation(field, resolved_type.annotation.clone()),
             doc,
             optional: true,
-            from_wire_expr: optional_from_wire_expr(&resolved_type, wire_field_expr),
+            from_wire_expr: annotated_from_wire_expr(field, &resolved_type, from_wire_expr),
             to_wire_expr: optional_to_wire_expr(&resolved_type, &generated_field_name),
             flattened_fields: Vec::new(),
             requirements: resolved_type.requirements,
@@ -1152,6 +1135,12 @@ impl<'a> ApiPlanner<'a> {
                 .unwrap_or_else(|| nested_rendered_field.annotation.clone());
             let to_wire_expr =
                 Self::flattened_field_to_wire_expr(&nested_rendered_field, &annotation);
+            let from_wire_expr = flattened_field_from_wire_expr(
+                &containing_wire_expr,
+                &nested_rendered_field.from_wire_expr,
+                &nested_rendered_field.annotation,
+                &annotation,
+            );
             requirements.merge(&nested_rendered_field.requirements);
             flattened_fields.push(RenderedFlattenedField {
                 name: nested_rendered_field.name,
@@ -1159,10 +1148,7 @@ impl<'a> ApiPlanner<'a> {
                 annotation,
                 doc: nested_rendered_field.doc,
                 optional: nested_rendered_field.optional,
-                from_wire_expr: flattened_field_from_wire_expr(
-                    &containing_wire_expr,
-                    &nested_rendered_field.from_wire_expr,
-                ),
+                from_wire_expr,
                 to_wire_expr,
             });
         }
@@ -1598,11 +1584,15 @@ fn required_from_wire_expr(
 
     match resolved_type.kind {
         ResolvedFieldKind::Message => required_field_expr(
-            &resolved_type
-                .wire_conversion
-                .as_ref()
-                .expect("message conversion should be present")
-                .from_wire_expr(&required_wire_expr),
+            &format!(
+                "({}) as {}",
+                resolved_type
+                    .wire_conversion
+                    .as_ref()
+                    .expect("message conversion should be present")
+                    .from_wire_expr(&required_wire_expr),
+                resolved_type.annotation
+            ),
             owner_name,
             generated_field_name,
         ),
@@ -1636,18 +1626,68 @@ fn required_to_wire_expr(
 fn optional_from_wire_expr(resolved_type: &ResolvedFieldType, wire_value_expr: &str) -> String {
     match resolved_type.kind {
         ResolvedFieldKind::Message => format!(
-            "{wire_value_expr} == null ? undefined : {}",
+            "{wire_value_expr} == null ? undefined : ({}) as {}",
             resolved_type
                 .wire_conversion
                 .as_ref()
                 .expect("message conversion should be present")
-                .from_wire_expr(wire_value_expr)
+                .from_wire_expr(wire_value_expr),
+            resolved_type.annotation
         ),
         ResolvedFieldKind::Enum => format!(
             "{wire_value_expr} == null ? undefined : {}",
             enum_from_wire_expr(resolved_type, wire_value_expr)
         ),
         _ => format!("{wire_value_expr} ?? undefined"),
+    }
+}
+
+fn function_field_from_wire_expr(
+    resolved_type: &ResolvedFieldType,
+    owner_name: &str,
+    wire_value_expr: &str,
+    generated_field_name: &str,
+    field: &RecordFieldSpec<PlannedFamily>,
+    function: &FunctionFieldSpec<PlannedFamily>,
+) -> String {
+    let expression = if field.required {
+        required_from_wire_expr(
+            resolved_type,
+            owner_name,
+            wire_value_expr,
+            generated_field_name,
+            field,
+        )
+    } else {
+        optional_from_wire_expr(resolved_type, wire_value_expr)
+    };
+    let Some(alternate_type) = &function.alternate_type else {
+        return expression;
+    };
+    let mut annotation = typescript_authored_type_annotation(alternate_type);
+    if !field.required {
+        annotation.push_str(" | undefined");
+    }
+    format!("({expression}) as {annotation}")
+}
+
+fn annotated_from_wire_expr(
+    field: &RecordFieldSpec<PlannedFamily>,
+    resolved_type: &ResolvedFieldType,
+    expression: String,
+) -> String {
+    let annotation = field
+        .annotation
+        .as_ref()
+        .and_then(|annotation| annotation.for_language(Language::TypeScript))
+        .map(str::to_string);
+    let Some(annotation) = annotation else {
+        return expression;
+    };
+    if annotation == resolved_type.annotation {
+        expression
+    } else {
+        format!("({expression}) as {annotation}")
     }
 }
 
@@ -1666,7 +1706,18 @@ fn defaulted_enum_from_wire_expr(
 fn flattened_field_from_wire_expr(
     containing_wire_expr: &str,
     nested_field_from_wire_expr: &str,
+    nested_annotation: &str,
+    flattened_annotation: &str,
 ) -> String {
+    let nested_field_from_wire_expr = if nested_annotation == "common.Payload"
+        && flattened_annotation != nested_annotation
+    {
+        format!(
+            "{nested_field_from_wire_expr} == null ? undefined : configuredPayloadConverter().fromPayload<{flattened_annotation}>(({nested_field_from_wire_expr})!)"
+        )
+    } else {
+        nested_field_from_wire_expr.to_string()
+    };
     format!("{containing_wire_expr} == null ? undefined : {nested_field_from_wire_expr}")
 }
 
@@ -1805,7 +1856,6 @@ pub(crate) fn generate(
     mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
 ) -> Result<GeneratedFiles> {
-    crate::generator::proto::ensure_supported_oneof_conversions(tree, Language::TypeScript)?;
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
@@ -1915,6 +1965,17 @@ fn collect_typescript_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageIm
             }
             if let Some(annotation) = &field.flattened_annotation {
                 collect_typescript_import(annotation, true, false, &mut imports);
+            }
+            match &field.data.wire_binding {
+                Some(PlannedWireFieldBinding::Value { wire_type, .. }) => {
+                    collect_value_type_imports(wire_type, &mut imports);
+                }
+                Some(PlannedWireFieldBinding::VariantMembers { members, .. }) => {
+                    for member in members {
+                        collect_value_type_imports(&member.wire_type, &mut imports);
+                    }
+                }
+                None => {}
             }
         }
         for (_, field) in model.public_fields() {
@@ -2748,14 +2809,19 @@ struct RenderedVariantCase {
 pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) full_name: String,
     pub(in crate::generator) name: String,
-    pub(in crate::generator) from_wire_function_name: Option<String>,
-    pub(in crate::generator) to_wire_function_name: Option<String>,
+    pub(in crate::generator) wire_function_names: Option<WireFunctionNames>,
     experimental: bool,
     pub(in crate::generator) type_parameters: Vec<RenderedTypeParameter>,
     pub(in crate::generator) fields: Vec<RenderedField>,
     pub(in crate::generator) sourced_fields: Vec<RenderedSourcedField>,
     functions: Vec<RenderedFunctionField>,
     with_arguments: Vec<RenderedWithArgumentsField>,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::generator) struct WireFunctionNames {
+    pub(in crate::generator) from_wire: String,
+    pub(in crate::generator) to_wire: String,
 }
 
 #[derive(Debug)]
@@ -2865,8 +2931,7 @@ pub(in crate::generator) struct WireValueConversion {
     pub(in crate::generator) from_wire: String,
     pub(in crate::generator) to_wire: String,
     pub(in crate::generator) function_name_to_wire: Option<String>,
-    pub(in crate::generator) from_wire_function_name: Option<String>,
-    pub(in crate::generator) to_wire_function_name: Option<String>,
+    pub(in crate::generator) wire_function_names: Option<WireFunctionNames>,
     pub(in crate::generator) uses_rendered_model_annotation: bool,
 }
 
@@ -3583,7 +3648,18 @@ fn render_models_module(
     }
     if uses_invocation_models {
         body.push('\n');
-        render_function_runtime_helpers(&mut body);
+        render_function_runtime_helpers(
+            &mut body,
+            models.iter().any(|model| {
+                model.fields.iter().any(|field| {
+                    field.from_wire_expr.contains("requestArgsFromPayloads(")
+                        || field
+                            .flattened_fields
+                            .iter()
+                            .any(|field| field.from_wire_expr.contains("requestArgsFromPayloads("))
+                })
+            }),
+        );
     }
     if !enums.is_empty() {
         body.push('\n');
@@ -4018,7 +4094,12 @@ fn resource_type_names(services: &[RenderedService<'_>]) -> Vec<String> {
 fn model_to_wire_function_names(models: &[&RenderedModel]) -> Vec<String> {
     models
         .iter()
-        .filter_map(|model| model.to_wire_function_name.clone())
+        .filter_map(|model| {
+            model
+                .wire_function_names
+                .as_ref()
+                .map(|names| names.to_wire.clone())
+        })
         .collect()
 }
 
@@ -4103,7 +4184,19 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
     }
 }
 
-fn render_function_runtime_helpers(output: &mut String) {
+fn render_function_runtime_helpers(output: &mut String, render_from: bool) {
+    if render_from {
+        output.push_str("function requestArgsFromPayloads(\n");
+        output.push_str("  payloads: temporal.api.common.v1.IPayloads | null | undefined,\n");
+        output.push_str("): unknown[] | undefined {\n");
+        output.push_str("  if (payloads == null) {\n");
+        output.push_str("    return undefined;\n");
+        output.push_str("  }\n");
+        output.push_str(
+            "  return common.arrayFromPayloads(configuredPayloadConverter(), payloads.payloads);\n",
+        );
+        output.push_str("}\n\n");
+    }
     output.push_str("function requestArgsToPayloads(\n");
     output.push_str("  args: ReadonlyArray<unknown> | undefined,\n");
     output.push_str("): temporal.api.common.v1.IPayloads | undefined {\n");

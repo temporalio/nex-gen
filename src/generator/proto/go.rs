@@ -5,11 +5,14 @@ use std::path::PathBuf;
 use indexmap::IndexMap;
 
 use crate::error::{Error, Result};
-use crate::generator::{ExternalModelBackend, ModelWireCapabilities};
+use crate::generator::ExternalModelBackend;
 use crate::language::Language;
 use crate::planning::ResolvedResourceBindingSource;
-use crate::planning::{PlannedFamily, PlannedResource, PlannedResourceField, PlannedSpec};
-use crate::spec::{RecordFieldSpec, RecordSpec};
+use crate::planning::{
+    PlannedFamily, PlannedProtoType, PlannedResource, PlannedResourceField, PlannedSpec,
+    PlannedType, PlannedWireFieldBinding,
+};
+use crate::spec::{ExternalTypeSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec};
 
 use crate::generator::go::{
     GoPackageContext, PlannedEnumType, PlannedFieldKind, PlannedMessageSource, PlannedMessageType,
@@ -539,10 +542,6 @@ fn descriptor_has_go_package(info: &PlannedTypeInfo) -> bool {
 /// Proto serialization metadata for a rendered Go model.
 #[derive(Debug)]
 pub(in crate::generator) struct RenderedModelWire {
-    /// Whether to emit a `FromProto` constructor.
-    pub(in crate::generator) from_proto: bool,
-    /// Whether to emit a `ToProto` method.
-    pub(in crate::generator) to_proto: bool,
     /// The Go proto type expression (e.g. `"common.ActivityOptions"`) the
     /// model converts to/from, qualified with the resolved import alias.
     pub(in crate::generator) proto_type: String,
@@ -632,11 +631,8 @@ impl ModelBackend {
             };
 
             let planned_record = record_for_model_key(api_plan, &full_name);
-            let capabilities = planned_record
-                .map(|record| record.data.capabilities)
-                .unwrap_or(ModelWireCapabilities::BIDIRECTIONAL);
-            if !capabilities.from_wire && !capabilities.to_wire {
-                continue;
+            if let Some(planned_record) = planned_record {
+                validate_record_conversion(planned_record)?;
             }
 
             let proto_type = self
@@ -667,8 +663,6 @@ impl ModelBackend {
             self.set_model_wire(
                 full_name,
                 RenderedModelWire {
-                    from_proto: capabilities.from_wire,
-                    to_proto: capabilities.to_wire,
                     proto_type,
                     field_conversions,
                     sourced_fields,
@@ -787,6 +781,53 @@ impl ModelBackend {
         }
         Ok(())
     }
+}
+
+fn validate_record_conversion(record: &RecordSpec<PlannedFamily>) -> Result<()> {
+    let Some(proto) = &record.data.proto else {
+        return Ok(());
+    };
+    for (field_name, field) in record
+        .fields
+        .iter()
+        .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+    {
+        match &field.data.wire_binding {
+            Some(PlannedWireFieldBinding::VariantMembers { wire_name, .. }) => {
+                return Err(Error::UnsupportedProtoOneofConversion {
+                    language: Language::Go,
+                    message: proto.full_name.clone(),
+                    oneof: wire_name.clone(),
+                });
+            }
+            Some(PlannedWireFieldBinding::Value { wire_type, .. })
+                if matches!(
+                    field.field_type.validation_type(),
+                    PlannedType::TypeParameter(_)
+                ) && is_proto_generic_carrier(wire_type) =>
+            {
+                return Err(Error::UnsupportedProtoGenericCarrierConversion {
+                    language: Language::Go,
+                    message: proto.full_name.clone(),
+                    field: field_name.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn is_proto_generic_carrier(kind: &PlannedType) -> bool {
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) =
+        kind.validation_type()
+    else {
+        return false;
+    };
+    matches!(
+        message.proto.full_name.as_str(),
+        "temporal.api.common.v1.Payload" | "temporal.api.common.v1.Payloads"
+    )
 }
 
 /// Renders an operation function that serializes its request to proto before
@@ -2009,59 +2050,55 @@ fn render_model_wire_methods(
 ) {
     let proto_value_type = wire.proto_type.trim_start_matches('*');
 
-    if wire.to_proto {
-        output.push('\n');
-        output.push_str("func (m ");
-        output.push_str(&model.name);
-        output.push_str(") toProto(ctx ");
-        output.push_str(&package.workflow_context_type());
-        output.push_str(") (");
-        output.push_str(&wire.proto_type);
-        output.push_str(", error) {\n");
-        output.push_str("\tmessage := &");
-        output.push_str(proto_value_type);
-        output.push_str("{}\n");
-        for conversion in &wire.field_conversions {
-            for line in &conversion.to_proto_lines {
-                output.push('\t');
-                output.push_str(line);
-                output.push('\n');
-            }
+    output.push('\n');
+    output.push_str("func (m ");
+    output.push_str(&model.name);
+    output.push_str(") toProto(ctx ");
+    output.push_str(&package.workflow_context_type());
+    output.push_str(") (");
+    output.push_str(&wire.proto_type);
+    output.push_str(", error) {\n");
+    output.push_str("\tmessage := &");
+    output.push_str(proto_value_type);
+    output.push_str("{}\n");
+    for conversion in &wire.field_conversions {
+        for line in &conversion.to_proto_lines {
+            output.push('\t');
+            output.push_str(line);
+            output.push('\n');
         }
-        for sourced in &wire.sourced_fields {
-            for line in &sourced.to_proto_lines {
-                output.push('\t');
-                output.push_str(line);
-                output.push('\n');
-            }
-        }
-        output.push_str("\treturn message, nil\n");
-        output.push_str("}\n");
     }
+    for sourced in &wire.sourced_fields {
+        for line in &sourced.to_proto_lines {
+            output.push('\t');
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+    output.push_str("\treturn message, nil\n");
+    output.push_str("}\n");
 
-    if wire.from_proto {
-        output.push('\n');
-        output.push_str("func ");
-        let (model_ident, _) = split_go_type_decl_name(&model.name);
-        output.push_str(&go_unexported_name(model_ident));
-        output.push_str("FromProto(ctx ");
-        output.push_str(&package.workflow_context_type());
-        output.push_str(", proto ");
-        output.push_str(&wire.proto_type);
-        output.push_str(") (");
-        output.push_str(&model.name);
-        output.push_str(", error) {\n");
-        output.push_str("\tvalue := ");
-        output.push_str(&model.name);
-        output.push_str("{}\n");
-        for conversion in &wire.field_conversions {
-            for line in &conversion.from_proto_lines {
-                output.push('\t');
-                output.push_str(line);
-                output.push('\n');
-            }
+    output.push('\n');
+    output.push_str("func ");
+    let (model_ident, _) = split_go_type_decl_name(&model.name);
+    output.push_str(&go_unexported_name(model_ident));
+    output.push_str("FromProto(ctx ");
+    output.push_str(&package.workflow_context_type());
+    output.push_str(", proto ");
+    output.push_str(&wire.proto_type);
+    output.push_str(") (");
+    output.push_str(&model.name);
+    output.push_str(", error) {\n");
+    output.push_str("\tvalue := ");
+    output.push_str(&model.name);
+    output.push_str("{}\n");
+    for conversion in &wire.field_conversions {
+        for line in &conversion.from_proto_lines {
+            output.push('\t');
+            output.push_str(line);
+            output.push('\n');
         }
-        output.push_str("\treturn value, nil\n");
-        output.push_str("}\n");
     }
+    output.push_str("\treturn value, nil\n");
+    output.push_str("}\n");
 }

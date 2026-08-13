@@ -3,10 +3,15 @@
 import type * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import {
+  retryPolicyFromProto,
   retryPolicyToProto,
+  taskQueueFromProto,
   taskQueueToProto,
+  failureFromProto,
   failureToProto,
+  durationFromProto,
   durationToProto,
+  priorityFromProto,
   priorityToProto,
 } from "./support";
 
@@ -26,6 +31,35 @@ export interface ActivityOptions {
   retryPolicy: common.RetryPolicy;
   scheduleToCloseTimeout?: common.Duration;
   priority?: common.Priority;
+}
+
+export function activityOptionsFromProto(
+  proto: temporal.api.activity.v1.IActivityOptions | null | undefined,
+): ActivityOptions | undefined {
+  if (proto == null) {
+    return undefined;
+  }
+  return {
+    taskQueue:
+      proto.taskQueue == null
+        ? undefined
+        : (taskQueueFromProto(proto.taskQueue) as string),
+    retryPolicy: requiredField(
+      retryPolicyFromProto(
+        requiredField(proto.retryPolicy, "ActivityOptions", "retryPolicy"),
+      ) as common.RetryPolicy,
+      "ActivityOptions",
+      "retryPolicy",
+    ),
+    scheduleToCloseTimeout:
+      proto.scheduleToCloseTimeout == null
+        ? undefined
+        : (durationFromProto(proto.scheduleToCloseTimeout) as common.Duration),
+    priority:
+      proto.priority == null
+        ? undefined
+        : (priorityFromProto(proto.priority) as common.Priority),
+  };
 }
 
 export function activityOptionsToProto(
@@ -49,6 +83,21 @@ export function activityOptionsToProto(
 
 export interface FailureContainer {
   failure?: Error;
+}
+
+export function failureContainerFromProto(
+  proto:
+    | temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes
+    | null
+    | undefined,
+): FailureContainer | undefined {
+  if (proto == null) {
+    return undefined;
+  }
+  return {
+    failure:
+      proto.failure == null ? undefined : (failureFromProto(proto.failure) as Error),
+  };
 }
 
 export function failureContainerToProto(

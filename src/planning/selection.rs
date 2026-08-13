@@ -12,9 +12,8 @@
 
 use crate::language::Language;
 use crate::spec::{
-    ApiSpec, ApiSpecTransform, AuthoredFamily, AuthoredResourceType, AuthoredServiceData,
-    JsonModelSpec, LanguageStringSpec, SelectedFamily, SelectedSupportSpec, SelectedTextSpec,
-    SupportSpec, Symbol,
+    ApiSpec, ApiSpecTransform, AuthoredFamily, AuthoredResourceType, JsonModelSpec,
+    LanguageStringSpec, SelectedFamily, SelectedSupportSpec, SelectedTextSpec, SupportSpec, Symbol,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 
@@ -53,9 +52,7 @@ impl ApiSpecTransform<AuthoredFamily, SelectedFamily> for Selector {
     fn map_alias(&mut self, name: Symbol) -> Symbol {
         name
     }
-    fn map_service_data(&mut self, _name: &str, data: AuthoredServiceData) -> AuthoredServiceData {
-        data
-    }
+    fn map_service_data(&mut self, _name: &str, _data: ()) {}
     fn map_record_data(&mut self, _full_name: &str, _data: ()) {}
     fn map_resource_data(&mut self, _name: &str, _data: ()) {}
     fn map_operation_data(&mut self, _name: &str, _data: ()) {}
@@ -161,7 +158,7 @@ mod tests {
                 delay_load_temporalio_workflow: false,
                 operations: Vec::new(),
                 resources: Vec::new(),
-                data: crate::spec::AuthoredServiceData::default(),
+                data: (),
             }],
             types: BTreeMap::new(),
         };

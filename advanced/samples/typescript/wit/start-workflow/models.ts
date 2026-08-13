@@ -3,9 +3,12 @@
 import type * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import {
+  workflowTypeFromProto,
   workflowTypeToProto,
+  taskQueueFromProto,
   taskQueueToProto,
   workflowNamespace,
+  durationFromProto,
   durationToProto,
 } from "./support";
 
@@ -56,6 +59,42 @@ export interface StartWorkflowRequest {
   workflowStartDelay?: common.Duration;
 }
 
+export function startWorkflowRequestFromProto(
+  proto:
+    | temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest
+    | null
+    | undefined,
+): StartWorkflowRequest | undefined {
+  if (proto == null) {
+    return undefined;
+  }
+  return {
+    workflow: requiredField(
+      workflowTypeFromProto(
+        requiredField(proto.workflowType, "StartWorkflowRequest", "workflow"),
+      ) as string,
+      "StartWorkflowRequest",
+      "workflow",
+    ),
+    workflowId: requiredField(
+      proto.workflowId === "" ? undefined : proto.workflowId,
+      "StartWorkflowRequest",
+      "workflowId",
+    ),
+    taskQueue: requiredField(
+      taskQueueFromProto(
+        requiredField(proto.taskQueue, "StartWorkflowRequest", "taskQueue"),
+      ) as string,
+      "StartWorkflowRequest",
+      "taskQueue",
+    ),
+    workflowStartDelay:
+      proto.workflowStartDelay == null
+        ? undefined
+        : (durationFromProto(proto.workflowStartDelay) as common.Duration),
+  };
+}
+
 export function startWorkflowRequestToProto(
   model: StartWorkflowRequest | null | undefined,
 ): temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest | undefined {
@@ -80,6 +119,18 @@ export function startWorkflowRequestToProto(
 
 export type CancelWorkflowResponse = Record<string, never>;
 
+export function cancelWorkflowResponseFromProto(
+  proto:
+    | temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse
+    | null
+    | undefined,
+): CancelWorkflowResponse | undefined {
+  if (proto == null) {
+    return undefined;
+  }
+  return {};
+}
+
 export function cancelWorkflowResponseToProto(
   model: CancelWorkflowResponse | null | undefined,
 ): temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse | undefined {
@@ -92,6 +143,31 @@ export function cancelWorkflowResponseToProto(
 export interface CancelWorkflowRequest {
   workflowExecution: WorkflowExecution;
   reason?: string;
+}
+
+export function cancelWorkflowRequestFromProto(
+  proto:
+    | temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionRequest
+    | null
+    | undefined,
+): CancelWorkflowRequest | undefined {
+  if (proto == null) {
+    return undefined;
+  }
+  return {
+    workflowExecution: requiredField(
+      workflowExecutionFromProto(
+        requiredField(
+          proto.workflowExecution,
+          "CancelWorkflowRequest",
+          "workflowExecution",
+        ),
+      ) as WorkflowExecution,
+      "CancelWorkflowRequest",
+      "workflowExecution",
+    ),
+    reason: proto.reason ?? undefined,
+  };
 }
 
 export function cancelWorkflowRequestToProto(

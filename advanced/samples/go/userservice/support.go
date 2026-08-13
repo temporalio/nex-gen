@@ -14,6 +14,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -263,6 +264,57 @@ func searchAttributesToProto(_ workflow.Context, searchAttributes *temporal.Sear
 	return &common.SearchAttributes{IndexedFields: fields}, nil
 }
 
+func searchAttributesFromProto(_ workflow.Context, searchAttributes *common.SearchAttributes) (*temporal.SearchAttributes, error) {
+	if searchAttributes == nil {
+		return nil, nil
+	}
+
+	updates := make([]temporal.SearchAttributeUpdate, 0, len(searchAttributes.GetIndexedFields()))
+	for name, payload := range searchAttributes.GetIndexedFields() {
+		valueType, err := enums.IndexedValueTypeFromString(string(payload.GetMetadata()["type"]))
+		if err != nil {
+			return nil, fmt.Errorf("decode search attribute [%s] type error: %v", name, err)
+		}
+		switch valueType {
+		case enums.INDEXED_VALUE_TYPE_BOOL:
+			var value bool
+			err = converter.GetDefaultDataConverter().FromPayload(payload, &value)
+			updates = append(updates, temporal.NewSearchAttributeKeyBool(name).ValueSet(value))
+		case enums.INDEXED_VALUE_TYPE_KEYWORD:
+			var value string
+			err = converter.GetDefaultDataConverter().FromPayload(payload, &value)
+			updates = append(updates, temporal.NewSearchAttributeKeyKeyword(name).ValueSet(value))
+		case enums.INDEXED_VALUE_TYPE_TEXT:
+			var value string
+			err = converter.GetDefaultDataConverter().FromPayload(payload, &value)
+			updates = append(updates, temporal.NewSearchAttributeKeyString(name).ValueSet(value))
+		case enums.INDEXED_VALUE_TYPE_INT:
+			var value int64
+			err = converter.GetDefaultDataConverter().FromPayload(payload, &value)
+			updates = append(updates, temporal.NewSearchAttributeKeyInt64(name).ValueSet(value))
+		case enums.INDEXED_VALUE_TYPE_DOUBLE:
+			var value float64
+			err = converter.GetDefaultDataConverter().FromPayload(payload, &value)
+			updates = append(updates, temporal.NewSearchAttributeKeyFloat64(name).ValueSet(value))
+		case enums.INDEXED_VALUE_TYPE_DATETIME:
+			var value time.Time
+			err = converter.GetDefaultDataConverter().FromPayload(payload, &value)
+			updates = append(updates, temporal.NewSearchAttributeKeyTime(name).ValueSet(value))
+		case enums.INDEXED_VALUE_TYPE_KEYWORD_LIST:
+			var value []string
+			err = converter.GetDefaultDataConverter().FromPayload(payload, &value)
+			updates = append(updates, temporal.NewSearchAttributeKeyKeywordList(name).ValueSet(value))
+		default:
+			return nil, fmt.Errorf("decode search attribute [%s] error: unknown type %v", name, valueType)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("decode search attribute [%s] error: %v", name, err)
+		}
+	}
+	value := temporal.NewSearchAttributes(updates...)
+	return &value, nil
+}
+
 // --- VersioningOverride (temporal.api.workflow.v1.VersioningOverride) ---
 
 func versioningOverrideToProto(_ workflow.Context, versioningOverride *client.VersioningOverride) (*workflowpb.VersioningOverride, error) {
@@ -299,4 +351,36 @@ func versioningOverrideToProto(_ workflow.Context, versioningOverride *client.Ve
 	default:
 		return nil, nil
 	}
+}
+
+func versioningOverrideFromProto(_ workflow.Context, versioningOverride *workflowpb.VersioningOverride) (*client.VersioningOverride, error) {
+	if versioningOverride == nil {
+		return nil, nil
+	}
+
+	var value client.VersioningOverride
+	switch override := versioningOverride.GetOverride().(type) {
+	case *workflowpb.VersioningOverride_AutoUpgrade:
+		value = &client.AutoUpgradeVersioningOverride{}
+	case *workflowpb.VersioningOverride_Pinned:
+		version := override.Pinned.GetVersion()
+		value = &client.PinnedVersioningOverride{Version: worker.WorkerDeploymentVersion{
+			DeploymentName: version.GetDeploymentName(),
+			BuildID:        version.GetBuildId(),
+		}}
+	}
+	if value == nil {
+		switch versioningOverride.GetBehavior() {
+		case enums.VERSIONING_BEHAVIOR_AUTO_UPGRADE:
+			value = &client.AutoUpgradeVersioningOverride{}
+		case enums.VERSIONING_BEHAVIOR_PINNED:
+			deploymentName := versioningOverride.GetDeployment().GetSeriesName()
+			buildID := versioningOverride.GetDeployment().GetBuildId()
+			value = &client.PinnedVersioningOverride{Version: worker.WorkerDeploymentVersion{
+				DeploymentName: deploymentName,
+				BuildID:        buildID,
+			}}
+		}
+	}
+	return &value, nil
 }

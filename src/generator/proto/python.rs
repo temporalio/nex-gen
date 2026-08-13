@@ -1,6 +1,6 @@
 use heck::ToSnakeCase;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::python::{
     PythonFieldDefaultKind, PythonImports, RenderedField, RenderedModel, RenderedModelFragments,
@@ -9,8 +9,8 @@ use crate::generator::python::{
 };
 use crate::language::Language;
 use crate::planning::{
-    PlannedFamily, PlannedProtoGenericCarrier, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec,
-    PlannedType, relative_descriptor_name,
+    PlannedFamily, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec, PlannedType,
+    PlannedWireFieldBinding, PlannedWireVariantMember, relative_descriptor_name,
 };
 use crate::spec::{ExternalTypeSpec, RecordFieldSpec, RecordSpec, TypeReplacementSpec};
 
@@ -29,6 +29,32 @@ enum WireReadPolicy {
     Required { missing_error: String },
     Optional,
     Default { default_expr: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::generator) enum ProtoGenericCarrier {
+    Payload,
+    Payloads,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::generator) struct ProtoOneofCasePlan {
+    pub(in crate::generator) tag: String,
+    pub(in crate::generator) proto_name: String,
+    pub(in crate::generator) payload: PlannedType,
+    pub(in crate::generator) generic_carrier: Option<ProtoGenericCarrier>,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::generator) struct ProtoOneofPlan {
+    pub(in crate::generator) name: String,
+    pub(in crate::generator) cases: Vec<ProtoOneofCasePlan>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(in crate::generator) struct ProtoFieldPlan {
+    pub(in crate::generator) oneof: Option<ProtoOneofPlan>,
+    pub(in crate::generator) generic_carrier: Option<ProtoGenericCarrier>,
 }
 
 #[derive(Debug, Default)]
@@ -87,7 +113,120 @@ impl ExternalModelBackend for ModelBackend {
     }
 }
 
+fn build_oneof_plan(
+    api_plan: &PlannedSpec,
+    message_name: &str,
+    field: &RecordFieldSpec<PlannedFamily>,
+    wire_name: &str,
+    members: &[PlannedWireVariantMember],
+) -> Result<ProtoOneofPlan> {
+    let PlannedType::Variant(variant_type) = field.field_type.validation_type() else {
+        return Err(Error::InvalidTypeOverrideField {
+            message: message_name.to_string(),
+            field: wire_name.to_string(),
+            property: "type",
+            reason: "wire variant members do not resolve to a planned variant".to_string(),
+        });
+    };
+    let variant = api_plan.variant(&variant_type.full_name).ok_or_else(|| {
+        Error::InvalidTypeOverrideField {
+            message: message_name.to_string(),
+            field: wire_name.to_string(),
+            property: "type",
+            reason: format!(
+                "planned variant `{}` is unavailable",
+                variant_type.full_name
+            ),
+        }
+    })?;
+    let mut cases = Vec::new();
+    for member in members {
+        let case = variant
+            .cases
+            .iter()
+            .find(|case| case.wire_name == member.wire_name)
+            .ok_or_else(|| Error::InvalidTypeOverrideField {
+                message: message_name.to_string(),
+                field: wire_name.to_string(),
+                property: "type",
+                reason: format!(
+                    "planned variant `{}` is missing wire case `{}`",
+                    variant.name, member.wire_name
+                ),
+            })?;
+        let payload = case
+            .payload
+            .clone()
+            .ok_or_else(|| Error::InvalidTypeOverrideField {
+                message: message_name.to_string(),
+                field: wire_name.to_string(),
+                property: "type",
+                reason: format!("planned variant case `{}` has no payload", case.name),
+            })?;
+        cases.push(ProtoOneofCasePlan {
+            tag: case.name.clone(),
+            proto_name: member.wire_name.clone(),
+            generic_carrier: matches!(payload.validation_type(), PlannedType::TypeParameter(_))
+                .then(|| proto_generic_carrier(&member.wire_type))
+                .flatten(),
+            payload,
+        });
+    }
+    Ok(ProtoOneofPlan {
+        name: wire_name.to_string(),
+        cases,
+    })
+}
+
+fn proto_generic_carrier(wire_type: &PlannedType) -> Option<ProtoGenericCarrier> {
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) =
+        wire_type.validation_type()
+    else {
+        return None;
+    };
+    match message.proto.full_name.as_str() {
+        "temporal.api.common.v1.Payload" => Some(ProtoGenericCarrier::Payload),
+        "temporal.api.common.v1.Payloads" => Some(ProtoGenericCarrier::Payloads),
+        _ => None,
+    }
+}
+
 impl ModelBackend {
+    pub(in crate::generator) fn field_plan(
+        &self,
+        api_plan: &PlannedSpec,
+        record: &RecordSpec<PlannedFamily>,
+        field: &RecordFieldSpec<PlannedFamily>,
+    ) -> Result<ProtoFieldPlan> {
+        let generic_carrier = match &field.data.wire_binding {
+            Some(PlannedWireFieldBinding::Value { wire_type, .. })
+                if matches!(
+                    field.field_type.validation_type(),
+                    PlannedType::TypeParameter(_)
+                ) =>
+            {
+                proto_generic_carrier(wire_type)
+            }
+            _ => None,
+        };
+        let oneof = match (&record.data.proto, &field.data.wire_binding) {
+            (Some(proto), Some(PlannedWireFieldBinding::VariantMembers { wire_name, members })) => {
+                Some(build_oneof_plan(
+                    api_plan,
+                    &proto.full_name,
+                    field,
+                    wire_name,
+                    members,
+                )?)
+            }
+            _ => None,
+        };
+        Ok(ProtoFieldPlan {
+            oneof,
+            generic_carrier,
+        })
+    }
+
     pub(in crate::generator) fn render_record_wire_block(
         &self,
         model: &RenderedModel,
@@ -297,7 +436,7 @@ fn field_read(
     attr_name: &str,
     field: &RecordFieldSpec<PlannedFamily>,
     resolved_value_type: &ResolvedFieldType,
-    generic_carrier: Option<PlannedProtoGenericCarrier>,
+    generic_carrier: Option<ProtoGenericCarrier>,
     policy: WireReadPolicy,
 ) -> RenderedWireRead {
     let proto_expr = format!("proto.{proto_name}");
@@ -342,7 +481,7 @@ fn field_write(
     field: &RecordFieldSpec<PlannedFamily>,
     value_expr: &str,
     resolved_value_type: &ResolvedFieldType,
-    generic_carrier: Option<PlannedProtoGenericCarrier>,
+    generic_carrier: Option<ProtoGenericCarrier>,
     optional_guard: bool,
 ) -> RenderedWireWrite {
     let lines = match generic_carrier {
@@ -366,19 +505,19 @@ fn field_write(
 }
 
 fn generic_carrier_from_proto_expr(
-    carrier: PlannedProtoGenericCarrier,
+    carrier: ProtoGenericCarrier,
     _resolved_type: &ResolvedFieldType,
     proto_expr: &str,
 ) -> String {
     let converter = match carrier {
-        PlannedProtoGenericCarrier::Payload => "payload_from_proto",
-        PlannedProtoGenericCarrier::Payloads => "payloads_from_proto",
+        ProtoGenericCarrier::Payload => "payload_from_proto",
+        ProtoGenericCarrier::Payloads => "payloads_from_proto",
     };
     format!("typing.cast(typing.Any, {converter}({proto_expr}))")
 }
 
 fn generic_carrier_to_proto_lines(
-    carrier: PlannedProtoGenericCarrier,
+    carrier: ProtoGenericCarrier,
     value_expr: &str,
     proto_name: &str,
     optional_guard: bool,
@@ -389,8 +528,8 @@ fn generic_carrier_to_proto_lines(
     }
     let indent = if optional_guard { "    " } else { "" };
     let converted = match carrier {
-        PlannedProtoGenericCarrier::Payload => format!("payload_to_proto({value_expr})"),
-        PlannedProtoGenericCarrier::Payloads => format!(
+        ProtoGenericCarrier::Payload => format!("payload_to_proto({value_expr})"),
+        ProtoGenericCarrier::Payloads => format!(
             "payloads_to_proto(typing.cast(collections.abc.Sequence[typing.Any], {value_expr}))"
         ),
     };
@@ -680,10 +819,6 @@ fn render_record_wire_block(
     model: &RenderedModel,
     planned_model: &RecordSpec<PlannedFamily>,
 ) -> Option<RenderedRecordWireBlock> {
-    if !model.capabilities.from_wire && !model.capabilities.to_wire {
-        return None;
-    }
-
     let proto_ref = record_python_ref(planned_model)?;
     let converter_model_annotation = if model.type_parameters.is_empty() {
         format!("\"{}\"", model.name)
@@ -703,8 +838,7 @@ fn render_record_wire_block(
         ),
         String::new(),
     ];
-    let mut wrote_method = false;
-    if model.capabilities.from_wire {
+    {
         if !model.fields.is_empty() {
             output.push('\n');
         }
@@ -808,9 +942,9 @@ fn render_record_wire_block(
             }
             output.push_str("        )\n");
         }
-        wrote_method = true;
     }
-    if model.capabilities.to_wire {
+    let wrote_method = true;
+    {
         if model.fields.is_empty() {
             if wrote_method {
                 output.push('\n');
@@ -986,7 +1120,7 @@ fn oneof_field_read(
         ));
         setup_lines.push(format!(
             "    {local_var} = ({}, {})",
-            python_string_literal(&case.wit_name),
+            python_string_literal(&case.tag),
             match case.generic_carrier {
                 Some(carrier) => generic_carrier_from_proto_expr(
                     carrier,
@@ -1034,7 +1168,7 @@ fn oneof_field_write(
         let keyword = if index == 0 { "if" } else { "elif" };
         lines.push(format!(
             "{case_indent}{keyword} {value_expr}[0] == {}:",
-            python_string_literal(&case.wit_name)
+            python_string_literal(&case.tag)
         ));
         let case_value_expr = format!("{value_expr}[1]");
         let case_lines = match case.generic_carrier {

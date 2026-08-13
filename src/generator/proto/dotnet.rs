@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::generator::dotnet::{
     WireValueConversion, csharp_parameter_name, csharp_type_name, field_property_name,
     function_args_parameter_type, qualify_dotnet_support_reference,
@@ -6,15 +6,20 @@ use crate::generator::dotnet::{
 use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedProtoMessageType, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec,
-    PlannedType,
+    PlannedType, PlannedWireFieldBinding,
 };
-use crate::spec::{ExternalTypeSpec, RecordFieldSpec, RecordSpec, TypeReplacementSpec};
+use crate::spec::{
+    ExternalTypeSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec, TypeReplacementSpec,
+};
 
 #[derive(Debug, Default)]
 pub(in crate::generator) struct ModelBackend;
 
 impl ModelBackend {
-    pub(in crate::generator) fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
+    pub(in crate::generator) fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+        for (_, record) in api_plan.records() {
+            validate_record_conversion(record)?;
+        }
         Ok(())
     }
 
@@ -146,10 +151,9 @@ impl ModelBackend {
         &self,
         model: &RecordSpec<PlannedFamily>,
     ) -> bool {
-        model.data.capabilities.to_wire
-            && model.data.proto.as_ref().is_some_and(|proto| {
-                dotnet_proto_type_name_for_info(proto) != csharp_type_name(&model.name)
-            })
+        model.data.proto.as_ref().is_some_and(|proto| {
+            dotnet_proto_type_name_for_info(proto) != csharp_type_name(&model.name)
+        })
     }
 
     pub(in crate::generator) fn model_wire_interface(
@@ -175,7 +179,7 @@ impl ModelBackend {
         if !self.model_needs_wire_method(model) {
             return false;
         }
-        render_model_to_proto_method(output, model, api_plan, support_namespace);
+        render_model_to_proto_method(self, output, model, api_plan, support_namespace);
         true
     }
 
@@ -349,6 +353,53 @@ impl ModelBackend {
     }
 }
 
+fn validate_record_conversion(record: &RecordSpec<PlannedFamily>) -> Result<()> {
+    let Some(proto) = &record.data.proto else {
+        return Ok(());
+    };
+    for (field_name, field) in record
+        .fields
+        .iter()
+        .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+    {
+        match &field.data.wire_binding {
+            Some(PlannedWireFieldBinding::VariantMembers { wire_name, .. }) => {
+                return Err(Error::UnsupportedProtoOneofConversion {
+                    language: Language::Dotnet,
+                    message: proto.full_name.clone(),
+                    oneof: wire_name.clone(),
+                });
+            }
+            Some(PlannedWireFieldBinding::Value { wire_type, .. })
+                if matches!(
+                    field.field_type.validation_type(),
+                    PlannedType::TypeParameter(_)
+                ) && is_proto_generic_carrier(wire_type) =>
+            {
+                return Err(Error::UnsupportedProtoGenericCarrierConversion {
+                    language: Language::Dotnet,
+                    message: proto.full_name.clone(),
+                    field: field_name.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn is_proto_generic_carrier(kind: &PlannedType) -> bool {
+    let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) =
+        kind.validation_type()
+    else {
+        return false;
+    };
+    matches!(
+        message.proto.full_name.as_str(),
+        "temporal.api.common.v1.Payload" | "temporal.api.common.v1.Payloads"
+    )
+}
+
 pub(crate) fn dotnet_message_type(model_type: &PlannedType) -> String {
     match model_type {
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => proto
@@ -436,6 +487,7 @@ pub(crate) fn dotnet_from_proto_converter(model_type: &PlannedType) -> Option<&s
 }
 
 fn render_model_to_proto_method(
+    backend: &ModelBackend,
     output: &mut String,
     model: &RecordSpec<PlannedFamily>,
     api_plan: &PlannedSpec,
@@ -448,7 +500,6 @@ fn render_model_to_proto_method(
             .as_ref()
             .expect("model to proto method requires proto backing"),
     );
-    let backend = ModelBackend;
     render_model_from_wire_method(output, model, api_plan, support_namespace, &raw_type);
     output.push_str("    public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n");
     output.push_str("        var proto = new ");
@@ -471,6 +522,7 @@ fn render_model_to_proto_method(
     }
     for (field_name, field) in model.public_fields() {
         render_field_to_proto_assignment(
+            backend,
             output,
             model,
             field_name,
@@ -711,6 +763,7 @@ fn optional_presence_from_wire_expr(source_expr: &str, converted_expr: &str) -> 
 }
 
 fn render_field_to_proto_assignment(
+    backend: &ModelBackend,
     output: &mut String,
     model: &RecordSpec<PlannedFamily>,
     field_name: &str,
@@ -726,6 +779,7 @@ fn render_field_to_proto_assignment(
         output.push_str(&target);
         output.push_str(" = ");
         output.push_str(&field_to_proto_expr(
+            backend,
             model,
             field_name,
             field,
@@ -744,6 +798,7 @@ fn render_field_to_proto_assignment(
         output.push_str(&target);
         output.push_str(" = ");
         output.push_str(&field_to_proto_expr(
+            backend,
             model,
             field_name,
             field,
@@ -757,6 +812,7 @@ fn render_field_to_proto_assignment(
 }
 
 fn field_to_proto_expr(
+    backend: &ModelBackend,
     model: &RecordSpec<PlannedFamily>,
     field_name: &str,
     field: &RecordFieldSpec<PlannedFamily>,
@@ -775,7 +831,7 @@ fn field_to_proto_expr(
             });
         return format!("{converter}({source_expr}, payloadConverter)");
     }
-    ModelBackend.field_kind_to_wire_expr(
+    backend.field_kind_to_wire_expr(
         &field.field_type,
         source_expr,
         !field.required,
@@ -795,7 +851,7 @@ fn function_args_field_uses_logical_storage(
         && function_args_parameter_type(
             model,
             field_name,
-            ModelBackend.function_args_authored_type(field),
+            ModelBackend::default().function_args_authored_type(field),
         )
         .is_some()
 }

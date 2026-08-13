@@ -28,7 +28,13 @@ impl CompilerPass<PlannedFamily, PlannedFamily> for ReachabilityPass {
 
 fn prune(spec: &mut PlannedSpec) {
     let mut pending = Vec::new();
-    let mut reachable = spec.data.module_exports.clone();
+    let mut reachable = spec
+        .types
+        .iter()
+        .filter(|(_, entry)| entry.module_exported)
+        .map(|(name, _)| name.clone())
+        .collect::<BTreeSet<_>>();
+    let has_module_exports = !reachable.is_empty();
     for service in &spec.services {
         for operation in &service.operations {
             pending.extend(
@@ -58,16 +64,16 @@ fn prune(spec: &mut PlannedSpec) {
         }
         for name in to_expand {
             if let Some(declaration) = spec.types.get(&name) {
-                enqueue_declaration_references(declaration, &mut pending);
+                enqueue_declaration_references(&declaration.declaration, &mut pending);
             }
         }
     }
 
-    spec.types.retain(|name, declaration| {
+    spec.types.retain(|name, entry| {
         reachable.contains(name)
-            && (!matches!(declaration, TypeDeclSpec::External(_))
-                || spec.data.module_exports.is_empty()
-                || spec.data.module_exports.contains(name))
+            && (!matches!(entry.declaration, TypeDeclSpec::External(_))
+                || !has_module_exports
+                || entry.module_exported)
     });
 }
 

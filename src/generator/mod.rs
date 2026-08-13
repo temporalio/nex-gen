@@ -59,30 +59,6 @@ impl GeneratedFiles {
     }
 }
 
-/// Tracks which public-model/wire-model conversion directions must be generated.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ModelWireCapabilities {
-    pub(crate) from_wire: bool,
-    pub(crate) to_wire: bool,
-}
-
-impl ModelWireCapabilities {
-    pub(crate) const TO_WIRE: Self = Self {
-        from_wire: false,
-        to_wire: true,
-    };
-
-    pub(crate) const BIDIRECTIONAL: Self = Self {
-        from_wire: true,
-        to_wire: true,
-    };
-
-    pub(crate) fn merge(&mut self, other: Self) {
-        self.from_wire |= other.from_wire;
-        self.to_wire |= other.to_wire;
-    }
-}
-
 pub(crate) trait ExternalModelBackend<ModelType = PlannedType> {
     type ModelFragments;
     type WireConversion;

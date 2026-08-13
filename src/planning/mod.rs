@@ -6,7 +6,6 @@ use prost_types::FileOptions;
 
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
-use crate::generator::ModelWireCapabilities;
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ApiSpecTransform, AuthoredResourceType, ExternalTypeSpec, FunctionArgSpec,
@@ -33,9 +32,7 @@ pub(crate) use emitted_names::build_json_name_manifest;
 pub(crate) use operation_binding::{
     OperationBindingPass, OperationBoundFamily, OperationBoundOperation, OperationBoundResource,
 };
-pub(crate) use operation_lowering::{
-    OperationLoweredFamily, OperationLoweredRecordData, OperationLoweringPass,
-};
+pub(crate) use operation_lowering::{OperationLoweredFamily, OperationLoweringPass};
 pub(crate) use proto::{message_model_name, relative_descriptor_name};
 pub(crate) use reachability::ReachabilityPass;
 pub(crate) use resource_binding::{
@@ -201,33 +198,30 @@ pub(crate) struct PlannedProtoTypeInfo {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PlannedRecordData {
     pub(crate) proto: Option<PlannedProtoTypeInfo>,
-    pub(crate) capabilities: ModelWireCapabilities,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PlannedFieldData {
     pub(crate) has_presence: Option<bool>,
-    pub(crate) oneof: Option<PlannedProtoOneofField>,
-    pub(crate) generic_carrier: Option<PlannedProtoGenericCarrier>,
+    pub(crate) wire_binding: Option<PlannedWireFieldBinding>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PlannedProtoOneofField {
-    pub(crate) name: String,
-    pub(crate) cases: Vec<PlannedProtoOneofCase>,
+pub(crate) enum PlannedWireFieldBinding {
+    Value {
+        wire_name: String,
+        wire_type: PlannedType,
+    },
+    VariantMembers {
+        wire_name: String,
+        members: Vec<PlannedWireVariantMember>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PlannedProtoOneofCase {
-    pub(crate) wit_name: String,
-    pub(crate) proto_name: String,
-    pub(crate) generic_carrier: Option<PlannedProtoGenericCarrier>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PlannedProtoGenericCarrier {
-    Payload,
-    Payloads,
+pub(crate) struct PlannedWireVariantMember {
+    pub(crate) wire_name: String,
+    pub(crate) wire_type: PlannedType,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -275,7 +269,6 @@ pub(crate) struct PlannedJsonType {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PlannedSpecData {
     pub(crate) module_imports: BTreeMap<ModulePath, BTreeSet<String>>,
-    pub(crate) module_exports: BTreeSet<String>,
 }
 
 impl AsRef<str> for PlannedJsonType {

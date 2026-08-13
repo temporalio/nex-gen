@@ -76,8 +76,8 @@ pub(crate) fn build_json_name_manifest(
 
 fn resolve_emitted_json_names(spec: &mut PlannedSpec, language: Language) -> Result<()> {
     let manifest = build_json_name_manifest(language, spec)?;
-    for decl in spec.types.values_mut() {
-        if let TypeDeclSpec::External(binding) = decl
+    for entry in spec.types.values_mut() {
+        if let TypeDeclSpec::External(binding) = &mut entry.declaration
             && let ExternalTypeSpec::Json(json) = &mut binding.external_type
             && let Some(resolved) = manifest.type_name(&json.full_name)
         {

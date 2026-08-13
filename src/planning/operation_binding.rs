@@ -31,7 +31,7 @@ impl TypeFamily for OperationBoundFamily {
     type Proto = Symbol;
     type Json = JsonModelSpec<Symbol>;
     type Alias = Symbol;
-    type ServiceData = crate::spec::AuthoredServiceData;
+    type ServiceData = ();
     type RecordData = ();
     type ResourceData = OperationBoundResource;
     type OperationData = OperationBoundOperation;
@@ -99,7 +99,7 @@ impl CompilerPass<ResourceBoundFamily, OperationBoundFamily> for OperationBindin
 struct OperationBindingMapper;
 
 impl ApiSpecTransform<ResourceBoundFamily, OperationBoundFamily> for OperationBindingMapper {
-    fn map_spec_data(&mut self, _: ResourceBoundData) {}
+    fn map_spec_data(&mut self, _data: ResourceBoundData) {}
     fn map_record(&mut self, value: Symbol) -> Symbol {
         value
     }
@@ -124,13 +124,7 @@ impl ApiSpecTransform<ResourceBoundFamily, OperationBoundFamily> for OperationBi
     fn map_alias(&mut self, value: Symbol) -> Symbol {
         value
     }
-    fn map_service_data(
-        &mut self,
-        _: &str,
-        data: crate::spec::AuthoredServiceData,
-    ) -> crate::spec::AuthoredServiceData {
-        data
-    }
+    fn map_service_data(&mut self, _: &str, _: ()) {}
     fn map_record_data(&mut self, _: &str, _: ()) {}
     fn map_resource_data(&mut self, _: &str, _: ()) -> OperationBoundResource {
         OperationBoundResource { resolved: None }

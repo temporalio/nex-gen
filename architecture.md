@@ -13,6 +13,13 @@ collapses language-specific values once; the remaining passes enrich the same
 structural `ApiSpecTree` family. Each pass returns a complete IR for its
 successor; no pass receives planner state saved by an earlier pass.
 
+Parsers mark public roots on the corresponding neutral type-declaration entries.
+The WIT frontend marks types owned by operation-free exported interfaces, while
+the JSON Schema frontend marks the root model, `$defs`, and inline operation
+models owned by each source. The metadata stays with each declaration through
+family transformations and supplies reachability roots; later passes do not
+inspect the input format to reconstruct them.
+
 Each IR box in the diagram names the `TypeFamily` parameter of the
 `ApiSpecTree<F>` produced at that point. A family may appear more than once
 where the same tree crosses a logical phase boundary or a pass refines its

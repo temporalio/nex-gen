@@ -19,7 +19,7 @@
   outputs with the generator.
 - JSON Schema sample outputs: `cargo build-json-examples [--lang <language>]`.
 - Advanced WIT sample outputs: `cargo build-examples [--lang <language>]
-  [<example>]`.
+[<example>]`.
 - Review regenerated diffs to ensure they are the intended consequence of the
   source change.
 
@@ -44,6 +44,13 @@
   or modules (for example `src/generator/python.rs` and
   `src/generator/json_schema/python.rs`). Shared code may represent language
   neutral concepts, but must not encode one target's conventions.
+
+### Planning
+
+When planning a change, map each change onto one or more existing architectural component
+such as parsing or specific passes. If the change requires adding a pass then explicitly
+identify it as a new addition to the architecture. Each change should have a
+justification for why it belongs where it is planned in the architecture.
 
 ## Documentation and public changes
 

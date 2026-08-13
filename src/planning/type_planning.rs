@@ -10,46 +10,6 @@ fn module_import_index(
     imports
 }
 
-fn module_export_names(spec: &ApiSpec<OperationLoweredFamily>) -> BTreeSet<String> {
-    let mut exports = spec
-        .types
-        .iter()
-        .filter_map(|(name, decl)| {
-            // Only JSON-schema models are treated as an always-exported module
-            // surface (root type + every `$def`, including unreferenced ones).
-            // WIT-sourced records/enums/protos keep their reachability-based
-            // tree-shaking, so they are never force-exported here.
-            let TypeDeclSpec::External(binding) = decl else {
-                return None;
-            };
-            if !matches!(binding.external_type, ExternalTypeSpec::Json(_)) {
-                return None;
-            }
-            external_type_module_path(&binding.external_type)
-                .is_none_or(|module_path| module_path == &spec.module_path)
-                .then(|| name.clone())
-        })
-        .collect::<BTreeSet<_>>();
-
-    for service in &spec.services {
-        if service.operations.is_empty() && service.resources.is_empty() {
-            exports.extend(service.data.declared_type_names.iter().cloned());
-        }
-    }
-
-    exports
-}
-
-fn external_type_module_path(
-    external: &ExternalTypeSpec<OperationLoweredFamily>,
-) -> Option<&ModulePath> {
-    match external {
-        ExternalTypeSpec::Proto(symbol) => symbol.module_path(),
-        ExternalTypeSpec::Json(json_type) => json_type.name.module_path(),
-        ExternalTypeSpec::Alias { name, .. } => name.module_path(),
-    }
-}
-
 fn collect_tree_module_imports(
     node: &ApiSpecNode<OperationLoweredFamily>,
     imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
@@ -95,8 +55,8 @@ fn collect_spec_module_imports(
             }
         }
     }
-    for decl in spec.types.values() {
-        match decl {
+    for entry in spec.types.values() {
+        match &entry.declaration {
             TypeDeclSpec::External(binding) => {
                 collect_external_type_module_imports(
                     &spec.module_path,
@@ -319,7 +279,6 @@ pub(super) struct TypePlanningContext<'a> {
     spec_data: PlannedSpecData,
     language: Language,
     pub(super) descriptors: &'a DescriptorIndex,
-    root_model_capabilities: BTreeMap<String, ModelWireCapabilities>,
     resource_data: IndexMap<String, PlannedResource>,
     record_plans: IndexMap<String, PlannedRecordData>,
 }
@@ -354,8 +313,7 @@ impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMap
             .source_spec
             .record(name.as_str())
             .unwrap_or_else(|| panic!("record `{name}` should resolve during planning"));
-        self.planner
-            .plan_record_type(record, record_wire_capabilities(record))
+        self.planner.plan_record_type(record)
     }
 
     fn map_enum(&mut self, name: Symbol) -> PlannedEnumType {
@@ -423,13 +381,9 @@ impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMap
         }
     }
 
-    fn map_service_data(&mut self, _name: &str, _data: crate::spec::AuthoredServiceData) {}
+    fn map_service_data(&mut self, _name: &str, _data: ()) {}
 
-    fn map_record_data(
-        &mut self,
-        full_name: &str,
-        _data: OperationLoweredRecordData,
-    ) -> PlannedRecordData {
+    fn map_record_data(&mut self, full_name: &str, _data: ()) -> PlannedRecordData {
         self.planner
             .record_plans
             .get(full_name)
@@ -466,14 +420,8 @@ impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMap
     ) -> PlannedFieldData {
         self.source_spec
             .record(record_full_name)
-            .and_then(|record| {
-                proto::planned_record_field_data(
-                    record,
-                    field_name,
-                    self.source_spec,
-                    self.planner.descriptors,
-                )
-            })
+            .cloned()
+            .and_then(|record| proto::planned_record_field_data(&record, field_name, self.planner))
             .unwrap_or_default()
     }
 
@@ -495,19 +443,20 @@ impl<'a> TypePlanningContext<'a> {
         descriptors: &'a DescriptorIndex,
         language: Language,
     ) -> Result<Self> {
-        let root_model_capabilities = root_model_capabilities(&spec, descriptors, language)?;
         Ok(Self {
             spec,
             spec_data,
             language,
             descriptors,
-            root_model_capabilities,
             resource_data: IndexMap::new(),
             record_plans: IndexMap::new(),
         })
     }
 
     fn plan_spec(&mut self, spec: ApiSpec<OperationLoweredFamily>) -> PlannedSpec {
+        for record in spec.records().map(|(_, record)| record.clone()) {
+            self.ensure_record_model_plan(&record);
+        }
         let source_spec = spec.clone();
         let mut planned_spec = spec.map_names(TypePlanningMapper {
             source_spec: &source_spec,
@@ -522,21 +471,20 @@ impl<'a> TypePlanningContext<'a> {
         source_spec: &ApiSpec<OperationLoweredFamily>,
         planned_spec: &mut PlannedSpec,
     ) {
-        for (record_name, planned_decl) in &mut planned_spec.types {
-            let TypeDeclSpec::Record(planned_record) = planned_decl else {
+        for (record_name, planned_entry) in &mut planned_spec.types {
+            let TypeDeclSpec::Record(planned_record) = &mut planned_entry.declaration else {
                 continue;
             };
             let Some(source_record) = source_spec.record(record_name) else {
                 continue;
             };
-            let capabilities = planned_record.data.capabilities;
             for (field_name, field) in &mut planned_record.fields {
                 let source_field = source_record
                     .fields
                     .get(field_name)
                     .expect("planned record field should exist in source record");
                 field.field_type =
-                    proto::planned_record_field_type(source_record, field_name, capabilities, self)
+                    proto::planned_record_field_type(source_record, field_name, self)
                         .unwrap_or_else(|| {
                             self.planned_type_from_authored(
                                 source_field.field_type.without_option(),
@@ -639,14 +587,7 @@ impl<'a> TypePlanningContext<'a> {
                             type_name: type_ref.as_str().to_string(),
                         }
                     })?;
-                Ok(Some(proto::planned_type_for_message(
-                    input_message,
-                    self.root_model_capabilities
-                        .get(&input_message.full_name)
-                        .copied()
-                        .unwrap_or_else(|| self.operation_proto_input_capabilities()),
-                    self,
-                )))
+                Ok(Some(proto::planned_type_for_message(input_message, self)))
             }
             Some(TypeSpec::External(ExternalTypeSpec::Json(json_type))) => Ok(Some(
                 TypeSpec::External(ExternalTypeSpec::Json(self.map_json_type(json_type))),
@@ -661,10 +602,7 @@ impl<'a> TypePlanningContext<'a> {
                         operation: operation.name.clone(),
                         type_name: record_name.as_str().to_string(),
                     })?;
-                Ok(Some(TypeSpec::Record(self.plan_record_type(
-                    &record,
-                    record_wire_capabilities(&record),
-                ))))
+                Ok(Some(TypeSpec::Record(self.plan_record_type(&record))))
             }
             Some(TypeSpec::Resource(resource_name)) => Err(Error::InvalidWit {
                 path: std::path::PathBuf::from("<api-plan>"),
@@ -695,14 +633,7 @@ impl<'a> TypePlanningContext<'a> {
                             operation: operation.name.clone(),
                             type_name: output_proto.as_str().to_string(),
                         })?;
-                Ok(Some(proto::planned_type_for_message(
-                    output_message,
-                    self.root_model_capabilities
-                        .get(&output_message.full_name)
-                        .copied()
-                        .unwrap_or_else(|| self.operation_proto_output_capabilities()),
-                    self,
-                )))
+                Ok(Some(proto::planned_type_for_message(output_message, self)))
             }
             Some(TypeSpec::External(ExternalTypeSpec::Json(json_type))) => Ok(Some(
                 TypeSpec::External(ExternalTypeSpec::Json(self.map_json_type(json_type))),
@@ -717,10 +648,7 @@ impl<'a> TypePlanningContext<'a> {
                         operation: operation.name.clone(),
                         type_name: record_name.as_str().to_string(),
                     })?;
-                Ok(Some(TypeSpec::Record(self.plan_record_type(
-                    &record,
-                    record_wire_capabilities(&record),
-                ))))
+                Ok(Some(TypeSpec::Record(self.plan_record_type(&record))))
             }
             Some(TypeSpec::Resource(resource_name)) => Ok(Some(TypeSpec::Resource(
                 self.plan_operation_resource_type(service, operation, resource_name)?,
@@ -776,22 +704,6 @@ impl<'a> TypePlanningContext<'a> {
             type_name: resource.as_str().to_upper_camel_case(),
             wire_type: Some(wire_type),
         })
-    }
-
-    fn operation_proto_input_capabilities(&self) -> ModelWireCapabilities {
-        if self.language == Language::Python {
-            ModelWireCapabilities::BIDIRECTIONAL
-        } else {
-            ModelWireCapabilities::TO_WIRE
-        }
-    }
-
-    fn operation_proto_output_capabilities(&self) -> ModelWireCapabilities {
-        if matches!(self.language, Language::Go | Language::Python) {
-            ModelWireCapabilities::BIDIRECTIONAL
-        } else {
-            ModelWireCapabilities::TO_WIRE
-        }
     }
 
     fn plan_resource(
@@ -892,28 +804,17 @@ impl<'a> TypePlanningContext<'a> {
     pub(super) fn plan_record_type(
         &mut self,
         record: &RecordSpec<OperationLoweredFamily>,
-        requested_capabilities: ModelWireCapabilities,
     ) -> PlannedRecordType {
         let planned_record = PlannedRecordType {
             full_name: record.full_name.clone(),
             model_name: record.name.clone(),
         };
-        self.ensure_record_model_plan(record, requested_capabilities);
+        self.ensure_record_model_plan(record);
         planned_record
     }
 
-    fn ensure_record_model_plan(
-        &mut self,
-        record: &RecordSpec<OperationLoweredFamily>,
-        requested_capabilities: ModelWireCapabilities,
-    ) {
-        if let Some(existing) = self.record_plans.get_mut(&record.full_name) {
-            let previous_capabilities = existing.capabilities;
-            existing.capabilities.merge(requested_capabilities);
-            let merged_capabilities = existing.capabilities;
-            if previous_capabilities != merged_capabilities {
-                self.ensure_record_field_capabilities(record, merged_capabilities);
-            }
+    fn ensure_record_model_plan(&mut self, record: &RecordSpec<OperationLoweredFamily>) {
+        if self.record_plans.contains_key(&record.full_name) {
             return;
         }
 
@@ -921,93 +822,8 @@ impl<'a> TypePlanningContext<'a> {
             record.full_name.clone(),
             PlannedRecordData {
                 proto: proto::record_proto_info(record, &self.spec, self.descriptors),
-                capabilities: requested_capabilities,
             },
         );
-
-        self.ensure_record_field_capabilities(record, requested_capabilities);
-    }
-
-    fn ensure_record_field_capabilities(
-        &mut self,
-        record: &RecordSpec<OperationLoweredFamily>,
-        requested_capabilities: ModelWireCapabilities,
-    ) {
-        let field_types = record
-            .fields
-            .iter()
-            .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
-            .map(|(field_name, field)| (field_name.as_str(), &field.field_type))
-            .map(|(field_name, field_type)| {
-                proto::planned_record_field_type(record, field_name, requested_capabilities, self)
-                    .unwrap_or_else(|| self.planned_type_from_authored(field_type))
-            })
-            .collect::<Vec<_>>();
-        for field_type in field_types {
-            self.ensure_planned_type_capabilities(&field_type, requested_capabilities);
-        }
-    }
-
-    fn ensure_planned_type_capabilities(
-        &mut self,
-        kind: &PlannedType,
-        requested_capabilities: ModelWireCapabilities,
-    ) {
-        match kind {
-            TypeSpec::Option(inner) | TypeSpec::List(inner) => {
-                self.ensure_planned_type_capabilities(inner, requested_capabilities);
-            }
-            TypeSpec::Map(key, value) => {
-                self.ensure_planned_type_capabilities(key, requested_capabilities);
-                self.ensure_planned_type_capabilities(value, requested_capabilities);
-            }
-            TypeSpec::Record(record_type) => {
-                if let Some(record) = self.spec.record(&record_type.full_name).cloned() {
-                    self.plan_record_type(&record, requested_capabilities);
-                }
-            }
-            TypeSpec::Variant(variant_type) => {
-                if let Some(variant) = self.spec.variant(&variant_type.full_name).cloned() {
-                    for case in &variant.cases {
-                        if let Some(payload) = &case.payload {
-                            let payload = self.planned_type_from_authored(payload);
-                            self.ensure_planned_type_capabilities(&payload, requested_capabilities);
-                        }
-                    }
-                }
-            }
-            TypeSpec::Resource(resource) => {
-                if let Some(wire_type) = &resource.wire_type {
-                    self.ensure_planned_type_capabilities(
-                        &TypeSpec::External(wire_type.clone()),
-                        requested_capabilities,
-                    );
-                }
-            }
-            TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) => {
-                if let Some(message) = self.descriptors.message(&message.proto.full_name).cloned() {
-                    proto::planned_type_for_message(&message, requested_capabilities, self);
-                }
-            }
-            TypeSpec::External(ExternalTypeSpec::Json(_)) => {}
-            TypeSpec::External(ExternalTypeSpec::Alias { target, .. }) => {
-                self.ensure_planned_type_capabilities(target, requested_capabilities);
-            }
-            TypeSpec::Result { ok, err } => {
-                if let Some(ok) = ok.as_deref() {
-                    self.ensure_planned_type_capabilities(ok, requested_capabilities);
-                }
-                if let Some(err) = err.as_deref() {
-                    self.ensure_planned_type_capabilities(err, requested_capabilities);
-                }
-            }
-            TypeSpec::Tuple(items) => {
-                for item in items {
-                    self.ensure_planned_type_capabilities(item, requested_capabilities);
-                }
-            }
-            _ => {}
-        }
     }
 
     fn planned_external_type_from_resource(
@@ -1271,11 +1087,7 @@ impl<'a> TypePlanningContext<'a> {
                 .spec
                 .record(record_name.as_str())
                 .cloned()
-                .map(|record| {
-                    TypeSpec::Record(
-                        self.plan_record_type(&record, ModelWireCapabilities::default()),
-                    )
-                })
+                .map(|record| TypeSpec::Record(self.plan_record_type(&record)))
                 .unwrap_or(TypeSpec::String),
             TypeSpec::Enum(enum_name) => self
                 .spec
@@ -1368,50 +1180,6 @@ impl<'a> TypePlanningContext<'a> {
     }
 }
 
-fn root_model_capabilities(
-    spec: &ApiSpec<OperationLoweredFamily>,
-    descriptors: &DescriptorIndex,
-    language: Language,
-) -> Result<BTreeMap<String, ModelWireCapabilities>> {
-    let mut capabilities: BTreeMap<String, ModelWireCapabilities> = BTreeMap::new();
-
-    for service in &spec.services {
-        for operation in &service.operations {
-            if language == Language::Python
-                && let Some(TypeSpec::External(ExternalTypeSpec::Proto(input_proto))) =
-                    operation.input_type()
-                && let Some(input_message) = descriptors.message(input_proto.as_str())
-            {
-                capabilities
-                    .entry(input_message.full_name.clone())
-                    .or_default()
-                    .merge(ModelWireCapabilities::BIDIRECTIONAL);
-            }
-
-            if matches!(language, Language::Go | Language::Python)
-                && let Some(TypeSpec::External(ExternalTypeSpec::Proto(output_proto))) =
-                    operation.output_type()
-                && let Some(output_message) = descriptors.message(output_proto.as_str())
-            {
-                capabilities
-                    .entry(output_message.full_name.clone())
-                    .or_default()
-                    .merge(ModelWireCapabilities::BIDIRECTIONAL);
-            }
-        }
-    }
-
-    Ok(capabilities)
-}
-
-fn record_wire_capabilities(record: &RecordSpec<OperationLoweredFamily>) -> ModelWireCapabilities {
-    if record.data.is_operation_output_intermediate {
-        ModelWireCapabilities::BIDIRECTIONAL
-    } else {
-        ModelWireCapabilities::default()
-    }
-}
-
 fn plan_operation_resource_return(
     output_resource_return: Option<&ResolvedResourceReturnSpec>,
 ) -> Option<PlannedOperationResourceReturn> {
@@ -1462,7 +1230,6 @@ impl CompilerPass<OperationLoweredFamily, PlannedFamily> for TypePlanningPass<'_
                 .get(&leaf.module_path)
                 .cloned()
                 .unwrap_or_default(),
-            module_exports: module_export_names(&leaf.spec),
         };
         let mut planner = TypePlanningContext::new(
             leaf.spec.clone(),
@@ -1470,7 +1237,6 @@ impl CompilerPass<OperationLoweredFamily, PlannedFamily> for TypePlanningPass<'_
             self.descriptors,
             self.language,
         )?;
-        planner.plan_module_exports();
         let lowered = planner.plan_operations()?;
         let source_spec = planner.spec.clone();
         let mut planned = planner.plan_spec(source_spec);
@@ -1491,7 +1257,7 @@ impl CompilerPass<OperationLoweredFamily, PlannedFamily> for TypePlanningPass<'_
 struct SelectedToOperationLoweredMapper;
 
 impl ApiSpecTransform<SelectedFamily, OperationLoweredFamily> for SelectedToOperationLoweredMapper {
-    fn map_spec_data(&mut self, _: ()) {}
+    fn map_spec_data(&mut self, _data: ()) {}
     fn map_record(&mut self, value: Symbol) -> Symbol {
         value
     }
@@ -1516,16 +1282,8 @@ impl ApiSpecTransform<SelectedFamily, OperationLoweredFamily> for SelectedToOper
     fn map_alias(&mut self, value: Symbol) -> Symbol {
         value
     }
-    fn map_service_data(
-        &mut self,
-        _: &str,
-        data: crate::spec::AuthoredServiceData,
-    ) -> crate::spec::AuthoredServiceData {
-        data
-    }
-    fn map_record_data(&mut self, _: &str, _: ()) -> OperationLoweredRecordData {
-        OperationLoweredRecordData::default()
-    }
+    fn map_service_data(&mut self, _: &str, _: ()) {}
+    fn map_record_data(&mut self, _: &str, _: ()) {}
     fn map_resource_data(&mut self, _: &str, _: ()) -> OperationBoundResource {
         OperationBoundResource { resolved: None }
     }
@@ -1545,28 +1303,6 @@ impl ApiSpecTransform<SelectedFamily, OperationLoweredFamily> for SelectedToOper
 }
 
 impl TypePlanningContext<'_> {
-    fn plan_module_exports(&mut self) {
-        let requested_capabilities = if self.language == Language::Python {
-            ModelWireCapabilities::BIDIRECTIONAL
-        } else {
-            ModelWireCapabilities::default()
-        };
-        for name in self.spec_data.module_exports.clone() {
-            let Some(declaration) = self.spec.types.get(&name).cloned() else {
-                continue;
-            };
-            let authored_type = match declaration {
-                TypeDeclSpec::Record(_) => TypeSpec::Record(Symbol::new(name)),
-                TypeDeclSpec::Enum(_) => TypeSpec::Enum(Symbol::new(name)),
-                TypeDeclSpec::Flags(_) => TypeSpec::Flags(Symbol::new(name)),
-                TypeDeclSpec::Variant(_) => TypeSpec::Variant(Symbol::new(name)),
-                TypeDeclSpec::External(binding) => TypeSpec::External(binding.external_type),
-            };
-            let planned_type = self.planned_type_from_authored(&authored_type);
-            self.ensure_planned_type_capabilities(&planned_type, requested_capabilities);
-        }
-    }
-
     fn plan_operations(&mut self) -> Result<PlannedOperations> {
         let services = self.spec.services.clone();
         let mut operations = IndexMap::new();
@@ -1603,6 +1339,66 @@ mod tests {
                 panic!("descriptor-only proto reference should stay external");
             };
             assert_eq!(message.proto.full_name, proto_name);
+        }
+    }
+
+    #[test]
+    fn grouped_oneof_plans_as_an_ordinary_variant_field() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let spec = crate::parser::load_api_spec_from_wit_for_language_with_inputs(
+            Language::Python,
+            &[
+                root.join("advanced/samples/inputs/proto-oneof.wit"),
+                root.join("advanced/samples/inputs/deps"),
+            ],
+        )
+        .unwrap();
+        let plan = plan_single_leaf(spec);
+        let record = plan
+            .records()
+            .map(|(_, record)| record)
+            .find(|record| {
+                record
+                    .data
+                    .proto
+                    .as_ref()
+                    .is_some_and(|proto| proto.full_name == "temporal.api.update.v1.Outcome")
+            })
+            .expect("proto-backed outcome record should be planned");
+        assert_eq!(
+            record
+                .data
+                .proto
+                .as_ref()
+                .map(|proto| proto.full_name.as_str()),
+            Some("temporal.api.update.v1.Outcome")
+        );
+        let field = record.fields.get("value").expect("grouped field");
+        assert!(matches!(field.field_type, PlannedType::Variant(_)));
+        assert_eq!(field.data.has_presence, Some(true));
+        let Some(super::PlannedWireFieldBinding::VariantMembers { wire_name, members }) =
+            &field.data.wire_binding
+        else {
+            panic!("grouped field should retain its wire variant members");
+        };
+        assert_eq!(wire_name, "value");
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| member.wire_name.as_str())
+                .collect::<Vec<_>>(),
+            ["success", "failure"]
+        );
+        for (member, expected_type) in members.iter().zip([
+            "temporal.api.common.v1.Payloads",
+            "temporal.api.failure.v1.Failure",
+        ]) {
+            let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) =
+                &member.wire_type
+            else {
+                panic!("oneof member should retain its external wire type");
+            };
+            assert_eq!(message.proto.full_name, expected_type);
         }
     }
 
@@ -1675,7 +1471,7 @@ mod tests {
                     data: (),
                 }],
                 resources: Vec::new(),
-                data: crate::spec::AuthoredServiceData::default(),
+                data: (),
             }],
             types: BTreeMap::new(),
         }

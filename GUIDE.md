@@ -1175,9 +1175,8 @@ record response {
 ```
 
 Python performs bidirectional oneof conversion using tagged tuples such as
-`("success", value)`. Other targets reject a reachable protobuf-backed model
-that requires oneof wire conversion; unused declarations, omitted oneofs, and
-models that do not require wire conversion remain valid.
+`("success", value)`. Other targets reject a reachable model containing a 
+oneof they cannot convert; unreachable declarations and omitted oneofs remain valid.
 
 ---
 

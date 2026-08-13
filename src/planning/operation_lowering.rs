@@ -11,22 +11,13 @@ use crate::error::{Error, Result};
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 use crate::spec::{
     ApiSpecTransform, AuthoredResourceType, ExternalTypeSpec, JsonModelSpec, RecordFieldSpec,
-    RecordFieldVisibility, RecordSpec, Symbol, TypeDeclSpec, TypeSpec,
+    RecordFieldVisibility, RecordSpec, Symbol, TypeDeclEntry, TypeDeclSpec, TypeSpec,
 };
 
 use super::{
     OperationBoundFamily, OperationBoundOperation, OperationBoundResource,
     ResolvedResourceBindingSource, SelectedSupportSpec, SelectedTextSpec,
 };
-
-/// Metadata attached to records after operation lowering.
-///
-/// A marked record is the intermediate, wire-facing output for an operation
-/// whose authored return is a proto-backed resource.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct OperationLoweredRecordData {
-    pub(crate) is_operation_output_intermediate: bool,
-}
 
 /// Operation-bound IR after resource-return structures become explicit records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,8 +33,8 @@ impl crate::spec::TypeFamily for OperationLoweredFamily {
     type Proto = Symbol;
     type Json = JsonModelSpec<Symbol>;
     type Alias = Symbol;
-    type ServiceData = crate::spec::AuthoredServiceData;
-    type RecordData = OperationLoweredRecordData;
+    type ServiceData = ();
+    type RecordData = ();
     type ResourceData = OperationBoundResource;
     type OperationData = OperationBoundOperation;
     type FieldData = ();
@@ -105,9 +96,7 @@ impl CompilerPass<OperationBoundFamily, OperationLoweredFamily> for OperationLow
                         experimental: operation.experimental,
                         flatten_in_api: false,
                         fields: resource_result_fields(resource_return),
-                        data: OperationLoweredRecordData {
-                            is_operation_output_intermediate: true,
-                        },
+                        data: (),
                     },
                 ));
             }
@@ -116,7 +105,7 @@ impl CompilerPass<OperationBoundFamily, OperationLoweredFamily> for OperationLow
         for (full_name, record) in generated_records {
             spec.types
                 .entry(full_name)
-                .or_insert(TypeDeclSpec::Record(record));
+                .or_insert_with(|| TypeDeclEntry::new(TypeDeclSpec::Record(record)));
         }
 
         Ok(ApiSpecLeaf {
@@ -164,7 +153,7 @@ fn resource_result_fields(
 struct OperationLoweringMapper;
 
 impl ApiSpecTransform<OperationBoundFamily, OperationLoweredFamily> for OperationLoweringMapper {
-    fn map_spec_data(&mut self, _: ()) {}
+    fn map_spec_data(&mut self, _data: ()) {}
     fn map_record(&mut self, value: Symbol) -> Symbol {
         value
     }
@@ -189,16 +178,8 @@ impl ApiSpecTransform<OperationBoundFamily, OperationLoweredFamily> for Operatio
     fn map_alias(&mut self, value: Symbol) -> Symbol {
         value
     }
-    fn map_service_data(
-        &mut self,
-        _: &str,
-        data: crate::spec::AuthoredServiceData,
-    ) -> crate::spec::AuthoredServiceData {
-        data
-    }
-    fn map_record_data(&mut self, _: &str, _: ()) -> OperationLoweredRecordData {
-        OperationLoweredRecordData::default()
-    }
+    fn map_service_data(&mut self, _: &str, _: ()) {}
+    fn map_record_data(&mut self, _: &str, _: ()) {}
     fn map_resource_data(
         &mut self,
         _: &str,
