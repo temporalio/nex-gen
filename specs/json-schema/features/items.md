@@ -106,14 +106,15 @@ Notes:
   whole collection. The two axes compose (an optional array of nullable
   elements is legal), and neither implies the other: an optional array of
   nullable elements is `list[T | None] | None`, not `list[T | None]`.
-- **A union element is named.** An element schema that is a `oneOf` *sum
-  type* (two or more non-`null` branches) is named after its position at
-  load — `<EnclosingType><Property>Item`, `…ItemItem` for a nested array —
-  moved into `$defs`, and the element rewritten to a `$ref`, so the element
-  type is an ordinary named union in every target (see [[oneOf]] §"Unions in
-  element positions"). Go and Java decode such an element through the
-  union's dispatcher one value at a time — neither can allocate a sealed
-  interface from a whole-collection decode.
+- **An inline element shape is named.** An element schema that is an
+  **object** or a `oneOf` *sum type* (two or more non-`null` branches) is
+  named after its position at load — `<EnclosingType><Property>Item`,
+  `…ItemItem` for a nested array — moved into `$defs`, and the element
+  rewritten to a `$ref`, so the element type is an ordinary named model or
+  union in every target (see [[properties]] §"Naming an inline object shape"
+  and [[oneOf]] §"Unions in element positions"). Go and Java decode a *union*
+  element through the union's dispatcher one value at a time — neither can
+  allocate a sealed interface from a whole-collection decode.
 - **Java** uses `List<T>` (interface type; the concrete `ArrayList` is an
   implementation detail of the deserializer). `List<T>` is a reference
   type, so it carries a non-null validator rather than boxing (see
@@ -176,7 +177,7 @@ of the value and is preserved).
 | Shape | Example |
 |---|---|
 | List of scalars | `{type:array, items:{type:string}}` |
-| List of objects | `{type:array, items:{type:object, properties:{id:{type:integer}}}}` |
+| List of objects (element named after the position) | `{type:array, items:{type:object, properties:{id:{type:integer}}}}` |
 | Nested array | `{type:array, items:{type:array, items:{type:integer}}}` |
 | Element with assertions | `{type:array, items:{type:string, minLength:1}}` |
 | Nullable elements | `{type:array, items:{oneOf:[{type:string},{type:null}]}}` |

@@ -132,11 +132,15 @@ admitted for completeness, not recommended; the diagnostic on a missing
 override points at both remedies.
 
 The **free-form object** (`type: object` with `additionalProperties: true`
-and no declared `properties`) is the exception that needs no name at all: it
-declares no shape to emit, so TS and Python express it structurally
-(`Record<string, unknown>` / `dict[str, Any]`) and only Go and Java wrap it —
-as `<Union>Object` over the verbatim member map ([[additionalProperties]],
-**P13**). It is left inline rather than hoisted.
+and no declared `properties`) is the exception that needs no name at all *as
+a branch*: it declares no shape to emit, so TS and Python express it
+structurally inside the value union (`Record<string, unknown>` /
+`dict[str, Any]`) and only Go and Java wrap it — as `<Union>Object` over the
+verbatim member map ([[additionalProperties]], **P13**). It is left inline
+rather than hoisted. This is specific to the branch position: written in a
+value position of its own — a property, an element, a map member — a free-form
+object *is* named and hoisted like any other object ([[properties]] §"Naming
+an inline object shape").
 
 ### Discriminated object unions — the `const`-tag
 
@@ -239,6 +243,9 @@ rejects a collision rather than mangling — the rules every synthesized name
 follows. Because the hoist runs to a fixpoint, an inline *object branch* of a
 hoisted element union is named in turn (`BagValuesItemObject`), so the
 element position needs no `$defs` boilerplate from the author for any shape.
+An inline *object* in an element position is named by the same rule and the
+same table ([[properties]] §"Naming an inline object shape") — the positions
+and their names are shared; only what occupies them differs.
 
 Two consequences worth stating:
 

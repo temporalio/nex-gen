@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- JSON Schema: An `x-<lang>-name` alongside a `$ref` is no longer merged as an
+  implicit-`allOf` conjunct, which cloned the referenced target into the use site.
+  It names the *member* the reference is bound to and leaves the reference intact
+  — the one sibling keyword treated this way, because it asserts nothing about the
+  value, and the only way to rename a member whose type is a `$ref` (a member
+  named `class` was otherwise unfixable in Python and Java).
 - Generating into an existing `--output` directory no longer deletes it first.
   The directory is written into instead, so pre-existing files and
   subdirectories are preserved; generated files are still overwritten in place.
@@ -72,6 +78,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema: An object written **inline** in a value position — a property, an
+  array element at any depth, a typed `additionalProperties` member — had its
+  declared shape silently discarded. Go, TypeScript, and Python typed the member
+  as an opaque map (`map[string]json.RawMessage` / `Record<string, unknown>` /
+  `dict[str, Any]`) and Java as `String`, so declared properties and member
+  constraints never reached the generated code; Go additionally never decoded the
+  member at all, leaving the value neither typed nor preserved in the catch-all.
+  Every inline object is now named after its position (`<Model><Property>`,
+  `<Enclosing>Item`, `<Enclosing>Value`), moved into `$defs`, and the position
+  rewritten to a `$ref`, so it emits as the ordinary named model the
+  `$defs` + `$ref` form produces — materialized, validated, exported, and
+  round-tripped identically in all four languages. Nullability no longer changes
+  the name: the object inside a `oneOf: [{object}, {"type":"null"}]` wrapper takes
+  the position's name too. This covers every object shape, including a typed map
+  and the free-form object, whose member-count and key-shape constraints were
+  dropped along with the rest.
 - JSON Schema: A union-typed array element or map member decoded through the
   whole-collection path, which cannot allocate a sealed interface: Go failed at
   runtime on `[]Union` / `map[string]Union` (`json.Unmarshal` into an interface)

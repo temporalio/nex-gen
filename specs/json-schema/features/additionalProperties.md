@@ -124,6 +124,16 @@ This buys two things:
    namespaces unambiguous — the canonicalizer touches declared members
    only, extras pass through untouched.
 
+Shape stability is also why an object written **inline** in a value position —
+a property, an array element, a map member — is *named after that position and
+hoisted into `$defs`* rather than lowered to a bare map at the use site (see
+[[properties]] §"Naming an inline object shape"). It is the same aggregate
+either way, so `{type:object, additionalProperties:true}` written on a property
+and a `$ref` at an authored definition of that shape emit identical code, and
+adding `properties` to the inline form later still only adds fields. The one
+position where a free-form object stays inline is a [[oneOf]] branch, where it
+is the union's object *kind* rather than a position of its own.
+
 For TS specifically, the named member also sidesteps the index-signature
 conformance limit: a *typed* index signature (`[k: string]: T`) is
 illegal alongside heterogeneous declared props (TS2411 — a declared
@@ -256,6 +266,7 @@ unambiguous in both directions.
 | Typed map | `{type:object, additionalProperties:{type:string}}` |
 | **Typed extras + `properties`** | `{type:object, properties:{id:{type:integer}}, additionalProperties:{type:string}}` |
 | Closed empty object | `{type:object, additionalProperties:false}` |
+| Any of the above written **inline** on a property / element / map member | named after its position and hoisted ([[properties]]); emits identically to the `$defs` + `$ref` form |
 
 ### Rejected at load time (negative)
 
