@@ -30,6 +30,22 @@ properties:
       - { type: string }
 "#;
 
+/// A union whose **non-object** branches each declare constraints of their own:
+/// once the wire token selects a branch, the value is held to everything that
+/// branch declares — including a closed value set — in both directions.
+const BRANCH_CONSTRAINT_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, minLength: 3, pattern: "^[a-z]+$" }
+      - { type: integer, minimum: 1 }
+  listOrName:
+    oneOf:
+      - { type: array, items: { type: number }, minItems: 1, uniqueItems: true }
+      - { type: string, enum: [auto, manual] }
+"#;
+
 /// Unions in positions with no property of their own: an array element (inline
 /// and `$ref`), a map member (inline), plus a nullable element for contrast.
 const ELEMENT_UNION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
@@ -1739,6 +1755,54 @@ fn go_json_decodes_element_position_unions() {
     assert!(rendered.contains("if value, ok := unmarshalEntriesValue(v, k, &errs); ok {"));
     // Element nullability stays the element's own concern.
     assert!(rendered.contains("Slots []*string `json:\"slots,omitempty\"`"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Every constraint a **non-object** branch declares is carried into the
+/// wrapper's `Validate`, which the dispatcher calls on the way in and
+/// `MarshalJSON` re-runs before emit (P12). A `pattern` on a branch compiles to a
+/// package-level regex var keyed by the wrapper type, and a closed value set is
+/// checked against the wire literals (the wrapper has no field to hang value
+/// constants off). See `specs/json-schema/features/oneOf.md` ("Validator mapping").
+#[test]
+fn go_json_validates_non_object_union_branch_constraints() {
+    let temp_dir = unique_output_path("go-json-branch-constraints");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bc.yaml");
+    fs::write(&input_path, BRANCH_CONSTRAINT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bc");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("bc.go")).unwrap();
+
+    // The string branch: length, then the pattern through its own compiled var.
+    assert!(rendered.contains("var bcValueStringPattern = regexp.MustCompile(\"^[a-z]+$\")"));
+    assert!(rendered.contains("must have length >= 3, got %d"));
+    assert!(rendered.contains("if !bcValueStringPattern.MatchString(string(v)) {"));
+    // The integer branch's own bound.
+    assert!(rendered.contains("if int64(v) < 1 {"));
+    assert!(rendered.contains("must be >= 1, got %v"));
+    // The array branch's bounds, over the wrapper's underlying slice.
+    assert!(rendered.contains("if n := len([]float64(v)); n < 1 {"));
+    assert!(rendered.contains("duplicate items: element at index %d equals index %d"));
+    // A closed value set on a branch is a membership check over the wire values.
+    assert!(rendered.contains("switch string(v) {"));
+    assert!(rendered.contains("case \"auto\", \"manual\":"));
+    // The dispatcher runs the selected branch's `Validate`, and so does the
+    // model's own `Validate` (which `MarshalJSON` calls before emit).
+    assert!(rendered.contains("v := BcValueString(s)\n\t\tmergeNested(errs, path, v.Validate())"));
+    assert!(rendered.contains("mergeNested(&errs, \"value\", m.Value.Validate())"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

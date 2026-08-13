@@ -21,14 +21,30 @@ import org.jspecify.annotations.Nullable;
 public interface ShowcaseSegmentsItem {
     static @Nullable ShowcaseSegmentsItem fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
         if (node.isTextual()) {
-            return new ShowcaseSegmentsItemString(node.textValue());
+            ShowcaseSegmentsItemString wrapped = new ShowcaseSegmentsItemString(node.textValue());
+            wrapped.validate(path, violations);
+            return wrapped;
         }
         if (node.isNumber()) {
             Long parsed = SpecNumbers.specLong(node, path, violations);
-            return parsed == null ? null : new ShowcaseSegmentsItemInteger(parsed);
+            if (parsed == null) {
+                return null;
+            }
+            ShowcaseSegmentsItemInteger wrapped = new ShowcaseSegmentsItemInteger(parsed);
+            wrapped.validate(path, violations);
+            return wrapped;
         }
         violations.add(new Violation(path, "expected one of: string, integer"));
         return null;
+    }
+
+    static void validate(ShowcaseSegmentsItem value, String path, List<Violation> violations) {
+        if (value instanceof ShowcaseSegmentsItemString) {
+            ((ShowcaseSegmentsItemString) value).validate(path, violations);
+        }
+        if (value instanceof ShowcaseSegmentsItemInteger) {
+            ((ShowcaseSegmentsItemInteger) value).validate(path, violations);
+        }
     }
 
     public static final class ShowcaseSegmentsItemString implements ShowcaseSegmentsItem {
@@ -41,6 +57,13 @@ public interface ShowcaseSegmentsItem {
         @JsonValue
         public String getValue() {
             return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            int length = value.codePointCount(0, value.length());
+            if (length < 2) {
+                violations.add(new Violation(path, "must have length >= 2, got " + length));
+            }
         }
 
         @Override
@@ -75,6 +98,12 @@ public interface ShowcaseSegmentsItem {
         @JsonValue
         public long getValue() {
             return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (value < 0L) {
+                violations.add(new Violation(path, "must be >= 0, got " + value));
+            }
         }
 
         @Override

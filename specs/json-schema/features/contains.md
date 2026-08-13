@@ -129,7 +129,7 @@ pushed.
 |---|---|
 | Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding into the `[]T`: `matched := false; for _, e := range v { if matchesContains(e) { matched = true; break } }; if !matched { push(Violation{Path, Reason: "no element matches the required schema"}) }`, collected into one `ValidationError`. `matchesContains` reuses the matcher's own scalar predicates. |
 | TypeScript | After the `Array.isArray` guard ([[items]]), the shared `Validate` scans: ``if (!v.some(e => matchesContains(e))) push(Violation{path, reason})``, throwing one `ValidationError`. |
-| Python | A `model_validator` over the decoded `list[T]` (Pydantic v2 has no native `contains`): `if not any(_matches_contains(e) for e in v): raise InitErrorDetails(...)`, aggregated into `pydantic.ValidationError`. |
+| Python | A `model_validator` over the decoded `list[T]` (Pydantic v2 has no native `contains`): `if not any(_matches_contains(e) for e in v): raise InitErrorDetails(...)`, aggregated into `pydantic.ValidationError`. In a position with **no declared field** to key a model validator on — a typed map's member, a [[oneOf]] branch — the same count predicate rides in the annotation as a `_check_contains` AfterValidator, with the identical reasons. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `List<T>`, scans against the matcher predicate, and on no match pushes a `Violation{path, reason}` into the single `ValidationException`. Not bean-validation. |
 
 Reason strings name **what was required**, not a bare keyword — the matcher

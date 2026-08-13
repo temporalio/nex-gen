@@ -3403,9 +3403,13 @@ fn validate_one_of(
     // Classify every branch by kind, resolving `$ref` branches to their target.
     let mut kinds: Vec<BranchKind> = Vec::with_capacity(branches.len());
     let mut object_schemas: Vec<Schema> = Vec::new();
+    let mut non_object_schemas: Vec<Schema> = Vec::new();
     for branch in branches {
         let resolved = resolve_branch_schema(branch, path, canonical_path, docs, models)?;
         let kind = one_of_branch_kind(branch, &resolved, path, context)?;
+        if kind != BranchKind::Object && kind != BranchKind::Null {
+            non_object_schemas.push(resolved.clone());
+        }
         if kind == BranchKind::Object {
             // An inline object branch that declares a shape is named and moved
             // into `$defs` by `hoist_inline_object_shapes`, so by now it is a
@@ -3512,6 +3516,47 @@ fn validate_one_of(
     // is the degenerate nullability pattern ([[nullability]] owns it); a lone
     // non-null branch with no `null` is a single-branch wrapper (already
     // rejected above). Two or more non-null branches form the sum type.
+    let non_null = kinds
+        .iter()
+        .filter(|kind| **kind != BranchKind::Null)
+        .count();
+    if non_null >= 2 {
+        for branch in &non_object_schemas {
+            reject_materialized_branch_keyword(path, branch, context)?;
+        }
+    }
+    Ok(())
+}
+
+/// Rejects a **materializing** keyword on a non-object branch of a `oneOf` *sum
+/// type*: a temporal [[format]] or a [[contentEncoding]]. Both replace the wire
+/// `string` with a native typed value (`time.Time` / `OffsetDateTime` /
+/// `datetime` / `Temporal.*`, `[]byte` / `byte[]` / `bytes`), and the synthesized
+/// `<Union><Kind>` wrapper has no such type today — Python would materialize the
+/// branch while Go, TypeScript, and Java carried an unvalidated `string`, which is
+/// exactly the silent per-target divergence **P1** forbids. Deferred loudly (**P6**)
+/// rather than approximated; see `specs/json-schema/features/oneOf.md` §Deferred.
+///
+/// Scoped to the sum type: the [[nullability]] pattern `oneOf:[{T},{null}]` has a
+/// single non-null branch and no wrapper at all, so a materialized nullable
+/// field keeps working ([[format]], [[contentEncoding]]).
+fn reject_materialized_branch_keyword(path: &Path, branch: &Schema, context: &str) -> Result<()> {
+    let reject = |keyword: &str, value: &str, native: &str| {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "{context}: a `oneOf` branch cannot declare `{keyword}: {value}` — it materializes a native {native} value, which a `oneOf` branch has no wrapper type for yet; drop the `{keyword}` to keep the branch a plain `string`, or carry the value as a property of an object branch"
+            ),
+        })
+    };
+    if let Some(Value::String(format)) = branch.extra.get("format")
+        && crate::json_schema::format::TEMPORAL_FORMATS.contains(&format.as_str())
+    {
+        return reject("format", format, "date/time");
+    }
+    if let Some(Value::String(encoding)) = branch.extra.get("contentEncoding") {
+        return reject("contentEncoding", encoding, "binary");
+    }
     Ok(())
 }
 
@@ -8632,6 +8677,82 @@ properties:
 "#,
         )
         .expect("nullable multi-kind union should load");
+    }
+
+    #[test]
+    fn accepts_constrained_non_object_union_branches() {
+        union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, minLength: 3, pattern: "^[a-z]+$", format: uuid }
+      - { type: integer, minimum: 0 }
+  listOrName:
+    oneOf:
+      - { type: array, items: { type: number }, minItems: 1, uniqueItems: true }
+      - { type: string, enum: [auto, manual] }
+"#,
+        )
+        .expect("a non-object branch may carry its own constraints");
+    }
+
+    #[test]
+    fn rejects_materialized_temporal_format_on_a_sum_type_branch() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, format: date-time }
+      - { type: integer }
+"#,
+        );
+        assert!(error.contains("`format: date-time`"), "{error}");
+        assert!(error.contains("no wrapper type"), "{error}");
+    }
+
+    #[test]
+    fn rejects_materialized_content_encoding_on_a_sum_type_branch() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, contentEncoding: base64 }
+      - { type: integer }
+"#,
+        );
+        assert!(error.contains("`contentEncoding: base64`"), "{error}");
+    }
+
+    #[test]
+    fn accepts_materialized_keywords_on_a_nullable_branch() {
+        // The nullability `oneOf` has a single non-null branch and synthesizes no
+        // wrapper, so a materialized nullable field is unaffected by the sum-type
+        // deferral above.
+        union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  when:
+    oneOf:
+      - { type: string, format: date-time }
+      - { type: "null" }
+  blob:
+    oneOf:
+      - { type: string, contentEncoding: base64 }
+      - { type: "null" }
+"#,
+        )
+        .expect("a nullable materialized field should load");
     }
 
     #[test]

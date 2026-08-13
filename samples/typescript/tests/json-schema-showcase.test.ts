@@ -471,6 +471,74 @@ describe("json-schema showcase generated definitions", () => {
     ).toThrow(/unknown discriminator kind triangle/);
   });
 
+  test("holds a union member to the constraints of the branch it selects", () => {
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+    const mapper = new ShowcaseMapper();
+
+    // The string branch's own `minLength` and the integer branch's own
+    // `minimum` — each enforced only for the branch the token selects.
+    expect(mapper.fromIntermediate({ ...base, idOrName: "abc" }).idOrName).toBe("abc");
+    expect(mapper.fromIntermediate({ ...base, idOrName: 1 }).idOrName).toBe(1);
+    expect(() => mapper.fromIntermediate({ ...base, idOrName: "ab" })).toThrow(
+      /idOrName: must have length >= 3, got 2/,
+    );
+    expect(() => mapper.fromIntermediate({ ...base, idOrName: 0 })).toThrow(
+      /idOrName: must be >= 1, got 0/,
+    );
+
+    // A closed value set on a branch narrows to a literal union type, and an
+    // unknown string is a Violation.
+    expect(mapper.fromIntermediate({ ...base, mode: "manual" }).mode).toBe("manual");
+    expect(() => mapper.fromIntermediate({ ...base, mode: "turbo" })).toThrow(
+      /mode: must be one of \["auto", "manual"\]/,
+    );
+
+    // The array branch's `minItems`/`uniqueItems` and the string branch's
+    // `pattern`, on the same union.
+    expect(() => mapper.fromIntermediate({ ...base, measurements: [] })).toThrow(
+      /measurements: must have at least 1 items, got 0/,
+    );
+    expect(() =>
+      mapper.fromIntermediate({ ...base, measurements: [1.5, 1.5] }),
+    ).toThrow(/duplicate items: element at index 1 equals index 0/);
+    expect(() => mapper.fromIntermediate({ ...base, measurements: "AUTO" })).toThrow(
+      /measurements: must match pattern/,
+    );
+
+    // Serialize re-runs the selected branch's constraints (P12).
+    const valid = mapper.fromIntermediate({ ...base, idOrName: "abc" });
+    expect(() => mapper.toIntermediate({ ...valid, idOrName: "ab" })).toThrow(
+      /idOrName: must have length >= 3, got 2/,
+    );
+    expect(() => mapper.toIntermediate({ ...valid, measurements: [2, 2] })).toThrow(
+      /duplicate items: element at index 1 equals index 0/,
+    );
+
+    // A named element union validates through its own mapper, in both
+    // directions, with the element's index on the violation path.
+    expect(mapper.fromIntermediate({ ...base, segments: ["ab", 0] }).segments).toEqual([
+      "ab",
+      0,
+    ]);
+    expect(() => mapper.fromIntermediate({ ...base, segments: ["a"] })).toThrow(
+      /segments\[0\]: must have length >= 2, got 1/,
+    );
+    expect(() => mapper.toIntermediate({ ...valid, segments: [-1] })).toThrow(
+      /must be >= 0, got -1/,
+    );
+  });
+
   test("round-trips the free-form object as a union branch and a named model", () => {
     // The inline object branch of the `payload` union, and the named `Extras`
     // model: members are carried verbatim in both.

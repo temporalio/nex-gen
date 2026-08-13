@@ -69,6 +69,22 @@ properties:
       - { type: string }
 "#;
 
+/// A union whose **non-object** branches each declare constraints of their own:
+/// once the wire token selects a branch, the value is held to everything that
+/// branch declares — including a closed value set — in both directions.
+const BRANCH_CONSTRAINT_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, minLength: 3, pattern: "^[a-z]+$" }
+      - { type: integer, minimum: 1 }
+  listOrName:
+    oneOf:
+      - { type: array, items: { type: number }, minItems: 1, uniqueItems: true }
+      - { type: string, enum: [auto, manual] }
+"#;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -746,6 +762,51 @@ fn typescript_json_names_inline_object_union_branch() {
         "function serializeDetailPayload(value: DetailPayloadObject | string): unknown {"
     ));
     assert!(rendered.contains("out.payload = serializeDetailPayload(value.payload);"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Every constraint a **non-object** branch declares is checked once the token
+/// narrows to it, on both sides of the mapper (P12). A `const`/`enum` branch also
+/// narrows the member *type* to its literal set, without which the narrowed
+/// assignment would not even typecheck.
+/// See `specs/json-schema/features/oneOf.md` ("Validator mapping").
+#[test]
+fn typescript_json_validates_non_object_union_branch_constraints() {
+    let temp_dir = unique_output_path("ts-json-branch-constraints");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bc.yaml");
+    fs::write(&input_path, BRANCH_CONSTRAINT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bc");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    // A closed value set narrows the branch type itself.
+    assert!(rendered.contains("listOrName?: number[] | \"auto\" | \"manual\";"));
+    // Parse: each branch's own predicates run under the union's path.
+    assert!(rendered.contains("if ([...(value as string)].length < 3) {"));
+    assert!(rendered.contains("if (!PATTERN_C182F89FDB221836.test((value as string))) {"));
+    assert!(rendered.contains("if ((value as number) < 1) {"));
+    assert!(rendered.contains("if ((listOrName as number[]).length < 1) {"));
+    assert!(rendered.contains("duplicate items: element at index ${index}"));
+    assert!(rendered.contains(
+        "if ((listOrName as \"auto\" | \"manual\") !== \"auto\" && (listOrName as \"auto\" | \"manual\") !== \"manual\") {"
+    ));
+    // Serialize: the same predicates over the in-memory member, aggregated into
+    // the model's own violations before the wire object is built.
+    assert!(rendered.contains("if ([...(value.value as string)].length < 3) {"));
+    assert!(rendered.contains("if ((value.value as number) < 1) {"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

@@ -278,6 +278,23 @@ path (`shapes[1]`, `choices.primary`) per **P11**.
   with a diagnostic pointing at the const-tag form, which needs no OpenAPI
   extension.
 
+- **A materializing keyword on a non-object branch of a sum type** — a temporal
+  [[format]] (`date-time`/`date`/`time`/`duration`) or a [[contentEncoding]].
+  Both replace the wire `string` with a native typed value (`time.Time` /
+  `OffsetDateTime` / `datetime` / `Temporal.*`; `[]byte` / `byte[]` / `bytes`),
+  and the synthesized `<Union><Kind>` wrapper has no such type: the branch would
+  materialize in Python while Go, TypeScript, and Java carried an unvalidated
+  `string`, which is exactly the silent per-target divergence **P1** forbids. So
+  it is rejected with a located diagnostic naming the keyword and the two
+  remedies — drop the keyword to keep the branch a plain (still fully validated)
+  `string`, or carry the value as a *property* of an object branch, where
+  materialization already works. Non-materializing string formats (`uuid`,
+  `email`, `hostname`, `uri`, `ipv4`, `ipv6`) are **not** deferred: they assert
+  and keep the `string`, so they ride along like any other branch constraint.
+  This is scoped to the sum type — the [[nullability]] pattern
+  `oneOf:[{T},{null}]` has a single non-null branch and synthesizes no wrapper,
+  so a materialized nullable field is unaffected.
+
 ### Rejected outright (incoherent, not merely unsupported)
 
 - **`integer | number`** — both are the JSON number token *and*
@@ -628,6 +645,33 @@ branch types (`expected Widget, string, or number[]`), never a bare
 `oneOf` — per the informative-reason convention the constraint families
 use.
 
+### Branch constraints
+
+Selection is only half of it. A branch is an ordinary schema, so once the
+selector routes a value to one, that value is held to **everything that branch
+declares** — and to nothing the other branches declare. An **object** branch gets
+this for free: it is a named model ([[properties]]), so it validates through its
+own model's checks. A **non-object** branch has no model, so the type each target
+synthesizes for it carries the branch's predicates instead — the same emitters,
+with the same reasons, a *property* of that type would use (`minLength`/`maxLength`
+/`pattern`/`format`, the numeric bounds and `multipleOf`, `minItems`/`maxItems`/
+`uniqueItems`/`contains`, a `const`/`enum` value set), under the union's own
+violation path (`idOrName`, `shapes[1]`, `choices.primary`):
+
+| Language | Where a non-object branch's constraints live |
+|---|---|
+| Go | the synthesized `<Union><Kind>` wrapper's `Validate`, over a conversion back to the underlying type (`string(v)`, `[]float64(v)`). The dispatcher calls it on the selected branch, and the declaring model's `Validate` — which `MarshalJSON` runs first — calls it again before emit. A branch `pattern`/`format` compiles to a package-level regex var keyed by the wrapper type (`fooStringPattern`). |
+| TypeScript | the narrowing chain itself: each `typeof`/`Array.isArray` arm runs the branch's checks over the narrowed value, in `fromIntermediate` and again on the serialize side (a named union in its `Mapper.toIntermediate`, an inline one in the declaring model's, so a branch violation aggregates with its siblings). |
+| Python | the union member's own annotation — the native `pydantic.Field` bounds innermost (next to the type they bound), the refinement validators (`multipleOf`, `pattern`, `format`) wrapping them, and `uniqueItems`/`contains` as the AfterValidators Pydantic has no native form for. Selecting the branch *is* validating it. |
+| Java | a package-private `validate(path, violations)` on the wrapper class, with its compiled `pattern`/`format` `Pattern` statics. `fromNode` calls it on the wrapper it just built; the interface's static `validate` dispatches on the member's runtime class and is called by the declaring POJO's `Serializer` (and per element/member for a collection of unions) before any wire member is written. |
+
+A **closed value set** (`const`/`enum`) on a branch closes the *type* where the
+target can express that — a TypeScript literal union (`"auto" | "manual" | number`),
+a Python `Literal` — and is a membership check in the validator in Go and Java,
+which have no field to hang a defined type or value class off (the same treatment a
+typed map's member gets, [[additionalProperties]] §"Per-member `T` validation").
+The accepted value set is identical in all four.
+
 ### Serialize-side (P12)
 
 In the statically typed targets (Go/TS/Java) the in-memory value **is** a
@@ -653,6 +697,9 @@ than being written (real teeth where construction is unchecked).
 | Object ∪ array | `{oneOf:[{$ref:"#/$defs/Widget"},{type:array,items:{type:number}}]}` |
 | Three disjoint kinds | `{oneOf:[{$ref:"#/$defs/Widget"},{type:string},{type:array,items:{type:number}}]}` |
 | Branch constraints carried through | `{oneOf:[{type:string,minLength:3},{type:integer,minimum:0}]}` |
+| An array branch's own bounds | `{oneOf:[{type:array,items:{type:number},minItems:1,uniqueItems:true},{type:string}]}` |
+| A closed value set on a branch | `{oneOf:[{type:string,enum:[auto,manual]},{type:integer,minimum:0}]}` |
+| An asserted (non-materializing) `format` on a branch | `{oneOf:[{type:string,format:uuid},{type:integer}]}` |
 | Named `$defs` union reused by `$ref` | `{$defs:{Foo:{oneOf:[…]}}, properties:{f:{$ref:"#/$defs/Foo"}}}` |
 | Object tagged union (`const`-tag) | `{oneOf:[{$ref:"#/$defs/Cat"},{$ref:"#/$defs/Dog"}]}` with `kind:{const:…}` required in each |
 | Tagged union mixed with a scalar kind | `{oneOf:[{$ref:"#/$defs/Cat"},{$ref:"#/$defs/Dog"},{type:string}]}` (token picks object-vs-string; `const` picks Cat-vs-Dog) |
@@ -679,6 +726,8 @@ than being written (real teeth where construction is unchecked).
 | Discriminator `const` not `required` in a branch | `{oneOf:[{Cat with kind required},{Dog with kind optional}]}` |
 | Non-distinct discriminator values | `{oneOf:[{kind:{const:"x"}…},{kind:{const:"x"}…}]}` |
 | Ambiguous discriminator (2+ qualifying properties) | two object branches sharing both `kind` and `variant` as required-`const` |
+| A materialized temporal `format` on a sum-type branch (deferred) | `{oneOf:[{type:string,format:"date-time"},{type:integer}]}` |
+| A materialized `contentEncoding` on a sum-type branch (deferred) | `{oneOf:[{type:string,contentEncoding:base64},{type:integer}]}` |
 | Two same-**scalar**-kind branches (use `enum`) | `{oneOf:[{type:string,const:"a"},{type:string,const:"b"}]}` → [[enum]] |
 | `integer`+`number` overlap (unsatisfiable, P7.1) | `{oneOf:[{type:integer},{type:number}]}` |
 | Duplicate `null` branches | `{oneOf:[{type:string},{type:"null"},{type:"null"}]}` (same-kind, and a tautology) |
@@ -709,8 +758,17 @@ than being written (real teeth where construction is unchecked).
   as the null state (required+nullable) / omitted-or-null per the
   [[nullability]] serialize table (optional); `null` against a
   non-nullable union → one `Violation`.
+- A branch constraint is enforced **only for the branch the token selected**:
+  `"ab"` against `{oneOf:[{type:string,minLength:3},{type:integer,minimum:1}]}`
+  → one length `Violation`; `0` against the same union → one `minimum`
+  `Violation` (never the string branch's).
+- An array branch's own bounds: `[]` against
+  `{type:array,minItems:1,uniqueItems:true}` → one `minItems` `Violation`;
+  `[1.5,1.5]` → one duplicate-items `Violation`.
+- A `const`/`enum` branch: an off-set string → one `Violation` naming the
+  admissible values, while the sibling numeric branch stays unbounded.
 - Serialize of an in-memory member violating its branch's own constraints
-  → rejected before emit (**P12**).
+  → rejected before emit (**P12**), aggregated with any failing sibling field.
 - A union-typed array element / map member: each value routed
   independently, with a failing one reported under its index or key
   (`shapes[1]`, `choices.primary`) and the rest still checked (**P11**).

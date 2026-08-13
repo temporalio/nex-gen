@@ -579,9 +579,6 @@ pub(in crate::generator) fn render_external_models(
     let mut needs_set_fields_helper = false;
     let mut needs_pydantic_core = false;
     let mut needs_spec_int_helper = false;
-    let mut needs_multiple_of_helper = false;
-    let mut needs_pattern_helper = false;
-    let mut needs_format_helper = false;
     for (index, model) in class_models.iter().enumerate() {
         render_model(
             &mut models_body,
@@ -590,9 +587,6 @@ pub(in crate::generator) fn render_external_models(
             &mut needs_set_fields_helper,
             &mut needs_pydantic_core,
             &mut needs_spec_int_helper,
-            &mut needs_multiple_of_helper,
-            &mut needs_pattern_helper,
-            &mut needs_format_helper,
         )?;
         if index + 1 != class_models.len() {
             models_body.push_str("\n\n");
@@ -628,9 +622,6 @@ pub(in crate::generator) fn render_external_models(
             .iter()
             .map(|model| model.model_name.clone())
             .collect(),
-        &mut needs_multiple_of_helper,
-        &mut needs_pattern_helper,
-        &mut needs_format_helper,
     )?;
     let mut module_imports = BTreeSet::from(["pydantic".to_string()]);
     if needs_pydantic_core {
@@ -641,19 +632,16 @@ pub(in crate::generator) fn render_external_models(
     if needs_spec_int_helper || post_model_statements.contains("SpecInt") {
         runtime_imports.insert("SpecInt".to_string());
     }
-    if needs_multiple_of_helper {
-        runtime_imports.insert("_check_multiple_of".to_string());
-    }
-    if needs_pattern_helper {
-        runtime_imports.insert("_check_pattern".to_string());
-    }
-    if needs_format_helper {
-        runtime_imports.insert("_check_format".to_string());
-    }
-    // Import the materialized-temporal / bytes field aliases actually referenced
-    // by the rendered module (defined once in the runtime module) — by a model's
-    // own field, or by a map's member adapter.
+    // Import the refinement validators and the materialized-temporal / bytes
+    // field aliases actually referenced by the rendered module (defined once in
+    // the runtime module) — by a model's own field, by a map's member adapter, or
+    // by a union branch's refined member type.
     for alias in [
+        "_check_multiple_of",
+        "_check_pattern",
+        "_check_format",
+        "_check_unique_items",
+        "_check_contains",
         "DateTimeField",
         "DateField",
         "TimeField",
@@ -824,6 +812,8 @@ fn render_json_runtime_module() -> String {
         "_check_multiple_of",
         "_check_pattern",
         "_check_format",
+        "_check_unique_items",
+        "_check_contains",
         "_reject_explicit_null",
         "_emit_set_fields",
     ] {
@@ -839,6 +829,10 @@ fn render_json_runtime_module() -> String {
     render_pattern_helper(&mut output);
     output.push_str("\n\n");
     render_format_helper(&mut output);
+    output.push_str("\n\n");
+    render_unique_items_helper(&mut output);
+    output.push_str("\n\n");
+    render_contains_helper(&mut output);
     output.push_str("\n\n");
     render_temporal_helpers(&mut output);
     output.push_str("\n\n");
@@ -1126,6 +1120,65 @@ fn render_pattern_helper(output: &mut String) {
     output.push_str("    return validate\n");
 }
 
+/// Emits the `_check_unique_items` runtime helper: an AfterValidator asserting
+/// pairwise-distinct elements, reporting the first duplicate's index and the
+/// index it repeats — the same reason every other target emits. Pydantic has no
+/// native `uniqueItems`, and unlike the declared-property path (a model validator
+/// keyed by field name) a position with no field of its own — a typed map's
+/// member, a `oneOf` branch — has to carry the check in its annotation. See
+/// `specs/json-schema/features/uniqueItems.md`.
+fn render_unique_items_helper(output: &mut String) {
+    output.push_str("def _check_unique_items(\n");
+    output.push_str("    value: list[typing.Any],\n");
+    output.push_str(") -> list[typing.Any]:\n");
+    output.push_str(
+        "    \"\"\"An AfterValidator asserting an array's elements are pairwise distinct.\"\"\"\n",
+    );
+    output.push_str("\n");
+    output.push_str("    seen: dict[object, int] = {}\n");
+    output.push_str("    for index, element in enumerate(value):\n");
+    output.push_str("        if element in seen:\n");
+    output.push_str(
+        "            raise ValueError(\n                f\"duplicate items: element at index {index} equals index {seen[element]}\"\n            )\n",
+    );
+    output.push_str("        seen[element] = index\n");
+    output.push_str("    return value\n");
+}
+
+/// Emits the `_check_contains` runtime helper: an AfterValidator asserting the
+/// number of elements matching a predicate falls in
+/// `[min_contains, max_contains]`, with the same reasons the property path emits.
+/// Pydantic has no native `contains`; see
+/// `specs/json-schema/features/contains.md` (and [`render_unique_items_helper`]
+/// for why an annotation-carried check is needed).
+fn render_contains_helper(output: &mut String) {
+    output.push_str("def _check_contains(\n");
+    output.push_str("    matches: typing.Callable[[typing.Any], bool],\n");
+    output.push_str("    min_contains: int,\n");
+    output.push_str("    max_contains: int | None = None,\n");
+    output.push_str("    bounded_min: bool = False,\n");
+    output.push_str(") -> typing.Callable[[list[typing.Any]], list[typing.Any]]:\n");
+    output.push_str(
+        "    \"\"\"Builds an AfterValidator asserting how many elements match the `contains` schema.\"\"\"\n",
+    );
+    output.push_str("\n");
+    output.push_str("    def validate(value: list[typing.Any]) -> list[typing.Any]:\n");
+    output.push_str("        match_count = sum(1 for element in value if matches(element))\n");
+    output.push_str("        if match_count < min_contains:\n");
+    output.push_str("            if bounded_min:\n");
+    output.push_str(
+        "                raise ValueError(\n                    f\"too few matching items: at least {min_contains}, got {match_count}\"\n                )\n",
+    );
+    output.push_str("            raise ValueError(\"no element matches the required schema\")\n");
+    output.push_str("        if max_contains is not None and match_count > max_contains:\n");
+    output.push_str(
+        "            raise ValueError(\n                f\"too many matching items: at most {max_contains}, got {match_count}\"\n            )\n",
+    );
+    output.push_str("        return value\n");
+    output.push_str("\n");
+    output.push_str("    return validate\n");
+}
+
 /// Emits the `_check_format` runtime helper: an AfterValidator that asserts a
 /// string matches a pinned `format` regex, with an optional total-length guard
 /// run **first** (short-circuit — the email order neutralizes a matcher-recursion
@@ -1162,9 +1215,6 @@ fn render_model(
     needs_set_fields_helper: &mut bool,
     needs_pydantic_core: &mut bool,
     needs_spec_int_helper: &mut bool,
-    needs_multiple_of_helper: &mut bool,
-    needs_pattern_helper: &mut bool,
-    needs_format_helper: &mut bool,
 ) -> Result<()> {
     let schema = decode_schema(model)?;
     // A `oneOf` sum-type union def is emitted as a TypeAlias by the caller.
@@ -1235,13 +1285,7 @@ fn render_model(
     for (json_name, property) in properties {
         output.push('\n');
         let field_name = property.py_member_name(json_name);
-        let mut annotation = refined_annotation(
-            property,
-            None,
-            needs_multiple_of_helper,
-            needs_pattern_helper,
-            needs_format_helper,
-        )?;
+        let mut annotation = refined_annotation(property, None)?;
         // Native deprecation marker (PEP 702) on the field; `category=None` is
         // the no-runtime-warning form. See specs/json-schema/features/deprecated.md.
         if property.deprecated == Some(true) {
@@ -1516,9 +1560,6 @@ fn render_map_member_adapters(
     output: &mut String,
     models: &[&PlannedJsonType],
     union_names: &BTreeSet<String>,
-    needs_multiple_of_helper: &mut bool,
-    needs_pattern_helper: &mut bool,
-    needs_format_helper: &mut bool,
 ) -> Result<()> {
     for model in models {
         let schema = decode_schema(model)?;
@@ -1535,30 +1576,13 @@ fn render_map_member_adapters(
             Some(inner) => (inner, true),
             None => (&value_schema, false),
         };
-        // The `Field` bounds sit *innermost*, next to the type they bound — the
-        // position a declared field puts them in — so Pydantic reads
-        // `min_length` as the string's length and not as the length of whatever
-        // an outer validator returned. A nullable member widens the type inside
-        // that same `Annotated`, the way a declared field pairs `T | None` with
-        // its `Field(...)`; the refinements wrap the result.
-        let mut annotation = annotation(member)?;
-        if nullable {
-            annotation = optional_annotation(&annotation);
-        }
-        let constraints = field_constraint_args(member);
-        if !constraints.is_empty() {
-            annotation = format!(
-                "typing.Annotated[{annotation}, pydantic.Field({})]",
-                constraints.join(", ")
-            );
-        }
-        let annotation = refined_annotation(
-            member,
-            Some(annotation),
-            needs_multiple_of_helper,
-            needs_pattern_helper,
-            needs_format_helper,
-        )?;
+        let annotation = if nullable {
+            // A nullable member widens the type inside the same `Annotated` a
+            // declared field pairs `T | None` with.
+            constrained_annotation_over(member, optional_annotation(&annotation(member)?))?
+        } else {
+            constrained_annotation(member)?
+        };
         // Pydantic rejects a `config` override on a `BaseModel` — a referenced
         // model carries its own strict config. A union alias is not a model, so
         // it takes the override like any other annotation.
@@ -2282,19 +2306,66 @@ fn temporal_field_alias(kind: crate::json_schema::format::TemporalKind) -> &'sta
 /// native `Field` arguments are added separately (see [`field_constraint_args`]),
 /// so a value position that has no `Field` — a typed map's member — composes the
 /// two itself.
-fn refined_annotation(
-    schema: &Schema,
-    base: Option<String>,
-    needs_multiple_of_helper: &mut bool,
-    needs_pattern_helper: &mut bool,
-    needs_format_helper: &mut bool,
-) -> Result<String> {
+/// The annotation for a value in a position that has **no declared field of its
+/// own** to hang `pydantic.Field(...)` off — a typed map's member, a `oneOf` sum
+/// type's member — so every constraint the schema declares rides inside the
+/// annotation itself. This is the same set of predicates a declared field of that
+/// type is held to, so the position validates identically.
+fn constrained_annotation(schema: &Schema) -> Result<String> {
+    constrained_annotation_over(schema, annotation(schema)?)
+}
+
+/// [`constrained_annotation`] over an already-built base annotation (a nullable
+/// member widens the base before the constraints are applied).
+///
+/// The `Field` bounds sit *innermost*, next to the type they bound — the position
+/// a declared field puts them in — so Pydantic reads `min_length` as the string's
+/// own length and not as the length of whatever an outer validator returned; the
+/// refinement validators wrap that result.
+fn constrained_annotation_over(schema: &Schema, base: String) -> Result<String> {
+    let mut annotation = base;
+    let constraints = field_constraint_args(schema);
+    if !constraints.is_empty() {
+        annotation = format!(
+            "typing.Annotated[{annotation}, pydantic.Field({})]",
+            constraints.join(", ")
+        );
+    }
+    // `uniqueItems` / `contains` have no native Pydantic form, and there is no
+    // declared field here to hang a model validator off, so they ride as
+    // AfterValidators in the annotation itself.
+    if schema.is_array_field() {
+        if schema.unique_items == Some(true) {
+            annotation = format!(
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_unique_items)]"
+            );
+        }
+        if let Some(matcher) = &schema.contains {
+            let condition = py_matcher_condition(matcher, "element")?;
+            let min = schema.min_contains.unwrap_or(1);
+            let max = match schema.max_contains {
+                Some(max) => max.to_string(),
+                None => "None".to_string(),
+            };
+            annotation = format!(
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_contains(lambda element: {condition}, {min}, {max}, {}))]",
+                if schema.min_contains.is_some() {
+                    "True"
+                } else {
+                    "False"
+                }
+            );
+        }
+    }
+    refined_annotation(schema, Some(annotation))
+}
+
+fn refined_annotation(schema: &Schema, base: Option<String>) -> Result<String> {
     let mut annotation = match base {
         Some(base) => base,
         None => annotation(schema)?,
     };
     if let Some(divisor) = schema.number_multiple_of() {
-        *needs_multiple_of_helper = true;
         annotation = format!(
             "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_multiple_of({}))]",
             py_bound_literal(divisor, false)
@@ -2303,7 +2374,6 @@ fn refined_annotation(
     if let Some(pattern) = &schema.pattern
         && schema.ty.as_ref().and_then(Value::as_str) == Some("string")
     {
-        *needs_pattern_helper = true;
         // Per-target `$`→`\Z` rewrite: `re`'s `\Z` is the strict
         // end-of-string anchor (no trailing-`\n` exception). See
         // `specs/json-schema/features/pattern.md`.
@@ -2317,7 +2387,6 @@ fn refined_annotation(
         && schema.ty.as_ref().and_then(Value::as_str) == Some("string")
         && let Some(check) = crate::json_schema::format::check_for(format)
     {
-        *needs_format_helper = true;
         // Per-target `$`→`\Z` rewrite (strict end-of-string, no trailing-`\n`
         // exception), matching `_check_pattern`.
         let rewritten = crate::json_schema::pattern::rewrite_end_anchor(&check.pattern, r"\Z");
@@ -2370,9 +2439,11 @@ fn annotation(schema: &Schema) -> Result<String> {
         // token / `Literal` discriminant). One non-null branch is the
         // degenerate nullability pattern.
         if non_null.len() >= 2 {
+            // Each member carries its own branch's constraints, so the branch is
+            // validated once the union selects it ([[oneOf]] §"Validator mapping").
             let mut members = non_null
                 .iter()
-                .map(|branch| annotation(branch))
+                .map(|branch| constrained_annotation(branch))
                 .collect::<Result<Vec<_>>>()?;
             if nullable {
                 members.push("None".to_string());

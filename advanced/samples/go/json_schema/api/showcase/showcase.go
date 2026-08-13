@@ -316,6 +316,9 @@ func (ShowcaseIdOrNameString) isShowcaseIdOrName() {}
 // listing any violations.
 func (v ShowcaseIdOrNameString) Validate() error {
 	var errs []Violation
+	if n := utf8.RuneCountInString(string(v)); n < 3 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 3, got %d", n)})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -331,6 +334,12 @@ func (ShowcaseIdOrNameInteger) isShowcaseIdOrName() {}
 // listing any violations.
 func (v ShowcaseIdOrNameInteger) Validate() error {
 	var errs []Violation
+	if int64(v) < -integerCap || int64(v) > integerCap {
+		errs = append(errs, Violation{"", "exceeds ±(2^53-1) integer cap"})
+	}
+	if int64(v) < 1 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must be >= 1, got %v", int64(v))})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -389,11 +398,26 @@ func (ShowcaseMeasurementsArray) isShowcaseMeasurements() {}
 // listing any violations.
 func (v ShowcaseMeasurementsArray) Validate() error {
 	var errs []Violation
+	if n := len([]float64(v)); n < 1 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have at least 1 items, got %d", n)})
+	}
+	{
+		seen := make(map[float64]int, len([]float64(v)))
+		for i, e := range []float64(v) {
+			if j, ok := seen[e]; ok {
+				errs = append(errs, Violation{"", fmt.Sprintf("duplicate items: element at index %d equals index %d", i, j)})
+			} else {
+				seen[e] = i
+			}
+		}
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
 	return nil
 }
+
+var showcaseMeasurementsStringPattern = regexp.MustCompile("^[a-z]+$")
 
 // ShowcaseMeasurementsString wraps a string value admissible in the ShowcaseMeasurements union.
 type ShowcaseMeasurementsString string
@@ -404,6 +428,9 @@ func (ShowcaseMeasurementsString) isShowcaseMeasurements() {}
 // listing any violations.
 func (v ShowcaseMeasurementsString) Validate() error {
 	var errs []Violation
+	if !showcaseMeasurementsStringPattern.MatchString(string(v)) {
+		errs = append(errs, Violation{"", fmt.Sprintf("must match pattern %q, got %q", "^[a-z]+$", string(v))})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -437,6 +464,90 @@ func unmarshalShowcaseMeasurements(raw json.RawMessage, path string, errs *[]Vio
 		return v, true
 	}
 	*errs = append(*errs, Violation{path, "expected one of: []float64, string"})
+	return nil, false
+}
+
+// ShowcaseMode is one of: string, integer.
+type ShowcaseMode interface {
+	isShowcaseMode()
+	Validate() error
+}
+
+// ShowcaseModeString wraps a string value admissible in the ShowcaseMode union.
+type ShowcaseModeString string
+
+func (ShowcaseModeString) isShowcaseMode() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseModeString) Validate() error {
+	var errs []Violation
+	switch string(v) {
+	case "auto", "manual":
+	default:
+		errs = append(errs, Violation{"", fmt.Sprintf("must be one of [\"auto\",\"manual\"], got %q", string(v))})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// ShowcaseModeInteger wraps a int64 value admissible in the ShowcaseMode union.
+type ShowcaseModeInteger int64
+
+func (ShowcaseModeInteger) isShowcaseMode() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseModeInteger) Validate() error {
+	var errs []Violation
+	if int64(v) < -integerCap || int64(v) > integerCap {
+		errs = append(errs, Violation{"", "exceeds ±(2^53-1) integer cap"})
+	}
+	if int64(v) < 0 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must be >= 0, got %v", int64(v))})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+func unmarshalShowcaseMode(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseMode, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		*errs = append(*errs, Violation{path, "expected one of: string, integer"})
+		return nil, false
+	}
+	switch trimmed[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			*errs = append(*errs, Violation{path, "expected string"})
+			return nil, false
+		}
+		v := ShowcaseModeString(s)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		dec := json.NewDecoder(bytes.NewReader(trimmed))
+		dec.UseNumber()
+		var n json.Number
+		if err := dec.Decode(&n); err != nil {
+			*errs = append(*errs, Violation{path, "expected integer"})
+			return nil, false
+		}
+		iv, err := parseSpecInteger(n)
+		if err != nil {
+			*errs = append(*errs, Violation{path, err.Error()})
+			return nil, false
+		}
+		v := ShowcaseModeInteger(iv)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	}
+	*errs = append(*errs, Violation{path, "expected one of: string, integer"})
 	return nil, false
 }
 
@@ -550,6 +661,9 @@ func (ShowcaseSegmentsItemString) isShowcaseSegmentsItem() {}
 // listing any violations.
 func (v ShowcaseSegmentsItemString) Validate() error {
 	var errs []Violation
+	if n := utf8.RuneCountInString(string(v)); n < 2 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 2, got %d", n)})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -565,6 +679,12 @@ func (ShowcaseSegmentsItemInteger) isShowcaseSegmentsItem() {}
 // listing any violations.
 func (v ShowcaseSegmentsItemInteger) Validate() error {
 	var errs []Violation
+	if int64(v) < -integerCap || int64(v) > integerCap {
+		errs = append(errs, Violation{"", "exceeds ±(2^53-1) integer cap"})
+	}
+	if int64(v) < 0 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must be >= 0, got %v", int64(v))})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -627,6 +747,9 @@ func (ShowcaseShapeOrNameString) isShowcaseShapeOrName() {}
 // listing any violations.
 func (v ShowcaseShapeOrNameString) Validate() error {
 	var errs []Violation
+	if n := utf8.RuneCountInString(string(v)); n > 32 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have length <= 32, got %d", n)})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -1606,15 +1729,17 @@ type Showcase struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Roles Access roles; must contain between one and two "admin" entries.
 	Roles []string `json:"roles,omitempty"`
-	// IdOrName Disjoint-kind union (oneOf sum type): the wire value is either a string or an integer, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector.
+	// IdOrName Disjoint-kind union (oneOf sum type): the wire value is either a string of at least 3 code points or an integer of at least 1, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector. Each branch also carries its **own constraints**: once the token selects a branch, the value is held to everything that branch declares, in both directions, with the union's path on the violation.
 	IdOrName ShowcaseIdOrName `json:"idOrName,omitempty"`
+	// Mode A union whose string branch is a **closed value set**: either one of two named modes or an unbounded non-negative integer. The branch narrows to its own admissible values (a Go/Java membership check, a TypeScript literal union, a Python `Literal`), so an unknown string is a Violation while any non-negative integer is accepted.
+	Mode ShowcaseMode `json:"mode,omitempty"`
 	// Payload Mixed-kind union whose object branch is an inline free-form object: the wire value is either an arbitrary object (members carried verbatim) or a string, selected by its JSON token. The free-form object is the one object branch that needs no type name — TypeScript and Python carry it structurally, Go and Java wrap it as `<Union>Object`.
 	Payload ShowcasePayload `json:"payload,omitempty"`
 	// Detail Mixed-kind union whose object branch is an inline *structured* object, written directly on the property rather than in `$defs`. It is the only object branch of this union, so it derives its name from the union it belongs to — `ShowcaseDetailObject` — and is emitted as an ordinary model: its members keep their own constraints and it stays open to unknown ones.
 	Detail ShowcaseDetail `json:"detail,omitempty"`
-	// ShapeOrName Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface).
+	// ShapeOrName Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface). The scalar branch carries a length bound of its own; the object branches validate through their own models.
 	ShapeOrName ShowcaseShapeOrName `json:"shapeOrName,omitempty"`
-	// Measurements Mixed-kind union with an array branch: the wire value is either a list of numbers or a string, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`.
+	// Measurements Mixed-kind union with an array branch: the wire value is either a non-empty list of distinct numbers or a lowercase preset name, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`. Both branches carry their own constraints — the array's `minItems`/`uniqueItems` and the string's `pattern` — so the array-vs-string choice is validated as well as selected.
 	Measurements ShowcaseMeasurements `json:"measurements,omitempty"`
 	// Shapes A list whose element type is a named union: every element is routed to exactly one branch by the union's own selector, and its index carries into the violation path (`shapes[1]`). Go and Java cannot decode a sealed interface as a whole, so the element decodes through the union's dispatcher one at a time.
 	Shapes []Shape `json:"shapes,omitempty"`
@@ -1846,6 +1971,9 @@ func (m Showcase) Validate() error {
 	if m.IdOrName != nil {
 		mergeNested(&errs, "idOrName", m.IdOrName.Validate())
 	}
+	if m.Mode != nil {
+		mergeNested(&errs, "mode", m.Mode.Validate())
+	}
 	if m.Payload != nil {
 		mergeNested(&errs, "payload", m.Payload.Validate())
 	}
@@ -1931,7 +2059,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	for k := range all {
 		switch k {
-		case "kind", "revision", "enabled", "status", "tier", "scale", "name", "count", "active", "nickname", "code", "sku", "phrase", "requestId", "contactEmail", "host", "homepage", "gateway", "blob", "urlBlob", "retries", "verbose", "greeting", "debug", "legacyId", "middleName", "category", "priority", "level", "ratio", "step", "tags", "aliases", "roles", "idOrName", "payload", "detail", "shapeOrName", "measurements", "shapes", "segments", "slots", "grid", "location", "audit", "rows", "ledger", "metadata", "quotas", "tokens", "nicknames", "choices", "extras", "shape", "note", "address", "labels", "settings", "attributes", "contact":
+		case "kind", "revision", "enabled", "status", "tier", "scale", "name", "count", "active", "nickname", "code", "sku", "phrase", "requestId", "contactEmail", "host", "homepage", "gateway", "blob", "urlBlob", "retries", "verbose", "greeting", "debug", "legacyId", "middleName", "category", "priority", "level", "ratio", "step", "tags", "aliases", "roles", "idOrName", "mode", "payload", "detail", "shapeOrName", "measurements", "shapes", "segments", "slots", "grid", "location", "audit", "rows", "ledger", "metadata", "quotas", "tokens", "nicknames", "choices", "extras", "shape", "note", "address", "labels", "settings", "attributes", "contact":
 		default:
 			errs = append(errs, Violation{k, "unknown field"})
 		}
@@ -2183,6 +2311,12 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 		errs = append(errs, Violation{"idOrName", "explicit null not allowed"})
 	} else if v, ok := unmarshalShowcaseIdOrName(*raw, "idOrName", &errs); ok {
 		m.IdOrName = v
+	}
+	if raw := get("mode"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"mode", "explicit null not allowed"})
+	} else if v, ok := unmarshalShowcaseMode(*raw, "mode", &errs); ok {
+		m.Mode = v
 	}
 	if raw := get("payload"); raw == nil {
 	} else if isNull(*raw) {
@@ -2525,6 +2659,9 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	}
 	if m.IdOrName != nil {
 		marshalField(out, "idOrName", m.IdOrName, &errs)
+	}
+	if m.Mode != nil {
+		marshalField(out, "mode", m.Mode, &errs)
 	}
 	if m.Payload != nil {
 		marshalField(out, "payload", m.Payload, &errs)

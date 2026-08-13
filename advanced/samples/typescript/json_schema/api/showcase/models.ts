@@ -295,9 +295,13 @@ export interface Showcase {
    */
   roles?: string[];
   /**
-   * Disjoint-kind union (oneOf sum type): the wire value is either a string or an integer, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector.
+   * Disjoint-kind union (oneOf sum type): the wire value is either a string of at least 3 code points or an integer of at least 1, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector. Each branch also carries its **own constraints**: once the token selects a branch, the value is held to everything that branch declares, in both directions, with the union's path on the violation.
    */
   idOrName?: string | number;
+  /**
+   * A union whose string branch is a **closed value set**: either one of two named modes or an unbounded non-negative integer. The branch narrows to its own admissible values (a Go/Java membership check, a TypeScript literal union, a Python `Literal`), so an unknown string is a Violation while any non-negative integer is accepted.
+   */
+  mode?: "auto" | "manual" | number;
   /**
    * Mixed-kind union whose object branch is an inline free-form object: the wire value is either an arbitrary object (members carried verbatim) or a string, selected by its JSON token. The free-form object is the one object branch that needs no type name — TypeScript and Python carry it structurally, Go and Java wrap it as `<Union>Object`.
    */
@@ -307,11 +311,11 @@ export interface Showcase {
    */
   detail?: ShowcaseDetailObject | string;
   /**
-   * Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface).
+   * Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface). The scalar branch carries a length bound of its own; the object branches validate through their own models.
    */
   shapeOrName?: Circle | Square | string;
   /**
-   * Mixed-kind union with an array branch: the wire value is either a list of numbers or a string, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`.
+   * Mixed-kind union with an array branch: the wire value is either a non-empty list of distinct numbers or a lowercase preset name, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`. Both branches carry their own constraints — the array's `minItems`/`uniqueItems` and the string's `pattern` — so the array-vs-string choice is validated as well as selected.
    */
   measurements?: number[] | string;
   /**
@@ -2008,16 +2012,60 @@ export class ShowcaseMapper {
     } else if (raw.idOrName !== undefined) {
       if (typeof raw.idOrName === "string") {
         idOrName = raw.idOrName as string;
+        if ([...(idOrName as string)].length < 3) {
+          violations.push({
+            path: "idOrName",
+            reason: `must have length >= 3, got ${[...(idOrName as string)].length}`,
+          });
+        }
       } else if (
         typeof raw.idOrName === "number" &&
         Number.isSafeInteger(raw.idOrName)
       ) {
         idOrName = raw.idOrName as number;
+        if ((idOrName as number) < 1) {
+          violations.push({
+            path: "idOrName",
+            reason: `must be >= 1, got ${idOrName as number}`,
+          });
+        }
       } else {
         violations.push({
           path: "idOrName",
           reason: "expected one of: string, integer",
         });
+      }
+    }
+
+    let mode: "auto" | "manual" | number | undefined = undefined as unknown as
+      | "auto"
+      | "manual"
+      | number
+      | undefined;
+    if (raw.mode === null) {
+      violations.push({ path: "mode", reason: "explicit null not allowed" });
+    } else if (raw.mode !== undefined) {
+      if (typeof raw.mode === "string") {
+        mode = raw.mode as "auto" | "manual";
+        if (
+          (mode as "auto" | "manual") !== "auto" &&
+          (mode as "auto" | "manual") !== "manual"
+        ) {
+          violations.push({
+            path: "mode",
+            reason: `must be one of ["auto", "manual"], got ${JSON.stringify(mode as "auto" | "manual")}`,
+          });
+        }
+      } else if (typeof raw.mode === "number" && Number.isSafeInteger(raw.mode)) {
+        mode = raw.mode as number;
+        if ((mode as number) < 0) {
+          violations.push({
+            path: "mode",
+            reason: `must be >= 0, got ${mode as number}`,
+          });
+        }
+      } else {
+        violations.push({ path: "mode", reason: "expected one of: string, integer" });
       }
     }
 
@@ -2092,6 +2140,12 @@ export class ShowcaseMapper {
         }
       } else if (typeof raw.shapeOrName === "string") {
         shapeOrName = raw.shapeOrName as string;
+        if ([...(shapeOrName as string)].length > 32) {
+          violations.push({
+            path: "shapeOrName",
+            reason: `must have length <= 32, got ${[...(shapeOrName as string)].length}`,
+          });
+        }
       } else {
         violations.push({
           path: "shapeOrName",
@@ -2109,8 +2163,33 @@ export class ShowcaseMapper {
     } else if (raw.measurements !== undefined) {
       if (Array.isArray(raw.measurements)) {
         measurements = raw.measurements as number[];
+        if ((measurements as number[]).length < 1) {
+          violations.push({
+            path: "measurements",
+            reason: `must have at least 1 items, got ${(measurements as number[]).length}`,
+          });
+        }
+        {
+          const seen = new Map<unknown, number>();
+          (measurements as number[]).forEach((element, index) => {
+            if (seen.has(element)) {
+              violations.push({
+                path: "measurements",
+                reason: `duplicate items: element at index ${index} equals index ${seen.get(element)}`,
+              });
+            } else {
+              seen.set(element, index);
+            }
+          });
+        }
       } else if (typeof raw.measurements === "string") {
         measurements = raw.measurements as string;
+        if (!PATTERN_C182F89FDB221836.test(measurements as string)) {
+          violations.push({
+            path: "measurements",
+            reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(measurements as string)}`,
+          });
+        }
       } else {
         violations.push({
           path: "measurements",
@@ -2481,6 +2560,7 @@ export class ShowcaseMapper {
         key !== "aliases" &&
         key !== "roles" &&
         key !== "idOrName" &&
+        key !== "mode" &&
         key !== "payload" &&
         key !== "detail" &&
         key !== "shapeOrName" &&
@@ -2600,6 +2680,9 @@ export class ShowcaseMapper {
     }
     if (idOrName !== undefined) {
       out.idOrName = idOrName;
+    }
+    if (mode !== undefined) {
+      out.mode = mode;
     }
     if (payload !== undefined) {
       out.payload = payload;
@@ -2941,7 +3024,45 @@ export class ShowcaseMapper {
       out.roles = value.roles;
     }
     if (value.idOrName !== undefined) {
+      if (typeof value.idOrName === "string") {
+        if ([...(value.idOrName as string)].length < 3) {
+          violations.push({
+            path: "idOrName",
+            reason: `must have length >= 3, got ${[...(value.idOrName as string)].length}`,
+          });
+        }
+      }
+      if (typeof value.idOrName === "number" && Number.isSafeInteger(value.idOrName)) {
+        if ((value.idOrName as number) < 1) {
+          violations.push({
+            path: "idOrName",
+            reason: `must be >= 1, got ${value.idOrName as number}`,
+          });
+        }
+      }
       out.idOrName = value.idOrName;
+    }
+    if (value.mode !== undefined) {
+      if (typeof value.mode === "string") {
+        if (
+          (value.mode as "auto" | "manual") !== "auto" &&
+          (value.mode as "auto" | "manual") !== "manual"
+        ) {
+          violations.push({
+            path: "mode",
+            reason: `must be one of ["auto", "manual"], got ${JSON.stringify(value.mode as "auto" | "manual")}`,
+          });
+        }
+      }
+      if (typeof value.mode === "number" && Number.isSafeInteger(value.mode)) {
+        if ((value.mode as number) < 0) {
+          violations.push({
+            path: "mode",
+            reason: `must be >= 0, got ${value.mode as number}`,
+          });
+        }
+      }
+      out.mode = value.mode;
     }
     if (value.payload !== undefined) {
       out.payload = value.payload;
@@ -2950,9 +3071,46 @@ export class ShowcaseMapper {
       out.detail = serializeShowcaseDetail(value.detail);
     }
     if (value.shapeOrName !== undefined) {
+      if (typeof value.shapeOrName === "string") {
+        if ([...(value.shapeOrName as string)].length > 32) {
+          violations.push({
+            path: "shapeOrName",
+            reason: `must have length <= 32, got ${[...(value.shapeOrName as string)].length}`,
+          });
+        }
+      }
       out.shapeOrName = serializeShowcaseShapeOrName(value.shapeOrName);
     }
     if (value.measurements !== undefined) {
+      if (Array.isArray(value.measurements)) {
+        if ((value.measurements as number[]).length < 1) {
+          violations.push({
+            path: "measurements",
+            reason: `must have at least 1 items, got ${(value.measurements as number[]).length}`,
+          });
+        }
+        {
+          const seen = new Map<unknown, number>();
+          (value.measurements as number[]).forEach((element, index) => {
+            if (seen.has(element)) {
+              violations.push({
+                path: "measurements",
+                reason: `duplicate items: element at index ${index} equals index ${seen.get(element)}`,
+              });
+            } else {
+              seen.set(element, index);
+            }
+          });
+        }
+      }
+      if (typeof value.measurements === "string") {
+        if (!PATTERN_C182F89FDB221836.test(value.measurements as string)) {
+          violations.push({
+            path: "measurements",
+            reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(value.measurements as string)}`,
+          });
+        }
+      }
       out.measurements = value.measurements;
     }
     if (value.shapes !== undefined) {
@@ -3534,8 +3692,17 @@ export class ShowcaseSegmentsItemMapper {
     let out: ShowcaseSegmentsItem = undefined as unknown as ShowcaseSegmentsItem;
     if (typeof raw === "string") {
       out = raw as string;
+      if ([...(out as string)].length < 2) {
+        violations.push({
+          path: "",
+          reason: `must have length >= 2, got ${[...(out as string)].length}`,
+        });
+      }
     } else if (typeof raw === "number" && Number.isSafeInteger(raw)) {
       out = raw as number;
+      if ((out as number) < 0) {
+        violations.push({ path: "", reason: `must be >= 0, got ${out as number}` });
+      }
     } else {
       violations.push({ path: "", reason: "expected one of: string, integer" });
     }
@@ -3546,6 +3713,23 @@ export class ShowcaseSegmentsItemMapper {
   }
 
   public toIntermediate(value: ShowcaseSegmentsItem): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (typeof value === "string") {
+      if ([...(value as string)].length < 2) {
+        violations.push({
+          path: "",
+          reason: `must have length >= 2, got ${[...(value as string)].length}`,
+        });
+      }
+    }
+    if (typeof value === "number" && Number.isSafeInteger(value)) {
+      if ((value as number) < 0) {
+        violations.push({ path: "", reason: `must be >= 0, got ${value as number}` });
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
     if (typeof value === "string") {
       return value;
     }

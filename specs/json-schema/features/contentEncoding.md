@@ -278,6 +278,11 @@ emit** (**P12**), as those specs describe.
   canonical form, mirroring [[format]].
 - **[[nullability]]**: orthogonal — a `null` skips the check and is not
   materialized; a present value is checked and decoded.
+- **[[oneOf]]**: **deferred** on a non-object branch of a sum type — the
+  synthesized `<Union><Kind>` wrapper has no bytes construct to hold, so it is
+  rejected rather than materialized in one target and left an unvalidated
+  `string` in the others ([[oneOf]] §Deferred). The [[nullability]] `oneOf`
+  wrapper is not a sum type and materializes normally.
 - **[[required]]**: orthogonal — presence vs value shape.
 
 ## Ecosystem variance

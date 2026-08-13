@@ -784,6 +784,17 @@ fn field_needs_serialize_check(schema: &Schema) -> bool {
     if schema.const_value.is_some() || schema.enum_values.is_some() {
         return true;
     }
+    // An inline sum type: any branch that declares something is re-checked
+    // against the member it holds ([[oneOf]] §"Serialize-side"). A `$ref` branch
+    // validates through its own mapper, so only the non-object branches count.
+    if is_ts_union(schema) {
+        return schema
+            .one_of
+            .iter()
+            .flatten()
+            .filter(|branch| branch.reference.is_none())
+            .any(field_needs_serialize_check);
+    }
     match schema.ty.as_ref().and_then(Value::as_str) {
         Some("string") => schema.has_string_constraints(),
         Some("number") | Some("integer") => schema.has_numeric_constraints(),
@@ -849,9 +860,11 @@ fn render_ts_serialize_closed_check(
 /// Emits the per-field constraint checks over an in-memory `value_expr` for the
 /// serialize path, reusing the same emitters as the parse path (numeric /
 /// string-length / pattern / format / array / enum / const). References,
-/// unions, temporal, and contentEncoding carry no serialize-side field check
-/// here (nested mappers validate their own values; materialized reprs re-encode
-/// losslessly).
+/// temporal, and contentEncoding carry no serialize-side field check here
+/// (nested mappers validate their own values; materialized reprs re-encode
+/// losslessly). An **inline** `oneOf` sum type narrows to the branch it holds and
+/// runs that branch's own checks; a `$ref` to a named union validates through the
+/// union's mapper instead.
 fn render_ts_field_checks(
     output: &mut String,
     schema: &Schema,
@@ -863,6 +876,15 @@ fn render_ts_field_checks(
     // has already guarded the value against `null`.
     if let Some(non_null) = nullable_non_null_schema(schema) {
         render_ts_field_checks(output, non_null, value_expr, path_expr, indent);
+        return;
+    }
+    if is_ts_union(schema) {
+        // The union's branches were classified without model lookup: only a
+        // non-object branch contributes a check, and those need no `$ref`
+        // resolution.
+        if let Some(union) = classify_ts_union(schema, &[]) {
+            render_ts_union_value_checks(output, &union, value_expr, path_expr, indent);
+        }
         return;
     }
     if let Some(const_value) = &schema.const_value {
@@ -1641,6 +1663,10 @@ struct TsUnionVariant {
     is_integer: bool,
     is_array: bool,
     label: String,
+    /// The branch's own schema, whose constraints the narrowed value is held to —
+    /// a scalar/array branch has no mapper to carry them ([[oneOf]] §"Validator
+    /// mapping").
+    schema: Schema,
 }
 
 #[derive(Debug, Clone)]
@@ -1710,6 +1736,15 @@ fn find_ref_model<'a>(
         .find(|model| model.model_name == target || model.full_name == target)
 }
 
+/// The TypeScript type a **scalar** branch contributes to the union: the branch's
+/// own annotation, so a `const`/`enum` branch narrows to the closed literal set it
+/// declares (`"auto" | "manual"`) rather than the wider primitive — which the
+/// narrowed assignment would not even typecheck against. `primitive` is the
+/// fallback for a branch that declares nothing but its kind.
+fn ts_scalar_branch_type(resolved: &Schema, primitive: &str) -> String {
+    type_annotation(resolved).unwrap_or_else(|_| primitive.to_string())
+}
+
 /// Classifies a `oneOf` schema into a TypeScript union, or `None` for the
 /// degenerate nullability pattern.
 fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsUnion> {
@@ -1765,10 +1800,11 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                     is_integer: false,
                     is_array: false,
                     label,
+                    schema: resolved.clone(),
                 });
             }
             Some("string") => variants.push(TsUnionVariant {
-                ts_type: "string".to_string(),
+                ts_type: ts_scalar_branch_type(&resolved, "string"),
                 is_object: false,
                 mapper: None,
                 discriminant_value: None,
@@ -1776,9 +1812,10 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                 is_integer: false,
                 is_array: false,
                 label: "string".to_string(),
+                schema: resolved.clone(),
             }),
             Some("integer") => variants.push(TsUnionVariant {
-                ts_type: "number".to_string(),
+                ts_type: ts_scalar_branch_type(&resolved, "number"),
                 is_object: false,
                 mapper: None,
                 discriminant_value: None,
@@ -1786,9 +1823,10 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                 is_integer: true,
                 is_array: false,
                 label: "integer".to_string(),
+                schema: resolved.clone(),
             }),
             Some("number") => variants.push(TsUnionVariant {
-                ts_type: "number".to_string(),
+                ts_type: ts_scalar_branch_type(&resolved, "number"),
                 is_object: false,
                 mapper: None,
                 discriminant_value: None,
@@ -1796,9 +1834,10 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                 is_integer: false,
                 is_array: false,
                 label: "number".to_string(),
+                schema: resolved.clone(),
             }),
             Some("boolean") => variants.push(TsUnionVariant {
-                ts_type: "boolean".to_string(),
+                ts_type: ts_scalar_branch_type(&resolved, "boolean"),
                 is_object: false,
                 mapper: None,
                 discriminant_value: None,
@@ -1806,6 +1845,7 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                 is_integer: false,
                 is_array: false,
                 label: "boolean".to_string(),
+                schema: resolved.clone(),
             }),
             Some("array") => {
                 let ts_type =
@@ -1819,6 +1859,7 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                     is_integer: false,
                     is_array: true,
                     label: ts_type,
+                    schema: resolved.clone(),
                 });
             }
             _ => {}
@@ -1979,21 +2020,24 @@ fn render_ts_union_parse(
     }
 
     for variant in union.variants.iter().filter(|variant| !variant.is_object) {
-        if variant.is_array {
-            clause(output, &format!("Array.isArray({raw_expr})"));
-        } else if variant.is_integer {
-            clause(
-                output,
-                &format!("typeof {raw_expr} === 'number' && Number.isSafeInteger({raw_expr})"),
-            );
-        } else if let Some(guard) = variant.typeof_guard {
-            clause(output, &format!("typeof {raw_expr} === '{guard}'"));
+        if let Some(guard) = ts_variant_guard(variant, raw_expr) {
+            clause(output, &guard);
         }
         output.push_str(indent);
         output.push_str(&format!(
             "  {target} = {raw_expr} as {};\n",
             variant.ts_type
         ));
+        // The token has selected the branch; the value is now held to everything
+        // the branch declares (P12 — the same predicates the property position
+        // runs for a value of that type).
+        render_ts_field_checks(
+            output,
+            &variant.schema,
+            &format!("({target} as {})", variant.ts_type),
+            path_expr,
+            &format!("{indent}  "),
+        );
     }
 
     if union.nullable {
@@ -2014,6 +2058,63 @@ fn render_ts_union_parse(
     ));
     output.push_str(indent);
     output.push_str("}\n");
+}
+
+/// The narrowing guard that selects a non-object variant from a value of the
+/// union type — the JSON token, expressed in TypeScript's own narrowing
+/// primitives (`typeof` / `Array.isArray`). The same guard selects the branch on
+/// the wire (parse) and in memory (serialize), because a scalar/array member *is*
+/// its wire form.
+fn ts_variant_guard(variant: &TsUnionVariant, value_expr: &str) -> Option<String> {
+    if variant.is_array {
+        return Some(format!("Array.isArray({value_expr})"));
+    }
+    if variant.is_integer {
+        return Some(format!(
+            "typeof {value_expr} === 'number' && Number.isSafeInteger({value_expr})"
+        ));
+    }
+    variant
+        .typeof_guard
+        .map(|guard| format!("typeof {value_expr} === '{guard}'"))
+}
+
+/// Emits the constraint checks a union's **in-memory** value is held to, narrowed
+/// to the branch it holds: one guarded block per non-object branch that declares
+/// anything (P12 — an in-memory member violating its own branch's rules fails
+/// before emit rather than being written). Object branches carry their own
+/// validation in their model's mapper, so they contribute no block here.
+///
+/// Emits nothing when no branch declares a constraint, so a plain sum type of
+/// unconstrained kinds keeps its verbatim assignment.
+fn render_ts_union_value_checks(
+    output: &mut String,
+    union: &TsUnion,
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+) {
+    for variant in union.variants.iter().filter(|variant| !variant.is_object) {
+        let mut body = String::new();
+        render_ts_field_checks(
+            &mut body,
+            &variant.schema,
+            &format!("({value_expr} as {})", variant.ts_type),
+            path_expr,
+            &format!("{indent}  "),
+        );
+        if body.is_empty() {
+            continue;
+        }
+        let Some(guard) = ts_variant_guard(variant, value_expr) else {
+            continue;
+        };
+        output.push_str(indent);
+        output.push_str(&format!("if ({guard}) {{\n"));
+        output.push_str(&body);
+        output.push_str(indent);
+        output.push_str("}\n");
+    }
 }
 
 /// Emits the serialize dispatch for a union def's `toIntermediate`.
@@ -2212,6 +2313,21 @@ fn render_model_mapper(
         output.push_str("  public toIntermediate(value: ");
         output.push_str(&model.model_name);
         output.push_str("): unknown {\n");
+        // A named union has no enclosing model to aggregate into, so it collects
+        // its own branch violations and throws the one aggregated error (P11/P12).
+        let mut checks = String::new();
+        render_ts_union_value_checks(&mut checks, &union, "value", "''", "    ");
+        if !checks.is_empty() {
+            output.push_str(&format!(
+                "    const violations: {DEFINITIONS_NAMESPACE}.Violation[] = [];\n"
+            ));
+            output.push_str(&checks);
+            output.push_str("    if (violations.length) {\n");
+            output.push_str(&format!(
+                "      throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+            ));
+            output.push_str("    }\n");
+        }
         render_ts_union_serialize(output, &union, "value");
         output.push_str("  }\n");
         output.push_str("}\n");
@@ -3223,9 +3339,11 @@ fn render_collect_helper(output: &mut String) {
     );
     output.push_str("  if (error instanceof ValidationError) {\n");
     output.push_str("    for (const inner of error.violations) {\n");
-    output.push_str(
-        "      violations.push({ path: `${path}.${inner.path}`, reason: inner.reason });\n",
-    );
+    // A nested violation about the value *itself* carries no path of its own (a
+    // union branch's own constraint, an element-level check), so the prefix is
+    // the whole path — never `segments[0].` with a dangling separator (P11).
+    output.push_str("      const nested = inner.path ? `${path}.${inner.path}` : path;\n");
+    output.push_str("      violations.push({ path: nested, reason: inner.reason });\n");
     output.push_str("    }\n");
     output.push_str("  } else {\n");
     output.push_str("    violations.push({ path, reason: String(error) });\n");

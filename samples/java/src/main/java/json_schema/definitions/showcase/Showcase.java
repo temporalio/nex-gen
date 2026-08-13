@@ -29,14 +29,30 @@ public final class Showcase {
     public interface IdOrName {
         static @Nullable IdOrName fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
             if (node.isTextual()) {
-                return new IdOrNameString(node.textValue());
+                IdOrNameString wrapped = new IdOrNameString(node.textValue());
+                wrapped.validate(path, violations);
+                return wrapped;
             }
             if (node.isNumber()) {
                 Long parsed = SpecNumbers.specLong(node, path, violations);
-                return parsed == null ? null : new IdOrNameInteger(parsed);
+                if (parsed == null) {
+                    return null;
+                }
+                IdOrNameInteger wrapped = new IdOrNameInteger(parsed);
+                wrapped.validate(path, violations);
+                return wrapped;
             }
             violations.add(new Violation(path, "expected one of: string, integer"));
             return null;
+        }
+
+        static void validate(IdOrName value, String path, List<Violation> violations) {
+            if (value instanceof IdOrNameString) {
+                ((IdOrNameString) value).validate(path, violations);
+            }
+            if (value instanceof IdOrNameInteger) {
+                ((IdOrNameInteger) value).validate(path, violations);
+            }
         }
     }
 
@@ -50,6 +66,13 @@ public final class Showcase {
         @JsonValue
         public String getValue() {
             return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            int length = value.codePointCount(0, value.length());
+            if (length < 3) {
+                violations.add(new Violation(path, "must have length >= 3, got " + length));
+            }
         }
 
         @Override
@@ -86,6 +109,12 @@ public final class Showcase {
             return value;
         }
 
+        void validate(String path, List<Violation> violations) {
+            if (value < 1L) {
+                violations.add(new Violation(path, "must be >= 1, got " + value));
+            }
+        }
+
         @Override
         public boolean equals(Object other) {
             if (this == other) {
@@ -105,6 +134,116 @@ public final class Showcase {
         @Override
         public String toString() {
             return "IdOrNameInteger[" + value + "]";
+        }
+    }
+
+    public interface Mode {
+        static @Nullable Mode fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
+            if (node.isTextual()) {
+                ModeString wrapped = new ModeString(node.textValue());
+                wrapped.validate(path, violations);
+                return wrapped;
+            }
+            if (node.isNumber()) {
+                Long parsed = SpecNumbers.specLong(node, path, violations);
+                if (parsed == null) {
+                    return null;
+                }
+                ModeInteger wrapped = new ModeInteger(parsed);
+                wrapped.validate(path, violations);
+                return wrapped;
+            }
+            violations.add(new Violation(path, "expected one of: string, integer"));
+            return null;
+        }
+
+        static void validate(Mode value, String path, List<Violation> violations) {
+            if (value instanceof ModeString) {
+                ((ModeString) value).validate(path, violations);
+            }
+            if (value instanceof ModeInteger) {
+                ((ModeInteger) value).validate(path, violations);
+            }
+        }
+    }
+
+    public static final class ModeString implements Mode {
+        private final String value;
+
+        public ModeString(String value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public String getValue() {
+            return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (!("auto".equals(value)) && !("manual".equals(value))) {
+                violations.add(new Violation(path, "must be one of [\"auto\", \"manual\"], got " + value));
+            }
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ModeString)) {
+                return false;
+            }
+            return Objects.equals(value, ((ModeString) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "ModeString[" + value + "]";
+        }
+    }
+
+    public static final class ModeInteger implements Mode {
+        private final long value;
+
+        public ModeInteger(long value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public long getValue() {
+            return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (value < 0L) {
+                violations.add(new Violation(path, "must be >= 0, got " + value));
+            }
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ModeInteger)) {
+                return false;
+            }
+            return Objects.equals(value, ((ModeInteger) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "ModeInteger[" + value + "]";
         }
     }
 
@@ -291,10 +430,18 @@ public final class Showcase {
                 }
             }
             if (node.isTextual()) {
-                return new ShapeOrNameString(node.textValue());
+                ShapeOrNameString wrapped = new ShapeOrNameString(node.textValue());
+                wrapped.validate(path, violations);
+                return wrapped;
             }
             violations.add(new Violation(path, "expected one of: Circle, Square, string"));
             return null;
+        }
+
+        static void validate(ShapeOrName value, String path, List<Violation> violations) {
+            if (value instanceof ShapeOrNameString) {
+                ((ShapeOrNameString) value).validate(path, violations);
+            }
         }
     }
 
@@ -308,6 +455,13 @@ public final class Showcase {
         @JsonValue
         public String getValue() {
             return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            int length = value.codePointCount(0, value.length());
+            if (length > 32) {
+                violations.add(new Violation(path, "must have length <= 32, got " + length));
+            }
         }
 
         @Override
@@ -345,13 +499,26 @@ public final class Showcase {
                         items.add(element.doubleValue());
                     }
                 }
-                return new MeasurementsArray(items);
+                MeasurementsArray wrapped = new MeasurementsArray(items);
+                wrapped.validate(path, violations);
+                return wrapped;
             }
             if (node.isTextual()) {
-                return new MeasurementsString(node.textValue());
+                MeasurementsString wrapped = new MeasurementsString(node.textValue());
+                wrapped.validate(path, violations);
+                return wrapped;
             }
             violations.add(new Violation(path, "expected one of: array, string"));
             return null;
+        }
+
+        static void validate(Measurements value, String path, List<Violation> violations) {
+            if (value instanceof MeasurementsArray) {
+                ((MeasurementsArray) value).validate(path, violations);
+            }
+            if (value instanceof MeasurementsString) {
+                ((MeasurementsString) value).validate(path, violations);
+            }
         }
     }
 
@@ -365,6 +532,22 @@ public final class Showcase {
         @JsonValue
         public List<Double> getValue() {
             return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (value.size() < 1) {
+                violations.add(new Violation(path, "must have at least 1 items, got " + value.size()));
+            }
+            java.util.Map<Double, Integer> seen = new java.util.HashMap<>();
+            for (int index = 0; index < value.size(); index++) {
+                Double element = value.get(index);
+                Integer priorIndex = seen.get(element);
+                if (priorIndex != null) {
+                    violations.add(new Violation(path, "duplicate items: element at index " + index + " equals index " + priorIndex));
+                } else {
+                    seen.put(element, index);
+                }
+            }
         }
 
         @Override
@@ -390,6 +573,8 @@ public final class Showcase {
     }
 
     public static final class MeasurementsString implements Measurements {
+        private static final java.util.regex.Pattern VALUE_PATTERN = java.util.regex.Pattern.compile("^[a-z]+\\z");
+
         private final String value;
 
         public MeasurementsString(String value) {
@@ -399,6 +584,12 @@ public final class Showcase {
         @JsonValue
         public String getValue() {
             return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (!VALUE_PATTERN.matcher(value).find()) {
+                violations.add(new Violation(path, "must match pattern " + "^[a-z]+\\z" + ", got " + value));
+            }
         }
 
         @Override
@@ -865,9 +1056,13 @@ public final class Showcase {
      */
     private final @Nullable List<String> roles;
     /**
-     * Disjoint-kind union (oneOf sum type): the wire value is either a string or an integer, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector.
+     * Disjoint-kind union (oneOf sum type): the wire value is either a string of at least 3 code points or an integer of at least 1, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector. Each branch also carries its **own constraints**: once the token selects a branch, the value is held to everything that branch declares, in both directions, with the union's path on the violation.
      */
     private final @Nullable IdOrName idOrName;
+    /**
+     * A union whose string branch is a **closed value set**: either one of two named modes or an unbounded non-negative integer. The branch narrows to its own admissible values (a Go/Java membership check, a TypeScript literal union, a Python `Literal`), so an unknown string is a Violation while any non-negative integer is accepted.
+     */
+    private final @Nullable Mode mode;
     /**
      * Mixed-kind union whose object branch is an inline free-form object: the wire value is either an arbitrary object (members carried verbatim) or a string, selected by its JSON token. The free-form object is the one object branch that needs no type name — TypeScript and Python carry it structurally, Go and Java wrap it as `<Union>Object`.
      */
@@ -877,11 +1072,11 @@ public final class Showcase {
      */
     private final @Nullable Detail detail;
     /**
-     * Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface).
+     * Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface). The scalar branch carries a length bound of its own; the object branches validate through their own models.
      */
     private final @Nullable ShapeOrName shapeOrName;
     /**
-     * Mixed-kind union with an array branch: the wire value is either a list of numbers or a string, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`.
+     * Mixed-kind union with an array branch: the wire value is either a non-empty list of distinct numbers or a lowercase preset name, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`. Both branches carry their own constraints — the array's `minItems`/`uniqueItems` and the string's `pattern` — so the array-vs-string choice is validated as well as selected.
      */
     private final @Nullable Measurements measurements;
     /**
@@ -924,7 +1119,7 @@ public final class Showcase {
     private final @Nullable Attributes attributes;
     private final @Nullable ContactJava contact;
 
-    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Payload payload, @Nullable Detail detail, @Nullable ShapeOrName shapeOrName, @Nullable Measurements measurements, @Nullable List<Shape> shapes, @Nullable List<ShowcaseSegmentsItem> segments, @Nullable List<@Nullable String> slots, @Nullable List<List<Long>> grid, @Nullable ShowcaseLocation location, @Nullable ShowcaseAudit audit, @Nullable List<ShowcaseRowsItem> rows, @Nullable ShowcaseLedger ledgerJava, @Nullable ShowcaseMetadata metadata, @Nullable Quotas quotas, @Nullable Tokens tokens, @Nullable Nicknames nicknames, @Nullable Choices choices, @Nullable Extras extras, @Nullable Shape shape, @Nullable Note note, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
+    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Mode mode, @Nullable Payload payload, @Nullable Detail detail, @Nullable ShapeOrName shapeOrName, @Nullable Measurements measurements, @Nullable List<Shape> shapes, @Nullable List<ShowcaseSegmentsItem> segments, @Nullable List<@Nullable String> slots, @Nullable List<List<Long>> grid, @Nullable ShowcaseLocation location, @Nullable ShowcaseAudit audit, @Nullable List<ShowcaseRowsItem> rows, @Nullable ShowcaseLedger ledgerJava, @Nullable ShowcaseMetadata metadata, @Nullable Quotas quotas, @Nullable Tokens tokens, @Nullable Nicknames nicknames, @Nullable Choices choices, @Nullable Extras extras, @Nullable Shape shape, @Nullable Note note, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
         this.kind = kind;
         this.revision = revision;
         this.enabled = enabled;
@@ -960,6 +1155,7 @@ public final class Showcase {
         this.aliases = aliases;
         this.roles = roles;
         this.idOrName = idOrName;
+        this.mode = mode;
         this.payload = payload;
         this.detail = detail;
         this.shapeOrName = shapeOrName;
@@ -1143,6 +1339,10 @@ public final class Showcase {
         return idOrName;
     }
 
+    public @Nullable Mode getMode() {
+        return mode;
+    }
+
     public @Nullable Payload getPayload() {
         return payload;
     }
@@ -1287,6 +1487,7 @@ public final class Showcase {
             && Objects.equals(this.aliases, that.aliases)
             && Objects.equals(this.roles, that.roles)
             && Objects.equals(this.idOrName, that.idOrName)
+            && Objects.equals(this.mode, that.mode)
             && Objects.equals(this.payload, that.payload)
             && Objects.equals(this.detail, that.detail)
             && Objects.equals(this.shapeOrName, that.shapeOrName)
@@ -1316,7 +1517,7 @@ public final class Showcase {
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
+        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, mode, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
     }
 
     @Override
@@ -1357,6 +1558,7 @@ public final class Showcase {
             + ", aliases=" + aliases
             + ", roles=" + roles
             + ", idOrName=" + idOrName
+            + ", mode=" + mode
             + ", payload=" + payload
             + ", detail=" + detail
             + ", shapeOrName=" + shapeOrName
@@ -1508,6 +1710,23 @@ public final class Showcase {
                     violations.add(new Violation("roles", "too many matching items: at most 2, got " + matchCount));
                 }
             }
+            if (value.idOrName != null) {
+                IdOrName.validate(value.idOrName, "idOrName", violations);
+            }
+            if (value.mode != null) {
+                Mode.validate(value.mode, "mode", violations);
+            }
+            if (value.shapeOrName != null) {
+                ShapeOrName.validate(value.shapeOrName, "shapeOrName", violations);
+            }
+            if (value.measurements != null) {
+                Measurements.validate(value.measurements, "measurements", violations);
+            }
+            if (value.segments != null) {
+                for (int index = 0; index < value.segments.size(); index++) {
+                    ShowcaseSegmentsItem.validate(value.segments.get(index), "segments" + "[" + index + "]", violations);
+                }
+            }
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
@@ -1620,6 +1839,10 @@ public final class Showcase {
             if (value.idOrName != null) {
                 gen.writeFieldName("idOrName");
                 serializers.defaultSerializeValue(value.idOrName, gen);
+            }
+            if (value.mode != null) {
+                gen.writeFieldName("mode");
+                serializers.defaultSerializeValue(value.mode, gen);
             }
             if (value.payload != null) {
                 gen.writeFieldName("payload");
@@ -1769,6 +1992,7 @@ public final class Showcase {
                     case "measurements":
                     case "metadata":
                     case "middleName":
+                    case "mode":
                     case "name":
                     case "nickname":
                     case "nicknames":
@@ -2443,6 +2667,16 @@ public final class Showcase {
                     idOrName = IdOrName.fromNode(field, "idOrName", violations, context);
                 }
             }
+            Mode mode = null;
+            {
+                JsonNode field = node.get("mode");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("mode", "explicit null not allowed"));
+                } else {
+                    mode = Mode.fromNode(field, "mode", violations, context);
+                }
+            }
             Payload payload = null;
             {
                 JsonNode field = node.get("payload");
@@ -2892,7 +3126,7 @@ public final class Showcase {
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
+            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, mode, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
         }
     }
 }

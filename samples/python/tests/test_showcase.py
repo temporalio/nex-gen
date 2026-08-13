@@ -559,6 +559,62 @@ def test_one_of_sum_types_roundtrip_and_reject() -> None:
         _ = Showcase.model_validate({**base, "shape": {"kind": "triangle"}})
 
 
+def test_one_of_branch_constraints() -> None:
+    """Once the token selects a branch, the value is held to everything that
+    branch declares: each union member carries its own constraints."""
+    base = {
+        "kind": "showcase",
+        "revision": 1,
+        "enabled": True,
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+    }
+
+    # The string branch's own `minLength` and the integer branch's own `minimum`
+    # — each enforced only for the branch that declares it.
+    assert Showcase.model_validate({**base, "idOrName": "abc"}).id_or_name == "abc"
+    assert Showcase.model_validate({**base, "idOrName": 1}).id_or_name == 1
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "idOrName": "ab"})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "idOrName": 0})
+
+    # A closed value set on a branch: an unknown string matches no member.
+    assert Showcase.model_validate({**base, "mode": "manual"}).mode == "manual"
+    assert Showcase.model_validate({**base, "mode": 7}).mode == 7
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "mode": "turbo"})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "mode": -1})
+
+    # The array branch's `minItems`/`uniqueItems` and the string branch's
+    # `pattern`, on the same union.
+    assert Showcase.model_validate(
+        {**base, "measurements": [1.5, 2.5]}
+    ).measurements == [1.5, 2.5]
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "measurements": []})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "measurements": [1.5, 1.5]})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "measurements": "AUTO"})
+
+    # An element union's branch constraints hold per element.
+    assert Showcase.model_validate({**base, "segments": ["ab", 0]}).segments == [
+        "ab",
+        0,
+    ]
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "segments": ["a"]})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "segments": [-1]})
+
+
 def test_free_form_object_roundtrip_and_reject() -> None:
     # The free-form object in both positions: the inline object branch of the
     # `payload` union, and the named `Extras` model. Members are carried

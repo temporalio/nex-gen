@@ -929,6 +929,9 @@ struct JavaUnionVariant {
     /// True for an array wrapper whose *elements* are nullable ([[items]]).
     nullable_items: bool,
     label: String,
+    /// The branch's own schema. A wrapper has no POJO to carry the branch's
+    /// constraints, so it runs them itself ([[oneOf]] §"Validator mapping").
+    schema: Schema,
 }
 
 #[derive(Debug, Clone)]
@@ -1033,6 +1036,7 @@ fn classify_java_union(
                     } else {
                         class
                     },
+                    schema: member_schema.clone(),
                 });
             }
             Some("string") => variants.push(JavaUnionVariant {
@@ -1046,6 +1050,7 @@ fn classify_java_union(
                 owned_object: false,
                 nullable_items: false,
                 label: "string".to_string(),
+                schema: member_schema.clone(),
             }),
             Some("integer") => variants.push(JavaUnionVariant {
                 class: format!("{interface}Integer"),
@@ -1058,6 +1063,7 @@ fn classify_java_union(
                 owned_object: false,
                 nullable_items: false,
                 label: "integer".to_string(),
+                schema: member_schema.clone(),
             }),
             Some("number") => variants.push(JavaUnionVariant {
                 class: format!("{interface}Number"),
@@ -1070,6 +1076,7 @@ fn classify_java_union(
                 owned_object: false,
                 nullable_items: false,
                 label: "number".to_string(),
+                schema: member_schema.clone(),
             }),
             Some("boolean") => variants.push(JavaUnionVariant {
                 class: format!("{interface}Boolean"),
@@ -1082,6 +1089,7 @@ fn classify_java_union(
                 owned_object: false,
                 nullable_items: false,
                 label: "boolean".to_string(),
+                schema: member_schema.clone(),
             }),
             Some("array") => {
                 let item = member_schema
@@ -1100,6 +1108,7 @@ fn classify_java_union(
                     owned_object: false,
                     nullable_items: member_schema.items.as_deref().is_some_and(allows_null),
                     label: "array".to_string(),
+                    schema: member_schema.clone(),
                 });
             }
             _ => {}
@@ -1227,6 +1236,10 @@ struct FieldPlan {
     /// A `oneOf` sum type carried by this field (an inline union or a `$ref` to
     /// a named union def).
     union: Option<JavaUnion>,
+    /// A `oneOf` sum type carried by this field's *elements* — a collection whose
+    /// element type is a union def ([[oneOf]] §"Unions in element positions").
+    /// Distinct from `union`, which is the field's own type.
+    element_union: Option<JavaUnion>,
 }
 
 impl FieldPlan {
@@ -1462,16 +1475,8 @@ fn resolve_model_kind(
                     },
                     union,
                 )
-            } else if let Some(reference) = &property.reference
-                && all_models
-                    .get(strip_ref(reference))
-                    .and_then(|model| decode_schema(model).ok())
-                    .is_some_and(|target| is_java_union_schema(&target))
-            {
-                let (_package, class) = context.resolve_ref(reference);
-                let target = decode_schema(&all_models[strip_ref(reference)])?;
-                let union = classify_java_union(&class, false, &target, all_models, context);
-                (java_type_for(property, context)?, union)
+            } else if let Some(union) = ref_union(property, all_models, context) {
+                (java_type_for(property, context)?, Some(union))
             } else if !closed_values.is_empty() {
                 // A `const`/`enum` member is a nested value class over its
                 // underlying scalar (P13.1). The class name follows the member
@@ -1486,6 +1491,13 @@ fn resolve_model_kind(
                 )
             } else {
                 (java_type_for(property, context)?, None)
+            };
+            // A collection whose *element* is a union def: the field carries the
+            // element's union so the serialize side can route each element through
+            // its dispatcher ([[oneOf]] §"Unions in element positions").
+            let element_union = match &property.items {
+                Some(element) => ref_union(element, all_models, context),
+                None => None,
             };
             fields.push(FieldPlan {
                 java_name,
@@ -1503,6 +1515,7 @@ fn resolve_model_kind(
                 array: ArrayConstraints::from_schema(property),
                 nullable_items: property.items.as_deref().is_some_and(allows_null),
                 union,
+                element_union,
             });
         }
     }
@@ -1636,7 +1649,15 @@ pub(in crate::generator) fn render_model_file(
             value,
             max_properties,
         } => {
-            render_typed_map_class(&mut body, class, &schema, value, *max_properties, &mut refs);
+            render_typed_map_class(
+                &mut body,
+                class,
+                &schema,
+                value,
+                *max_properties,
+                map_member_union(&schema, all_models, &context).as_ref(),
+                &mut refs,
+            );
         }
     }
 
@@ -1802,7 +1823,8 @@ fn render_union_read_object(
     output.push_str(&format!("{indent}}}\n"));
 }
 
-/// Reads a scalar/array wrapper member and returns a new wrapper instance.
+/// Reads a scalar/array wrapper member and returns a new wrapper instance,
+/// holding it to the branch's own constraints on the way in.
 fn render_union_read_scalar(
     output: &mut String,
     variant: &JavaUnionVariant,
@@ -1810,30 +1832,48 @@ fn render_union_read_scalar(
     path: &str,
     indent: &str,
 ) {
-    match variant.underlying.as_ref() {
-        Some(JavaType::String) => {
+    // A branch that declares constraints validates the wrapper it just built, so
+    // a bad value is a `Violation` under the union's own path rather than an
+    // accepted member.
+    let checked = java_variant_checks(variant, path, indent).is_some();
+    let wrap = |output: &mut String, argument: &str| {
+        if checked {
             output.push_str(&format!(
-                "{indent}return new {}({node}.textValue());\n",
+                "{indent}{class} wrapped = new {class}({argument});\n{indent}wrapped.validate({path}, violations);\n{indent}return wrapped;\n",
+                class = variant.class
+            ));
+        } else {
+            output.push_str(&format!(
+                "{indent}return new {}({argument});\n",
                 variant.class
             ));
         }
+    };
+    match variant.underlying.as_ref() {
+        Some(JavaType::String) => {
+            wrap(output, &format!("{node}.textValue()"));
+        }
         Some(JavaType::Boolean) => {
-            output.push_str(&format!(
-                "{indent}return new {}({node}.booleanValue());\n",
-                variant.class
-            ));
+            wrap(output, &format!("{node}.booleanValue()"));
         }
         Some(JavaType::Long) => {
             output.push_str(&format!(
-                "{indent}Long parsed = SpecNumbers.specLong({node}, {path}, violations);\n{indent}return parsed == null ? null : new {}(parsed);\n",
-                variant.class
+                "{indent}Long parsed = SpecNumbers.specLong({node}, {path}, violations);\n"
             ));
+            if checked {
+                output.push_str(&format!(
+                    "{indent}if (parsed == null) {{\n{indent}    return null;\n{indent}}}\n"
+                ));
+                wrap(output, "parsed");
+            } else {
+                output.push_str(&format!(
+                    "{indent}return parsed == null ? null : new {}(parsed);\n",
+                    variant.class
+                ));
+            }
         }
         Some(JavaType::Double) => {
-            output.push_str(&format!(
-                "{indent}return new {}({node}.doubleValue());\n",
-                variant.class
-            ));
+            wrap(output, &format!("{node}.doubleValue()"));
         }
         Some(JavaType::List(item)) => {
             output.push_str(&format!(
@@ -1860,7 +1900,7 @@ fn render_union_read_scalar(
                 &format!("{indent}    "),
             );
             output.push_str(&format!("{indent}}}\n"));
-            output.push_str(&format!("{indent}return new {}(items);\n", variant.class));
+            wrap(output, "items");
         }
         _ => {
             output.push_str(&format!("{indent}return null;\n"));
@@ -1892,6 +1932,94 @@ fn render_union_from_node(output: &mut String, union: &JavaUnion, indent: &str) 
     ));
     render_union_dispatch_body(output, union, "node", "path", &format!("{indent}    "));
     output.push_str(&format!("{indent}}}\n"));
+    render_union_validate(output, union, indent);
+}
+
+/// Emits the union's static `validate` — the serialize-side counterpart of
+/// `fromNode`: it dispatches on the member's runtime class and re-runs that
+/// branch's own constraints before the value is written (P12). The enclosing
+/// POJO's `Serializer` calls it, so a branch violation aggregates with its
+/// siblings into the one `ValidationException` (P11).
+///
+/// Emitted only when some branch declares a constraint; a union of unconstrained
+/// kinds needs no dispatcher, because holding a member *is* the whole invariant.
+fn render_union_validate(output: &mut String, union: &JavaUnion, indent: &str) {
+    if !java_union_has_checks(union) {
+        return;
+    }
+    let inner = format!("{indent}    ");
+    output.push_str(&format!(
+        "\n{indent}static void validate({} value, String path, List<Violation> violations) {{\n",
+        union.interface
+    ));
+    for variant in &union.variants {
+        if java_variant_checks(variant, "path", "").is_none() {
+            continue;
+        }
+        output.push_str(&format!(
+            "{inner}if (value instanceof {class}) {{\n{inner}    (({class}) value).validate(path, violations);\n{inner}}}\n",
+            class = variant.class
+        ));
+    }
+    output.push_str(&format!("{indent}}}\n"));
+}
+
+/// The predicates a wrapper runs over the `value` it holds — every constraint the
+/// branch declares, through the same emitters (and with the same reasons) a
+/// declared field of that type uses. `None` when the branch declares nothing, so
+/// an unconstrained wrapper keeps no `validate` at all.
+fn java_variant_checks(
+    variant: &JavaUnionVariant,
+    path_expr: &str,
+    indent: &str,
+) -> Option<String> {
+    let ty = variant.underlying.as_ref()?;
+    let mut body = String::new();
+    render_java_member_checks(&mut body, "value", path_expr, &variant.schema, ty, indent);
+    (!body.is_empty()).then_some(body)
+}
+
+/// The union a schema `$ref`s, when its target definition is a `oneOf` sum type.
+/// Used for a member whose type is a named union and for a collection whose
+/// element type is (an inline element union is hoisted into `$defs` by the loader,
+/// so it arrives here as a reference too).
+fn ref_union(
+    schema: &Schema,
+    all_models: &BTreeMap<String, PlannedJsonType>,
+    context: &JavaContext,
+) -> Option<JavaUnion> {
+    let reference = schema.reference.as_ref()?;
+    let target = all_models
+        .get(strip_ref(reference))
+        .and_then(|model| decode_schema(model).ok())?;
+    if !is_java_union_schema(&target) {
+        return None;
+    }
+    let (_package, class) = context.resolve_ref(reference);
+    classify_java_union(&class, false, &target, all_models, context)
+}
+
+/// The union interface a field's type carries, if any: an inline union nested in
+/// the declaring POJO, a `$ref` to a named union def, or a collection whose
+/// element is either.
+fn java_union_interface(ty: &JavaType) -> Option<&String> {
+    match ty {
+        JavaType::Union { class } => Some(class),
+        JavaType::Ref {
+            class, union: true, ..
+        } => Some(class),
+        JavaType::List(element) => java_union_interface(element),
+        _ => None,
+    }
+}
+
+/// True when any of a union's wrapper classes carries a `validate` — i.e. some
+/// non-object branch declares a constraint.
+fn java_union_has_checks(union: &JavaUnion) -> bool {
+    union
+        .variants
+        .iter()
+        .any(|variant| java_variant_checks(variant, "path", "").is_some())
 }
 
 /// Renders the wrapper class carrying each non-object member (and the free-form
@@ -1919,6 +2047,25 @@ fn render_union_wrapper_classes(output: &mut String, union: &JavaUnion, indent: 
             "{indent}public static final class {} implements {} {{\n",
             variant.class, union.interface
         ));
+        // Compiled `pattern`/`format` regexes for the branch, compiled once at
+        // class init — the wrapper counterpart of a POJO's per-field statics. The
+        // wrapper's single field is `value`, so the position name is the same one
+        // a map member uses.
+        let string_length = StringLengthConstraints::from_schema(&variant.schema);
+        if let Some(pattern) = &string_length.pattern {
+            output.push_str(&format!(
+                "{inner}private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n\n",
+                java_pattern_field_name(MAP_MEMBER_POSITION),
+                java_string_literal(pattern),
+            ));
+        }
+        if let Some(format) = &string_length.format {
+            output.push_str(&format!(
+                "{inner}private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n\n",
+                java_format_field_name(MAP_MEMBER_POSITION),
+                java_string_literal(&format.pattern),
+            ));
+        }
         output.push_str(&format!("{inner}private final {field_type} value;\n\n"));
         output.push_str(&format!(
             "{inner}public {}({field_type} value) {{\n{inner}    this.value = value;\n{inner}}}\n\n",
@@ -1930,6 +2077,13 @@ fn render_union_wrapper_classes(output: &mut String, union: &JavaUnion, indent: 
         output.push_str(&format!(
             "{inner}@JsonValue\n{inner}public {getter_type} getValue() {{\n{inner}    return value;\n{inner}}}\n\n"
         ));
+        // The branch's own constraints, run on the way in (the dispatcher) and
+        // again before emit (the enclosing serializer) — P12 over one emitter.
+        if let Some(checks) = java_variant_checks(variant, "path", &format!("{inner}    ")) {
+            output.push_str(&format!(
+                "{inner}void validate(String path, List<Violation> violations) {{\n{checks}{inner}}}\n\n"
+            ));
+        }
         // equals/hashCode/toString over the single value.
         output.push_str(&format!(
             "{inner}@Override\n{inner}public boolean equals(Object other) {{\n"
@@ -2362,6 +2516,14 @@ fn render_equals_hashcode_tostring(
 /// `render_java_serialize_field_check`. A closed value (`const`/`enum`) needs no
 /// serialize check: its value class can only hold a known constant.
 fn field_has_serialize_check(field: &FieldPlan) -> bool {
+    // A union member (on its own, or as a collection's element) is re-checked
+    // against the branch it holds, when any branch declares a constraint.
+    if let Some(union) = field.union.as_ref().or(field.element_union.as_ref())
+        && java_union_interface(&field.ty).is_some()
+        && java_union_has_checks(union)
+    {
+        return true;
+    }
     match &field.ty {
         JavaType::String => !field.string_length.is_empty(),
         JavaType::Long | JavaType::Double => !field.numeric.is_empty(),
@@ -2426,6 +2588,26 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
                 &inner,
             ),
             _ => {}
+        }
+        // A union member is re-checked against the branch it holds before emit,
+        // through the union's own runtime-class dispatcher. As a collection's
+        // element, each value is routed under its own index (P11) — the
+        // serialize-side counterpart of the elementwise parse.
+        if let Some(union) = &field.union
+            && java_union_has_checks(union)
+            && let Some(interface) = java_union_interface(&field.ty)
+        {
+            body.push_str(&format!(
+                "{inner}{interface}.validate({accessor}, {json}, violations);\n"
+            ));
+        }
+        if let Some(union) = &field.element_union
+            && java_union_has_checks(union)
+            && let Some(interface) = java_union_interface(&field.ty)
+        {
+            body.push_str(&format!(
+                "{inner}for (int index = 0; index < {accessor}.size(); index++) {{\n{inner}    {interface}.validate({accessor}.get(index), {json} + \"[\" + index + \"]\", violations);\n{inner}}}\n"
+            ));
         }
     }
     if body.is_empty() {
@@ -3501,6 +3683,17 @@ fn map_member_allows_null(schema: &Schema) -> bool {
         .unwrap_or(false)
 }
 
+/// The union a typed map's member type refers to, when the member is a `oneOf`
+/// sum type. The loader hoists an inline member union into `$defs` and rewrites
+/// the position to a `$ref`, so a union member is always a reference here.
+fn map_member_union(
+    schema: &Schema,
+    all_models: &BTreeMap<String, PlannedJsonType>,
+    context: &JavaContext,
+) -> Option<JavaUnion> {
+    ref_union(&map_member_schema(schema)?, all_models, context)
+}
+
 /// A map-shaped schema's declared member schema, with any nullability `oneOf`
 /// wrapper looked through so the constraints it carries are the member's own.
 fn map_member_schema(schema: &Schema) -> Option<Schema> {
@@ -3520,6 +3713,7 @@ fn render_typed_map_class(
     schema: &Schema,
     value: &JavaType,
     max_properties: Option<usize>,
+    member_union: Option<&JavaUnion>,
     refs: &mut BTreeSet<(String, String)>,
 ) {
     value.collect_refs(refs);
@@ -3608,6 +3802,17 @@ fn render_typed_map_class(
             value,
             "                ",
         );
+        // A union-typed member is re-checked against the branch it holds, through
+        // the union's own dispatcher (the parse side runs the same checks inside
+        // `fromNode`).
+        if let Some(interface) = java_union_interface(value)
+            && let Some(union) = member_union
+            && java_union_has_checks(union)
+        {
+            member_checks.push_str(&format!(
+                "                {interface}.validate(entry.getValue(), entry.getKey(), violations);\n"
+            ));
+        }
     }
     let map_needs_validation = schema.min_properties.is_some()
         || schema.max_properties.is_some()

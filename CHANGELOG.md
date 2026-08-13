@@ -55,6 +55,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delegating call instead of an inlined token chain, and a union member
   serializes by runtime class: object branches through their POJO's serializer,
   scalar/array wrappers through Jackson's `@JsonValue` on `getValue()`.
+- JSON Schema: A **materializing** keyword on a non-object branch of a `oneOf`
+  sum type — a temporal `format` (`date-time`/`date`/`time`/`duration`) or a
+  `contentEncoding` — is now **rejected at load** with a located diagnostic. The
+  synthesized `<Union><Kind>` wrapper has no native construct to hold, so the
+  branch materialized in Python while Go, TypeScript, and Java carried an
+  unvalidated `string`. The remedy is a plain `string` branch (still fully
+  validated) or an object branch carrying the value as a property, where
+  materialization already works. Asserted string formats (`uuid`, `email`,
+  `hostname`, `uri`, `ipv4`, `ipv6`) are unaffected, and the nullability
+  `oneOf:[{T},{null}]` is not a sum type, so a materialized nullable field keeps
+  working.
 
 ### Deprecated
 
@@ -78,6 +89,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema: A **non-object `oneOf` branch's own constraints** were dropped in
+  three of four languages: only Go carried them, in the synthesized
+  `<Union><Kind>` variant's `Validate`. TypeScript cast the narrowed value
+  through unchecked, Python emitted a bare `str | SpecInt` with no constraint
+  metadata, and Java's wrapper classes held the value without validating it. A
+  branch is now held to everything it declares — string lengths, `pattern`, an
+  asserted `format`, numeric bounds and `multipleOf`, `minItems`/`maxItems`/
+  `uniqueItems`/`contains`, a `const`/`enum` value set — in all four languages and
+  both directions, under the union's own violation path. Go additionally dropped a
+  branch's `pattern`/`format` while emitting an (empty) `Validate` for it.
+- TypeScript: A `const`/`enum` on a non-object `oneOf` branch generated code that
+  **did not compile** (`tsc` TS2322): the branch narrowed the member type to its
+  literal set while the parse path assigned the wider primitive into it. The
+  branch's member type and its narrowed assignment now agree.
+- TypeScript: A nested violation carrying no path of its own — a union branch's
+  own constraint, an element-level check — was reported with a dangling separator
+  (`segments[0].`). The prefix is now the whole path, matching Go and Java.
+- JSON Schema: `uniqueItems` and `contains` were dropped on an array-typed **typed
+  map member** in Python, for want of a native Pydantic form. Both now ride in the
+  member's annotation as AfterValidators, with the same reasons the property
+  position emits (and the same mechanism now serves a `oneOf` branch).
 - JSON Schema: A typed map's members were validated against their type *token*
   only, so every constraint the member type declared was silently dropped — a
   string's `minLength`/`maxLength`/`pattern`/`format`, a number's bounds and

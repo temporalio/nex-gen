@@ -600,6 +600,110 @@ final class JsonSchemaShowcaseRoundTripTest {
     }
 
     /**
+     * Once the wire token selects a branch, the value is held to everything that
+     * branch declares — {@code idOrName}'s length/numeric bounds, {@code mode}'s
+     * closed string value set, {@code measurements}' array bounds and pattern —
+     * in both directions, with the union's own path on the violation.
+     */
+    @Test
+    void oneOfBranchConstraintsAreEnforced() throws IOException {
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // The string branch's own `minLength`.
+        RuntimeException shortString = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload((base + ",\"idOrName\":\"ab\"}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(shortString).contains("idOrName: must have length >= 3, got 2"),
+                messageChain(shortString));
+
+        // The integer branch's own `minimum` — the string branch's bound does not
+        // apply to it.
+        RuntimeException smallInt = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload((base + ",\"idOrName\":0}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(smallInt).contains("idOrName: must be >= 1, got 0"),
+                messageChain(smallInt));
+
+        // A closed value set on a branch: an unknown string names the admissible
+        // values, while the integer branch accepts any non-negative value.
+        RuntimeException badMode = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload((base + ",\"mode\":\"turbo\"}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(badMode).contains("mode: must be one of [\"auto\", \"manual\"], got turbo"),
+                messageChain(badMode));
+        Showcase full = roundTrip("showcase-full.json", Showcase.class);
+        assertTrue(full.getMode() instanceof Showcase.ModeString);
+        assertEquals("auto", ((Showcase.ModeString) full.getMode()).getValue());
+
+        // The array branch's `minItems`/`uniqueItems` and the string branch's
+        // `pattern`, on the same union.
+        RuntimeException empty = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload((base + ",\"measurements\":[]}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(empty).contains("measurements: must have at least 1 items, got 0"),
+                messageChain(empty));
+        RuntimeException duplicate = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"measurements\":[1.5,1.5]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(duplicate)
+                        .contains("duplicate items: element at index 1 equals index 0"),
+                messageChain(duplicate));
+        RuntimeException offPattern = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"measurements\":\"AUTO\"}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(offPattern).contains("measurements: must match pattern"),
+                messageChain(offPattern));
+
+        // An element union's branch constraints hold per element, under the
+        // element's own index (P11).
+        RuntimeException element = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"segments\":[\"ab\",\"c\"]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(element).contains("segments[1]: must have length >= 2, got 1"),
+                messageChain(element));
+
+        // Serialize re-runs the selected branch's constraints (P12), for a
+        // property-level union and for a collection's elements.
+        RuntimeException serialize = assertThrows(RuntimeException.class, () ->
+                CONVERTER.toPayload(
+                        showcaseWith(null, null, null, null, null,
+                                new Showcase.IdOrNameString("ab"))));
+        assertTrue(
+                messageChain(serialize).contains("idOrName: must have length >= 3, got 2"),
+                messageChain(serialize));
+    }
+
+    /**
      * The free-form object in both positions: the inline object branch of the
      * {@code payload} union (a nested wrapper class holding the members verbatim)
      * and the named {@code Extras} model. Members keep their wire form, so a large
@@ -1065,6 +1169,20 @@ final class JsonSchemaShowcaseRoundTripTest {
             String requestId,
             Long priority,
             java.util.List<String> aliases) {
+        return showcaseWith(code, sku, requestId, priority, aliases, null);
+    }
+
+    /**
+     * As {@link #showcaseWith}, additionally varying the {@code idOrName} union
+     * member so a branch's own constraints can be exercised on the serialize side.
+     */
+    private static Showcase showcaseWith(
+            String code,
+            String sku,
+            String requestId,
+            Long priority,
+            java.util.List<String> aliases,
+            Showcase.IdOrName idOrName) {
         // Closed value-set members can only hold a known value-class constant —
         // a wrong value cannot be constructed (private constructor), so these
         // fields are always the valid constants here.
@@ -1074,10 +1192,10 @@ final class JsonSchemaShowcaseRoundTripTest {
                 "w", 1L, true,
                 null, code, sku, null, requestId, null, null, null, null,
                 null, null, null, null, null, null, null, null, "tools",
-                priority, null, null, null, null, aliases, null, null, null,
+                priority, null, null, null, null, aliases, null, idOrName, null,
                 null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     /**

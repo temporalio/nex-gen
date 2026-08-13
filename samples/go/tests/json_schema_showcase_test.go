@@ -583,6 +583,50 @@ func TestJSONSchemaShowcaseUnions(t *testing.T) {
 	require.Contains(t, err.Error(), "shape")
 }
 
+// TestJSONSchemaShowcaseBranchConstraints asserts that once the token selects a
+// branch, the value is held to everything that branch declares — `idOrName`'s
+// `minLength`/`minimum`, `mode`'s closed string value set — in both directions,
+// with the union's own path on the violation.
+func TestJSONSchemaShowcaseBranchConstraints(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+
+	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
+	var out showcase.Showcase
+
+	// The selected string branch's own `minLength`.
+	err := dc.FromPayload(jsonPayload([]byte(base+`,"idOrName":"ab"}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "idOrName: must have length >= 3, got 2")
+
+	// The selected integer branch's own `minimum` — the other branch's
+	// constraints are irrelevant to it.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"idOrName":0}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "idOrName: must be >= 1, got 0")
+
+	// A closed value set on a branch: an unknown string is rejected naming the
+	// admissible values, while the integer branch stays unbounded above.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"mode":"turbo"}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `mode: must be one of ["auto","manual"], got "turbo"`)
+	mode := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-full.json")
+	require.Equal(t, showcase.ShowcaseModeString("auto"), mode.Mode)
+
+	// Serialize re-runs the selected branch's constraints (P12): an in-memory
+	// member violating its own branch is rejected before any bytes are written.
+	invalid := mode
+	invalid.IdOrName = showcase.ShowcaseIdOrNameString("ab")
+	_, err = dc.ToPayload(invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "idOrName: must have length >= 3, got 2")
+
+	invalid = mode
+	invalid.Mode = showcase.ShowcaseModeInteger(-1)
+	_, err = dc.ToPayload(invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mode: must be >= 0, got -1")
+}
+
 // TestJSONSchemaShowcaseFreeFormObject round-trips the free-form object in both
 // positions: the named `Extras` model and the inline object branch of the
 // `payload` union. Members are carried verbatim, so a large integer survives

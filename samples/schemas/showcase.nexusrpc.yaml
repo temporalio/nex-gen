@@ -270,12 +270,25 @@ $defs:
         maxContains: 2
       idOrName:
         description: >-
-          Disjoint-kind union (oneOf sum type): the wire value is either a string or
-          an integer, selected by its JSON token. Not a member of a discriminated
-          union — the token itself is the selector.
+          Disjoint-kind union (oneOf sum type): the wire value is either a string of
+          at least 3 code points or an integer of at least 1, selected by its JSON
+          token. Not a member of a discriminated union — the token itself is the
+          selector. Each branch also carries its **own constraints**: once the token
+          selects a branch, the value is held to everything that branch declares, in
+          both directions, with the union's path on the violation.
         oneOf:
-          - { type: string }
-          - { type: integer }
+          - { type: string, minLength: 3 }
+          - { type: integer, minimum: 1 }
+      mode:
+        description: >-
+          A union whose string branch is a **closed value set**: either one of two
+          named modes or an unbounded non-negative integer. The branch narrows to
+          its own admissible values (a Go/Java membership check, a TypeScript
+          literal union, a Python `Literal`), so an unknown string is a Violation
+          while any non-negative integer is accepted.
+        oneOf:
+          - { type: string, enum: [auto, manual] }
+          - { type: integer, minimum: 0 }
       payload:
         description: >-
           Mixed-kind union whose object branch is an inline free-form object: the
@@ -310,22 +323,27 @@ $defs:
           position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and
           it reuses the `Circle`/`Square` branches of `shape` — a branch type
           may belong to more than one union (Go gains a second marker method,
-          Java a second implemented interface).
+          Java a second implemented interface). The scalar branch carries a
+          length bound of its own; the object branches validate through their
+          own models.
         oneOf:
           - { $ref: "#/$defs/Circle" }
           - { $ref: "#/$defs/Square" }
-          - { type: string }
+          - { type: string, maxLength: 32 }
       measurements:
         description: >-
-          Mixed-kind union with an array branch: the wire value is either a list
-          of numbers or a string, selected by its JSON token. An array branch has
-          no definition to take a name from, so Go and Java emit it as the
-          synthesized `<Union>Array` variant (a defined type / a `@JsonValue`
-          wrapper) while TypeScript and Python carry it structurally as
-          `number[]` / `list[float]`.
+          Mixed-kind union with an array branch: the wire value is either a
+          non-empty list of distinct numbers or a lowercase preset name, selected
+          by its JSON token. An array branch has no definition to take a name
+          from, so Go and Java emit it as the synthesized `<Union>Array` variant
+          (a defined type / a `@JsonValue` wrapper) while TypeScript and Python
+          carry it structurally as `number[]` / `list[float]`. Both branches
+          carry their own constraints — the array's `minItems`/`uniqueItems` and
+          the string's `pattern` — so the array-vs-string choice is validated as
+          well as selected.
         oneOf:
-          - { type: array, items: { type: number } }
-          - { type: string }
+          - { type: array, items: { type: number }, minItems: 1, uniqueItems: true }
+          - { type: string, pattern: "^[a-z]+$" }
       shapes:
         description: >-
           A list whose element type is a named union: every element is routed to
@@ -345,8 +363,8 @@ $defs:
         type: array
         items:
           oneOf:
-            - { type: string }
-            - { type: integer }
+            - { type: string, minLength: 2 }
+            - { type: integer, minimum: 0 }
       slots:
         description: >-
           A list of **nullable elements** — the two-branch nullability `oneOf`

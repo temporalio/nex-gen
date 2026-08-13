@@ -14,6 +14,7 @@ from ._definitions import (
     _check_format,
     _check_multiple_of,
     _check_pattern,
+    _check_unique_items,
     _emit_set_fields,
     _reject_explicit_null,
 )
@@ -826,10 +827,28 @@ class Showcase(pydantic.BaseModel):
     roles: list[str] | None = pydantic.Field(default=None)
     """Access roles; must contain between one and two "admin" entries."""
 
-    id_or_name: str | SpecInt | None = pydantic.Field(default=None, alias="idOrName")
-    """Disjoint-kind union (oneOf sum type): the wire value is either a string or an
-    integer, selected by its JSON token. Not a member of a discriminated union — the
-    token itself is the selector.
+    id_or_name: (
+        typing.Annotated[str, pydantic.Field(min_length=3)]
+        | typing.Annotated[SpecInt, pydantic.Field(ge=1)]
+        | None
+    ) = pydantic.Field(default=None, alias="idOrName")
+    """Disjoint-kind union (oneOf sum type): the wire value is either a string of at least
+    3 code points or an integer of at least 1, selected by its JSON token. Not a member
+    of a discriminated union — the token itself is the selector. Each branch also
+    carries its **own constraints**: once the token selects a branch, the value is held
+    to everything that branch declares, in both directions, with the union's path on the
+    violation.
+    """
+
+    mode: (
+        typing.Literal["auto", "manual"]
+        | typing.Annotated[SpecInt, pydantic.Field(ge=0)]
+        | None
+    ) = pydantic.Field(default=None)
+    """A union whose string branch is a **closed value set**: either one of two named modes
+    or an unbounded non-negative integer. The branch narrows to its own admissible
+    values (a Go/Java membership check, a TypeScript literal union, a Python `Literal`),
+    so an unknown string is a Violation while any non-negative integer is accepted.
     """
 
     payload: dict[str, typing.Any] | str | None = pydantic.Field(default=None)
@@ -848,24 +867,34 @@ class Showcase(pydantic.BaseModel):
     own constraints and it stays open to unknown ones.
     """
 
-    shape_or_name: Circle | Square | str | None = pydantic.Field(
-        default=None, alias="shapeOrName"
-    )
+    shape_or_name: (
+        Circle | Square | typing.Annotated[str, pydantic.Field(max_length=32)] | None
+    ) = pydantic.Field(default=None, alias="shapeOrName")
     """Tagged object union mixed with a scalar kind: the two selector layers compose — the
     JSON token picks object-vs-string, and, for an object, the shared required `kind`
     const picks Circle-vs-Square. Written inline on the property, so the union itself is
     named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`),
     and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong
     to more than one union (Go gains a second marker method, Java a second implemented
-    interface).
+    interface). The scalar branch carries a length bound of its own; the object branches
+    validate through their own models.
     """
 
-    measurements: list[float] | str | None = pydantic.Field(default=None)
-    """Mixed-kind union with an array branch: the wire value is either a list of numbers or
-    a string, selected by its JSON token. An array branch has no definition to take a
-    name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a
-    defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it
-    structurally as `number[]` / `list[float]`.
+    measurements: (
+        typing.Annotated[
+            typing.Annotated[list[float], pydantic.Field(min_length=1)],
+            pydantic.AfterValidator(_check_unique_items),
+        ]
+        | typing.Annotated[str, pydantic.AfterValidator(_check_pattern("^[a-z]+\\Z"))]
+        | None
+    ) = pydantic.Field(default=None)
+    """Mixed-kind union with an array branch: the wire value is either a non-empty list of
+    distinct numbers or a lowercase preset name, selected by its JSON token. An array
+    branch has no definition to take a name from, so Go and Java emit it as the
+    synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while
+    TypeScript and Python carry it structurally as `number[]` / `list[float]`. Both
+    branches carry their own constraints — the array's `minItems`/`uniqueItems` and the
+    string's `pattern` — so the array-vs-string choice is validated as well as selected.
     """
 
     shapes: list[Shape] | None = pydantic.Field(default=None)
@@ -1123,6 +1152,7 @@ class Showcase(pydantic.BaseModel):
             "location",
             "measurements",
             "metadata",
+            "mode",
             "nickname",
             "nicknames",
             "note",
@@ -1628,7 +1658,10 @@ unknown tag is a Violation.
 Shape: typing.TypeAlias = Circle | Square
 
 
-ShowcaseSegmentsItem: typing.TypeAlias = str | SpecInt
+ShowcaseSegmentsItem: typing.TypeAlias = (
+    typing.Annotated[str, pydantic.Field(min_length=2)]
+    | typing.Annotated[SpecInt, pydantic.Field(ge=0)]
+)
 
 
 _ = Choices.model_rebuild()

@@ -59,6 +59,22 @@ properties:
       - { type: string }
 "#;
 
+/// A union whose **non-object** branches each declare constraints of their own:
+/// once the wire token selects a branch, the value is held to everything that
+/// branch declares — including a closed value set — in both directions.
+const BRANCH_CONSTRAINT_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, minLength: 3, pattern: "^[a-z]+$" }
+      - { type: integer, minimum: 1 }
+  listOrName:
+    oneOf:
+      - { type: array, items: { type: number }, minItems: 1, uniqueItems: true }
+      - { type: string, enum: [auto, manual] }
+"#;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -243,6 +259,60 @@ fn java_json_names_inline_object_union_branch() {
     ] {
         assert!(declaring.contains(expected), "{expected}\n{declaring}");
     }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Every constraint a **non-object** branch declares becomes a `validate` on its
+/// wrapper class: the `fromNode` dispatcher runs it on the way in, and the
+/// enclosing POJO's `Serializer` runs it again through the interface's static
+/// `validate` before emit (P12), so a branch violation aggregates with its
+/// siblings. See `specs/json-schema/features/oneOf.md` ("Validator mapping").
+#[test]
+fn java_json_validates_non_object_union_branch_constraints() {
+    let temp_dir = unique_output_path("java-json-branch-constraints");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bc.yaml");
+    fs::write(&input_path, BRANCH_CONSTRAINT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bc");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("bc".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = read_java_files(&output_path);
+    let declaring = &rendered[&PathBuf::from("Bc.java")];
+
+    // The wrapper carries the branch's checks, and its compiled `pattern` — the
+    // wrapper's single field is `value`, so the static follows that name.
+    assert!(declaring.contains(
+        "private static final java.util.regex.Pattern VALUE_PATTERN = java.util.regex.Pattern.compile(\"^[a-z]+\\\\z\");"
+    ));
+    assert!(declaring.contains("void validate(String path, List<Violation> violations) {"));
+    assert!(declaring.contains("must have length >= 3, got "));
+    assert!(declaring.contains("if (!VALUE_PATTERN.matcher(value).find()) {"));
+    assert!(declaring.contains("must be >= 1, got "));
+    assert!(declaring.contains("must have at least 1 items, got "));
+    assert!(declaring.contains("duplicate items: element at index "));
+    assert!(declaring.contains("must be one of [\\\"auto\\\", \\\"manual\\\"], got "));
+    // Parse: the dispatcher validates the wrapper it just built.
+    assert!(declaring.contains("ValueString wrapped = new ValueString(node.textValue());"));
+    assert!(declaring.contains("wrapped.validate(path, violations);"));
+    // Serialize: the interface's runtime-class dispatcher, called by the POJO's
+    // Serializer before any member is written.
+    assert!(
+        declaring.contains(
+            "static void validate(Value value, String path, List<Violation> violations) {"
+        )
+    );
+    assert!(declaring.contains("Value.validate(value.value, \"value\", violations);"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

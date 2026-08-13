@@ -1754,6 +1754,15 @@ fn render_go_unions(
 
         for variant in &union.variants {
             if let Some(underlying) = &variant.synthesized {
+                // The compiled-regex vars the wrapper's `Validate` references for
+                // a `pattern`/`format` the branch declares, keyed by the wrapper
+                // type itself (`fooStringPattern`).
+                render_go_string_vars(
+                    output,
+                    &variant.go_type,
+                    UNION_VARIANT_POSITION,
+                    &variant.schema,
+                );
                 render_go_schema_doc(
                     output,
                     "",
@@ -1812,8 +1821,16 @@ fn render_go_unions(
     Ok(())
 }
 
-/// The wrapper `Validate` for a synthesized scalar/array variant: re-runs the
-/// branch's own constraints (P12) before assigning/serializing.
+/// The position name a union's synthesized `<Union><Kind>` variant contributes to
+/// a compiled-regex var: none, because the variant type name already identifies
+/// the branch (`fooStringPattern`).
+const UNION_VARIANT_POSITION: &str = "";
+
+/// The wrapper `Validate` for a synthesized scalar/array variant: runs every
+/// predicate the branch declares, so the branch's own constraints are enforced
+/// on the way in (the dispatcher calls this) and again before emit (P12) — the
+/// same predicates, with the same reasons, the property position runs for a value
+/// of that type ([[oneOf]] §"Validator mapping").
 fn render_go_variant_validate(output: &mut String, variant: &GoUnionVariant) {
     output
         .push_str("// Validate checks v against every constraint and returns a *ValidationError\n");
@@ -1821,26 +1838,19 @@ fn render_go_variant_validate(output: &mut String, variant: &GoUnionVariant) {
     output.push_str("func (v ");
     output.push_str(&variant.go_type);
     output.push_str(") Validate() error {\n\tvar errs []Violation\n");
-    let schema = &variant.schema;
     let underlying = variant.synthesized.as_deref().unwrap_or("");
-    match underlying {
-        "string" => {
-            if schema.has_string_constraints() {
-                render_go_string_checks(output, "string(v)", "\"\"", schema, "\t");
-            }
-        }
-        "int64" | "float64" => {
-            if schema.has_numeric_constraints() {
-                let expr = format!("{underlying}(v)");
-                render_go_numeric_checks(output, &expr, "\"\"", schema, "\t");
-            }
-        }
-        _ => {
-            if underlying.starts_with("[]") && schema.has_array_constraints() {
-                render_go_array_checks(output, &format!("{underlying}(v)"), "\"\"", schema, "\t");
-            }
-        }
-    }
+    // The wrapper is a defined type over `underlying`, so every predicate reads
+    // the value through a conversion back to it.
+    render_go_member_checks(
+        output,
+        "\t",
+        &format!("{underlying}(v)"),
+        "\"\"",
+        &variant.go_type,
+        UNION_VARIANT_POSITION,
+        &variant.schema,
+        true,
+    );
     output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
 }
 
@@ -3168,7 +3178,16 @@ fn render_go_map_methods(
             output.push_str(".Validate())\n");
         }
         if let Some(value) = &shape.value_schema {
-            render_go_member_checks(output, indent, &subject, "k", type_name, value, true);
+            render_go_member_checks(
+                output,
+                indent,
+                &subject,
+                "k",
+                type_name,
+                MAP_MEMBER_POSITION,
+                value,
+                true,
+            );
         }
         output.push_str("\t}\n");
     }
@@ -3214,7 +3233,16 @@ fn render_go_map_methods(
             output.push_str(helper);
             output.push_str("(&v, k, true, false, &errs); ok {\n");
             if let Some(value) = &shape.value_schema {
-                render_go_member_checks(output, "\t\t\t", "value", "k", type_name, value, false);
+                render_go_member_checks(
+                    output,
+                    "\t\t\t",
+                    "value",
+                    "k",
+                    type_name,
+                    MAP_MEMBER_POSITION,
+                    value,
+                    false,
+                );
             }
             output.push_str("\t\t\tm.AdditionalProperties[k] = ");
             store(output, "value");
@@ -3238,7 +3266,16 @@ fn render_go_map_methods(
                 output.push_str(decoded_type);
                 output.push_str("\n\t\tif err := json.Unmarshal(v, &value); err != nil {\n\t\t\tmergeNested(&errs, k, err)\n\t\t\tcontinue\n\t\t}\n");
                 if let Some(value) = &shape.value_schema {
-                    render_go_member_checks(output, "\t\t", "value", "k", type_name, value, false);
+                    render_go_member_checks(
+                        output,
+                        "\t\t",
+                        "value",
+                        "k",
+                        type_name,
+                        MAP_MEMBER_POSITION,
+                        value,
+                        false,
+                    );
                 }
                 output.push_str("\t\tm.AdditionalProperties[k] = ");
                 store(output, "value");
@@ -3276,27 +3313,34 @@ fn schema_declares_member_checks(value: &Schema) -> bool {
         || value.has_array_constraints() && ty == Some("array")
 }
 
-/// Emits the predicates a typed map's member schema declares, over `value_expr`
-/// (the decoded member, in scope) and keyed by `key_expr` (the member's own key,
-/// which becomes the violation path). These are the same predicates — and the
-/// same reasons — the property position runs for a value of that type, per
-/// [[additionalProperties]] §"Validator mapping" (per-member `T` validation).
+/// Emits the predicates a value schema declares, over `value_expr` (the decoded
+/// value, in scope) and keyed by `key_expr` (the violation path). These are the
+/// same predicates — and the same reasons — the property position runs for a
+/// value of that type, per [[additionalProperties]] §"Validator mapping"
+/// (per-member `T` validation) and [[oneOf]] §"Validator mapping" (a branch's own
+/// constraints). Two positions share it: a typed map's member (keyed by the
+/// member's own key) and a union's synthesized `<Union><Kind>` variant.
+///
+/// `type_name`/`position` name the package-level compiled-regex vars a `pattern`
+/// or `format` references — the map's model + `value`, or the variant type itself.
 ///
 /// `serialize_side` selects the checks the parse adapter has already made:
 /// the integer cap is enforced by `parseIntegerField` on the way in, so it is
 /// re-checked only before emit (P12), where an in-memory `int64` can hold a
 /// magnitude the cap forbids.
 ///
-/// A closed member value set (`const`/`enum`) is checked against the wire
-/// literals rather than through a synthesized defined type: a map member has no
-/// field to hang Go's value constants off, so the closedness lives in the
-/// validator alone. The accepted value set is identical to every other target's.
+/// A closed value set (`const`/`enum`) is checked against the wire literals
+/// rather than through a synthesized defined type: neither a map member nor a
+/// union variant has a field to hang Go's value constants off, so the closedness
+/// lives in the validator alone. The accepted value set is identical to every
+/// other target's.
 fn render_go_member_checks(
     output: &mut String,
     indent: &str,
     value_expr: &str,
     key_expr: &str,
     type_name: &str,
+    position: &str,
     value: &Schema,
     serialize_side: bool,
 ) {
@@ -3362,7 +3406,7 @@ fn render_go_member_checks(
                 output,
                 value_expr,
                 key_expr,
-                &go_pattern_var_name(type_name, MAP_MEMBER_POSITION),
+                &go_pattern_var_name(type_name, position),
                 pattern,
                 indent,
             );
@@ -3372,7 +3416,7 @@ fn render_go_member_checks(
                 output,
                 value_expr,
                 key_expr,
-                &go_format_var_name(type_name, MAP_MEMBER_POSITION),
+                &go_format_var_name(type_name, position),
                 format,
                 indent,
             );
