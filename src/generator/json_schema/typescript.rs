@@ -20,6 +20,12 @@ use crate::parser::NameManifest;
 use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
+/// The converter identifier is owned by the parser's per-language naming policy,
+/// which also enters it into the P15 collision namespace. Re-exported so the
+/// shared TypeScript emitter reaches the name through this backend — the JSON
+/// tier that emits the converters — and never spells the derivation itself.
+pub(in crate::generator) use crate::parser::ts_transfer_type_converter_name;
+
 thread_local! {
     /// The active `--date-time-types` while rendering the TS models/runtime.
     /// Generation is single-threaded per file, so a thread-local avoids threading
@@ -803,7 +809,7 @@ fn field_needs_serialize_check(schema: &Schema) -> bool {
     }
 }
 
-/// True when a model's `toIntermediate` must run collecting validation before
+/// True when a model's `toTransferType` must run collecting validation before
 /// emitting the wire object: any constrained declared field, a constrained
 /// typed-map value, or an object-level count/name/dependency constraint.
 fn model_needs_serialize_validation(schema: &Schema) -> Result<bool> {
@@ -861,10 +867,10 @@ fn render_ts_serialize_closed_check(
 /// serialize path, reusing the same emitters as the parse path (numeric /
 /// string-length / pattern / format / array / enum / const). References,
 /// temporal, and contentEncoding carry no serialize-side field check here
-/// (nested mappers validate their own values; materialized reprs re-encode
+/// (nested converters validate their own values; materialized reprs re-encode
 /// losslessly). An **inline** `oneOf` sum type narrows to the branch it holds and
 /// runs that branch's own checks; a `$ref` to a named union validates through the
-/// union's mapper instead.
+/// union's converter instead.
 fn render_ts_field_checks(
     output: &mut String,
     schema: &Schema,
@@ -998,14 +1004,6 @@ fn render_ts_serialize_property_check(
     }
 }
 
-pub(in crate::generator) fn model_type_ref(json_type: &PlannedJsonType) -> String {
-    json_type.model_name.clone()
-}
-
-fn mapper_class_name(model_name: &str) -> String {
-    format!("{model_name}Mapper")
-}
-
 fn push_indented(output: &mut String, body: &str, indent: &str) {
     for line in body.lines() {
         output.push_str(indent);
@@ -1027,6 +1025,31 @@ pub(in crate::generator) struct ModelBackend {
     ref_names: BTreeMap<String, String>,
 }
 
+impl ModelBackend {
+    /// A model's emitted type identifier, resolved through the name manifest so
+    /// an `x-ts-name` override applies. Every reference the backend answers has
+    /// to come back through the manifest: `prepare` rewrites `model_name` only on
+    /// the clones this backend renders, while the plan hands operations (and
+    /// fields) their own clones still carrying the pre-override derived name.
+    /// A model declared in another module is absent from this leaf's manifest and
+    /// keeps its planned name.
+    fn resolved_model_name(&self, json_type: &PlannedJsonType) -> String {
+        self.manifest
+            .type_name(&json_type.full_name)
+            .unwrap_or(json_type.model_name.as_str())
+            .to_string()
+    }
+
+    /// The identifier of the model's exported `TransferTypeConverter` instance,
+    /// which the operation type info and the cross-module value imports name.
+    pub(in crate::generator) fn transfer_type_converter(
+        &self,
+        json_type: &PlannedJsonType,
+    ) -> String {
+        ts_transfer_type_converter_name(&self.resolved_model_name(json_type))
+    }
+}
+
 impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
     type ModelFragments = RenderedExternalModelFragments;
     type WireConversion = WireValueConversion;
@@ -1040,8 +1063,10 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         };
         // Resolve every emitted identifier once (overrides applied), then adopt the
         // resolved type name as each model's `model_name` so every downstream
-        // derivation (interface/type decl, mapper class, `model_type_ref`) follows the
-        // same identifier. `$ref` targets are resolved via `ref_names` below.
+        // derivation (interface/type decl, converter const) follows the same
+        // identifier. `$ref` targets are resolved via `ref_names` below, and
+        // references handed in from outside the backend via
+        // [`ModelBackend::resolved_model_name`].
         self.manifest = build_json_name_manifest(Language::TypeScript, api_plan)?;
         self.json_models = api_plan
             .external_types()
@@ -1100,7 +1125,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
     }
 
     fn model_type_annotation(&self, json_type: &PlannedJsonType) -> Option<String> {
-        Some(model_type_ref(json_type))
+        Some(self.resolved_model_name(json_type))
     }
 
     fn wire_type_identifier(&self, json_type: &PlannedJsonType) -> Option<String> {
@@ -1113,7 +1138,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         _planned_record: Option<&RecordSpec<PlannedFamily>>,
     ) -> Option<WireValueConversion> {
         Some(WireValueConversion {
-            annotation: model_type_ref(json_type),
+            annotation: self.resolved_model_name(json_type),
             from_wire: "{wire}".to_string(),
             to_wire: "{value}".to_string(),
             function_name_to_wire: None,
@@ -1155,7 +1180,7 @@ fn render_external_models(
 
     for model in json_models {
         output.push('\n');
-        render_model_mapper(&mut output, model, json_models)?;
+        render_model_transfer_type_converter(&mut output, model, json_models)?;
     }
 
     Ok(RenderedExternalModelFragments {
@@ -1167,7 +1192,7 @@ fn render_external_models(
             .collect(),
         value_exported_names: json_models
             .iter()
-            .map(|model| mapper_class_name(&model.model_name))
+            .map(|model| ts_transfer_type_converter_name(&model.model_name))
             .collect(),
     })
 }
@@ -1180,6 +1205,9 @@ const DEFINITIONS_NAMESPACE: &str = "__nexgenDefinitions";
 
 fn render_json_model_imports(runtime_import_module: &str) -> String {
     let mut imports = String::new();
+    // Every model gets a converter, so the SDK contract it implements is always
+    // referenced. Type-only: nexus-rpc contributes no runtime code to `models.ts`.
+    imports.push_str("import type { TransferTypeConverter } from \"nexus-rpc\";\n");
     // Temporal-repr models reference the ambient global `Temporal.*` types
     // (TS 6's `esnext.temporal` lib) — no import required (P4).
     // `ValidationError`/`isPlainObject`/`Violation` are referenced by every
@@ -1656,7 +1684,7 @@ fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) ->
 struct TsUnionVariant {
     ts_type: String,
     is_object: bool,
-    mapper: Option<String>,
+    converter: Option<String>,
     discriminant_value: Option<Value>,
     typeof_guard: Option<&'static str>,
     is_integer: bool,
@@ -1766,15 +1794,15 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
         match ty {
             Some("null") => nullable = true,
             Some("object") => {
-                // A `$ref` branch is the named model (parsed by its mapper); an
+                // A `$ref` branch is the named model (parsed by its converter); an
                 // inline branch is the free-form object (loader-enforced), so it
                 // stays an anonymous `Record` carried verbatim — TS needs no
                 // synthesized name to narrow on the object token.
-                let (name, mapper, label) = match &branch.reference {
+                let (name, converter, label) = match &branch.reference {
                     Some(reference) => {
                         let name = reference_model_name(reference);
-                        let mapper = mapper_class_name(&name);
-                        (name.clone(), Some(mapper), name)
+                        let converter = ts_transfer_type_converter_name(&name);
+                        (name.clone(), Some(converter), name)
                     }
                     None => {
                         let value = ts_map_shape(&resolved)
@@ -1793,7 +1821,7 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                 variants.push(TsUnionVariant {
                     ts_type: name,
                     is_object: true,
-                    mapper,
+                    converter,
                     discriminant_value: None,
                     typeof_guard: None,
                     is_integer: false,
@@ -1805,7 +1833,7 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
             Some("string") => variants.push(TsUnionVariant {
                 ts_type: ts_scalar_branch_type(&resolved, "string"),
                 is_object: false,
-                mapper: None,
+                converter: None,
                 discriminant_value: None,
                 typeof_guard: Some("string"),
                 is_integer: false,
@@ -1816,7 +1844,7 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
             Some("integer") => variants.push(TsUnionVariant {
                 ts_type: ts_scalar_branch_type(&resolved, "number"),
                 is_object: false,
-                mapper: None,
+                converter: None,
                 discriminant_value: None,
                 typeof_guard: Some("number"),
                 is_integer: true,
@@ -1827,7 +1855,7 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
             Some("number") => variants.push(TsUnionVariant {
                 ts_type: ts_scalar_branch_type(&resolved, "number"),
                 is_object: false,
-                mapper: None,
+                converter: None,
                 discriminant_value: None,
                 typeof_guard: Some("number"),
                 is_integer: false,
@@ -1838,7 +1866,7 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
             Some("boolean") => variants.push(TsUnionVariant {
                 ts_type: ts_scalar_branch_type(&resolved, "boolean"),
                 is_object: false,
-                mapper: None,
+                converter: None,
                 discriminant_value: None,
                 typeof_guard: Some("boolean"),
                 is_integer: false,
@@ -1852,7 +1880,7 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
                 variants.push(TsUnionVariant {
                     ts_type: ts_type.clone(),
                     is_object: false,
-                    mapper: None,
+                    converter: None,
                     discriminant_value: None,
                     typeof_guard: None,
                     is_integer: false,
@@ -1963,8 +1991,8 @@ fn render_ts_union_parse(
                 output.push_str("      try {\n");
                 output.push_str(indent);
                 output.push_str(&format!(
-                    "        {target} = new {}().fromIntermediate({raw_expr});\n",
-                    variant.mapper.as_deref().unwrap_or("")
+                    "        {target} = {}.fromTransferType({raw_expr});\n",
+                    variant.converter.as_deref().unwrap_or("")
                 ));
                 output.push_str(indent);
                 output.push_str("      } catch (error) {\n");
@@ -1988,13 +2016,13 @@ fn render_ts_union_parse(
             output.push_str("  }\n");
         } else {
             let variant = object_variants[0];
-            match variant.mapper.as_deref() {
-                Some(mapper) => {
+            match variant.converter.as_deref() {
+                Some(converter) => {
                     output.push_str(indent);
                     output.push_str("  try {\n");
                     output.push_str(indent);
                     output.push_str(&format!(
-                        "    {target} = new {mapper}().fromIntermediate({raw_expr});\n"
+                        "    {target} = {converter}.fromTransferType({raw_expr});\n"
                     ));
                     output.push_str(indent);
                     output.push_str("  } catch (error) {\n");
@@ -2005,7 +2033,7 @@ fn render_ts_union_parse(
                     output.push_str(indent);
                     output.push_str("  }\n");
                 }
-                // An inline map-shaped branch has no mapper: the wire object is
+                // An inline map-shaped branch has no converter: the wire object is
                 // already the in-memory value.
                 None => {
                     output.push_str(indent);
@@ -2082,7 +2110,7 @@ fn ts_variant_guard(variant: &TsUnionVariant, value_expr: &str) -> Option<String
 /// to the branch it holds: one guarded block per non-object branch that declares
 /// anything (P12 — an in-memory member violating its own branch's rules fails
 /// before emit rather than being written). Object branches carry their own
-/// validation in their model's mapper, so they contribute no block here.
+/// validation in their model's converter, so they contribute no block here.
 ///
 /// Emits nothing when no branch declares a constraint, so a plain sum type of
 /// unconstrained kinds keeps its verbatim assignment.
@@ -2116,12 +2144,12 @@ fn render_ts_union_value_checks(
     }
 }
 
-/// Emits the serialize dispatch for a union def's `toIntermediate`.
+/// Emits the serialize dispatch for a union def's `toTransferType`.
 fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &str) {
     for variant in &union.variants {
         if variant.is_object {
             let member = &variant.ts_type;
-            let Some(mapper) = variant.mapper.as_deref() else {
+            let Some(converter) = variant.converter.as_deref() else {
                 // An inline map-shaped branch: the in-memory value is the wire
                 // object already.
                 output.push_str(&format!(
@@ -2135,7 +2163,7 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
                 let literal =
                     typescript_value_literal(value).unwrap_or_else(|_| "undefined".to_string());
                 output.push_str(&format!(
-                    "  if (({value_expr} as unknown as Record<string, unknown>)[{}] === {literal}) {{\n    return new {mapper}().toIntermediate({value_expr} as {member});\n  }}\n",
+                    "  if (({value_expr} as unknown as Record<string, unknown>)[{}] === {literal}) {{\n    return {converter}.toTransferType({value_expr} as {member});\n  }}\n",
                     typescript_string_literal(discriminant)
                 ));
             } else {
@@ -2143,7 +2171,7 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
                 // object token so a scalar/array member still reaches its own
                 // branch below (the token is the selector, both directions).
                 output.push_str(&format!(
-                    "  if ({DEFINITIONS_NAMESPACE}.isPlainObject({value_expr})) {{\n    return new {mapper}().toIntermediate({value_expr} as unknown as {member});\n  }}\n"
+                    "  if ({DEFINITIONS_NAMESPACE}.isPlainObject({value_expr})) {{\n    return {converter}.toTransferType({value_expr} as unknown as {member});\n  }}\n"
                 ));
             }
         } else if variant.is_array {
@@ -2173,7 +2201,7 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
 
 /// The module-private serializer function an **inline** (property-level) union
 /// needs when a member's in-memory form differs from its wire form — an object
-/// branch, whose mapper spreads `additionalProperties` back out. A union of
+/// branch, whose converter spreads `additionalProperties` back out. A union of
 /// scalars, arrays, and free-form objects needs none: the member already *is* the
 /// wire value, so the property is assigned verbatim.
 fn ts_inline_union_serializer(
@@ -2189,7 +2217,7 @@ fn ts_inline_union_serializer(
     if !union
         .variants
         .iter()
-        .any(|variant| variant.mapper.is_some())
+        .any(|variant| variant.converter.is_some())
     {
         return None;
     }
@@ -2201,7 +2229,7 @@ fn ts_inline_union_serializer(
 
 /// Emits the inline-union serializers a module's models reference (see
 /// [`ts_inline_union_serializer`]). A named `$defs` union needs none — its own
-/// `Mapper.toIntermediate` is the same dispatch.
+/// `toTransferType` is the same dispatch.
 fn render_ts_inline_union_serializers(
     output: &mut String,
     models: &[&PlannedJsonType],
@@ -2280,19 +2308,41 @@ fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Resul
     Ok(())
 }
 
-fn render_model_mapper(
+/// Opens the model's converter: an anonymous `TransferTypeConverter<Model>` class
+/// expression instantiated in place, so consumers reference a ready instance
+/// (`inputType: { transferTypeConverter: … }`) instead of constructing one.
+fn open_transfer_type_converter(output: &mut String, model_name: &str) {
+    output.push_str("export const ");
+    output.push_str(&ts_transfer_type_converter_name(model_name));
+    output.push_str(" = new class implements TransferTypeConverter<");
+    output.push_str(model_name);
+    output.push_str("> {\n");
+    output.push_str("  public fromTransferType(raw: unknown): ");
+    output.push_str(model_name);
+    output.push_str(" {\n");
+}
+
+/// Closes the parse method and opens the serialize one.
+fn split_transfer_type_converter(output: &mut String, model_name: &str) {
+    output.push_str("  }\n\n");
+    output.push_str("  public toTransferType(value: ");
+    output.push_str(model_name);
+    output.push_str("): unknown {\n");
+}
+
+fn close_transfer_type_converter(output: &mut String) {
+    output.push_str("  }\n");
+    output.push_str("}();\n");
+}
+
+fn render_model_transfer_type_converter(
     output: &mut String,
     model: &PlannedJsonType,
     models: &[&PlannedJsonType],
 ) -> Result<()> {
     let schema = decode_schema(model)?;
     if let Some(union) = classify_ts_union(&schema, models) {
-        output.push_str("export class ");
-        output.push_str(&mapper_class_name(&model.model_name));
-        output.push_str(" {\n");
-        output.push_str("  public fromIntermediate(raw: unknown): ");
-        output.push_str(&model.model_name);
-        output.push_str(" {\n");
+        open_transfer_type_converter(output, &model.model_name);
         output.push_str(&format!(
             "    const violations: {DEFINITIONS_NAMESPACE}.Violation[] = [];\n"
         ));
@@ -2308,10 +2358,7 @@ fn render_model_mapper(
         ));
         output.push_str("    }\n");
         output.push_str("    return out;\n");
-        output.push_str("  }\n\n");
-        output.push_str("  public toIntermediate(value: ");
-        output.push_str(&model.model_name);
-        output.push_str("): unknown {\n");
+        split_transfer_type_converter(output, &model.model_name);
         // A named union has no enclosing model to aggregate into, so it collects
         // its own branch violations and throws the one aggregated error (P11/P12).
         let mut checks = String::new();
@@ -2328,8 +2375,7 @@ fn render_model_mapper(
             output.push_str("    }\n");
         }
         render_ts_union_serialize(output, &union, "value");
-        output.push_str("  }\n");
-        output.push_str("}\n");
+        close_transfer_type_converter(output);
         return Ok(());
     }
     if is_open_object(&schema) {
@@ -2337,28 +2383,19 @@ fn render_model_mapper(
         output.push('\n');
     }
 
-    output.push_str("export class ");
-    output.push_str(&mapper_class_name(&model.model_name));
-    output.push_str(" {\n");
-    output.push_str("  public fromIntermediate(raw: unknown): ");
-    output.push_str(&model.model_name);
-    output.push_str(" {\n");
+    open_transfer_type_converter(output, &model.model_name);
 
     let mut parser_body = String::new();
     render_model_parser_body(&mut parser_body, model, &schema, models)?;
     push_indented(output, &parser_body, "  ");
 
-    output.push_str("  }\n\n");
-    output.push_str("  public toIntermediate(value: ");
-    output.push_str(&model.model_name);
-    output.push_str("): unknown {\n");
+    split_transfer_type_converter(output, &model.model_name);
 
     let mut serializer_body = String::new();
     render_model_serializer_body(&mut serializer_body, model, &schema, models)?;
     push_indented(output, &serializer_body, "  ");
 
-    output.push_str("  }\n");
-    output.push_str("}\n");
+    close_transfer_type_converter(output);
     Ok(())
 }
 
@@ -2701,7 +2738,7 @@ fn render_property_value_parser(
     }
 
     // An inline `oneOf` sum-type union dispatches on the wire token /
-    // discriminant (a `$ref` to a named union routes through its mapper via the
+    // discriminant (a `$ref` to a named union routes through its converter via the
     // reference path below).
     if let Some(union) = classify_ts_union(property, models) {
         render_ts_union_parse(output, &union, &raw_expr, field_name, &path_expr, "    ");
@@ -2755,9 +2792,9 @@ fn render_value_parser_at_depth(
         output.push_str(indent);
         output.push_str("  ");
         output.push_str(target);
-        output.push_str(" = new ");
-        output.push_str(&mapper_class_name(&model_name));
-        output.push_str("().fromIntermediate(");
+        output.push_str(" = ");
+        output.push_str(&ts_transfer_type_converter_name(&model_name));
+        output.push_str(".fromTransferType(");
         output.push_str(raw_expr);
         output.push_str(");\n");
         output.push_str(indent);
@@ -3354,8 +3391,8 @@ fn serialize_expr(schema: &Schema, value_expr: &str) -> String {
     if let Some(reference) = &schema.reference {
         let model_name = reference_model_name(reference);
         return format!(
-            "new {}().toIntermediate({value_expr})",
-            mapper_class_name(&model_name)
+            "{}.toTransferType({value_expr})",
+            ts_transfer_type_converter_name(&model_name)
         );
     }
     // A materialized temporal re-serializes through the generator-owned
@@ -3391,7 +3428,7 @@ fn serialize_expr(schema: &Schema, value_expr: &str) -> String {
         }
     }
     // An array whose elements need a transform re-serializes elementwise: an
-    // element model's own `toIntermediate` flattens its catch-all bag onto the
+    // element model's own `toTransferType` flattens its catch-all bag onto the
     // wire object and re-encodes its temporal/bytes members, none of which the
     // in-memory value carries in wire form.
     if schema.ty.as_ref().and_then(Value::as_str) == Some("array")

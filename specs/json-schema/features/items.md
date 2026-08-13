@@ -156,7 +156,7 @@ comes from [[type]]'s `"array"` row.
 
 `items` is symmetric across directions: serialize recurses the shared
 `Validate` into each element (a nested aggregate element runs its own
-`MarshalJSON`/`toIntermediate`/`model_dump`; a scalar element re-runs the
+`MarshalJSON`/`toTransferType`/`model_dump`; a scalar element re-runs the
 same predicate the deserializer used) **before emitting a byte**, failing
 with the same aggregated primitive (**P11**), and re-emits elements in
 order (arrays are ordered — unlike object members, element order is part

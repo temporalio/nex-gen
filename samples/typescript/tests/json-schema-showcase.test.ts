@@ -1,21 +1,22 @@
 import { describe, expect, test } from "vitest";
+import type { TransferTypeConverter } from "nexus-rpc";
 
 import {
-  AddressMapper,
-  AttributesMapper,
-  ContactTsMapper,
+  addressTransferTypeConverter,
+  attributesTransferTypeConverter,
+  contactTsTransferTypeConverter,
   DEFAULT_DEBUG,
   DEFAULT_GREETING,
   DEFAULT_RETRIES,
-  ExtrasMapper,
-  LabelsMapper,
-  NicknamesMapper,
-  QuotasMapper,
-  SettingsMapper,
-  ShowcaseMapper,
-  TokensMapper,
+  extrasTransferTypeConverter,
+  labelsTransferTypeConverter,
+  nicknamesTransferTypeConverter,
+  quotasTransferTypeConverter,
+  settingsTransferTypeConverter,
+  showcaseTransferTypeConverter,
+  tokensTransferTypeConverter,
   ValidationError,
-  WidgetMapper,
+  widgetTransferTypeConverter,
   type LinkNote,
   type Showcase,
   type ShowcaseDetailObject,
@@ -26,7 +27,6 @@ import {
   fixtureBytes,
   loadFixture as loadFixtureFrom,
   roundTripFixture,
-  type IntermediateMapper,
 } from "./json-converter-helper.ts";
 
 const wireFixtureDir = new URL("../../wire/json_schema/showcase/", import.meta.url);
@@ -35,11 +35,11 @@ function loadFixture(name: string): unknown {
   return loadFixtureFrom(wireFixtureDir, name);
 }
 
-// TS mappers preserve explicit nulls, so all showcase fixtures round-trip with
+// TS converters preserve explicit nulls, so all showcase fixtures round-trip with
 // exact JSON-equality (no optional+nullable collapse — unlike Go/Java).
-function expectRoundTrip<T>(name: string, mapper: IntermediateMapper<T>): T {
+function expectRoundTrip<T>(name: string, converter: TransferTypeConverter<T>): T {
   const { value, serialized } = roundTripFixture(
-    mapper,
+    converter,
     fixtureBytes(wireFixtureDir, name),
   );
   expect(serialized).toEqual(loadFixture(name));
@@ -48,7 +48,10 @@ function expectRoundTrip<T>(name: string, mapper: IntermediateMapper<T>): T {
 
 describe("json-schema showcase generated definitions", () => {
   test("roundtrips canonical wire fixtures through the Temporal converter", () => {
-    const minimal = expectRoundTrip("showcase-minimal.json", new ShowcaseMapper());
+    const minimal = expectRoundTrip(
+      "showcase-minimal.json",
+      showcaseTransferTypeConverter,
+    );
     expect(minimal).toMatchObject<Partial<Showcase>>({
       kind: "showcase",
       revision: 1,
@@ -74,7 +77,7 @@ describe("json-schema showcase generated definitions", () => {
     expect(minimalWire).not.toHaveProperty("debug");
     expect(minimalWire).not.toHaveProperty("retries");
 
-    const full = expectRoundTrip("showcase-full.json", new ShowcaseMapper());
+    const full = expectRoundTrip("showcase-full.json", showcaseTransferTypeConverter);
     expect(full.retries).toBe(5);
     expect(full.middleName).toBe("Q");
     expect(full.tags).toEqual(["a", "b"]);
@@ -88,23 +91,26 @@ describe("json-schema showcase generated definitions", () => {
     });
     expect(full.settings?.fontSize).toBe(14);
 
-    const nulls = expectRoundTrip("showcase-nulls.json", new ShowcaseMapper());
+    const nulls = expectRoundTrip("showcase-nulls.json", showcaseTransferTypeConverter);
     expect(nulls.middleName).toBeNull();
     expect(nulls.category).toBeNull();
     expect(nulls.active).toBe(false);
 
-    const address = expectRoundTrip("address-open.json", new AddressMapper());
+    const address = expectRoundTrip("address-open.json", addressTransferTypeConverter);
     expect(address.street).toBe("1 Main St");
     expect(address.additionalProperties).toEqual({ "x-extra": 7 });
 
-    const labels = expectRoundTrip("labels.json", new LabelsMapper());
+    const labels = expectRoundTrip("labels.json", labelsTransferTypeConverter);
     expect(labels.additionalProperties).toEqual({ env: "prod", team: "core" });
 
-    const settings = expectRoundTrip("settings.json", new SettingsMapper());
+    const settings = expectRoundTrip("settings.json", settingsTransferTypeConverter);
     expect(settings.theme).toBe("dark");
     expect(settings.fontSize).toBe(14);
 
-    const metrics = expectRoundTrip("showcase-metrics.json", new ShowcaseMapper());
+    const metrics = expectRoundTrip(
+      "showcase-metrics.json",
+      showcaseTransferTypeConverter,
+    );
     expect(metrics.priority).toBe(5);
     expect(metrics.level).toBe(2);
     expect(metrics.ratio).toBe(15);
@@ -112,7 +118,10 @@ describe("json-schema showcase generated definitions", () => {
 
     // The astral crux: "a😀b" is 3 code points but 6 UTF-8 bytes / 4 UTF-16
     // units; it must round-trip through code (maxLength:5) unchanged.
-    const strings = expectRoundTrip("showcase-strings.json", new ShowcaseMapper());
+    const strings = expectRoundTrip(
+      "showcase-strings.json",
+      showcaseTransferTypeConverter,
+    );
     expect(strings.code).toBe("a😀b");
     expect(strings.nickname).toBe("buddy");
   });
@@ -120,7 +129,7 @@ describe("json-schema showcase generated definitions", () => {
   test("roundtrips the allOf-merged Widget type and enforces its merged bounds", () => {
     // Widget is an allOf base-type extension (WidgetBase folded in + an extension
     // branch): a flat standalone object with the union of properties and required.
-    const widget = expectRoundTrip("widget.json", new WidgetMapper());
+    const widget = expectRoundTrip("widget.json", widgetTransferTypeConverter);
     expect(widget).toMatchObject<Partial<Widget>>({
       id: "w-1",
       kind: "gadget",
@@ -130,14 +139,22 @@ describe("json-schema showcase generated definitions", () => {
 
     // `size` carries a bound tightened from two allOf branches to [10, 20].
     expect(() =>
-      new WidgetMapper().fromIntermediate({ id: "w-1", name: "Widget One", size: 5 }),
+      widgetTransferTypeConverter.fromTransferType({
+        id: "w-1",
+        name: "Widget One",
+        size: 5,
+      }),
     ).toThrow(/must be >= 10, got 5/);
     expect(() =>
-      new WidgetMapper().fromIntermediate({ id: "w-1", name: "Widget One", size: 25 }),
+      widgetTransferTypeConverter.fromTransferType({
+        id: "w-1",
+        name: "Widget One",
+        size: 25,
+      }),
     ).toThrow(/must be <= 20, got 25/);
 
     // A missing required member contributed by the extension branch is rejected.
-    expect(() => new WidgetMapper().fromIntermediate({ id: "w-1" })).toThrow(
+    expect(() => widgetTransferTypeConverter.fromTransferType({ id: "w-1" })).toThrow(
       ValidationError,
     );
   });
@@ -145,7 +162,7 @@ describe("json-schema showcase generated definitions", () => {
   test("reports JSON schema validation errors", () => {
     // Wrong const value.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         kind: "nope",
         name: "w",
         count: 1,
@@ -156,7 +173,7 @@ describe("json-schema showcase generated definitions", () => {
 
     // Missing required (required+nullable) field.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         kind: "showcase",
         name: "w",
         count: 1,
@@ -166,12 +183,12 @@ describe("json-schema showcase generated definitions", () => {
 
     // Unknown key on a closed object.
     expect(() =>
-      new SettingsMapper().fromIntermediate({ theme: "dark", nope: 1 }),
+      settingsTransferTypeConverter.fromTransferType({ theme: "dark", nope: 1 }),
     ).toThrow(ValidationError);
 
     // Wrong integer const value.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         kind: "showcase",
         revision: 2,
         enabled: true,
@@ -201,20 +218,20 @@ describe("json-schema showcase generated definitions", () => {
 
     // Closed value-set (enum/const) rejections with informative reasons.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, status: "archived" }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, status: "archived" }),
     ).toThrow(/must be one of \["active", "inactive", "pending"\], got "archived"/);
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, tier: 9 })).toThrow(
-      /must be one of \[1, 2, 3\], got 9/,
-    );
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, scale: 3.5 }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, tier: 9 }),
+    ).toThrow(/must be one of \[1, 2, 3\], got 9/);
+    expect(() =>
+      showcaseTransferTypeConverter.fromTransferType({ ...base, scale: 3.5 }),
     ).toThrow(/must be one of \[1.5, 2.5\], got 3.5/);
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, enabled: false }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, enabled: false }),
     ).toThrow(/must equal true/);
     // Valid enum/const values are accepted.
     expect(
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         status: "pending",
         tier: 3,
@@ -222,63 +239,63 @@ describe("json-schema showcase generated definitions", () => {
       }).status,
     ).toBe("pending");
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, priority: 99 }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, priority: 99 }),
     ).toThrow(/must be <= 10, got 99/);
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, level: 0 })).toThrow(
-      /must be > 0, got 0/,
-    );
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, step: 7 })).toThrow(
-      /must be a multiple of 3, got 7/,
-    );
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, ratio: 7 })).toThrow(
-      /must be a multiple of 5, got 7/,
-    );
+    expect(() =>
+      showcaseTransferTypeConverter.fromTransferType({ ...base, level: 0 }),
+    ).toThrow(/must be > 0, got 0/);
+    expect(() =>
+      showcaseTransferTypeConverter.fromTransferType({ ...base, step: 7 }),
+    ).toThrow(/must be a multiple of 3, got 7/);
+    expect(() =>
+      showcaseTransferTypeConverter.fromTransferType({ ...base, ratio: 7 }),
+    ).toThrow(/must be a multiple of 5, got 7/);
 
     // String-length bounds fire at runtime, counted in code points.
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, code: "a" })).toThrow(
-      /must have length >= 2, got 1/,
-    );
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, code: "abcdef" }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, code: "a" }),
+    ).toThrow(/must have length >= 2, got 1/);
+    expect(() =>
+      showcaseTransferTypeConverter.fromTransferType({ ...base, code: "abcdef" }),
     ).toThrow(/must have length <= 5, got 6/);
     // Astral: 6 emoji = 6 code points (24 bytes); rejected by code-point count.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, code: "😀😀😀😀😀😀" }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, code: "😀😀😀😀😀😀" }),
     ).toThrow(/must have length <= 5, got 6/);
     // A multi-byte value within the code-point bound is accepted (byte count 6
     // would exceed maxLength:5 — proving code points, not bytes).
-    expect(new ShowcaseMapper().fromIntermediate({ ...base, code: "a😀b" }).code).toBe(
-      "a😀b",
-    );
+    expect(
+      showcaseTransferTypeConverter.fromTransferType({ ...base, code: "a😀b" }).code,
+    ).toBe("a😀b");
 
     // Array constraints fire at runtime with informative reasons.
     // Too few / too many items (minItems:1 / maxItems:5).
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, tags: [] })).toThrow(
-      /must have at least 1 items, got 0/,
-    );
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({ ...base, tags: [] }),
+    ).toThrow(/must have at least 1 items, got 0/);
+    expect(() =>
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         tags: ["a", "b", "c", "d", "e", "f"],
       }),
     ).toThrow(/must have at most 5 items, got 6/);
     // Duplicate element (uniqueItems).
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, aliases: ["x", "x"] }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, aliases: ["x", "x"] }),
     ).toThrow(/duplicate items: element at index 1 equals index 0/);
     // Missing required contains match (no "admin").
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, roles: ["user"] }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, roles: ["user"] }),
     ).toThrow(/too few matching items: at least 1, got 0/);
     // Too many contains matches (maxContains:2).
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         roles: ["admin", "admin", "admin"],
       }),
     ).toThrow(/too many matching items: at most 2, got 3/);
     // Valid arrays are accepted.
-    const ok = new ShowcaseMapper().fromIntermediate({
+    const ok = showcaseTransferTypeConverter.fromTransferType({
       ...base,
       tags: ["a"],
       aliases: ["x", "y"],
@@ -289,7 +306,10 @@ describe("json-schema showcase generated definitions", () => {
 
   test("enforces pattern constraints with RE2-safe portable semantics", () => {
     // sku `^[A-Z]{2,4}$` and phrase `^\S+\s\S+$` round-trip.
-    const patterns = expectRoundTrip("showcase-patterns.json", new ShowcaseMapper());
+    const patterns = expectRoundTrip(
+      "showcase-patterns.json",
+      showcaseTransferTypeConverter,
+    );
     expect(patterns.sku).toBe("AB");
     expect(patterns.phrase).toBe("hello world");
 
@@ -307,16 +327,16 @@ describe("json-schema showcase generated definitions", () => {
     };
 
     // Lowercase / too-long sku.
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, sku: "ab" })).toThrow(
-      /must match pattern/,
-    );
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, sku: "ABCDE" }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, sku: "ab" }),
+    ).toThrow(/must match pattern/);
+    expect(() =>
+      showcaseTransferTypeConverter.fromTransferType({ ...base, sku: "ABCDE" }),
     ).toThrow(/must match pattern/);
 
     // phrase with no whitespace separator.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, phrase: "helloworld" }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, phrase: "helloworld" }),
     ).toThrow(/must match pattern/);
 
     // `\s` ASCII-class crux: a NBSP (U+00A0) is NOT ASCII whitespace. The loader
@@ -324,18 +344,24 @@ describe("json-schema showcase generated definitions", () => {
     // RegExp, so JS's otherwise-Unicode `\s` rejects it — consistent with
     // Go/Python/Java.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, phrase: "hello world" }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        phrase: "hello world",
+      }),
     ).toThrow(/must match pattern/);
 
     // `$` end-anchor crux: a trailing newline is rejected. JS `$` is already
     // end-of-input (no `\n` exception), matching the `\Z`/`\z` rewrite applied
     // for Python/Java.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, phrase: "hello world\n" }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        phrase: "hello world\n",
+      }),
     ).toThrow(/must match pattern/);
 
     // A valid ASCII-space phrase and sku are accepted.
-    const okPattern = new ShowcaseMapper().fromIntermediate({
+    const okPattern = showcaseTransferTypeConverter.fromTransferType({
       ...base,
       sku: "XY",
       phrase: "hello world",
@@ -346,7 +372,10 @@ describe("json-schema showcase generated definitions", () => {
 
   test("enforces asserted string formats with pinned, portable checks", () => {
     // uuid/email/hostname/uri/ipv4 round-trip (string-typed, no materialization).
-    const formats = expectRoundTrip("showcase-format.json", new ShowcaseMapper());
+    const formats = expectRoundTrip(
+      "showcase-format.json",
+      showcaseTransferTypeConverter,
+    );
     expect(formats.requestId).toBe("de305d54-75b4-431b-adb2-eb6b9e546013");
     expect(formats.contactEmail).toBe("user@example.com");
     expect(formats.host).toBe("api.example.com");
@@ -368,12 +397,15 @@ describe("json-schema showcase generated definitions", () => {
 
     // A malformed uuid.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, requestId: "not-a-uuid" }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        requestId: "not-a-uuid",
+      }),
     ).toThrow(/must be a valid uuid, got "not-a-uuid"/);
 
     // Single-label email domain (user@localhost) is rejected.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         contactEmail: "user@localhost",
       }),
@@ -381,48 +413,59 @@ describe("json-schema showcase generated definitions", () => {
 
     // ipv4 octet out of range.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, gateway: "256.0.0.1" }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, gateway: "256.0.0.1" }),
     ).toThrow(/must be a valid ipv4, got "256.0.0.1"/);
 
     // uri with a double-`::` IPv6 IP-literal host (spliced ipv6 grammar rejects).
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, homepage: "http://[1::2::3]" }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        homepage: "http://[1::2::3]",
+      }),
     ).toThrow(/must be a valid uri/);
 
     // An over-long hostname (> 253 code points) is rejected by the length guard.
     const longHost = Array.from({ length: 64 }, () => "abc").join(".");
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, host: longHost }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, host: longHost }),
     ).toThrow(/must be a valid hostname/);
   });
 
   test("enforces object member-count, propertyNames, and dependentRequired", () => {
     // Valid map and object round-trip.
-    const attributes = expectRoundTrip("attributes.json", new AttributesMapper());
+    const attributes = expectRoundTrip(
+      "attributes.json",
+      attributesTransferTypeConverter,
+    );
     expect(attributes.additionalProperties).toEqual({ host: "a", port: "8080" });
-    const contact = expectRoundTrip("contact.json", new ContactTsMapper());
+    const contact = expectRoundTrip("contact.json", contactTsTransferTypeConverter);
     expect(contact.shippingStreet).toBe("1 Main St");
     expect(contact.shippingZip).toBe("90210");
 
     // minProperties:1 on a map — an empty object is too few.
-    expect(() => new AttributesMapper().fromIntermediate({})).toThrow(
+    expect(() => attributesTransferTypeConverter.fromTransferType({})).toThrow(
       /must have at least 1 properties, got 0/,
     );
     // maxProperties:3 on a map.
     expect(() =>
-      new AttributesMapper().fromIntermediate({ a: "1", b: "2", c: "3", d: "4" }),
+      attributesTransferTypeConverter.fromTransferType({
+        a: "1",
+        b: "2",
+        c: "3",
+        d: "4",
+      }),
     ).toThrow(/must have at most 3 properties, got 4/);
     // propertyNames maxLength:8 — an over-long key.
-    expect(() => new AttributesMapper().fromIntermediate({ toolongkey: "1" })).toThrow(
-      /invalid property name "toolongkey": must have length <= 8, got 10/,
-    );
+    expect(() =>
+      attributesTransferTypeConverter.fromTransferType({ toolongkey: "1" }),
+    ).toThrow(/invalid property name "toolongkey": must have length <= 8, got 10/);
 
     // dependentRequired — a shipping street present without a shipping zip.
     expect(() =>
-      new ContactTsMapper().fromIntermediate({ shippingStreet: "1 Main St" }),
+      contactTsTransferTypeConverter.fromTransferType({ shippingStreet: "1 Main St" }),
     ).toThrow(/property "shippingZip" is required when "shippingStreet" is present/);
     // minProperties:1 on a declared-property object — an empty object.
-    expect(() => new ContactTsMapper().fromIntermediate({})).toThrow(
+    expect(() => contactTsTransferTypeConverter.fromTransferType({})).toThrow(
       /must have at least 1 properties, got 0/,
     );
   });
@@ -432,16 +475,25 @@ describe("json-schema showcase generated definitions", () => {
     // narrows natively.
     const asString = expectRoundTrip(
       "showcase-union-string.json",
-      new ShowcaseMapper(),
+      showcaseTransferTypeConverter,
     );
     expect(asString.idOrName).toBe("abc");
-    const asInt = expectRoundTrip("showcase-union-int.json", new ShowcaseMapper());
+    const asInt = expectRoundTrip(
+      "showcase-union-int.json",
+      showcaseTransferTypeConverter,
+    );
     expect(asInt.idOrName).toBe(7);
 
     // Discriminated (tagged) union (Circle | Square) selected by `kind`.
-    const circle = expectRoundTrip("showcase-shape-circle.json", new ShowcaseMapper());
+    const circle = expectRoundTrip(
+      "showcase-shape-circle.json",
+      showcaseTransferTypeConverter,
+    );
     expect(circle.shape).toMatchObject({ kind: "circle", radius: 2.5 });
-    const square = expectRoundTrip("showcase-shape-square.json", new ShowcaseMapper());
+    const square = expectRoundTrip(
+      "showcase-shape-square.json",
+      showcaseTransferTypeConverter,
+    );
     expect(square.shape).toMatchObject({ kind: "square", side: 4 });
 
     const base = {
@@ -459,12 +511,12 @@ describe("json-schema showcase generated definitions", () => {
 
     // An unmatchable wire token (boolean) names the admissible kinds.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, idOrName: true }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, idOrName: true }),
     ).toThrow(/expected one of: string, integer/);
 
     // An unknown discriminator value is rejected (closed value set, P13.1).
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         shape: { kind: "triangle" },
       }),
@@ -484,57 +536,57 @@ describe("json-schema showcase generated definitions", () => {
       active: true,
       category: "tools",
     } as const;
-    const mapper = new ShowcaseMapper();
+    const converter = showcaseTransferTypeConverter;
 
     // The string branch's own `minLength` and the integer branch's own
     // `minimum` — each enforced only for the branch the token selects.
-    expect(mapper.fromIntermediate({ ...base, idOrName: "abc" }).idOrName).toBe("abc");
-    expect(mapper.fromIntermediate({ ...base, idOrName: 1 }).idOrName).toBe(1);
-    expect(() => mapper.fromIntermediate({ ...base, idOrName: "ab" })).toThrow(
+    expect(converter.fromTransferType({ ...base, idOrName: "abc" }).idOrName).toBe("abc");
+    expect(converter.fromTransferType({ ...base, idOrName: 1 }).idOrName).toBe(1);
+    expect(() => converter.fromTransferType({ ...base, idOrName: "ab" })).toThrow(
       /idOrName: must have length >= 3, got 2/,
     );
-    expect(() => mapper.fromIntermediate({ ...base, idOrName: 0 })).toThrow(
+    expect(() => converter.fromTransferType({ ...base, idOrName: 0 })).toThrow(
       /idOrName: must be >= 1, got 0/,
     );
 
     // A closed value set on a branch narrows to a literal union type, and an
     // unknown string is a Violation.
-    expect(mapper.fromIntermediate({ ...base, mode: "manual" }).mode).toBe("manual");
-    expect(() => mapper.fromIntermediate({ ...base, mode: "turbo" })).toThrow(
+    expect(converter.fromTransferType({ ...base, mode: "manual" }).mode).toBe("manual");
+    expect(() => converter.fromTransferType({ ...base, mode: "turbo" })).toThrow(
       /mode: must be one of \["auto", "manual"\]/,
     );
 
     // The array branch's `minItems`/`uniqueItems` and the string branch's
     // `pattern`, on the same union.
-    expect(() => mapper.fromIntermediate({ ...base, measurements: [] })).toThrow(
+    expect(() => converter.fromTransferType({ ...base, measurements: [] })).toThrow(
       /measurements: must have at least 1 items, got 0/,
     );
     expect(() =>
-      mapper.fromIntermediate({ ...base, measurements: [1.5, 1.5] }),
+      converter.fromTransferType({ ...base, measurements: [1.5, 1.5] }),
     ).toThrow(/duplicate items: element at index 1 equals index 0/);
-    expect(() => mapper.fromIntermediate({ ...base, measurements: "AUTO" })).toThrow(
+    expect(() => converter.fromTransferType({ ...base, measurements: "AUTO" })).toThrow(
       /measurements: must match pattern/,
     );
 
     // Serialize re-runs the selected branch's constraints (P12).
-    const valid = mapper.fromIntermediate({ ...base, idOrName: "abc" });
-    expect(() => mapper.toIntermediate({ ...valid, idOrName: "ab" })).toThrow(
+    const valid = converter.fromTransferType({ ...base, idOrName: "abc" });
+    expect(() => converter.toTransferType({ ...valid, idOrName: "ab" })).toThrow(
       /idOrName: must have length >= 3, got 2/,
     );
-    expect(() => mapper.toIntermediate({ ...valid, measurements: [2, 2] })).toThrow(
+    expect(() => converter.toTransferType({ ...valid, measurements: [2, 2] })).toThrow(
       /duplicate items: element at index 1 equals index 0/,
     );
 
-    // A named element union validates through its own mapper, in both
+    // A named element union validates through its own converter, in both
     // directions, with the element's index on the violation path.
-    expect(mapper.fromIntermediate({ ...base, segments: ["ab", 0] }).segments).toEqual([
+    expect(converter.fromTransferType({ ...base, segments: ["ab", 0] }).segments).toEqual([
       "ab",
       0,
     ]);
-    expect(() => mapper.fromIntermediate({ ...base, segments: ["a"] })).toThrow(
+    expect(() => converter.fromTransferType({ ...base, segments: ["a"] })).toThrow(
       /segments\[0\]: must have length >= 2, got 1/,
     );
-    expect(() => mapper.toIntermediate({ ...valid, segments: [-1] })).toThrow(
+    expect(() => converter.toTransferType({ ...valid, segments: [-1] })).toThrow(
       /must be >= 0, got -1/,
     );
   });
@@ -542,29 +594,32 @@ describe("json-schema showcase generated definitions", () => {
   test("round-trips the free-form object as a union branch and a named model", () => {
     // The inline object branch of the `payload` union, and the named `Extras`
     // model: members are carried verbatim in both.
-    const asObject = expectRoundTrip("showcase-freeform.json", new ShowcaseMapper());
+    const asObject = expectRoundTrip(
+      "showcase-freeform.json",
+      showcaseTransferTypeConverter,
+    );
     expect(asObject.payload).toEqual({ note: "free-form", big: 9007199254740992 });
     expect(asObject.extras?.additionalProperties).toEqual({ note: "free-form" });
 
     // The same union's string branch, selected by the wire token.
     const asString = expectRoundTrip(
       "showcase-freeform-string.json",
-      new ShowcaseMapper(),
+      showcaseTransferTypeConverter,
     );
     expect(asString.payload).toBe("text");
 
     // The named free-form model round-trips standalone, nested members included.
-    const extras = expectRoundTrip("extras.json", new ExtrasMapper());
+    const extras = expectRoundTrip("extras.json", extrasTransferTypeConverter);
     expect(extras.additionalProperties.nested).toEqual({ a: 1 });
 
     // maxProperties over the member set is enforced on parse…
     expect(() =>
-      new ExtrasMapper().fromIntermediate({ a: 1, b: 2, c: 3, d: 4, e: 5 }),
+      extrasTransferTypeConverter.fromTransferType({ a: 1, b: 2, c: 3, d: 4, e: 5 }),
     ).toThrow(/must have at most 4 properties/);
 
     // …and on serialize (P12).
     expect(() =>
-      new ExtrasMapper().toIntermediate({
+      extrasTransferTypeConverter.toTransferType({
         additionalProperties: { a: 1, b: 2, c: 3, d: 4, e: 5 },
       }),
     ).toThrow(/must have at most 4 properties/);
@@ -584,21 +639,27 @@ describe("json-schema showcase generated definitions", () => {
 
     // An unmatchable wire token (boolean) names the admissible kinds.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, payload: true }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, payload: true }),
     ).toThrow(/expected one of: object, string/);
   });
 
   test("round-trips a tagged union whose object branches are written inline", () => {
     // Each `note` branch is named by its `x-ts-name` override and emitted as an
-    // interface with its own mapper, so the union narrows on the `kind` literal.
-    const text = expectRoundTrip("showcase-note-text.json", new ShowcaseMapper());
+    // interface with its own converter, so the union narrows on the `kind` literal.
+    const text = expectRoundTrip(
+      "showcase-note-text.json",
+      showcaseTransferTypeConverter,
+    );
     const note = text.note as TextNote;
     expect(note.kind).toBe("text");
     expect(note.body).toBe("remember the milk");
     // The branch stays open: an unknown member is preserved (P13).
     expect(note.additionalProperties).toEqual({ pinned: true });
 
-    const link = expectRoundTrip("showcase-note-link.json", new ShowcaseMapper());
+    const link = expectRoundTrip(
+      "showcase-note-link.json",
+      showcaseTransferTypeConverter,
+    );
     expect((link.note as LinkNote).href).toBe("https://example.test/notes/1");
 
     const base = {
@@ -616,7 +677,7 @@ describe("json-schema showcase generated definitions", () => {
 
     // The selected branch's own constraints are enforced.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         note: { kind: "text", body: "" },
       }),
@@ -624,12 +685,15 @@ describe("json-schema showcase generated definitions", () => {
 
     // An unknown tag value matches no branch.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, note: { kind: "audio" } }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        note: { kind: "audio" },
+      }),
     ).toThrow(/unknown discriminator kind/);
 
     // Serialize dispatches on the tag and re-runs that branch's constraints (P12).
     expect(() =>
-      new ShowcaseMapper().toIntermediate({
+      showcaseTransferTypeConverter.toTransferType({
         ...link,
         note: { kind: "link", href: "", additionalProperties: {} },
       }),
@@ -638,16 +702,22 @@ describe("json-schema showcase generated definitions", () => {
 
   test("round-trips a union written inline on a property with an object branch", () => {
     // `detail`'s lone structured object branch derives `ShowcaseDetailObject` from
-    // the union it belongs to and gets an interface + mapper, so its members keep
+    // the union it belongs to and gets an interface + converter, so its members keep
     // their constraints while the string branch selects on its own token.
-    const object = expectRoundTrip("showcase-detail-object.json", new ShowcaseMapper());
+    const object = expectRoundTrip(
+      "showcase-detail-object.json",
+      showcaseTransferTypeConverter,
+    );
     const detail = object.detail as ShowcaseDetailObject;
     expect(detail.code).toBe("E_LIMIT");
     expect(detail.hint).toBe("retry later");
     // The branch stays open: an unknown member is preserved (P13).
     expect(detail.additionalProperties).toEqual({ retryAfterMs: 250 });
 
-    const text = expectRoundTrip("showcase-detail-string.json", new ShowcaseMapper());
+    const text = expectRoundTrip(
+      "showcase-detail-string.json",
+      showcaseTransferTypeConverter,
+    );
     expect(text.detail).toBe("E_LIMIT");
 
     const base = {
@@ -665,17 +735,17 @@ describe("json-schema showcase generated definitions", () => {
 
     // The object branch's own constraints are enforced.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, detail: { code: "" } }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, detail: { code: "" } }),
     ).toThrow(/must have length >= 1/);
 
     // A value admitted by no branch names the admissible ones.
-    expect(() => new ShowcaseMapper().fromIntermediate({ ...base, detail: 7 })).toThrow(
-      /expected one of: ShowcaseDetailObject, string/,
-    );
+    expect(() =>
+      showcaseTransferTypeConverter.fromTransferType({ ...base, detail: 7 }),
+    ).toThrow(/expected one of: ShowcaseDetailObject, string/);
 
     // Serialize picks the object branch by shape and re-runs its constraints (P12).
     expect(() =>
-      new ShowcaseMapper().toIntermediate({
+      showcaseTransferTypeConverter.toTransferType({
         ...object,
         detail: { code: "", additionalProperties: {} },
       }),
@@ -688,13 +758,13 @@ describe("json-schema showcase generated definitions", () => {
     // Square are the same branch types the `shape` union uses.
     const square = expectRoundTrip(
       "showcase-shape-or-name-square.json",
-      new ShowcaseMapper(),
+      showcaseTransferTypeConverter,
     );
     expect(square.shapeOrName).toMatchObject({ kind: "square", side: 4 });
 
     const named = expectRoundTrip(
       "showcase-shape-or-name-string.json",
-      new ShowcaseMapper(),
+      showcaseTransferTypeConverter,
     );
     expect(named.shapeOrName).toBe("unit-square");
 
@@ -714,7 +784,7 @@ describe("json-schema showcase generated definitions", () => {
     // The object token still routes through the discriminator, so an unknown tag
     // is rejected rather than falling back to the string branch.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         shapeOrName: { kind: "triangle" },
       }),
@@ -722,7 +792,7 @@ describe("json-schema showcase generated definitions", () => {
 
     // A token matching no branch names all admissible ones.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, shapeOrName: 7 }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, shapeOrName: 7 }),
     ).toThrow(/expected one of: Circle, Square, string/);
   });
 
@@ -731,13 +801,13 @@ describe("json-schema showcase generated definitions", () => {
     // structurally (no synthesized variant type) and narrows with Array.isArray.
     const list = expectRoundTrip(
       "showcase-measurements-array.json",
-      new ShowcaseMapper(),
+      showcaseTransferTypeConverter,
     );
     expect(list.measurements).toEqual([1.5, 2.5, 3.75]);
 
     const preset = expectRoundTrip(
       "showcase-measurements-string.json",
-      new ShowcaseMapper(),
+      showcaseTransferTypeConverter,
     );
     expect(preset.measurements).toBe("auto");
 
@@ -756,7 +826,7 @@ describe("json-schema showcase generated definitions", () => {
 
     // A token matching neither branch names both admissible kinds.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, measurements: true }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, measurements: true }),
     ).toThrow(/expected one of: number\[\], string/);
   });
 
@@ -764,9 +834,9 @@ describe("json-schema showcase generated definitions", () => {
     // Three positions with no property of their own: an array element at a
     // named union (`shapes`), an array element at an inline union the loader
     // names `ShowcaseSegmentsItem`, and a map member at an inline union named
-    // `ChoicesValue`. Each element runs its union's own mapper, so a bad value
+    // `ChoicesValue`. Each element runs its union's own converter, so a bad value
     // is reported at its index / key.
-    const value = expectRoundTrip("showcase-element-unions.json", new ShowcaseMapper());
+    const value = expectRoundTrip("showcase-element-unions.json", showcaseTransferTypeConverter);
 
     expect(value.shapes).toEqual([
       { kind: "circle", radius: 2.5, additionalProperties: {} },
@@ -796,22 +866,22 @@ describe("json-schema showcase generated definitions", () => {
     } as const;
 
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         shapes: [{ kind: "circle", radius: 1 }, true],
       }),
     ).toThrow(/shapes\[1\]/);
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         shapes: [{ kind: "triangle" }],
       }),
     ).toThrow(/triangle/);
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, segments: ["ok", 1.5] }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, segments: ["ok", 1.5] }),
     ).toThrow(/segments\[1\]/);
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         choices: { primary: "circle" },
       }),
@@ -820,40 +890,43 @@ describe("json-schema showcase generated definitions", () => {
 
   test("rejects invalid in-memory values on serialize (P12, both directions)", () => {
     // A valid model round-trips; mutating a single field to an out-of-spec value
-    // and re-serializing (toIntermediate) is rejected before any wire object is
+    // and re-serializing (toTransferType) is rejected before any wire object is
     // produced, with the same informative reason as the parse path.
-    const full = new ShowcaseMapper().fromIntermediate(
+    const full = showcaseTransferTypeConverter.fromTransferType(
       loadFixture("showcase-full.json"),
     );
 
     // Numeric bound: an in-memory value past `maximum` fails to serialize.
     expect(() =>
-      new ShowcaseMapper().toIntermediate({ ...full, priority: 42 }),
+      showcaseTransferTypeConverter.toTransferType({ ...full, priority: 42 }),
     ).toThrow(/must be <= 10, got 42/);
 
     // String length: an in-memory over-long string fails to serialize.
     expect(() =>
-      new ShowcaseMapper().toIntermediate({ ...full, code: "abcdef" }),
+      showcaseTransferTypeConverter.toTransferType({ ...full, code: "abcdef" }),
     ).toThrow(/must have length <= 5, got 6/);
 
     // Pattern: an in-memory off-pattern value fails to serialize.
-    expect(() => new ShowcaseMapper().toIntermediate({ ...full, sku: "xyz" })).toThrow(
-      /must match pattern/,
-    );
+    expect(() =>
+      showcaseTransferTypeConverter.toTransferType({ ...full, sku: "xyz" }),
+    ).toThrow(/must match pattern/);
 
     // Format: an in-memory malformed uuid fails to serialize.
     expect(() =>
-      new ShowcaseMapper().toIntermediate({ ...full, requestId: "nope" }),
+      showcaseTransferTypeConverter.toTransferType({ ...full, requestId: "nope" }),
     ).toThrow(/must be a valid uuid, got "nope"/);
 
     // Array: an in-memory duplicate (uniqueItems) fails to serialize.
     expect(() =>
-      new ShowcaseMapper().toIntermediate({ ...full, aliases: ["dup", "dup"] }),
+      showcaseTransferTypeConverter.toTransferType({
+        ...full,
+        aliases: ["dup", "dup"],
+      }),
     ).toThrow(/duplicate items: element at index 1 equals index 0/);
 
     // Closed value-set: a mutated enum member fails to serialize.
     expect(() =>
-      new ShowcaseMapper().toIntermediate({
+      showcaseTransferTypeConverter.toTransferType({
         ...full,
         status: "archived" as (typeof full)["status"],
       }),
@@ -861,21 +934,23 @@ describe("json-schema showcase generated definitions", () => {
 
     // const: a mutated integer const fails to serialize.
     expect(() =>
-      new ShowcaseMapper().toIntermediate({
+      showcaseTransferTypeConverter.toTransferType({
         ...full,
         revision: 2 as (typeof full)["revision"],
       }),
     ).toThrow(/must equal 1/);
 
     // allOf-merged bound: an in-memory `size` past the tightened maximum fails.
-    const widget = new WidgetMapper().fromIntermediate(loadFixture("widget.json"));
-    expect(() => new WidgetMapper().toIntermediate({ ...widget, size: 25 })).toThrow(
-      /must be <= 20, got 25/,
+    const widget = widgetTransferTypeConverter.fromTransferType(
+      loadFixture("widget.json"),
     );
+    expect(() =>
+      widgetTransferTypeConverter.toTransferType({ ...widget, size: 25 }),
+    ).toThrow(/must be <= 20, got 25/);
 
     // Object dependentRequired: a shipping street with no zip fails to serialize.
     expect(() =>
-      new ContactTsMapper().toIntermediate({
+      contactTsTransferTypeConverter.toTransferType({
         shippingStreet: "1 Main St",
         additionalProperties: {},
       }),
@@ -883,24 +958,24 @@ describe("json-schema showcase generated definitions", () => {
 
     // Object member-count: an empty map is below minProperties:1 on serialize.
     expect(() =>
-      new AttributesMapper().toIntermediate({ additionalProperties: {} }),
+      attributesTransferTypeConverter.toTransferType({ additionalProperties: {} }),
     ).toThrow(/must have at least 1 properties, got 0/);
     // propertyNames key-shape: an over-long key fails to serialize.
     expect(() =>
-      new AttributesMapper().toIntermediate({
+      attributesTransferTypeConverter.toTransferType({
         additionalProperties: { toolongkey: "1" },
       }),
     ).toThrow(/invalid property name "toolongkey": must have length <= 8, got 10/);
 
     // A valid model still serializes cleanly (no false rejection).
-    expect(() => new ShowcaseMapper().toIntermediate(full)).not.toThrow();
+    expect(() => showcaseTransferTypeConverter.toTransferType(full)).not.toThrow();
   });
 
   test("roundtrips materialized contentEncoding bytes and rejects malformed", () => {
     // blob (base64) and urlBlob (base64url) round-trip: a JSON string on the
     // wire, a native Uint8Array in the model, re-encoded byte-identically via the
     // pure-JS codec. The same bytes (">>>") encode to "Pj4+" vs "Pj4-".
-    const bytes = expectRoundTrip("showcase-bytes.json", new ShowcaseMapper());
+    const bytes = expectRoundTrip("showcase-bytes.json", showcaseTransferTypeConverter);
     const expected = new Uint8Array([0x3e, 0x3e, 0x3e]);
     expect(bytes.blob).toEqual(expected);
     expect(bytes.urlBlob).toEqual(expected);
@@ -918,17 +993,17 @@ describe("json-schema showcase generated definitions", () => {
 
     // A base64 field using the URL-safe alphabet is rejected by the pinned regex.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, blob: "Pj4-" }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, blob: "Pj4-" }),
     ).toThrow(/must be base64-encoded, got "Pj4-"/);
 
     // A base64 field missing padding is rejected.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, blob: "aGk" }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, blob: "aGk" }),
     ).toThrow(/must be base64-encoded/);
 
     // A base64url field carrying padding is rejected.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, urlBlob: "aGk=" }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, urlBlob: "aGk=" }),
     ).toThrow(/must be base64url-encoded, got "aGk="/);
   });
 
@@ -939,7 +1014,7 @@ describe("json-schema showcase generated definitions", () => {
     // map and its member (`ledger`), and a free-form bag (`metadata`). The same
     // fixture covers a typed map's member constraints (`quotas`, `tokens`,
     // `nicknames`) and a nested array (`grid`).
-    const value = expectRoundTrip("showcase-inline-shapes.json", new ShowcaseMapper());
+    const value = expectRoundTrip("showcase-inline-shapes.json", showcaseTransferTypeConverter);
 
     expect(value.grid).toEqual([[1, 2], [3]]);
     expect(value.location).toEqual({
@@ -978,28 +1053,28 @@ describe("json-schema showcase generated definitions", () => {
 
     // A hoisted shape validates like any other model, at the nested path.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, location: { city: "" } }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, location: { city: "" } }),
     ).toThrow(/location\.city/);
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, rows: [{ cell: "ok" }, {}] }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, rows: [{ cell: "ok" }, {}] }),
     ).toThrow(/rows\[1\]\.cell/);
     // A nested array reports the failing element at its own two-dimensional index.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, grid: [[1], [2, 1.5]] }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, grid: [[1], [2, 1.5]] }),
     ).toThrow(/grid\[1\]\[1\]/);
     // A typed map's member constraints are enforced, keyed by the member.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, quotas: { cpu: 7 } }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, quotas: { cpu: 7 } }),
     ).toThrow(/cpu/);
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, tokens: { primary: "AB" } }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, tokens: { primary: "AB" } }),
     ).toThrow(/primary/);
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({ ...base, nicknames: { tiny: "a" } }),
+      showcaseTransferTypeConverter.fromTransferType({ ...base, nicknames: { tiny: "a" } }),
     ).toThrow(/tiny/);
     // The free-form bag's member-count bound rides with the hoisted type.
     expect(() =>
-      new ShowcaseMapper().fromIntermediate({
+      showcaseTransferTypeConverter.fromTransferType({
         ...base,
         metadata: { a: 1, b: 2, c: 3, d: 4 },
       }),
@@ -1007,13 +1082,13 @@ describe("json-schema showcase generated definitions", () => {
 
     // Serialize re-runs every member's own constraints before emitting (P12).
     expect(() =>
-      new QuotasMapper().toIntermediate({ additionalProperties: { cpu: 7 } }),
+      quotasTransferTypeConverter.toTransferType({ additionalProperties: { cpu: 7 } }),
     ).toThrow(/cpu/);
     expect(() =>
-      new TokensMapper().toIntermediate({ additionalProperties: { primary: "AB" } }),
+      tokensTransferTypeConverter.toTransferType({ additionalProperties: { primary: "AB" } }),
     ).toThrow(/primary/);
     expect(() =>
-      new NicknamesMapper().toIntermediate({ additionalProperties: { tiny: "a" } }),
+      nicknamesTransferTypeConverter.toTransferType({ additionalProperties: { tiny: "a" } }),
     ).toThrow(/tiny/);
   });
 });

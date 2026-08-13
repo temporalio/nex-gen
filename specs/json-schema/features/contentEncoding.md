@@ -60,7 +60,7 @@ The defining choices (citing [[PRINCIPLES.md]]):
   browser-portable stdlib codec, so it gets a small generator-owned
   pure-JS codec (below). We already own the parse/encode adapters
   (PRINCIPLES: shadow-layout `UnmarshalJSON`, the collecting Jackson
-  (de)serializer, the TS TypeHint, the Python model hooks), so selecting
+  (de)serializer, the TS transfer type converter, the Python model hooks), so selecting
   the standard vs URL-safe codec per node is a codec choice, not new
   machinery.
 - **A native bytes field is the idiomatic shape (P2).** A base64 blob
@@ -190,7 +190,7 @@ wire is unambiguous and the stdlib decoder below agrees.
 | Language | Strategy |
 |---|---|
 | Go | Parse adapter: run the encoding's pinned regex over the wire string, pushing a `Violation` on failure; else decode with the codec above → `[]byte`. Encode adapter: re-encode with the same codec. `regexp.MustCompile` compiled once at init. |
-| TypeScript | `fromIntermediate`: pinned regex (`/…/u`) — **essential**, since the pure-JS decoder assumes canonical input and won't itself reject malformed text — then the generator-owned decoder → `Uint8Array`. `toIntermediate`: the generator-owned encoder. Lookup table + arithmetic; **no `Buffer`/`atob`**, so it runs in the browser. |
+| TypeScript | `fromTransferType`: pinned regex (`/…/u`) — **essential**, since the pure-JS decoder assumes canonical input and won't itself reject malformed text — then the generator-owned decoder → `Uint8Array`. `toTransferType`: the generator-owned encoder. Lookup table + arithmetic; **no `Buffer`/`atob`**, so it runs in the browser. |
 | Python | Parse hook (an `AfterValidator` / model validator): regex over the wire string, then `b64decode(s, validate=True)` (`base64`) or `urlsafe_b64decode(s + pad)` (`base64url`) → `bytes`. Serialize: `@model_serializer` emits `b64encode(b)` / `urlsafe_b64encode(b).rstrip(b"=")` as ASCII. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex over the `String`, then `Base64.getDecoder()` / `getUrlDecoder()` `.decode(s)` → `byte[]`, pushing a `Violation` on failure. The `Serializer` emits with `getEncoder()` / `getUrlEncoder().withoutPadding()`. |
 

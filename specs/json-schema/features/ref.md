@@ -233,7 +233,9 @@ the recursion-pointer rule above applies to cyclic edges. Imports follow
 
 - **Python** — `from .b import Foo`, `from ._recursive import Node`,
   `from .definitions import ValidationError`.
-- **TypeScript** — `import { Foo } from './b'`.
+- **TypeScript** — `import type { Foo } from './b'`, plus
+  `import { fooTransferTypeConverter } from './b'` since the referencing
+  type's converter delegates to the target's (PRINCIPLES TS §4).
 - **Go / Java** — same package; no import.
 
 **Bare-`$ref`-root alias.** A file root that is exactly `{"$ref":

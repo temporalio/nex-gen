@@ -12,6 +12,7 @@
     "esModuleInterop": true
   },
   "include": [
+    "shims/**/*.d.ts",
     "chat/**/*.ts",
     "kb/**/*.ts",
     "showcase/**/*.ts",

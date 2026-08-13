@@ -106,7 +106,7 @@ optional-non-nullable null rejection in [[nullability]]. For a required
 **Serialize side (P12).** The presence check runs again before emit, off
 the in-memory value: a required member that is empty in memory (Go `nil`
 pointer · TS `undefined` · Python unset · Java `null` reference) is a
-`ValidationError`, so `MarshalJSON`/`toIntermediate`/`model_dump` fails
+`ValidationError`, so `MarshalJSON`/`toTransferType`/`model_dump` fails
 rather than emitting a malformed object. A required member is therefore
 **never omitted** on serialize — required-non-nullable always emits its
 value; required+nullable emits the value or `null`, never absent (see the

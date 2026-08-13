@@ -85,6 +85,47 @@ properties:
       - { type: string, enum: [auto, manual] }
 "#;
 
+/// A service whose two operations are each one-sided: one declares only an
+/// `input`, the other only an `output`.
+const ONE_SIDED_OPERATION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Jobs:
+    fqn: example.jobs.v1.Jobs
+    operations:
+      accept:
+        input: { $ref: "#/$defs/Job" }
+      produce:
+        output: { $ref: "#/$defs/Job" }
+$defs:
+  Job:
+    type: object
+    properties:
+      id: { type: string }
+"##;
+
+/// An operation whose output type carries an `x-ts-name` override.
+const OPERATION_IO_TS_NAME_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Pages:
+    fqn: example.pages.v1.Pages
+    operations:
+      get:
+        input: { $ref: "#/$defs/GetInput" }
+        output: { $ref: "#/$defs/Page" }
+$defs:
+  GetInput:
+    type: object
+    properties:
+      id: { type: string }
+  Page:
+    type: object
+    x-ts-name: RenamedPage
+    properties:
+      title: { type: string }
+"##;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -383,15 +424,52 @@ fn typescript_json_example_generation_matches_checked_in_output() {
             assert!(all.contains("export interface Extras {"));
             assert!(all.contains("additionalProperties: Record<string, unknown>;"));
             // A tagged union whose branches are written inline: each branch names
-            // itself with `x-ts-name` and is emitted as an interface + mapper.
+            // itself with `x-ts-name` and is emitted as an interface + converter.
             assert!(all.contains("export type Note = TextNote | LinkNote;"));
             assert!(all.contains("export interface TextNote {"));
-            assert!(all.contains("export class LinkNoteMapper {"));
+            assert!(all.contains(
+                "export const linkNoteTransferTypeConverter =\n  new (class implements TransferTypeConverter<LinkNote> {"
+            ));
             // The lone inline object branch of a property union derives its name
             // from the union it belongs to.
             assert!(all.contains("detail?: ShowcaseDetailObject | string;"));
             assert!(all.contains("export interface ShowcaseDetailObject {"));
             assert!(all.contains("out.detail = serializeShowcaseDetail(value.detail);"));
+            // Each operation carries its models' converters as operation type
+            // info; the `x-ts-name` override flows into the converter identifier.
+            assert!(all.contains(
+                "inputType: { transferTypeConverter: getShowcaseInputTransferTypeConverter },"
+            ));
+            assert!(
+                all.contains(
+                    "outputType: { transferTypeConverter: showcaseTransferTypeConverter },"
+                )
+            );
+            assert!(all.contains("export const contactTsTransferTypeConverter ="));
+        }
+        if example_id == "chat" {
+            let services = rendered
+                .get(std::path::Path::new("services.ts"))
+                .expect("chat services module");
+            // A void side has no value to convert, so it carries no type info.
+            assert!(services.contains("ping: nexus.operation<void, void>({ name: \"Ping\" }),"));
+            assert!(services.contains(
+                "inputType: { transferTypeConverter: sendMessageInputTransferTypeConverter },"
+            ));
+        }
+        if example_id == "kb" {
+            // A cross-module I/O model's converter imports as a value from the
+            // module that declares it, alongside the type-only model import.
+            let services = rendered
+                .get(std::path::Path::new("kb/services.ts"))
+                .expect("kb services module");
+            assert!(services.contains(
+                "import { blockTransferTypeConverter } from \"../content/block/models\";"
+            ));
+            assert!(
+                services
+                    .contains("outputType: { transferTypeConverter: pageTransferTypeConverter },")
+            );
         }
         fs::remove_dir_all(output_path).unwrap();
     }
@@ -728,9 +806,9 @@ fn typescript_renders_required_fields_and_custom_message_types() {
 }
 
 /// An inline **structured** object `oneOf` branch on a property: the branch is
-/// named `<Union>Object` and emitted as an interface with its own mapper, and the
-/// union's serialize side routes through it (the in-memory `additionalProperties`
-/// member must not reach the wire).
+/// named `<Union>Object` and emitted as an interface with its own converter, and
+/// the union's serialize side routes through it (the in-memory
+/// `additionalProperties` member must not reach the wire).
 /// See `specs/json-schema/features/oneOf.md` ("Object branches").
 #[test]
 fn typescript_json_names_inline_object_union_branch() {
@@ -756,9 +834,13 @@ fn typescript_json_names_inline_object_union_branch() {
 
     assert!(rendered.contains("payload?: DetailPayloadObject | string;"));
     assert!(rendered.contains("export interface DetailPayloadObject {"));
-    assert!(rendered.contains("export class DetailPayloadObjectMapper {"));
-    // Parse and serialize both route the object token through the branch mapper.
-    assert!(rendered.contains("new DetailPayloadObjectMapper().fromIntermediate(raw.payload)"));
+    assert!(rendered.contains(
+        "export const detailPayloadObjectTransferTypeConverter = new class implements TransferTypeConverter<DetailPayloadObject> {"
+    ));
+    // Parse and serialize both route the object token through the branch converter.
+    assert!(
+        rendered.contains("detailPayloadObjectTransferTypeConverter.fromTransferType(raw.payload)")
+    );
     assert!(rendered.contains(
         "function serializeDetailPayload(value: DetailPayloadObject | string): unknown {"
     ));
@@ -767,8 +849,8 @@ fn typescript_json_names_inline_object_union_branch() {
 }
 
 /// Every constraint a **non-object** branch declares is checked once the token
-/// narrows to it, on both sides of the mapper (P12). A `const`/`enum` branch also
-/// narrows the member *type* to its literal set, without which the narrowed
+/// narrows to it, on both sides of the converter (P12). A `const`/`enum` branch
+/// also narrows the member *type* to its literal set, without which the narrowed
 /// assignment would not even typecheck.
 /// See `specs/json-schema/features/oneOf.md` ("Validator mapping").
 #[test]
@@ -812,10 +894,10 @@ fn typescript_json_validates_non_object_union_branch_constraints() {
 }
 
 /// A union in an element position: the loader names it, so TypeScript emits an
-/// ordinary union alias plus mapper and runs it per element/member — including
-/// on the serialize side, where an element model's catch-all bag would otherwise
-/// reach the wire. A nullable element parenthesizes (`(T | null)[]`), which
-/// `T | null[]` would silently misread.
+/// ordinary union alias plus converter and runs it per element/member —
+/// including on the serialize side, where an element model's catch-all bag would
+/// otherwise reach the wire. A nullable element parenthesizes (`(T | null)[]`),
+/// which `T | null[]` would silently misread.
 /// See `specs/json-schema/features/oneOf.md` ("Unions in element positions").
 #[test]
 fn typescript_json_maps_element_position_unions() {
@@ -841,12 +923,90 @@ fn typescript_json_maps_element_position_unions() {
 
     assert!(rendered.contains("export type BagSegmentsItem = string | number;"));
     assert!(rendered.contains("segments?: BagSegmentsItem[];"));
-    assert!(rendered.contains("new BagSegmentsItemMapper().fromIntermediate(element)"));
-    assert!(rendered.contains("new ChoiceMapper().fromIntermediate(element)"));
-    // A map member runs the member mapper in both directions.
-    assert!(rendered.contains("new EntriesValueMapper().fromIntermediate(raw[key])"));
-    assert!(rendered.contains("out[key] = new EntriesValueMapper().toIntermediate(entry);"));
+    assert!(rendered.contains("bagSegmentsItemTransferTypeConverter.fromTransferType(element)"));
+    assert!(rendered.contains("choiceTransferTypeConverter.fromTransferType(element)"));
+    // A map member runs the member converter in both directions.
+    assert!(rendered.contains("entriesValueTransferTypeConverter.fromTransferType(raw[key])"));
+    assert!(rendered.contains("out[key] = entriesValueTransferTypeConverter.toTransferType(entry);"));
     // Element nullability is the element's own concern, and parenthesized.
     assert!(rendered.contains("slots?: (string | null)[];"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A one-sided operation: the non-void side carries its converter as operation
+/// type info, the void side carries no field at all (there is no value to
+/// convert, so an empty `TypeInfo` would assert a conversion that does not
+/// exist). See `specs/json-schema/services.md` ("TypeScript operation type
+/// info"); the checked-in samples only cover void-on-both-sides.
+#[test]
+fn typescript_json_one_sided_operation_type_info() {
+    let temp_dir = unique_output_path("ts-json-one-sided-type-info");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("jobs.nexusrpc.yaml");
+    fs::write(&input_path, ONE_SIDED_OPERATION_SCHEMA).unwrap();
+    let output_path = temp_dir.join("jobs");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("services.ts")).unwrap();
+
+    // Input present, output omitted: `inputType` only.
+    assert!(rendered.contains(
+        "  >({ name: \"Accept\", inputType: { transferTypeConverter: jobTransferTypeConverter } }),"
+    ));
+    // The mirror: output present, input omitted.
+    assert!(rendered.contains(
+        "  >({ name: \"Produce\", outputType: { transferTypeConverter: jobTransferTypeConverter } }),"
+    ));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// An `x-ts-name` override on an operation's I/O type moves every emitted
+/// reference with the type: the operation generic, the model/converter imports,
+/// and the converter named in the operation type info (the identifier is derived
+/// from the *resolved* type name).
+#[test]
+fn typescript_json_operation_type_info_follows_ts_name_override() {
+    let temp_dir = unique_output_path("ts-json-type-info-override");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("pages.nexusrpc.yaml");
+    fs::write(&input_path, OPERATION_IO_TS_NAME_SCHEMA).unwrap();
+    let output_path = temp_dir.join("pages");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let models = fs::read_to_string(output_path.join("models.ts")).unwrap();
+    let services = fs::read_to_string(output_path.join("services.ts")).unwrap();
+
+    assert!(models.contains("export interface RenamedPage {"));
+    assert!(models.contains("export const renamedPageTransferTypeConverter = new class"));
+    assert!(services.contains("import { getInputTransferTypeConverter, renamedPageTransferTypeConverter } from './models';"));
+    assert!(services.contains("import type { GetInput, RenamedPage } from './models';"));
+    assert!(services.contains("    RenamedPage\n"));
+    assert!(
+        services.contains(
+            "outputType: { transferTypeConverter: renamedPageTransferTypeConverter } }),"
+        )
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }

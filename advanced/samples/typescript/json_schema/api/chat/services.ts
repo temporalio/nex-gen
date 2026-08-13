@@ -2,6 +2,12 @@
 
 import * as nexus from "nexus-rpc";
 import * as workflow from "@temporalio/workflow";
+import {
+  getRoomInputTransferTypeConverter,
+  roomTransferTypeConverter,
+  sendMessageInputTransferTypeConverter,
+  sendMessageOutputTransferTypeConverter,
+} from "./models";
 import type { GetRoomInput, Room, SendMessageInput, SendMessageOutput } from "./models";
 
 /**
@@ -13,11 +19,17 @@ export const chatService = nexus.service("example.chat.v1.ChatService", {
    */
   sendMessage: nexus.operation<SendMessageInput, SendMessageOutput>({
     name: "SendMessage",
+    inputType: { transferTypeConverter: sendMessageInputTransferTypeConverter },
+    outputType: { transferTypeConverter: sendMessageOutputTransferTypeConverter },
   }),
   /**
    * Look up a room by id.
    */
-  getRoom: nexus.operation<GetRoomInput, Room>({ name: "GetRoom" }),
+  getRoom: nexus.operation<GetRoomInput, Room>({
+    name: "GetRoom",
+    inputType: { transferTypeConverter: getRoomInputTransferTypeConverter },
+    outputType: { transferTypeConverter: roomTransferTypeConverter },
+  }),
   /**
    * Liveness probe.
    */

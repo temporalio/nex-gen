@@ -93,7 +93,7 @@ typed map, a free-form object, member-count bounds). The constraint is not
 the shape, it is the **name**: every target has to materialize a *type* for a
 **structured** object branch — Go a defined type to carry the marker method,
 Java a class to `implement` the interface, Python a `BaseModel` for Pydantic
-to select, TS an interface plus the mapper that validates its members — and a
+to select, TS an interface plus the converter that validates its members — and a
 type needs a name. So every object branch must resolve to a determinate name:
 
 - **`$ref` to a named definition** — the definition's name *is* the branch
@@ -399,9 +399,10 @@ literal property). This is the best-fit target: the acceptance rule is
 *exactly* what TS narrows without hand-written type guards (**P2**).
 
 An inline object branch is the one place TS does need a name: the branch's
-members have to be validated, and that validation lives in a `Mapper` class
-keyed to a type. A **structured** inline branch is therefore emitted as the
-interface + mapper pair a named definition gets (`<Union>Object`, or the
+members have to be validated, and that validation lives in a
+`TransferTypeConverter` keyed to a type. A **structured** inline branch is
+therefore emitted as the interface + converter pair a named definition gets
+(`<Union>Object`, or the
 branch's `x-ts-name`) and enters the union under that name; the union still
 narrows structurally, on the object token or the discriminant literal. Only the
 **free-form** branch stays anonymous — it has no members to validate:
@@ -414,9 +415,9 @@ export type Bar = Record<string, unknown> | string;        // free-form inline b
 
 A property-level (anonymous) union whose members need a transform gets one
 module-private `serialize<Union>` function — the same dispatch a named union's
-`Mapper.toIntermediate` performs — so an object member is written through its
-branch mapper rather than emitted with its in-memory `additionalProperties`
-member intact.
+`toTransferType` performs — so an object member is written through its branch
+converter rather than emitted with its in-memory `additionalProperties` member
+intact.
 
 ### Python
 
@@ -636,7 +637,7 @@ then delegate**, never a trial-all-branches loop.
 | Language | Strategy |
 |---|---|
 | Go | The container's collecting `UnmarshalJSON` (shadow `*json.RawMessage` layout, **PRINCIPLES Go** / [[nullability]]) peeks the field's first non-space token, routes to the branch of that kind (`{`→object; `[`→array: `FooArray`; `"`→string: `FooString`; number→the numeric branch via `parseSpecInteger`/spec-number so `1.5` still yields a `Violation`). For an object token with 2+ object branches it further reads the discriminator property and selects the branch with that `const`. It then runs that branch's shared `Validate` and assigns the concrete type to the interface field. No matching kind / unknown discriminator value → `Violation` collected into the single `ValidationError`. |
-| TypeScript | `fromIntermediate` is the `typeof`/`Array.isArray` chain shown above; for an object it switches on the discriminant literal (`raw.kind`) and delegates to that branch's converter (e.g. `CatTypeHint.fromIntermediate`); the fall-through pushes one `Violation`. Plain checks only (**PRINCIPLES TS §1** — no runtime schema lib). |
+| TypeScript | `fromTransferType` is the `typeof`/`Array.isArray` chain shown above; for an object it switches on the discriminant literal (`raw.kind`) and delegates to that branch's converter (e.g. `catTransferTypeConverter.fromTransferType`); the fall-through pushes one `Violation`. Plain checks only (**PRINCIPLES TS §1** — no runtime schema lib). |
 | Python | Pydantic v2 strict `Union` selects by kind; an object tagged union uses `Field(discriminator=...)` for O(1) selection. Zero matches / unknown discriminator raise, aggregated into `pydantic.ValidationError`. |
 | Java | The union interface's static `fromNode` (called by the enclosing POJO's collecting deserializer, **PRINCIPLES Java §5**) switches on the `JsonNode` kind (`isObject`/`isArray`/`isTextual`/`isNumber`/`isBoolean`); for an object with 2+ object branches it peeks the discriminator node and dispatches to the matching POJO's collecting deserializer. On no match / unknown discriminator it pushes a `Violation` into the single `ValidationException` and returns `null`. One dispatcher serves both positions: a named union def and a union written inline on a property. |
 
@@ -679,7 +680,7 @@ single branch member, so "exactly one" is structurally guaranteed and the
 encode adapter simply emits the held variant: Go `json.Marshal` on the
 interface marshals its dynamic type (a `FooString`/`FooArray` named type
 serializes as its underlying JSON kind; an object branch emits its
-fields); TS `toIntermediate` branches on `typeof`/`Array.isArray` and
+fields); TS `toTransferType` branches on `typeof`/`Array.isArray` and
 delegates to the member's converter; Java's `Serializer` writes by runtime
 class. The shared `Validate` still **re-runs the selected branch's
 constraints before emit**, so an in-memory member violating its own

@@ -70,7 +70,7 @@ written** — i.e. *after* default omission and the omit-vs-`null` decision
 default is unset is omitted and does **not** count, exactly as it didn't
 on the way in. `model_fields_set` (Python) is again the exact emitted-key
 count under `exclude_unset`; Go/TS count the members the encoder will
-emit; an over-cap model fails `MarshalJSON`/`toIntermediate`/`model_dump`
+emit; an over-cap model fails `MarshalJSON`/`toTransferType`/`model_dump`
 rather than emitting an out-of-bounds object. Because the in-memory model
 can *read* a default as present that *serializes* as absent, a model can
 legitimately fail `maxProperties`/`minProperties` on serialize that

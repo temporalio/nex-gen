@@ -181,7 +181,7 @@ default. Mechanisms (all empirically verified):
 | Language | Omit-unset mechanism |
 |---|---|
 | Go | `*T` with `,omitempty` → `nil` omitted by the stdlib encoder via the type-alias `MarshalJSON`. Pointer-to-zero-value still emits, so set-ness ≡ pointer-presence. |
-| TypeScript | `toIntermediate` skips keys whose value is `undefined` when building the intermediate value (PRINCIPLES TS §4). |
+| TypeScript | `toTransferType` skips keys whose value is `undefined` when building the transfer value (PRINCIPLES TS §4). |
 | Python | generated `@model_serializer(mode='wrap')` emits only `model_fields_set` keys — omits unset while the attribute still reads the default; explicit-set (incl. set-to-default) pins. No deep-equals. Baked into the model so the **default Temporal `pydantic_data_converter`** (which owns `to_json`, not us) honors it. |
 | Java | `@JsonInclude(NON_NULL)` — `null` (unset) omitted; getter still returns the default to the consumer. |
 

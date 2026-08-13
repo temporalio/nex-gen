@@ -213,7 +213,8 @@ three languages simply emit no comment, as elsewhere ([[description]]).
 | Aspect | Go | TypeScript | Python | Java |
 |---|---|---|---|---|
 | Service binding | pkg-level `var <Name> = struct{…}{…}` | `export const <name> = nexus.service(fqn, {…})` | `@nexusrpc.service(name=fqn)` class | `@Service(name=fqn)` interface |
-| Operation entry | field `nexus.OperationReference[In, Out]` set via `nexus.NewOperationReference[In,Out](wire)` | `nexus.operation<In, Out>({ name: wire })` | attr `nexusrpc.Operation[In, Out] = nexusrpc.Operation(name=wire)` | method `Out m(In input)` + `@Operation(name=wire)` |
+| Operation entry | field `nexus.OperationReference[In, Out]` set via `nexus.NewOperationReference[In,Out](wire)` | `nexus.operation<In, Out>({ name: wire, inputType, outputType })` | attr `nexusrpc.Operation[In, Out] = nexusrpc.Operation(name=wire)` | method `Out m(In input)` + `@Operation(name=wire)` |
+| Operation type info | — | `inputType`/`outputType` carry the I/O type's transfer type converter (below) | — | — |
 | Service wire name | `ServiceName` struct field | first arg to `nexus.service` | `service(name=…)` | `@Service(name=…)` |
 | Void output | `nexus.NoValue` | `void` | `None` | `void` return |
 | Void input | `nexus.NoValue` | `void` | `None` | **no-arg method** `Out m()` |
@@ -227,7 +228,12 @@ three languages simply emit no comment, as elsewhere ([[description]]).
   `func NewOperationReference[I, O any](name string) OperationReference[I, O]`,
   `type NoValue *struct{}`.
 - **TypeScript** (`nexus-rpc`): `nexus.service(name, operations)`,
-  `nexus.operation<In, Out>({ name })` — confirmed by the existing
+  `nexus.operation<In, Out>({ name, inputType?, outputType? })` where both
+  type-info fields are `TypeInfo<T, unknown>` and
+  `interface TypeInfo<T = unknown, D = T> { transferTypeConverter?:
+  TransferTypeConverter<T, D> }`,
+  `interface TransferTypeConverter<T, D = unknown> { fromTransferType(value:
+  D): T; toTransferType(value: T): D }` — confirmed by the existing
   generator's compiling output.
 - **Python** (`nexusrpc`): `@nexusrpc.service` /
   `@nexusrpc.service(name=…)` (name defaults to the class name);
@@ -281,12 +287,15 @@ export const chatService = nexus.service("example.v1.ChatService", {
    */
   pollMessages: nexus.operation<PollMessagesInput, PollMessagesOutput>({
     name: "poll-messages",
+    inputType: { transferTypeConverter: pollMessagesInputTransferTypeConverter },
+    outputType: { transferTypeConverter: pollMessagesOutputTransferTypeConverter },
   }),
   /**
    * Send a message.
    */
   sendMessage: nexus.operation<SendMessageInput, void>({
     name: "SendMessage",
+    inputType: { transferTypeConverter: sendMessageInputTransferTypeConverter },
   }),
 });
 ```
@@ -422,6 +431,43 @@ binding itself adds nothing to that path. Void I/O (`nexus.NoValue` / TS
 `void` / Python `None` / Java `void` return or no-arg method) has no value
 to validate.
 
+### TypeScript operation type info
+
+TypeScript is the one target where the operation entry **names** its I/O
+types' converters: each non-void side carries
+`inputType`/`outputType` = `{ transferTypeConverter: <side>TransferTypeConverter }`,
+the model's exported converter instance (PRINCIPLES TS §4). This is
+metadata, not behavior — nexus-rpc carries it verbatim and interprets
+nothing; a protocol integration applies the conversion when transferring
+the value. It exists because TS is the only target whose conversion is
+*not* discoverable from the type: Go reaches it through
+`MarshalJSON`/`UnmarshalJSON` on the model, Python through the model's
+Pydantic hooks, Java through the POJO's class-level Jackson
+(de)serializer — all attached to the type itself, so the SDK finds them
+with nothing named at the operation. A TS model is a bare `interface` with
+no runtime footprint (PRINCIPLES TS §2), so its converter is a separate
+value and the operation is the only place that can point at it.
+
+A **void** side carries neither field. There is no value to convert, so an
+empty `TypeInfo` would assert a conversion that does not exist; absence is
+the accurate encoding and matches the SDK's optional fields. Since a
+declared `input`/`output` is always an object type (above), a non-void side
+always has exactly one converter to name — there is no case where the
+field would be present but empty.
+
+The converter identifier is derived, not declared: it is the model's
+resolved type identifier lower-camel-cased plus `TransferTypeConverter` —
+the same identifier the type declaration uses, so an `x-ts-name` override
+moves the type and its converter together. Because it is derived and
+lower-camel-casing folds names the type namespace keeps apart (`HTTPError`
+and `HttpError` both yield `httpErrorTransferTypeConverter`), the converter
+identifier also enters the module's identifier namespace for the
+PRINCIPLES §15 collision pass: a fold rejects at load with a fix-it rather
+than emitting one `export const` twice. Converters declared in another
+input file's module import as **values** from that module (beside the
+type-only model import), following the same module resolution as any
+cross-module reference ([[ref]], [[generated-file-layout]]).
+
 ## Reuse (existing WIT emitters)
 
 This spec is intentionally shape-compatible with the WIT generator's
@@ -438,9 +484,10 @@ emission code rather than duplicate it:
   shared emitter must recase it.
 - Only the **input model** differs (JSON Schema here vs WIT there); none
   of WIT's input-side concepts (directives, proto backing, resources)
-  cross into this spec. The TS `<Type>TypeHint` converter wiring (a
-  not-yet-supported nexus-rpc feature) concerns the *converter* argument,
-  not the TS generics, which are emitted today.
+  cross into this spec. The TS transfer type converter wiring (below) is
+  JSON-Schema-only: a WIT-input operation carries the TS generics but no
+  operation type info, since WIT models convert through proto helpers
+  rather than a `TransferTypeConverter`.
 
 ## Property-testing matrix
 
@@ -453,6 +500,9 @@ emission code rather than duplicate it:
 | Inline-object I/O promoted | `input: {type: object, properties: {…}}` → `<Op>Input` |
 | Omitted output | → `NoValue` / `void` / `None` / Java `void` return |
 | Omitted input | → `NoValue` / `void` / `None` / Java **no-arg method** |
+| TS type info on a non-void side | `inputType`/`outputType` = `{ transferTypeConverter: … }` naming the I/O type's converter |
+| TS type info on a void side | neither field emitted |
+| TS type info across modules | I/O `$ref` into another module → converter imported as a value from that module |
 | `fqn` overrides on service and op | wire name = `fqn` verbatim |
 | Defaults applied | op without `fqn` → PascalCase wire; service without `fqn` → service name |
 | Acronym op name | `sendHTTPRequest` → field `SendHttpRequest`, type `SendHttpRequestInput` (folded; `x-*-name` to refine) |
@@ -471,6 +521,7 @@ emission code rather than duplicate it:
 | Non-object I/O (`$ref`) | `input: {$ref: '#/$defs/Y'}` where `Y` is not `type: object` |
 | Synthesized name collides | inline `sendMessage.input` + a `$defs/SendMessageInput` |
 | Service collides with a model | service `ChatService` + a `$defs/ChatService` model (same per-package identifier) |
+| TS converter identifiers fold together | `$defs/HTTPError` (kept verbatim by `x-ts-name`) + `$defs/HttpError` → one `httpErrorTransferTypeConverter` |
 | `$ref` I/O unresolvable / non-`$defs` | `input: {$ref: '#/properties/x'}` — per [[ref]] |
 | Identifier invalid/reserved in an emitted lang (no override) | a service/op key mapping to a reserved word |
 | `x-<lang>-name` value not a legal identifier | `x-go-name: "2fa"` / a reserved word on a service or op |

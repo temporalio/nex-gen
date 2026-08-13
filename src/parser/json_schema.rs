@@ -2972,15 +2972,16 @@ fn is_inline_object_shape(schema: &Schema) -> bool {
 /// `$ref` at it. Every target has to materialize a *type* for such a shape: Go a
 /// struct (plus a defined type to carry a union's marker method), Java a class
 /// (to `implement` a union interface), Python a `BaseModel` for Pydantic to
-/// select, TypeScript an interface plus the mapper that validates its members —
-/// so the shape needs a name; and once it has one, a named definition is exactly
-/// what every target already emits. Hoisting is therefore the whole feature:
-/// downstream the position holds an ordinary `$ref` and its target an ordinary
-/// model, so validation, ref resolution, P15, module exports, and emission all
-/// apply unchanged, and the inline form emits byte-identical code to the `$defs`
-/// + `$ref` form. See `specs/json-schema/features/properties.md` §"Naming an
-/// inline object shape" and `specs/json-schema/features/oneOf.md` §"Object
-/// branches — naming the inline shape".
+/// select, TypeScript an interface plus the converter that validates its members
+/// — so the shape needs a name; and once it has one, a named definition is
+/// exactly what every target already emits. Hoisting is therefore the whole
+/// feature: downstream the position holds an ordinary `$ref` and its target an
+/// ordinary model, so validation, ref resolution, P15, module exports, and
+/// emission all apply unchanged, and the inline form emits byte-identical code to
+/// the `$defs` + `$ref` form. See
+/// `specs/json-schema/features/properties.md` §"Naming an inline object shape"
+/// and `specs/json-schema/features/oneOf.md` §"Object branches — naming the
+/// inline shape".
 ///
 /// The one object left inline is the **free-form** object as a `oneOf` *branch*:
 /// there it is the union's object kind rather than a value position of its own, so
@@ -5473,6 +5474,16 @@ fn type_identifier(language: Language, model_name: &str, schema: &Schema) -> Str
         .unwrap_or_else(|| model_name.to_string())
 }
 
+/// The TypeScript identifier of a model's `TransferTypeConverter` instance,
+/// derived from the model's resolved type identifier. This is the single owner of
+/// the name: the P15 collision pass enters it into the module namespace here and
+/// the TypeScript emitters (model declaration, cross-module value imports,
+/// operation `inputType`/`outputType`) ask for it, so the derivation is never
+/// spelled twice and the check can never drift from emission.
+pub(crate) fn ts_transfer_type_converter_name(type_ident: &str) -> String {
+    format!("{}TransferTypeConverter", type_ident.to_lower_camel_case())
+}
+
 /// Whether a property schema is a scalar closed value set (`const`/`enum`) that
 /// synthesizes a Go defined type + value constants / Java value constants.
 fn schema_closed_values(schema: &Schema) -> Vec<Value> {
@@ -5796,10 +5807,12 @@ pub(crate) fn build_name_manifest(
                 )?;
             }
         }
-        // TypeScript `DEFAULT_<FIELD>` constants share the module scope; make
-        // them participate rather than silently coexist (P15).
+        // TypeScript `DEFAULT_<FIELD>` constants and per-model transfer type
+        // converters share the module scope; make them participate rather than
+        // silently coexist (P15).
         if language == Language::TypeScript {
             collect_ts_default_constants(module_key, &ns_models, &mut top)?;
+            collect_ts_transfer_type_converters(module_key, &ns_models, &mut top)?;
         }
     }
 
@@ -5817,9 +5830,15 @@ pub(crate) fn build_name_manifest(
 ///   and `ValidationError` live in the models' own package; every other runtime
 ///   symbol is unexported (`addViolations`, `parseSpecInteger`, …) and cannot
 ///   collide with an exported user type.
-/// - TypeScript (`src/generator/json/typescript.rs`): `Violation` (interface)
-///   and `ValidationError` (class) are imported into every model module; the
-///   helper functions (`isPlainObject`, `collect`, …) are `camelCase`.
+/// - TypeScript (`src/generator/json/typescript.rs`): nexus-rpc's
+///   `TransferTypeConverter` is a bare named import in every model module (the
+///   contract each model's converter implements), so a user type of that name is
+///   an import-versus-local-declaration conflict. `Violation` (interface) and
+///   `ValidationError` (class) reach `models.ts` only through the namespace
+///   import `__nexgenDefinitions`, but the package barrel re-exports both from
+///   `./definitions` beside `export *` of the model modules, so a user type of
+///   either name is silently shadowed out of the package surface (P7). The
+///   runtime helper functions (`isPlainObject`, `collect`, …) are `camelCase`.
 /// - Python (`src/generator/json/python.rs`): the `UpperCamelCase` runtime type
 ///   aliases imported into model modules (`SpecInt`, the materialized temporal
 ///   and base64 field aliases). There is no generated `Violation`/error class —
@@ -5831,7 +5850,8 @@ pub(crate) fn build_name_manifest(
 ///   (`TemporalSupport`/`Base64Support` are schema-dependent, so excluded.)
 fn boilerplate_idents(language: Language) -> &'static [&'static str] {
     match language {
-        Language::Go | Language::TypeScript => &["Violation", "ValidationError"],
+        Language::Go => &["Violation", "ValidationError"],
+        Language::TypeScript => &["Violation", "ValidationError", "TransferTypeConverter"],
         Language::Python => &[
             "SpecInt",
             "DateTimeField",
@@ -6075,6 +6095,28 @@ fn collect_ts_default_constants(
                 format!("`{}.{json_name}` DEFAULT_ constant", model.full_name),
             )?;
         }
+    }
+    Ok(())
+}
+
+/// TypeScript per-model `TransferTypeConverter` instances (module scope). The
+/// identifier is derived from the model's type identifier
+/// ([`ts_transfer_type_converter_name`]), and lower-camel-casing is not
+/// injective over the distinct `UpperCamelCase` type names — `HTTPError` and
+/// `HttpError` both derive `httpErrorTransferTypeConverter` — so the derived
+/// name has to enter the shared module namespace too, or two models emit the
+/// same `export const` (P15).
+fn collect_ts_transfer_type_converters(
+    module_key: &str,
+    models: &[NsModel],
+    top: &mut Namespace,
+) -> Result<()> {
+    for model in models.iter().filter(|model| model.module_key == module_key) {
+        top.insert(
+            Language::TypeScript,
+            ts_transfer_type_converter_name(&model.type_ident),
+            format!("type `{}` transfer type converter", model.full_name),
+        )?;
     }
     Ok(())
 }
@@ -9954,6 +9996,98 @@ $defs:
         );
         // Python has no `Violation` symbol, so it accepts the schema.
         parse_for(Language::Python, input).expect("Python has no Violation boilerplate");
+    }
+
+    #[test]
+    fn rejects_type_colliding_with_typescript_transfer_type_converter() {
+        // Every TS model module imports nexus-rpc's `TransferTypeConverter` for
+        // the contract its converter implements, so a `$defs` type of that name
+        // conflicts with the import.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  c: { $ref: "#/$defs/TransferTypeConverter" }
+$defs:
+  TransferTypeConverter:
+    type: object
+    properties: { a: { type: string } }
+"##;
+        let error = reject_for(Language::TypeScript, input);
+        assert!(
+            error.contains("collision") && error.contains("TransferTypeConverter"),
+            "{error}"
+        );
+        // The other targets import no such symbol, so the same schema is accepted.
+        parse_for(Language::Go, input).expect("Go has no TransferTypeConverter boilerplate");
+        parse_for(Language::Java, input).expect("Java has no TransferTypeConverter boilerplate");
+    }
+
+    #[test]
+    fn rejects_typescript_transfer_type_converters_that_case_fold_together() {
+        // The converter identifier is derived by lower-camel-casing the resolved
+        // type name, which is not injective over the distinct type names P15
+        // guarantees: both types below keep their verbatim names through an
+        // override, yet derive the same `httpErrorTransferTypeConverter` — one
+        // `export const` emitted twice. The derived name participates in the
+        // pass, so this rejects with a fix-it instead.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [a, b]
+properties:
+  a: { $ref: "#/$defs/HTTPError" }
+  b: { $ref: "#/$defs/HttpError" }
+$defs:
+  HTTPError:
+    type: object
+    x-ts-name: HTTPError
+    x-go-name: HTTPError
+    x-py-name: HTTPError
+    x-java-name: HTTPError
+    properties: { m: { type: string } }
+  HttpError:
+    type: object
+    properties: { n: { type: string } }
+"##;
+        let error = reject_for(Language::TypeScript, input);
+        assert!(
+            error.contains("collision") && error.contains("httpErrorTransferTypeConverter"),
+            "{error}"
+        );
+        // The other targets derive no value identifier from a type name, so the
+        // two distinct type names are all they have to keep apart.
+        parse_for(Language::Go, input).expect("Go derives no converter identifier");
+        parse_for(Language::Python, input).expect("Python derives no converter identifier");
+        parse_for(Language::Java, input).expect("Java derives no converter identifier");
+    }
+
+    #[test]
+    fn rejects_service_name_colliding_with_a_transfer_type_converter() {
+        // A service's TypeScript identifier shares the module scope with the
+        // derived converter identifiers, so an override that lands on one is a
+        // P15 collision (TS2440 plus a temporal-dead-zone `ReferenceError` if
+        // emitted).
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Thing:
+    fqn: example.t.v1.Thing
+    x-ts-name: getInputTransferTypeConverter
+    operations:
+      get:
+        input: { $ref: "#/$defs/GetInput" }
+$defs:
+  GetInput:
+    type: object
+    properties: { id: { type: string } }
+"##;
+        let error = reject_for(Language::TypeScript, input);
+        assert!(
+            error.contains("service `Thing`") && error.contains("getInputTransferTypeConverter"),
+            "{error}"
+        );
     }
 
     #[test]

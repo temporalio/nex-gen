@@ -227,10 +227,14 @@ types:
   cross-module import cycle is gone. A cycle **within** a single file
   stays in its module.
 - **TypeScript**: no recursive file. Type references erase
-  (`import type` is always cycle-safe) and validator-function imports are
-  ESM live bindings resolved at call time, not module-init; generated
-  const values are self-contained leaf literals, so there is no
-  init-order hazard. Cyclic types stay in their per-input modules.
+  (`import type` is always cycle-safe), and the imported *values* — a
+  sibling model's transfer type converter, a validator function — are ESM
+  live bindings read at call time, not module-init. A converter is
+  instantiated at module-init, but the sibling converters it delegates to
+  are named only inside its method bodies, so a mutually-referencing pair
+  initializes in either order. Every other generated const is a
+  self-contained leaf literal. So there is no init-order hazard, and cyclic
+  types stay in their per-input modules.
 - **Go**: no recursive file — the single flat package makes every cycle
   (same-file or cross-directory) a within-package reference, which Go
   resolves natively. This is exactly why Go flattens (above).

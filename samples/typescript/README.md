@@ -9,8 +9,8 @@ service scaffolding).
   (`chat`, `kb`, `showcase`, `temporal`, plus the `temporal-date` /
   `temporal-temporal` date-time representation variants)
 - Vitest round-trip tests live in `samples/typescript/tests/`, driving the
-  generated mappers through the Temporal data converter against the canonical
-  wire fixtures in [`samples/wire/json_schema`](../wire/json_schema)
+  generated transfer type converters through the Temporal data converter against
+  the canonical wire fixtures in [`samples/wire/json_schema`](../wire/json_schema)
 - `build_outputs.mjs` is a thin wrapper around
   `cargo build-json-examples --lang typescript`
 

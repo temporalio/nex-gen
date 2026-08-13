@@ -1,12 +1,13 @@
 import { describe, expect, test } from "vitest";
+import type { TransferTypeConverter } from "nexus-rpc";
 
 import {
   DEFAULT_PRIORITY,
-  LabelsMapper,
-  MessageMapper,
-  RoomMapper,
-  SendMessageInputMapper,
-  SendMessageOutputMapper,
+  labelsTransferTypeConverter,
+  messageTransferTypeConverter,
+  roomTransferTypeConverter,
+  sendMessageInputTransferTypeConverter,
+  sendMessageOutputTransferTypeConverter,
   ValidationError,
   type Labels,
   type Message,
@@ -15,7 +16,6 @@ import {
   fixtureBytes,
   loadFixture as loadFixtureFrom,
   roundTripFixture,
-  type IntermediateMapper,
 } from "./json-converter-helper.ts";
 
 const wireFixtureDir = new URL("../../wire/json_schema/chat/", import.meta.url);
@@ -25,12 +25,12 @@ function loadFixture(name: string): unknown {
 }
 
 // Round-trip a fixture through the Temporal data converter (driven by the
-// generated mapper) and assert the re-serialized JSON is JSON-equal to the
-// fixture. TS mappers preserve explicit nulls, so all chat fixtures use exact
+// generated converter) and assert the re-serialized JSON is JSON-equal to the
+// fixture. TS converters preserve explicit nulls, so all chat fixtures use exact
 // JSON-equality (no optional+nullable collapse — unlike Go).
-function expectRoundTrip<T>(name: string, mapper: IntermediateMapper<T>): T {
+function expectRoundTrip<T>(name: string, converter: TransferTypeConverter<T>): T {
   const { value, serialized } = roundTripFixture(
-    mapper,
+    converter,
     fixtureBytes(wireFixtureDir, name),
   );
   expect(serialized).toEqual(loadFixture(name));
@@ -39,7 +39,10 @@ function expectRoundTrip<T>(name: string, mapper: IntermediateMapper<T>): T {
 
 describe("json-schema chat generated definitions", () => {
   test("roundtrips canonical wire fixtures through the Temporal converter", () => {
-    const message = expectRoundTrip("message-minimal.json", new MessageMapper());
+    const message = expectRoundTrip(
+      "message-minimal.json",
+      messageTransferTypeConverter,
+    );
     expect(message).toMatchObject<Message>({
       kind: "text",
       body: "hi",
@@ -47,34 +50,37 @@ describe("json-schema chat generated definitions", () => {
     expect(message.replyToId).toBeUndefined();
     expect(message.priority ?? DEFAULT_PRIORITY).toBe(0);
 
-    const fullMessage = expectRoundTrip("message-full.json", new MessageMapper());
+    const fullMessage = expectRoundTrip(
+      "message-full.json",
+      messageTransferTypeConverter,
+    );
     expect(fullMessage.replyToId).toBeNull();
     expect(fullMessage.priority).toBe(7);
 
-    const room = expectRoundTrip("room-open.json", new RoomMapper());
+    const room = expectRoundTrip("room-open.json", roomTransferTypeConverter);
     expect(room.additionalProperties).toEqual({ "x-extra": 42 });
 
-    const labels = expectRoundTrip("labels.json", new LabelsMapper());
+    const labels = expectRoundTrip("labels.json", labelsTransferTypeConverter);
     expect(labels).toMatchObject<Labels>({
       additionalProperties: { env: "prod", team: "core" },
     });
 
     const request = expectRoundTrip(
       "send-message-input.json",
-      new SendMessageInputMapper(),
+      sendMessageInputTransferTypeConverter,
     );
     expect(request.message.body).toBe("hi");
 
     const response = expectRoundTrip(
       "send-message-output.json",
-      new SendMessageOutputMapper(),
+      sendMessageOutputTransferTypeConverter,
     );
     expect(response.messageId).toBe("m1");
   });
 
   test("reports JSON schema validation errors", () => {
     expect(() =>
-      new SendMessageInputMapper().fromIntermediate({
+      sendMessageInputTransferTypeConverter.fromTransferType({
         roomId: "r1",
         message: { kind: "text", body: "hi" },
         extra: true,
@@ -82,10 +88,10 @@ describe("json-schema chat generated definitions", () => {
     ).toThrow(ValidationError);
 
     expect(() =>
-      new MessageMapper().fromIntermediate({ kind: "image", body: "hi" }),
+      messageTransferTypeConverter.fromTransferType({ kind: "image", body: "hi" }),
     ).toThrow(ValidationError);
 
-    expect(() => new SendMessageOutputMapper().fromIntermediate({})).toThrow(
+    expect(() => sendMessageOutputTransferTypeConverter.fromTransferType({})).toThrow(
       ValidationError,
     );
   });

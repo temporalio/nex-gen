@@ -337,7 +337,7 @@ Per-language mechanism (all are *encode-adapter* concerns; the shared
   omitted); required+nullable → `*T` **without** `omitempty` (nil →
   `null`); required-non-nullable → bare value type. The type-alias
   `MarshalJSON` lets the tags do the work.
-- **TypeScript** — `toIntermediate` omits `undefined`, emits `null`; the
+- **TypeScript** — `toTransferType` omits `undefined`, emits `null`; the
   three-state gives faithful optional+nullable for free.
 - **Python** — a generated `@model_serializer(mode='wrap')` emits only
   `model_fields_set` keys (plus const fields), implementing the whole

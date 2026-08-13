@@ -71,7 +71,7 @@ serialize mirror of "before default population"). A field whose default
 is unset is omitted and does **not** count toward the floor, exactly as
 it didn't on the way in — so a model that reads as populated in memory
 (defaults visible) can legitimately fall **under** `minProperties` on the
-wire, and serialize fails (`MarshalJSON`/`toIntermediate`/`model_dump`) rather
+wire, and serialize fails (`MarshalJSON`/`toTransferType`/`model_dump`) rather
 than emitting an under-floor object. `model_fields_set` is again the
 exact emitted-key count under `exclude_unset`. See [[maxProperties]]
 serialize note (symmetric).

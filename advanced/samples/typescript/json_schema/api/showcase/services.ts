@@ -2,6 +2,10 @@
 
 import * as nexus from "nexus-rpc";
 import * as workflow from "@temporalio/workflow";
+import {
+  getShowcaseInputTransferTypeConverter,
+  showcaseTransferTypeConverter,
+} from "./models";
 import type { GetShowcaseInput, Showcase } from "./models";
 
 /**
@@ -21,7 +25,11 @@ export const showcaseServiceTs = nexus.service("example.showcase.v1.ShowcaseServ
    * `GetShowcase` and the synthesized I/O type stays `GetShowcaseInput` (derived from
    * the operation key, not the override).
    */
-  getShowcaseTs: nexus.operation<GetShowcaseInput, Showcase>({ name: "GetShowcase" }),
+  getShowcaseTs: nexus.operation<GetShowcaseInput, Showcase>({
+    name: "GetShowcase",
+    inputType: { transferTypeConverter: getShowcaseInputTransferTypeConverter },
+    outputType: { transferTypeConverter: showcaseTransferTypeConverter },
+  }),
 });
 
 /**

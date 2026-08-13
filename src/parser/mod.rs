@@ -13,7 +13,10 @@ pub use json_schema::{
     load_api_spec_tree_from_json_schema_for_language_with_inputs,
 };
 
-pub(crate) use json_schema::{ManifestModel, ManifestService, NameManifest, build_name_manifest};
+pub(crate) use json_schema::{
+    ManifestModel, ManifestService, NameManifest, build_name_manifest,
+    ts_transfer_type_converter_name,
+};
 pub use wit::{load_api_spec_from_wit_for_language_with_inputs, write_prepared_wit_directory};
 
 pub(crate) use wit::{

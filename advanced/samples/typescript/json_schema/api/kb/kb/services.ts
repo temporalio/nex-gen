@@ -2,7 +2,15 @@
 
 import * as nexus from "nexus-rpc";
 import * as workflow from "@temporalio/workflow";
+import {
+  getCategoryTreeInputTransferTypeConverter,
+  getPageInputTransferTypeConverter,
+  putBlockOutputTransferTypeConverter,
+} from "./models";
 import type { GetCategoryTreeInput, GetPageInput, PutBlockOutput } from "./models";
+import { blockTransferTypeConverter } from "../content/block/models";
+import { pageTransferTypeConverter } from "../content/page/models";
+import { categoryTransferTypeConverter } from "../tree/category/models";
 import type { Block } from "../content/block/models";
 import type { Page } from "../content/page/models";
 import type { Category } from "../tree/category/models";
@@ -16,16 +24,26 @@ export const knowledgeBaseService = nexus.service(
     /**
      * Fetch a page by id.
      */
-    getPage: nexus.operation<GetPageInput, Page>({ name: "GetPage" }),
+    getPage: nexus.operation<GetPageInput, Page>({
+      name: "GetPage",
+      inputType: { transferTypeConverter: getPageInputTransferTypeConverter },
+      outputType: { transferTypeConverter: pageTransferTypeConverter },
+    }),
     /**
      * Create or update a content block.
      */
-    putBlock: nexus.operation<Block, PutBlockOutput>({ name: "PutBlock" }),
+    putBlock: nexus.operation<Block, PutBlockOutput>({
+      name: "PutBlock",
+      inputType: { transferTypeConverter: blockTransferTypeConverter },
+      outputType: { transferTypeConverter: putBlockOutputTransferTypeConverter },
+    }),
     /**
      * Fetch the category tree rooted at a category.
      */
     getCategoryTree: nexus.operation<GetCategoryTreeInput, Category>({
       name: "GetCategoryTree",
+      inputType: { transferTypeConverter: getCategoryTreeInputTransferTypeConverter },
+      outputType: { transferTypeConverter: categoryTransferTypeConverter },
     }),
   },
 );

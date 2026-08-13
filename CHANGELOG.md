@@ -54,6 +54,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — the one sibling keyword treated this way, because it asserts nothing about the
   value, and the only way to rename a member whose type is a `$ref` (a member
   named `class` was otherwise unfixable in Python and Java).
+- TypeScript: A model's companion converter is now an exported
+  `TransferTypeConverter` **instance** instead of a class. `class <Type>Mapper`
+  with `fromIntermediate`/`toIntermediate` becomes
+  `export const <type>TransferTypeConverter = new class implements
+  TransferTypeConverter<Type> { … }()` with `fromTransferType`/`toTransferType`,
+  implementing the contract from
+  [nexus-rpc/sdk-typescript#40](https://github.com/nexus-rpc/sdk-typescript/pull/40).
+  Call sites drop the construction: `new UserMapper().fromIntermediate(raw)`
+  becomes `userTransferTypeConverter.fromTransferType(raw)`. The converter
+  identifier is the model's resolved type name lower-camel-cased, so an
+  `x-ts-name` override moves it. `models.ts` now carries a type-only
+  `import type { TransferTypeConverter } from "nexus-rpc"`. Because the
+  identifier is derived by lower-camel-casing, it takes part in the load-time
+  identifier-collision check: two models in one module whose converter names
+  coincide (for example `HTTPError` and `HttpError`) are now rejected with a
+  fix-it, as is a service whose `x-ts-name` lands on a converter name.
+- TypeScript: Generated operations now carry operation type info. Each
+  non-void side of `nexus.operation` emits
+  `inputType`/`outputType` = `{ transferTypeConverter: … }` naming the I/O
+  model's converter, so a protocol integration can apply the conversion without
+  the caller wiring it by hand; a void side carries neither field. Applies to
+  JSON-Schema input only — WIT-input operations are unchanged. Requires a
+  `nexus-rpc` release that includes the type-info API.
 - Generating into an existing `--output` directory no longer deletes it first.
   The directory is written into instead, so pre-existing files and
   subdirectories are preserved; generated files are still overwritten in place.
@@ -219,8 +242,8 @@ array"` at runtime, though `items.md` accepts them. Both now decode elementwise,
   comments.
 - JSON Schema: A `oneOf` with an inline object branch generated uncompilable Go
   (a marker method on an undeclared `<Union>Object` type) and uncompilable
-  TypeScript (`new Record<string, unknown>Mapper()`); Java bound the branch to
-  `null` without a violation.
+  TypeScript (a converter named after the anonymous `Record<string, unknown>`
+  branch type); Java bound the branch to `null` without a violation.
 - Java: An object branch of a union written inline on a property was silently
   dropped — the branch's class implemented nothing, and the parse arm for the
   object token was empty. The branch class now implements the nested union
@@ -244,7 +267,7 @@ array"` at runtime, though `items.md` accepts them. Both now decode elementwise,
 - JSON Schema: TypeScript serialized an object member of a property-level union
   by copying the in-memory value, so the model's `additionalProperties` member
   reached the wire as a literal key and its extras were never spread back out.
-  The union now serializes through the branch's mapper.
+  The union now serializes through the branch's converter.
 - JSON Schema: TypeScript's serializer for a mixed-kind union returned the lone
   object branch unconditionally, making the scalar/array branches unreachable;
   the object branch is now guarded by the object token, matching the parse side.

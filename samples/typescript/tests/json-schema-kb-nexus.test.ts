@@ -2,17 +2,18 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
 
+import { chatService } from "../chat/services.ts";
 import { knowledgeBaseService } from "../kb/kb/services.ts";
-import { BlockMapper } from "../kb/content/block/models.ts";
+import { blockTransferTypeConverter } from "../kb/content/block/models.ts";
 import type { Block } from "../kb/content/block/models.ts";
-import { CategoryMapper } from "../kb/tree/category/models.ts";
+import { categoryTransferTypeConverter } from "../kb/tree/category/models.ts";
 import type { Category } from "../kb/tree/category/models.ts";
-import { PageMapper } from "../kb/content/page/models.ts";
+import { pageTransferTypeConverter } from "../kb/content/page/models.ts";
 import type { Page } from "../kb/content/page/models.ts";
 import {
-  GetCategoryTreeInputMapper,
-  GetPageInputMapper,
-  PutBlockOutputMapper,
+  getCategoryTreeInputTransferTypeConverter,
+  getPageInputTransferTypeConverter,
+  putBlockOutputTransferTypeConverter,
 } from "../kb/kb/models.ts";
 import type { PutBlockOutput } from "../kb/kb/models.ts";
 import { loadFixture as loadFixtureFrom } from "./json-converter-helper.ts";
@@ -37,11 +38,39 @@ describe("json-schema KB generated Nexus service", () => {
     );
   });
 
+  // Every operation carries its models' transfer type converters as operation
+  // type info, so a protocol integration can apply the conversion without the
+  // caller naming the converter. `chatService.operations.ping` (void on both
+  // sides) is the counter-case: there is no value to convert, so it carries none.
+  test("carries transfer type info on every operation", () => {
+    expect(
+      knowledgeBaseService.operations.getPage.inputType?.transferTypeConverter,
+    ).toBe(getPageInputTransferTypeConverter);
+    expect(
+      knowledgeBaseService.operations.getPage.outputType?.transferTypeConverter,
+    ).toBe(pageTransferTypeConverter);
+    expect(
+      knowledgeBaseService.operations.putBlock.inputType?.transferTypeConverter,
+    ).toBe(blockTransferTypeConverter);
+    expect(
+      knowledgeBaseService.operations.putBlock.outputType?.transferTypeConverter,
+    ).toBe(putBlockOutputTransferTypeConverter);
+    expect(
+      knowledgeBaseService.operations.getCategoryTree.inputType?.transferTypeConverter,
+    ).toBe(getCategoryTreeInputTransferTypeConverter);
+    expect(
+      knowledgeBaseService.operations.getCategoryTree.outputType?.transferTypeConverter,
+    ).toBe(categoryTransferTypeConverter);
+
+    expect(chatService.operations.ping.inputType).toBeUndefined();
+    expect(chatService.operations.ping.outputType).toBeUndefined();
+  });
+
   // Register a handler bound to the generated service definition, then run a
   // workflow that calls every operation through the SDK's Nexus client. Both
-  // sides bridge the Nexus wire payloads through the generated model mappers:
-  // the handler validates each request with `fromIntermediate` and projects
-  // each response with `toIntermediate`, exercising the generated
+  // sides bridge the Nexus wire payloads through the generated transfer type
+  // converters: the handler validates each request with `fromTransferType` and
+  // projects each response with `toTransferType`, exercising the generated
   // service/operation definitions end-to-end over a real Temporal + Nexus
   // endpoint.
   test("drives every operation through a real Nexus client", async () => {
@@ -49,23 +78,26 @@ describe("json-schema KB generated Nexus service", () => {
       const calls: Array<[string, unknown]> = [];
       const handler = nexus.serviceHandler(knowledgeBaseService, {
         async getPage(_ctx, input) {
-          calls.push(["GetPage", new GetPageInputMapper().fromIntermediate(input)]);
-          return new PageMapper().toIntermediate(
+          calls.push([
+            "GetPage",
+            getPageInputTransferTypeConverter.fromTransferType(input),
+          ]);
+          return pageTransferTypeConverter.toTransferType(
             loadFixture<Page>("page.json"),
           ) as Page;
         },
         async putBlock(_ctx, input) {
-          calls.push(["PutBlock", new BlockMapper().fromIntermediate(input)]);
-          return new PutBlockOutputMapper().toIntermediate(
+          calls.push(["PutBlock", blockTransferTypeConverter.fromTransferType(input)]);
+          return putBlockOutputTransferTypeConverter.toTransferType(
             loadFixture<PutBlockOutput>("put-block-output.json"),
           ) as PutBlockOutput;
         },
         async getCategoryTree(_ctx, input) {
           calls.push([
             "GetCategoryTree",
-            new GetCategoryTreeInputMapper().fromIntermediate(input),
+            getCategoryTreeInputTransferTypeConverter.fromTransferType(input),
           ]);
-          return new CategoryMapper().toIntermediate(
+          return categoryTransferTypeConverter.toTransferType(
             loadFixture<Category>("category-tree.json"),
           ) as Category;
         },
