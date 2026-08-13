@@ -8,6 +8,7 @@ using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using NexusRpc;
+using Temporalio.Converters;
 
 namespace Nexgen.StartWorkflowService
 {
@@ -28,6 +29,47 @@ namespace Nexgen.StartWorkflowService
         [NexusOperation("CancelWorkflow")]
         CancelWorkflowResponse CancelWorkflow(CancelWorkflowRequest request);
 
+    }
+
+    internal interface INexgenOperationInfo
+    {
+        OperationDefinition Operation { get; }
+
+        Func<object, ISerializationContext>? SerializationContext { get; }
+    }
+
+    internal sealed class NexgenOperationInfo<TRequest, TResponse> : INexgenOperationInfo
+    {
+        internal NexgenOperationInfo(
+            OperationDefinition operation,
+            Func<TRequest, ISerializationContext>? serializationContext = null)
+        {
+            Operation = operation;
+            SerializationContext = serializationContext;
+        }
+
+        internal OperationDefinition Operation { get; }
+
+        OperationDefinition INexgenOperationInfo.Operation => Operation;
+
+        internal Func<TRequest, ISerializationContext>? SerializationContext { get; }
+
+        Func<object, ISerializationContext>? INexgenOperationInfo.SerializationContext => SerializationContext == null ? null : request => SerializationContext((TRequest)request);
+    }
+
+    internal static class NexgenOperationRegistry
+    {
+        private static readonly ServiceDefinition StartWorkflowServiceServiceDefinition = ServiceDefinition.FromType<IStartWorkflowService>();
+
+        internal static IReadOnlyDictionary<(string Service, string Operation), INexgenOperationInfo> Operations { get; } = new Dictionary<(string Service, string Operation), INexgenOperationInfo>
+        {
+            [("StartWorkflowService", "StartWorkflow")] = new NexgenOperationInfo<StartWorkflowRequest, StartWorkflowResult>(
+                StartWorkflowServiceServiceDefinition.Operations["StartWorkflow"]),
+            [("StartWorkflowService", "RestartWorkflow")] = new NexgenOperationInfo<StartWorkflowRequest, StartWorkflowResult>(
+                StartWorkflowServiceServiceDefinition.Operations["RestartWorkflow"]),
+            [("StartWorkflowService", "CancelWorkflow")] = new NexgenOperationInfo<CancelWorkflowRequest, CancelWorkflowResponse>(
+                StartWorkflowServiceServiceDefinition.Operations["CancelWorkflow"]),
+        };
     }
 
 }

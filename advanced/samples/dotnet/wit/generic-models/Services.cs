@@ -8,6 +8,7 @@ using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using NexusRpc;
+using Temporalio.Converters;
 
 namespace Nexgen.GenericModelService
 {
@@ -20,6 +21,43 @@ namespace Nexgen.GenericModelService
         [NexusOperation("Complete")]
         GenericResponse<object, object, object> Complete(GenericRequest<object> request);
 
+    }
+
+    internal interface INexgenOperationInfo
+    {
+        OperationDefinition Operation { get; }
+
+        Func<object, ISerializationContext>? SerializationContext { get; }
+    }
+
+    internal sealed class NexgenOperationInfo<TRequest, TResponse> : INexgenOperationInfo
+    {
+        internal NexgenOperationInfo(
+            OperationDefinition operation,
+            Func<TRequest, ISerializationContext>? serializationContext = null)
+        {
+            Operation = operation;
+            SerializationContext = serializationContext;
+        }
+
+        internal OperationDefinition Operation { get; }
+
+        OperationDefinition INexgenOperationInfo.Operation => Operation;
+
+        internal Func<TRequest, ISerializationContext>? SerializationContext { get; }
+
+        Func<object, ISerializationContext>? INexgenOperationInfo.SerializationContext => SerializationContext == null ? null : request => SerializationContext((TRequest)request);
+    }
+
+    internal static class NexgenOperationRegistry
+    {
+        private static readonly ServiceDefinition GenericModelServiceServiceDefinition = ServiceDefinition.FromType<IGenericModelService>();
+
+        internal static IReadOnlyDictionary<(string Service, string Operation), INexgenOperationInfo> Operations { get; } = new Dictionary<(string Service, string Operation), INexgenOperationInfo>
+        {
+            [("GenericModelService", "Complete")] = new NexgenOperationInfo<GenericRequest<object>, GenericResponse<object, object, object>>(
+                GenericModelServiceServiceDefinition.Operations["Complete"]),
+        };
     }
 
 }

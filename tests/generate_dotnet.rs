@@ -121,6 +121,13 @@ fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
 }
 
 fn generate_dotnet_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBuf]) -> String {
+    render_output_files(generate_dotnet_files(input_paths, descriptor_paths))
+}
+
+fn generate_dotnet_files(
+    input_paths: &[PathBuf],
+    descriptor_paths: &[PathBuf],
+) -> BTreeMap<PathBuf, String> {
     let temp_dir = unique_output_path("dotnet-rendered");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
@@ -135,13 +142,16 @@ fn generate_dotnet_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBu
         ts_date_time_types: Default::default(),
     })
     .unwrap();
-    let rendered = if output_path.is_file() {
-        fs::read_to_string(&output_path).unwrap()
+    let files = if output_path.is_file() {
+        BTreeMap::from([(
+            PathBuf::from("output.cs"),
+            fs::read_to_string(&output_path).unwrap(),
+        )])
     } else {
-        render_output_files(read_dotnet_output_files(&output_path))
+        read_dotnet_output_files(&output_path)
     };
     fs::remove_dir_all(temp_dir).unwrap();
-    rendered
+    files
 }
 
 fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
@@ -270,20 +280,36 @@ fn dotnet_example_project_builds() {
 #[test]
 fn dotnet_renders_nexus_service_interface_and_resources() {
     let root = project_root();
-    let rendered = generate_dotnet_to_string(
+    let files = generate_dotnet_files(
         &example_input_paths(&root, TYPE_SHOWCASE_EXAMPLE_ID),
         &[descriptor_path(&root)],
     );
+    let services = files.get(&PathBuf::from("Services.cs")).unwrap().clone();
+    let operations = files.get(&PathBuf::from("Operations.cs")).unwrap().clone();
+    let rendered = render_output_files(files);
 
     assert!(rendered.contains("[NexusService(\"TypeShowcase\")]"));
     assert!(rendered.contains("internal interface ITypeShowcase"));
     assert!(rendered.contains("[NexusOperation(\"SetProfile\")]"));
     assert!(rendered.contains("User SetProfile(SetProfileRequest request);"));
     assert!(!rendered.contains("public sealed class NexgenNexusOperation"));
-    assert!(!rendered.contains("NexgenOperationRegistry"));
-    assert!(!rendered.contains("ServiceDefinition.FromType"));
-    assert!(!rendered.contains("OperationDefinition"));
-    assert!(!rendered.contains("OperationDefinition.FromMethod"));
+    assert!(rendered.contains("NexgenOperationRegistry"));
+    assert!(rendered.contains("NexgenOperationInfo<GetUserRequest, User>"));
+    assert!(!rendered.contains("serializationContext:"));
+    assert!(!rendered.contains("WorkflowServiceSerializationContexts"));
+    assert!(services.contains("NexgenOperationRegistry"));
+    assert!(
+        services.contains(
+            "IReadOnlyDictionary<(string Service, string Operation), INexgenOperationInfo>"
+        )
+    );
+    assert!(services.contains(
+        "private static readonly ServiceDefinition TypeShowcaseServiceDefinition = ServiceDefinition.FromType<ITypeShowcase>();"
+    ));
+    assert!(services.contains("TypeShowcaseServiceDefinition.Operations[\"GetUser\"]"));
+    assert!(!services.contains("OperationDefinition.FromMethod"));
+    assert!(!operations.contains("NexgenOperationRegistry"));
+    assert!(!operations.contains("ServiceDefinition.FromType"));
     assert!(!rendered.contains("endpoint: \"type-showcase\""));
     assert!(!rendered.contains("requestType: typeof(SetProfileRequest)"));
     assert!(!rendered.contains("responseType: typeof(User)"));
@@ -317,10 +343,13 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
 #[test]
 fn dotnet_renders_proto_backed_temporal_types() {
     let root = project_root();
-    let rendered = generate_dotnet_to_string(
+    let files = generate_dotnet_files(
         &example_input_paths(&root, WORKFLOW_SERVICE_EXAMPLE_ID),
         &[descriptor_path(&root)],
     );
+    let services = files.get(&PathBuf::from("Services.cs")).unwrap().clone();
+    let operations = files.get(&PathBuf::from("Operations.cs")).unwrap().clone();
+    let rendered = render_output_files(files);
 
     assert!(rendered.contains("internal interface IWorkflowService"));
     assert!(rendered.contains("namespace Temporalio.Workflows\n{"));
@@ -330,9 +359,35 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains(
         "SignalWithStartWorkflowResponse SignalWithStartWorkflow(SignalWithStartWorkflowRequest request);"
     ));
-    assert!(!rendered.contains("NexgenOperationRegistry"));
-    assert!(!rendered.contains("ServiceDefinition.FromType"));
-    assert!(!rendered.contains("OperationDefinition"));
+    assert!(rendered.contains("NexgenOperationRegistry"));
+    assert!(rendered.contains(
+        "NexgenOperationInfo<SignalWithStartWorkflowRequest, SignalWithStartWorkflowResponse>"
+    ));
+    assert!(rendered.contains(
+        "serializationContext: Nexgen.Support.WorkflowServiceSerializationContexts.SignalWithStartWorkflow"
+    ));
+    assert!(services.contains("NexgenOperationRegistry"));
+    assert!(services.contains(
+        "serializationContext: Nexgen.Support.WorkflowServiceSerializationContexts.SignalWithStartWorkflow"
+    ));
+    assert!(
+        services.contains(
+            "IReadOnlyDictionary<(string Service, string Operation), INexgenOperationInfo>"
+        )
+    );
+    assert!(services.contains(
+        "private static readonly ServiceDefinition WorkflowServiceServiceDefinition = ServiceDefinition.FromType<IWorkflowService>();"
+    ));
+    assert!(services.contains(
+        "WorkflowServiceServiceDefinition.Operations[\"SignalWithStartWorkflowExecution\"]"
+    ));
+    assert!(!services.contains("OperationDefinition.FromMethod"));
+    assert!(!operations.contains("NexgenOperationRegistry"));
+    assert!(rendered.contains(
+        "internal static ISerializationContext SignalWithStartWorkflow(SignalWithStartWorkflowRequest request)"
+    ));
+    assert!(rendered.contains("new ISerializationContext.Workflow(request.Namespace, request.Id)"));
+    assert!(!operations.contains("ServiceDefinition.FromType"));
     assert!(!rendered.contains("endpoint: \"temporal-system\""));
     assert!(!rendered.contains(
         "requestType: typeof(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest)"

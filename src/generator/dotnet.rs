@@ -112,13 +112,21 @@ impl<'a> ApiPlanner<'a> {
 
     fn render_service_file(&self, namespace: &str, include_native_api: bool) -> String {
         let module_imports = dotnet_module_imports(self.api_plan);
+        let has_endpoint_operations = self
+            .api_plan
+            .services
+            .iter()
+            .any(|service| service.endpoint.is_some() && !service.operations.is_empty());
         let mut imports = vec![
             "System",
             "System.CodeDom.Compiler",
             "System.Collections.Generic",
-            "System.Threading.Tasks",
-            "NexusRpc",
         ];
+        imports.push("System.Threading.Tasks");
+        imports.push("NexusRpc");
+        if has_endpoint_operations {
+            imports.push("Temporalio.Converters");
+        }
         if include_native_api
             && self
                 .api_plan
@@ -152,6 +160,7 @@ impl<'a> ApiPlanner<'a> {
                 self.render_endpoint_service_class(&mut output, service, &service_type);
             }
         }
+        self.render_operation_registry(&mut output);
         close_namespace(&mut output);
         output
     }
@@ -163,10 +172,8 @@ impl<'a> ApiPlanner<'a> {
             "System.Collections.Generic",
             "System.Linq",
             "System.Linq.Expressions",
-            "System.Reflection",
             "System.Threading.Tasks",
             "Google.Protobuf.WellKnownTypes",
-            "Temporalio.Converters",
             "Temporalio.Workflows",
         ];
         let module_imports = dotnet_module_imports(self.api_plan);
@@ -223,6 +230,95 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(" request");
         }
         output.push_str(");\n\n");
+    }
+
+    fn render_operation_registry(&self, output: &mut String) {
+        let operations = self
+            .api_plan
+            .services
+            .iter()
+            .filter(|service| service.endpoint.is_some())
+            .flat_map(|service| {
+                service
+                    .operations
+                    .iter()
+                    .map(move |operation| (service, operation))
+            })
+            .collect::<Vec<_>>();
+        if operations.is_empty() {
+            return;
+        }
+
+        output.push_str("internal interface INexgenOperationInfo\n{\n");
+        output.push_str("    OperationDefinition Operation { get; }\n\n");
+        output.push_str("    Func<object, ISerializationContext>? SerializationContext { get; }\n");
+        output.push_str("}\n\n");
+        output.push_str(
+            "internal sealed class NexgenOperationInfo<TRequest, TResponse> : INexgenOperationInfo\n{\n",
+        );
+        output.push_str("    internal NexgenOperationInfo(\n");
+        output.push_str("        OperationDefinition operation,\n");
+        output.push_str(
+            "        Func<TRequest, ISerializationContext>? serializationContext = null)\n",
+        );
+        output.push_str("    {\n");
+        output.push_str("        Operation = operation;\n");
+        output.push_str("        SerializationContext = serializationContext;\n");
+        output.push_str("    }\n\n");
+        output.push_str("    internal OperationDefinition Operation { get; }\n\n");
+        output.push_str("    OperationDefinition INexgenOperationInfo.Operation => Operation;\n\n");
+        output.push_str(
+            "    internal Func<TRequest, ISerializationContext>? SerializationContext { get; }\n",
+        );
+        output.push_str(
+            "\n    Func<object, ISerializationContext>? INexgenOperationInfo.SerializationContext => SerializationContext == null ? null : request => SerializationContext((TRequest)request);\n",
+        );
+        output.push_str("}\n\n");
+
+        output.push_str("internal static class NexgenOperationRegistry\n{\n");
+        for service in self
+            .api_plan
+            .services
+            .iter()
+            .filter(|service| service.endpoint.is_some() && !service.operations.is_empty())
+        {
+            output.push_str("    private static readonly ServiceDefinition ");
+            output.push_str(&service_definition_field_name(service));
+            output.push_str(" = ServiceDefinition.FromType<I");
+            output.push_str(&csharp_type_name(&service.name));
+            output.push_str(">();\n");
+        }
+        output.push('\n');
+        output.push_str("    internal static IReadOnlyDictionary<(string Service, string Operation), INexgenOperationInfo> Operations { get; } = new Dictionary<(string Service, string Operation), INexgenOperationInfo>\n    {\n");
+        for (service, operation) in operations {
+            output.push_str("        [(");
+            output.push_str(&csharp_string_literal(&service.wire_name));
+            output.push_str(", ");
+            output.push_str(&csharp_string_literal(&operation.wire_name));
+            output.push_str(")] = new NexgenOperationInfo<");
+            output.push_str(&self.operation_registry_request_type(operation));
+            output.push_str(", ");
+            output.push_str(&self.operation_registry_response_type(operation));
+            output.push_str(">(\n");
+            output.push_str("            ");
+            output.push_str(&service_definition_field_name(service));
+            output.push_str(".Operations[");
+            output.push_str(&csharp_string_literal(&operation.wire_name));
+            output.push_str("]");
+            if let Some(serialization_context) = operation
+                .serialization_context
+                .for_language(Language::Dotnet)
+            {
+                output.push_str(",\n            serializationContext: ");
+                output.push_str(&qualify_dotnet_support_reference(
+                    serialization_context,
+                    self.support_namespace,
+                ));
+            }
+            output.push_str("),\n");
+        }
+        output.push_str("    };\n");
+        output.push_str("}\n\n");
     }
 
     fn render_operations_class(&self, output: &mut String, service: &PlannedService) {
@@ -1321,6 +1417,26 @@ impl<'a> ApiPlanner<'a> {
         self.operation_output_type(operation)
     }
 
+    fn operation_registry_request_type(&self, operation: &PlannedOperation) -> String {
+        if self.operation_has_input(operation) {
+            self.dotnet_erased_model_type(operation.input_model())
+        } else {
+            "object".to_string()
+        }
+    }
+
+    fn operation_registry_response_type(&self, operation: &PlannedOperation) -> String {
+        if let Some(output_type @ PlannedType::Record(_)) = operation.output_type() {
+            return self.dotnet_erased_model_type(output_type);
+        }
+        let response_type = self.operation_raw_return_type(operation);
+        if response_type == "void" {
+            "object".to_string()
+        } else {
+            response_type
+        }
+    }
+
     fn operation_output_type(&self, operation: &PlannedOperation) -> String {
         if let Some(PlannedType::Record(record)) = operation.output_type() {
             let parameters = self
@@ -2294,6 +2410,16 @@ fn validate_dotnet_support_references(
     external_models: &DotNetExternalModels,
     support_namespace: Option<&str>,
 ) -> Result<()> {
+    for service in &api_plan.services {
+        for operation in &service.operations {
+            if let Some(reference) = operation
+                .serialization_context
+                .for_language(Language::Dotnet)
+            {
+                validate_dotnet_support_reference(reference, support_namespace)?;
+            }
+        }
+    }
     for model in api_plan.records().map(|(_, record)| record) {
         for (_, sourced_field, source_expr) in model.sourced_fields() {
             if let Some(reference) = source_expr.strip_suffix("()") {
@@ -3052,6 +3178,10 @@ fn render_operation_options_constructor(
 
 fn operation_options_type_name(operation: &PlannedOperation) -> String {
     csharp_type_name(&format!("{}Options", operation.name))
+}
+
+fn service_definition_field_name(service: &PlannedService) -> String {
+    format!("{}ServiceDefinition", csharp_type_name(&service.name))
 }
 
 fn model_has_options_fields(model: &PlannedModel, api_plan: &PlannedSpec) -> bool {
