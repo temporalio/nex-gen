@@ -143,9 +143,10 @@ The read-side surfacing synthesizes **one new identifier in three targets**
 | Java | none (default folds into the existing getter) | — | — |
 
 The constant is named `DEFAULT_<FIELD>`, or **`DEFAULT_<MODEL>_<FIELD>`**
-when that field name is not unique across the module's models — the same
-qualification rule in TypeScript and Python, since both put the constant in
-module scope. A collision that survives qualification rejects.
+when that member identifier is not unique across the module's models — the
+same qualification rule in TypeScript and Python, since both put the constant
+in module scope. Qualification separates two *models*; two members of **one**
+model that shout alike are a collision it cannot resolve, and rejects.
 
 Per **P15** these participate in the single per-scope collision pass and
 **reject at load** on any coincidence — never auto-mangled (a

@@ -2112,7 +2112,11 @@ fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) ->
                 continue;
             };
             constants.push((
-                default_const_name(&model.model_name, json_name, models)?,
+                default_const_name(
+                    &model.model_name,
+                    &property.py_member_name(json_name),
+                    models,
+                )?,
                 python_value_literal(default)?,
             ));
         }
@@ -2131,12 +2135,15 @@ fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) ->
 }
 
 /// `DEFAULT_<FIELD>` when exactly one model in the module declares a defaulted
-/// field of that JSON name, else `DEFAULT_<MODEL>_<FIELD>`. The loader replicates
-/// this rule to reserve the name in the module namespace (P15), so the two must
-/// stay in step.
+/// member emitting that identifier, else `DEFAULT_<MODEL>_<FIELD>`. The name is
+/// built from the **emitted member identifier**, as TypeScript's is, so an
+/// `x-py-name` override on the declaring property moves the constant with it — a
+/// name synthesized *from the member* follows the member (P15). The loader
+/// replicates this rule to reserve the name in the module namespace, so the two
+/// must stay in step.
 fn default_const_name(
     model_name: &str,
-    field_name: &str,
+    member_ident: &str,
     models: &[&PlannedJsonType],
 ) -> Result<String> {
     let field_count = models
@@ -2146,19 +2153,19 @@ fn default_const_name(
         .into_iter()
         .filter(|schema| {
             schema.properties.as_ref().is_some_and(|properties| {
-                properties
-                    .get(field_name)
-                    .is_some_and(|property| property.default.is_some())
+                properties.iter().any(|(json_name, property)| {
+                    property.py_member_name(json_name) == member_ident && property.default.is_some()
+                })
             })
         })
         .count();
     Ok(if field_count == 1 {
-        format!("DEFAULT_{}", field_name.to_shouty_snake_case())
+        format!("DEFAULT_{}", member_ident.to_shouty_snake_case())
     } else {
         format!(
             "DEFAULT_{}_{}",
             model_name.to_shouty_snake_case(),
-            field_name.to_shouty_snake_case()
+            member_ident.to_shouty_snake_case()
         )
     })
 }

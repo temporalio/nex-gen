@@ -1386,7 +1386,7 @@ services:
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(
-        rendered.matches("class Page(").count(),
+        rendered.matches("class Page:").count(),
         1,
         "`Page` must be declared once\n{rendered}"
     );

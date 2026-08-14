@@ -6160,7 +6160,7 @@ fn collect_default_constants(
             .filter(|model| {
                 model.schema.properties.as_ref().is_some_and(|properties| {
                     properties.iter().any(|(json_name, property)| {
-                        member_identifier(Language::TypeScript, json_name, property) == member_ident
+                        member_identifier(language, json_name, property) == member_ident
                             && property.extra.get("default").is_some_and(|default| {
                                 !default.is_null() && !default.is_object() && !default.is_array()
                             })
@@ -6180,7 +6180,7 @@ fn collect_default_constants(
             if default.is_null() || default.is_object() || default.is_array() {
                 continue;
             }
-            let member_ident = member_identifier(Language::TypeScript, json_name, property);
+            let member_ident = member_identifier(language, json_name, property);
             let field_shouty = member_ident.to_shouty_snake_case();
             let ident = if field_count(&member_ident) == 1 {
                 format!("DEFAULT_{field_shouty}")
@@ -9867,11 +9867,54 @@ properties:
 
     #[test]
     fn rejects_colliding_default_constants_python_and_typescript() {
-        // Python and TypeScript hoist a defaulted field's value to a module-level
-        // `DEFAULT_<FIELD>` constant (unprefixed, because each field name occurs
-        // in exactly one model). `fooBar` and `foo_bar` shouty-snake-case to the
-        // same `DEFAULT_FOO_BAR`, a module-scope clash.
-        let input = r##"
+        // Python and TypeScript hoist a defaulted member's value to a module-level
+        // `DEFAULT_<FIELD>` constant, named off the **emitted** member identifier.
+        // Two members that stay distinct as identifiers (`fooBar` / `foo_bar`, held
+        // apart by their overrides) still shout to one `DEFAULT_FOO_BAR`, and the
+        // model-name qualification cannot separate two members of one model.
+        for (language, override_key) in [
+            (Language::Python, "x-py-name"),
+            (Language::TypeScript, "x-ts-name"),
+        ] {
+            let input = format!(
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+properties:
+  first: {{ type: string, default: "x", {override_key}: fooBar }}
+  second: {{ type: string, default: "y", {override_key}: foo_bar }}
+"##
+            );
+            let error = reject_for(language, &input);
+            assert!(
+                error.contains("collision") && error.contains("DEFAULT_FOO_BAR"),
+                "{language:?}: {error}"
+            );
+            // Go and Java keep the default on the model (no module-level constant),
+            // so the same schema is accepted there.
+            parse_for(Language::Go, &input).expect("Go emits no DEFAULT_ constants");
+            parse_for(Language::Java, &input).expect("Java emits no DEFAULT_ constants");
+
+            // The escape hatch reaches the constant, because the constant follows
+            // the member it was synthesized from (P15).
+            let resolved = format!(
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+properties:
+  first: {{ type: string, default: "x", {override_key}: fooBar }}
+  second: {{ type: string, default: "y", {override_key}: fooBarTwo }}
+"##
+            );
+            parse_for(language, &resolved)
+                .expect("the override moves the DEFAULT_ constant with the member");
+        }
+
+        // Two *models* each declaring a member of that identifier are separated by
+        // the model-name qualification instead, so they load.
+        let across_models = r##"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
 properties:
@@ -9888,16 +9931,9 @@ $defs:
       foo_bar: { type: string, default: "y" }
 "##;
         for language in [Language::Python, Language::TypeScript] {
-            let error = reject_for(language, input);
-            assert!(
-                error.contains("collision") && error.contains("DEFAULT_FOO_BAR"),
-                "{language:?}: {error}"
-            );
+            parse_for(language, across_models)
+                .expect("`DEFAULT_<MODEL>_<FIELD>` keeps the two apart");
         }
-        // Go and Java keep the default on the model (no module-level constant),
-        // so the same schema is accepted there.
-        parse_for(Language::Go, input).expect("Go emits no DEFAULT_ constants");
-        parse_for(Language::Java, input).expect("Java emits no DEFAULT_ constants");
     }
 
     #[test]
@@ -10842,11 +10878,19 @@ $defs:
             error.contains("collision") && error.contains("httpErrorTransferTypeConverter"),
             "{error}"
         );
-        // The other targets derive no value identifier from a type name, so the
-        // two distinct type names are all they have to keep apart.
+        // Go and Java derive no value identifier from a type name, so the two
+        // distinct type names are all they have to keep apart.
         parse_for(Language::Go, input).expect("Go derives no converter identifier");
-        parse_for(Language::Python, input).expect("Python derives no converter identifier");
         parse_for(Language::Java, input).expect("Java derives no converter identifier");
+        // Python derives module-level names from the type name too. Its converter
+        // classes stay apart (`_HTTPError…` / `_HttpError…`), but the declared-key
+        // frozensets both shout to `_HTTP_ERROR_DECLARED`, so it rejects for that
+        // reason rather than accepting.
+        let python_error = reject_for(Language::Python, input);
+        assert!(
+            python_error.contains("collision") && python_error.contains("_HTTP_ERROR_DECLARED"),
+            "{python_error}"
+        );
     }
 
     #[test]

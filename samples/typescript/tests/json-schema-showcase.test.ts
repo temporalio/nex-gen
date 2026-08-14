@@ -50,7 +50,7 @@ function expectRoundTrip<T>(name: string, converter: TransferTypeConverter<T>): 
 // assertions that pin an exact `{ path, reason }` set rather than one message.
 function parseViolations(raw: unknown): { path: string; reason: string }[] {
   try {
-    new ShowcaseMapper().fromIntermediate(raw);
+    showcaseTransferTypeConverter.fromTransferType(raw);
   } catch (error) {
     if (error instanceof ValidationError) {
       return error.violations.map(({ path, reason }) => ({ path, reason }));
