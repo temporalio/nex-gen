@@ -4,6 +4,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nexgen::{add_message_to_string, add_rpc_to_string};
@@ -26,12 +27,19 @@ fn linked_inputs_path(root: &std::path::Path) -> PathBuf {
     root.join("advanced/samples/inputs/deps")
 }
 
+/// A per-call temp directory. The clock alone is not enough: `write_oneof_descriptor`
+/// passes one fixed `name` and several tests call it, so two threads that read the
+/// same timestamp would land on one directory and `fs::write` the same `api.bin`
+/// concurrently — a reader then sees the truncated file mid-write. The counter makes
+/// the path unique per call regardless of clock granularity.
 fn unique_temp_dir(name: &str) -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nexgen-{name}-{unique}"))
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("nexgen-{name}-{unique}-{seq}"))
 }
 
 fn write_temp_wit(name: &str, contents: &str) -> PathBuf {
