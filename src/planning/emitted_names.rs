@@ -269,6 +269,7 @@ fn manifest_services(language: Language, api_plan: &PlannedSpec) -> Vec<Manifest
         .map(|service| ManifestService {
             name: service.name.clone(),
             code_name: service.code_name.for_language(language).map(str::to_string),
+            module_key: api_plan.module_path.as_module_key(),
         })
         .collect()
 }

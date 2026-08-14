@@ -186,7 +186,10 @@ override or rename):
 - two inputs flattening to the same module (`full/name` vs `full_name`);
 - an input flattening onto a reserved generated name (a root-level
   `definitions.json`);
-- (type-name collisions are handled the same way — see [[ref]]);
+- a **type name** declared by two different input files — `a/page.json`
+  and `b/page.json` both emitting `Page` is one redeclaration in the flat
+  package, so Go's collision scope is the whole run rather than the module
+  (see [[ref]] and PRINCIPLES §15); the diagnostic names both modules;
 - a generated **service binding** colliding with a model (or synthesized
   I/O) type — service `ChatService` against a `$defs/ChatService`; see
   [[services]], which shares this one namespace.

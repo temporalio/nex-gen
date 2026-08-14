@@ -5701,15 +5701,37 @@ pub(crate) struct ManifestService {
     /// (`x-<lang>-name`), if the active target carries one. `None` derives from
     /// `name`.
     pub(crate) code_name: Option<String>,
+    /// The module the declaring file emits into — the scope this service's
+    /// identifier occupies. Empty for the single-input root.
+    pub(crate) module_key: String,
 }
 
 impl ManifestService {
     /// The emitted service code identifier for `language`: the verbatim override
     /// when present, else the derived name.
+    ///
+    /// TypeScript binds a service to a lower-camel `const` (`chatService`), not a
+    /// type name, so it derives through the member pipeline; Go's `var`, Python's
+    /// `class`, and Java's class all carry the name as authored. Deriving all four
+    /// as type names claimed a TypeScript service collided with a same-named
+    /// model, which it never can — the emitted identifiers differ in case.
     fn code_ident(&self, language: Language) -> String {
-        self.code_name
-            .clone()
-            .unwrap_or_else(|| recase_type_name(language, &self.name))
+        self.code_name.clone().unwrap_or_else(|| match language {
+            Language::TypeScript => recase_member(Language::TypeScript, &self.name),
+            _ => recase_type_name(language, &self.name),
+        })
+    }
+
+    /// How this service is named in a collision diagnostic. The module qualifier
+    /// matters in Go, whose scope spans every module: two same-named services in
+    /// different modules are a real clash, and identical origin text would make
+    /// them read as one declaration seen twice.
+    fn origin_label(&self) -> String {
+        if self.module_key.is_empty() {
+            format!("service `{}`", self.name)
+        } else {
+            format!("service `{}` in module `{}`", self.name, self.module_key)
+        }
     }
 }
 
@@ -5749,7 +5771,7 @@ pub(crate) fn build_name_manifest(
             .insert(model.full_name.clone(), type_ident.clone());
         ns_models.push(NsModel {
             module_key: model.module_key.clone(),
-            full_name: model.local_name.clone(),
+            full_name: model.full_name.clone(),
             type_ident,
             schema,
         });
@@ -5759,17 +5781,29 @@ pub(crate) fn build_name_manifest(
         return Ok(manifest);
     }
 
-    // Group modules → their own top-level namespace.
+    // Each emitted scope gets its own top-level namespace. For most targets that
+    // is the module, which maps to one emitted file set. **Go is different**: it
+    // flattens every module into a single package, so two same-named types in
+    // different modules are redeclarations in one package — its scope is the whole
+    // closure, and `None` below means "every module at once".
+    //
+    // A module with services but no models still has a scope, so its service
+    // identifiers are checked against the boilerplate.
     let module_keys: BTreeSet<String> = ns_models
         .iter()
         .map(|model| model.module_key.clone())
+        .chain(services.iter().map(|service| service.module_key.clone()))
         .collect();
-    for module_key in &module_keys {
+    let scopes: Vec<Option<String>> = if language == Language::Go {
+        vec![None]
+    } else {
+        module_keys.into_iter().map(Some).collect()
+    };
+    for scope in &scopes {
+        let in_scope = |key: &str| scope.as_deref().is_none_or(|scope| scope == key);
+        let module_key: &str = scope.as_deref().unwrap_or_default();
         let mut top = Namespace::default();
-        for model in ns_models
-            .iter()
-            .filter(|model| &model.module_key == module_key)
-        {
+        for model in ns_models.iter().filter(|model| in_scope(&model.module_key)) {
             top.insert(
                 language,
                 model.type_ident.clone(),
@@ -5796,16 +5830,20 @@ pub(crate) fn build_name_manifest(
                 format!("generated runtime identifier `{ident}`"),
             )?;
         }
-        // Services and their derived bindings live in the root module scope of
-        // the file that declares them (the single-input scope).
-        if module_key.is_empty() {
-            for service in services {
-                top.insert(
-                    language,
-                    service.code_ident(language),
-                    format!("service `{}`", service.name),
-                )?;
-            }
+        // A service's bindings live in the module scope of the file that declares
+        // it — which is the root module only in single-input mode. Keying the
+        // insert on an empty module key meant that in multi-input mode services
+        // never entered the pass at all, so a service clashing with a model in its
+        // own module generated uncompilable code without a diagnostic.
+        for service in services
+            .iter()
+            .filter(|service| in_scope(&service.module_key))
+        {
+            top.insert(
+                language,
+                service.code_ident(language),
+                service.origin_label(),
+            )?;
         }
         // TypeScript `DEFAULT_<FIELD>` / `<FIELD>_CONST` constants and per-model
         // transfer type converters share the module scope; make them participate
@@ -5897,6 +5935,7 @@ fn manifest_inputs_from_spec(
         .map(|service| ManifestService {
             name: service.name.clone(),
             code_name: service.code_name.for_language(language).map(str::to_string),
+            module_key: spec.module_path.as_module_key(),
         })
         .collect();
     (models, services)
@@ -9108,6 +9147,58 @@ properties:
   userId: { type: string, x-go-name: UserIdent }
 "#;
         parse_for(Language::Go, input).expect("override resolves the Go collision");
+    }
+
+    /// TypeScript binds a service to a lower-camel `const`, so a service and a
+    /// model of the same name emit `thing` and `Thing` and never collide. Deriving
+    /// the service identifier as a type name claimed they did, rejecting a schema
+    /// that generates cleanly — while missing the clash that can actually happen,
+    /// a service whose lower-camel form lands on a model's converter const.
+    #[test]
+    fn typescript_service_identifier_is_lower_camel() {
+        let service_and_model = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Thing:
+    fqn: example.v1.Thing
+    operations:
+      doIt:
+        input: { $ref: "#/$defs/Thing" }
+$defs:
+  Thing:
+    type: object
+    properties:
+      id: { type: string }
+"##;
+        parse_for(Language::TypeScript, service_and_model)
+            .expect("`thing` and `Thing` are distinct TypeScript identifiers");
+        // Python names the service class `Thing`, so there it is a real clash.
+        let error = reject_for(Language::Python, service_and_model);
+        assert!(
+            error.contains("collision") && error.contains("Thing"),
+            "{error}"
+        );
+
+        // The clash TypeScript does have: the service's lower-camel form is the
+        // model's converter identifier.
+        let converter_clash = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  ThingTransferTypeConverter:
+    fqn: example.v1.Thing
+    operations:
+      doIt:
+        input: { $ref: "#/$defs/Thing" }
+$defs:
+  Thing:
+    type: object
+    properties:
+      id: { type: string }
+"##;
+        let error = reject_for(Language::TypeScript, converter_clash);
+        assert!(error.contains("thingTransferTypeConverter"), "{error}");
     }
 
     /// A name synthesized *from a member* follows that member's override (P15).

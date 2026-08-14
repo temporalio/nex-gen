@@ -126,6 +126,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema: The P15 collision pass used the wrong scope in two ways, so
+  **multi-input** runs accepted schemas that generate uncompilable code. Services
+  were only entered into the namespace of the root module, which in multi-input
+  mode is no module at all — a service clashing with a model in its own file
+  rejected when that file was the sole input and was silently accepted when it sat
+  in a directory. And every target was scoped per module, but **Go flattens every
+  module into one package**: two input files each declaring a `Page` emitted the
+  type twice into one package (`Page redeclared in this block`) with no
+  diagnostic. Services now enter the namespace of their declaring module, and Go's
+  scope is the whole input closure; its diagnostic names the module each
+  declaration came from (`a/page#Page` and `b/page#Page`), which it could not do
+  while two same-named models in different modules produced identical origin text
+  and were mistaken for one declaration seen twice. The other three targets are
+  unchanged — separate modules keep the names apart, as
+  `generated-file-layout.md` already specified.
+- JSON Schema: A TypeScript service identifier was derived as a *type* name in the
+  collision pass while the generator emits a lower-camel `const`, so the pass
+  rejected a service and a model of the same name — `chatService` and
+  `ChatService` are distinct TypeScript identifiers and generate cleanly — and
+  missed the clash TypeScript really has, a service whose lower-camel form lands
+  on a model's `<model>TransferTypeConverter`. The identifier is now derived the
+  way it is emitted. Only the collision pass is affected; no emitted name changes.
 - JSON Schema: An `x-<lang>-name` override on a property did not move two of the
   identifiers **synthesized from that property**, so a collision on either was
   rejected with a fix-it the author could not act on. The TypeScript

@@ -61,8 +61,9 @@ Rationale (citing [[PRINCIPLES.md]]):
   Nexus document — live in [[input-files]].)
 - **P14 / P15 ([[generated-file-layout]])**: bindings emit into the
   declaring file's module (Java the one-class-per-file exception); every
-  synthesized identifier and I/O type name enters the single per-package
-  collision pass.
+  synthesized identifier and I/O type name enters the collision pass for
+  that module — which in Go is the whole package, since every module
+  flattens into one.
 
 ## Document gating
 
@@ -400,19 +401,26 @@ Per [[generated-file-layout]]:
   './<module>'`), `__init__.py` (`__all__`). Go/Java rely on exported
   visibility (capitalized / `public`).
 - Service identifiers, operation field identifiers, and synthesized I/O
-  type names all live in the one package-wide identifier namespace (P15)
-  and are checked **per emitted target** (normalization differs per
-  language, like [[properties]] / [[ref]]).
+  type names all live in the identifier namespace of the **declaring
+  module** (P15) — package-wide in Go, where every module flattens into one
+  package — and are checked **per emitted target** (normalization differs
+  per language, like [[properties]] / [[ref]]). A service declared in a
+  non-root input file is checked in that file's module, not the root's.
 
 > **A generated service and a generated model that resolve to the same
 > identifier collide, and the generator fails the build (P7.1/P15).** A
-> service binding occupies the *same* per-package namespace as the
-> `$defs` model types — it is not a separate namespace. So a service
+> service binding occupies the *same* namespace as the `$defs` model types
+> of its module — it is not a separate namespace. So a service
 > `ChatService` and a `$defs/ChatService` model both claim the identifier
-> `ChatService` (Go: a `var ChatService` against a `type ChatService`;
-> Python: two `class ChatService`; TS: a `const chatService` against a
-> recased model; Java: two top-level `ChatService` types). This is a
-> **load reject** with a fix-it, **never silently mangled** — exactly the
+> `ChatService` in Go (a `var ChatService` against a `type ChatService`),
+> Python (two `class ChatService`) and Java (two top-level `ChatService`
+> types). **TypeScript is the exception**: it binds a service to a
+> lower-camel `const`, so `chatService` and the model's `ChatService` are
+> distinct identifiers and the pair generates cleanly. What a TypeScript
+> service *can* collide with is another lower-camel module binding — most
+> readily a model's `<model>TransferTypeConverter`, which a service named
+> `ChatServiceTransferTypeConverter` would claim. This is a **load reject**
+> with a fix-it, **never silently mangled** — exactly the
 > synthesized-I/O-vs-`$defs` rule above, one level up. Resolve it by
 > renaming the `$defs` model or applying `x-<lang>-name` to the service
 > (the `fqn` wire name is unaffected — only the *code identifier*

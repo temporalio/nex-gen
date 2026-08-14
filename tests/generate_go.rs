@@ -2006,3 +2006,129 @@ fn go_json_override_moves_member_derived_names_only() {
     assert!(!rendered.contains("ProbeLocation"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+/// Go flattens every module into one package, so its collision scope is the whole
+/// input closure, not the module. Two modules declaring the same type name are a
+/// redeclaration in that single package — uncompilable Go, previously emitted
+/// without a diagnostic because the pass scoped collisions per module.
+/// See `specs/json-schema/PRINCIPLES.md` §15 and
+/// `specs/json-schema/generated-file-layout.md`.
+#[test]
+fn go_json_rejects_same_type_name_in_two_modules() {
+    let temp_dir = unique_output_path("go-json-flat-package-collision");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(input_dir.join("a")).unwrap();
+    fs::create_dir_all(input_dir.join("b")).unwrap();
+    let page = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"title":{"type":"string"}}}"#;
+    fs::write(input_dir.join("a/page.json"), page).unwrap();
+    fs::write(input_dir.join("b/page.json"), page).unwrap();
+    fs::write(
+        input_dir.join("root.nexusrpc.yaml"),
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Svc:
+    fqn: example.v1.Svc
+    operations:
+      one:
+        input: { $ref: "a/page.json" }
+      two:
+        input: { $ref: "b/page.json" }
+"##,
+    )
+    .unwrap();
+
+    let error = generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_dir.clone()],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("out"),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .expect_err("two modules declaring `Page` collide in Go's flat package")
+    .to_string();
+    // The diagnostic names both modules — the bare type name appears twice and
+    // would otherwise read as one declaration seen twice.
+    assert!(error.contains("collision"), "{error}");
+    assert!(error.contains("a/page#Page"), "{error}");
+    assert!(error.contains("b/page#Page"), "{error}");
+
+    // The same closure is fine in a language whose modules are separate scopes.
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("out-py"),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .expect("separate Python modules keep `Page` apart");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A service enters the collision pass in the module that declares it. Keying the
+/// insert on the root module meant that in multi-input mode services never entered
+/// the pass at all, so this clash — which rejects when the same file is the only
+/// input — was silently accepted.
+#[test]
+fn go_json_rejects_service_clashing_with_a_model_in_multi_input() {
+    let temp_dir = unique_output_path("go-json-multi-input-service-clash");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(input_dir.join("sub")).unwrap();
+    fs::write(
+        input_dir.join("sub/api.nexusrpc.yaml"),
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Thing:
+    fqn: example.v1.Thing
+    operations:
+      doIt:
+        input: { $ref: "#/$defs/Thing" }
+$defs:
+  Thing:
+    type: object
+    properties:
+      id: { type: string }
+"##,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("root.nexusrpc.yaml"),
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+$defs:
+  Root:
+    type: object
+    properties:
+      x: { type: string }
+"##,
+    )
+    .unwrap();
+
+    let error = generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("out"),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .expect_err("a service and a model in one module both map to `Thing`")
+    .to_string();
+    assert!(
+        error.contains("collision") && error.contains("Thing"),
+        "{error}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
