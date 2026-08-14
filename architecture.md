@@ -98,4 +98,7 @@ flowchart LR
   result records.
 - `TypePlanningPass` materializes target-ready type metadata.
 - `ReachabilityPass` removes declarations outside the generated surface.
-- `EmittedNameResolutionPass` resolves final emitted JSON model identifiers.
+- `EmittedNameResolutionPass` resolves final emitted JSON model identifiers. Its
+  name manifest spans the whole tree, not one leaf: a `$ref` across input files
+  names a model whose `x-<lang>-name` override is declared in the other file, so
+  the consuming module can only resolve it from the tree-wide manifest.

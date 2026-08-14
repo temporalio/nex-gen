@@ -126,6 +126,62 @@ $defs:
       title: { type: string }
 "##;
 
+/// The entry file of a two-file closure. `get`'s output is the model the *other*
+/// file declares, and `FindOutput.page` `$ref`s it from a property, so both
+/// cross-module reference shapes are covered.
+const CROSS_MODULE_ENTRY_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Pages:
+    fqn: example.pages.v1.Pages
+    operations:
+      get:
+        input: { $ref: "#/$defs/GetInput" }
+        output: { $ref: "content/page.json" }
+      find:
+        input: { $ref: "#/$defs/GetInput" }
+        output: { $ref: "#/$defs/FindOutput" }
+$defs:
+  GetInput:
+    type: object
+    additionalProperties: false
+    properties:
+      id: { type: string }
+  FindOutput:
+    type: object
+    additionalProperties: false
+    properties:
+      page: { $ref: "content/page.json" }
+"##;
+
+/// The referenced file. Its model carries the name override the *consuming*
+/// module has to resolve through.
+const CROSS_MODULE_PAGE_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+x-ts-name: RenamedPage
+properties:
+  title: { type: string }
+"##;
+
+/// Writes the two-file cross-module closure into `dir` and returns the input
+/// directory to generate from.
+fn write_cross_module_closure(dir: &Path) -> PathBuf {
+    let input_dir = dir.join("input");
+    fs::create_dir_all(input_dir.join("content")).unwrap();
+    fs::write(
+        input_dir.join("kb.nexusrpc.yaml"),
+        CROSS_MODULE_ENTRY_SCHEMA,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("content/page.json"),
+        CROSS_MODULE_PAGE_SCHEMA,
+    )
+    .unwrap();
+    input_dir
+}
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -927,7 +983,9 @@ fn typescript_json_maps_element_position_unions() {
     assert!(rendered.contains("choiceTransferTypeConverter.fromTransferType(element)"));
     // A map member runs the member converter in both directions.
     assert!(rendered.contains("entriesValueTransferTypeConverter.fromTransferType(raw[key])"));
-    assert!(rendered.contains("out[key] = entriesValueTransferTypeConverter.toTransferType(entry);"));
+    assert!(
+        rendered.contains("out[key] = entriesValueTransferTypeConverter.toTransferType(entry);")
+    );
     // Element nullability is the element's own concern, and parenthesized.
     assert!(rendered.contains("slots?: (string | null)[];"));
     fs::remove_dir_all(temp_dir).unwrap();
@@ -1008,5 +1066,60 @@ fn typescript_json_operation_type_info_follows_ts_name_override() {
             "outputType: { transferTypeConverter: renamedPageTransferTypeConverter } }),"
         )
     );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// An `x-ts-name` override on a model in *another* input file moves every
+/// reference the consuming module emits: the operation generic, the type-only
+/// model import, the converter value import, and the property annotation of a
+/// cross-module `$ref`. The override is declared in the referenced file, so only
+/// the tree-wide name manifest can resolve it (P14/P15).
+#[test]
+fn typescript_json_cross_module_ts_name_override_moves_every_reference() {
+    let temp_dir = unique_output_path("ts-json-cross-module-override");
+    let input_dir = write_cross_module_closure(&temp_dir);
+    let output_path = temp_dir.join("output");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let declaring = fs::read_to_string(output_path.join("content/page/models.ts")).unwrap();
+    assert!(declaring.contains("export interface RenamedPage {"));
+    assert!(declaring.contains("export const renamedPageTransferTypeConverter = new class"));
+
+    let services = fs::read_to_string(output_path.join("kb/services.ts")).unwrap();
+    for expected in [
+        "import { renamedPageTransferTypeConverter } from '../content/page/models';",
+        "import type { RenamedPage } from '../content/page/models';",
+        "    RenamedPage\n",
+        "outputType: { transferTypeConverter: renamedPageTransferTypeConverter } }),",
+    ] {
+        assert!(services.contains(expected), "{expected}\n{services}");
+    }
+
+    let models = fs::read_to_string(output_path.join("kb/models.ts")).unwrap();
+    for expected in [
+        "import { renamedPageTransferTypeConverter } from '../content/page/models';",
+        "import type { RenamedPage } from '../content/page/models';",
+        "  page?: RenamedPage;",
+        "page = renamedPageTransferTypeConverter.fromTransferType(raw.page);",
+    ] {
+        assert!(models.contains(expected), "{expected}\n{models}");
+    }
+    // Nothing names the pre-override identifier.
+    for stale in ["{ Page }", "pageTransferTypeConverter", ": Page", " Page\n"] {
+        assert!(!services.contains(stale), "{stale}\n{services}");
+        assert!(!models.contains(stale), "{stale}\n{models}");
+    }
     fs::remove_dir_all(temp_dir).unwrap();
 }

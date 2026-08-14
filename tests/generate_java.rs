@@ -369,3 +369,121 @@ fn java_json_decodes_element_position_unions() {
     }
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+/// The entry file of a two-file closure. `get`'s output is the model the *other*
+/// file declares, and `FindOutput.page` `$ref`s it from a property, so both
+/// cross-module reference shapes are covered.
+const CROSS_MODULE_ENTRY_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Pages:
+    fqn: example.pages.v1.Pages
+    operations:
+      get:
+        input: { $ref: "#/$defs/GetInput" }
+        output: { $ref: "content/page.json" }
+      find:
+        input: { $ref: "#/$defs/GetInput" }
+        output: { $ref: "#/$defs/FindOutput" }
+$defs:
+  GetInput:
+    type: object
+    additionalProperties: false
+    properties:
+      id: { type: string }
+  FindOutput:
+    type: object
+    additionalProperties: false
+    properties:
+      page: { $ref: "content/page.json" }
+"##;
+
+/// The referenced file. Its model carries the name override the *consuming*
+/// module has to resolve through.
+const CROSS_MODULE_PAGE_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+x-java-name: RenamedPage
+properties:
+  title: { type: string }
+"##;
+
+/// Writes the two-file cross-module closure into `dir` and returns the input
+/// directory to generate from.
+fn write_cross_module_closure(dir: &Path) -> PathBuf {
+    let input_dir = dir.join("input");
+    fs::create_dir_all(input_dir.join("content")).unwrap();
+    fs::write(
+        input_dir.join("kb.nexusrpc.yaml"),
+        CROSS_MODULE_ENTRY_SCHEMA,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("content/page.json"),
+        CROSS_MODULE_PAGE_SCHEMA,
+    )
+    .unwrap();
+    input_dir
+}
+
+/// An `x-java-name` override on a model in *another* input file moves every
+/// reference the consuming package emits: the operation's return type, the
+/// cross-package import, and the field/getter of a cross-module `$ref` property.
+/// The override is declared in the referenced file, so only the tree-wide name
+/// manifest can resolve it (P14/P15).
+#[test]
+fn java_json_cross_module_java_name_override_moves_every_reference() {
+    let temp_dir = unique_output_path("java-json-cross-module-override");
+    let input_dir = write_cross_module_closure(&temp_dir);
+    // The output directory's base name must equal the package's last segment.
+    let output_path = temp_dir.join("pages");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("example.pages".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let declaring = &rendered[&PathBuf::from("content/page/RenamedPage.java")];
+    assert!(
+        declaring.contains("public final class RenamedPage {"),
+        "{declaring}"
+    );
+
+    let service = &rendered[&PathBuf::from("kb/Pages.java")];
+    for expected in [
+        "import example.pages.content.page.RenamedPage;",
+        "RenamedPage get(GetInput input);",
+    ] {
+        assert!(service.contains(expected), "{expected}\n{service}");
+    }
+
+    let consuming = &rendered[&PathBuf::from("kb/FindOutput.java")];
+    for expected in [
+        "import example.pages.content.page.RenamedPage;",
+        "private final @Nullable RenamedPage page;",
+        "public @Nullable RenamedPage getPage() {",
+        "context.readTreeAsValue(field, RenamedPage.class);",
+    ] {
+        assert!(consuming.contains(expected), "{expected}\n{consuming}");
+    }
+    // Nothing names the pre-override identifier.
+    for stale in [
+        ".page.Page;",
+        "@Nullable Page ",
+        "(field, Page.class)",
+        " Page get(",
+    ] {
+        assert!(!service.contains(stale), "{stale}\n{service}");
+        assert!(!consuming.contains(stale), "{stale}\n{consuming}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}

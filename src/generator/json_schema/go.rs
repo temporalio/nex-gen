@@ -13,6 +13,7 @@ use crate::generator::go::{
     go_string_literal,
 };
 use crate::generator::json_schema::build_json_name_manifest;
+use crate::generator::json_schema::register_cross_module_ref_names;
 use crate::language::Language;
 use crate::parser::NameManifest;
 use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
@@ -756,6 +757,11 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
             .collect();
         self.local_json_models.clear();
         self.model_names.clear();
+        // Go flattens the whole tree into one package, so a model another input
+        // file declares is still an unqualified local name here -- but only the
+        // tree-wide resolution knows the identifier that file's `x-go-name`
+        // moved it to.
+        register_cross_module_ref_names(api_plan, &mut self.model_names);
 
         for model in &self.json_models {
             // Go flattens every input file in a generate closure into one flat
@@ -771,20 +777,6 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
                 format!("#/$defs/{}", model.full_name),
                 model.model_name.clone(),
             );
-        }
-        if self.include_service_imports && !api_plan.services.is_empty() {
-            for (module_path, names) in &api_plan.data.module_imports {
-                for name in names {
-                    self.model_names.insert(
-                        format!("{}#{name}", module_path.as_module_key()),
-                        name.clone(),
-                    );
-                    self.model_names.insert(
-                        format!("{}#/$defs/{name}", module_path.as_module_key()),
-                        name.clone(),
-                    );
-                }
-            }
         }
         Ok(())
     }

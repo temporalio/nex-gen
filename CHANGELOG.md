@@ -235,11 +235,19 @@ array"` at runtime, though `items.md` accepts them. Both now decode elementwise,
 - TypeScript: An array of models or unions serialized its elements verbatim, so
   an element's in-memory `additionalProperties` bag reached the wire as a literal
   member (and an element's temporal/bytes members were never re-encoded). Each
-  element now re-serializes through its own mapper, as does a typed map's member.
+  element now re-serializes through its own converter, as does a typed map's
+  member.
 - Go: A schema `description` ending a sentence with a package-like word ("one at
   a time.") added that package to the import block, and an unused import is a Go
   compile error. Package use is now read off the emitted code, not the doc
   comments.
+- JSON Schema: An `x-<lang>-name` override on a model was ignored by every
+  *other* input file that referenced it, in all four languages. The consuming
+  module emitted the pre-override identifier — a dangling operation generic,
+  model import, and (in TypeScript) converter import; a dangling field type for a
+  cross-file `$ref` property; and, in Go's flat package, a reference to a type
+  name that is never declared. Emitted identifiers are now resolved once over the
+  whole input closure, so a cross-file reference names the overridden type.
 - JSON Schema: A `oneOf` with an inline object branch generated uncompilable Go
   (a marker method on an undeclared `<Union>Object` type) and uncompilable
   TypeScript (a converter named after the anonymous `Record<string, unknown>`

@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::json_schema::build_json_name_manifest;
+use crate::generator::json_schema::register_cross_module_ref_names;
 use crate::generator::python::{
     PythonImports, PythonModelHoists, RenderedModelFragments, WireValueConversion,
     module_common_prefix_len, python_field_name, python_string_literal,
@@ -208,6 +209,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         self.json_models = std::mem::take(&mut json_models);
         self.hoisted_json_models = Vec::new();
         self.ref_names.clear();
+        register_cross_module_ref_names(api_plan, &mut self.ref_names);
         for model in &self.json_models {
             // A resolved `$ref` is `#/$defs/<full_name>`; register that form (plus the
             // bare `full_name`) so `reference_model_name` resolves through the manifest

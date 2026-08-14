@@ -10,6 +10,7 @@ use std::cell::{Cell, RefCell};
 
 use crate::error::{Error, Result};
 use crate::generator::json_schema::build_json_name_manifest;
+use crate::generator::json_schema::register_cross_module_ref_names;
 use crate::generator::typescript::{
     RenderedExternalModelFragments, WireValueConversion, typescript_generated_field_name,
 };
@@ -1083,6 +1084,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
             })
             .collect();
         self.ref_names.clear();
+        register_cross_module_ref_names(api_plan, &mut self.ref_names);
         for model in &self.json_models {
             // A resolved `$ref` is `#/$defs/<full_name>`; register that form (plus the
             // bare `full_name`) so `reference_model_name` resolves through the manifest

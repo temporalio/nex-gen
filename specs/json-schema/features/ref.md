@@ -148,6 +148,11 @@ derived as:
   rules ([[const]]/[[enum]]/[[properties]]; nest where the language
   allows, P15 backstop).
 
+A type's emitted name is resolved once for the **whole input closure**, so
+a reference from another input file names exactly the identifier the
+declaring file's own module emits — including its `x-<lang>-name`
+override, which the referencing file does not restate.
+
 **Collision.** All type names occupy **one package-wide namespace**
 ([[generated-file-layout]]). A collision → **load reject, no mangling**;
 the escape hatch is `x-<lang>-name` / root `title` (**P15**, scope

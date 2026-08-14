@@ -1844,3 +1844,103 @@ properties:
     assert!(!rendered.contains("\t\"time\"\n"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+/// The entry file of a two-file closure. `get`'s output is the model the *other*
+/// file declares, and `FindOutput.page` `$ref`s it from a property, so both
+/// cross-module reference shapes are covered.
+const CROSS_MODULE_ENTRY_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Pages:
+    fqn: example.pages.v1.Pages
+    operations:
+      get:
+        input: { $ref: "#/$defs/GetInput" }
+        output: { $ref: "content/page.json" }
+      find:
+        input: { $ref: "#/$defs/GetInput" }
+        output: { $ref: "#/$defs/FindOutput" }
+$defs:
+  GetInput:
+    type: object
+    additionalProperties: false
+    properties:
+      id: { type: string }
+  FindOutput:
+    type: object
+    additionalProperties: false
+    properties:
+      page: { $ref: "content/page.json" }
+"##;
+
+/// The referenced file. Its model carries the name override the *consuming*
+/// module has to resolve through.
+const CROSS_MODULE_PAGE_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+x-go-name: RenamedPage
+properties:
+  title: { type: string }
+"##;
+
+/// Writes the two-file cross-module closure into `dir` and returns the input
+/// directory to generate from.
+fn write_cross_module_closure(dir: &Path) -> PathBuf {
+    let input_dir = dir.join("input");
+    fs::create_dir_all(input_dir.join("content")).unwrap();
+    fs::write(
+        input_dir.join("kb.nexusrpc.yaml"),
+        CROSS_MODULE_ENTRY_SCHEMA,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("content/page.json"),
+        CROSS_MODULE_PAGE_SCHEMA,
+    )
+    .unwrap();
+    input_dir
+}
+
+/// An `x-go-name` override on a model in *another* input file moves every
+/// reference the consuming module emits. Go collapses the whole closure into one
+/// flat package, so there is no import to fix — but the operation generic and the
+/// cross-module `$ref` field still name the type, and the override is declared in
+/// the referenced file, so only the tree-wide name manifest can resolve it
+/// (P14/P15).
+#[test]
+fn go_json_cross_module_go_name_override_moves_every_reference() {
+    let temp_dir = unique_output_path("go-json-cross-module-override");
+    let input_dir = write_cross_module_closure(&temp_dir);
+    let output_path = temp_dir.join("output");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let declaring = fs::read_to_string(output_path.join("content_page.go")).unwrap();
+    assert!(declaring.contains("type RenamedPage struct {"));
+
+    let consuming = fs::read_to_string(output_path.join("kb.go")).unwrap();
+    for expected in [
+        "Get nexus.OperationReference[GetInput, RenamedPage]",
+        "Get: nexus.NewOperationReference[GetInput, RenamedPage](\"Get\")",
+        "Page *RenamedPage `json:\"page,omitempty\"`",
+        "var tmp RenamedPage",
+    ] {
+        assert!(consuming.contains(expected), "{expected}\n{consuming}");
+    }
+    // Nothing names the pre-override identifier.
+    for stale in ["[GetInput, Page]", "*Page ", "var tmp Page\n"] {
+        assert!(!consuming.contains(stale), "{stale}\n{consuming}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}

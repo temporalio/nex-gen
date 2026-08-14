@@ -269,6 +269,12 @@ pub(crate) struct PlannedJsonType {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PlannedSpecData {
     pub(crate) module_imports: BTreeMap<ModulePath, BTreeSet<String>>,
+    /// The emitted identifier of every JSON model declared in *another* module,
+    /// keyed by model full name. A leaf cannot derive these: the `x-<lang>-name`
+    /// override that moves an identifier is declared in the other input file, so
+    /// `EmittedNameResolutionPass` resolves them from the tree-wide manifest and
+    /// records them here for the generators' `$ref` registries.
+    pub(crate) cross_module_model_names: BTreeMap<String, String>,
 }
 
 impl AsRef<str> for PlannedJsonType {

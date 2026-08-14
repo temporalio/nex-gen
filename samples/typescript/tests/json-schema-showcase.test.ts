@@ -540,7 +540,9 @@ describe("json-schema showcase generated definitions", () => {
 
     // The string branch's own `minLength` and the integer branch's own
     // `minimum` — each enforced only for the branch the token selects.
-    expect(converter.fromTransferType({ ...base, idOrName: "abc" }).idOrName).toBe("abc");
+    expect(converter.fromTransferType({ ...base, idOrName: "abc" }).idOrName).toBe(
+      "abc",
+    );
     expect(converter.fromTransferType({ ...base, idOrName: 1 }).idOrName).toBe(1);
     expect(() => converter.fromTransferType({ ...base, idOrName: "ab" })).toThrow(
       /idOrName: must have length >= 3, got 2/,
@@ -579,10 +581,9 @@ describe("json-schema showcase generated definitions", () => {
 
     // A named element union validates through its own converter, in both
     // directions, with the element's index on the violation path.
-    expect(converter.fromTransferType({ ...base, segments: ["ab", 0] }).segments).toEqual([
-      "ab",
-      0,
-    ]);
+    expect(
+      converter.fromTransferType({ ...base, segments: ["ab", 0] }).segments,
+    ).toEqual(["ab", 0]);
     expect(() => converter.fromTransferType({ ...base, segments: ["a"] })).toThrow(
       /segments\[0\]: must have length >= 2, got 1/,
     );
@@ -836,7 +837,10 @@ describe("json-schema showcase generated definitions", () => {
     // names `ShowcaseSegmentsItem`, and a map member at an inline union named
     // `ChoicesValue`. Each element runs its union's own converter, so a bad value
     // is reported at its index / key.
-    const value = expectRoundTrip("showcase-element-unions.json", showcaseTransferTypeConverter);
+    const value = expectRoundTrip(
+      "showcase-element-unions.json",
+      showcaseTransferTypeConverter,
+    );
 
     expect(value.shapes).toEqual([
       { kind: "circle", radius: 2.5, additionalProperties: {} },
@@ -878,7 +882,10 @@ describe("json-schema showcase generated definitions", () => {
       }),
     ).toThrow(/triangle/);
     expect(() =>
-      showcaseTransferTypeConverter.fromTransferType({ ...base, segments: ["ok", 1.5] }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        segments: ["ok", 1.5],
+      }),
     ).toThrow(/segments\[1\]/);
     expect(() =>
       showcaseTransferTypeConverter.fromTransferType({
@@ -1014,7 +1021,10 @@ describe("json-schema showcase generated definitions", () => {
     // map and its member (`ledger`), and a free-form bag (`metadata`). The same
     // fixture covers a typed map's member constraints (`quotas`, `tokens`,
     // `nicknames`) and a nested array (`grid`).
-    const value = expectRoundTrip("showcase-inline-shapes.json", showcaseTransferTypeConverter);
+    const value = expectRoundTrip(
+      "showcase-inline-shapes.json",
+      showcaseTransferTypeConverter,
+    );
 
     expect(value.grid).toEqual([[1, 2], [3]]);
     expect(value.location).toEqual({
@@ -1053,24 +1063,39 @@ describe("json-schema showcase generated definitions", () => {
 
     // A hoisted shape validates like any other model, at the nested path.
     expect(() =>
-      showcaseTransferTypeConverter.fromTransferType({ ...base, location: { city: "" } }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        location: { city: "" },
+      }),
     ).toThrow(/location\.city/);
     expect(() =>
-      showcaseTransferTypeConverter.fromTransferType({ ...base, rows: [{ cell: "ok" }, {}] }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        rows: [{ cell: "ok" }, {}],
+      }),
     ).toThrow(/rows\[1\]\.cell/);
     // A nested array reports the failing element at its own two-dimensional index.
     expect(() =>
-      showcaseTransferTypeConverter.fromTransferType({ ...base, grid: [[1], [2, 1.5]] }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        grid: [[1], [2, 1.5]],
+      }),
     ).toThrow(/grid\[1\]\[1\]/);
     // A typed map's member constraints are enforced, keyed by the member.
     expect(() =>
       showcaseTransferTypeConverter.fromTransferType({ ...base, quotas: { cpu: 7 } }),
     ).toThrow(/cpu/);
     expect(() =>
-      showcaseTransferTypeConverter.fromTransferType({ ...base, tokens: { primary: "AB" } }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        tokens: { primary: "AB" },
+      }),
     ).toThrow(/primary/);
     expect(() =>
-      showcaseTransferTypeConverter.fromTransferType({ ...base, nicknames: { tiny: "a" } }),
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        nicknames: { tiny: "a" },
+      }),
     ).toThrow(/tiny/);
     // The free-form bag's member-count bound rides with the hoisted type.
     expect(() =>
@@ -1085,10 +1110,14 @@ describe("json-schema showcase generated definitions", () => {
       quotasTransferTypeConverter.toTransferType({ additionalProperties: { cpu: 7 } }),
     ).toThrow(/cpu/);
     expect(() =>
-      tokensTransferTypeConverter.toTransferType({ additionalProperties: { primary: "AB" } }),
+      tokensTransferTypeConverter.toTransferType({
+        additionalProperties: { primary: "AB" },
+      }),
     ).toThrow(/primary/);
     expect(() =>
-      nicknamesTransferTypeConverter.toTransferType({ additionalProperties: { tiny: "a" } }),
+      nicknamesTransferTypeConverter.toTransferType({
+        additionalProperties: { tiny: "a" },
+      }),
     ).toThrow(/tiny/);
   });
 });

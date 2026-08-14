@@ -1230,6 +1230,9 @@ impl CompilerPass<OperationLoweredFamily, PlannedFamily> for TypePlanningPass<'_
                 .get(&leaf.module_path)
                 .cloned()
                 .unwrap_or_default(),
+            // Resolved later, by `EmittedNameResolutionPass`: naming a model in
+            // another module needs the tree-wide name manifest.
+            cross_module_model_names: BTreeMap::new(),
         };
         let mut planner = TypePlanningContext::new(
             leaf.spec.clone(),

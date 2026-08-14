@@ -147,8 +147,8 @@ pub(crate) fn compile_tree_to_files(
     let planned_tree = planning::ReachabilityPass::new().apply(planned_tree)?;
 
     // planned IR -> emitted JSON names -> render target-language files
-    let generator_ready_tree =
-        planning::EmittedNameResolutionPass::new(language).apply(planned_tree)?;
+    let name_resolution = planning::EmittedNameResolutionPass::new(language, &planned_tree)?;
+    let generator_ready_tree = name_resolution.apply(planned_tree)?;
     generator::generate_files_from_planned_tree(
         language,
         &generator_ready_tree,
