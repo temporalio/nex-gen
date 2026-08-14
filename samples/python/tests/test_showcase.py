@@ -12,10 +12,15 @@ from showcase import (
     Attributes,
     Circle,
     ContactPy,
+    Extras,
     Labels,
+    LinkNote,
     Settings,
     Showcase,
+    ShowcaseDetailObject,
+    ShowcaseLedgerValue,
     Square,
+    TextNote,
     Widget,
 )
 
@@ -554,6 +559,306 @@ def test_one_of_sum_types_roundtrip_and_reject() -> None:
         _ = Showcase.model_validate({**base, "shape": {"kind": "triangle"}})
 
 
+def test_one_of_branch_constraints() -> None:
+    """Once the token selects a branch, the value is held to everything that
+    branch declares: each union member carries its own constraints."""
+    base = {
+        "kind": "showcase",
+        "revision": 1,
+        "enabled": True,
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+    }
+
+    # The string branch's own `minLength` and the integer branch's own `minimum`
+    # — each enforced only for the branch that declares it.
+    assert Showcase.model_validate({**base, "idOrName": "abc"}).id_or_name == "abc"
+    assert Showcase.model_validate({**base, "idOrName": 1}).id_or_name == 1
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "idOrName": "ab"})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "idOrName": 0})
+
+    # A closed value set on a branch: an unknown string matches no member.
+    assert Showcase.model_validate({**base, "mode": "manual"}).mode == "manual"
+    assert Showcase.model_validate({**base, "mode": 7}).mode == 7
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "mode": "turbo"})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "mode": -1})
+
+    # The array branch's `minItems`/`uniqueItems` and the string branch's
+    # `pattern`, on the same union.
+    assert Showcase.model_validate(
+        {**base, "measurements": [1.5, 2.5]}
+    ).measurements == [1.5, 2.5]
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "measurements": []})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "measurements": [1.5, 1.5]})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "measurements": "AUTO"})
+
+    # An element union's branch constraints hold per element.
+    assert Showcase.model_validate({**base, "segments": ["ab", 0]}).segments == [
+        "ab",
+        0,
+    ]
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "segments": ["a"]})
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "segments": [-1]})
+
+
+def test_free_form_object_roundtrip_and_reject() -> None:
+    # The free-form object in both positions: the inline object branch of the
+    # `payload` union, and the named `Extras` model. Members are carried
+    # verbatim, so a large integer survives untruncated.
+    as_object = typing.cast(
+        Showcase, roundtrip_fixture("showcase-freeform.json", Showcase)
+    )
+    assert isinstance(as_object.payload, dict)
+    assert as_object.payload["big"] == 9007199254740992
+    assert as_object.extras is not None
+    assert (as_object.extras.model_extra or {})["note"] == "free-form"
+
+    # The same union's string branch, selected by the wire token.
+    as_string = typing.cast(
+        Showcase, roundtrip_fixture("showcase-freeform-string.json", Showcase)
+    )
+    assert as_string.payload == "text"
+
+    # The named free-form model round-trips standalone, nested members included.
+    extras = typing.cast(Extras, roundtrip_fixture("extras.json", Extras))
+    members = extras.model_extra or {}
+    assert members["nested"] == {"a": 1}
+    assert members["count"] == 9007199254740992
+
+    # maxProperties over the member set is enforced.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Extras.model_validate({"a": 1, "b": 2, "c": 3, "d": 4, "e": 5})
+    assert "must have at most 4 properties" in str(excinfo.value)
+
+    base = {
+        "kind": "showcase",
+        "revision": 1,
+        "enabled": True,
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+    }
+
+    # An unmatchable wire token (boolean) matches no branch of object | string.
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "payload": True})
+
+
+def test_inline_object_union_roundtrip_and_reject() -> None:
+    # The `note` tagged union's branches are written inline in the schema and
+    # named by their `x-py-name` overrides, so each is a `BaseModel` Pydantic
+    # selects on — with its own constraints and its own open member set.
+    text = typing.cast(Showcase, roundtrip_fixture("showcase-note-text.json", Showcase))
+    assert isinstance(text.note, TextNote)
+    assert text.note.kind == "text"
+    assert text.note.body == "remember the milk"
+    # The branch stays open: an unknown member is preserved (P13).
+    assert (text.note.model_extra or {})["pinned"] is True
+
+    link = typing.cast(Showcase, roundtrip_fixture("showcase-note-link.json", Showcase))
+    assert isinstance(link.note, LinkNote)
+    assert link.note.href == "https://example.test/notes/1"
+
+    base = {
+        "kind": "showcase",
+        "revision": 1,
+        "enabled": True,
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+    }
+
+    # The selected branch's own constraints are enforced.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "note": {"kind": "text", "body": ""}})
+    assert "at least 1 character" in str(excinfo.value)
+
+    # An unknown tag value matches no branch.
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "note": {"kind": "audio"}})
+
+
+def test_property_inline_object_union_roundtrip_and_reject() -> None:
+    # `detail`'s union is written inline on the property; its lone structured
+    # object branch derives `ShowcaseDetailObject` from the union it belongs to
+    # and is an ordinary model, so Pydantic selects on it by shape.
+    object_detail = typing.cast(
+        Showcase, roundtrip_fixture("showcase-detail-object.json", Showcase)
+    )
+    assert isinstance(object_detail.detail, ShowcaseDetailObject)
+    assert object_detail.detail.code == "E_LIMIT"
+    assert object_detail.detail.hint == "retry later"
+    # The branch stays open: an unknown member is preserved (P13).
+    assert (object_detail.detail.model_extra or {})["retryAfterMs"] == 250
+
+    text = typing.cast(
+        Showcase, roundtrip_fixture("showcase-detail-string.json", Showcase)
+    )
+    assert text.detail == "E_LIMIT"
+
+    base = {
+        "kind": "showcase",
+        "revision": 1,
+        "enabled": True,
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+    }
+
+    # The object branch's own constraints are enforced.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "detail": {"code": ""}})
+    assert "at least 1 character" in str(excinfo.value)
+
+    # A value admitted by no branch is rejected.
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "detail": 7})
+
+
+def test_tagged_union_with_scalar_branch_roundtrip_and_reject() -> None:
+    # `shapeOrName` composes both selector layers: the JSON token picks
+    # object-vs-string, then the `kind` const picks Circle-vs-Square. Both branch
+    # models are the ones the `shape` union already uses.
+    square = typing.cast(
+        Showcase, roundtrip_fixture("showcase-shape-or-name-square.json", Showcase)
+    )
+    assert isinstance(square.shape_or_name, Square)
+    assert square.shape_or_name.side == 4
+
+    named = typing.cast(
+        Showcase, roundtrip_fixture("showcase-shape-or-name-string.json", Showcase)
+    )
+    assert named.shape_or_name == "unit-square"
+
+    base = {
+        "kind": "showcase",
+        "revision": 1,
+        "enabled": True,
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+    }
+
+    # An object with an unknown tag matches no branch — it does not fall back to
+    # the string branch.
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "shapeOrName": {"kind": "triangle"}})
+
+    # A value admitted by no branch is rejected.
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "shapeOrName": 7})
+
+
+def test_array_branch_union_roundtrip_and_reject() -> None:
+    # `measurements` is `list[float] | str`: Python carries the array branch
+    # structurally (no synthesized variant model) and Pydantic selects by kind.
+    values = typing.cast(
+        Showcase, roundtrip_fixture("showcase-measurements-array.json", Showcase)
+    )
+    assert values.measurements == [1.5, 2.5, 3.75]
+
+    preset = typing.cast(
+        Showcase, roundtrip_fixture("showcase-measurements-string.json", Showcase)
+    )
+    assert preset.measurements == "auto"
+
+    base = {
+        "kind": "showcase",
+        "revision": 1,
+        "enabled": True,
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+    }
+
+    # A value admitted by neither branch is rejected.
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "measurements": True})
+
+
+def test_element_position_unions_roundtrip_and_reject() -> None:
+    # Unions in positions with no property of their own: an array element at a
+    # named union (`shapes`), an array element at an inline union the loader
+    # names `ShowcaseSegmentsItem`, and a map member at an inline union named
+    # `ChoicesValue`. Pydantic selects the branch per element/member.
+    value = typing.cast(
+        Showcase, roundtrip_fixture("showcase-element-unions.json", Showcase)
+    )
+    assert value.shapes is not None
+    assert isinstance(value.shapes[0], Circle)
+    assert value.shapes[0].radius == 2.5
+    assert isinstance(value.shapes[1], Square)
+    assert value.shapes[1].side == 4
+    assert value.segments == ["alpha", 7]
+    # Element nullability is the element's own concern: `list[str | None]`, so
+    # an explicit null is a member rather than a violation.
+    assert value.slots == ["first", None, "third"]
+    # A map's members live in Pydantic's extras bag, materialized into their
+    # declared member type — here the union each member is routed to.
+    assert value.choices is not None
+    assert value.choices.model_extra is not None
+    primary = value.choices.model_extra["primary"]
+    assert isinstance(primary, Circle)
+    assert primary.radius == 1
+
+    base = {
+        "kind": "showcase",
+        "revision": 1,
+        "enabled": True,
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+    }
+
+    # An element admitted by no branch is rejected, at its own index.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate(
+            {**base, "shapes": [{"kind": "circle", "radius": 1}, True]}
+        )
+    assert "shapes" in str(excinfo.value)
+
+    with pytest.raises(ValidationError):
+        _ = Showcase.model_validate({**base, "segments": ["ok", 1.5]})
+
+
 def test_content_encoding_roundtrip_and_reject() -> None:
     # blob (base64) and urlBlob (base64url) round-trip: JSON string on the wire,
     # native `bytes` in the model, re-encoded byte-identically. The same bytes
@@ -587,3 +892,83 @@ def test_content_encoding_roundtrip_and_reject() -> None:
     with pytest.raises(ValidationError) as excinfo:
         _ = Showcase.model_validate({**base, "urlBlob": "aGk="})
     assert "must be base64url-encoded" in str(excinfo.value)
+
+
+def test_inline_object_shapes_roundtrip_and_reject() -> None:
+    # An object written inline in a value position is named after that position
+    # and emitted as an ordinary model: a property (`location`, with its own
+    # nested `geo`), a nullable property (`audit`), an array element (`rows`), a
+    # map and its member (`ledger`), and a free-form bag (`metadata`). The same
+    # fixture covers a typed map's member constraints (`quotas`, `tokens`,
+    # `nicknames`) and a nested array (`grid`).
+    value = typing.cast(
+        Showcase, roundtrip_fixture("showcase-inline-shapes.json", Showcase)
+    )
+    assert value.grid == [[1, 2], [3]]
+    assert value.location is not None
+    assert value.location.city == "Springfield"
+    assert value.location.geo is not None
+    assert value.location.geo.lat == 39.8
+    assert value.audit is not None
+    assert value.audit.by == "alice"
+    assert value.rows is not None
+    assert value.rows[0].cell == "a1"
+    # The member override renamed the member (`ledger_py`); the hoisted types keep
+    # their position-derived names. A map's members are materialized into their
+    # declared member type.
+    assert value.ledger_py is not None
+    opening = (value.ledger_py.model_extra or {})["opening"]
+    assert isinstance(opening, ShowcaseLedgerValue)
+    assert opening.amount == 100
+    assert value.metadata is not None
+    assert (value.metadata.model_extra or {}) == {"source": "import", "batch": 7}
+    assert value.quotas is not None
+    assert (value.quotas.model_extra or {}) == {"cpu": 20, "memory": 100}
+    # A null member of a nullable map is a member, not a violation.
+    assert value.nicknames is not None
+    assert (value.nicknames.model_extra or {}) == {"short": "al", "none": None}
+
+    base = {
+        "kind": "showcase",
+        "name": "w",
+        "count": 1,
+        "active": True,
+        "category": "tools",
+        "status": "active",
+        "tier": 1,
+        "scale": 1.5,
+    }
+
+    # A hoisted shape validates like any other model, at the nested path.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "location": {"city": ""}})
+    assert "location.city" in str(excinfo.value)
+
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "rows": [{"cell": "ok"}, {}]})
+    assert "rows.1.cell" in str(excinfo.value)
+
+    # A nested array reports the failing element at its own two-dimensional index.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "grid": [[1], [2, 1.5]]})
+    assert "grid.1.1" in str(excinfo.value)
+
+    # A typed map's member constraints are enforced, keyed by the member.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "quotas": {"cpu": 7}})
+    assert "cpu" in str(excinfo.value)
+
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "tokens": {"primary": "AB"}})
+    assert "primary" in str(excinfo.value)
+
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate({**base, "nicknames": {"tiny": "a"}})
+    assert "tiny" in str(excinfo.value)
+
+    # The free-form bag's member-count bound rides with the hoisted type.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = Showcase.model_validate(
+            {**base, "metadata": {"a": 1, "b": 2, "c": 3, "d": 4}}
+        )
+    assert "at most 3 properties" in str(excinfo.value)

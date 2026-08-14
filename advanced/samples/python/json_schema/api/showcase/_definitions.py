@@ -25,6 +25,8 @@ __all__ = [
     "_check_multiple_of",
     "_check_pattern",
     "_check_format",
+    "_check_unique_items",
+    "_check_contains",
     "_reject_explicit_null",
     "_emit_set_fields",
 ]
@@ -96,6 +98,46 @@ def _check_format(
             max_code_points is not None and len(value) > max_code_points
         ) or compiled.search(value) is None:
             raise ValueError(f"must be a valid {format_name}, got {value!r}")
+        return value
+
+    return validate
+
+
+def _check_unique_items(
+    value: list[typing.Any],
+) -> list[typing.Any]:
+    """An AfterValidator asserting an array's elements are pairwise distinct."""
+
+    seen: dict[object, int] = {}
+    for index, element in enumerate(value):
+        if element in seen:
+            raise ValueError(
+                f"duplicate items: element at index {index} equals index {seen[element]}"
+            )
+        seen[element] = index
+    return value
+
+
+def _check_contains(
+    matches: typing.Callable[[typing.Any], bool],
+    min_contains: int,
+    max_contains: int | None = None,
+    bounded_min: bool = False,
+) -> typing.Callable[[list[typing.Any]], list[typing.Any]]:
+    """Builds an AfterValidator asserting how many elements match the `contains` schema."""
+
+    def validate(value: list[typing.Any]) -> list[typing.Any]:
+        match_count = sum(1 for element in value if matches(element))
+        if match_count < min_contains:
+            if bounded_min:
+                raise ValueError(
+                    f"too few matching items: at least {min_contains}, got {match_count}"
+                )
+            raise ValueError("no element matches the required schema")
+        if max_contains is not None and match_count > max_contains:
+            raise ValueError(
+                f"too many matching items: at most {max_contains}, got {match_count}"
+            )
         return value
 
     return validate

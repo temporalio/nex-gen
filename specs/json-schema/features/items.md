@@ -104,7 +104,17 @@ Notes:
   `list[Optional[T]]` (Python), `List<@Nullable T>` (Java) — distinct
   from the array field itself being optional/nullable, which wraps the
   whole collection. The two axes compose (an optional array of nullable
-  elements is legal).
+  elements is legal), and neither implies the other: an optional array of
+  nullable elements is `list[T | None] | None`, not `list[T | None]`.
+- **An inline element shape is named.** An element schema that is an
+  **object** or a `oneOf` *sum type* (two or more non-`null` branches) is
+  named after its position at load — `<EnclosingType><Property>Item`,
+  `…ItemItem` for a nested array — moved into `$defs`, and the element
+  rewritten to a `$ref`, so the element type is an ordinary named model or
+  union in every target (see [[properties]] §"Naming an inline object shape"
+  and [[oneOf]] §"Unions in element positions"). Go and Java decode a *union*
+  element through the union's dispatcher one value at a time — neither can
+  allocate a sealed interface from a whole-collection decode.
 - **Java** uses `List<T>` (interface type; the concrete `ArrayList` is an
   implementation detail of the deserializer). `List<T>` is a reference
   type, so it carries a non-null validator rather than boxing (see
@@ -134,7 +144,10 @@ comes from [[type]]'s `"array"` row.
   can locate the offending element unambiguously (**P11**).
 - **Element recursion.** Each element validates recursively — an array of
   objects runs each object's own `Validate`, an array of arrays recurses
-  again, an array of `$ref` follows the reference (see [[ref]]).
+  again, an array of `$ref` follows the reference (see [[ref]]). A nested
+  array decodes one loop per level, each level's loop variables carrying
+  their depth so an inner element never shadows the level above it, and each
+  level appending its own index to the path (`matrix[1][2]`).
 - **Empty array.** The element loop is vacuous; an empty `[]` passes the
   `items` check (array-length floors, when supported, live in their own
   specs — see Interactions).
@@ -167,10 +180,11 @@ of the value and is preserved).
 | Shape | Example |
 |---|---|
 | List of scalars | `{type:array, items:{type:string}}` |
-| List of objects | `{type:array, items:{type:object, properties:{id:{type:integer}}}}` |
+| List of objects (element named after the position) | `{type:array, items:{type:object, properties:{id:{type:integer}}}}` |
 | Nested array | `{type:array, items:{type:array, items:{type:integer}}}` |
 | Element with assertions | `{type:array, items:{type:string, minLength:1}}` |
 | Nullable elements | `{type:array, items:{oneOf:[{type:string},{type:null}]}}` |
+| Union elements (named after the position) | `{type:array, items:{oneOf:[{type:string},{type:integer}]}}` |
 | Array member of a struct | `{type:object, properties:{tags:{type:array, items:{type:string}}}}` |
 | Self-reference via `items`, **required** OK (see [[ref]]) | tree node — the empty array terminates the recursion: `{type:object, properties:{value:{type:string}, children:{type:array, items:{$ref:"#"}}}}` with `children` required |
 

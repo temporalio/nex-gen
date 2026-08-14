@@ -1,0 +1,51 @@
+{
+  "kind": "showcase",
+  "revision": 1,
+  "enabled": true,
+  "status": "active",
+  "tier": 1,
+  "scale": 1.5,
+  "name": "Widget",
+  "count": 3,
+  "active": true,
+  "category": "tools",
+  "grid": [[1, 2], [3]],
+  "location": {
+    "city": "Springfield",
+    "geo": {
+      "lat": 39.8,
+      "lon": -89.6
+    }
+  },
+  "audit": {
+    "by": "alice"
+  },
+  "rows": [
+    {
+      "cell": "a1"
+    },
+    {
+      "cell": "b2"
+    }
+  ],
+  "ledger": {
+    "opening": {
+      "amount": 100
+    }
+  },
+  "metadata": {
+    "source": "import",
+    "batch": 7
+  },
+  "quotas": {
+    "cpu": 20,
+    "memory": 100
+  },
+  "tokens": {
+    "primary": "abc"
+  },
+  "nicknames": {
+    "short": "al",
+    "none": null
+  }
+}

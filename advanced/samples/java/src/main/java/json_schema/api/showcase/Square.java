@@ -20,11 +20,11 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A square branch of the Shape tagged union.
+ * A square branch of the Shape and shapeOrName tagged unions.
  */
 @JsonSerialize(using = Square.Serializer.class)
 @JsonDeserialize(using = Square.Deserializer.class)
-public final class Square implements Shape {
+public final class Square implements ChoicesValue, Shape, Showcase.ShapeOrName {
     public static final class Kind {
         public static final Kind KIND = new Kind("square");
 

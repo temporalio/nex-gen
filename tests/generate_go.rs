@@ -16,6 +16,70 @@ use common::json_input_path;
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A property whose union has one inline structured object branch (named
+/// `<Union>Object`) and one scalar branch.
+const INLINE_OBJECT_BRANCH_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  payload:
+    oneOf:
+      - type: object
+        required: [text]
+        properties:
+          text: { type: string, minLength: 1 }
+      - { type: string }
+"#;
+
+/// A union whose **non-object** branches each declare constraints of their own:
+/// once the wire token selects a branch, the value is held to everything that
+/// branch declares — including a closed value set — in both directions.
+const BRANCH_CONSTRAINT_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, minLength: 3, pattern: "^[a-z]+$" }
+      - { type: integer, minimum: 1 }
+  listOrName:
+    oneOf:
+      - { type: array, items: { type: number }, minItems: 1, uniqueItems: true }
+      - { type: string, enum: [auto, manual] }
+"#;
+
+/// Unions in positions with no property of their own: an array element (inline
+/// and `$ref`), a map member (inline), plus a nullable element for contrast.
+const ELEMENT_UNION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  segments:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+  choices:
+    type: array
+    items: { $ref: "#/$defs/Choice" }
+  entries: { $ref: "#/$defs/Entries" }
+  slots:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: "null" }
+$defs:
+  Choice:
+    oneOf:
+      - { type: string }
+      - { type: boolean }
+  Entries:
+    type: object
+    additionalProperties:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+"##;
+
 fn generate_to_string_with_inputs(
     language: nexgen::language::Language,
     input_paths: &[PathBuf],
@@ -698,6 +762,31 @@ fn go_json_generation_matches_checked_in_output() {
                         // constants while the wire values stay `1` / "active".
                         assert!(generated.contains("RevisionGo ShowcaseRevision = 1"));
                         assert!(generated.contains("ActiveGo ShowcaseStatus = \"active\""));
+                        // An inline free-form object branch: the union declares
+                        // the variant struct, whose sole member carries the wire
+                        // members verbatim (a named free-form model gets the same
+                        // shape).
+                        assert!(generated.contains("type ShowcasePayloadObject struct"));
+                        assert!(
+                            generated
+                                .contains("func (ShowcasePayloadObject) isShowcasePayload() {}")
+                        );
+                        assert!(generated.contains("type Extras struct"));
+                        // A tagged union whose branches are written inline: each
+                        // branch names itself with `x-go-name` and is emitted as a
+                        // full model implementing the union interface.
+                        assert!(generated.contains("type TextNote struct"));
+                        assert!(generated.contains("func (TextNote) isNote() {}"));
+                        assert!(generated.contains("func (LinkNote) isNote() {}"));
+                        // The lone inline object branch of a property union
+                        // derives its name from the union it belongs to.
+                        assert!(generated.contains("type ShowcaseDetailObject struct"));
+                        assert!(
+                            generated.contains("func (ShowcaseDetailObject) isShowcaseDetail() {}")
+                        );
+                        assert!(
+                            generated.contains("AdditionalProperties map[string]json.RawMessage")
+                        );
                         // Type-level override: `Contact` emits as `ContactGo`
                         // at its declaration and at every `$ref`.
                         assert!(generated.contains("type ContactGo struct"));
@@ -1583,4 +1672,175 @@ fn generate_formatted_go_json_output(
         .status()
         .unwrap();
     assert!(format_status.success());
+}
+
+/// An inline **structured** object `oneOf` branch on a property: the branch is
+/// named `<Union>Object` and emitted as a full model (struct, `Validate`,
+/// (de)serialize) that implements the union's marker method, so the union's
+/// object token has a concrete type to decode into.
+/// See `specs/json-schema/features/oneOf.md` ("Object branches").
+#[test]
+fn go_json_names_inline_object_union_branch() {
+    let temp_dir = unique_output_path("go-json-inline-branch");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("detail.yaml");
+    fs::write(&input_path, INLINE_OBJECT_BRANCH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("detail");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("detail.go")).unwrap();
+
+    assert!(rendered.contains("Payload DetailPayload `json:\"payload,omitempty\"`"));
+    assert!(rendered.contains("type DetailPayloadObject struct {"));
+    assert!(rendered.contains("Text string `json:\"text\"`"));
+    assert!(rendered.contains("func (DetailPayloadObject) isDetailPayload() {}"));
+    // The branch decodes through its own model, so its constraints apply.
+    assert!(rendered.contains("var v DetailPayloadObject"));
+    assert!(rendered.contains("func (m DetailPayloadObject) Validate() error {"));
+    assert!(rendered.contains("func (m *DetailPayloadObject) UnmarshalJSON(data []byte) error {"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A union in an **element position** — an array's `items` and a map's
+/// `additionalProperties` — is named by the loader and emitted as an ordinary
+/// named union, and each element decodes through the union's dispatcher rather
+/// than `json.Unmarshal` (which cannot allocate a sealed interface).
+/// See `specs/json-schema/features/oneOf.md` ("Unions in element positions").
+#[test]
+fn go_json_decodes_element_position_unions() {
+    let temp_dir = unique_output_path("go-json-element-union");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bag.yaml");
+    fs::write(&input_path, ELEMENT_UNION_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bag");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("bag.go")).unwrap();
+
+    // The inline element union is named after its position.
+    assert!(rendered.contains("type BagSegmentsItem interface {"));
+    assert!(rendered.contains("Segments []BagSegmentsItem `json:\"segments,omitempty\"`"));
+    // Elements decode one at a time, with the index in the violation path.
+    assert!(rendered.contains("p0 := fmt.Sprintf(\"%s[%d]\", \"segments\", i0)"));
+    assert!(rendered.contains("if v, ok := unmarshalBagSegmentsItem(e0, p0, &errs); ok {"));
+    // A named union in element position takes the same path.
+    assert!(rendered.contains("Choices []Choice `json:\"choices,omitempty\"`"));
+    assert!(rendered.contains("if v, ok := unmarshalChoice(e0, p0, &errs); ok {"));
+    // Serialize re-runs each element's own branch constraints (P12).
+    assert!(rendered.contains("mergeNested(&errs, p0, v0.Validate())"));
+    // A map member routes through the dispatcher under its key.
+    assert!(rendered.contains("AdditionalProperties map[string]EntriesValue"));
+    assert!(rendered.contains("if value, ok := unmarshalEntriesValue(v, k, &errs); ok {"));
+    // Element nullability stays the element's own concern.
+    assert!(rendered.contains("Slots []*string `json:\"slots,omitempty\"`"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Every constraint a **non-object** branch declares is carried into the
+/// wrapper's `Validate`, which the dispatcher calls on the way in and
+/// `MarshalJSON` re-runs before emit (P12). A `pattern` on a branch compiles to a
+/// package-level regex var keyed by the wrapper type, and a closed value set is
+/// checked against the wire literals (the wrapper has no field to hang value
+/// constants off). See `specs/json-schema/features/oneOf.md` ("Validator mapping").
+#[test]
+fn go_json_validates_non_object_union_branch_constraints() {
+    let temp_dir = unique_output_path("go-json-branch-constraints");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bc.yaml");
+    fs::write(&input_path, BRANCH_CONSTRAINT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bc");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("bc.go")).unwrap();
+
+    // The string branch: length, then the pattern through its own compiled var.
+    assert!(rendered.contains("var bcValueStringPattern = regexp.MustCompile(\"^[a-z]+$\")"));
+    assert!(rendered.contains("must have length >= 3, got %d"));
+    assert!(rendered.contains("if !bcValueStringPattern.MatchString(string(v)) {"));
+    // The integer branch's own bound.
+    assert!(rendered.contains("if int64(v) < 1 {"));
+    assert!(rendered.contains("must be >= 1, got %v"));
+    // The array branch's bounds, over the wrapper's underlying slice.
+    assert!(rendered.contains("if n := len([]float64(v)); n < 1 {"));
+    assert!(rendered.contains("duplicate items: element at index %d equals index %d"));
+    // A closed value set on a branch is a membership check over the wire values.
+    assert!(rendered.contains("switch string(v) {"));
+    assert!(rendered.contains("case \"auto\", \"manual\":"));
+    // The dispatcher runs the selected branch's `Validate`, and so does the
+    // model's own `Validate` (which `MarshalJSON` calls before emit).
+    assert!(rendered.contains("v := BcValueString(s)\n\t\tmergeNested(errs, path, v.Validate())"));
+    assert!(rendered.contains("mergeNested(&errs, \"value\", m.Value.Validate())"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A description that ends a sentence with a package-like word must not pull in
+/// an import: an unused import is a Go compile error.
+#[test]
+fn go_json_ignores_package_names_in_doc_comments() {
+    let temp_dir = unique_output_path("go-json-comment-import");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("note.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  label:
+    description: Processed one at a time.
+    type: string
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("note");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("note.go")).unwrap();
+
+    assert!(rendered.contains("one at a time."));
+    assert!(!rendered.contains("\t\"time\"\n"));
+    fs::remove_dir_all(temp_dir).unwrap();
 }

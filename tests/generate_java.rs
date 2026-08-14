@@ -11,6 +11,70 @@ use common::json_input_path;
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A property whose union has one inline structured object branch (named
+/// `<Union>Object`) and one scalar branch.
+/// Unions in positions with no property of their own: an array element (inline
+/// and `$ref`), a map member (inline), plus a nullable element for contrast.
+const ELEMENT_UNION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  segments:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+  choices:
+    type: array
+    items: { $ref: "#/$defs/Choice" }
+  entries: { $ref: "#/$defs/Entries" }
+  slots:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: "null" }
+$defs:
+  Choice:
+    oneOf:
+      - { type: string }
+      - { type: boolean }
+  Entries:
+    type: object
+    additionalProperties:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+"##;
+
+const INLINE_OBJECT_BRANCH_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  payload:
+    oneOf:
+      - type: object
+        required: [text]
+        properties:
+          text: { type: string, minLength: 1 }
+      - { type: string }
+"#;
+
+/// A union whose **non-object** branches each declare constraints of their own:
+/// once the wire token selects a branch, the value is held to everything that
+/// branch declares — including a closed value set — in both directions.
+const BRANCH_CONSTRAINT_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, minLength: 3, pattern: "^[a-z]+$" }
+      - { type: integer, minimum: 1 }
+  listOrName:
+    oneOf:
+      - { type: array, items: { type: number }, minItems: 1, uniqueItems: true }
+      - { type: string, enum: [auto, manual] }
+"#;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -106,6 +170,31 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
             assert!(all.contains("private final @Nullable String legacyIdJava;"));
             assert!(all.contains("public @Nullable String getLegacyIdJava() {"));
             assert!(all.contains("gen.writeStringField(\"legacyId\", value.legacyIdJava);"));
+            // An inline free-form object branch: the union declares a nested
+            // wrapper holding the members verbatim (a named free-form model gets
+            // the same catch-all on its POJO).
+            assert!(all.contains("public static final class PayloadObject implements Payload {"));
+            assert!(all.contains("private final Map<String, JsonNode> value;"));
+            assert!(all.contains("public final class Extras {"));
+            // A tagged union whose branches are written inline: each branch names
+            // itself with `x-java-name` and implements the union interface.
+            assert!(all.contains("public final class TextNote implements Note {"));
+            assert!(all.contains("public final class LinkNote implements Note {"));
+            // A structured inline object branch of a *property* union: the branch
+            // is an ordinary POJO implementing the interface nested in the
+            // declaring class, and the union parses through `fromNode` exactly as
+            // a named union def does.
+            assert!(
+                all.contains(
+                    "public final class ShowcaseDetailObject implements Showcase.Detail {"
+                )
+            );
+            assert!(
+                all.contains("return context.readTreeAsValue(node, ShowcaseDetailObject.class);")
+            );
+            assert!(
+                all.contains("detail = Detail.fromNode(field, \"detail\", violations, context);")
+            );
         }
         fs::remove_dir_all(temp_dir).unwrap();
     }
@@ -119,4 +208,164 @@ fn java_json_example_generation_matches_checked_in_output() {
 #[test]
 fn java_json_api_example_generation_matches_checked_in_output() {
     assert_regeneration_matches("api", true);
+}
+
+/// A structured inline object branch of a property-level union is named
+/// `<Union>Object` by the load and emitted as an ordinary POJO — implementing the
+/// union interface nested in the declaring class, so the interface's `fromNode`
+/// dispatcher (the same one a named union def carries) delegates to the branch's
+/// own deserializer. See `specs/json-schema/features/oneOf.md`.
+#[test]
+fn java_json_names_inline_object_union_branch() {
+    let temp_dir = unique_output_path("java-json-inline-branch");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("detail.yaml");
+    fs::write(&input_path, INLINE_OBJECT_BRANCH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("detail");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("detail".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let branch = &rendered[&PathBuf::from("DetailPayloadObject.java")];
+    assert!(
+        branch.contains("public final class DetailPayloadObject implements Detail.Payload {"),
+        "{branch}"
+    );
+    // The branch is an ordinary model: its own constraints and catch-all.
+    assert!(branch.contains("must have length >= 1"), "{branch}");
+    assert!(
+        branch.contains("private final Map<String, JsonNode> additionalProperties;"),
+        "{branch}"
+    );
+
+    let declaring = &rendered[&PathBuf::from("Detail.java")];
+    for expected in [
+        "public interface Payload {",
+        "static @Nullable Payload fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {",
+        "return context.readTreeAsValue(node, DetailPayloadObject.class);",
+        "public static final class PayloadString implements Payload {",
+        "payload = Payload.fromNode(field, \"payload\", violations, context);",
+    ] {
+        assert!(declaring.contains(expected), "{expected}\n{declaring}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Every constraint a **non-object** branch declares becomes a `validate` on its
+/// wrapper class: the `fromNode` dispatcher runs it on the way in, and the
+/// enclosing POJO's `Serializer` runs it again through the interface's static
+/// `validate` before emit (P12), so a branch violation aggregates with its
+/// siblings. See `specs/json-schema/features/oneOf.md` ("Validator mapping").
+#[test]
+fn java_json_validates_non_object_union_branch_constraints() {
+    let temp_dir = unique_output_path("java-json-branch-constraints");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bc.yaml");
+    fs::write(&input_path, BRANCH_CONSTRAINT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bc");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("bc".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = read_java_files(&output_path);
+    let declaring = &rendered[&PathBuf::from("Bc.java")];
+
+    // The wrapper carries the branch's checks, and its compiled `pattern` — the
+    // wrapper's single field is `value`, so the static follows that name.
+    assert!(declaring.contains(
+        "private static final java.util.regex.Pattern VALUE_PATTERN = java.util.regex.Pattern.compile(\"^[a-z]+\\\\z\");"
+    ));
+    assert!(declaring.contains("void validate(String path, List<Violation> violations) {"));
+    assert!(declaring.contains("must have length >= 3, got "));
+    assert!(declaring.contains("if (!VALUE_PATTERN.matcher(value).find()) {"));
+    assert!(declaring.contains("must be >= 1, got "));
+    assert!(declaring.contains("must have at least 1 items, got "));
+    assert!(declaring.contains("duplicate items: element at index "));
+    assert!(declaring.contains("must be one of [\\\"auto\\\", \\\"manual\\\"], got "));
+    // Parse: the dispatcher validates the wrapper it just built.
+    assert!(declaring.contains("ValueString wrapped = new ValueString(node.textValue());"));
+    assert!(declaring.contains("wrapped.validate(path, violations);"));
+    // Serialize: the interface's runtime-class dispatcher, called by the POJO's
+    // Serializer before any member is written.
+    assert!(
+        declaring.contains(
+            "static void validate(Value value, String path, List<Violation> violations) {"
+        )
+    );
+    assert!(declaring.contains("Value.validate(value.value, \"value\", violations);"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A union in an element position decodes through the interface's own
+/// `fromNode` dispatcher — Jackson cannot instantiate a sealed interface — with
+/// the element index / member key in the violation path. A nullable element
+/// takes the TYPE_USE annotation instead (the list stays non-null).
+/// See `specs/json-schema/features/oneOf.md` ("Unions in element positions").
+#[test]
+fn java_json_decodes_element_position_unions() {
+    let temp_dir = unique_output_path("java-json-element-union");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bag.yaml");
+    fs::write(&input_path, ELEMENT_UNION_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bag");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("bag".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    // The inline element union is named after its position and emitted as an
+    // ordinary named union def.
+    assert!(rendered.contains_key(&PathBuf::from("BagSegmentsItem.java")));
+    assert!(rendered.contains_key(&PathBuf::from("EntriesValue.java")));
+
+    let declaring = &rendered[&PathBuf::from("Bag.java")];
+    for expected in [
+        "private final @Nullable List<BagSegmentsItem> segments;",
+        "String elementPath = \"segments\" + \"[\" + index + \"]\";",
+        "BagSegmentsItem parsedItems = BagSegmentsItem.fromNode(element, elementPath, violations, context);",
+        "Choice parsedItems = Choice.fromNode(element, elementPath, violations, context);",
+        "private final @Nullable List<@Nullable String> slots;",
+        "items.add(null);",
+    ] {
+        assert!(declaring.contains(expected), "{expected}\n{declaring}");
+    }
+
+    let map = &rendered[&PathBuf::from("Entries.java")];
+    for expected in [
+        "Map<String, EntriesValue> additionalProperties",
+        "EntriesValue parsedAdditionalProperties = EntriesValue.fromNode(element, key, violations, context);",
+    ] {
+        assert!(map.contains(expected), "{expected}\n{map}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
 }

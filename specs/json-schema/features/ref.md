@@ -48,6 +48,13 @@ Rationale (citing [[PRINCIPLES.md]]):
   load-time merge ([[allOf]]): a sibling-bearing `$ref` is rewritten to
   `allOf:[{$ref:X},{…siblings}]` and **merged** into a single schema. `$id`
   re-basing opens a URI-resolution surface we otherwise avoid (**P6**).
+- **`x-<lang>-name` is the one exception**, because it is not a conjunct: it
+  names the **member** the reference is bound to ([[properties]] Stage 4) and
+  asserts nothing about the value, so merging it would *clone* the referenced
+  target into the use site instead of referencing it. A `$ref` carrying
+  nothing but name overrides therefore stays a plain reference with the member
+  renamed — and without that, a member whose type is a `$ref` could not be
+  renamed at all, leaving a member named `class` unfixable in Python and Java.
 
 ### Accepted ref forms
 
@@ -72,7 +79,8 @@ fix-it:
   sugar is rewritten to an explicit `allOf` and merged ([[allOf]]). The
   merged result is subject to `allOf`'s reject rules (e.g. a sibling that
   contradicts the target), and unresolvable/cyclic targets still reject
-  here.
+  here. An `x-<lang>-name` sibling is not merged — it renames the member and
+  leaves the reference intact (above).
 - **`$id` anywhere** (root or nested) → reject. Fix-it: "remove `$id`;
   refs resolve by file path + JSON pointer." (local-file-only — no URI resolution.)
 - **HTTP/URI ref**, `$anchor` fragment, `$dynamicRef`, `$dynamicAnchor`

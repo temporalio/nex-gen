@@ -1,0 +1,34 @@
+{
+  "kind": "showcase",
+  "revision": 1,
+  "enabled": true,
+  "status": "active",
+  "tier": 1,
+  "scale": 1.5,
+  "name": "Widget",
+  "count": 3,
+  "active": true,
+  "category": "tools",
+  "shapes": [
+    {
+      "kind": "circle",
+      "radius": 2.5
+    },
+    {
+      "kind": "square",
+      "side": 4.0
+    }
+  ],
+  "segments": ["alpha", 7],
+  "slots": ["first", null, "third"],
+  "choices": {
+    "primary": {
+      "kind": "circle",
+      "radius": 1.0
+    },
+    "secondary": {
+      "kind": "square",
+      "side": 2.0
+    }
+  }
+}

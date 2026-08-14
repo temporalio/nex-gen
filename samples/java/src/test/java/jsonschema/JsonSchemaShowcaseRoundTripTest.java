@@ -19,16 +19,26 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import json_schema.definitions.showcase.Address;
 import json_schema.definitions.showcase.Attributes;
 import json_schema.definitions.showcase.Circle;
 import json_schema.definitions.showcase.ContactJava;
+import json_schema.definitions.showcase.Extras;
 import json_schema.definitions.showcase.Labels;
+import json_schema.definitions.showcase.LinkNote;
+import json_schema.definitions.showcase.Nicknames;
+import json_schema.definitions.showcase.Quotas;
 import json_schema.definitions.showcase.Settings;
 import json_schema.definitions.showcase.Showcase;
+import json_schema.definitions.showcase.ShowcaseDetailObject;
+import json_schema.definitions.showcase.ShowcaseLedgerValue;
+import json_schema.definitions.showcase.Tokens;
+import json_schema.definitions.showcase.ShowcaseSegmentsItem;
 import json_schema.definitions.showcase.Square;
+import json_schema.definitions.showcase.TextNote;
 import json_schema.definitions.showcase.Widget;
 
 /**
@@ -117,7 +127,7 @@ final class JsonSchemaShowcaseRoundTripTest {
         assertEquals("1 Main St", full.getAddress().getStreet());
         assertTrue(full.getAddress().getAdditionalProperties().containsKey("region"));
         assertNotNull(full.getLabels());
-        assertEquals("prod", full.getLabels().getValues().get("env"));
+        assertEquals("prod", full.getLabels().getAdditionalProperties().get("env"));
         assertNotNull(full.getSettings());
         assertEquals(14L, full.getSettings().getFontSize());
 
@@ -133,8 +143,8 @@ final class JsonSchemaShowcaseRoundTripTest {
         assertTrue(address.getAdditionalProperties().containsKey("x-extra"));
 
         Labels labels = roundTrip("labels.json", Labels.class);
-        assertEquals("prod", labels.getValues().get("env"));
-        assertEquals("core", labels.getValues().get("team"));
+        assertEquals("prod", labels.getAdditionalProperties().get("env"));
+        assertEquals("core", labels.getAdditionalProperties().get("team"));
 
         Settings settings = roundTrip("settings.json", Settings.class);
         assertEquals("dark", settings.getTheme());
@@ -453,8 +463,8 @@ final class JsonSchemaShowcaseRoundTripTest {
     void objectConstraintsRoundTripAndReject() throws IOException {
         // Valid map and object round-trip.
         Attributes attributes = roundTrip("attributes.json", Attributes.class);
-        assertEquals("a", attributes.getValues().get("host"));
-        assertEquals("8080", attributes.getValues().get("port"));
+        assertEquals("a", attributes.getAdditionalProperties().get("host"));
+        assertEquals("8080", attributes.getAdditionalProperties().get("port"));
 
         ContactJava contact = roundTrip("contact.json", ContactJava.class);
         assertEquals("1 Main St", contact.getShippingStreet());
@@ -590,6 +600,566 @@ final class JsonSchemaShowcaseRoundTripTest {
     }
 
     /**
+     * Once the wire token selects a branch, the value is held to everything that
+     * branch declares — {@code idOrName}'s length/numeric bounds, {@code mode}'s
+     * closed string value set, {@code measurements}' array bounds and pattern —
+     * in both directions, with the union's own path on the violation.
+     */
+    @Test
+    void oneOfBranchConstraintsAreEnforced() throws IOException {
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // The string branch's own `minLength`.
+        RuntimeException shortString = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload((base + ",\"idOrName\":\"ab\"}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(shortString).contains("idOrName: must have length >= 3, got 2"),
+                messageChain(shortString));
+
+        // The integer branch's own `minimum` — the string branch's bound does not
+        // apply to it.
+        RuntimeException smallInt = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload((base + ",\"idOrName\":0}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(smallInt).contains("idOrName: must be >= 1, got 0"),
+                messageChain(smallInt));
+
+        // A closed value set on a branch: an unknown string names the admissible
+        // values, while the integer branch accepts any non-negative value.
+        RuntimeException badMode = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload((base + ",\"mode\":\"turbo\"}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(badMode).contains("mode: must be one of [\"auto\", \"manual\"], got turbo"),
+                messageChain(badMode));
+        Showcase full = roundTrip("showcase-full.json", Showcase.class);
+        assertTrue(full.getMode() instanceof Showcase.ModeString);
+        assertEquals("auto", ((Showcase.ModeString) full.getMode()).getValue());
+
+        // The array branch's `minItems`/`uniqueItems` and the string branch's
+        // `pattern`, on the same union.
+        RuntimeException empty = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload((base + ",\"measurements\":[]}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(empty).contains("measurements: must have at least 1 items, got 0"),
+                messageChain(empty));
+        RuntimeException duplicate = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"measurements\":[1.5,1.5]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(duplicate)
+                        .contains("duplicate items: element at index 1 equals index 0"),
+                messageChain(duplicate));
+        RuntimeException offPattern = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"measurements\":\"AUTO\"}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(offPattern).contains("measurements: must match pattern"),
+                messageChain(offPattern));
+
+        // An element union's branch constraints hold per element, under the
+        // element's own index (P11).
+        RuntimeException element = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"segments\":[\"ab\",\"c\"]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(element).contains("segments[1]: must have length >= 2, got 1"),
+                messageChain(element));
+
+        // Serialize re-runs the selected branch's constraints (P12), for a
+        // property-level union and for a collection's elements.
+        RuntimeException serialize = assertThrows(RuntimeException.class, () ->
+                CONVERTER.toPayload(
+                        showcaseWith(null, null, null, null, null,
+                                new Showcase.IdOrNameString("ab"))));
+        assertTrue(
+                messageChain(serialize).contains("idOrName: must have length >= 3, got 2"),
+                messageChain(serialize));
+    }
+
+    /**
+     * The free-form object in both positions: the inline object branch of the
+     * {@code payload} union (a nested wrapper class holding the members verbatim)
+     * and the named {@code Extras} model. Members keep their wire form, so a large
+     * integer survives untruncated, and the member-count bound is enforced.
+     */
+    @Test
+    void freeFormObjectRoundTripsAndRejects() throws IOException {
+        Showcase asObject = roundTrip("showcase-freeform.json", Showcase.class);
+        assertTrue(asObject.getPayload() instanceof Showcase.PayloadObject);
+        Map<String, JsonNode> members =
+                ((Showcase.PayloadObject) asObject.getPayload()).getValue();
+        assertEquals(9007199254740992L, members.get("big").longValue());
+        assertNotNull(asObject.getExtras());
+        assertEquals(
+                "free-form",
+                asObject.getExtras().getAdditionalProperties().get("note").textValue());
+
+        // The same union's string branch, selected by its wire token.
+        Showcase asString = roundTrip("showcase-freeform-string.json", Showcase.class);
+        assertTrue(asString.getPayload() instanceof Showcase.PayloadString);
+        assertEquals("text", ((Showcase.PayloadString) asString.getPayload()).getValue());
+
+        // The named free-form model round-trips standalone, nested members included.
+        Extras extras = roundTrip("extras.json", Extras.class);
+        assertEquals(1, extras.getAdditionalProperties().get("nested").get("a").intValue());
+        assertEquals(
+                9007199254740992L, extras.getAdditionalProperties().get("count").longValue());
+
+        // maxProperties over the member set is enforced.
+        RuntimeException tooMany = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                "{\"a\":1,\"b\":2,\"c\":3,\"d\":4,\"e\":5}"
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Extras.class,
+                        Extras.class));
+        assertTrue(messageChain(tooMany).contains("at most 4 properties"), messageChain(tooMany));
+
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // An unmatchable wire token (boolean) names the admissible kinds.
+        RuntimeException badToken = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload((base + ",\"payload\":true}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badToken).contains("object, string"), messageChain(badToken));
+    }
+
+    /**
+     * The {@code note} tagged union, whose object branches are written inline in
+     * the schema and named by their {@code x-java-name} overrides: each is a full
+     * POJO that implements the union interface, keeping its own constraints and
+     * its own verbatim member map.
+     */
+    @Test
+    void inlineObjectUnionRoundTripsAndRejects() throws IOException {
+        Showcase text = roundTrip("showcase-note-text.json", Showcase.class);
+        assertTrue(text.getNote() instanceof TextNote);
+        TextNote note = (TextNote) text.getNote();
+        assertEquals("remember the milk", note.getBody());
+        // The branch stays open: an unknown member is preserved (P13).
+        assertTrue(note.getAdditionalProperties().get("pinned").booleanValue());
+
+        Showcase link = roundTrip("showcase-note-link.json", Showcase.class);
+        assertTrue(link.getNote() instanceof LinkNote);
+        assertEquals(
+                "https://example.test/notes/1", ((LinkNote) link.getNote()).getHref());
+
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // The selected branch's own constraints are enforced.
+        RuntimeException tooShort = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"note\":{\"kind\":\"text\",\"body\":\"\"}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(tooShort).contains("length >= 1"), messageChain(tooShort));
+
+        // An unknown tag value matches no branch.
+        RuntimeException badTag = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"note\":{\"kind\":\"audio\"}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badTag).contains("audio"), messageChain(badTag));
+    }
+
+    /**
+     * The {@code detail} union is written inline on the property, so its interface
+     * is nested in {@code Showcase}. Its lone structured object branch derives
+     * {@code ShowcaseDetailObject} from the union it belongs to and is an ordinary
+     * POJO implementing that nested interface, so the union's {@code fromNode}
+     * delegates to the branch's own deserializer; the string branch is carried by
+     * the generated {@code DetailString} wrapper.
+     */
+    @Test
+    void propertyInlineObjectUnionRoundTripsAndRejects() throws IOException {
+        Showcase object = roundTrip("showcase-detail-object.json", Showcase.class);
+        assertTrue(object.getDetail() instanceof ShowcaseDetailObject);
+        ShowcaseDetailObject detail = (ShowcaseDetailObject) object.getDetail();
+        assertEquals("E_LIMIT", detail.getCode());
+        assertEquals("retry later", detail.getHint());
+        // The branch stays open: an unknown member is preserved (P13).
+        assertEquals(250, detail.getAdditionalProperties().get("retryAfterMs").intValue());
+
+        Showcase text = roundTrip("showcase-detail-string.json", Showcase.class);
+        assertTrue(text.getDetail() instanceof Showcase.DetailString);
+        assertEquals("E_LIMIT", ((Showcase.DetailString) text.getDetail()).getValue());
+
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // The object branch's own constraints are enforced.
+        RuntimeException tooShort = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"detail\":{\"code\":\"\"}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(tooShort).contains("length >= 1"), messageChain(tooShort));
+
+        // A token admitted by no branch names the admissible ones.
+        RuntimeException badToken = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"detail\":7}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(badToken).contains("ShowcaseDetailObject, string"),
+                messageChain(badToken));
+    }
+
+    /**
+     * The {@code shapeOrName} union composes both selector layers: {@code fromNode}
+     * switches on the JSON node kind to pick object-vs-string and, for an object,
+     * peeks the shared required {@code kind} const to pick Circle-vs-Square. Both
+     * POJOs also implement the {@code Shape} interface, so a branch type may take
+     * part in more than one union.
+     */
+    @Test
+    void taggedUnionWithScalarBranchRoundTripsAndRejects() throws IOException {
+        Showcase square = roundTrip("showcase-shape-or-name-square.json", Showcase.class);
+        assertTrue(square.getShapeOrName() instanceof Square);
+        assertEquals(4.0, ((Square) square.getShapeOrName()).getSide());
+
+        Showcase named = roundTrip("showcase-shape-or-name-string.json", Showcase.class);
+        assertTrue(named.getShapeOrName() instanceof Showcase.ShapeOrNameString);
+        assertEquals(
+                "unit-square",
+                ((Showcase.ShapeOrNameString) named.getShapeOrName()).getValue());
+
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // The object node routes through the discriminator, so an unknown tag is
+        // rejected rather than falling back to the string branch.
+        RuntimeException badTag = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"shapeOrName\":{\"kind\":\"triangle\"}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badTag).contains("triangle"), messageChain(badTag));
+
+        // A node kind admitted by no branch names all admissible ones.
+        RuntimeException badToken = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"shapeOrName\":7}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(badToken).contains("Circle, Square, string"),
+                messageChain(badToken));
+    }
+
+    /**
+     * The {@code measurements} union has an array branch, which has no definition
+     * to take a name from: Java wraps it in the generated {@code MeasurementsArray}
+     * class (a {@code @JsonValue} holder, so it writes back as a bare array)
+     * alongside the {@code MeasurementsString} wrapper.
+     */
+    @Test
+    void arrayBranchUnionRoundTripsAndRejects() throws IOException {
+        Showcase values = roundTrip("showcase-measurements-array.json", Showcase.class);
+        assertTrue(values.getMeasurements() instanceof Showcase.MeasurementsArray);
+        assertEquals(
+                java.util.Arrays.asList(1.5, 2.5, 3.75),
+                ((Showcase.MeasurementsArray) values.getMeasurements()).getValue());
+
+        Showcase preset = roundTrip("showcase-measurements-string.json", Showcase.class);
+        assertTrue(preset.getMeasurements() instanceof Showcase.MeasurementsString);
+        assertEquals(
+                "auto", ((Showcase.MeasurementsString) preset.getMeasurements()).getValue());
+
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // A node kind admitted by neither branch names both admissible ones.
+        RuntimeException badToken = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"measurements\":true}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badToken).contains("array, string"), messageChain(badToken));
+
+        // The array branch's element type is enforced once the branch is selected.
+        RuntimeException badElement = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"measurements\":[\"x\"]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(badElement).contains("expected number"), messageChain(badElement));
+    }
+
+    /**
+     * Unions in positions with no property of their own: an array element at a
+     * named union ({@code shapes}), an array element at an inline union the loader
+     * names {@code ShowcaseSegmentsItem}, and a map member at an inline union
+     * named {@code ChoicesValue}. Jackson cannot instantiate the sealed
+     * interface, so each element/member is routed through the interface's own
+     * {@code fromNode} dispatcher, which reports under the element index or the
+     * member key.
+     */
+    @Test
+    void elementPositionUnionsRoundTripAndReject() throws IOException {
+        Showcase value = roundTrip("showcase-element-unions.json", Showcase.class);
+
+        assertNotNull(value.getShapes());
+        assertEquals(2, value.getShapes().size());
+        assertTrue(value.getShapes().get(0) instanceof Circle);
+        assertEquals(2.5, ((Circle) value.getShapes().get(0)).getRadius());
+        assertTrue(value.getShapes().get(1) instanceof Square);
+        assertEquals(4.0, ((Square) value.getShapes().get(1)).getSide());
+
+        assertNotNull(value.getSegments());
+        assertEquals(
+                "alpha",
+                ((ShowcaseSegmentsItem.ShowcaseSegmentsItemString) value.getSegments().get(0))
+                        .getValue());
+        assertEquals(
+                7L,
+                ((ShowcaseSegmentsItem.ShowcaseSegmentsItemInteger) value.getSegments().get(1))
+                        .getValue());
+
+        // Element nullability is the element's own concern: the list stays a
+        // list, its members are @Nullable, and an explicit null is a member.
+        assertEquals(java.util.Arrays.asList("first", null, "third"), value.getSlots());
+
+        assertNotNull(value.getChoices());
+        assertTrue(value.getChoices().getAdditionalProperties().get("primary") instanceof Circle);
+
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // A bad element is reported at its own index, not at the array.
+        RuntimeException badElement = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"shapes\":[{\"kind\":\"circle\",\"radius\":1},true]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badElement).contains("shapes[1]"), messageChain(badElement));
+
+        // An unknown discriminator inside an element is still routed by tag.
+        RuntimeException badTag = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"shapes\":[{\"kind\":\"triangle\"}]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badTag).contains("triangle"), messageChain(badTag));
+
+        // The inline element union is a closed sum type like any other.
+        RuntimeException badSegment = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"segments\":[\"ok\",1.5]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badSegment).contains("segments[1]"), messageChain(badSegment));
+
+        // A map member's violation carries its key.
+        RuntimeException badMember = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"choices\":{\"primary\":\"circle\"}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badMember).contains("primary"), messageChain(badMember));
+    }
+
+    /**
+     * An object written inline in a value position is named after that position and
+     * emitted as an ordinary model: a property ({@code location}, with its own
+     * nested {@code geo}), a nullable property ({@code audit}), an array element
+     * ({@code rows}), a map and its member ({@code ledger}), and a free-form bag
+     * ({@code metadata}). The same fixture covers a typed map's member constraints
+     * ({@code quotas}, {@code tokens}, {@code nicknames}) and a nested array
+     * ({@code grid}).
+     */
+    @Test
+    void inlineObjectShapesRoundTripAndReject() throws IOException {
+        Showcase value = roundTrip("showcase-inline-shapes.json", Showcase.class);
+
+        assertEquals(
+                java.util.Arrays.asList(
+                        java.util.Arrays.asList(1L, 2L), java.util.Arrays.asList(3L)),
+                value.getGrid());
+        assertNotNull(value.getLocation());
+        assertEquals("Springfield", value.getLocation().getCity());
+        assertNotNull(value.getLocation().getGeo());
+        assertEquals(39.8, value.getLocation().getGeo().getLat());
+        assertNotNull(value.getAudit());
+        assertEquals("alice", value.getAudit().getBy());
+        assertNotNull(value.getRows());
+        assertEquals("a1", value.getRows().get(0).getCell());
+        // The member override renamed the accessor (`getLedgerJava`); the hoisted
+        // types keep their position-derived names.
+        assertNotNull(value.getLedgerJava());
+        ShowcaseLedgerValue opening =
+                value.getLedgerJava().getAdditionalProperties().get("opening");
+        assertNotNull(opening);
+        assertEquals(100L, opening.getAmount());
+        assertNotNull(value.getMetadata());
+        assertEquals(2, value.getMetadata().getAdditionalProperties().size());
+        assertNotNull(value.getQuotas());
+        assertEquals(20L, value.getQuotas().getAdditionalProperties().get("cpu"));
+        // A null member of a nullable map is a member, not a violation.
+        assertNotNull(value.getNicknames());
+        assertEquals("al", value.getNicknames().getAdditionalProperties().get("short"));
+        assertTrue(value.getNicknames().getAdditionalProperties().containsKey("none"));
+        assertNull(value.getNicknames().getAdditionalProperties().get("none"));
+
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+
+        // A hoisted shape validates like any other model, at the nested path.
+        RuntimeException nested = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"location\":{\"city\":\"\"}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(nested).contains("location.city"), messageChain(nested));
+
+        RuntimeException badRow = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"rows\":[{\"cell\":\"ok\"},{}]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badRow).contains("rows[1]"), messageChain(badRow));
+
+        // A nested array reports the failing element at its own two-dimensional
+        // index — each level decodes elementwise.
+        RuntimeException badCell = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"grid\":[[1],[2,1.5]]}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badCell).contains("grid[1][1]"), messageChain(badCell));
+
+        // A typed map's member constraints are enforced, keyed by the member.
+        RuntimeException badQuota = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"quotas\":{\"cpu\":7}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badQuota).contains("cpu"), messageChain(badQuota));
+        assertTrue(
+                messageChain(badQuota).contains("must be a multiple of 5"),
+                messageChain(badQuota));
+
+        RuntimeException badToken = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"tokens\":{\"primary\":\"AB\"}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badToken).contains("primary"), messageChain(badToken));
+
+        RuntimeException badNickname = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"nicknames\":{\"tiny\":\"a\"}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badNickname).contains("tiny"), messageChain(badNickname));
+
+        // The free-form bag's member-count bound rides with the hoisted type.
+        RuntimeException tooManyMembers = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(
+                                (base + ",\"metadata\":{\"a\":1,\"b\":2,\"c\":3,\"d\":4}}")
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(
+                messageChain(tooManyMembers).contains("at most 3"), messageChain(tooManyMembers));
+
+        // Serialize re-runs every member's own constraints before emitting (P12).
+        Map<String, Long> badQuotas = new java.util.LinkedHashMap<>();
+        badQuotas.put("cpu", 7L);
+        RuntimeException quotaSerialize = assertThrows(RuntimeException.class, () ->
+                CONVERTER.toPayload(new Quotas(badQuotas)));
+        assertTrue(messageChain(quotaSerialize).contains("cpu"), messageChain(quotaSerialize));
+
+        Map<String, String> badTokens = new java.util.LinkedHashMap<>();
+        badTokens.put("primary", "AB");
+        RuntimeException tokenSerialize = assertThrows(RuntimeException.class, () ->
+                CONVERTER.toPayload(new Tokens(badTokens)));
+        assertTrue(messageChain(tokenSerialize).contains("primary"), messageChain(tokenSerialize));
+    }
+
+    /**
      * Builds a Showcase with all required members valid, varying only the members
      * under serialize-side test; every other optional member is left unset.
      */
@@ -599,6 +1169,20 @@ final class JsonSchemaShowcaseRoundTripTest {
             String requestId,
             Long priority,
             java.util.List<String> aliases) {
+        return showcaseWith(code, sku, requestId, priority, aliases, null);
+    }
+
+    /**
+     * As {@link #showcaseWith}, additionally varying the {@code idOrName} union
+     * member so a branch's own constraints can be exercised on the serialize side.
+     */
+    private static Showcase showcaseWith(
+            String code,
+            String sku,
+            String requestId,
+            Long priority,
+            java.util.List<String> aliases,
+            Showcase.IdOrName idOrName) {
         // Closed value-set members can only hold a known value-class constant —
         // a wrong value cannot be constructed (private constructor), so these
         // fields are always the valid constants here.
@@ -608,7 +1192,9 @@ final class JsonSchemaShowcaseRoundTripTest {
                 "w", 1L, true,
                 null, code, sku, null, requestId, null, null, null, null,
                 null, null, null, null, null, null, null, null, "tools",
-                priority, null, null, null, null, aliases, null, null, null,
+                priority, null, null, null, null, aliases, null, idOrName, null,
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null);
     }
 

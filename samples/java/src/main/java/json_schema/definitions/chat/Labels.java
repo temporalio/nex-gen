@@ -23,14 +23,14 @@ import org.jspecify.annotations.Nullable;
 @JsonSerialize(using = Labels.Serializer.class)
 @JsonDeserialize(using = Labels.Deserializer.class)
 public final class Labels {
-    private final Map<String, String> values;
+    private final Map<String, String> additionalProperties;
 
-    public Labels(Map<String, String> values) {
-        this.values = values;
+    public Labels(Map<String, String> additionalProperties) {
+        this.additionalProperties = additionalProperties;
     }
 
-    public Map<String, String> getValues() {
-        return values;
+    public Map<String, String> getAdditionalProperties() {
+        return additionalProperties;
     }
 
     @Override
@@ -41,31 +41,33 @@ public final class Labels {
         if (!(other instanceof Labels)) {
             return false;
         }
-        return Objects.equals(this.values, ((Labels) other).values);
+        return Objects.equals(this.additionalProperties, ((Labels) other).additionalProperties);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(values);
+        return Objects.hash(additionalProperties);
     }
 
     @Override
     public String toString() {
-        return "Labels{values=" + values + "}";
+        return "Labels{"
+            + "additionalProperties=" + additionalProperties
+            + "}";
     }
 
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Labels> {
         @Override
         public void serialize(Labels value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
-            if (value.values.size() > 50) {
-                violations.add(new Violation("", "must have at most 50 properties, got " + value.values.size()));
+            if (value.additionalProperties.size() > 50) {
+                violations.add(new Violation("", "must have at most 50 properties, got " + value.additionalProperties.size()));
             }
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
             gen.writeStartObject();
-            for (Map.Entry<String, String> entry : value.values.entrySet()) {
+            for (Map.Entry<String, String> entry : value.additionalProperties.entrySet()) {
                 gen.writeStringField(entry.getKey(), entry.getValue());
             }
             gen.writeEndObject();
@@ -81,7 +83,7 @@ public final class Labels {
                 violations.add(new Violation("", "expected object"));
                 throw new ValidationException(violations);
             }
-            Map<String, String> values = new LinkedHashMap<>();
+            Map<String, String> additionalProperties = new LinkedHashMap<>();
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
@@ -93,7 +95,7 @@ public final class Labels {
                 if (!element.isTextual()) {
                     violations.add(new Violation(key, "expected string value"));
                 } else {
-                    values.put(key, element.textValue());
+                    additionalProperties.put(key, element.textValue());
                 }
             }
             if (node.size() > 50) {
@@ -102,7 +104,7 @@ public final class Labels {
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Labels(values);
+            return new Labels(additionalProperties);
         }
     }
 }

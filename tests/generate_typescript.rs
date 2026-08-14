@@ -21,6 +21,70 @@ const START_WORKFLOW_EXAMPLE_ID: &str = "start-workflow";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A property whose union has one inline structured object branch (named
+/// `<Union>Object`) and one scalar branch.
+/// Unions in positions with no property of their own: an array element (inline
+/// and `$ref`), a map member (inline), plus a nullable element for contrast.
+const ELEMENT_UNION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  segments:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+  choices:
+    type: array
+    items: { $ref: "#/$defs/Choice" }
+  entries: { $ref: "#/$defs/Entries" }
+  slots:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: "null" }
+$defs:
+  Choice:
+    oneOf:
+      - { type: string }
+      - { type: boolean }
+  Entries:
+    type: object
+    additionalProperties:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+"##;
+
+const INLINE_OBJECT_BRANCH_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  payload:
+    oneOf:
+      - type: object
+        required: [text]
+        properties:
+          text: { type: string, minLength: 1 }
+      - { type: string }
+"#;
+
+/// A union whose **non-object** branches each declare constraints of their own:
+/// once the wire token selects a branch, the value is held to everything that
+/// branch declares — including a closed value set — in both directions.
+const BRANCH_CONSTRAINT_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, minLength: 3, pattern: "^[a-z]+$" }
+      - { type: integer, minimum: 1 }
+  listOrName:
+    oneOf:
+      - { type: array, items: { type: number }, minItems: 1, uniqueItems: true }
+      - { type: string, enum: [auto, manual] }
+"#;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -312,6 +376,22 @@ fn typescript_json_example_generation_matches_checked_in_output() {
             assert!(all.contains("legacyIdTs?: string;"));
             assert!(all.contains("legacyIdTs = raw.legacyId;"));
             assert!(all.contains("out.legacyId = value.legacyIdTs;"));
+            // A free-form object stays an anonymous `Record` — narrowed on the
+            // object token as a union branch, and the sole member of the named
+            // `Extras` interface.
+            assert!(all.contains("payload?: Record<string, unknown> | string;"));
+            assert!(all.contains("export interface Extras {"));
+            assert!(all.contains("additionalProperties: Record<string, unknown>;"));
+            // A tagged union whose branches are written inline: each branch names
+            // itself with `x-ts-name` and is emitted as an interface + mapper.
+            assert!(all.contains("export type Note = TextNote | LinkNote;"));
+            assert!(all.contains("export interface TextNote {"));
+            assert!(all.contains("export class LinkNoteMapper {"));
+            // The lone inline object branch of a property union derives its name
+            // from the union it belongs to.
+            assert!(all.contains("detail?: ShowcaseDetailObject | string;"));
+            assert!(all.contains("export interface ShowcaseDetailObject {"));
+            assert!(all.contains("out.detail = serializeShowcaseDetail(value.detail);"));
         }
         fs::remove_dir_all(output_path).unwrap();
     }
@@ -644,4 +724,128 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     );
     assert!(type_roundtrip_rendered.contains("retryPolicy: common.RetryPolicy;"));
     assert!(!type_roundtrip_rendered.contains("retryPolicyOperation"));
+}
+
+/// An inline **structured** object `oneOf` branch on a property: the branch is
+/// named `<Union>Object` and emitted as an interface with its own mapper, and the
+/// union's serialize side routes through it (the in-memory `additionalProperties`
+/// member must not reach the wire).
+/// See `specs/json-schema/features/oneOf.md` ("Object branches").
+#[test]
+fn typescript_json_names_inline_object_union_branch() {
+    let temp_dir = unique_output_path("ts-json-inline-branch");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("detail.yaml");
+    fs::write(&input_path, INLINE_OBJECT_BRANCH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("detail");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    assert!(rendered.contains("payload?: DetailPayloadObject | string;"));
+    assert!(rendered.contains("export interface DetailPayloadObject {"));
+    assert!(rendered.contains("export class DetailPayloadObjectMapper {"));
+    // Parse and serialize both route the object token through the branch mapper.
+    assert!(rendered.contains("new DetailPayloadObjectMapper().fromIntermediate(raw.payload)"));
+    assert!(rendered.contains(
+        "function serializeDetailPayload(value: DetailPayloadObject | string): unknown {"
+    ));
+    assert!(rendered.contains("out.payload = serializeDetailPayload(value.payload);"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Every constraint a **non-object** branch declares is checked once the token
+/// narrows to it, on both sides of the mapper (P12). A `const`/`enum` branch also
+/// narrows the member *type* to its literal set, without which the narrowed
+/// assignment would not even typecheck.
+/// See `specs/json-schema/features/oneOf.md` ("Validator mapping").
+#[test]
+fn typescript_json_validates_non_object_union_branch_constraints() {
+    let temp_dir = unique_output_path("ts-json-branch-constraints");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bc.yaml");
+    fs::write(&input_path, BRANCH_CONSTRAINT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bc");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    // A closed value set narrows the branch type itself.
+    assert!(rendered.contains("listOrName?: number[] | \"auto\" | \"manual\";"));
+    // Parse: each branch's own predicates run under the union's path.
+    assert!(rendered.contains("if ([...(value as string)].length < 3) {"));
+    assert!(rendered.contains("if (!PATTERN_C182F89FDB221836.test((value as string))) {"));
+    assert!(rendered.contains("if ((value as number) < 1) {"));
+    assert!(rendered.contains("if ((listOrName as number[]).length < 1) {"));
+    assert!(rendered.contains("duplicate items: element at index ${index}"));
+    assert!(rendered.contains(
+        "if ((listOrName as \"auto\" | \"manual\") !== \"auto\" && (listOrName as \"auto\" | \"manual\") !== \"manual\") {"
+    ));
+    // Serialize: the same predicates over the in-memory member, aggregated into
+    // the model's own violations before the wire object is built.
+    assert!(rendered.contains("if ([...(value.value as string)].length < 3) {"));
+    assert!(rendered.contains("if ((value.value as number) < 1) {"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A union in an element position: the loader names it, so TypeScript emits an
+/// ordinary union alias plus mapper and runs it per element/member — including
+/// on the serialize side, where an element model's catch-all bag would otherwise
+/// reach the wire. A nullable element parenthesizes (`(T | null)[]`), which
+/// `T | null[]` would silently misread.
+/// See `specs/json-schema/features/oneOf.md` ("Unions in element positions").
+#[test]
+fn typescript_json_maps_element_position_unions() {
+    let temp_dir = unique_output_path("ts-json-element-union");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bag.yaml");
+    fs::write(&input_path, ELEMENT_UNION_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bag");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    assert!(rendered.contains("export type BagSegmentsItem = string | number;"));
+    assert!(rendered.contains("segments?: BagSegmentsItem[];"));
+    assert!(rendered.contains("new BagSegmentsItemMapper().fromIntermediate(element)"));
+    assert!(rendered.contains("new ChoiceMapper().fromIntermediate(element)"));
+    // A map member runs the member mapper in both directions.
+    assert!(rendered.contains("new EntriesValueMapper().fromIntermediate(raw[key])"));
+    assert!(rendered.contains("out[key] = new EntriesValueMapper().toIntermediate(entry);"));
+    // Element nullability is the element's own concern, and parenthesized.
+    assert!(rendered.contains("slots?: (string | null)[];"));
+    fs::remove_dir_all(temp_dir).unwrap();
 }

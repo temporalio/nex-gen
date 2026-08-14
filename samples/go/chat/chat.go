@@ -92,6 +92,7 @@ func (m GetRoomInput) MarshalJSON() ([]byte, error) {
 
 // Labels Arbitrary string key/value labels.
 type Labels struct {
+	// AdditionalProperties holds every member of this map-shaped object.
 	AdditionalProperties map[string]string
 }
 
@@ -118,16 +119,9 @@ func (m *Labels) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]string, len(raw))
 	for k, v := range raw {
-		if isNull(v) {
-			errs = append(errs, Violation{k, "explicit null not allowed"})
-			continue
+		if value, ok := parseStringField(&v, k, true, false, &errs); ok {
+			m.AdditionalProperties[k] = value
 		}
-		var s string
-		if err := json.Unmarshal(v, &s); err != nil {
-			errs = append(errs, Violation{k, "expected string"})
-			continue
-		}
-		m.AdditionalProperties[k] = s
 	}
 	if n := len(raw); n > 50 {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 50 properties, got %d", n)})

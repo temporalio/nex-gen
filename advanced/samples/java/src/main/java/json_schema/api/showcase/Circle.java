@@ -20,11 +20,11 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A circle branch of the Shape tagged union.
+ * A circle branch of the Shape and shapeOrName tagged unions.
  */
 @JsonSerialize(using = Circle.Serializer.class)
 @JsonDeserialize(using = Circle.Deserializer.class)
-public final class Circle implements Shape {
+public final class Circle implements ChoicesValue, Shape, Showcase.ShapeOrName {
     public static final class Kind {
         public static final Kind KIND = new Kind("circle");
 

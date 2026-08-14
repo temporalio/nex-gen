@@ -651,6 +651,9 @@ pub(in crate::generator) struct JavaContext<'a> {
     /// Maps a planned model's `full_name` (the canonical string that appears in
     /// planned `$ref` values) to its `(package, class)` pair.
     pub(in crate::generator) registry: &'a BTreeMap<String, (String, String)>,
+    /// The `full_name` of every definition that is a `oneOf` union, so a `$ref`
+    /// at one can be told apart from a `$ref` at a POJO.
+    pub(in crate::generator) union_defs: &'a BTreeSet<String>,
 }
 
 impl JavaContext<'_> {
@@ -667,6 +670,12 @@ impl JavaContext<'_> {
 
     fn current_package(&self) -> String {
         Self::package_for_module(self.base_package, &self.module.0)
+    }
+
+    /// True when a `$ref` points at a named `oneOf` union definition.
+    fn ref_is_union(&self, reference: &str) -> bool {
+        self.union_defs
+            .contains(reference.strip_prefix("#/$defs/").unwrap_or(reference))
     }
 
     /// Resolve a `$ref` string to the target (package, class) pair.
@@ -734,6 +743,11 @@ enum JavaType {
     Ref {
         package: String,
         class: String,
+        /// True when the target definition is a `oneOf` union — a sealed
+        /// interface Jackson cannot instantiate, so a value in this position
+        /// decodes through the interface's static `fromNode` dispatcher rather
+        /// than `readTreeAsValue`.
+        union: bool,
     },
     List(Box<JavaType>),
     /// A `oneOf` sum type — a sealed-by-convention interface. `class` is the
@@ -793,7 +807,7 @@ impl JavaType {
 
     fn collect_refs(&self, refs: &mut BTreeSet<(String, String)>) {
         match self {
-            JavaType::Ref { package, class } => {
+            JavaType::Ref { package, class, .. } => {
                 refs.insert((package.clone(), class.clone()));
             }
             JavaType::List(inner) => inner.collect_refs(refs),
@@ -903,7 +917,21 @@ struct JavaUnionVariant {
     /// The member's canonical `full_name` (object `$ref` members only), for
     /// wiring `implements` on the member POJO.
     member_full_name: Option<String>,
+    /// The member POJO's package (object `$ref` members only), so a union
+    /// declared in another module still imports the member class.
+    member_package: Option<String>,
+    /// True for an **inline** object member: the union declares the wrapper class
+    /// itself (`<Interface>Object`), because there is no named POJO to implement
+    /// the interface. Only the free-form object stays inline (every structured
+    /// shape is named and `$ref`ed by the loader), so `Map<String, JsonNode>`
+    /// expresses the member in full.
+    owned_object: bool,
+    /// True for an array wrapper whose *elements* are nullable ([[items]]).
+    nullable_items: bool,
     label: String,
+    /// The branch's own schema. A wrapper has no POJO to carry the branch's
+    /// constraints, so it runs them itself ([[oneOf]] §"Validator mapping").
+    schema: Schema,
 }
 
 #[derive(Debug, Clone)]
@@ -974,22 +1002,23 @@ fn classify_java_union(
     let mut variants: Vec<JavaUnionVariant> = Vec::new();
     let mut object_schemas: Vec<Schema> = Vec::new();
     for branch in branches {
-        let (member_schema, object_class, member_full) = if let Some(reference) = &branch.reference
-        {
-            let full = strip_ref(reference).to_string();
-            let member_schema = all_models
-                .get(&full)
-                .and_then(|model| decode_schema(model).ok())
-                .unwrap_or_else(|| branch.clone());
-            let (_package, class) = context.resolve_ref(reference);
-            (member_schema, Some(class), Some(full))
-        } else {
-            (branch.clone(), None, None)
-        };
+        let (member_schema, object_class, member_full, member_package) =
+            if let Some(reference) = &branch.reference {
+                let full = strip_ref(reference).to_string();
+                let member_schema = all_models
+                    .get(&full)
+                    .and_then(|model| decode_schema(model).ok())
+                    .unwrap_or_else(|| branch.clone());
+                let (package, class) = context.resolve_ref(reference);
+                (member_schema, Some(class), Some(full), Some(package))
+            } else {
+                (branch.clone(), None, None, None)
+            };
         let ty = member_schema.ty.as_ref().and_then(Value::as_str);
         match ty {
             Some("null") => nullable = true,
             Some("object") => {
+                let owned_object = object_class.is_none();
                 let class = object_class.unwrap_or_else(|| format!("{interface}Object"));
                 object_schemas.push(member_schema.clone());
                 variants.push(JavaUnionVariant {
@@ -999,7 +1028,15 @@ fn classify_java_union(
                     node_test: "isObject",
                     discriminant_value: None,
                     member_full_name: member_full,
-                    label: class,
+                    member_package,
+                    owned_object,
+                    nullable_items: false,
+                    label: if owned_object {
+                        "object".to_string()
+                    } else {
+                        class
+                    },
+                    schema: member_schema.clone(),
                 });
             }
             Some("string") => variants.push(JavaUnionVariant {
@@ -1009,7 +1046,11 @@ fn classify_java_union(
                 node_test: "isTextual",
                 discriminant_value: None,
                 member_full_name: None,
+                member_package: None,
+                owned_object: false,
+                nullable_items: false,
                 label: "string".to_string(),
+                schema: member_schema.clone(),
             }),
             Some("integer") => variants.push(JavaUnionVariant {
                 class: format!("{interface}Integer"),
@@ -1018,7 +1059,11 @@ fn classify_java_union(
                 node_test: "isNumber",
                 discriminant_value: None,
                 member_full_name: None,
+                member_package: None,
+                owned_object: false,
+                nullable_items: false,
                 label: "integer".to_string(),
+                schema: member_schema.clone(),
             }),
             Some("number") => variants.push(JavaUnionVariant {
                 class: format!("{interface}Number"),
@@ -1027,7 +1072,11 @@ fn classify_java_union(
                 node_test: "isNumber",
                 discriminant_value: None,
                 member_full_name: None,
+                member_package: None,
+                owned_object: false,
+                nullable_items: false,
                 label: "number".to_string(),
+                schema: member_schema.clone(),
             }),
             Some("boolean") => variants.push(JavaUnionVariant {
                 class: format!("{interface}Boolean"),
@@ -1036,7 +1085,11 @@ fn classify_java_union(
                 node_test: "isBoolean",
                 discriminant_value: None,
                 member_full_name: None,
+                member_package: None,
+                owned_object: false,
+                nullable_items: false,
                 label: "boolean".to_string(),
+                schema: member_schema.clone(),
             }),
             Some("array") => {
                 let item = member_schema
@@ -1051,7 +1104,11 @@ fn classify_java_union(
                     node_test: "isArray",
                     discriminant_value: None,
                     member_full_name: None,
+                    member_package: None,
+                    owned_object: false,
+                    nullable_items: member_schema.items.as_deref().is_some_and(allows_null),
                     label: "array".to_string(),
+                    schema: member_schema.clone(),
                 });
             }
             _ => {}
@@ -1171,9 +1228,18 @@ struct FieldPlan {
     numeric: NumericConstraints,
     string_length: StringLengthConstraints,
     array: ArrayConstraints,
+    /// True when the array's *elements* are nullable — the `items` subschema is
+    /// the [[nullability]] `oneOf` pattern. Distinct from `nullable`, which
+    /// wraps the whole collection ([[items]] §"Element nullability is the
+    /// element's own concern").
+    nullable_items: bool,
     /// A `oneOf` sum type carried by this field (an inline union or a `$ref` to
     /// a named union def).
     union: Option<JavaUnion>,
+    /// A `oneOf` sum type carried by this field's *elements* — a collection whose
+    /// element type is a union def ([[oneOf]] §"Unions in element positions").
+    /// Distinct from `union`, which is the field's own type.
+    element_union: Option<JavaUnion>,
 }
 
 impl FieldPlan {
@@ -1195,6 +1261,12 @@ impl FieldPlan {
     fn field_type(&self) -> String {
         if self.is_primitive() {
             self.ty.primitive_name().expect("primitive").to_string()
+        } else if let JavaType::List(item) = &self.ty
+            && self.nullable_items
+        {
+            // A TYPE_USE annotation on the element, not the collection: the
+            // list itself is non-null, its members may be null.
+            format!("List<{}>", element_declaration(item, true))
         } else {
             self.ty.boxed_name()
         }
@@ -1297,10 +1369,23 @@ fn nullable_non_null_schema(schema: &Schema) -> Option<&Schema> {
     })
 }
 
+/// The `full_name` of every model that is a named `oneOf` union definition.
+fn union_def_names(all_models: &BTreeMap<String, PlannedJsonType>) -> BTreeSet<String> {
+    all_models
+        .iter()
+        .filter(|(_, model)| decode_schema(model).is_ok_and(|schema| is_java_union_schema(&schema)))
+        .map(|(full_name, _)| full_name.clone())
+        .collect()
+}
+
 fn java_type_for(schema: &Schema, context: &JavaContext) -> Result<JavaType> {
     if let Some(reference) = &schema.reference {
         let (package, class) = context.resolve_ref(reference);
-        return Ok(JavaType::Ref { package, class });
+        return Ok(JavaType::Ref {
+            package,
+            class,
+            union: context.ref_is_union(reference),
+        });
     }
     if let Some(non_null) = nullable_non_null_schema(schema) {
         return java_type_for(non_null, context);
@@ -1390,16 +1475,8 @@ fn resolve_model_kind(
                     },
                     union,
                 )
-            } else if let Some(reference) = &property.reference
-                && all_models
-                    .get(strip_ref(reference))
-                    .and_then(|model| decode_schema(model).ok())
-                    .is_some_and(|target| is_java_union_schema(&target))
-            {
-                let (_package, class) = context.resolve_ref(reference);
-                let target = decode_schema(&all_models[strip_ref(reference)])?;
-                let union = classify_java_union(&class, false, &target, all_models, context);
-                (java_type_for(property, context)?, union)
+            } else if let Some(union) = ref_union(property, all_models, context) {
+                (java_type_for(property, context)?, Some(union))
             } else if !closed_values.is_empty() {
                 // A `const`/`enum` member is a nested value class over its
                 // underlying scalar (P13.1). The class name follows the member
@@ -1415,6 +1492,13 @@ fn resolve_model_kind(
             } else {
                 (java_type_for(property, context)?, None)
             };
+            // A collection whose *element* is a union def: the field carries the
+            // element's union so the serialize side can route each element through
+            // its dispatcher ([[oneOf]] §"Unions in element positions").
+            let element_union = match &property.items {
+                Some(element) => ref_union(element, all_models, context),
+                None => None,
+            };
             fields.push(FieldPlan {
                 java_name,
                 json_name: json_name.clone(),
@@ -1429,7 +1513,9 @@ fn resolve_model_kind(
                 numeric: NumericConstraints::from_schema(property),
                 string_length: StringLengthConstraints::from_schema(property),
                 array: ArrayConstraints::from_schema(property),
+                nullable_items: property.items.as_deref().is_some_and(allows_null),
                 union,
+                element_union,
             });
         }
     }
@@ -1462,10 +1548,12 @@ pub(in crate::generator) fn render_model_file(
             (key.clone(), (package.clone(), class))
         })
         .collect();
+    let union_defs = union_def_names(all_models);
     let context = JavaContext {
         base_package,
         module,
         registry: &resolved_registry,
+        union_defs: &union_defs,
     };
     let package = context.current_package();
     let class_name = manifest
@@ -1486,43 +1574,65 @@ pub(in crate::generator) fn render_model_file(
 
     let kind = resolve_model_kind(&schema, &context, all_models)?;
 
-    // Interfaces this POJO implements: every named union def with this model as
-    // an object member.
+    let mut body = String::new();
+    let mut refs = BTreeSet::new();
+
+    // Interfaces this POJO implements: every union with this model as an object
+    // member — a named union def (`Shape`), or a union written inline on another
+    // model's property, whose interface is nested in that model (`Showcase.Note`).
     let mut implements: Vec<String> = Vec::new();
     for other in all_models.values() {
         let Ok(other_schema) = decode_schema(other) else {
             continue;
         };
-        if !is_java_union_schema(&other_schema) {
-            continue;
-        }
         let other_context = JavaContext {
             base_package,
             module,
             registry: &resolved_registry,
+            union_defs: &union_defs,
         };
-        let other_interface = manifest
+        let other_class = manifest
             .type_name(&other.full_name)
             .unwrap_or(&other.model_name);
-        if let Some(union) = classify_java_union(
-            other_interface,
-            false,
-            &other_schema,
-            all_models,
-            &other_context,
-        ) && union
-            .variants
-            .iter()
-            .any(|variant| variant.member_full_name.as_deref() == Some(model.full_name.as_str()))
-        {
-            implements.push(other_interface.to_string());
+        let holds_this_model = |union: &JavaUnion| {
+            union.variants.iter().any(|variant| {
+                variant.member_full_name.as_deref() == Some(model.full_name.as_str())
+            })
+        };
+        if is_java_union_schema(&other_schema) {
+            if let Some(union) = classify_java_union(
+                other_class,
+                false,
+                &other_schema,
+                all_models,
+                &other_context,
+            ) && holds_this_model(&union)
+            {
+                implements.push(other_class.to_string());
+            }
+            continue;
+        }
+        for (json_name, property) in other_schema.properties.iter().flatten() {
+            if property.one_of.is_none() || !is_java_union_schema(property) {
+                continue;
+            }
+            let interface = json_name.to_upper_camel_case();
+            if let Some(union) =
+                classify_java_union(&interface, true, property, all_models, &other_context)
+                && holds_this_model(&union)
+            {
+                implements.push(format!("{other_class}.{interface}"));
+                // The nested interface is reached through its declaring class, so
+                // that class is imported when it lives in another module.
+                let (other_package, _) =
+                    other_context.resolve_ref(&format!("#/$defs/{}", other.full_name));
+                refs.insert((other_package, other_class.to_string()));
+            }
         }
     }
     implements.sort();
     implements.dedup();
 
-    let mut body = String::new();
-    let mut refs = BTreeSet::new();
     match &kind {
         ModelKind::Object { open, fields } => {
             render_object_class(
@@ -1539,7 +1649,15 @@ pub(in crate::generator) fn render_model_file(
             value,
             max_properties,
         } => {
-            render_typed_map_class(&mut body, class, &schema, value, *max_properties, &mut refs);
+            render_typed_map_class(
+                &mut body,
+                class,
+                &schema,
+                value,
+                *max_properties,
+                map_member_union(&schema, all_models, &context).as_ref(),
+                &mut refs,
+            );
         }
     }
 
@@ -1558,6 +1676,11 @@ fn render_union_interface(
         if let Some(underlying) = &variant.underlying {
             underlying.collect_refs(refs);
         }
+        // An object member is named by `X.class` in the dispatcher; import it
+        // when the member POJO lives in another module.
+        if let Some(package) = &variant.member_package {
+            refs.insert((package.clone(), variant.class.clone()));
+        }
     }
     render_java_schema_doc(
         output,
@@ -1568,12 +1691,14 @@ fn render_union_interface(
         "type",
     );
     output.push_str(&format!("public interface {} {{\n", union.interface));
-    output.push_str(&format!(
-        "    static @Nullable {} fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {{\n",
-        union.interface
-    ));
-    render_union_dispatch_body(output, union, "node", "path", "        ");
-    output.push_str("    }\n");
+    render_union_from_node(output, union, "    ");
+    let mut wrappers = String::new();
+    render_union_wrapper_classes(&mut wrappers, union, "    ");
+    if !wrappers.is_empty() {
+        output.push('\n');
+        output.push_str(wrappers.trim_end());
+        output.push('\n');
+    }
     output.push_str("}\n");
 }
 
@@ -1664,6 +1789,21 @@ fn render_union_read_object(
     path: &str,
     indent: &str,
 ) {
+    // The free-form object member has no POJO: the wrapper carries the wire
+    // members verbatim, exactly like an open POJO's catch-all (P13).
+    if variant.owned_object {
+        output.push_str(&format!(
+            "{indent}{JAVA_JSON_MAP_TYPE} members = new LinkedHashMap<>();\n"
+        ));
+        output.push_str(&format!(
+            "{indent}Iterator<String> memberNames = {node}.fieldNames();\n"
+        ));
+        output.push_str(&format!(
+            "{indent}while (memberNames.hasNext()) {{\n{indent}    String memberName = memberNames.next();\n{indent}    members.put(memberName, {node}.get(memberName));\n{indent}}}\n"
+        ));
+        output.push_str(&format!("{indent}return new {}(members);\n", variant.class));
+        return;
+    }
     output.push_str(&format!("{indent}try {{\n"));
     output.push_str(&format!(
         "{indent}    return context.readTreeAsValue({node}, {}.class);\n",
@@ -1683,7 +1823,8 @@ fn render_union_read_object(
     output.push_str(&format!("{indent}}}\n"));
 }
 
-/// Reads a scalar/array wrapper member and returns a new wrapper instance.
+/// Reads a scalar/array wrapper member and returns a new wrapper instance,
+/// holding it to the branch's own constraints on the way in.
 fn render_union_read_scalar(
     output: &mut String,
     variant: &JavaUnionVariant,
@@ -1691,30 +1832,75 @@ fn render_union_read_scalar(
     path: &str,
     indent: &str,
 ) {
-    match variant.underlying.as_ref() {
-        Some(JavaType::String) => {
+    // A branch that declares constraints validates the wrapper it just built, so
+    // a bad value is a `Violation` under the union's own path rather than an
+    // accepted member.
+    let checked = java_variant_checks(variant, path, indent).is_some();
+    let wrap = |output: &mut String, argument: &str| {
+        if checked {
             output.push_str(&format!(
-                "{indent}return new {}({node}.textValue());\n",
+                "{indent}{class} wrapped = new {class}({argument});\n{indent}wrapped.validate({path}, violations);\n{indent}return wrapped;\n",
+                class = variant.class
+            ));
+        } else {
+            output.push_str(&format!(
+                "{indent}return new {}({argument});\n",
                 variant.class
             ));
         }
+    };
+    match variant.underlying.as_ref() {
+        Some(JavaType::String) => {
+            wrap(output, &format!("{node}.textValue()"));
+        }
         Some(JavaType::Boolean) => {
-            output.push_str(&format!(
-                "{indent}return new {}({node}.booleanValue());\n",
-                variant.class
-            ));
+            wrap(output, &format!("{node}.booleanValue()"));
         }
         Some(JavaType::Long) => {
             output.push_str(&format!(
-                "{indent}Long parsed = SpecNumbers.specLong({node}, {path}, violations);\n{indent}return parsed == null ? null : new {}(parsed);\n",
-                variant.class
+                "{indent}Long parsed = SpecNumbers.specLong({node}, {path}, violations);\n"
             ));
+            if checked {
+                output.push_str(&format!(
+                    "{indent}if (parsed == null) {{\n{indent}    return null;\n{indent}}}\n"
+                ));
+                wrap(output, "parsed");
+            } else {
+                output.push_str(&format!(
+                    "{indent}return parsed == null ? null : new {}(parsed);\n",
+                    variant.class
+                ));
+            }
         }
         Some(JavaType::Double) => {
+            wrap(output, &format!("{node}.doubleValue()"));
+        }
+        Some(JavaType::List(item)) => {
             output.push_str(&format!(
-                "{indent}return new {}({node}.doubleValue());\n",
-                variant.class
+                "{indent}List<{}> items = new ArrayList<>();\n",
+                element_declaration(item, variant.nullable_items)
             ));
+            output.push_str(&format!(
+                "{indent}for (int index = 0; index < {node}.size(); index++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    JsonNode element = {node}.get(index);\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    String elementPath = {path} + \"[\" + index + \"]\";\n"
+            ));
+            render_parse_element(
+                output,
+                item,
+                "items",
+                "element",
+                "elementPath",
+                variant.nullable_items,
+                0,
+                &format!("{indent}    "),
+            );
+            output.push_str(&format!("{indent}}}\n"));
+            wrap(output, "items");
         }
         _ => {
             output.push_str(&format!("{indent}return null;\n"));
@@ -1722,53 +1908,202 @@ fn render_union_read_scalar(
     }
 }
 
-/// Renders an inline union's nested interface and scalar/array wrapper classes
-/// inside the enclosing POJO.
+/// The Java type carrying a free-form object's members verbatim — the same shape
+/// an open POJO's catch-all uses, so unknown members survive a round-trip (P13).
+const JAVA_JSON_MAP_TYPE: &str = "Map<String, JsonNode>";
+
+/// Renders a property-level union's interface — carrying the same static
+/// `fromNode` dispatcher a named union def does — and its wrapper classes,
+/// nested inside the enclosing POJO.
 fn render_nested_union(output: &mut String, union: &JavaUnion) {
+    output.push_str(&format!("    public interface {} {{\n", union.interface));
+    render_union_from_node(output, union, "        ");
+    output.push_str("    }\n\n");
+    render_union_wrapper_classes(output, union, "    ");
+}
+
+/// Emits the `fromNode` collecting dispatcher every union interface carries, so
+/// a union parses identically whether it is a named def or written inline on a
+/// property.
+fn render_union_from_node(output: &mut String, union: &JavaUnion, indent: &str) {
     output.push_str(&format!(
-        "    public interface {} {{}}\n\n",
+        "{indent}static @Nullable {} fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {{\n",
+        union.interface
+    ));
+    render_union_dispatch_body(output, union, "node", "path", &format!("{indent}    "));
+    output.push_str(&format!("{indent}}}\n"));
+    render_union_validate(output, union, indent);
+}
+
+/// Emits the union's static `validate` — the serialize-side counterpart of
+/// `fromNode`: it dispatches on the member's runtime class and re-runs that
+/// branch's own constraints before the value is written (P12). The enclosing
+/// POJO's `Serializer` calls it, so a branch violation aggregates with its
+/// siblings into the one `ValidationException` (P11).
+///
+/// Emitted only when some branch declares a constraint; a union of unconstrained
+/// kinds needs no dispatcher, because holding a member *is* the whole invariant.
+fn render_union_validate(output: &mut String, union: &JavaUnion, indent: &str) {
+    if !java_union_has_checks(union) {
+        return;
+    }
+    let inner = format!("{indent}    ");
+    output.push_str(&format!(
+        "\n{indent}static void validate({} value, String path, List<Violation> violations) {{\n",
         union.interface
     ));
     for variant in &union.variants {
-        let Some(underlying) = &variant.underlying else {
+        if java_variant_checks(variant, "path", "").is_none() {
             continue;
-        };
-        let (field_type, getter_type) = match underlying {
-            JavaType::Long => ("long".to_string(), "long".to_string()),
-            JavaType::Double => ("double".to_string(), "double".to_string()),
-            JavaType::Boolean => ("boolean".to_string(), "boolean".to_string()),
-            other => (other.boxed_name(), other.boxed_name()),
+        }
+        output.push_str(&format!(
+            "{inner}if (value instanceof {class}) {{\n{inner}    (({class}) value).validate(path, violations);\n{inner}}}\n",
+            class = variant.class
+        ));
+    }
+    output.push_str(&format!("{indent}}}\n"));
+}
+
+/// The predicates a wrapper runs over the `value` it holds — every constraint the
+/// branch declares, through the same emitters (and with the same reasons) a
+/// declared field of that type uses. `None` when the branch declares nothing, so
+/// an unconstrained wrapper keeps no `validate` at all.
+fn java_variant_checks(
+    variant: &JavaUnionVariant,
+    path_expr: &str,
+    indent: &str,
+) -> Option<String> {
+    let ty = variant.underlying.as_ref()?;
+    let mut body = String::new();
+    render_java_member_checks(&mut body, "value", path_expr, &variant.schema, ty, indent);
+    (!body.is_empty()).then_some(body)
+}
+
+/// The union a schema `$ref`s, when its target definition is a `oneOf` sum type.
+/// Used for a member whose type is a named union and for a collection whose
+/// element type is (an inline element union is hoisted into `$defs` by the loader,
+/// so it arrives here as a reference too).
+fn ref_union(
+    schema: &Schema,
+    all_models: &BTreeMap<String, PlannedJsonType>,
+    context: &JavaContext,
+) -> Option<JavaUnion> {
+    let reference = schema.reference.as_ref()?;
+    let target = all_models
+        .get(strip_ref(reference))
+        .and_then(|model| decode_schema(model).ok())?;
+    if !is_java_union_schema(&target) {
+        return None;
+    }
+    let (_package, class) = context.resolve_ref(reference);
+    classify_java_union(&class, false, &target, all_models, context)
+}
+
+/// The union interface a field's type carries, if any: an inline union nested in
+/// the declaring POJO, a `$ref` to a named union def, or a collection whose
+/// element is either.
+fn java_union_interface(ty: &JavaType) -> Option<&String> {
+    match ty {
+        JavaType::Union { class } => Some(class),
+        JavaType::Ref {
+            class, union: true, ..
+        } => Some(class),
+        JavaType::List(element) => java_union_interface(element),
+        _ => None,
+    }
+}
+
+/// True when any of a union's wrapper classes carries a `validate` — i.e. some
+/// non-object branch declares a constraint.
+fn java_union_has_checks(union: &JavaUnion) -> bool {
+    union
+        .variants
+        .iter()
+        .any(|variant| java_variant_checks(variant, "path", "").is_some())
+}
+
+/// Renders the wrapper class carrying each non-object member (and the free-form
+/// object member, which has no POJO of its own). A `$ref` object member is
+/// already a POJO and implements the interface directly, so it gets no wrapper.
+fn render_union_wrapper_classes(output: &mut String, union: &JavaUnion, indent: &str) {
+    let inner = format!("{indent}    ");
+    for variant in &union.variants {
+        let (field_type, getter_type) = match &variant.underlying {
+            Some(JavaType::Long) => ("long".to_string(), "long".to_string()),
+            Some(JavaType::Double) => ("double".to_string(), "double".to_string()),
+            Some(JavaType::Boolean) => ("boolean".to_string(), "boolean".to_string()),
+            Some(other) => (other.boxed_name(), other.boxed_name()),
+            // An inline free-form object member: the wrapper holds the wire
+            // members verbatim, exactly like an open POJO's catch-all (P13).
+            None if variant.owned_object => (
+                JAVA_JSON_MAP_TYPE.to_string(),
+                JAVA_JSON_MAP_TYPE.to_string(),
+            ),
+            // A `$ref` object member is its own POJO; it implements the
+            // interface instead of being wrapped.
+            None => continue,
         };
         output.push_str(&format!(
-            "    public static final class {} implements {} {{\n",
+            "{indent}public static final class {} implements {} {{\n",
             variant.class, union.interface
         ));
-        output.push_str(&format!("        private final {field_type} value;\n\n"));
+        // Compiled `pattern`/`format` regexes for the branch, compiled once at
+        // class init — the wrapper counterpart of a POJO's per-field statics. The
+        // wrapper's single field is `value`, so the position name is the same one
+        // a map member uses.
+        let string_length = StringLengthConstraints::from_schema(&variant.schema);
+        if let Some(pattern) = &string_length.pattern {
+            output.push_str(&format!(
+                "{inner}private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n\n",
+                java_pattern_field_name(MAP_MEMBER_POSITION),
+                java_string_literal(pattern),
+            ));
+        }
+        if let Some(format) = &string_length.format {
+            output.push_str(&format!(
+                "{inner}private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n\n",
+                java_format_field_name(MAP_MEMBER_POSITION),
+                java_string_literal(&format.pattern),
+            ));
+        }
+        output.push_str(&format!("{inner}private final {field_type} value;\n\n"));
         output.push_str(&format!(
-            "        public {}({field_type} value) {{\n            this.value = value;\n        }}\n\n",
+            "{inner}public {}({field_type} value) {{\n{inner}    this.value = value;\n{inner}}}\n\n",
             variant.class
         ));
+        // `@JsonValue` is what writes the member back to the wire: a union field
+        // serializes by runtime class, so the wrapper must render as the value it
+        // holds rather than as a bean around it.
         output.push_str(&format!(
-            "        public {getter_type} getValue() {{\n            return value;\n        }}\n\n"
+            "{inner}@JsonValue\n{inner}public {getter_type} getValue() {{\n{inner}    return value;\n{inner}}}\n\n"
         ));
+        // The branch's own constraints, run on the way in (the dispatcher) and
+        // again before emit (the enclosing serializer) — P12 over one emitter.
+        if let Some(checks) = java_variant_checks(variant, "path", &format!("{inner}    ")) {
+            output.push_str(&format!(
+                "{inner}void validate(String path, List<Violation> violations) {{\n{checks}{inner}}}\n\n"
+            ));
+        }
         // equals/hashCode/toString over the single value.
-        output.push_str("        @Override\n        public boolean equals(Object other) {\n");
         output.push_str(&format!(
-            "            if (this == other) {{\n                return true;\n            }}\n            if (!(other instanceof {})) {{\n                return false;\n            }}\n",
+            "{inner}@Override\n{inner}public boolean equals(Object other) {{\n"
+        ));
+        output.push_str(&format!(
+            "{inner}    if (this == other) {{\n{inner}        return true;\n{inner}    }}\n{inner}    if (!(other instanceof {})) {{\n{inner}        return false;\n{inner}    }}\n",
             variant.class
         ));
         output.push_str(&format!(
-            "            return Objects.equals(value, (({}) other).value);\n        }}\n\n",
+            "{inner}    return Objects.equals(value, (({}) other).value);\n{inner}}}\n\n",
             variant.class
         ));
-        output.push_str(
-            "        @Override\n        public int hashCode() {\n            return Objects.hash(value);\n        }\n\n",
-        );
         output.push_str(&format!(
-            "        @Override\n        public String toString() {{\n            return \"{}[\" + value + \"]\";\n        }}\n",
+            "{inner}@Override\n{inner}public int hashCode() {{\n{inner}    return Objects.hash(value);\n{inner}}}\n\n"
+        ));
+        output.push_str(&format!(
+            "{inner}@Override\n{inner}public String toString() {{\n{inner}    return \"{}[\" + value + \"]\";\n{inner}}}\n",
             variant.class
         ));
-        output.push_str("    }\n\n");
+        output.push_str(&format!("{indent}}}\n\n"));
     }
 }
 
@@ -2181,6 +2516,14 @@ fn render_equals_hashcode_tostring(
 /// `render_java_serialize_field_check`. A closed value (`const`/`enum`) needs no
 /// serialize check: its value class can only hold a known constant.
 fn field_has_serialize_check(field: &FieldPlan) -> bool {
+    // A union member (on its own, or as a collection's element) is re-checked
+    // against the branch it holds, when any branch declares a constraint.
+    if let Some(union) = field.union.as_ref().or(field.element_union.as_ref())
+        && java_union_interface(&field.ty).is_some()
+        && java_union_has_checks(union)
+    {
+        return true;
+    }
     match &field.ty {
         JavaType::String => !field.string_length.is_empty(),
         JavaType::Long | JavaType::Double => !field.numeric.is_empty(),
@@ -2245,6 +2588,26 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
                 &inner,
             ),
             _ => {}
+        }
+        // A union member is re-checked against the branch it holds before emit,
+        // through the union's own runtime-class dispatcher. As a collection's
+        // element, each value is routed under its own index (P11) — the
+        // serialize-side counterpart of the elementwise parse.
+        if let Some(union) = &field.union
+            && java_union_has_checks(union)
+            && let Some(interface) = java_union_interface(&field.ty)
+        {
+            body.push_str(&format!(
+                "{inner}{interface}.validate({accessor}, {json}, violations);\n"
+            ));
+        }
+        if let Some(union) = &field.element_union
+            && java_union_has_checks(union)
+            && let Some(interface) = java_union_interface(&field.ty)
+        {
+            body.push_str(&format!(
+                "{inner}for (int index = 0; index < {accessor}.size(); index++) {{\n{inner}    {interface}.validate({accessor}.get(index), {json} + \"[\" + index + \"]\", violations);\n{inner}}}\n"
+            ));
         }
     }
     if body.is_empty() {
@@ -2346,7 +2709,7 @@ fn render_java_serialize_dependent_required(
 }
 
 /// Emits the `propertyNames` key-shape predicate over the keys of a typed map's
-/// in-memory `values` for the serialize path. See
+/// in-memory `additionalProperties` for the serialize path. See
 /// `specs/json-schema/features/propertyNames.md`.
 fn render_java_serialize_property_name_checks(
     output: &mut String,
@@ -2424,41 +2787,6 @@ fn render_object_serializer(
 fn render_field_serialize(output: &mut String, field: &FieldPlan) {
     let json = java_string_literal(&field.json_name);
     let accessor = format!("value.{}", field.java_name);
-
-    // An inline union serializes its held wrapper via runtime-class dispatch; a
-    // named-union `$ref` field is a Ref type handled by the normal path below.
-    if let Some(union) = &field.union
-        && union.nested
-    {
-        output.push_str(&format!("            if ({accessor} != null) {{\n"));
-        for variant in &union.variants {
-            let write = match variant.underlying.as_ref() {
-                Some(JavaType::String) => format!(
-                    "gen.writeStringField({json}, (({}) {accessor}).getValue());",
-                    variant.class
-                ),
-                Some(JavaType::Long | JavaType::Double) => format!(
-                    "gen.writeNumberField({json}, (({}) {accessor}).getValue());",
-                    variant.class
-                ),
-                Some(JavaType::Boolean) => format!(
-                    "gen.writeBooleanField({json}, (({}) {accessor}).getValue());",
-                    variant.class
-                ),
-                Some(JavaType::List(_)) => format!(
-                    "gen.writeFieldName({json});\n                    serializers.defaultSerializeValue((({}) {accessor}).getValue(), gen);",
-                    variant.class
-                ),
-                _ => continue,
-            };
-            output.push_str(&format!(
-                "                if ({accessor} instanceof {}) {{\n                    {write}\n                }}\n",
-                variant.class
-            ));
-        }
-        output.push_str("            }\n");
-        return;
-    }
 
     let write = write_value_statement(&field.ty, &json, &accessor, "                ");
 
@@ -2655,6 +2983,7 @@ fn render_field_deserialize(output: &mut String, field: &FieldPlan) {
             &field.numeric,
             &field.string_length,
             &field.array,
+            field.nullable_items,
             &format!("{indent}        "),
         );
     }
@@ -2662,8 +2991,9 @@ fn render_field_deserialize(output: &mut String, field: &FieldPlan) {
     output.push_str(&format!("{indent}}}\n"));
 }
 
-/// Assigns a union-typed field from the wire `field` node: a named-union `$ref`
-/// delegates to `<Interface>.fromNode`; an inline union dispatches on the token.
+/// Assigns a union-typed field from the wire `field` node by delegating to the
+/// union interface's `fromNode` — the same call whether the interface is a named
+/// def or nested in this POJO.
 fn render_union_field_parse(
     output: &mut String,
     union: &JavaUnion,
@@ -2671,49 +3001,10 @@ fn render_union_field_parse(
     json: &str,
     indent: &str,
 ) {
-    if !union.nested {
-        output.push_str(&format!(
-            "{indent}{target} = {}.fromNode(field, {json}, violations, context);\n",
-            union.interface
-        ));
-        return;
-    }
-    let mut first = true;
-    for variant in &union.variants {
-        let keyword = if first { "if" } else { "} else if" };
-        first = false;
-        output.push_str(&format!(
-            "{indent}{keyword} (field.{}()) {{\n",
-            variant.node_test
-        ));
-        match variant.underlying.as_ref() {
-            Some(JavaType::String) => output.push_str(&format!(
-                "{indent}    {target} = new {}(field.textValue());\n",
-                variant.class
-            )),
-            Some(JavaType::Boolean) => output.push_str(&format!(
-                "{indent}    {target} = new {}(field.booleanValue());\n",
-                variant.class
-            )),
-            Some(JavaType::Long) => output.push_str(&format!(
-                "{indent}    Long parsed = SpecNumbers.specLong(field, {json}, violations);\n{indent}    if (parsed != null) {{\n{indent}        {target} = new {}(parsed);\n{indent}    }}\n",
-                variant.class
-            )),
-            Some(JavaType::Double) => output.push_str(&format!(
-                "{indent}    {target} = new {}(field.doubleValue());\n",
-                variant.class
-            )),
-            _ => {}
-        }
-    }
-    if !first {
-        output.push_str(&format!("{indent}}} else {{\n"));
-        output.push_str(&format!(
-            "{indent}    violations.add(new Violation({json}, {}));\n",
-            java_string_literal(&format!("expected one of: {}", union.admissible()))
-        ));
-        output.push_str(&format!("{indent}}}\n"));
-    }
+    output.push_str(&format!(
+        "{indent}{target} = {}.fromNode(field, {json}, violations, context);\n",
+        union.interface
+    ));
 }
 
 fn render_parse_value(
@@ -2727,6 +3018,7 @@ fn render_parse_value(
     numeric: &NumericConstraints,
     string_length: &StringLengthConstraints,
     array: &ArrayConstraints,
+    nullable_items: bool,
     indent: &str,
 ) {
     if let JavaType::ClosedValue { class, wire } = ty {
@@ -2864,7 +3156,7 @@ fn render_parse_value(
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
                 "{indent}    List<{}> items = new ArrayList<>();\n",
-                inner.boxed_name()
+                element_declaration(inner, nullable_items)
             ));
             output.push_str(&format!(
                 "{indent}    for (int index = 0; index < field.size(); index++) {{\n"
@@ -2881,6 +3173,8 @@ fn render_parse_value(
                 "items",
                 "element",
                 "elementPath",
+                nullable_items,
+                0,
                 &format!("{indent}        "),
             );
             output.push_str(&format!("{indent}    }}\n"));
@@ -2909,14 +3203,40 @@ fn render_parse_value(
     }
 }
 
+/// An element type as it is written inside `List<…>`: a nullable element takes
+/// the TYPE_USE annotation, so the collection stays non-null while its members
+/// may be null ([[items]]).
+fn element_declaration(ty: &JavaType, nullable: bool) -> String {
+    if !nullable {
+        return ty.boxed_name();
+    }
+    // A `byte[]` takes the array-level annotation (`byte @Nullable []`);
+    // `@Nullable byte[]` would (wrongly) annotate the primitive component type,
+    // as for a field of that type (see `FieldPlan::declared_type`).
+    if matches!(ty, JavaType::Bytes(_)) {
+        return "byte @Nullable []".to_string();
+    }
+    format!("@Nullable {}", ty.boxed_name())
+}
+
 fn render_parse_element(
     output: &mut String,
     ty: &JavaType,
     list: &str,
     element: &str,
     path_var: &str,
+    nullable: bool,
+    depth: usize,
     indent: &str,
 ) {
+    // A nullable element ([[nullability]] `oneOf` in `items`) admits a wire
+    // `null` as a null member; the element type's own parse handles the rest.
+    if nullable {
+        output.push_str(&format!("{indent}if ({element}.isNull()) {{\n"));
+        output.push_str(&format!("{indent}    {list}.add(null);\n"));
+        output.push_str(&format!("{indent}    continue;\n"));
+        output.push_str(&format!("{indent}}}\n"));
+    }
     match ty {
         JavaType::String => {
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
@@ -2957,6 +3277,20 @@ fn render_parse_element(
             ));
             output.push_str(&format!("{indent}}}\n"));
         }
+        // A union element is a sealed interface: Jackson cannot instantiate it,
+        // so it decodes through the interface's own token dispatcher, which
+        // collects its violations under the element path itself.
+        JavaType::Ref {
+            class, union: true, ..
+        } => {
+            let parsed = format!("parsed{}", upper_first(list));
+            output.push_str(&format!(
+                "{indent}{class} {parsed} = {class}.fromNode({element}, {path_var}, violations, context);\n"
+            ));
+            output.push_str(&format!("{indent}if ({parsed} != null) {{\n"));
+            output.push_str(&format!("{indent}    {list}.add({parsed});\n"));
+            output.push_str(&format!("{indent}}}\n"));
+        }
         JavaType::Ref { class, .. } => {
             output.push_str(&format!("{indent}try {{\n"));
             output.push_str(&format!(
@@ -2978,11 +3312,44 @@ fn render_parse_element(
             ));
             output.push_str(&format!("{indent}}}\n"));
         }
-        JavaType::List(_) => {
-            // Nested arrays are outside the supported subset.
+        // A nested array decodes elementwise in turn, one loop per level. The
+        // loop variables carry the nesting depth so an inner level never shadows
+        // the element, index, or path of the level above it ([[items]] admits
+        // `items` at any depth).
+        JavaType::List(inner) => {
+            let level = depth + 1;
+            let nested = format!("items{level}");
+            output.push_str(&format!("{indent}if (!{element}.isArray()) {{\n"));
             output.push_str(&format!(
-                "{indent}violations.add(new Violation({path_var}, \"unsupported nested array\"));\n"
+                "{indent}    violations.add(new Violation({path_var}, \"expected array\"));\n"
             ));
+            output.push_str(&format!("{indent}}} else {{\n"));
+            output.push_str(&format!(
+                "{indent}    List<{}> {nested} = new ArrayList<>();\n",
+                element_declaration(inner, false)
+            ));
+            output.push_str(&format!(
+                "{indent}    for (int index{level} = 0; index{level} < {element}.size(); index{level}++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}        JsonNode element{level} = {element}.get(index{level});\n"
+            ));
+            output.push_str(&format!(
+                "{indent}        String path{level} = {path_var} + \"[\" + index{level} + \"]\";\n"
+            ));
+            render_parse_element(
+                output,
+                inner,
+                &nested,
+                &format!("element{level}"),
+                &format!("path{level}"),
+                false,
+                level,
+                &format!("{indent}        "),
+            );
+            output.push_str(&format!("{indent}    }}\n"));
+            output.push_str(&format!("{indent}    {list}.add({nested});\n"));
+            output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Union { .. } => {
             output.push_str(&format!(
@@ -2991,13 +3358,14 @@ fn render_parse_element(
         }
         JavaType::Temporal(kind) => {
             let parse_fn = java_temporal_parse_fn(*kind);
+            let parsed_type = java_temporal_type(*kind);
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
             output.push_str(&format!(
                 "{indent}    violations.add(new Violation({path_var}, \"expected string\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
-                "{indent}    var parsed = TemporalSupport.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
+                "{indent}    {parsed_type} parsed = TemporalSupport.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {list}.add(parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
@@ -3010,7 +3378,7 @@ fn render_parse_element(
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
-                "{indent}    var parsed = Base64Support.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
+                "{indent}    byte[] parsed = Base64Support.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {list}.add(parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
@@ -3029,8 +3397,21 @@ fn render_parse_map_value(
     map: &str,
     element: &str,
     key_var: &str,
+    member: Option<&Schema>,
     indent: &str,
 ) {
+    // The member's own constraints run over the decoded value, keyed by its key.
+    let checks = |output: &mut String, value_expr: &str, indent: &str| {
+        if let Some(member) = member {
+            render_java_member_checks(output, value_expr, key_var, member, ty, indent);
+        }
+    };
+    // A member with nothing to check needs no local for the decoded value.
+    let has_checks = {
+        let mut probe = String::new();
+        checks(&mut probe, "value", "");
+        !probe.is_empty()
+    };
     match ty {
         JavaType::String => {
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
@@ -3038,9 +3419,17 @@ fn render_parse_map_value(
                 "{indent}    violations.add(new Violation({key_var}, \"expected string value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
-            output.push_str(&format!(
-                "{indent}    {map}.put({key_var}, {element}.textValue());\n"
-            ));
+            if has_checks {
+                output.push_str(&format!(
+                    "{indent}    String value = {element}.textValue();\n"
+                ));
+                checks(output, "value", &format!("{indent}    "));
+                output.push_str(&format!("{indent}    {map}.put({key_var}, value);\n"));
+            } else {
+                output.push_str(&format!(
+                    "{indent}    {map}.put({key_var}, {element}.textValue());\n"
+                ));
+            }
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Long => {
@@ -3048,6 +3437,7 @@ fn render_parse_map_value(
                 "{indent}Long parsed = SpecNumbers.specLong({element}, {key_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}if (parsed != null) {{\n"));
+            checks(output, "parsed", &format!("{indent}    "));
             output.push_str(&format!("{indent}    {map}.put({key_var}, parsed);\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
@@ -3057,9 +3447,17 @@ fn render_parse_map_value(
                 "{indent}    violations.add(new Violation({key_var}, \"expected number value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
-            output.push_str(&format!(
-                "{indent}    {map}.put({key_var}, {element}.doubleValue());\n"
-            ));
+            if has_checks {
+                output.push_str(&format!(
+                    "{indent}    double value = {element}.doubleValue();\n"
+                ));
+                checks(output, "value", &format!("{indent}    "));
+                output.push_str(&format!("{indent}    {map}.put({key_var}, value);\n"));
+            } else {
+                output.push_str(&format!(
+                    "{indent}    {map}.put({key_var}, {element}.doubleValue());\n"
+                ));
+            }
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Boolean => {
@@ -3071,6 +3469,19 @@ fn render_parse_map_value(
             output.push_str(&format!(
                 "{indent}    {map}.put({key_var}, {element}.booleanValue());\n"
             ));
+            output.push_str(&format!("{indent}}}\n"));
+        }
+        // A union member decodes through the interface's token dispatcher —
+        // Jackson cannot instantiate a sealed interface.
+        JavaType::Ref {
+            class, union: true, ..
+        } => {
+            let parsed = format!("parsed{}", upper_first(map));
+            output.push_str(&format!(
+                "{indent}{class} {parsed} = {class}.fromNode({element}, {key_var}, violations, context);\n"
+            ));
+            output.push_str(&format!("{indent}if ({parsed} != null) {{\n"));
+            output.push_str(&format!("{indent}    {map}.put({key_var}, {parsed});\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Ref { class, .. } => {
@@ -3094,10 +3505,42 @@ fn render_parse_map_value(
             ));
             output.push_str(&format!("{indent}}}\n"));
         }
-        JavaType::List(_) => {
+        // An array-valued member decodes elementwise, like an array-typed field;
+        // its own `items` constraints then run over the decoded list, keyed by the
+        // member's key.
+        JavaType::List(inner) => {
+            output.push_str(&format!("{indent}if (!{element}.isArray()) {{\n"));
             output.push_str(&format!(
-                "{indent}violations.add(new Violation({key_var}, \"unsupported nested array\"));\n"
+                "{indent}    violations.add(new Violation({key_var}, \"expected array value\"));\n"
             ));
+            output.push_str(&format!("{indent}}} else {{\n"));
+            output.push_str(&format!(
+                "{indent}    List<{}> items = new ArrayList<>();\n",
+                element_declaration(inner, false)
+            ));
+            output.push_str(&format!(
+                "{indent}    for (int index = 0; index < {element}.size(); index++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}        JsonNode item = {element}.get(index);\n"
+            ));
+            output.push_str(&format!(
+                "{indent}        String itemPath = {key_var} + \"[\" + index + \"]\";\n"
+            ));
+            render_parse_element(
+                output,
+                inner,
+                "items",
+                "item",
+                "itemPath",
+                false,
+                0,
+                &format!("{indent}        "),
+            );
+            output.push_str(&format!("{indent}    }}\n"));
+            checks(output, "items", &format!("{indent}    "));
+            output.push_str(&format!("{indent}    {map}.put({key_var}, items);\n"));
+            output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Union { .. } => {
             output.push_str(&format!(
@@ -3106,13 +3549,14 @@ fn render_parse_map_value(
         }
         JavaType::Temporal(kind) => {
             let parse_fn = java_temporal_parse_fn(*kind);
+            let parsed_type = java_temporal_type(*kind);
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
             output.push_str(&format!(
                 "{indent}    violations.add(new Violation({key_var}, \"expected string value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
-                "{indent}    var parsed = TemporalSupport.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
+                "{indent}    {parsed_type} parsed = TemporalSupport.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {map}.put({key_var}, parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
@@ -3125,7 +3569,7 @@ fn render_parse_map_value(
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
-                "{indent}    var parsed = Base64Support.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
+                "{indent}    byte[] parsed = Base64Support.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {map}.put({key_var}, parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
@@ -3138,12 +3582,138 @@ fn render_parse_map_value(
     }
 }
 
+/// The Java identifier a typed map's member contributes to a synthesized name —
+/// the static `Pattern` fields its `pattern`/`format` compile into. Matches the
+/// `Value` position name the loader gives an inline member shape.
+const MAP_MEMBER_POSITION: &str = "value";
+
+/// Emits the predicates a typed map's member schema declares, over `value_expr`
+/// (the decoded member in scope) keyed by `key_expr` (the member's own key, which
+/// becomes the violation path) — the same predicates, and the same reasons, a
+/// declared field of that type carries. See
+/// `specs/json-schema/features/additionalProperties.md` §"Validator mapping"
+/// (per-member `T` validation).
+fn render_java_member_checks(
+    output: &mut String,
+    value_expr: &str,
+    key_expr: &str,
+    member: &Schema,
+    ty: &JavaType,
+    indent: &str,
+) {
+    if let Some(values) = closed_member_values(member) {
+        let condition = values
+            .iter()
+            .map(|value| format!("!({})", java_equals_term(value, value_expr, ty)))
+            .collect::<Vec<_>>()
+            .join(" && ");
+        let reason = java_string_literal(&format!(
+            "must be one of [{}], got ",
+            java_closed_set_display(&values)
+        ));
+        output.push_str(&format!(
+            "{indent}if ({condition}) {{\n{indent}    violations.add(new Violation({key_expr}, {reason} + {value_expr}));\n{indent}}}\n"
+        ));
+    }
+    match member.ty.as_ref().and_then(Value::as_str) {
+        Some("string") if matches!(ty, JavaType::String) => {
+            let constraints = StringLengthConstraints::from_schema(member);
+            if !constraints.is_empty() {
+                render_java_string_checks(
+                    output,
+                    value_expr,
+                    key_expr,
+                    MAP_MEMBER_POSITION,
+                    &constraints,
+                    indent,
+                );
+            }
+        }
+        Some(kind @ ("integer" | "number")) => {
+            let constraints = NumericConstraints::from_schema(member);
+            if !constraints.is_empty() {
+                render_java_numeric_checks(
+                    output,
+                    value_expr,
+                    key_expr,
+                    &constraints,
+                    kind == "integer",
+                    indent,
+                );
+            }
+        }
+        Some("array") => {
+            let constraints = ArrayConstraints::from_schema(member);
+            if !constraints.is_empty()
+                && let JavaType::List(element) = ty
+            {
+                render_java_array_checks(
+                    output,
+                    value_expr,
+                    key_expr,
+                    element,
+                    &constraints,
+                    indent,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The admissible values of a closed member value set (`const`/`enum`). A map
+/// member has no field to hang Java's value class off, so its closedness lives in
+/// the validator alone; the accepted value set is identical to every other
+/// target's.
+fn closed_member_values(member: &Schema) -> Option<Vec<Value>> {
+    if let Some(value) = &member.const_value {
+        return Some(vec![value.clone()]);
+    }
+    member.enum_values.clone()
+}
+
+/// True when a map-shaped schema admits an explicit `null` member (its
+/// `additionalProperties` is the nullability `oneOf` wrapper).
+fn map_member_allows_null(schema: &Schema) -> bool {
+    let Some(Value::Object(members)) = &schema.additional_properties else {
+        return false;
+    };
+    serde_json::from_value::<Schema>(Value::Object(members.clone()))
+        .map(|member| allows_null(&member))
+        .unwrap_or(false)
+}
+
+/// The union a typed map's member type refers to, when the member is a `oneOf`
+/// sum type. The loader hoists an inline member union into `$defs` and rewrites
+/// the position to a `$ref`, so a union member is always a reference here.
+fn map_member_union(
+    schema: &Schema,
+    all_models: &BTreeMap<String, PlannedJsonType>,
+    context: &JavaContext,
+) -> Option<JavaUnion> {
+    ref_union(&map_member_schema(schema)?, all_models, context)
+}
+
+/// A map-shaped schema's declared member schema, with any nullability `oneOf`
+/// wrapper looked through so the constraints it carries are the member's own.
+fn map_member_schema(schema: &Schema) -> Option<Schema> {
+    let Some(Value::Object(members)) = &schema.additional_properties else {
+        return None;
+    };
+    let member: Schema = serde_json::from_value(Value::Object(members.clone())).ok()?;
+    match nullable_non_null_schema(&member) {
+        Some(non_null) => Some(non_null.clone()),
+        None => Some(member),
+    }
+}
+
 fn render_typed_map_class(
     output: &mut String,
     class: &str,
     schema: &Schema,
     value: &JavaType,
     max_properties: Option<usize>,
+    member_union: Option<&JavaUnion>,
     refs: &mut BTreeSet<(String, String)>,
 ) {
     value.collect_refs(refs);
@@ -3158,15 +3728,40 @@ fn render_typed_map_class(
     output.push_str(&format!(
         "@JsonSerialize(using = {class}.Serializer.class)\n@JsonDeserialize(using = {class}.Deserializer.class)\npublic final class {class} {{\n"
     ));
-    let value_type = value.boxed_name();
+    // A nullable member takes the TYPE_USE annotation, so the map stays non-null
+    // while its members may be null — the rule [[items]] applies to an element.
+    let nullable_members = map_member_allows_null(schema);
+    let value_type = element_declaration(value, nullable_members);
+    let member = map_member_schema(schema);
+    // Compiled member `pattern`/`format` regexes (compiled once at class init),
+    // the map counterpart of a POJO's per-field `Pattern` statics.
+    if let Some(member) = &member {
+        let constraints = StringLengthConstraints::from_schema(member);
+        if let Some(pattern) = &constraints.pattern {
+            output.push_str(&format!(
+                "    private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n\n",
+                java_pattern_field_name(MAP_MEMBER_POSITION),
+                java_string_literal(pattern),
+            ));
+        }
+        if let Some(format) = &constraints.format {
+            output.push_str(&format!(
+                "    private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n\n",
+                java_format_field_name(MAP_MEMBER_POSITION),
+                java_string_literal(&format.pattern),
+            ));
+        }
+    }
+    // The catch-all is always the named `additionalProperties` member, matching
+    // the struct-shaped POJOs — see `specs/json-schema/features/additionalProperties.md`.
     output.push_str(&format!(
-        "    private final Map<String, {value_type}> values;\n\n"
+        "    private final Map<String, {value_type}> additionalProperties;\n\n"
     ));
     output.push_str(&format!(
-        "    public {class}(Map<String, {value_type}> values) {{\n        this.values = values;\n    }}\n\n"
+        "    public {class}(Map<String, {value_type}> additionalProperties) {{\n        this.additionalProperties = additionalProperties;\n    }}\n\n"
     ));
     output.push_str(&format!(
-        "    public Map<String, {value_type}> getValues() {{\n        return values;\n    }}\n\n"
+        "    public Map<String, {value_type}> getAdditionalProperties() {{\n        return additionalProperties;\n    }}\n\n"
     ));
 
     // equals/hashCode/toString
@@ -3176,13 +3771,13 @@ fn render_typed_map_class(
         "        if (!(other instanceof {class})) {{\n            return false;\n        }}\n"
     ));
     output.push_str(&format!(
-        "        return Objects.equals(this.values, (({class}) other).values);\n    }}\n\n"
+        "        return Objects.equals(this.additionalProperties, (({class}) other).additionalProperties);\n    }}\n\n"
     ));
     output.push_str(
-        "    @Override\n    public int hashCode() {\n        return Objects.hash(values);\n    }\n\n",
+        "    @Override\n    public int hashCode() {\n        return Objects.hash(additionalProperties);\n    }\n\n",
     );
     output.push_str(&format!(
-        "    @Override\n    public String toString() {{\n        return \"{class}{{values=\" + values + \"}}\";\n    }}\n\n"
+        "    @Override\n    public String toString() {{\n        return \"{class}{{\"\n            + \"additionalProperties=\" + additionalProperties\n            + \"}}\";\n    }}\n\n"
     ));
 
     // Serializer
@@ -3194,29 +3789,74 @@ fn render_typed_map_class(
     ));
 
     // Serialize-side (P12): member-count and key-shape constraints over the
-    // in-memory map, thrown as an aggregated `ValidationException` before
-    // emitting — matching the deserializer.
+    // in-memory map, plus each member re-checked against `T`, thrown as an
+    // aggregated `ValidationException` before emitting — matching the
+    // deserializer.
+    let mut member_checks = String::new();
+    if let Some(member) = &member {
+        render_java_member_checks(
+            &mut member_checks,
+            "entry.getValue()",
+            "entry.getKey()",
+            member,
+            value,
+            "                ",
+        );
+        // A union-typed member is re-checked against the branch it holds, through
+        // the union's own dispatcher (the parse side runs the same checks inside
+        // `fromNode`).
+        if let Some(interface) = java_union_interface(value)
+            && let Some(union) = member_union
+            && java_union_has_checks(union)
+        {
+            member_checks.push_str(&format!(
+                "                {interface}.validate(entry.getValue(), entry.getKey(), violations);\n"
+            ));
+        }
+    }
     let map_needs_validation = schema.min_properties.is_some()
         || schema.max_properties.is_some()
-        || schema.property_names.is_some();
+        || schema.property_names.is_some()
+        || !member_checks.is_empty();
     if map_needs_validation {
         output.push_str("            List<Violation> violations = new ArrayList<>();\n");
-        render_java_property_count_checks(output, "value.values.size()", schema, "            ");
+        render_java_property_count_checks(
+            output,
+            "value.additionalProperties.size()",
+            schema,
+            "            ",
+        );
         if let Some(subschema) = &schema.property_names {
             render_java_serialize_property_name_checks(
                 output,
-                "value.values.keySet()",
+                "value.additionalProperties.keySet()",
                 subschema,
                 "            ",
             );
+        }
+        if !member_checks.is_empty() {
+            output.push_str(&format!(
+                "            for (Map.Entry<String, {value_type}> entry : value.additionalProperties.entrySet()) {{\n"
+            ));
+            if nullable_members {
+                output.push_str("                if (entry.getValue() == null) {\n");
+                output.push_str("                    continue;\n                }\n");
+            }
+            output.push_str(&member_checks);
+            output.push_str("            }\n");
         }
         output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
     }
 
     output.push_str("            gen.writeStartObject();\n");
     output.push_str(&format!(
-        "            for (Map.Entry<String, {value_type}> entry : value.values.entrySet()) {{\n"
+        "            for (Map.Entry<String, {value_type}> entry : value.additionalProperties.entrySet()) {{\n"
     ));
+    if nullable_members {
+        output.push_str("                if (entry.getValue() == null) {\n");
+        output.push_str("                    gen.writeNullField(entry.getKey());\n");
+        output.push_str("                    continue;\n                }\n");
+    }
     output.push_str(&write_map_value(value));
     output.push_str("            }\n");
     output.push_str("            gen.writeEndObject();\n");
@@ -3236,22 +3876,31 @@ fn render_typed_map_class(
         "                violations.add(new Violation(\"\", \"expected object\"));\n                throw new ValidationException(violations);\n            }\n",
     );
     output.push_str(&format!(
-        "            Map<String, {value_type}> values = new LinkedHashMap<>();\n"
+        "            Map<String, {value_type}> additionalProperties = new LinkedHashMap<>();\n"
     ));
     output.push_str("            Iterator<String> fieldNames = node.fieldNames();\n");
     output.push_str("            while (fieldNames.hasNext()) {\n");
     output.push_str("                String key = fieldNames.next();\n");
     output.push_str("                JsonNode element = node.get(key);\n");
     output.push_str("                if (element.isNull()) {\n");
-    output.push_str(
-        "                    violations.add(new Violation(key, \"explicit null not allowed\"));\n                    continue;\n                }\n",
-    );
+    if nullable_members {
+        // A `null` member of a nullable map is kept as a null member, so the key
+        // survives the round trip ([[nullability]]).
+        output.push_str(
+            "                    additionalProperties.put(key, null);\n                    continue;\n                }\n",
+        );
+    } else {
+        output.push_str(
+            "                    violations.add(new Violation(key, \"explicit null not allowed\"));\n                    continue;\n                }\n",
+        );
+    }
     render_parse_map_value(
         output,
         value,
-        "values",
+        "additionalProperties",
         "element",
         "key",
+        member.as_ref(),
         "                ",
     );
     output.push_str("            }\n");
@@ -3263,7 +3912,9 @@ fn render_typed_map_class(
         render_java_property_name_checks(output, "node", subschema, "            ");
     }
     output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
-    output.push_str(&format!("            return new {class}(values);\n"));
+    output.push_str(&format!(
+        "            return new {class}(additionalProperties);\n"
+    ));
     output.push_str("        }\n    }\n}\n");
 }
 

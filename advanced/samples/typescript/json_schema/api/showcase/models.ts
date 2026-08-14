@@ -14,10 +14,12 @@ export function requiredField<T>(
 }
 
 const CIRCLE_KIND_CONST = "circle";
+const LINK_NOTE_KIND_CONST = "link";
 const SHOWCASE_KIND_CONST = "showcase";
 const REVISION_CONST = 1;
 const ENABLED_CONST = true;
 const SQUARE_KIND_CONST = "square";
+const TEXT_NOTE_KIND_CONST = "text";
 export const DEFAULT_RETRIES = 3;
 export const DEFAULT_GREETING = "hello";
 export const DEFAULT_DEBUG = false;
@@ -47,6 +49,7 @@ const PATTERN_F5FB862A44510B9D = new RegExp(
   "^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$",
   "u",
 );
+const PATTERN_C182F89FDB221836 = new RegExp("^[a-z]+$", "u");
 
 /**
  * A nested object, open to forward-compatible extension.
@@ -66,7 +69,16 @@ export interface Attributes {
 }
 
 /**
- * A circle branch of the Shape tagged union.
+ * A map whose *member* type is a union written inline in `additionalProperties`. Like an element union it has no name of its own, so it is named after its position — `ChoicesValue` — and moved into `$defs`; each member then decodes through that union's selector, with the member key carrying into the violation path.
+ */
+export interface Choices {
+  additionalProperties: Record<string, ChoicesValue>;
+}
+
+export type ChoicesValue = Circle | Square;
+
+/**
+ * A circle branch of the Shape and shapeOrName tagged unions.
  */
 export interface Circle {
   readonly kind: "circle";
@@ -85,10 +97,45 @@ export interface ContactTs {
 }
 
 /**
+ * A free-form object (`additionalProperties: true` with no declared properties): every member is carried verbatim, bounded to at most 4 members. Members keep their wire form, so large integers survive a round-trip untruncated.
+ */
+export interface Extras {
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
  * Arbitrary string key/value labels (typed map).
  */
 export interface Labels {
   additionalProperties: Record<string, string>;
+}
+
+/**
+ * A link note branch, named inline.
+ */
+export interface LinkNote {
+  readonly kind: "link";
+  href: string;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A typed map of **nullable** members: a member may be an explicit null, which is kept as a null member rather than dropped from the map, while a present member still carries its own constraint.
+ */
+export interface Nicknames {
+  additionalProperties: Record<string, string | null>;
+}
+
+/**
+ * A tagged union whose object branches are written **inline** rather than `$ref`ed: each branch is emitted as a named type, so each names itself with the per-language `x-<lang>-name` override (two or more inline object branches cannot derive distinguishing names — the discriminator `const` is a wire value, not an identifier). Selection reads the shared required `kind` const, and each branch keeps its own constraints and stays open to unknown members.
+ */
+export type Note = TextNote | LinkNote;
+
+/**
+ * A typed map whose members carry their own constraints: every member is a non-negative multiple of 5, at most 100. A member is held to exactly what a declared field of that type is held to, in both directions, with the offending member's key as the violation path.
+ */
+export interface Quotas {
+  additionalProperties: Record<string, number>;
 }
 
 /**
@@ -248,10 +295,63 @@ export interface Showcase {
    */
   roles?: string[];
   /**
-   * Disjoint-kind union (oneOf sum type): the wire value is either a string or an integer, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector.
+   * Disjoint-kind union (oneOf sum type): the wire value is either a string of at least 3 code points or an integer of at least 1, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector. Each branch also carries its **own constraints**: once the token selects a branch, the value is held to everything that branch declares, in both directions, with the union's path on the violation.
    */
   idOrName?: string | number;
+  /**
+   * A union whose string branch is a **closed value set**: either one of two named modes or an unbounded non-negative integer. The branch narrows to its own admissible values (a Go/Java membership check, a TypeScript literal union, a Python `Literal`), so an unknown string is a Violation while any non-negative integer is accepted.
+   */
+  mode?: "auto" | "manual" | number;
+  /**
+   * Mixed-kind union whose object branch is an inline free-form object: the wire value is either an arbitrary object (members carried verbatim) or a string, selected by its JSON token. The free-form object is the one object branch that needs no type name — TypeScript and Python carry it structurally, Go and Java wrap it as `<Union>Object`.
+   */
+  payload?: Record<string, unknown> | string;
+  /**
+   * Mixed-kind union whose object branch is an inline *structured* object, written directly on the property rather than in `$defs`. It is the only object branch of this union, so it derives its name from the union it belongs to — `ShowcaseDetailObject` — and is emitted as an ordinary model: its members keep their own constraints and it stays open to unknown ones.
+   */
+  detail?: ShowcaseDetailObject | string;
+  /**
+   * Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface). The scalar branch carries a length bound of its own; the object branches validate through their own models.
+   */
+  shapeOrName?: Circle | Square | string;
+  /**
+   * Mixed-kind union with an array branch: the wire value is either a non-empty list of distinct numbers or a lowercase preset name, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`. Both branches carry their own constraints — the array's `minItems`/`uniqueItems` and the string's `pattern` — so the array-vs-string choice is validated as well as selected.
+   */
+  measurements?: number[] | string;
+  /**
+   * A list whose element type is a named union: every element is routed to exactly one branch by the union's own selector, and its index carries into the violation path (`shapes[1]`). Go and Java cannot decode a sealed interface as a whole, so the element decodes through the union's dispatcher one at a time.
+   */
+  shapes?: Shape[];
+  /**
+   * A list whose element union is written **inline**. An element has no name of its own, so the union is named after its position — `ShowcaseSegmentsItem` — moved into `$defs`, and the element becomes a `$ref` at it; from there it is an ordinary named union in every language.
+   */
+  segments?: ShowcaseSegmentsItem[];
+  /**
+   * A list of **nullable elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list stays a list.
+   */
+  slots?: (string | null)[];
+  /**
+   * A nested array: `items` at depth two. Each level decodes elementwise, so a bad element is reported at its own two-dimensional index (`grid[1][0]`).
+   */
+  grid?: number[][];
+  location?: ShowcaseLocation;
+  /**
+   * A nullable inline object. The nullability wrapper emits no type of its own, so the object inside it takes the property's name — `ShowcaseAudit`, the same name it would take written plainly: adding or removing nullability never renames the type.
+   */
+  audit?: ShowcaseAudit | null;
+  /**
+   * A list whose element is an inline object, named after its position (`ShowcaseRowsItem`) exactly as an inline element *union* is.
+   */
+  rows?: ShowcaseRowsItem[];
+  ledgerTs?: ShowcaseLedger;
+  metadata?: ShowcaseMetadata;
+  quotas?: Quotas;
+  tokens?: Tokens;
+  nicknames?: Nicknames;
+  choices?: Choices;
+  extras?: Extras;
   shape?: Shape;
+  note?: Note;
   address?: Address;
   labels?: Labels;
   settings?: Settings;
@@ -259,17 +359,85 @@ export interface Showcase {
   contact?: ContactTs;
 }
 
+export interface ShowcaseAudit {
+  by: string;
+  additionalProperties: Record<string, unknown>;
+}
+
+export interface ShowcaseDetailObject {
+  code: string;
+  hint?: string;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A typed map written inline on the property: the map itself is named `ShowcaseLedger` and its inline member shape `ShowcaseLedgerValue`, so both the map and its members are ordinary named models. Also exercises the member-name override on a hoisted property — `x-<lang>-name` keeps naming the *member* (Go `LedgerGo`, TS `ledgerTs`, Python `ledger_py`, Java `ledgerJava`) while the type keeps its position-derived name.
+ */
+export interface ShowcaseLedger {
+  additionalProperties: Record<string, ShowcaseLedgerValue>;
+}
+
+export interface ShowcaseLedgerValue {
+  amount: number;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * An object written **inline** on the property rather than in `$defs`. It is named after the position it occupies — `ShowcaseLocation` — moved into `$defs`, and the property becomes a `$ref` at it, so it emits as the ordinary named model an authored definition would produce, member constraints and all. Its own nested inline object is named against that name in turn (`ShowcaseLocationGeo`), so nesting needs no `$defs` boilerplate at any depth.
+ */
+export interface ShowcaseLocation {
+  city: string;
+  geo?: ShowcaseLocationGeo;
+  additionalProperties: Record<string, unknown>;
+}
+
+export interface ShowcaseLocationGeo {
+  lat?: number;
+  lon?: number;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A free-form object written inline. Even this is named (`ShowcaseMetadata`): every object emits as a named aggregate holding its members in a catch-all, so adding `properties` to it later only adds fields rather than changing the emitted type's kind, and its member-count bound rides along with it.
+ */
+export interface ShowcaseMetadata {
+  additionalProperties: Record<string, unknown>;
+}
+
+export interface ShowcaseRowsItem {
+  cell: string;
+  additionalProperties: Record<string, unknown>;
+}
+
+export type ShowcaseSegmentsItem = string | number;
+
 export interface GetShowcaseInput {
   id: string;
 }
 
 /**
- * A square branch of the Shape tagged union.
+ * A square branch of the Shape and shapeOrName tagged unions.
  */
 export interface Square {
   readonly kind: "square";
   side: number;
   additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A text note branch, named inline.
+ */
+export interface TextNote {
+  readonly kind: "text";
+  body: string;
+  additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A typed map with a refined *string* member: 2 to 8 code points of lowercase ASCII. Exercises the member-level `minLength`/`maxLength`/`pattern` in every language.
+ */
+export interface Tokens {
+  additionalProperties: Record<string, string>;
 }
 
 /**
@@ -293,6 +461,35 @@ export interface WidgetBase {
   id: string;
   kind?: string;
   additionalProperties: Record<string, unknown>;
+}
+
+function serializeShowcaseDetail(value: ShowcaseDetailObject | string): unknown {
+  if (__nexgenDefinitions.isPlainObject(value)) {
+    return new ShowcaseDetailObjectMapper().toIntermediate(
+      value as unknown as ShowcaseDetailObject,
+    );
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  throw new __nexgenDefinitions.ValidationError([
+    { path: "", reason: "expected one of: ShowcaseDetailObject, string" },
+  ]);
+}
+
+function serializeShowcaseShapeOrName(value: Circle | Square | string): unknown {
+  if ((value as unknown as Record<string, unknown>)["kind"] === "circle") {
+    return new CircleMapper().toIntermediate(value as Circle);
+  }
+  if ((value as unknown as Record<string, unknown>)["kind"] === "square") {
+    return new SquareMapper().toIntermediate(value as Square);
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  throw new __nexgenDefinitions.ValidationError([
+    { path: "", reason: "expected one of: Circle, Square, string" },
+  ]);
 }
 
 const ADDRESS_DECLARED = new Set(["street", "city", "zip"]);
@@ -454,6 +651,91 @@ export class AttributesMapper {
       throw new __nexgenDefinitions.ValidationError(violations);
     }
     return out;
+  }
+}
+
+export class ChoicesMapper {
+  public fromIntermediate(raw: unknown): Choices {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, ChoicesValue> = {};
+    for (const key of keys) {
+      let entry: ChoicesValue | undefined = undefined;
+      try {
+        entry = new ChoicesValueMapper().fromIntermediate(raw[key]);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, key, error);
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Choices): unknown {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = new ChoicesValueMapper().toIntermediate(entry);
+    }
+    return out;
+  }
+}
+
+export class ChoicesValueMapper {
+  public fromIntermediate(raw: unknown): ChoicesValue {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    let out: ChoicesValue = undefined as unknown as ChoicesValue;
+    if (__nexgenDefinitions.isPlainObject(raw)) {
+      switch ((raw as Record<string, unknown>)["kind"]) {
+        case "circle":
+          try {
+            out = new CircleMapper().fromIntermediate(raw);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "", error);
+          }
+          break;
+        case "square":
+          try {
+            out = new SquareMapper().fromIntermediate(raw);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "", error);
+          }
+          break;
+        default:
+          violations.push({
+            path: "",
+            reason: `unknown discriminator kind ${String((raw as Record<string, unknown>)["kind"])}: expected one of ["circle", "square"]`,
+          });
+      }
+    } else {
+      violations.push({ path: "", reason: "expected one of: Circle, Square" });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ChoicesValue): unknown {
+    if ((value as unknown as Record<string, unknown>)["kind"] === "circle") {
+      return new CircleMapper().toIntermediate(value as Circle);
+    }
+    if ((value as unknown as Record<string, unknown>)["kind"] === "square") {
+      return new SquareMapper().toIntermediate(value as Square);
+    }
+    throw new __nexgenDefinitions.ValidationError([
+      { path: "", reason: "expected one of: Circle, Square" },
+    ]);
   }
 }
 
@@ -653,6 +935,52 @@ export class ContactTsMapper {
   }
 }
 
+export class ExtrasMapper {
+  public fromIntermediate(raw: unknown): Extras {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    if (keys.length > 4) {
+      violations.push({
+        path: "",
+        reason: `must have at most 4 properties, got ${keys.length}`,
+      });
+    }
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of keys) {
+      additionalProperties[key] = raw[key];
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Extras): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    const keys = Object.keys(out);
+    if (keys.length > 4) {
+      violations.push({
+        path: "",
+        reason: `must have at most 4 properties, got ${keys.length}`,
+      });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
 export class LabelsMapper {
   public fromIntermediate(raw: unknown): Labels {
     const violations: __nexgenDefinitions.Violation[] = [];
@@ -699,6 +1027,254 @@ export class LabelsMapper {
         path: "",
         reason: `must have at most 50 properties, got ${keys.length}`,
       });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const LINK_NOTE_DECLARED = new Set(["kind", "href"]);
+
+export class LinkNoteMapper {
+  public fromIntermediate(raw: unknown): LinkNote {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let kind: "link" = undefined as unknown as "link";
+    if (raw.kind === undefined || raw.kind === null) {
+      violations.push({ path: "kind", reason: "required" });
+    } else {
+      if (typeof raw.kind !== "string") {
+        violations.push({ path: "kind", reason: "expected string" });
+      } else if (raw.kind !== LINK_NOTE_KIND_CONST) {
+        violations.push({ path: "kind", reason: `must equal "link"` });
+      } else {
+        kind = raw.kind as "link";
+      }
+    }
+
+    let href: string = undefined as unknown as string;
+    if (raw.href === undefined || raw.href === null) {
+      violations.push({ path: "href", reason: "required" });
+    } else {
+      if (typeof raw.href !== "string") {
+        violations.push({ path: "href", reason: "expected string" });
+      } else {
+        href = raw.href;
+        if ([...raw.href].length < 1) {
+          violations.push({
+            path: "href",
+            reason: `must have length >= 1, got ${[...raw.href].length}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!LINK_NOTE_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: LinkNote = { kind, href, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: LinkNote): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if (value.kind !== "link") {
+      violations.push({ path: "kind", reason: `must equal "link"` });
+    }
+    out.kind = value.kind;
+    if ([...value.href].length < 1) {
+      violations.push({
+        path: "href",
+        reason: `must have length >= 1, got ${[...value.href].length}`,
+      });
+    }
+    out.href = value.href;
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+export class NicknamesMapper {
+  public fromIntermediate(raw: unknown): Nicknames {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, string | null> = {};
+    for (const key of keys) {
+      let entry: string | null | undefined = undefined;
+      if (raw[key] === null) {
+        entry = null;
+      } else {
+        if (typeof raw[key] !== "string") {
+          violations.push({ path: key, reason: "expected string" });
+        } else {
+          entry = raw[key];
+          if ([...raw[key]].length < 2) {
+            violations.push({
+              path: key,
+              reason: `must have length >= 2, got ${[...raw[key]].length}`,
+            });
+          }
+        }
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Nicknames): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (entry !== null) {
+        if ([...entry].length < 2) {
+          violations.push({
+            path: key,
+            reason: `must have length >= 2, got ${[...entry].length}`,
+          });
+        }
+      }
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+export class NoteMapper {
+  public fromIntermediate(raw: unknown): Note {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    let out: Note = undefined as unknown as Note;
+    if (__nexgenDefinitions.isPlainObject(raw)) {
+      switch ((raw as Record<string, unknown>)["kind"]) {
+        case "text":
+          try {
+            out = new TextNoteMapper().fromIntermediate(raw);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "", error);
+          }
+          break;
+        case "link":
+          try {
+            out = new LinkNoteMapper().fromIntermediate(raw);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "", error);
+          }
+          break;
+        default:
+          violations.push({
+            path: "",
+            reason: `unknown discriminator kind ${String((raw as Record<string, unknown>)["kind"])}: expected one of ["text", "link"]`,
+          });
+      }
+    } else {
+      violations.push({ path: "", reason: "expected one of: TextNote, LinkNote" });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+
+  public toIntermediate(value: Note): unknown {
+    if ((value as unknown as Record<string, unknown>)["kind"] === "text") {
+      return new TextNoteMapper().toIntermediate(value as TextNote);
+    }
+    if ((value as unknown as Record<string, unknown>)["kind"] === "link") {
+      return new LinkNoteMapper().toIntermediate(value as LinkNote);
+    }
+    throw new __nexgenDefinitions.ValidationError([
+      { path: "", reason: "expected one of: TextNote, LinkNote" },
+    ]);
+  }
+}
+
+export class QuotasMapper {
+  public fromIntermediate(raw: unknown): Quotas {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, number> = {};
+    for (const key of keys) {
+      let entry: number | undefined = undefined;
+      if (typeof raw[key] !== "number" || !Number.isSafeInteger(raw[key])) {
+        violations.push({ path: key, reason: "expected integer" });
+      } else {
+        entry = raw[key];
+        if (raw[key] < 0) {
+          violations.push({ path: key, reason: `must be >= 0, got ${raw[key]}` });
+        }
+        if (raw[key] > 100) {
+          violations.push({ path: key, reason: `must be <= 100, got ${raw[key]}` });
+        }
+        if (raw[key] % 5 !== 0) {
+          violations.push({
+            path: key,
+            reason: `must be a multiple of 5, got ${raw[key]}`,
+          });
+        }
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Quotas): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (entry < 0) {
+        violations.push({ path: key, reason: `must be >= 0, got ${entry}` });
+      }
+      if (entry > 100) {
+        violations.push({ path: key, reason: `must be <= 100, got ${entry}` });
+      }
+      if (entry % 5 !== 0) {
+        violations.push({ path: key, reason: `must be a multiple of 5, got ${entry}` });
+      }
+      out[key] = entry;
     }
     if (violations.length) {
       throw new __nexgenDefinitions.ValidationError(violations);
@@ -1436,16 +2012,435 @@ export class ShowcaseMapper {
     } else if (raw.idOrName !== undefined) {
       if (typeof raw.idOrName === "string") {
         idOrName = raw.idOrName as string;
+        if ([...(idOrName as string)].length < 3) {
+          violations.push({
+            path: "idOrName",
+            reason: `must have length >= 3, got ${[...(idOrName as string)].length}`,
+          });
+        }
       } else if (
         typeof raw.idOrName === "number" &&
         Number.isSafeInteger(raw.idOrName)
       ) {
         idOrName = raw.idOrName as number;
+        if ((idOrName as number) < 1) {
+          violations.push({
+            path: "idOrName",
+            reason: `must be >= 1, got ${idOrName as number}`,
+          });
+        }
       } else {
         violations.push({
           path: "idOrName",
           reason: "expected one of: string, integer",
         });
+      }
+    }
+
+    let mode: "auto" | "manual" | number | undefined = undefined as unknown as
+      | "auto"
+      | "manual"
+      | number
+      | undefined;
+    if (raw.mode === null) {
+      violations.push({ path: "mode", reason: "explicit null not allowed" });
+    } else if (raw.mode !== undefined) {
+      if (typeof raw.mode === "string") {
+        mode = raw.mode as "auto" | "manual";
+        if (
+          (mode as "auto" | "manual") !== "auto" &&
+          (mode as "auto" | "manual") !== "manual"
+        ) {
+          violations.push({
+            path: "mode",
+            reason: `must be one of ["auto", "manual"], got ${JSON.stringify(mode as "auto" | "manual")}`,
+          });
+        }
+      } else if (typeof raw.mode === "number" && Number.isSafeInteger(raw.mode)) {
+        mode = raw.mode as number;
+        if ((mode as number) < 0) {
+          violations.push({
+            path: "mode",
+            reason: `must be >= 0, got ${mode as number}`,
+          });
+        }
+      } else {
+        violations.push({ path: "mode", reason: "expected one of: string, integer" });
+      }
+    }
+
+    let payload: Record<string, unknown> | string | undefined = undefined as unknown as
+      | Record<string, unknown>
+      | string
+      | undefined;
+    if (raw.payload === null) {
+      violations.push({ path: "payload", reason: "explicit null not allowed" });
+    } else if (raw.payload !== undefined) {
+      if (__nexgenDefinitions.isPlainObject(raw.payload)) {
+        payload = raw.payload as Record<string, unknown>;
+      } else if (typeof raw.payload === "string") {
+        payload = raw.payload as string;
+      } else {
+        violations.push({ path: "payload", reason: "expected one of: object, string" });
+      }
+    }
+
+    let detail: ShowcaseDetailObject | string | undefined = undefined as unknown as
+      | ShowcaseDetailObject
+      | string
+      | undefined;
+    if (raw.detail === null) {
+      violations.push({ path: "detail", reason: "explicit null not allowed" });
+    } else if (raw.detail !== undefined) {
+      if (__nexgenDefinitions.isPlainObject(raw.detail)) {
+        try {
+          detail = new ShowcaseDetailObjectMapper().fromIntermediate(raw.detail);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "detail", error);
+        }
+      } else if (typeof raw.detail === "string") {
+        detail = raw.detail as string;
+      } else {
+        violations.push({
+          path: "detail",
+          reason: "expected one of: ShowcaseDetailObject, string",
+        });
+      }
+    }
+
+    let shapeOrName: Circle | Square | string | undefined = undefined as unknown as
+      | Circle
+      | Square
+      | string
+      | undefined;
+    if (raw.shapeOrName === null) {
+      violations.push({ path: "shapeOrName", reason: "explicit null not allowed" });
+    } else if (raw.shapeOrName !== undefined) {
+      if (__nexgenDefinitions.isPlainObject(raw.shapeOrName)) {
+        switch ((raw.shapeOrName as Record<string, unknown>)["kind"]) {
+          case "circle":
+            try {
+              shapeOrName = new CircleMapper().fromIntermediate(raw.shapeOrName);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, "shapeOrName", error);
+            }
+            break;
+          case "square":
+            try {
+              shapeOrName = new SquareMapper().fromIntermediate(raw.shapeOrName);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, "shapeOrName", error);
+            }
+            break;
+          default:
+            violations.push({
+              path: "shapeOrName",
+              reason: `unknown discriminator kind ${String((raw.shapeOrName as Record<string, unknown>)["kind"])}: expected one of ["circle", "square"]`,
+            });
+        }
+      } else if (typeof raw.shapeOrName === "string") {
+        shapeOrName = raw.shapeOrName as string;
+        if ([...(shapeOrName as string)].length > 32) {
+          violations.push({
+            path: "shapeOrName",
+            reason: `must have length <= 32, got ${[...(shapeOrName as string)].length}`,
+          });
+        }
+      } else {
+        violations.push({
+          path: "shapeOrName",
+          reason: "expected one of: Circle, Square, string",
+        });
+      }
+    }
+
+    let measurements: number[] | string | undefined = undefined as unknown as
+      | number[]
+      | string
+      | undefined;
+    if (raw.measurements === null) {
+      violations.push({ path: "measurements", reason: "explicit null not allowed" });
+    } else if (raw.measurements !== undefined) {
+      if (Array.isArray(raw.measurements)) {
+        measurements = raw.measurements as number[];
+        if ((measurements as number[]).length < 1) {
+          violations.push({
+            path: "measurements",
+            reason: `must have at least 1 items, got ${(measurements as number[]).length}`,
+          });
+        }
+        {
+          const seen = new Map<unknown, number>();
+          (measurements as number[]).forEach((element, index) => {
+            if (seen.has(element)) {
+              violations.push({
+                path: "measurements",
+                reason: `duplicate items: element at index ${index} equals index ${seen.get(element)}`,
+              });
+            } else {
+              seen.set(element, index);
+            }
+          });
+        }
+      } else if (typeof raw.measurements === "string") {
+        measurements = raw.measurements as string;
+        if (!PATTERN_C182F89FDB221836.test(measurements as string)) {
+          violations.push({
+            path: "measurements",
+            reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(measurements as string)}`,
+          });
+        }
+      } else {
+        violations.push({
+          path: "measurements",
+          reason: "expected one of: number[], string",
+        });
+      }
+    }
+
+    let shapes: Shape[] | undefined = undefined as unknown as Shape[] | undefined;
+    if (raw.shapes === null) {
+      violations.push({ path: "shapes", reason: "explicit null not allowed" });
+    } else if (raw.shapes !== undefined) {
+      if (!Array.isArray(raw.shapes)) {
+        violations.push({ path: "shapes", reason: "expected array" });
+      } else {
+        shapes = [];
+        raw.shapes.forEach((element: unknown, index: number) => {
+          let item: Shape = undefined as unknown as Shape;
+          try {
+            item = new ShapeMapper().fromIntermediate(element);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, `shapes[${index}]`, error);
+          }
+          if (item !== undefined) {
+            shapes!.push(item);
+          }
+        });
+      }
+    }
+
+    let segments: ShowcaseSegmentsItem[] | undefined = undefined as unknown as
+      | ShowcaseSegmentsItem[]
+      | undefined;
+    if (raw.segments === null) {
+      violations.push({ path: "segments", reason: "explicit null not allowed" });
+    } else if (raw.segments !== undefined) {
+      if (!Array.isArray(raw.segments)) {
+        violations.push({ path: "segments", reason: "expected array" });
+      } else {
+        segments = [];
+        raw.segments.forEach((element: unknown, index: number) => {
+          let item: ShowcaseSegmentsItem = undefined as unknown as ShowcaseSegmentsItem;
+          try {
+            item = new ShowcaseSegmentsItemMapper().fromIntermediate(element);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, `segments[${index}]`, error);
+          }
+          if (item !== undefined) {
+            segments!.push(item);
+          }
+        });
+      }
+    }
+
+    let slots: (string | null)[] | undefined = undefined as unknown as
+      | (string | null)[]
+      | undefined;
+    if (raw.slots === null) {
+      violations.push({ path: "slots", reason: "explicit null not allowed" });
+    } else if (raw.slots !== undefined) {
+      if (!Array.isArray(raw.slots)) {
+        violations.push({ path: "slots", reason: "expected array" });
+      } else {
+        slots = [];
+        raw.slots.forEach((element: unknown, index: number) => {
+          let item: string | null = undefined as unknown as string | null;
+          if (element === null) {
+            item = null;
+          } else {
+            if (typeof element !== "string") {
+              violations.push({ path: `slots[${index}]`, reason: "expected string" });
+            } else {
+              item = element;
+            }
+          }
+          if (item !== undefined) {
+            slots!.push(item);
+          }
+        });
+      }
+    }
+
+    let grid: number[][] | undefined = undefined as unknown as number[][] | undefined;
+    if (raw.grid === null) {
+      violations.push({ path: "grid", reason: "explicit null not allowed" });
+    } else if (raw.grid !== undefined) {
+      if (!Array.isArray(raw.grid)) {
+        violations.push({ path: "grid", reason: "expected array" });
+      } else {
+        grid = [];
+        raw.grid.forEach((element: unknown, index: number) => {
+          let item: number[] = undefined as unknown as number[];
+          if (!Array.isArray(element)) {
+            violations.push({ path: `grid[${index}]`, reason: "expected array" });
+          } else {
+            item = [];
+            element.forEach((element1: unknown, index1: number) => {
+              let item1: number = undefined as unknown as number;
+              if (typeof element1 !== "number" || !Number.isSafeInteger(element1)) {
+                violations.push({
+                  path: `${`grid[${index}]`}[${index1}]`,
+                  reason: "expected integer",
+                });
+              } else {
+                item1 = element1;
+              }
+              if (item1 !== undefined) {
+                item!.push(item1);
+              }
+            });
+          }
+          if (item !== undefined) {
+            grid!.push(item);
+          }
+        });
+      }
+    }
+
+    let location: ShowcaseLocation | undefined = undefined as unknown as
+      | ShowcaseLocation
+      | undefined;
+    if (raw.location === null) {
+      violations.push({ path: "location", reason: "explicit null not allowed" });
+    } else if (raw.location !== undefined) {
+      try {
+        location = new ShowcaseLocationMapper().fromIntermediate(raw.location);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "location", error);
+      }
+    }
+
+    let audit: ShowcaseAudit | null | undefined = undefined as unknown as
+      | ShowcaseAudit
+      | null
+      | undefined;
+    if (raw.audit !== undefined) {
+      if (raw.audit === null) {
+        audit = null;
+      } else {
+        try {
+          audit = new ShowcaseAuditMapper().fromIntermediate(raw.audit);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "audit", error);
+        }
+      }
+    }
+
+    let rows: ShowcaseRowsItem[] | undefined = undefined as unknown as
+      | ShowcaseRowsItem[]
+      | undefined;
+    if (raw.rows === null) {
+      violations.push({ path: "rows", reason: "explicit null not allowed" });
+    } else if (raw.rows !== undefined) {
+      if (!Array.isArray(raw.rows)) {
+        violations.push({ path: "rows", reason: "expected array" });
+      } else {
+        rows = [];
+        raw.rows.forEach((element: unknown, index: number) => {
+          let item: ShowcaseRowsItem = undefined as unknown as ShowcaseRowsItem;
+          try {
+            item = new ShowcaseRowsItemMapper().fromIntermediate(element);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, `rows[${index}]`, error);
+          }
+          if (item !== undefined) {
+            rows!.push(item);
+          }
+        });
+      }
+    }
+
+    let ledgerTs: ShowcaseLedger | undefined = undefined as unknown as
+      | ShowcaseLedger
+      | undefined;
+    if (raw.ledger === null) {
+      violations.push({ path: "ledger", reason: "explicit null not allowed" });
+    } else if (raw.ledger !== undefined) {
+      try {
+        ledgerTs = new ShowcaseLedgerMapper().fromIntermediate(raw.ledger);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "ledger", error);
+      }
+    }
+
+    let metadata: ShowcaseMetadata | undefined = undefined as unknown as
+      | ShowcaseMetadata
+      | undefined;
+    if (raw.metadata === null) {
+      violations.push({ path: "metadata", reason: "explicit null not allowed" });
+    } else if (raw.metadata !== undefined) {
+      try {
+        metadata = new ShowcaseMetadataMapper().fromIntermediate(raw.metadata);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "metadata", error);
+      }
+    }
+
+    let quotas: Quotas | undefined = undefined as unknown as Quotas | undefined;
+    if (raw.quotas === null) {
+      violations.push({ path: "quotas", reason: "explicit null not allowed" });
+    } else if (raw.quotas !== undefined) {
+      try {
+        quotas = new QuotasMapper().fromIntermediate(raw.quotas);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "quotas", error);
+      }
+    }
+
+    let tokens: Tokens | undefined = undefined as unknown as Tokens | undefined;
+    if (raw.tokens === null) {
+      violations.push({ path: "tokens", reason: "explicit null not allowed" });
+    } else if (raw.tokens !== undefined) {
+      try {
+        tokens = new TokensMapper().fromIntermediate(raw.tokens);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "tokens", error);
+      }
+    }
+
+    let nicknames: Nicknames | undefined = undefined as unknown as
+      | Nicknames
+      | undefined;
+    if (raw.nicknames === null) {
+      violations.push({ path: "nicknames", reason: "explicit null not allowed" });
+    } else if (raw.nicknames !== undefined) {
+      try {
+        nicknames = new NicknamesMapper().fromIntermediate(raw.nicknames);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "nicknames", error);
+      }
+    }
+
+    let choices: Choices | undefined = undefined as unknown as Choices | undefined;
+    if (raw.choices === null) {
+      violations.push({ path: "choices", reason: "explicit null not allowed" });
+    } else if (raw.choices !== undefined) {
+      try {
+        choices = new ChoicesMapper().fromIntermediate(raw.choices);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "choices", error);
+      }
+    }
+
+    let extras: Extras | undefined = undefined as unknown as Extras | undefined;
+    if (raw.extras === null) {
+      violations.push({ path: "extras", reason: "explicit null not allowed" });
+    } else if (raw.extras !== undefined) {
+      try {
+        extras = new ExtrasMapper().fromIntermediate(raw.extras);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "extras", error);
       }
     }
 
@@ -1457,6 +2452,17 @@ export class ShowcaseMapper {
         shape = new ShapeMapper().fromIntermediate(raw.shape);
       } catch (error) {
         __nexgenDefinitions.collect(violations, "shape", error);
+      }
+    }
+
+    let note: Note | undefined = undefined as unknown as Note | undefined;
+    if (raw.note === null) {
+      violations.push({ path: "note", reason: "explicit null not allowed" });
+    } else if (raw.note !== undefined) {
+      try {
+        note = new NoteMapper().fromIntermediate(raw.note);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "note", error);
       }
     }
 
@@ -1554,7 +2560,27 @@ export class ShowcaseMapper {
         key !== "aliases" &&
         key !== "roles" &&
         key !== "idOrName" &&
+        key !== "mode" &&
+        key !== "payload" &&
+        key !== "detail" &&
+        key !== "shapeOrName" &&
+        key !== "measurements" &&
+        key !== "shapes" &&
+        key !== "segments" &&
+        key !== "slots" &&
+        key !== "grid" &&
+        key !== "location" &&
+        key !== "audit" &&
+        key !== "rows" &&
+        key !== "ledger" &&
+        key !== "metadata" &&
+        key !== "quotas" &&
+        key !== "tokens" &&
+        key !== "nicknames" &&
+        key !== "choices" &&
+        key !== "extras" &&
         key !== "shape" &&
+        key !== "note" &&
         key !== "address" &&
         key !== "labels" &&
         key !== "settings" &&
@@ -1655,8 +2681,68 @@ export class ShowcaseMapper {
     if (idOrName !== undefined) {
       out.idOrName = idOrName;
     }
+    if (mode !== undefined) {
+      out.mode = mode;
+    }
+    if (payload !== undefined) {
+      out.payload = payload;
+    }
+    if (detail !== undefined) {
+      out.detail = detail;
+    }
+    if (shapeOrName !== undefined) {
+      out.shapeOrName = shapeOrName;
+    }
+    if (measurements !== undefined) {
+      out.measurements = measurements;
+    }
+    if (shapes !== undefined) {
+      out.shapes = shapes;
+    }
+    if (segments !== undefined) {
+      out.segments = segments;
+    }
+    if (slots !== undefined) {
+      out.slots = slots;
+    }
+    if (grid !== undefined) {
+      out.grid = grid;
+    }
+    if (location !== undefined) {
+      out.location = location;
+    }
+    if (audit !== undefined) {
+      out.audit = audit;
+    }
+    if (rows !== undefined) {
+      out.rows = rows;
+    }
+    if (ledgerTs !== undefined) {
+      out.ledgerTs = ledgerTs;
+    }
+    if (metadata !== undefined) {
+      out.metadata = metadata;
+    }
+    if (quotas !== undefined) {
+      out.quotas = quotas;
+    }
+    if (tokens !== undefined) {
+      out.tokens = tokens;
+    }
+    if (nicknames !== undefined) {
+      out.nicknames = nicknames;
+    }
+    if (choices !== undefined) {
+      out.choices = choices;
+    }
+    if (extras !== undefined) {
+      out.extras = extras;
+    }
     if (shape !== undefined) {
       out.shape = shape;
+    }
+    if (note !== undefined) {
+      out.note = note;
     }
     if (address !== undefined) {
       out.address = address;
@@ -1938,10 +3024,151 @@ export class ShowcaseMapper {
       out.roles = value.roles;
     }
     if (value.idOrName !== undefined) {
+      if (typeof value.idOrName === "string") {
+        if ([...(value.idOrName as string)].length < 3) {
+          violations.push({
+            path: "idOrName",
+            reason: `must have length >= 3, got ${[...(value.idOrName as string)].length}`,
+          });
+        }
+      }
+      if (typeof value.idOrName === "number" && Number.isSafeInteger(value.idOrName)) {
+        if ((value.idOrName as number) < 1) {
+          violations.push({
+            path: "idOrName",
+            reason: `must be >= 1, got ${value.idOrName as number}`,
+          });
+        }
+      }
       out.idOrName = value.idOrName;
+    }
+    if (value.mode !== undefined) {
+      if (typeof value.mode === "string") {
+        if (
+          (value.mode as "auto" | "manual") !== "auto" &&
+          (value.mode as "auto" | "manual") !== "manual"
+        ) {
+          violations.push({
+            path: "mode",
+            reason: `must be one of ["auto", "manual"], got ${JSON.stringify(value.mode as "auto" | "manual")}`,
+          });
+        }
+      }
+      if (typeof value.mode === "number" && Number.isSafeInteger(value.mode)) {
+        if ((value.mode as number) < 0) {
+          violations.push({
+            path: "mode",
+            reason: `must be >= 0, got ${value.mode as number}`,
+          });
+        }
+      }
+      out.mode = value.mode;
+    }
+    if (value.payload !== undefined) {
+      out.payload = value.payload;
+    }
+    if (value.detail !== undefined) {
+      out.detail = serializeShowcaseDetail(value.detail);
+    }
+    if (value.shapeOrName !== undefined) {
+      if (typeof value.shapeOrName === "string") {
+        if ([...(value.shapeOrName as string)].length > 32) {
+          violations.push({
+            path: "shapeOrName",
+            reason: `must have length <= 32, got ${[...(value.shapeOrName as string)].length}`,
+          });
+        }
+      }
+      out.shapeOrName = serializeShowcaseShapeOrName(value.shapeOrName);
+    }
+    if (value.measurements !== undefined) {
+      if (Array.isArray(value.measurements)) {
+        if ((value.measurements as number[]).length < 1) {
+          violations.push({
+            path: "measurements",
+            reason: `must have at least 1 items, got ${(value.measurements as number[]).length}`,
+          });
+        }
+        {
+          const seen = new Map<unknown, number>();
+          (value.measurements as number[]).forEach((element, index) => {
+            if (seen.has(element)) {
+              violations.push({
+                path: "measurements",
+                reason: `duplicate items: element at index ${index} equals index ${seen.get(element)}`,
+              });
+            } else {
+              seen.set(element, index);
+            }
+          });
+        }
+      }
+      if (typeof value.measurements === "string") {
+        if (!PATTERN_C182F89FDB221836.test(value.measurements as string)) {
+          violations.push({
+            path: "measurements",
+            reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(value.measurements as string)}`,
+          });
+        }
+      }
+      out.measurements = value.measurements;
+    }
+    if (value.shapes !== undefined) {
+      out.shapes = value.shapes.map((element) =>
+        new ShapeMapper().toIntermediate(element),
+      );
+    }
+    if (value.segments !== undefined) {
+      out.segments = value.segments.map((element) =>
+        new ShowcaseSegmentsItemMapper().toIntermediate(element),
+      );
+    }
+    if (value.slots !== undefined) {
+      out.slots = value.slots;
+    }
+    if (value.grid !== undefined) {
+      out.grid = value.grid;
+    }
+    if (value.location !== undefined) {
+      out.location = new ShowcaseLocationMapper().toIntermediate(value.location);
+    }
+    if (value.audit !== undefined) {
+      out.audit =
+        value.audit === null
+          ? null
+          : new ShowcaseAuditMapper().toIntermediate(value.audit);
+    }
+    if (value.rows !== undefined) {
+      out.rows = value.rows.map((element) =>
+        new ShowcaseRowsItemMapper().toIntermediate(element),
+      );
+    }
+    if (value.ledgerTs !== undefined) {
+      out.ledger = new ShowcaseLedgerMapper().toIntermediate(value.ledgerTs);
+    }
+    if (value.metadata !== undefined) {
+      out.metadata = new ShowcaseMetadataMapper().toIntermediate(value.metadata);
+    }
+    if (value.quotas !== undefined) {
+      out.quotas = new QuotasMapper().toIntermediate(value.quotas);
+    }
+    if (value.tokens !== undefined) {
+      out.tokens = new TokensMapper().toIntermediate(value.tokens);
+    }
+    if (value.nicknames !== undefined) {
+      out.nicknames = new NicknamesMapper().toIntermediate(value.nicknames);
+    }
+    if (value.choices !== undefined) {
+      out.choices = new ChoicesMapper().toIntermediate(value.choices);
+    }
+    if (value.extras !== undefined) {
+      out.extras = new ExtrasMapper().toIntermediate(value.extras);
     }
     if (value.shape !== undefined) {
       out.shape = new ShapeMapper().toIntermediate(value.shape);
+    }
+    if (value.note !== undefined) {
+      out.note = new NoteMapper().toIntermediate(value.note);
     }
     if (value.address !== undefined) {
       out.address = new AddressMapper().toIntermediate(value.address);
@@ -1962,6 +3189,556 @@ export class ShowcaseMapper {
       throw new __nexgenDefinitions.ValidationError(violations);
     }
     return out;
+  }
+}
+
+const SHOWCASE_AUDIT_DECLARED = new Set(["by"]);
+
+export class ShowcaseAuditMapper {
+  public fromIntermediate(raw: unknown): ShowcaseAudit {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let by: string = undefined as unknown as string;
+    if (raw.by === undefined || raw.by === null) {
+      violations.push({ path: "by", reason: "required" });
+    } else {
+      if (typeof raw.by !== "string") {
+        violations.push({ path: "by", reason: "expected string" });
+      } else {
+        by = raw.by;
+        if ([...raw.by].length < 1) {
+          violations.push({
+            path: "by",
+            reason: `must have length >= 1, got ${[...raw.by].length}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_AUDIT_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseAudit = { by, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseAudit): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if ([...value.by].length < 1) {
+      violations.push({
+        path: "by",
+        reason: `must have length >= 1, got ${[...value.by].length}`,
+      });
+    }
+    out.by = value.by;
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_DETAIL_OBJECT_DECLARED = new Set(["code", "hint"]);
+
+export class ShowcaseDetailObjectMapper {
+  public fromIntermediate(raw: unknown): ShowcaseDetailObject {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let code: string = undefined as unknown as string;
+    if (raw.code === undefined || raw.code === null) {
+      violations.push({ path: "code", reason: "required" });
+    } else {
+      if (typeof raw.code !== "string") {
+        violations.push({ path: "code", reason: "expected string" });
+      } else {
+        code = raw.code;
+        if ([...raw.code].length < 1) {
+          violations.push({
+            path: "code",
+            reason: `must have length >= 1, got ${[...raw.code].length}`,
+          });
+        }
+      }
+    }
+
+    let hint: string | undefined = undefined as unknown as string | undefined;
+    if (raw.hint === null) {
+      violations.push({ path: "hint", reason: "explicit null not allowed" });
+    } else if (raw.hint !== undefined) {
+      if (typeof raw.hint !== "string") {
+        violations.push({ path: "hint", reason: "expected string" });
+      } else {
+        hint = raw.hint;
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_DETAIL_OBJECT_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseDetailObject = { code, additionalProperties };
+    if (hint !== undefined) {
+      out.hint = hint;
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseDetailObject): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if ([...value.code].length < 1) {
+      violations.push({
+        path: "code",
+        reason: `must have length >= 1, got ${[...value.code].length}`,
+      });
+    }
+    out.code = value.code;
+    if (value.hint !== undefined) {
+      out.hint = value.hint;
+    }
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+export class ShowcaseLedgerMapper {
+  public fromIntermediate(raw: unknown): ShowcaseLedger {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, ShowcaseLedgerValue> = {};
+    for (const key of keys) {
+      let entry: ShowcaseLedgerValue | undefined = undefined;
+      try {
+        entry = new ShowcaseLedgerValueMapper().fromIntermediate(raw[key]);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, key, error);
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: ShowcaseLedger): unknown {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = new ShowcaseLedgerValueMapper().toIntermediate(entry);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_LEDGER_VALUE_DECLARED = new Set(["amount"]);
+
+export class ShowcaseLedgerValueMapper {
+  public fromIntermediate(raw: unknown): ShowcaseLedgerValue {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let amount: number = undefined as unknown as number;
+    if (raw.amount === undefined || raw.amount === null) {
+      violations.push({ path: "amount", reason: "required" });
+    } else {
+      if (typeof raw.amount !== "number" || !Number.isSafeInteger(raw.amount)) {
+        violations.push({ path: "amount", reason: "expected integer" });
+      } else {
+        amount = raw.amount;
+        if (raw.amount < 0) {
+          violations.push({
+            path: "amount",
+            reason: `must be >= 0, got ${raw.amount}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_LEDGER_VALUE_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseLedgerValue = { amount, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseLedgerValue): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if (value.amount < 0) {
+      violations.push({ path: "amount", reason: `must be >= 0, got ${value.amount}` });
+    }
+    out.amount = value.amount;
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_LOCATION_DECLARED = new Set(["city", "geo"]);
+
+export class ShowcaseLocationMapper {
+  public fromIntermediate(raw: unknown): ShowcaseLocation {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let city: string = undefined as unknown as string;
+    if (raw.city === undefined || raw.city === null) {
+      violations.push({ path: "city", reason: "required" });
+    } else {
+      if (typeof raw.city !== "string") {
+        violations.push({ path: "city", reason: "expected string" });
+      } else {
+        city = raw.city;
+        if ([...raw.city].length < 1) {
+          violations.push({
+            path: "city",
+            reason: `must have length >= 1, got ${[...raw.city].length}`,
+          });
+        }
+      }
+    }
+
+    let geo: ShowcaseLocationGeo | undefined = undefined as unknown as
+      | ShowcaseLocationGeo
+      | undefined;
+    if (raw.geo === null) {
+      violations.push({ path: "geo", reason: "explicit null not allowed" });
+    } else if (raw.geo !== undefined) {
+      try {
+        geo = new ShowcaseLocationGeoMapper().fromIntermediate(raw.geo);
+      } catch (error) {
+        __nexgenDefinitions.collect(violations, "geo", error);
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_LOCATION_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseLocation = { city, additionalProperties };
+    if (geo !== undefined) {
+      out.geo = geo;
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseLocation): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if ([...value.city].length < 1) {
+      violations.push({
+        path: "city",
+        reason: `must have length >= 1, got ${[...value.city].length}`,
+      });
+    }
+    out.city = value.city;
+    if (value.geo !== undefined) {
+      out.geo = new ShowcaseLocationGeoMapper().toIntermediate(value.geo);
+    }
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_LOCATION_GEO_DECLARED = new Set(["lat", "lon"]);
+
+export class ShowcaseLocationGeoMapper {
+  public fromIntermediate(raw: unknown): ShowcaseLocationGeo {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let lat: number | undefined = undefined as unknown as number | undefined;
+    if (raw.lat === null) {
+      violations.push({ path: "lat", reason: "explicit null not allowed" });
+    } else if (raw.lat !== undefined) {
+      if (typeof raw.lat !== "number") {
+        violations.push({ path: "lat", reason: "expected number" });
+      } else {
+        lat = raw.lat;
+      }
+    }
+
+    let lon: number | undefined = undefined as unknown as number | undefined;
+    if (raw.lon === null) {
+      violations.push({ path: "lon", reason: "explicit null not allowed" });
+    } else if (raw.lon !== undefined) {
+      if (typeof raw.lon !== "number") {
+        violations.push({ path: "lon", reason: "expected number" });
+      } else {
+        lon = raw.lon;
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_LOCATION_GEO_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseLocationGeo = { additionalProperties };
+    if (lat !== undefined) {
+      out.lat = lat;
+    }
+    if (lon !== undefined) {
+      out.lon = lon;
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseLocationGeo): unknown {
+    const out: Record<string, unknown> = {};
+    if (value.lat !== undefined) {
+      out.lat = value.lat;
+    }
+    if (value.lon !== undefined) {
+      out.lon = value.lon;
+    }
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    return out;
+  }
+}
+
+export class ShowcaseMetadataMapper {
+  public fromIntermediate(raw: unknown): ShowcaseMetadata {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    if (keys.length > 3) {
+      violations.push({
+        path: "",
+        reason: `must have at most 3 properties, got ${keys.length}`,
+      });
+    }
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of keys) {
+      additionalProperties[key] = raw[key];
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: ShowcaseMetadata): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    const keys = Object.keys(out);
+    if (keys.length > 3) {
+      violations.push({
+        path: "",
+        reason: `must have at most 3 properties, got ${keys.length}`,
+      });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const SHOWCASE_ROWS_ITEM_DECLARED = new Set(["cell"]);
+
+export class ShowcaseRowsItemMapper {
+  public fromIntermediate(raw: unknown): ShowcaseRowsItem {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let cell: string = undefined as unknown as string;
+    if (raw.cell === undefined || raw.cell === null) {
+      violations.push({ path: "cell", reason: "required" });
+    } else {
+      if (typeof raw.cell !== "string") {
+        violations.push({ path: "cell", reason: "expected string" });
+      } else {
+        cell = raw.cell;
+        if ([...raw.cell].length < 1) {
+          violations.push({
+            path: "cell",
+            reason: `must have length >= 1, got ${[...raw.cell].length}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!SHOWCASE_ROWS_ITEM_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: ShowcaseRowsItem = { cell, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseRowsItem): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if ([...value.cell].length < 1) {
+      violations.push({
+        path: "cell",
+        reason: `must have length >= 1, got ${[...value.cell].length}`,
+      });
+    }
+    out.cell = value.cell;
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+export class ShowcaseSegmentsItemMapper {
+  public fromIntermediate(raw: unknown): ShowcaseSegmentsItem {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    let out: ShowcaseSegmentsItem = undefined as unknown as ShowcaseSegmentsItem;
+    if (typeof raw === "string") {
+      out = raw as string;
+      if ([...(out as string)].length < 2) {
+        violations.push({
+          path: "",
+          reason: `must have length >= 2, got ${[...(out as string)].length}`,
+        });
+      }
+    } else if (typeof raw === "number" && Number.isSafeInteger(raw)) {
+      out = raw as number;
+      if ((out as number) < 0) {
+        violations.push({ path: "", reason: `must be >= 0, got ${out as number}` });
+      }
+    } else {
+      violations.push({ path: "", reason: "expected one of: string, integer" });
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+
+  public toIntermediate(value: ShowcaseSegmentsItem): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (typeof value === "string") {
+      if ([...(value as string)].length < 2) {
+        violations.push({
+          path: "",
+          reason: `must have length >= 2, got ${[...(value as string)].length}`,
+        });
+      }
+    }
+    if (typeof value === "number" && Number.isSafeInteger(value)) {
+      if ((value as number) < 0) {
+        violations.push({ path: "", reason: `must be >= 0, got ${value as number}` });
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    if (typeof value === "number" && Number.isSafeInteger(value)) {
+      return value;
+    }
+    throw new __nexgenDefinitions.ValidationError([
+      { path: "", reason: "expected one of: string, integer" },
+    ]);
   }
 }
 
@@ -2063,6 +3840,162 @@ export class SquareMapper {
     out.kind = value.kind;
     out.side = value.side;
     for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+const TEXT_NOTE_DECLARED = new Set(["kind", "body"]);
+
+export class TextNoteMapper {
+  public fromIntermediate(raw: unknown): TextNote {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    let kind: "text" = undefined as unknown as "text";
+    if (raw.kind === undefined || raw.kind === null) {
+      violations.push({ path: "kind", reason: "required" });
+    } else {
+      if (typeof raw.kind !== "string") {
+        violations.push({ path: "kind", reason: "expected string" });
+      } else if (raw.kind !== TEXT_NOTE_KIND_CONST) {
+        violations.push({ path: "kind", reason: `must equal "text"` });
+      } else {
+        kind = raw.kind as "text";
+      }
+    }
+
+    let body: string = undefined as unknown as string;
+    if (raw.body === undefined || raw.body === null) {
+      violations.push({ path: "body", reason: "required" });
+    } else {
+      if (typeof raw.body !== "string") {
+        violations.push({ path: "body", reason: "expected string" });
+      } else {
+        body = raw.body;
+        if ([...raw.body].length < 1) {
+          violations.push({
+            path: "body",
+            reason: `must have length >= 1, got ${[...raw.body].length}`,
+          });
+        }
+      }
+    }
+
+    const additionalProperties: Record<string, unknown> = {};
+    for (const key of Object.keys(raw)) {
+      if (!TEXT_NOTE_DECLARED.has(key)) {
+        additionalProperties[key] = raw[key];
+      }
+    }
+
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    const out: TextNote = { kind, body, additionalProperties };
+    return out;
+  }
+
+  public toIntermediate(value: TextNote): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    if (value.kind !== "text") {
+      violations.push({ path: "kind", reason: `must equal "text"` });
+    }
+    out.kind = value.kind;
+    if ([...value.body].length < 1) {
+      violations.push({
+        path: "body",
+        reason: `must have length >= 1, got ${[...value.body].length}`,
+      });
+    }
+    out.body = value.body;
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      out[key] = entry;
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+}
+
+export class TokensMapper {
+  public fromIntermediate(raw: unknown): Tokens {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    if (!__nexgenDefinitions.isPlainObject(raw)) {
+      throw new __nexgenDefinitions.ValidationError([
+        { path: "", reason: "expected object" },
+      ]);
+    }
+
+    const keys = Object.keys(raw);
+    const additionalProperties: Record<string, string> = {};
+    for (const key of keys) {
+      let entry: string | undefined = undefined;
+      if (typeof raw[key] !== "string") {
+        violations.push({ path: key, reason: "expected string" });
+      } else {
+        entry = raw[key];
+        if ([...raw[key]].length < 2) {
+          violations.push({
+            path: key,
+            reason: `must have length >= 2, got ${[...raw[key]].length}`,
+          });
+        }
+        if ([...raw[key]].length > 8) {
+          violations.push({
+            path: key,
+            reason: `must have length <= 8, got ${[...raw[key]].length}`,
+          });
+        }
+        if (!PATTERN_C182F89FDB221836.test(raw[key])) {
+          violations.push({
+            path: key,
+            reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(raw[key])}`,
+          });
+        }
+      }
+      if (entry !== undefined) {
+        additionalProperties[key] = entry;
+      }
+    }
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return { additionalProperties };
+  }
+
+  public toIntermediate(value: Tokens): unknown {
+    const violations: __nexgenDefinitions.Violation[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if ([...entry].length < 2) {
+        violations.push({
+          path: key,
+          reason: `must have length >= 2, got ${[...entry].length}`,
+        });
+      }
+      if ([...entry].length > 8) {
+        violations.push({
+          path: key,
+          reason: `must have length <= 8, got ${[...entry].length}`,
+        });
+      }
+      if (!PATTERN_C182F89FDB221836.test(entry)) {
+        violations.push({
+          path: key,
+          reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(entry)}`,
+        });
+      }
       out[key] = entry;
     }
     if (violations.length) {

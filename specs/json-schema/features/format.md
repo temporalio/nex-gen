@@ -503,6 +503,14 @@ Representative cases:
   (`hostname` / `email`) are separate.
 - **[[nullability]]**: orthogonal — a `null` skips the format check and is not
   materialized; a present value is checked (and materialized).
+- **[[oneOf]]**: an **asserted** (non-materializing) format on a non-object
+  branch of a sum type rides along like any other branch constraint — the branch
+  stays `string` and the pinned check runs once the token selects it. A
+  **materialized temporal** format there is **deferred**: the synthesized
+  `<Union><Kind>` wrapper has no native construct to hold, so it is rejected
+  rather than silently materialized in one target and left an unvalidated
+  `string` in the others ([[oneOf]] §Deferred). The [[nullability]] `oneOf`
+  wrapper is not a sum type and materializes normally.
 - **[[required]]**: orthogonal — presence vs value shape.
 
 ## Ecosystem variance

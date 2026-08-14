@@ -78,7 +78,32 @@ impl Schema {
                 ..self.clone()
             } == Schema::default()
     }
+
+    /// True when the schema is a `$ref` carrying nothing but `x-<lang>-name`
+    /// overrides. Those name the **member** the reference is bound to (the
+    /// [[properties]] Stage 4 escape hatch), not the referenced type: they assert
+    /// nothing about the value, so unlike a schema keyword they never merge with
+    /// the target and are legal alongside a `$ref`. Without this a member whose
+    /// type is a `$ref` could not be renamed at all — and a member named `class`
+    /// would be unfixable in Python and Java.
+    fn is_ref_with_name_overrides_only(&self) -> bool {
+        self.reference.is_some()
+            && Schema {
+                reference: None,
+                extra: IndexMap::new(),
+                ..self.clone()
+            } == Schema::default()
+            && self
+                .extra
+                .keys()
+                .all(|keyword| LANG_NAME_KEYWORDS.contains(&keyword.as_str()))
+    }
 }
+
+/// Every target's `x-<lang>-name` keyword. On a member it renames the member; on
+/// a type declaration it renames the type (see [`lang_name_keyword`] for the
+/// per-target lookup).
+const LANG_NAME_KEYWORDS: [&str; 4] = ["x-go-name", "x-ts-name", "x-py-name", "x-java-name"];
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum TypeKey {
@@ -239,6 +264,7 @@ fn api_spec_tree_from_json_schema_sources(
         })
         .collect::<BTreeMap<_, _>>();
     let parsed = parse_json_documents(
+        language,
         sources
             .iter()
             .map(|source| (source.path.clone(), source.input.clone()))
@@ -411,12 +437,19 @@ fn api_spec_from_json_schema_sources(
     language: Language,
     sources: Vec<(PathBuf, String)>,
 ) -> Result<ApiSpec> {
-    let parsed = parse_json_documents(sources)?;
+    let parsed = parse_json_documents(language, sources)?;
     let paths = parsed.docs.keys().cloned().collect::<Vec<_>>();
     api_spec_from_parsed_json_documents(language, &parsed, &paths, None)
 }
 
-fn parse_json_documents(sources: Vec<(PathBuf, String)>) -> Result<ParsedJsonDocuments> {
+/// Parses, normalizes, and validates every input document, then collects the
+/// models it declares. Language-aware because two stages resolve per-target
+/// names: the inline-object-branch hoist (below) reads the branch's
+/// `x-<lang>-name`, and the caller's identifier pass runs per target.
+fn parse_json_documents(
+    language: Language,
+    sources: Vec<(PathBuf, String)>,
+) -> Result<ParsedJsonDocuments> {
     if sources.is_empty() {
         return Err(Error::InvalidJsonSchema {
             path: PathBuf::from("<input>"),
@@ -454,12 +487,29 @@ fn parse_json_documents(sources: Vec<(PathBuf, String)>) -> Result<ParsedJsonDoc
         normalize_document(&path, canonical_path, doc, &merge_ctx)?;
     }
 
-    let mut models = BTreeMap::<TypeKey, JsonModel>::new();
-    for (canonical_path, (path, doc)) in &docs {
+    for (path, doc) in docs.values() {
         validate_document(path, doc)?;
         if let Some(defs) = &doc.defs {
             for (name, schema) in defs {
                 validate_model_schema(path, schema, &format!("$defs.{name}"))?;
+            }
+        }
+        if root_is_schema_shaped(&doc.root) && !doc.root.is_bare_ref() {
+            validate_model_schema(path, &doc.root, "root schema")?;
+        }
+    }
+
+    // Names every inline object shape — a property's, an element's, a map
+    // member's, a `oneOf` branch's — by moving it into `$defs`. Runs after the
+    // per-model validation above (so a defect inside a shape is reported at the
+    // position the user wrote it) and before models are collected, so a hoisted
+    // definition is an ordinary model from here on.
+    hoist_inline_object_shapes(language, &mut docs)?;
+
+    let mut models = BTreeMap::<TypeKey, JsonModel>::new();
+    for (canonical_path, (path, doc)) in &docs {
+        if let Some(defs) = &doc.defs {
+            for (name, schema) in defs {
                 models.insert(
                     TypeKey::Def(canonical_path.clone(), name.clone()),
                     JsonModel {
@@ -472,7 +522,6 @@ fn parse_json_documents(sources: Vec<(PathBuf, String)>) -> Result<ParsedJsonDoc
             }
         }
         if root_is_schema_shaped(&doc.root) && !doc.root.is_bare_ref() {
-            validate_model_schema(path, &doc.root, "root schema")?;
             let model_name = root_type_name(path).to_upper_camel_case();
             models.insert(
                 TypeKey::Root(canonical_path.clone()),
@@ -900,10 +949,12 @@ fn validate_schema_common(path: &Path, schema: &Schema, context: &str) -> Result
             reason: format!("{context}: `$id` is not supported"),
         });
     }
-    if schema.reference.is_some() && !schema.is_bare_ref() {
+    if schema.reference.is_some() && !schema.is_ref_with_name_overrides_only() {
         return Err(Error::InvalidJsonSchema {
             path: path.to_path_buf(),
-            reason: format!("{context}: a `$ref` must not carry sibling keywords"),
+            reason: format!(
+                "{context}: a `$ref` must not carry sibling keywords (an `x-<lang>-name` member override is the one exception)"
+            ),
         });
     }
     if let Some(reference) = &schema.reference
@@ -2873,6 +2924,477 @@ fn branch_discriminator_tags(object: &Schema) -> BTreeMap<String, Value> {
     tags
 }
 
+/// True when a schema is the free-form object — `type: object` carrying nothing
+/// but `additionalProperties: true`, i.e. an open bag of unconstrained members.
+fn is_free_form_object(schema: &Schema) -> bool {
+    schema.additional_properties.as_ref() == Some(&Value::Bool(true))
+        && schema
+            .properties
+            .as_ref()
+            .is_none_or(|properties| properties.is_empty())
+}
+
+/// True when a schema is an object written inline — every object in a value
+/// position needs a name, whatever it declares. Even the free-form object does:
+/// [[additionalProperties]] emits every object as a *named aggregate* holding its
+/// members in a catch-all field, so that later adding `properties` to it only
+/// adds fields instead of changing the emitted type's kind (P13). Naming it is
+/// also what makes the inline form emit identically to the `$defs` + `$ref` form.
+/// A `oneOf` branch is the one position where the free-form object stays inline:
+/// there it is the union's *object kind*, which TypeScript and Python express
+/// structurally inside the value union ([[oneOf]]).
+fn is_inline_object_shape(schema: &Schema) -> bool {
+    schema.reference.is_none() && schema.ty.as_ref().and_then(Value::as_str) == Some("object")
+}
+
+/// Moves every inline object shape — and every inline element union — into a
+/// synthesized `$defs` entry, rewriting the position it was written in to a
+/// `$ref` at it. Every target has to materialize a *type* for such a shape: Go a
+/// struct (plus a defined type to carry a union's marker method), Java a class
+/// (to `implement` a union interface), Python a `BaseModel` for Pydantic to
+/// select, TypeScript an interface plus the mapper that validates its members —
+/// so the shape needs a name; and once it has one, a named definition is exactly
+/// what every target already emits. Hoisting is therefore the whole feature:
+/// downstream the position holds an ordinary `$ref` and its target an ordinary
+/// model, so validation, ref resolution, P15, module exports, and emission all
+/// apply unchanged, and the inline form emits byte-identical code to the `$defs`
+/// + `$ref` form. See `specs/json-schema/features/properties.md` §"Naming an
+/// inline object shape" and `specs/json-schema/features/oneOf.md` §"Object
+/// branches — naming the inline shape".
+///
+/// The one object left inline is the **free-form** object as a `oneOf` *branch*:
+/// there it is the union's object kind rather than a value position of its own, so
+/// TypeScript and Python express it structurally inside the value union
+/// (`Record<string, unknown>` / `dict[str, Any]`) and Go/Java wrap it as the
+/// union's `<Union>Object` variant ([[oneOf]], [[additionalProperties]]).
+///
+/// Ordering: after `normalize_document` (so an `allOf` branch is already merged),
+/// after per-model validation (so a defect inside a shape is reported at the
+/// position the user wrote it), and before models are collected (so a hoisted
+/// definition is picked up as one).
+fn hoist_inline_object_shapes(
+    language: Language,
+    docs: &mut IndexMap<PathBuf, (PathBuf, Document)>,
+) -> Result<()> {
+    for (path, doc) in docs.values_mut() {
+        // Fixpoint: a hoisted definition is walked on the next pass, so a union
+        // nested in a hoisted branch's property is hoisted too. Each pass
+        // replaces at least one inline branch with a `$ref` (and never
+        // introduces one), so the walk terminates.
+        loop {
+            let mut hoisted: Vec<(String, Schema)> = Vec::new();
+            if let Some(defs) = doc.defs.as_mut() {
+                for (name, schema) in defs.iter_mut() {
+                    hoist_model_inline_shapes(
+                        language,
+                        path,
+                        &name.to_upper_camel_case(),
+                        &format!("$defs.{name}"),
+                        schema,
+                        &mut hoisted,
+                    )?;
+                }
+            }
+            if root_is_schema_shaped(&doc.root) && !doc.root.is_bare_ref() {
+                let model_name = root_type_name(path).to_upper_camel_case();
+                hoist_model_inline_shapes(
+                    language,
+                    path,
+                    &model_name,
+                    "root schema",
+                    &mut doc.root,
+                    &mut hoisted,
+                )?;
+            }
+            if let Some(services) = doc.services.as_mut() {
+                for (service_name, service) in services.iter_mut() {
+                    for (operation_name, operation) in service.operations.iter_mut() {
+                        for (suffix, schema) in [
+                            ("Input", operation.input.as_mut()),
+                            ("Output", operation.output.as_mut()),
+                        ] {
+                            // A `$ref` I/O carries no inline schema of its own;
+                            // its target is walked as a `$defs` model.
+                            let Some(schema) = schema.filter(|schema| schema.reference.is_none())
+                            else {
+                                continue;
+                            };
+                            hoist_model_inline_shapes(
+                                language,
+                                path,
+                                &format!("{}{suffix}", operation_name.to_upper_camel_case()),
+                                &format!(
+                                    "services.{service_name}.operations.{operation_name}.{}",
+                                    suffix.to_lowercase()
+                                ),
+                                schema,
+                                &mut hoisted,
+                            )?;
+                        }
+                    }
+                }
+            }
+            if hoisted.is_empty() {
+                break;
+            }
+            let defs = doc.defs.get_or_insert_with(IndexMap::new);
+            for (name, schema) in hoisted {
+                if defs.contains_key(&name) {
+                    return Err(Error::InvalidJsonSchema {
+                        path: path.to_path_buf(),
+                        reason: format!(
+                            "the name `{name}` synthesized for an inline shape is already declared in `$defs`; rename either one, name the inline shape with an `{}` override where it takes one (a `oneOf` branch, an array element, a map member), or move it into `$defs` under a name of your own and `$ref` it (P15 — the generator never auto-mangles)",
+                            lang_name_keyword(language).unwrap_or("x-<lang>-name"),
+                        ),
+                    });
+                }
+                defs.insert(name, schema);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Hoists the inline shapes a model declares that need a name: the object
+/// branches of its unions — its own (a named `$defs` union) and each property's
+/// (an anonymous union, named `<Model><Property>` — the [[properties]]
+/// synthesized-name rule) — the object a property declares directly
+/// ([`hoist_property_shape`]), and every shape written inline in a subschema
+/// position ([`hoist_subschema_shapes`]).
+fn hoist_model_inline_shapes(
+    language: Language,
+    path: &Path,
+    model_name: &str,
+    context: &str,
+    schema: &mut Schema,
+    hoisted: &mut Vec<(String, Schema)>,
+) -> Result<()> {
+    if let Some(branches) = schema.one_of.as_mut() {
+        // The model *is* the union, so the union carries its own name and its
+        // inline object branches derive `<Model>Object`.
+        hoist_union_object_branches(
+            language,
+            path,
+            &format!("{model_name}Object"),
+            context,
+            branches,
+            hoisted,
+        )?;
+        // An array branch (`<Union>Array`) is a subschema position of its own.
+        for branch in branches.iter_mut() {
+            hoist_subschema_shapes(
+                language,
+                path,
+                &format!("{model_name}Array"),
+                &format!("{context}.oneOf"),
+                branch,
+                hoisted,
+            )?;
+        }
+    }
+    if let Some(properties) = schema.properties.as_mut() {
+        for (json_name, property) in properties.iter_mut() {
+            let property_name = format!("{model_name}{}", json_name.to_upper_camel_case());
+            let property_context = format!("{context}.properties.{json_name}");
+            hoist_property_shape(
+                language,
+                path,
+                &property_name,
+                &property_context,
+                property,
+                hoisted,
+            )?;
+            hoist_subschema_shapes(
+                language,
+                path,
+                &property_name,
+                &property_context,
+                property,
+                hoisted,
+            )?;
+        }
+    }
+    // The model's own element positions: a map-shaped model's members, or a
+    // struct's typed catch-all.
+    hoist_subschema_shapes(language, path, model_name, context, schema, hoisted)?;
+    Ok(())
+}
+
+/// Names and hoists the inline object shape a **property** declares: the object
+/// branches of a property-level union, the object inside a nullability `oneOf`
+/// wrapper, or an object written directly on the property.
+///
+/// Which name the shape takes follows the position: a *sum type* occupies the
+/// property's own synthesized name (the emitted union type), so its branches
+/// derive `<Model><Property>Object`, while a nullability wrapper emits no type of
+/// its own — every target expresses it structurally on the value — so the object
+/// inside it takes `<Model><Property>` directly, exactly as a plainly-written one
+/// does. Adding or removing nullability therefore never renames the type.
+fn hoist_property_shape(
+    language: Language,
+    path: &Path,
+    property_name: &str,
+    context: &str,
+    property: &mut Schema,
+    hoisted: &mut Vec<(String, Schema)>,
+) -> Result<()> {
+    if is_sum_type_union(property) {
+        let branches = property.one_of.as_mut().expect("a union has branches");
+        return hoist_union_object_branches(
+            language,
+            path,
+            &format!("{property_name}Object"),
+            context,
+            branches,
+            hoisted,
+        );
+    }
+    if hoist_nullable_object_branch(language, property_name, context, property, hoisted)? {
+        return Ok(());
+    }
+    if !is_inline_object_shape(property) {
+        return Ok(());
+    }
+    let mut shape = std::mem::take(property);
+    // The shape's doc text travels with it: it describes the object, which is now
+    // a type of its own, and the member falls back to its synthesized doc line —
+    // exactly what authoring the shape in `$defs` and `$ref`ing it produces. An
+    // `x-<lang>-name`, by contrast, is the [[properties]] Stage 4 escape hatch for
+    // the *member* identifier, and the same keyword names a *type* in `$defs`, so
+    // it stays behind on the property.
+    *property = Schema {
+        reference: Some(format!("#/$defs/{property_name}")),
+        ..Schema::default()
+    };
+    for keyword in LANG_NAME_KEYWORDS {
+        if let Some(value) = shape.extra.shift_remove(keyword) {
+            property.extra.insert(keyword.to_string(), value);
+        }
+    }
+    hoisted.push((property_name.to_string(), shape));
+    Ok(())
+}
+
+/// Names and hoists every shape written inline in a **subschema position** that
+/// needs a name — a `oneOf` sum type or an object — in an array's `items` (at any
+/// depth) or an object's typed `additionalProperties`, the same way
+/// [`hoist_union_object_branches`] names an inline object branch and for the same
+/// reason: Go and Java need a *type* for the element (a struct, or a sealed
+/// interface with its dispatcher), so the shape needs a name, and a named `$defs`
+/// model is what every target already emits. The synthesized name is the
+/// enclosing name plus the position — `<Enclosing>Item` for `items`,
+/// `<Enclosing>Value` for `additionalProperties` — or the shape's own
+/// `x-<lang>-name`. See `specs/json-schema/features/oneOf.md` §"Unions in element
+/// positions".
+///
+/// A nested object written in one of these positions is hoisted the same way and
+/// takes the same name; the walk stops there rather than descending into its
+/// `properties`, because the shape is now a `$defs` model that the next fixpoint
+/// pass walks in its own right.
+fn hoist_subschema_shapes(
+    language: Language,
+    path: &Path,
+    base_name: &str,
+    context: &str,
+    schema: &mut Schema,
+    hoisted: &mut Vec<(String, Schema)>,
+) -> Result<()> {
+    if let Some(items) = schema.items.as_mut() {
+        hoist_subschema_shape(
+            language,
+            path,
+            &format!("{base_name}Item"),
+            &format!("{context}.items"),
+            items,
+            hoisted,
+        )?;
+    }
+    if let Some(Value::Object(members)) = &schema.additional_properties {
+        let mut value: Schema =
+            serde_json::from_value(Value::Object(members.clone())).map_err(|error| {
+                Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!("{context}.additionalProperties is invalid: {error}"),
+                }
+            })?;
+        hoist_subschema_shape(
+            language,
+            path,
+            &format!("{base_name}Value"),
+            &format!("{context}.additionalProperties"),
+            &mut value,
+            hoisted,
+        )?;
+        schema.additional_properties =
+            Some(
+                serde_json::to_value(&value).map_err(|error| Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!("{context}: failed to preserve additionalProperties: {error}"),
+                })?,
+            );
+    }
+    Ok(())
+}
+
+/// Hoists one subschema slot: the shape occupying the slot when it needs a name
+/// — a sum type, or an object — otherwise the object inside a nullability
+/// wrapper, otherwise recursing into the slot's own element positions (a nested
+/// array, a map).
+fn hoist_subschema_shape(
+    language: Language,
+    path: &Path,
+    name: &str,
+    context: &str,
+    slot: &mut Schema,
+    hoisted: &mut Vec<(String, Schema)>,
+) -> Result<()> {
+    if is_sum_type_union(slot) || is_inline_object_shape(slot) {
+        let name = resolve_shape_name(language, name, slot, context)?;
+        move_into_defs(slot, name, hoisted);
+        return Ok(());
+    }
+    if hoist_nullable_object_branch(language, name, context, slot, hoisted)? {
+        return Ok(());
+    }
+    hoist_subschema_shapes(language, path, name, context, slot, hoisted)
+}
+
+/// Hoists the object inside a **nullability wrapper** (`oneOf: [T, null]`) under
+/// the position's own name, leaving the wrapper in place over a `$ref`. The
+/// wrapper emits no type of its own — every target expresses it structurally on
+/// the value — so the object it wraps occupies the position, exactly as a
+/// plainly-written one does; adding or removing nullability therefore never
+/// renames the type. Returns whether it hoisted.
+fn hoist_nullable_object_branch(
+    language: Language,
+    derived: &str,
+    context: &str,
+    slot: &mut Schema,
+    hoisted: &mut Vec<(String, Schema)>,
+) -> Result<bool> {
+    if is_sum_type_union(slot) {
+        return Ok(false);
+    }
+    let Some(branch) = slot
+        .one_of
+        .as_mut()
+        .and_then(|branches| branches.iter_mut().find(|b| is_inline_object_shape(b)))
+    else {
+        return Ok(false);
+    };
+    let name = resolve_shape_name(language, derived, branch, context)?;
+    move_into_defs(branch, name, hoisted);
+    Ok(true)
+}
+
+/// The name a hoisted shape takes: its own `x-<lang>-name` for the active target
+/// when it carries one, else the name derived from its position.
+fn resolve_shape_name(
+    language: Language,
+    derived: &str,
+    schema: &Schema,
+    context: &str,
+) -> Result<String> {
+    match (lang_name_keyword(language), override_name(language, schema)) {
+        (Some(keyword), Some(value)) => {
+            validate_override(
+                language,
+                keyword,
+                &Value::String(value.to_string()),
+                context,
+            )?;
+            Ok(value.to_string())
+        }
+        _ => Ok(derived.to_string()),
+    }
+}
+
+/// Replaces a schema position with a `$ref` at `name` and queues the shape that
+/// was written there for insertion into `$defs`.
+fn move_into_defs(slot: &mut Schema, name: String, hoisted: &mut Vec<(String, Schema)>) {
+    let shape = std::mem::take(slot);
+    *slot = Schema {
+        reference: Some(format!("#/$defs/{name}")),
+        ..Schema::default()
+    };
+    hoisted.push((name, shape));
+}
+
+/// True when a `oneOf` node is a **sum type** — two or more non-`null` branches
+/// — as opposed to the degenerate nullability pattern (`oneOf: [T, null]`),
+/// which every target expresses structurally on the element itself and which
+/// therefore needs no name.
+fn is_sum_type_union(schema: &Schema) -> bool {
+    schema.one_of.as_ref().is_some_and(|branches| {
+        branches
+            .iter()
+            .filter(|branch| !schema_type_is_null(branch))
+            .count()
+            >= 2
+    })
+}
+
+/// True when a schema's `type` is exactly `"null"`.
+fn schema_type_is_null(schema: &Schema) -> bool {
+    schema.ty.as_ref().and_then(Value::as_str) == Some("null")
+}
+
+/// Names and hoists one union's inline object branches. A lone branch takes
+/// `derived` — the name the union's position yields for it; two or more must each
+/// carry the target's `x-<lang>-name`, because every branch would derive the same
+/// name and nothing in a branch yields a *distinguishing* one (the discriminator
+/// `const` is a wire value, not an identifier, and ordinals reorder silently when
+/// a branch is inserted).
+fn hoist_union_object_branches(
+    language: Language,
+    path: &Path,
+    derived: &str,
+    context: &str,
+    branches: &mut [Schema],
+    hoisted: &mut Vec<(String, Schema)>,
+) -> Result<()> {
+    let inline: Vec<usize> = branches
+        .iter()
+        .enumerate()
+        .filter(|(_, branch)| is_inline_object_shape(branch) && !is_free_form_object(branch))
+        .map(|(index, _)| index)
+        .collect();
+    if inline.is_empty() {
+        return Ok(());
+    }
+    let keyword = lang_name_keyword(language);
+    for index in inline.iter().copied() {
+        let branch = &branches[index];
+        let override_ident = match (keyword, override_name(language, branch)) {
+            (Some(keyword), Some(value)) => {
+                validate_override(
+                    language,
+                    keyword,
+                    &Value::String(value.to_string()),
+                    &format!("{context}.oneOf[{index}]"),
+                )?;
+                Some(value.to_string())
+            }
+            _ => None,
+        };
+        let name = match (inline.len(), override_ident) {
+            (_, Some(ident)) => ident,
+            (1, None) => derived.to_string(),
+            (_, None) => {
+                return Err(Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!(
+                        "{context}.oneOf[{index}]: a union with two or more inline object branches must name each one with `{}` (every branch would otherwise derive `{derived}`); name the branches, or move them into `$defs` and `$ref` them",
+                        keyword.unwrap_or("x-<lang>-name"),
+                    ),
+                });
+            }
+        };
+        move_into_defs(&mut branches[index], name, hoisted);
+    }
+    Ok(())
+}
+
 /// Validates a `oneOf` as a supported closed sum type (or the degenerate
 /// nullability pattern, which [[nullability]] owns). See
 /// `specs/json-schema/features/oneOf.md` for the full acceptance rules.
@@ -2905,10 +3427,24 @@ fn validate_one_of(
     // Classify every branch by kind, resolving `$ref` branches to their target.
     let mut kinds: Vec<BranchKind> = Vec::with_capacity(branches.len());
     let mut object_schemas: Vec<Schema> = Vec::new();
+    let mut non_object_schemas: Vec<Schema> = Vec::new();
     for branch in branches {
         let resolved = resolve_branch_schema(branch, path, canonical_path, docs, models)?;
         let kind = one_of_branch_kind(branch, &resolved, path, context)?;
+        if kind != BranchKind::Object && kind != BranchKind::Null {
+            non_object_schemas.push(resolved.clone());
+        }
         if kind == BranchKind::Object {
+            // An inline object branch that declares a shape is named and moved
+            // into `$defs` by `hoist_inline_object_shapes`, so by now it is a
+            // `$ref` branch; the free-form object — which needs no name — is the
+            // only one still written inline. Anything else means the branch sits
+            // in a position the hoist does not reach.
+            if branch.reference.is_none() && !is_free_form_object(&resolved) {
+                return reject(format!(
+                    "{context}: an inline object `oneOf` branch is not named in this position; make it a free-form object (`type: object` with `additionalProperties: true`), or move it into `$defs` and `$ref` it"
+                ));
+            }
             object_schemas.push(resolved);
         }
         kinds.push(kind);
@@ -3004,6 +3540,47 @@ fn validate_one_of(
     // is the degenerate nullability pattern ([[nullability]] owns it); a lone
     // non-null branch with no `null` is a single-branch wrapper (already
     // rejected above). Two or more non-null branches form the sum type.
+    let non_null = kinds
+        .iter()
+        .filter(|kind| **kind != BranchKind::Null)
+        .count();
+    if non_null >= 2 {
+        for branch in &non_object_schemas {
+            reject_materialized_branch_keyword(path, branch, context)?;
+        }
+    }
+    Ok(())
+}
+
+/// Rejects a **materializing** keyword on a non-object branch of a `oneOf` *sum
+/// type*: a temporal [[format]] or a [[contentEncoding]]. Both replace the wire
+/// `string` with a native typed value (`time.Time` / `OffsetDateTime` /
+/// `datetime` / `Temporal.*`, `[]byte` / `byte[]` / `bytes`), and the synthesized
+/// `<Union><Kind>` wrapper has no such type today — Python would materialize the
+/// branch while Go, TypeScript, and Java carried an unvalidated `string`, which is
+/// exactly the silent per-target divergence **P1** forbids. Deferred loudly (**P6**)
+/// rather than approximated; see `specs/json-schema/features/oneOf.md` §Deferred.
+///
+/// Scoped to the sum type: the [[nullability]] pattern `oneOf:[{T},{null}]` has a
+/// single non-null branch and no wrapper at all, so a materialized nullable
+/// field keeps working ([[format]], [[contentEncoding]]).
+fn reject_materialized_branch_keyword(path: &Path, branch: &Schema, context: &str) -> Result<()> {
+    let reject = |keyword: &str, value: &str, native: &str| {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "{context}: a `oneOf` branch cannot declare `{keyword}: {value}` — it materializes a native {native} value, which a `oneOf` branch has no wrapper type for yet; drop the `{keyword}` to keep the branch a plain `string`, or carry the value as a property of an object branch"
+            ),
+        })
+    };
+    if let Some(Value::String(format)) = branch.extra.get("format")
+        && crate::json_schema::format::TEMPORAL_FORMATS.contains(&format.as_str())
+    {
+        return reject("format", format, "date/time");
+    }
+    if let Some(Value::String(encoding)) = branch.extra.get("contentEncoding") {
+        return reject("contentEncoding", encoding, "binary");
+    }
     Ok(())
 }
 
@@ -3432,7 +4009,10 @@ fn normalize_schema(
     context: &str,
 ) -> Result<Schema> {
     let has_all_of = schema.extra.contains_key("allOf");
-    let ref_with_siblings = schema.reference.is_some() && !schema.is_bare_ref();
+    // An `x-<lang>-name` beside a `$ref` names the *member* and asserts nothing
+    // about the value, so it is not a conjunct: folding it would clone the
+    // referenced target into the use site instead of referencing it.
+    let ref_with_siblings = schema.reference.is_some() && !schema.is_ref_with_name_overrides_only();
 
     if has_all_of || ref_with_siblings {
         if has_all_of {
@@ -7084,8 +7664,7 @@ properties:
 
     #[test]
     fn all_of_closed_base_closes_to_union() {
-        let schema = model_schema(
-            r##"
+        const DOC: &str = r##"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
 properties:
@@ -7098,10 +7677,14 @@ properties:
       - type: object
         properties:
           b: { type: string }
-"##,
-            "Api",
+"##;
+        // The merge runs before the inline shape is named, so the property holds
+        // a `$ref` at the merged object.
+        assert_eq!(
+            model_schema(DOC, "Api")["properties"]["merged"]["$ref"],
+            "#/$defs/ApiMerged"
         );
-        let merged = &schema["properties"]["merged"];
+        let merged = model_schema(DOC, "ApiMerged");
         // Closed against the union of declared properties (footgun-fix).
         assert_eq!(merged["additionalProperties"], false);
         assert_eq!(merged["properties"]["a"]["type"], "string");
@@ -7237,11 +7820,22 @@ $defs:
     // --- `oneOf` sum types (specs/json-schema/features/oneOf.md) ---
 
     fn union_doc_result(doc: &str) -> Result<ApiSpec> {
-        parse_api_spec_from_json_schema_for_language(
-            Language::Python,
-            doc,
-            PathBuf::from("api.yaml"),
-        )
+        union_doc_result_for(Language::Python, doc)
+    }
+
+    fn union_doc_result_for(language: Language, doc: &str) -> Result<ApiSpec> {
+        parse_api_spec_from_json_schema_for_language(language, doc, PathBuf::from("api.yaml"))
+    }
+
+    /// The schema of a model in an already-loaded spec, by its emitted name.
+    fn loaded_model_schema(spec: &ApiSpec, name: &str) -> Value {
+        let binding = spec
+            .external_type_binding(name)
+            .unwrap_or_else(|| panic!("model `{name}` should be loaded"));
+        let ExternalTypeSpec::Json(json) = &binding.external_type else {
+            panic!("`{name}` should be a JSON model");
+        };
+        json.schema.clone()
     }
 
     fn union_reject(doc: &str) -> String {
@@ -7362,6 +7956,28 @@ properties:
     #[test]
     fn rejects_non_separable_overlapping_object_union() {
         let error = union_reject(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  A: { type: object, properties: { a: { type: string } } }
+  B: { type: object, properties: { b: { type: string } } }
+type: object
+properties:
+  value:
+    oneOf:
+      - { $ref: "#/$defs/A" }
+      - { $ref: "#/$defs/B" }
+"##,
+        );
+        assert!(error.contains("discriminator"), "{error}");
+    }
+
+    #[test]
+    fn names_inline_structured_object_one_of_branch() {
+        // A lone inline object branch is hoisted into `$defs` under the derived
+        // `<Union>Object` name, and the branch becomes a `$ref` at it — so every
+        // target emits it as an ordinary named model.
+        let spec = union_doc_result(
             r#"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
@@ -7369,14 +7985,145 @@ properties:
   value:
     oneOf:
       - { type: object, properties: { a: { type: string } } }
-      - { type: object, properties: { b: { type: string } } }
+      - { type: string }
 "#,
+        )
+        .expect("inline structured object branch should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Api")["properties"]["value"]["oneOf"][0]["$ref"],
+            Value::String("#/$defs/ApiValueObject".to_string())
         );
-        assert!(error.contains("discriminator"), "{error}");
+        assert_eq!(
+            loaded_model_schema(&spec, "ApiValueObject")["properties"]["a"]["type"],
+            Value::String("string".to_string())
+        );
     }
 
     #[test]
-    fn rejects_non_const_discriminator_union() {
+    fn names_inline_typed_map_one_of_branch() {
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: object, additionalProperties: { type: string } }
+      - { type: string }
+"#,
+        )
+        .expect("inline typed-map object branch should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "ApiValueObject")["additionalProperties"]["type"],
+            Value::String("string".to_string())
+        );
+    }
+
+    #[test]
+    fn names_inline_object_one_of_branch_of_named_union() {
+        // A named `$defs` union names its lone inline branch after the union
+        // itself, not after any enclosing property.
+        let spec = union_doc_result(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Payload:
+    oneOf:
+      - { type: object, properties: { a: { type: string } } }
+      - { type: string }
+type: object
+properties:
+  value: { $ref: "#/$defs/Payload" }
+"##,
+        )
+        .expect("named union with an inline object branch should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Payload")["oneOf"][0]["$ref"],
+            Value::String("#/$defs/PayloadObject".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "PayloadObject")["properties"]["a"].is_object());
+    }
+
+    #[test]
+    fn inline_object_one_of_branch_honors_name_override() {
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: object, properties: { a: { type: string } }, x-py-name: Detail }
+      - { type: string }
+"#,
+        )
+        .expect("named inline object branch should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Api")["properties"]["value"]["oneOf"][0]["$ref"],
+            Value::String("#/$defs/Detail".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "Detail")["properties"]["a"].is_object());
+    }
+
+    #[test]
+    fn names_inline_tagged_object_one_of_branches_by_override() {
+        let spec = union_doc_result_for(
+            Language::Go,
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - type: object
+        required: [kind]
+        properties: { kind: { type: string, const: cat }, meow: { type: string } }
+        x-go-name: Cat
+      - type: object
+        required: [kind]
+        properties: { kind: { type: string, const: dog }, bark: { type: string } }
+        x-go-name: Dog
+"#,
+        )
+        .expect("self-named inline tagged object branches should load");
+        assert!(loaded_model_schema(&spec, "Cat")["properties"]["meow"].is_object());
+        assert!(loaded_model_schema(&spec, "Dog")["properties"]["bark"].is_object());
+    }
+
+    #[test]
+    fn names_inline_object_branch_nested_in_another_inline_branch() {
+        // A hoisted branch is itself walked, so a union inside it is named
+        // against the branch's own name — composing deterministically.
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  outer:
+    oneOf:
+      - type: object
+        required: [inner]
+        properties:
+          inner:
+            oneOf:
+              - { type: object, properties: { deep: { type: string } } }
+              - { type: integer }
+      - { type: string }
+"#,
+        )
+        .expect("nested inline object branches should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "ApiOuterObject")["properties"]["inner"]["oneOf"][0]["$ref"],
+            Value::String("#/$defs/ApiOuterObjectInnerObject".to_string())
+        );
+        assert!(
+            loaded_model_schema(&spec, "ApiOuterObjectInnerObject")["properties"]["deep"]
+                .is_object()
+        );
+    }
+
+    #[test]
+    fn rejects_inline_tagged_object_one_of_branches_without_override() {
         let error = union_reject(
             r#"
 $schema: https://json-schema.org/draft/2020-12/schema
@@ -7386,11 +8133,420 @@ properties:
     oneOf:
       - type: object
         required: [kind]
-        properties: { kind: { type: string, const: a } }
+        properties: { kind: { type: string, const: cat }, meow: { type: string } }
       - type: object
         required: [kind]
-        properties: { kind: { type: string } }
+        properties: { kind: { type: string, const: dog }, bark: { type: string } }
 "#,
+        );
+        assert!(
+            error.contains("x-py-name") && error.contains("ApiValueObject"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_inline_object_one_of_branch_name_clashing_with_a_definition() {
+        let error = union_reject(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  ApiValueObject: { type: object, properties: { b: { type: string } } }
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: object, properties: { a: { type: string } } }
+      - { type: string }
+  other: { $ref: "#/$defs/ApiValueObject" }
+"##,
+        );
+        assert!(
+            error.contains("ApiValueObject") && error.contains("already declared in `$defs`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn hoists_inline_union_inside_items() {
+        // The element union is named `<Model><Property>Item` and moved into
+        // `$defs`; its own inline object branch is then named in turn, so the
+        // element position needs no `$defs` + `$ref` boilerplate from the
+        // author (specs/json-schema/features/oneOf.md §"Unions in element
+        // positions").
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  values:
+    type: array
+    items:
+      oneOf:
+        - { type: object, properties: { a: { type: string } } }
+        - { type: string }
+"#,
+        )
+        .expect("an inline element union should load");
+        let root = loaded_model_schema(&spec, "Api");
+        assert_eq!(
+            root["properties"]["values"]["items"]["$ref"],
+            Value::String("#/$defs/ApiValuesItem".to_string())
+        );
+        let element = loaded_model_schema(&spec, "ApiValuesItem");
+        assert_eq!(
+            element["oneOf"][0]["$ref"],
+            Value::String("#/$defs/ApiValuesItemObject".to_string())
+        );
+        assert_eq!(
+            loaded_model_schema(&spec, "ApiValuesItemObject")["properties"]["a"]["type"],
+            Value::String("string".to_string())
+        );
+    }
+
+    #[test]
+    fn hoists_inline_union_inside_additional_properties() {
+        let spec = union_doc_result(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  entries: { $ref: "#/$defs/Entries" }
+$defs:
+  Entries:
+    type: object
+    additionalProperties:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+"##,
+        )
+        .expect("an inline map-value union should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Entries")["additionalProperties"]["$ref"],
+            Value::String("#/$defs/EntriesValue".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "EntriesValue")["oneOf"].is_array());
+    }
+
+    #[test]
+    fn names_an_inline_element_union_with_a_type_override() {
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  values:
+    type: array
+    items:
+      x-py-name: Element
+      oneOf:
+        - { type: string }
+        - { type: integer }
+"#,
+        )
+        .expect("an overridden element union should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Api")["properties"]["values"]["items"]["$ref"],
+            Value::String("#/$defs/Element".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "Element")["oneOf"].is_array());
+    }
+
+    #[test]
+    fn leaves_a_nullable_element_inline() {
+        // Two branches, one of them `null`, is the nullability pattern rather
+        // than a sum type: every target expresses it on the element itself, so
+        // there is nothing to name.
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  values:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: "null" }
+"#,
+        )
+        .expect("a nullable element should load");
+        let root = loaded_model_schema(&spec, "Api");
+        assert!(root["properties"]["values"]["items"]["oneOf"].is_array());
+    }
+
+    #[test]
+    fn rejects_an_element_union_name_colliding_with_a_definition() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  values:
+    type: array
+    items:
+      oneOf:
+        - { type: string }
+        - { type: integer }
+$defs:
+  ApiValuesItem:
+    type: object
+    properties:
+      a: { type: string }
+"#,
+        );
+        assert!(
+            error.contains("ApiValuesItem") && error.contains("already declared in `$defs`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn names_an_inline_object_property() {
+        // An object written directly on a property is named `<Model><Property>`,
+        // moved into `$defs`, and the property becomes a `$ref` at it — so the
+        // declared shape is materialized instead of collapsing to an opaque map
+        // (specs/json-schema/features/properties.md §"Naming an inline object
+        // shape").
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  nested:
+    description: An inline nested object.
+    type: object
+    required: [a]
+    properties:
+      a: { type: string, minLength: 2 }
+"#,
+        )
+        .expect("an inline object property should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Api")["properties"]["nested"]["$ref"],
+            Value::String("#/$defs/ApiNested".to_string())
+        );
+        let nested = loaded_model_schema(&spec, "ApiNested");
+        assert_eq!(nested["properties"]["a"]["minLength"], Value::from(2));
+        assert_eq!(nested["required"], serde_json::json!(["a"]));
+        // The doc text travels with the shape it describes.
+        assert_eq!(
+            nested["description"],
+            Value::String("An inline nested object.".to_string())
+        );
+    }
+
+    #[test]
+    fn names_a_nullable_inline_object_property_the_same() {
+        // A nullability wrapper emits no type of its own, so the object inside it
+        // takes the property's name — adding or removing nullability never
+        // renames the type.
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  nested:
+    oneOf:
+      - type: object
+        properties: { a: { type: string } }
+      - { type: "null" }
+"#,
+        )
+        .expect("a nullable inline object property should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Api")["properties"]["nested"]["oneOf"][0]["$ref"],
+            Value::String("#/$defs/ApiNested".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "ApiNested")["properties"]["a"].is_object());
+    }
+
+    #[test]
+    fn names_an_inline_free_form_object_property() {
+        // Even the free-form object is named in a value position: every object
+        // emits as a named aggregate holding its members in a catch-all, so
+        // later adding `properties` only adds fields (P13), and the member-count
+        // and key-shape constraints ride along with it.
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  meta:
+    type: object
+    additionalProperties: true
+    maxProperties: 4
+"#,
+        )
+        .expect("an inline free-form object property should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "Api")["properties"]["meta"]["$ref"],
+            Value::String("#/$defs/ApiMeta".to_string())
+        );
+        let meta = loaded_model_schema(&spec, "ApiMeta");
+        assert_eq!(meta["additionalProperties"], Value::Bool(true));
+        assert_eq!(meta["maxProperties"], Value::from(4));
+    }
+
+    #[test]
+    fn names_an_inline_object_property_shape_by_fixpoint() {
+        // A hoisted shape is walked in turn, so an object nested inside one is
+        // named against its own name — composing deterministically.
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  outer:
+    type: object
+    properties:
+      inner:
+        type: object
+        properties:
+          leaf: { type: string }
+"#,
+        )
+        .expect("nested inline object properties should load");
+        assert_eq!(
+            loaded_model_schema(&spec, "ApiOuter")["properties"]["inner"]["$ref"],
+            Value::String("#/$defs/ApiOuterInner".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "ApiOuterInner")["properties"]["leaf"].is_object());
+    }
+
+    #[test]
+    fn names_inline_object_shapes_in_element_positions() {
+        // An element and a map member take the same position-derived names their
+        // unions do: `<Enclosing>Item` and `<Enclosing>Value`.
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  rows:
+    type: array
+    items:
+      type: object
+      properties: { cell: { type: string } }
+  byKey:
+    type: object
+    additionalProperties:
+      type: object
+      properties: { v: { type: integer } }
+"#,
+        )
+        .expect("inline object element and member shapes should load");
+        let root = loaded_model_schema(&spec, "Api");
+        assert_eq!(
+            root["properties"]["rows"]["items"]["$ref"],
+            Value::String("#/$defs/ApiRowsItem".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "ApiRowsItem")["properties"]["cell"].is_object());
+        assert_eq!(
+            loaded_model_schema(&spec, "ApiByKey")["additionalProperties"]["$ref"],
+            Value::String("#/$defs/ApiByKeyValue".to_string())
+        );
+        assert!(loaded_model_schema(&spec, "ApiByKeyValue")["properties"]["v"].is_object());
+    }
+
+    #[test]
+    fn a_hoisted_property_keeps_its_member_override() {
+        // `x-<lang>-name` on a property is the [[properties]] Stage 4 escape
+        // hatch for the *member* identifier, so it stays on the property; the
+        // hoisted type keeps its position-derived name.
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  class:
+    type: object
+    properties: { x: { type: string } }
+    x-py-name: klass
+"#,
+        )
+        .expect("a renamed inline object member should load");
+        let property = &loaded_model_schema(&spec, "Api")["properties"]["class"];
+        assert_eq!(
+            property["$ref"],
+            Value::String("#/$defs/ApiClass".to_string())
+        );
+        assert_eq!(property["x-py-name"], Value::String("klass".to_string()));
+        let hoisted = loaded_model_schema(&spec, "ApiClass");
+        assert!(hoisted["properties"]["x"].is_object());
+        assert!(hoisted["x-py-name"].is_null());
+    }
+
+    #[test]
+    fn accepts_a_member_override_beside_a_ref() {
+        // The override names the member, not the referenced type, so it asserts
+        // nothing about the value: it is the one keyword legal beside a `$ref`,
+        // and it is *not* an implicit-`allOf` conjunct — the reference stands, so
+        // the target is referenced rather than cloned into the use site. Without
+        // this a member whose type is a `$ref` could not be renamed at all.
+        let spec = union_doc_result(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Inner:
+    type: object
+    properties: { a: { type: string } }
+type: object
+properties:
+  class:
+    $ref: "#/$defs/Inner"
+    x-py-name: klass
+"##,
+        )
+        .expect("a renamed `$ref` member should load");
+        let property = &loaded_model_schema(&spec, "Api")["properties"]["class"];
+        assert_eq!(property["$ref"], Value::String("#/$defs/Inner".to_string()));
+        assert_eq!(property["x-py-name"], Value::String("klass".to_string()));
+    }
+
+    #[test]
+    fn accepts_inline_free_form_object_one_of_branch() {
+        let spec = union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: object, additionalProperties: true }
+      - { type: string }
+"#,
+        )
+        .expect("free-form inline object branch should load");
+        let root = spec.external_type_binding("Api").expect("root model");
+        let ExternalTypeSpec::Json(json) = &root.external_type else {
+            panic!("root should be a JSON model");
+        };
+        assert!(json.schema["properties"]["value"]["oneOf"].is_array());
+    }
+
+    #[test]
+    fn rejects_non_const_discriminator_union() {
+        let error = union_reject(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Tagged:
+    type: object
+    required: [kind]
+    properties: { kind: { type: string, const: a } }
+  Untagged:
+    type: object
+    required: [kind]
+    properties: { kind: { type: string } }
+type: object
+properties:
+  value:
+    oneOf:
+      - { $ref: "#/$defs/Tagged" }
+      - { $ref: "#/$defs/Untagged" }
+"##,
         );
         assert!(error.contains("discriminator"), "{error}");
     }
@@ -7398,19 +8554,24 @@ properties:
     #[test]
     fn rejects_non_unique_discriminator_union() {
         let error = union_reject(
-            r#"
+            r##"
 $schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  First:
+    type: object
+    required: [kind]
+    properties: { kind: { type: string, const: same }, a: { type: string } }
+  Second:
+    type: object
+    required: [kind]
+    properties: { kind: { type: string, const: same }, b: { type: string } }
 type: object
 properties:
   value:
     oneOf:
-      - type: object
-        required: [kind]
-        properties: { kind: { type: string, const: same }, a: { type: string } }
-      - type: object
-        required: [kind]
-        properties: { kind: { type: string, const: same }, b: { type: string } }
-"#,
+      - { $ref: "#/$defs/First" }
+      - { $ref: "#/$defs/Second" }
+"##,
         );
         assert!(error.contains("discriminator"), "{error}");
     }
@@ -7518,23 +8679,28 @@ properties:
     #[test]
     fn rejects_one_of_ambiguous_discriminator() {
         let error = union_reject(
-            r#"
+            r##"
 $schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  First:
+    type: object
+    required: [kind, variant]
+    properties:
+      kind: { type: string, const: a }
+      variant: { type: string, const: x }
+  Second:
+    type: object
+    required: [kind, variant]
+    properties:
+      kind: { type: string, const: b }
+      variant: { type: string, const: y }
 type: object
 properties:
   value:
     oneOf:
-      - type: object
-        required: [kind, variant]
-        properties:
-          kind: { type: string, const: a }
-          variant: { type: string, const: x }
-      - type: object
-        required: [kind, variant]
-        properties:
-          kind: { type: string, const: b }
-          variant: { type: string, const: y }
-"#,
+      - { $ref: "#/$defs/First" }
+      - { $ref: "#/$defs/Second" }
+"##,
         );
         assert!(error.contains("more than one qualifying"), "{error}");
     }
@@ -7554,6 +8720,82 @@ properties:
 "#,
         )
         .expect("nullable multi-kind union should load");
+    }
+
+    #[test]
+    fn accepts_constrained_non_object_union_branches() {
+        union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, minLength: 3, pattern: "^[a-z]+$", format: uuid }
+      - { type: integer, minimum: 0 }
+  listOrName:
+    oneOf:
+      - { type: array, items: { type: number }, minItems: 1, uniqueItems: true }
+      - { type: string, enum: [auto, manual] }
+"#,
+        )
+        .expect("a non-object branch may carry its own constraints");
+    }
+
+    #[test]
+    fn rejects_materialized_temporal_format_on_a_sum_type_branch() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, format: date-time }
+      - { type: integer }
+"#,
+        );
+        assert!(error.contains("`format: date-time`"), "{error}");
+        assert!(error.contains("no wrapper type"), "{error}");
+    }
+
+    #[test]
+    fn rejects_materialized_content_encoding_on_a_sum_type_branch() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string, contentEncoding: base64 }
+      - { type: integer }
+"#,
+        );
+        assert!(error.contains("`contentEncoding: base64`"), "{error}");
+    }
+
+    #[test]
+    fn accepts_materialized_keywords_on_a_nullable_branch() {
+        // The nullability `oneOf` has a single non-null branch and synthesizes no
+        // wrapper, so a materialized nullable field is unaffected by the sum-type
+        // deferral above.
+        union_doc_result(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  when:
+    oneOf:
+      - { type: string, format: date-time }
+      - { type: "null" }
+  blob:
+    oneOf:
+      - { type: string, contentEncoding: base64 }
+      - { type: "null" }
+"#,
+        )
+        .expect("a nullable materialized field should load");
     }
 
     #[test]
@@ -7946,7 +9188,7 @@ type: object
 properties:
   value:
     oneOf:
-      - { type: object, properties: { k: { type: string } }, required: [k] }
+      - { type: object, additionalProperties: true }
       - { type: qux }
 "#,
         );
@@ -8146,14 +9388,18 @@ services:
       pick:
         input: { $ref: "#/$defs/Thing" }
 $defs:
+  A:
+    type: object
+    properties: { kind: { type: string, const: a } }
+    required: [kind]
+  B:
+    type: object
+    properties: { kind: { type: string, const: b } }
+    required: [kind]
   Thing:
     oneOf:
-      - type: object
-        properties: { kind: { type: string, const: a } }
-        required: [kind]
-      - type: object
-        properties: { kind: { type: string, const: b } }
-        required: [kind]
+      - { $ref: "#/$defs/A" }
+      - { $ref: "#/$defs/B" }
 "##,
         );
         assert!(error.contains("must resolve to an object"), "{error}");

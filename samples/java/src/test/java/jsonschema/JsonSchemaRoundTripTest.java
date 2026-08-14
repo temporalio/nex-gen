@@ -108,8 +108,8 @@ final class JsonSchemaRoundTripTest {
         assertEquals(42, room.getAdditionalProperties().get("x-extra").intValue());
 
         Labels labels = roundTrip("chat", "labels.json", Labels.class);
-        assertEquals("prod", labels.getValues().get("env"));
-        assertEquals("core", labels.getValues().get("team"));
+        assertEquals("prod", labels.getAdditionalProperties().get("env"));
+        assertEquals("core", labels.getAdditionalProperties().get("team"));
 
         SendMessageInput input = roundTrip("chat", "send-message-input.json", SendMessageInput.class);
         assertEquals("r1", input.getRoomId());

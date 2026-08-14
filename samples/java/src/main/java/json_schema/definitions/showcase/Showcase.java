@@ -26,7 +26,35 @@ import org.jspecify.annotations.Nullable;
 @JsonSerialize(using = Showcase.Serializer.class)
 @JsonDeserialize(using = Showcase.Deserializer.class)
 public final class Showcase {
-    public interface IdOrName {}
+    public interface IdOrName {
+        static @Nullable IdOrName fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
+            if (node.isTextual()) {
+                IdOrNameString wrapped = new IdOrNameString(node.textValue());
+                wrapped.validate(path, violations);
+                return wrapped;
+            }
+            if (node.isNumber()) {
+                Long parsed = SpecNumbers.specLong(node, path, violations);
+                if (parsed == null) {
+                    return null;
+                }
+                IdOrNameInteger wrapped = new IdOrNameInteger(parsed);
+                wrapped.validate(path, violations);
+                return wrapped;
+            }
+            violations.add(new Violation(path, "expected one of: string, integer"));
+            return null;
+        }
+
+        static void validate(IdOrName value, String path, List<Violation> violations) {
+            if (value instanceof IdOrNameString) {
+                ((IdOrNameString) value).validate(path, violations);
+            }
+            if (value instanceof IdOrNameInteger) {
+                ((IdOrNameInteger) value).validate(path, violations);
+            }
+        }
+    }
 
     public static final class IdOrNameString implements IdOrName {
         private final String value;
@@ -35,8 +63,16 @@ public final class Showcase {
             this.value = value;
         }
 
+        @JsonValue
         public String getValue() {
             return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            int length = value.codePointCount(0, value.length());
+            if (length < 3) {
+                violations.add(new Violation(path, "must have length >= 3, got " + length));
+            }
         }
 
         @Override
@@ -68,8 +104,15 @@ public final class Showcase {
             this.value = value;
         }
 
+        @JsonValue
         public long getValue() {
             return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (value < 1L) {
+                violations.add(new Violation(path, "must be >= 1, got " + value));
+            }
         }
 
         @Override
@@ -91,6 +134,483 @@ public final class Showcase {
         @Override
         public String toString() {
             return "IdOrNameInteger[" + value + "]";
+        }
+    }
+
+    public interface Mode {
+        static @Nullable Mode fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
+            if (node.isTextual()) {
+                ModeString wrapped = new ModeString(node.textValue());
+                wrapped.validate(path, violations);
+                return wrapped;
+            }
+            if (node.isNumber()) {
+                Long parsed = SpecNumbers.specLong(node, path, violations);
+                if (parsed == null) {
+                    return null;
+                }
+                ModeInteger wrapped = new ModeInteger(parsed);
+                wrapped.validate(path, violations);
+                return wrapped;
+            }
+            violations.add(new Violation(path, "expected one of: string, integer"));
+            return null;
+        }
+
+        static void validate(Mode value, String path, List<Violation> violations) {
+            if (value instanceof ModeString) {
+                ((ModeString) value).validate(path, violations);
+            }
+            if (value instanceof ModeInteger) {
+                ((ModeInteger) value).validate(path, violations);
+            }
+        }
+    }
+
+    public static final class ModeString implements Mode {
+        private final String value;
+
+        public ModeString(String value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public String getValue() {
+            return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (!("auto".equals(value)) && !("manual".equals(value))) {
+                violations.add(new Violation(path, "must be one of [\"auto\", \"manual\"], got " + value));
+            }
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ModeString)) {
+                return false;
+            }
+            return Objects.equals(value, ((ModeString) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "ModeString[" + value + "]";
+        }
+    }
+
+    public static final class ModeInteger implements Mode {
+        private final long value;
+
+        public ModeInteger(long value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public long getValue() {
+            return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (value < 0L) {
+                violations.add(new Violation(path, "must be >= 0, got " + value));
+            }
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ModeInteger)) {
+                return false;
+            }
+            return Objects.equals(value, ((ModeInteger) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "ModeInteger[" + value + "]";
+        }
+    }
+
+    public interface Payload {
+        static @Nullable Payload fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
+            if (node.isObject()) {
+                Map<String, JsonNode> members = new LinkedHashMap<>();
+                Iterator<String> memberNames = node.fieldNames();
+                while (memberNames.hasNext()) {
+                    String memberName = memberNames.next();
+                    members.put(memberName, node.get(memberName));
+                }
+                return new PayloadObject(members);
+            }
+            if (node.isTextual()) {
+                return new PayloadString(node.textValue());
+            }
+            violations.add(new Violation(path, "expected one of: object, string"));
+            return null;
+        }
+    }
+
+    public static final class PayloadObject implements Payload {
+        private final Map<String, JsonNode> value;
+
+        public PayloadObject(Map<String, JsonNode> value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public Map<String, JsonNode> getValue() {
+            return value;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof PayloadObject)) {
+                return false;
+            }
+            return Objects.equals(value, ((PayloadObject) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "PayloadObject[" + value + "]";
+        }
+    }
+
+    public static final class PayloadString implements Payload {
+        private final String value;
+
+        public PayloadString(String value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public String getValue() {
+            return value;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof PayloadString)) {
+                return false;
+            }
+            return Objects.equals(value, ((PayloadString) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "PayloadString[" + value + "]";
+        }
+    }
+
+    public interface Detail {
+        static @Nullable Detail fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
+            if (node.isObject()) {
+                try {
+                    return context.readTreeAsValue(node, ShowcaseDetailObject.class);
+                } catch (ValidationException nested) {
+                    for (Violation violation : nested.getViolations()) {
+                        violations.add(violation.withPathPrefix(path));
+                    }
+                    return null;
+                } catch (IOException nested) {
+                    violations.add(new Violation(path, nested.getMessage()));
+                    return null;
+                }
+            }
+            if (node.isTextual()) {
+                return new DetailString(node.textValue());
+            }
+            violations.add(new Violation(path, "expected one of: ShowcaseDetailObject, string"));
+            return null;
+        }
+    }
+
+    public static final class DetailString implements Detail {
+        private final String value;
+
+        public DetailString(String value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public String getValue() {
+            return value;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof DetailString)) {
+                return false;
+            }
+            return Objects.equals(value, ((DetailString) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "DetailString[" + value + "]";
+        }
+    }
+
+    public interface ShapeOrName {
+        static @Nullable ShapeOrName fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
+            if (node.isObject()) {
+                JsonNode disc = node.get("kind");
+                if (disc == null || !disc.isTextual()) {
+                    violations.add(new Violation(path, "discriminator \"kind\" is required"));
+                    return null;
+                }
+                switch (disc.textValue()) {
+                    case "circle":
+                        try {
+                            return context.readTreeAsValue(node, Circle.class);
+                        } catch (ValidationException nested) {
+                            for (Violation violation : nested.getViolations()) {
+                                violations.add(violation.withPathPrefix(path));
+                            }
+                            return null;
+                        } catch (IOException nested) {
+                            violations.add(new Violation(path, nested.getMessage()));
+                            return null;
+                        }
+                    case "square":
+                        try {
+                            return context.readTreeAsValue(node, Square.class);
+                        } catch (ValidationException nested) {
+                            for (Violation violation : nested.getViolations()) {
+                                violations.add(violation.withPathPrefix(path));
+                            }
+                            return null;
+                        } catch (IOException nested) {
+                            violations.add(new Violation(path, nested.getMessage()));
+                            return null;
+                        }
+                    default:
+                        violations.add(new Violation(path, "unknown discriminator kind " + disc.textValue() + ": expected one of [circle, square]"));
+                        return null;
+                }
+            }
+            if (node.isTextual()) {
+                ShapeOrNameString wrapped = new ShapeOrNameString(node.textValue());
+                wrapped.validate(path, violations);
+                return wrapped;
+            }
+            violations.add(new Violation(path, "expected one of: Circle, Square, string"));
+            return null;
+        }
+
+        static void validate(ShapeOrName value, String path, List<Violation> violations) {
+            if (value instanceof ShapeOrNameString) {
+                ((ShapeOrNameString) value).validate(path, violations);
+            }
+        }
+    }
+
+    public static final class ShapeOrNameString implements ShapeOrName {
+        private final String value;
+
+        public ShapeOrNameString(String value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public String getValue() {
+            return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            int length = value.codePointCount(0, value.length());
+            if (length > 32) {
+                violations.add(new Violation(path, "must have length <= 32, got " + length));
+            }
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ShapeOrNameString)) {
+                return false;
+            }
+            return Objects.equals(value, ((ShapeOrNameString) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "ShapeOrNameString[" + value + "]";
+        }
+    }
+
+    public interface Measurements {
+        static @Nullable Measurements fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
+            if (node.isArray()) {
+                List<Double> items = new ArrayList<>();
+                for (int index = 0; index < node.size(); index++) {
+                    JsonNode element = node.get(index);
+                    String elementPath = path + "[" + index + "]";
+                    if (!element.isNumber()) {
+                        violations.add(new Violation(elementPath, "expected number"));
+                    } else {
+                        items.add(element.doubleValue());
+                    }
+                }
+                MeasurementsArray wrapped = new MeasurementsArray(items);
+                wrapped.validate(path, violations);
+                return wrapped;
+            }
+            if (node.isTextual()) {
+                MeasurementsString wrapped = new MeasurementsString(node.textValue());
+                wrapped.validate(path, violations);
+                return wrapped;
+            }
+            violations.add(new Violation(path, "expected one of: array, string"));
+            return null;
+        }
+
+        static void validate(Measurements value, String path, List<Violation> violations) {
+            if (value instanceof MeasurementsArray) {
+                ((MeasurementsArray) value).validate(path, violations);
+            }
+            if (value instanceof MeasurementsString) {
+                ((MeasurementsString) value).validate(path, violations);
+            }
+        }
+    }
+
+    public static final class MeasurementsArray implements Measurements {
+        private final List<Double> value;
+
+        public MeasurementsArray(List<Double> value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public List<Double> getValue() {
+            return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (value.size() < 1) {
+                violations.add(new Violation(path, "must have at least 1 items, got " + value.size()));
+            }
+            java.util.Map<Double, Integer> seen = new java.util.HashMap<>();
+            for (int index = 0; index < value.size(); index++) {
+                Double element = value.get(index);
+                Integer priorIndex = seen.get(element);
+                if (priorIndex != null) {
+                    violations.add(new Violation(path, "duplicate items: element at index " + index + " equals index " + priorIndex));
+                } else {
+                    seen.put(element, index);
+                }
+            }
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof MeasurementsArray)) {
+                return false;
+            }
+            return Objects.equals(value, ((MeasurementsArray) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "MeasurementsArray[" + value + "]";
+        }
+    }
+
+    public static final class MeasurementsString implements Measurements {
+        private static final java.util.regex.Pattern VALUE_PATTERN = java.util.regex.Pattern.compile("^[a-z]+\\z");
+
+        private final String value;
+
+        public MeasurementsString(String value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public String getValue() {
+            return value;
+        }
+
+        void validate(String path, List<Violation> violations) {
+            if (!VALUE_PATTERN.matcher(value).find()) {
+                violations.add(new Violation(path, "must match pattern " + "^[a-z]+\\z" + ", got " + value));
+            }
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof MeasurementsString)) {
+                return false;
+            }
+            return Objects.equals(value, ((MeasurementsString) other).value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "MeasurementsString[" + value + "]";
         }
     }
 
@@ -536,17 +1056,70 @@ public final class Showcase {
      */
     private final @Nullable List<String> roles;
     /**
-     * Disjoint-kind union (oneOf sum type): the wire value is either a string or an integer, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector.
+     * Disjoint-kind union (oneOf sum type): the wire value is either a string of at least 3 code points or an integer of at least 1, selected by its JSON token. Not a member of a discriminated union — the token itself is the selector. Each branch also carries its **own constraints**: once the token selects a branch, the value is held to everything that branch declares, in both directions, with the union's path on the violation.
      */
     private final @Nullable IdOrName idOrName;
+    /**
+     * A union whose string branch is a **closed value set**: either one of two named modes or an unbounded non-negative integer. The branch narrows to its own admissible values (a Go/Java membership check, a TypeScript literal union, a Python `Literal`), so an unknown string is a Violation while any non-negative integer is accepted.
+     */
+    private final @Nullable Mode mode;
+    /**
+     * Mixed-kind union whose object branch is an inline free-form object: the wire value is either an arbitrary object (members carried verbatim) or a string, selected by its JSON token. The free-form object is the one object branch that needs no type name — TypeScript and Python carry it structurally, Go and Java wrap it as `<Union>Object`.
+     */
+    private final @Nullable Payload payload;
+    /**
+     * Mixed-kind union whose object branch is an inline *structured* object, written directly on the property rather than in `$defs`. It is the only object branch of this union, so it derives its name from the union it belongs to — `ShowcaseDetailObject` — and is emitted as an ordinary model: its members keep their own constraints and it stays open to unknown ones.
+     */
+    private final @Nullable Detail detail;
+    /**
+     * Tagged object union mixed with a scalar kind: the two selector layers compose — the JSON token picks object-vs-string, and, for an object, the shared required `kind` const picks Circle-vs-Square. Written inline on the property, so the union itself is named after its position (`ShowcaseShapeOrName` / nested `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape` — a branch type may belong to more than one union (Go gains a second marker method, Java a second implemented interface). The scalar branch carries a length bound of its own; the object branches validate through their own models.
+     */
+    private final @Nullable ShapeOrName shapeOrName;
+    /**
+     * Mixed-kind union with an array branch: the wire value is either a non-empty list of distinct numbers or a lowercase preset name, selected by its JSON token. An array branch has no definition to take a name from, so Go and Java emit it as the synthesized `<Union>Array` variant (a defined type / a `@JsonValue` wrapper) while TypeScript and Python carry it structurally as `number[]` / `list[float]`. Both branches carry their own constraints — the array's `minItems`/`uniqueItems` and the string's `pattern` — so the array-vs-string choice is validated as well as selected.
+     */
+    private final @Nullable Measurements measurements;
+    /**
+     * A list whose element type is a named union: every element is routed to exactly one branch by the union's own selector, and its index carries into the violation path (`shapes[1]`). Go and Java cannot decode a sealed interface as a whole, so the element decodes through the union's dispatcher one at a time.
+     */
+    private final @Nullable List<Shape> shapes;
+    /**
+     * A list whose element union is written **inline**. An element has no name of its own, so the union is named after its position — `ShowcaseSegmentsItem` — moved into `$defs`, and the element becomes a `$ref` at it; from there it is an ordinary named union in every language.
+     */
+    private final @Nullable List<ShowcaseSegmentsItem> segments;
+    /**
+     * A list of **nullable elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list stays a list.
+     */
+    private final @Nullable List<@Nullable String> slots;
+    /**
+     * A nested array: `items` at depth two. Each level decodes elementwise, so a bad element is reported at its own two-dimensional index (`grid[1][0]`).
+     */
+    private final @Nullable List<List<Long>> grid;
+    private final @Nullable ShowcaseLocation location;
+    /**
+     * A nullable inline object. The nullability wrapper emits no type of its own, so the object inside it takes the property's name — `ShowcaseAudit`, the same name it would take written plainly: adding or removing nullability never renames the type.
+     */
+    private final @Nullable ShowcaseAudit audit;
+    /**
+     * A list whose element is an inline object, named after its position (`ShowcaseRowsItem`) exactly as an inline element *union* is.
+     */
+    private final @Nullable List<ShowcaseRowsItem> rows;
+    private final @Nullable ShowcaseLedger ledgerJava;
+    private final @Nullable ShowcaseMetadata metadata;
+    private final @Nullable Quotas quotas;
+    private final @Nullable Tokens tokens;
+    private final @Nullable Nicknames nicknames;
+    private final @Nullable Choices choices;
+    private final @Nullable Extras extras;
     private final @Nullable Shape shape;
+    private final @Nullable Note note;
     private final @Nullable Address address;
     private final @Nullable Labels labels;
     private final @Nullable Settings settings;
     private final @Nullable Attributes attributes;
     private final @Nullable ContactJava contact;
 
-    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Shape shape, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
+    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Mode mode, @Nullable Payload payload, @Nullable Detail detail, @Nullable ShapeOrName shapeOrName, @Nullable Measurements measurements, @Nullable List<Shape> shapes, @Nullable List<ShowcaseSegmentsItem> segments, @Nullable List<@Nullable String> slots, @Nullable List<List<Long>> grid, @Nullable ShowcaseLocation location, @Nullable ShowcaseAudit audit, @Nullable List<ShowcaseRowsItem> rows, @Nullable ShowcaseLedger ledgerJava, @Nullable ShowcaseMetadata metadata, @Nullable Quotas quotas, @Nullable Tokens tokens, @Nullable Nicknames nicknames, @Nullable Choices choices, @Nullable Extras extras, @Nullable Shape shape, @Nullable Note note, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
         this.kind = kind;
         this.revision = revision;
         this.enabled = enabled;
@@ -582,7 +1155,27 @@ public final class Showcase {
         this.aliases = aliases;
         this.roles = roles;
         this.idOrName = idOrName;
+        this.mode = mode;
+        this.payload = payload;
+        this.detail = detail;
+        this.shapeOrName = shapeOrName;
+        this.measurements = measurements;
+        this.shapes = shapes;
+        this.segments = segments;
+        this.slots = slots;
+        this.grid = grid;
+        this.location = location;
+        this.audit = audit;
+        this.rows = rows;
+        this.ledgerJava = ledgerJava;
+        this.metadata = metadata;
+        this.quotas = quotas;
+        this.tokens = tokens;
+        this.nicknames = nicknames;
+        this.choices = choices;
+        this.extras = extras;
         this.shape = shape;
+        this.note = note;
         this.address = address;
         this.labels = labels;
         this.settings = settings;
@@ -746,8 +1339,88 @@ public final class Showcase {
         return idOrName;
     }
 
+    public @Nullable Mode getMode() {
+        return mode;
+    }
+
+    public @Nullable Payload getPayload() {
+        return payload;
+    }
+
+    public @Nullable Detail getDetail() {
+        return detail;
+    }
+
+    public @Nullable ShapeOrName getShapeOrName() {
+        return shapeOrName;
+    }
+
+    public @Nullable Measurements getMeasurements() {
+        return measurements;
+    }
+
+    public @Nullable List<Shape> getShapes() {
+        return shapes;
+    }
+
+    public @Nullable List<ShowcaseSegmentsItem> getSegments() {
+        return segments;
+    }
+
+    public @Nullable List<@Nullable String> getSlots() {
+        return slots;
+    }
+
+    public @Nullable List<List<Long>> getGrid() {
+        return grid;
+    }
+
+    public @Nullable ShowcaseLocation getLocation() {
+        return location;
+    }
+
+    public @Nullable ShowcaseAudit getAudit() {
+        return audit;
+    }
+
+    public @Nullable List<ShowcaseRowsItem> getRows() {
+        return rows;
+    }
+
+    public @Nullable ShowcaseLedger getLedgerJava() {
+        return ledgerJava;
+    }
+
+    public @Nullable ShowcaseMetadata getMetadata() {
+        return metadata;
+    }
+
+    public @Nullable Quotas getQuotas() {
+        return quotas;
+    }
+
+    public @Nullable Tokens getTokens() {
+        return tokens;
+    }
+
+    public @Nullable Nicknames getNicknames() {
+        return nicknames;
+    }
+
+    public @Nullable Choices getChoices() {
+        return choices;
+    }
+
+    public @Nullable Extras getExtras() {
+        return extras;
+    }
+
     public @Nullable Shape getShape() {
         return shape;
+    }
+
+    public @Nullable Note getNote() {
+        return note;
     }
 
     public @Nullable Address getAddress() {
@@ -814,7 +1487,27 @@ public final class Showcase {
             && Objects.equals(this.aliases, that.aliases)
             && Objects.equals(this.roles, that.roles)
             && Objects.equals(this.idOrName, that.idOrName)
+            && Objects.equals(this.mode, that.mode)
+            && Objects.equals(this.payload, that.payload)
+            && Objects.equals(this.detail, that.detail)
+            && Objects.equals(this.shapeOrName, that.shapeOrName)
+            && Objects.equals(this.measurements, that.measurements)
+            && Objects.equals(this.shapes, that.shapes)
+            && Objects.equals(this.segments, that.segments)
+            && Objects.equals(this.slots, that.slots)
+            && Objects.equals(this.grid, that.grid)
+            && Objects.equals(this.location, that.location)
+            && Objects.equals(this.audit, that.audit)
+            && Objects.equals(this.rows, that.rows)
+            && Objects.equals(this.ledgerJava, that.ledgerJava)
+            && Objects.equals(this.metadata, that.metadata)
+            && Objects.equals(this.quotas, that.quotas)
+            && Objects.equals(this.tokens, that.tokens)
+            && Objects.equals(this.nicknames, that.nicknames)
+            && Objects.equals(this.choices, that.choices)
+            && Objects.equals(this.extras, that.extras)
             && Objects.equals(this.shape, that.shape)
+            && Objects.equals(this.note, that.note)
             && Objects.equals(this.address, that.address)
             && Objects.equals(this.labels, that.labels)
             && Objects.equals(this.settings, that.settings)
@@ -824,7 +1517,7 @@ public final class Showcase {
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, shape, address, labels, settings, attributes, contact);
+        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, mode, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
     }
 
     @Override
@@ -865,7 +1558,27 @@ public final class Showcase {
             + ", aliases=" + aliases
             + ", roles=" + roles
             + ", idOrName=" + idOrName
+            + ", mode=" + mode
+            + ", payload=" + payload
+            + ", detail=" + detail
+            + ", shapeOrName=" + shapeOrName
+            + ", measurements=" + measurements
+            + ", shapes=" + shapes
+            + ", segments=" + segments
+            + ", slots=" + slots
+            + ", grid=" + grid
+            + ", location=" + location
+            + ", audit=" + audit
+            + ", rows=" + rows
+            + ", ledgerJava=" + ledgerJava
+            + ", metadata=" + metadata
+            + ", quotas=" + quotas
+            + ", tokens=" + tokens
+            + ", nicknames=" + nicknames
+            + ", choices=" + choices
+            + ", extras=" + extras
             + ", shape=" + shape
+            + ", note=" + note
             + ", address=" + address
             + ", labels=" + labels
             + ", settings=" + settings
@@ -997,6 +1710,23 @@ public final class Showcase {
                     violations.add(new Violation("roles", "too many matching items: at most 2, got " + matchCount));
                 }
             }
+            if (value.idOrName != null) {
+                IdOrName.validate(value.idOrName, "idOrName", violations);
+            }
+            if (value.mode != null) {
+                Mode.validate(value.mode, "mode", violations);
+            }
+            if (value.shapeOrName != null) {
+                ShapeOrName.validate(value.shapeOrName, "shapeOrName", violations);
+            }
+            if (value.measurements != null) {
+                Measurements.validate(value.measurements, "measurements", violations);
+            }
+            if (value.segments != null) {
+                for (int index = 0; index < value.segments.size(); index++) {
+                    ShowcaseSegmentsItem.validate(value.segments.get(index), "segments" + "[" + index + "]", violations);
+                }
+            }
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
@@ -1107,16 +1837,92 @@ public final class Showcase {
                 serializers.defaultSerializeValue(value.roles, gen);
             }
             if (value.idOrName != null) {
-                if (value.idOrName instanceof IdOrNameString) {
-                    gen.writeStringField("idOrName", ((IdOrNameString) value.idOrName).getValue());
-                }
-                if (value.idOrName instanceof IdOrNameInteger) {
-                    gen.writeNumberField("idOrName", ((IdOrNameInteger) value.idOrName).getValue());
-                }
+                gen.writeFieldName("idOrName");
+                serializers.defaultSerializeValue(value.idOrName, gen);
+            }
+            if (value.mode != null) {
+                gen.writeFieldName("mode");
+                serializers.defaultSerializeValue(value.mode, gen);
+            }
+            if (value.payload != null) {
+                gen.writeFieldName("payload");
+                serializers.defaultSerializeValue(value.payload, gen);
+            }
+            if (value.detail != null) {
+                gen.writeFieldName("detail");
+                serializers.defaultSerializeValue(value.detail, gen);
+            }
+            if (value.shapeOrName != null) {
+                gen.writeFieldName("shapeOrName");
+                serializers.defaultSerializeValue(value.shapeOrName, gen);
+            }
+            if (value.measurements != null) {
+                gen.writeFieldName("measurements");
+                serializers.defaultSerializeValue(value.measurements, gen);
+            }
+            if (value.shapes != null) {
+                gen.writeFieldName("shapes");
+                serializers.defaultSerializeValue(value.shapes, gen);
+            }
+            if (value.segments != null) {
+                gen.writeFieldName("segments");
+                serializers.defaultSerializeValue(value.segments, gen);
+            }
+            if (value.slots != null) {
+                gen.writeFieldName("slots");
+                serializers.defaultSerializeValue(value.slots, gen);
+            }
+            if (value.grid != null) {
+                gen.writeFieldName("grid");
+                serializers.defaultSerializeValue(value.grid, gen);
+            }
+            if (value.location != null) {
+                gen.writeFieldName("location");
+                serializers.defaultSerializeValue(value.location, gen);
+            }
+            if (value.audit != null) {
+                gen.writeFieldName("audit");
+                serializers.defaultSerializeValue(value.audit, gen);
+            }
+            if (value.rows != null) {
+                gen.writeFieldName("rows");
+                serializers.defaultSerializeValue(value.rows, gen);
+            }
+            if (value.ledgerJava != null) {
+                gen.writeFieldName("ledger");
+                serializers.defaultSerializeValue(value.ledgerJava, gen);
+            }
+            if (value.metadata != null) {
+                gen.writeFieldName("metadata");
+                serializers.defaultSerializeValue(value.metadata, gen);
+            }
+            if (value.quotas != null) {
+                gen.writeFieldName("quotas");
+                serializers.defaultSerializeValue(value.quotas, gen);
+            }
+            if (value.tokens != null) {
+                gen.writeFieldName("tokens");
+                serializers.defaultSerializeValue(value.tokens, gen);
+            }
+            if (value.nicknames != null) {
+                gen.writeFieldName("nicknames");
+                serializers.defaultSerializeValue(value.nicknames, gen);
+            }
+            if (value.choices != null) {
+                gen.writeFieldName("choices");
+                serializers.defaultSerializeValue(value.choices, gen);
+            }
+            if (value.extras != null) {
+                gen.writeFieldName("extras");
+                serializers.defaultSerializeValue(value.extras, gen);
             }
             if (value.shape != null) {
                 gen.writeFieldName("shape");
                 serializers.defaultSerializeValue(value.shape, gen);
+            }
+            if (value.note != null) {
+                gen.writeFieldName("note");
+                serializers.defaultSerializeValue(value.note, gen);
             }
             if (value.address != null) {
                 gen.writeFieldName("address");
@@ -1159,41 +1965,61 @@ public final class Showcase {
                     case "address":
                     case "aliases":
                     case "attributes":
+                    case "audit":
                     case "blob":
                     case "category":
+                    case "choices":
                     case "code":
                     case "contact":
                     case "contactEmail":
                     case "count":
                     case "debug":
+                    case "detail":
                     case "enabled":
+                    case "extras":
                     case "gateway":
                     case "greeting":
+                    case "grid":
                     case "homepage":
                     case "host":
                     case "idOrName":
                     case "kind":
                     case "labels":
+                    case "ledger":
                     case "legacyId":
                     case "level":
+                    case "location":
+                    case "measurements":
+                    case "metadata":
                     case "middleName":
+                    case "mode":
                     case "name":
                     case "nickname":
+                    case "nicknames":
+                    case "note":
+                    case "payload":
                     case "phrase":
                     case "priority":
+                    case "quotas":
                     case "ratio":
                     case "requestId":
                     case "retries":
                     case "revision":
                     case "roles":
+                    case "rows":
                     case "scale":
+                    case "segments":
                     case "settings":
                     case "shape":
+                    case "shapeOrName":
+                    case "shapes":
                     case "sku":
+                    case "slots":
                     case "status":
                     case "step":
                     case "tags":
                     case "tier":
+                    case "tokens":
                     case "urlBlob":
                     case "verbose":
                         break;
@@ -1838,15 +2664,352 @@ public final class Showcase {
                 } else if (field.isNull()) {
                     violations.add(new Violation("idOrName", "explicit null not allowed"));
                 } else {
-                    if (field.isTextual()) {
-                        idOrName = new IdOrNameString(field.textValue());
-                    } else if (field.isNumber()) {
-                        Long parsed = SpecNumbers.specLong(field, "idOrName", violations);
-                        if (parsed != null) {
-                            idOrName = new IdOrNameInteger(parsed);
-                        }
+                    idOrName = IdOrName.fromNode(field, "idOrName", violations, context);
+                }
+            }
+            Mode mode = null;
+            {
+                JsonNode field = node.get("mode");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("mode", "explicit null not allowed"));
+                } else {
+                    mode = Mode.fromNode(field, "mode", violations, context);
+                }
+            }
+            Payload payload = null;
+            {
+                JsonNode field = node.get("payload");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("payload", "explicit null not allowed"));
+                } else {
+                    payload = Payload.fromNode(field, "payload", violations, context);
+                }
+            }
+            Detail detail = null;
+            {
+                JsonNode field = node.get("detail");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("detail", "explicit null not allowed"));
+                } else {
+                    detail = Detail.fromNode(field, "detail", violations, context);
+                }
+            }
+            ShapeOrName shapeOrName = null;
+            {
+                JsonNode field = node.get("shapeOrName");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("shapeOrName", "explicit null not allowed"));
+                } else {
+                    shapeOrName = ShapeOrName.fromNode(field, "shapeOrName", violations, context);
+                }
+            }
+            Measurements measurements = null;
+            {
+                JsonNode field = node.get("measurements");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("measurements", "explicit null not allowed"));
+                } else {
+                    measurements = Measurements.fromNode(field, "measurements", violations, context);
+                }
+            }
+            List<Shape> shapes = null;
+            {
+                JsonNode field = node.get("shapes");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("shapes", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("shapes", "expected array"));
                     } else {
-                        violations.add(new Violation("idOrName", "expected one of: string, integer"));
+                        List<Shape> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "shapes" + "[" + index + "]";
+                            Shape parsedItems = Shape.fromNode(element, elementPath, violations, context);
+                            if (parsedItems != null) {
+                                items.add(parsedItems);
+                            }
+                        }
+                        shapes = items;
+                    }
+                }
+            }
+            List<ShowcaseSegmentsItem> segments = null;
+            {
+                JsonNode field = node.get("segments");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("segments", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("segments", "expected array"));
+                    } else {
+                        List<ShowcaseSegmentsItem> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "segments" + "[" + index + "]";
+                            ShowcaseSegmentsItem parsedItems = ShowcaseSegmentsItem.fromNode(element, elementPath, violations, context);
+                            if (parsedItems != null) {
+                                items.add(parsedItems);
+                            }
+                        }
+                        segments = items;
+                    }
+                }
+            }
+            List<@Nullable String> slots = null;
+            {
+                JsonNode field = node.get("slots");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("slots", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("slots", "expected array"));
+                    } else {
+                        List<@Nullable String> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "slots" + "[" + index + "]";
+                            if (element.isNull()) {
+                                items.add(null);
+                                continue;
+                            }
+                            if (!element.isTextual()) {
+                                violations.add(new Violation(elementPath, "expected string"));
+                            } else {
+                                items.add(element.textValue());
+                            }
+                        }
+                        slots = items;
+                    }
+                }
+            }
+            List<List<Long>> grid = null;
+            {
+                JsonNode field = node.get("grid");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("grid", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("grid", "expected array"));
+                    } else {
+                        List<List<Long>> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "grid" + "[" + index + "]";
+                            if (!element.isArray()) {
+                                violations.add(new Violation(elementPath, "expected array"));
+                            } else {
+                                List<Long> items1 = new ArrayList<>();
+                                for (int index1 = 0; index1 < element.size(); index1++) {
+                                    JsonNode element1 = element.get(index1);
+                                    String path1 = elementPath + "[" + index1 + "]";
+                                    Long parsed = SpecNumbers.specLong(element1, path1, violations);
+                                    if (parsed != null) {
+                                        items1.add(parsed);
+                                    }
+                                }
+                                items.add(items1);
+                            }
+                        }
+                        grid = items;
+                    }
+                }
+            }
+            ShowcaseLocation location = null;
+            {
+                JsonNode field = node.get("location");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("location", "explicit null not allowed"));
+                } else {
+                    try {
+                        location = context.readTreeAsValue(field, ShowcaseLocation.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("location"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("location", nested.getMessage()));
+                    }
+                }
+            }
+            ShowcaseAudit audit = null;
+            {
+                JsonNode field = node.get("audit");
+                if (field == null) {
+                } else if (field.isNull()) {
+                } else {
+                    try {
+                        audit = context.readTreeAsValue(field, ShowcaseAudit.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("audit"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("audit", nested.getMessage()));
+                    }
+                }
+            }
+            List<ShowcaseRowsItem> rows = null;
+            {
+                JsonNode field = node.get("rows");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("rows", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("rows", "expected array"));
+                    } else {
+                        List<ShowcaseRowsItem> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "rows" + "[" + index + "]";
+                            try {
+                                items.add(context.readTreeAsValue(element, ShowcaseRowsItem.class));
+                            } catch (ValidationException nested) {
+                                for (Violation violation : nested.getViolations()) {
+                                    violations.add(violation.withPathPrefix(elementPath));
+                                }
+                            } catch (IOException nested) {
+                                violations.add(new Violation(elementPath, nested.getMessage()));
+                            }
+                        }
+                        rows = items;
+                    }
+                }
+            }
+            ShowcaseLedger ledgerJava = null;
+            {
+                JsonNode field = node.get("ledger");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("ledger", "explicit null not allowed"));
+                } else {
+                    try {
+                        ledgerJava = context.readTreeAsValue(field, ShowcaseLedger.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("ledger"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("ledger", nested.getMessage()));
+                    }
+                }
+            }
+            ShowcaseMetadata metadata = null;
+            {
+                JsonNode field = node.get("metadata");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("metadata", "explicit null not allowed"));
+                } else {
+                    try {
+                        metadata = context.readTreeAsValue(field, ShowcaseMetadata.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("metadata"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("metadata", nested.getMessage()));
+                    }
+                }
+            }
+            Quotas quotas = null;
+            {
+                JsonNode field = node.get("quotas");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("quotas", "explicit null not allowed"));
+                } else {
+                    try {
+                        quotas = context.readTreeAsValue(field, Quotas.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("quotas"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("quotas", nested.getMessage()));
+                    }
+                }
+            }
+            Tokens tokens = null;
+            {
+                JsonNode field = node.get("tokens");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("tokens", "explicit null not allowed"));
+                } else {
+                    try {
+                        tokens = context.readTreeAsValue(field, Tokens.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("tokens"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("tokens", nested.getMessage()));
+                    }
+                }
+            }
+            Nicknames nicknames = null;
+            {
+                JsonNode field = node.get("nicknames");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("nicknames", "explicit null not allowed"));
+                } else {
+                    try {
+                        nicknames = context.readTreeAsValue(field, Nicknames.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("nicknames"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("nicknames", nested.getMessage()));
+                    }
+                }
+            }
+            Choices choices = null;
+            {
+                JsonNode field = node.get("choices");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("choices", "explicit null not allowed"));
+                } else {
+                    try {
+                        choices = context.readTreeAsValue(field, Choices.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("choices"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("choices", nested.getMessage()));
+                    }
+                }
+            }
+            Extras extras = null;
+            {
+                JsonNode field = node.get("extras");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("extras", "explicit null not allowed"));
+                } else {
+                    try {
+                        extras = context.readTreeAsValue(field, Extras.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix("extras"));
+                        }
+                    } catch (IOException nested) {
+                        violations.add(new Violation("extras", nested.getMessage()));
                     }
                 }
             }
@@ -1858,6 +3021,16 @@ public final class Showcase {
                     violations.add(new Violation("shape", "explicit null not allowed"));
                 } else {
                     shape = Shape.fromNode(field, "shape", violations, context);
+                }
+            }
+            Note note = null;
+            {
+                JsonNode field = node.get("note");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("note", "explicit null not allowed"));
+                } else {
+                    note = Note.fromNode(field, "note", violations, context);
                 }
             }
             Address address = null;
@@ -1953,7 +3126,7 @@ public final class Showcase {
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, shape, address, labels, settings, attributes, contact);
+            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, step, tags, aliases, roles, idOrName, mode, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
         }
     }
 }

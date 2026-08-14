@@ -111,7 +111,9 @@ export class PageMapper {
     out.title = value.title;
     out.meta = new PageMetaMapper().toIntermediate(value.meta);
     if (value.blocks !== undefined) {
-      out.blocks = value.blocks;
+      out.blocks = value.blocks.map((element) =>
+        new BlockMapper().toIntermediate(element),
+      );
     }
     return out;
   }

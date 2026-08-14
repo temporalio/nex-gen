@@ -210,6 +210,70 @@ because flat-everywhere would needlessly inflict Go's limitation on Java,
 the language that benefits most from nesting. P15 remains the backstop in
 every language: nesting reduces, never eliminates, the collision surface.
 
+### Naming an inline object shape
+
+A member's schema may be an object written **inline** rather than `$ref`ed:
+
+```yaml
+Order:
+  type: object
+  properties:
+    address:
+      type: object
+      properties:
+        street: { type: string }
+```
+
+That object is a type in every target — a Go struct, a TS interface, a
+Pydantic model, a Java class — so, exactly like an inline [[oneOf]] object
+branch, the constraint on it is not its shape but its **name**. It is
+resolved the same way: the shape is **named after the position it was
+written in, moved into `$defs`, and the position rewritten to a `$ref`** at
+it. From there it *is* an ordinary definition, so one object-model emitter
+per target covers it, and the inline form emits **identical code to the
+`$defs` + `$ref` form** — the choice between them is only where the shape
+reads best.
+
+| Position | Synthesized name |
+|---|---|
+| the member `address` of `Order` | `OrderAddress` |
+| `items` of the member `rows` | `OrderRowsItem` |
+| `items` of `items` (nested array) | `OrderRowsItemItem` |
+| typed `additionalProperties` of `Order` | `OrderValue` |
+| a `oneOf` branch (the union owns the position's name) | `<Union>Object` ([[oneOf]]) |
+
+Rules that follow from "the name belongs to the position":
+
+- **The hoist runs to a fixpoint**, so an object nested inside a hoisted one
+  is named against *its* name — `OrderAddress` → `OrderAddressGeo`. Nesting
+  therefore needs no `$defs` boilerplate from the author at any depth.
+- **Nullability does not rename anything.** A nullability `oneOf`
+  (`oneOf: [{object}, {"type":"null"}]`, see [[nullability]]) emits no type
+  of its own — every target expresses it on the value — so the object inside
+  it takes the position's name, the same name it would take written plainly.
+  A *sum type*, by contrast, occupies the position (it is the emitted union
+  type), so its inline object branch derives `<Union>Object`.
+- **Every object is named, including the free-form one**
+  (`additionalProperties: true`): [[additionalProperties]] emits every object
+  as a named aggregate holding its members in a catch-all field, so that
+  adding `properties` to it later only *adds fields* rather than changing the
+  emitted type's kind (**P13**). Its member-count and key-shape constraints
+  ride along with it. The one place a free-form object stays inline is as a
+  `oneOf` branch, where it is the union's object *kind* rather than a
+  position of its own ([[oneOf]]).
+- **`x-<lang>-name` on the member still names the member.** It is the Stage 4
+  escape hatch for the *member* identifier, and the same keyword names a
+  *type* in `$defs`, so it stays on the property and the hoisted type keeps
+  its position-derived name. (For the same reason it is the one keyword legal
+  beside a `$ref` and is not an implicit-`allOf` conjunct — see [[ref]].) To
+  choose the type's name, author the shape in `$defs` and `$ref` it.
+- **The shape's own `title`/`description` travel with it**, since they
+  describe the object that is now a type; the member falls back to its
+  synthesized doc line — again identical to the `$defs` + `$ref` form.
+- **P15 is the backstop.** A synthesized name that collides with a declared
+  `$defs` entry or another synthesized name is a load reject with a fix-it
+  diagnostic, never auto-mangled.
+
 ### Documented limitation
 
 Folding acronyms as ordinary words means Go yields `UserId` / `HttpServer`
@@ -257,7 +321,9 @@ failure is the JSON member name, identical to deserialize.
 | Shape | Example |
 |---|---|
 | Typed struct | `{type:object, properties:{id:{type:integer}, name:{type:string}}}` |
-| Nested object member | member schema is itself `{type:object, properties:{...}}` |
+| Nested object member | member schema is itself `{type:object, properties:{...}}` — named `<Model><Member>` and materialized (above) |
+| Nested object member, nullable | `{oneOf:[{type:object, properties:{…}},{type:"null"}]}` — same name, nullable value |
+| Object element / map member | `{type:array, items:{type:object, properties:{…}}}` → `<Model><Member>Item`; typed `additionalProperties` → `<Model>Value` |
 | Member with assertions | `{name:{type:string, minLength:1}}` |
 | Member using nullability | `{bio:{oneOf:[{type:string},{type:null}]}}` |
 | Direct self-reference, optional (recursive, see [[ref]]) | linked list; `next` omitted from `required` so the chain can terminate: `{value:{type:string}, next:{$ref:"#"}}` with `required:[value]` |

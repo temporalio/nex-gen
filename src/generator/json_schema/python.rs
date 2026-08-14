@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use heck::ToUpperCamelCase;
+use heck::{ToShoutySnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 use serde::Deserialize;
 use serde_json::Value;
@@ -579,9 +579,6 @@ pub(in crate::generator) fn render_external_models(
     let mut needs_set_fields_helper = false;
     let mut needs_pydantic_core = false;
     let mut needs_spec_int_helper = false;
-    let mut needs_multiple_of_helper = false;
-    let mut needs_pattern_helper = false;
-    let mut needs_format_helper = false;
     for (index, model) in class_models.iter().enumerate() {
         render_model(
             &mut models_body,
@@ -590,9 +587,6 @@ pub(in crate::generator) fn render_external_models(
             &mut needs_set_fields_helper,
             &mut needs_pydantic_core,
             &mut needs_spec_int_helper,
-            &mut needs_multiple_of_helper,
-            &mut needs_pattern_helper,
-            &mut needs_format_helper,
         )?;
         if index + 1 != class_models.len() {
             models_body.push_str("\n\n");
@@ -621,27 +615,33 @@ pub(in crate::generator) fn render_external_models(
     let mut post_model_statements = String::new();
     render_cyclic_model_rebuilds(&mut post_model_statements, json_models);
     render_union_ref_rebuilds(&mut post_model_statements, &class_models, &union_models);
+    render_map_member_adapters(
+        &mut post_model_statements,
+        &class_models,
+        &union_models
+            .iter()
+            .map(|model| model.model_name.clone())
+            .collect(),
+    )?;
     let mut module_imports = BTreeSet::from(["pydantic".to_string()]);
     if needs_pydantic_core {
         module_imports.insert("pydantic_core".to_string());
     }
     let mut relative_imports = BTreeMap::<String, BTreeSet<String>>::new();
     let mut runtime_imports = BTreeSet::new();
-    if needs_spec_int_helper {
+    if needs_spec_int_helper || post_model_statements.contains("SpecInt") {
         runtime_imports.insert("SpecInt".to_string());
     }
-    if needs_multiple_of_helper {
-        runtime_imports.insert("_check_multiple_of".to_string());
-    }
-    if needs_pattern_helper {
-        runtime_imports.insert("_check_pattern".to_string());
-    }
-    if needs_format_helper {
-        runtime_imports.insert("_check_format".to_string());
-    }
-    // Import the materialized-temporal field aliases actually referenced by the
-    // rendered models (defined once in the runtime module).
+    // Import the refinement validators and the materialized-temporal / bytes
+    // field aliases actually referenced by the rendered module (defined once in
+    // the runtime module) — by a model's own field, by a map's member adapter, or
+    // by a union branch's refined member type.
     for alias in [
+        "_check_multiple_of",
+        "_check_pattern",
+        "_check_format",
+        "_check_unique_items",
+        "_check_contains",
         "DateTimeField",
         "DateField",
         "TimeField",
@@ -649,7 +649,7 @@ pub(in crate::generator) fn render_external_models(
         "Base64Field",
         "Base64UrlField",
     ] {
-        if models_body.contains(alias) {
+        if models_body.contains(alias) || post_model_statements.contains(alias) {
             runtime_imports.insert(alias.to_string());
         }
     }
@@ -812,6 +812,8 @@ fn render_json_runtime_module() -> String {
         "_check_multiple_of",
         "_check_pattern",
         "_check_format",
+        "_check_unique_items",
+        "_check_contains",
         "_reject_explicit_null",
         "_emit_set_fields",
     ] {
@@ -827,6 +829,10 @@ fn render_json_runtime_module() -> String {
     render_pattern_helper(&mut output);
     output.push_str("\n\n");
     render_format_helper(&mut output);
+    output.push_str("\n\n");
+    render_unique_items_helper(&mut output);
+    output.push_str("\n\n");
+    render_contains_helper(&mut output);
     output.push_str("\n\n");
     render_temporal_helpers(&mut output);
     output.push_str("\n\n");
@@ -1114,6 +1120,65 @@ fn render_pattern_helper(output: &mut String) {
     output.push_str("    return validate\n");
 }
 
+/// Emits the `_check_unique_items` runtime helper: an AfterValidator asserting
+/// pairwise-distinct elements, reporting the first duplicate's index and the
+/// index it repeats — the same reason every other target emits. Pydantic has no
+/// native `uniqueItems`, and unlike the declared-property path (a model validator
+/// keyed by field name) a position with no field of its own — a typed map's
+/// member, a `oneOf` branch — has to carry the check in its annotation. See
+/// `specs/json-schema/features/uniqueItems.md`.
+fn render_unique_items_helper(output: &mut String) {
+    output.push_str("def _check_unique_items(\n");
+    output.push_str("    value: list[typing.Any],\n");
+    output.push_str(") -> list[typing.Any]:\n");
+    output.push_str(
+        "    \"\"\"An AfterValidator asserting an array's elements are pairwise distinct.\"\"\"\n",
+    );
+    output.push_str("\n");
+    output.push_str("    seen: dict[object, int] = {}\n");
+    output.push_str("    for index, element in enumerate(value):\n");
+    output.push_str("        if element in seen:\n");
+    output.push_str(
+        "            raise ValueError(\n                f\"duplicate items: element at index {index} equals index {seen[element]}\"\n            )\n",
+    );
+    output.push_str("        seen[element] = index\n");
+    output.push_str("    return value\n");
+}
+
+/// Emits the `_check_contains` runtime helper: an AfterValidator asserting the
+/// number of elements matching a predicate falls in
+/// `[min_contains, max_contains]`, with the same reasons the property path emits.
+/// Pydantic has no native `contains`; see
+/// `specs/json-schema/features/contains.md` (and [`render_unique_items_helper`]
+/// for why an annotation-carried check is needed).
+fn render_contains_helper(output: &mut String) {
+    output.push_str("def _check_contains(\n");
+    output.push_str("    matches: typing.Callable[[typing.Any], bool],\n");
+    output.push_str("    min_contains: int,\n");
+    output.push_str("    max_contains: int | None = None,\n");
+    output.push_str("    bounded_min: bool = False,\n");
+    output.push_str(") -> typing.Callable[[list[typing.Any]], list[typing.Any]]:\n");
+    output.push_str(
+        "    \"\"\"Builds an AfterValidator asserting how many elements match the `contains` schema.\"\"\"\n",
+    );
+    output.push_str("\n");
+    output.push_str("    def validate(value: list[typing.Any]) -> list[typing.Any]:\n");
+    output.push_str("        match_count = sum(1 for element in value if matches(element))\n");
+    output.push_str("        if match_count < min_contains:\n");
+    output.push_str("            if bounded_min:\n");
+    output.push_str(
+        "                raise ValueError(\n                    f\"too few matching items: at least {min_contains}, got {match_count}\"\n                )\n",
+    );
+    output.push_str("            raise ValueError(\"no element matches the required schema\")\n");
+    output.push_str("        if max_contains is not None and match_count > max_contains:\n");
+    output.push_str(
+        "            raise ValueError(\n                f\"too many matching items: at most {max_contains}, got {match_count}\"\n            )\n",
+    );
+    output.push_str("        return value\n");
+    output.push_str("\n");
+    output.push_str("    return validate\n");
+}
+
 /// Emits the `_check_format` runtime helper: an AfterValidator that asserts a
 /// string matches a pinned `format` regex, with an optional total-length guard
 /// run **first** (short-circuit — the email order neutralizes a matcher-recursion
@@ -1150,9 +1215,6 @@ fn render_model(
     needs_set_fields_helper: &mut bool,
     needs_pydantic_core: &mut bool,
     needs_spec_int_helper: &mut bool,
-    needs_multiple_of_helper: &mut bool,
-    needs_pattern_helper: &mut bool,
-    needs_format_helper: &mut bool,
 ) -> Result<()> {
     let schema = decode_schema(model)?;
     // A `oneOf` sum-type union def is emitted as a TypeAlias by the caller.
@@ -1188,9 +1250,18 @@ fn render_model(
     output.push_str(&python_string_literal(extra));
     output.push_str(")\n");
 
-    if let Some(value_schema) = typed_map_value_schema(&schema)? {
-        render_typed_map_model_methods(output, &schema, &value_schema);
-        *needs_pydantic_core = true;
+    if is_python_map_model(&schema) {
+        // A map-shaped model has no declared fields: its members live in
+        // Pydantic's `model_extra`, validated by the generated model validator.
+        let value_schema = typed_map_value_schema(&schema)?;
+        if value_schema.is_some()
+            || schema.min_properties.is_some()
+            || schema.max_properties.is_some()
+            || schema.property_names.is_some()
+        {
+            render_map_model_methods(output, &schema, &model.model_name, value_schema.is_some());
+            *needs_pydantic_core = true;
+        }
         return Ok(());
     }
 
@@ -1214,45 +1285,7 @@ fn render_model(
     for (json_name, property) in properties {
         output.push('\n');
         let field_name = property.py_member_name(json_name);
-        let mut annotation = annotation(property)?;
-        if let Some(divisor) = property.number_multiple_of() {
-            *needs_multiple_of_helper = true;
-            annotation = format!(
-                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_multiple_of({}))]",
-                py_bound_literal(divisor, false)
-            );
-        }
-        if let Some(pattern) = &property.pattern
-            && property.ty.as_ref().and_then(Value::as_str) == Some("string")
-        {
-            *needs_pattern_helper = true;
-            // Per-target `$`→`\Z` rewrite: `re`'s `\Z` is the strict
-            // end-of-string anchor (no trailing-`\n` exception). See
-            // `specs/json-schema/features/pattern.md`.
-            let rewritten = crate::json_schema::pattern::rewrite_end_anchor(pattern, r"\Z");
-            annotation = format!(
-                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_pattern({}))]",
-                python_string_literal(&rewritten)
-            );
-        }
-        if let Some(format) = &property.format
-            && property.ty.as_ref().and_then(Value::as_str) == Some("string")
-            && let Some(check) = crate::json_schema::format::check_for(format)
-        {
-            *needs_format_helper = true;
-            // Per-target `$`→`\Z` rewrite (strict end-of-string, no trailing-`\n`
-            // exception), matching `_check_pattern`.
-            let rewritten = crate::json_schema::pattern::rewrite_end_anchor(&check.pattern, r"\Z");
-            let max_arg = match check.max_code_points {
-                Some(max) => format!(", {max}"),
-                None => String::new(),
-            };
-            annotation = format!(
-                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_format({}, {}{max_arg}))]",
-                python_string_literal(check.name),
-                python_string_literal(&rewritten)
-            );
-        }
+        let mut annotation = refined_annotation(property, None)?;
         // Native deprecation marker (PEP 702) on the field; `category=None` is
         // the no-runtime-warning form. See specs/json-schema/features/deprecated.md.
         if property.deprecated == Some(true) {
@@ -1372,18 +1405,40 @@ fn typed_map_value_schema(schema: &Schema) -> Result<Option<Schema>> {
     }
 }
 
-fn render_typed_map_model_methods(output: &mut String, schema: &Schema, value_schema: &Schema) {
-    output.push_str("\n    @pydantic.model_validator(mode=\"after\")\n");
-    output.push_str("    def _validate_extras(self) -> typing.Any:\n");
-    output.push_str("        extra = typing.cast(dict[str, object], self.model_extra or {})\n");
-    output.push_str("        errors: list[pydantic_core.InitErrorDetails] = []\n");
-    render_typed_map_value_validator(output, value_schema);
+/// True when the model is map-shaped: an object with no declared `properties`
+/// whose members are open (typed via `additionalProperties`, or free-form for
+/// `true`). A closed empty object (`additionalProperties: false`) admits no
+/// members and is not map-shaped.
+fn is_python_map_model(schema: &Schema) -> bool {
+    schema.ty.as_ref().and_then(Value::as_str) == Some("object")
+        && schema
+            .properties
+            .as_ref()
+            .is_none_or(|properties| properties.is_empty())
+        && schema.additional_properties.as_ref() != Some(&Value::Bool(false))
+}
+
+/// Emits a map-shaped model's `_validate_extras` validator: the per-member `T`
+/// validation (typed maps only) plus the member-count and key-shape constraints.
+fn render_map_model_methods(
+    output: &mut String,
+    schema: &Schema,
+    model_name: &str,
+    typed_members: bool,
+) {
+    // The checks are rendered first so the `extra` binding is only emitted when
+    // one of them reads it: an unused local is a type-checker diagnostic, and a
+    // map may carry no constraint at all (an unconstrained member type).
+    let mut checks = String::new();
+    if typed_members {
+        render_typed_map_value_validator(&mut checks, model_name);
+    }
     // `len(extra)` is the distinct wire-key count for a map (no declared
     // fields), counted as one number (never a declared + extras sum).
     if let Some(min) = schema.min_properties {
-        output.push_str(&format!("        if len(extra) < {min}:\n"));
+        checks.push_str(&format!("        if len(extra) < {min}:\n"));
         render_py_count_violation(
-            output,
+            &mut checks,
             "too_few_properties",
             &format!("must have at least {min} properties, got {{len(extra)}}"),
             "len(extra)",
@@ -1391,9 +1446,9 @@ fn render_typed_map_model_methods(output: &mut String, schema: &Schema, value_sc
         );
     }
     if let Some(max) = schema.max_properties {
-        output.push_str(&format!("        if len(extra) > {max}:\n"));
+        checks.push_str(&format!("        if len(extra) > {max}:\n"));
         render_py_count_violation(
-            output,
+            &mut checks,
             "too_many_properties",
             &format!("must have at most {max} properties, got {{len(extra)}}"),
             "len(extra)",
@@ -1401,8 +1456,16 @@ fn render_typed_map_model_methods(output: &mut String, schema: &Schema, value_sc
         );
     }
     if let Some(subschema) = &schema.property_names {
-        render_py_property_name_validator(output, subschema);
+        render_py_property_name_validator(&mut checks, subschema);
     }
+
+    output.push_str("\n    @pydantic.model_validator(mode=\"after\")\n");
+    output.push_str("    def _validate_extras(self) -> typing.Any:\n");
+    if checks.contains("extra") {
+        output.push_str("        extra = typing.cast(dict[str, object], self.model_extra or {})\n");
+    }
+    output.push_str("        errors: list[pydantic_core.InitErrorDetails] = []\n");
+    output.push_str(&checks);
     output.push_str("        if errors:\n");
     output.push_str("            raise pydantic.ValidationError.from_exception_data(\n");
     output.push_str("                title=type(self).__name__, line_errors=errors\n");
@@ -1413,24 +1476,132 @@ fn render_typed_map_model_methods(output: &mut String, schema: &Schema, value_sc
     output.push_str("        self,\n");
     output.push_str("        _handler: typing.Callable[[pydantic.BaseModel], typing.Any],\n");
     output.push_str("    ) -> dict[str, object]:\n");
+    if typed_members {
+        // Each member re-encodes through the same adapter that validated it, so a
+        // materialized member (a referenced model, a native temporal or bytes
+        // construct) reaches the wire in its declared form rather than however
+        // Pydantic happens to render an untyped value.
+        let adapter = map_member_adapter_name(model_name);
+        output.push_str("        return {\n");
+        output.push_str(&format!(
+            "            key: {adapter}.dump_python(value, mode=\"json\", by_alias=True)\n"
+        ));
+        output.push_str(
+            "            for key, value in typing.cast(dict[str, object], self.model_extra or {}).items()\n",
+        );
+        output.push_str("        }\n");
+        return;
+    }
     output
         .push_str("        return dict(typing.cast(dict[str, object], self.model_extra or {}))\n");
 }
 
-fn render_typed_map_value_validator(output: &mut String, value_schema: &Schema) {
-    if schema_type_includes(value_schema, "string") {
-        output.push_str("        for key, value in extra.items():\n");
-        output.push_str("            if not isinstance(value, str):\n");
-        output.push_str("                errors.append(\n");
-        output.push_str("                    pydantic_core.InitErrorDetails(\n");
-        output.push_str("                        type=pydantic_core.PydanticCustomError(\n");
-        output.push_str("                            \"string_type\", \"expected string value\"\n");
-        output.push_str("                        ),\n");
-        output.push_str("                        loc=(key,),\n");
-        output.push_str("                        input=value,\n");
-        output.push_str("                    )\n");
-        output.push_str("                )\n");
+/// Emits the per-member validation loop of a typed map: each member is validated
+/// **and materialized** through the model's member `TypeAdapter`, which carries
+/// the member type's whole annotation — the spec-strict integer parse, a native
+/// temporal/bytes construct, a `Literal` value set, a referenced model, the
+/// numeric/length bounds, and the `pattern`/`format`/`multipleOf` validators — so
+/// a member is held to exactly what a declared field of that type is held to
+/// ([[additionalProperties]] §"Validator mapping": per-member `T` validation).
+/// Pydantic's own violations are merged under the member's key, so the reported
+/// path threads the member (`labels.env`, `entries.a.street`) per **P11**.
+fn render_typed_map_value_validator(output: &mut String, model_name: &str) {
+    let adapter = map_member_adapter_name(model_name);
+    output.push_str("        for key, value in list(extra.items()):\n");
+    output.push_str("            try:\n");
+    output.push_str(&format!(
+        "                extra[key] = {adapter}.validate_python(value)\n"
+    ));
+    output.push_str("            except pydantic.ValidationError as error:\n");
+    output.push_str("                for detail in error.errors():\n");
+    output.push_str("                    errors.append(\n");
+    output.push_str("                        pydantic_core.InitErrorDetails(\n");
+    output.push_str("                            type=pydantic_core.PydanticCustomError(\n");
+    // `PydanticCustomError` types its arguments as `LiteralString`; a nested
+    // error's own type and message are ordinary `str`, so both are cast (the
+    // count/name validators do the same for their f-strings).
+    output.push_str("                                typing.cast(typing.Any, detail[\"type\"]),\n");
+    output.push_str("                                typing.cast(typing.Any, detail[\"msg\"]),\n");
+    output.push_str("                            ),\n");
+    output.push_str("                            loc=(key, *detail[\"loc\"]),\n");
+    output.push_str("                            input=detail[\"input\"],\n");
+    output.push_str("                        )\n");
+    output.push_str("                    )\n");
+}
+
+/// The non-null branch of a member schema that is the nullability `oneOf`
+/// wrapper, which carries the member's own constraints.
+fn nullable_member_schema(schema: &Schema) -> Option<&Schema> {
+    let branches = schema.one_of.as_ref()?;
+    let non_null: Vec<&Schema> = branches
+        .iter()
+        .filter(|branch| branch.ty.as_ref().and_then(Value::as_str) != Some("null"))
+        .collect();
+    match non_null.len() {
+        1 => Some(non_null[0]),
+        _ => None,
     }
+}
+
+/// The module-level `TypeAdapter` a map-shaped model validates its members with.
+/// It is defined *after* every class so its eagerly-evaluated annotation sees a
+/// referenced model that is declared later in the module — the same reason union
+/// aliases and `model_rebuild()` calls sit there.
+fn map_member_adapter_name(model_name: &str) -> String {
+    format!("_{}_MEMBER", model_name.to_shouty_snake_case())
+}
+
+/// Emits the member `TypeAdapter` definitions for every map-shaped model in the
+/// module (see [`map_member_adapter_name`]). `strict=True` is passed as the
+/// adapter's config so a member is held to the same strict mode a declared field
+/// is (PRINCIPLES Python §1) — except when the member type *is* a model or union
+/// alias, which carries its own config and rejects an override.
+fn render_map_member_adapters(
+    output: &mut String,
+    models: &[&PlannedJsonType],
+    union_names: &BTreeSet<String>,
+) -> Result<()> {
+    for model in models {
+        let schema = decode_schema(model)?;
+        if !is_python_map_model(&schema) {
+            continue;
+        }
+        let Some(value_schema) = typed_map_value_schema(&schema)? else {
+            continue;
+        };
+        // A nullable member's constraints sit on the non-null branch of its
+        // wrapper, so the refinements are composed over that branch and the
+        // wrapper's `| None` is re-added around the result.
+        let (member, nullable): (&Schema, bool) = match nullable_member_schema(&value_schema) {
+            Some(inner) => (inner, true),
+            None => (&value_schema, false),
+        };
+        let annotation = if nullable {
+            // A nullable member widens the type inside the same `Annotated` a
+            // declared field pairs `T | None` with.
+            constrained_annotation_over(member, optional_annotation(&annotation(member)?))?
+        } else {
+            constrained_annotation(member)?
+        };
+        // Pydantic rejects a `config` override on a `BaseModel` — a referenced
+        // model carries its own strict config. A union alias is not a model, so
+        // it takes the override like any other annotation.
+        let is_model_class = member
+            .reference
+            .as_ref()
+            .map(|reference| reference_model_name(reference))
+            .is_some_and(|name| !union_names.contains(&name));
+        let config = if is_model_class {
+            String::new()
+        } else {
+            ", config=pydantic.ConfigDict(strict=True)".to_string()
+        };
+        output.push_str(&format!(
+            "{}: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(\n    {annotation}{config}\n)\n",
+            map_member_adapter_name(&model.model_name)
+        ));
+    }
+    Ok(())
 }
 
 /// Emits an `errors.append(...)` for an object member-count violation (`{indent}`
@@ -1968,52 +2139,61 @@ fn render_field_expr(
     if json_name != field_name {
         arguments.push(format!("alias={}", python_string_literal(json_name)));
     }
+    arguments.extend(field_constraint_args(property));
+    output.push_str(&arguments.join(", "));
+    output.push(')');
+}
+
+/// The `pydantic.Field(...)` arguments for the bounds Pydantic enforces natively.
+/// Shared by a declared field and by a typed map's member, which composes them
+/// into its own `Annotated[...]` (it has no field to hang them off).
+fn field_constraint_args(schema: &Schema) -> Vec<String> {
+    let mut arguments = Vec::new();
     // Numeric bounds map to native Pydantic constraints (annotated_types
-    // Ge/Le/Gt/Lt). Integer-field `multipleOf` uses Pydantic's native
-    // `multiple_of` (exact for ints); number-field `multipleOf` is handled by
-    // an explicit `fmod` AfterValidator in the annotation instead.
-    let is_integer = property.is_integer_field();
-    if is_integer || property.is_number_field() {
-        if let Some(min) = &property.minimum {
+    // Ge/Le/Gt/Lt). Integer `multipleOf` uses Pydantic's native `multiple_of`
+    // (exact for ints); number `multipleOf` is handled by an explicit `fmod`
+    // AfterValidator in the annotation instead.
+    let is_integer = schema.is_integer_field();
+    if is_integer || schema.is_number_field() {
+        if let Some(min) = &schema.minimum {
             arguments.push(format!("ge={}", py_bound_literal(min, is_integer)));
         }
-        if let Some(max) = &property.maximum {
+        if let Some(max) = &schema.maximum {
             arguments.push(format!("le={}", py_bound_literal(max, is_integer)));
         }
-        if let Some(min) = &property.exclusive_minimum {
+        if let Some(min) = &schema.exclusive_minimum {
             arguments.push(format!("gt={}", py_bound_literal(min, is_integer)));
         }
-        if let Some(max) = &property.exclusive_maximum {
+        if let Some(max) = &schema.exclusive_maximum {
             arguments.push(format!("lt={}", py_bound_literal(max, is_integer)));
         }
-        if is_integer && let Some(divisor) = &property.multiple_of {
+        if is_integer && let Some(divisor) = &schema.multiple_of {
             arguments.push(format!("multiple_of={}", py_bound_literal(divisor, true)));
         }
     }
     // String-length bounds map to Pydantic's native `min_length`/`max_length`,
     // which count Unicode code points (verified in `maxLength.md`) — spec-correct
     // without a custom validator.
-    if property.is_string_field() {
-        if let Some(min) = property.min_length {
+    if schema.is_string_field() {
+        if let Some(min) = schema.min_length {
             arguments.push(format!("min_length={min}"));
         }
-        if let Some(max) = property.max_length {
+        if let Some(max) = schema.max_length {
             arguments.push(format!("max_length={max}"));
         }
     }
     // Array `minItems`/`maxItems` map to Pydantic's native `min_length`/
     // `max_length`, which bound the element count for sequences — spec-correct
     // without a custom validator (see minItems.md / maxItems.md).
-    if property.is_array_field() {
-        if let Some(min) = property.min_items {
+    if schema.is_array_field() {
+        if let Some(min) = schema.min_items {
             arguments.push(format!("min_length={min}"));
         }
-        if let Some(max) = property.max_items {
+        if let Some(max) = schema.max_items {
             arguments.push(format!("max_length={max}"));
         }
     }
-    output.push_str(&arguments.join(", "));
-    output.push(')');
+    arguments
 }
 
 /// Composes a docstring from a `title` (summary line) and `description` (body);
@@ -2120,6 +2300,109 @@ fn temporal_field_alias(kind: crate::json_schema::format::TemporalKind) -> &'sta
     }
 }
 
+/// The emitted annotation for a value, with the refinements Pydantic expresses as
+/// `Annotated` validators layered on: a number's `multipleOf` (`math.fmod`-exact),
+/// a string's `pattern`, and a string's `format`. The bounds Pydantic takes as
+/// native `Field` arguments are added separately (see [`field_constraint_args`]),
+/// so a value position that has no `Field` — a typed map's member — composes the
+/// two itself.
+/// The annotation for a value in a position that has **no declared field of its
+/// own** to hang `pydantic.Field(...)` off — a typed map's member, a `oneOf` sum
+/// type's member — so every constraint the schema declares rides inside the
+/// annotation itself. This is the same set of predicates a declared field of that
+/// type is held to, so the position validates identically.
+fn constrained_annotation(schema: &Schema) -> Result<String> {
+    constrained_annotation_over(schema, annotation(schema)?)
+}
+
+/// [`constrained_annotation`] over an already-built base annotation (a nullable
+/// member widens the base before the constraints are applied).
+///
+/// The `Field` bounds sit *innermost*, next to the type they bound — the position
+/// a declared field puts them in — so Pydantic reads `min_length` as the string's
+/// own length and not as the length of whatever an outer validator returned; the
+/// refinement validators wrap that result.
+fn constrained_annotation_over(schema: &Schema, base: String) -> Result<String> {
+    let mut annotation = base;
+    let constraints = field_constraint_args(schema);
+    if !constraints.is_empty() {
+        annotation = format!(
+            "typing.Annotated[{annotation}, pydantic.Field({})]",
+            constraints.join(", ")
+        );
+    }
+    // `uniqueItems` / `contains` have no native Pydantic form, and there is no
+    // declared field here to hang a model validator off, so they ride as
+    // AfterValidators in the annotation itself.
+    if schema.is_array_field() {
+        if schema.unique_items == Some(true) {
+            annotation = format!(
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_unique_items)]"
+            );
+        }
+        if let Some(matcher) = &schema.contains {
+            let condition = py_matcher_condition(matcher, "element")?;
+            let min = schema.min_contains.unwrap_or(1);
+            let max = match schema.max_contains {
+                Some(max) => max.to_string(),
+                None => "None".to_string(),
+            };
+            annotation = format!(
+                "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_contains(lambda element: {condition}, {min}, {max}, {}))]",
+                if schema.min_contains.is_some() {
+                    "True"
+                } else {
+                    "False"
+                }
+            );
+        }
+    }
+    refined_annotation(schema, Some(annotation))
+}
+
+fn refined_annotation(schema: &Schema, base: Option<String>) -> Result<String> {
+    let mut annotation = match base {
+        Some(base) => base,
+        None => annotation(schema)?,
+    };
+    if let Some(divisor) = schema.number_multiple_of() {
+        annotation = format!(
+            "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_multiple_of({}))]",
+            py_bound_literal(divisor, false)
+        );
+    }
+    if let Some(pattern) = &schema.pattern
+        && schema.ty.as_ref().and_then(Value::as_str) == Some("string")
+    {
+        // Per-target `$`→`\Z` rewrite: `re`'s `\Z` is the strict
+        // end-of-string anchor (no trailing-`\n` exception). See
+        // `specs/json-schema/features/pattern.md`.
+        let rewritten = crate::json_schema::pattern::rewrite_end_anchor(pattern, r"\Z");
+        annotation = format!(
+            "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_pattern({}))]",
+            python_string_literal(&rewritten)
+        );
+    }
+    if let Some(format) = &schema.format
+        && schema.ty.as_ref().and_then(Value::as_str) == Some("string")
+        && let Some(check) = crate::json_schema::format::check_for(format)
+    {
+        // Per-target `$`→`\Z` rewrite (strict end-of-string, no trailing-`\n`
+        // exception), matching `_check_pattern`.
+        let rewritten = crate::json_schema::pattern::rewrite_end_anchor(&check.pattern, r"\Z");
+        let max_arg = match check.max_code_points {
+            Some(max) => format!(", {max}"),
+            None => String::new(),
+        };
+        annotation = format!(
+            "typing.Annotated[{annotation}, pydantic.AfterValidator(_check_format({}, {}{max_arg}))]",
+            python_string_literal(check.name),
+            python_string_literal(&rewritten)
+        );
+    }
+    Ok(annotation)
+}
+
 fn annotation(schema: &Schema) -> Result<String> {
     if let Some(const_value) = &schema.const_value
         && let Some(annotation) = python_literal_annotation(const_value)
@@ -2156,9 +2439,11 @@ fn annotation(schema: &Schema) -> Result<String> {
         // token / `Literal` discriminant). One non-null branch is the
         // degenerate nullability pattern.
         if non_null.len() >= 2 {
+            // Each member carries its own branch's constraints, so the branch is
+            // validated once the union selects it ([[oneOf]] §"Validator mapping").
             let mut members = non_null
                 .iter()
-                .map(|branch| annotation(branch))
+                .map(|branch| constrained_annotation(branch))
                 .collect::<Result<Vec<_>>>()?;
             if nullable {
                 members.push("None".to_string());
@@ -2288,11 +2573,41 @@ fn object_annotation(schema: &Schema) -> Result<String> {
 }
 
 fn optional_annotation(annotation: &str) -> String {
-    if annotation.contains(" | None") || annotation == "None" {
+    if admits_none(annotation) {
         annotation.to_string()
     } else {
         format!("{annotation} | None")
     }
+}
+
+/// True when the annotation itself already admits `None` — a `None` member of
+/// the *top-level* union. A nested one does not count: in `list[str | None]`
+/// the elements are nullable while the list is not, so an optional field of
+/// that type still needs its own `| None` ([[items]] §"Element nullability is
+/// the element's own concern").
+fn admits_none(annotation: &str) -> bool {
+    split_top_level_union(annotation).contains(&"None")
+}
+
+/// Splits a type annotation on its top-level `|`, ignoring any inside a
+/// subscript (`list[str | None]` is one member, not two).
+fn split_top_level_union(annotation: &str) -> Vec<&str> {
+    let mut members = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, character) in annotation.char_indices() {
+        match character {
+            '[' | '(' => depth += 1,
+            ']' | ')' => depth = depth.saturating_sub(1),
+            '|' if depth == 0 => {
+                members.push(annotation[start..index].trim());
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    members.push(annotation[start..].trim());
+    members
 }
 
 fn reference_model_name(reference: &str) -> String {
