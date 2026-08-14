@@ -271,8 +271,10 @@ Rules that follow from "the name belongs to the position":
   describe the object that is now a type; the member falls back to its
   synthesized doc line — again identical to the `$defs` + `$ref` form.
 - **P15 is the backstop.** A synthesized name that collides with a declared
-  `$defs` entry or another synthesized name is a load reject with a fix-it
-  diagnostic, never auto-mangled.
+  `$defs` entry, with another synthesized name, or with the **file-root
+  type**'s name ([[ref]] type-name derivation) is a load reject with a fix-it
+  diagnostic naming the position the shape was written in, never
+  auto-mangled.
 
 ### Documented limitation
 

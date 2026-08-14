@@ -103,6 +103,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema: A file's **root type and a same-file `$defs` entry of the same
+  name** silently collapsed into one type. `thing.yaml` declaring a root object
+  plus `$defs.Thing` — `Thing` being the name the root derives from the file name
+  — emitted a single `Thing` carrying the *root's* shape in all four languages,
+  with the `$defs` entry's members gone and every reference to it retargeted at
+  the root: Go emitted `Nested *Thing`, TypeScript `nested?: Thing`, Python
+  `nested: Thing | None`, Java `@Nullable Thing nested`, all pointing at a
+  self-reference the schema never declared. The coincidence is now a load-time
+  rejection for every target, naming the identifier and both origins (the root
+  schema's file-name derivation and the `$defs` entry) with the two renames that
+  resolve it — the `$defs` key, or the file the root name derives from. A name
+  **synthesized** for an inline shape that lands on the root type's name is
+  rejected the same way, reported at the position the shape was written in
+  (`$defs.User.properties.profile`). This is a new rejection: a schema that hit
+  the collapse used to generate and now fails to load. An `x-<lang>-name`
+  override does not resolve it — the override moves one target's emitted
+  identifier, while the derived name is the model's identity. Any other route to
+  one identity is rejected too, rather than dropping a shape: two files whose
+  root types derive the same name in a module-less in-process load, for
+  instance.
 - JSON Schema: A **non-object `oneOf` branch's own constraints** were dropped in
   three of four languages: only Go carried them, in the synthesized
   `<Union><Kind>` variant's `Validate`. TypeScript cast the narrowed value

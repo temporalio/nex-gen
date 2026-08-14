@@ -156,6 +156,23 @@ widened from per-object to per-package). Consistent with [[properties]],
 accepted for a Go-only run and rejected for a Java run, because
 normalization differs per language.
 
+**The derived name is the model's identity.** The one collision that is
+*not* per-target is a file-root type and a same-file `$defs` entry that
+derive the **same** name (`thing.yaml` with a root type plus
+`$defs.Thing`): the derived name is the identity every `$ref` resolves
+through and every target emits one type for, so the two schemas would
+otherwise collapse into one — the loser's shape dropped and every
+reference to it silently retargeted at the winner. It is rejected for
+**every** target, and the fix-it is a rename of the `$defs` key or of the
+file the root name derives from; an `x-<lang>-name` override does not
+resolve it, because it moves one target's *emitted identifier* and leaves
+both schemas on the one identity. A name **synthesized** for an inline
+shape ([[properties]]) is held to the same rule — a hoisted `$defs` entry
+whose name equals the root type's is rejected where the shape is hoisted,
+with a diagnostic naming the position it was written in. A file with no
+root type (a definitions-only file or a Nexus document — see
+[[input-files]]) has no root name to collide with.
+
 ## Output layout
 
 The full package structure (file names, the shared `definitions` file,
@@ -276,6 +293,7 @@ helper is emitted — the named-type machinery already in place
 | Unresolvable | missing file or missing `$defs` entry |
 | Unsatisfiable cycle | every edge required + non-nullable + single-valued |
 | Type-name collision | two targets → same identifier in an emitted language (per-target, P15) |
+| Root/`$defs` name coincidence | a file-root type and a same-file `$defs` entry — authored or synthesized for an inline shape — derive the same name: one identity, two schemas (all targets, P15) |
 | Module-name collision | two inputs flatten to the same module name ([[generated-file-layout]]) |
 
 ### Runtime fixtures (validator)
