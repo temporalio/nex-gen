@@ -1271,7 +1271,8 @@ fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType])
             if !is_closed_value_schema(property) {
                 continue;
             }
-            let type_name = const_type_name(&model.model_name, field_name);
+            let type_name =
+                const_type_name(&model.model_name, &property.go_member_name(field_name));
             let underlying = go_closed_underlying(property);
             let consts = closed_values(property)
                 .iter()
@@ -3850,7 +3851,7 @@ fn go_property_type(
     model_names: &BTreeMap<String, String>,
 ) -> Result<String> {
     if is_closed_value_schema(schema) {
-        let type_name = const_type_name(model_name, json_name);
+        let type_name = const_type_name(model_name, &schema.go_member_name(json_name));
         return Ok(if required {
             type_name
         } else {
@@ -4205,8 +4206,15 @@ fn is_open_object(schema: &Schema) -> bool {
         && schema.additional_properties.as_ref() != Some(&Value::Bool(false))
 }
 
-fn const_type_name(model_name: &str, field_name: &str) -> String {
-    format!("{model_name}{}", go_field_name(field_name))
+/// The Go closed-value defined type, `<Model><Member>`, built from the **emitted
+/// member identifier** so an `x-go-name` override on the declaring property moves
+/// it: a name synthesized *from the member* follows the member (P15). This matches
+/// Java, whose nested value class is already named off the emitted member, and is
+/// what makes the collision fix-it in [[const]] actually resolve a clash — while
+/// the name derived from the JSON key, the override moved the field and left this
+/// type behind.
+fn const_type_name(model_name: &str, member_ident: &str) -> String {
+    format!("{model_name}{member_ident}")
 }
 
 /// True when the schema is a scalar closed value set (`const` or `enum`) that
@@ -4277,7 +4285,7 @@ fn go_closed_value_name(
     }
     format!(
         "{}{}",
-        const_type_name(model_name, field_name),
+        const_type_name(model_name, &schema.go_member_name(field_name)),
         go_value_suffix(value)
     )
 }
@@ -4412,7 +4420,7 @@ fn render_closed_value_unmarshal(
     required: bool,
 ) {
     let field = property.go_member_name(json_name);
-    let type_name = const_type_name(model_name, json_name);
+    let type_name = const_type_name(model_name, &field);
     let underlying = go_closed_underlying(property);
     let parser = match underlying {
         "int64" => "parseIntegerField",

@@ -143,7 +143,15 @@ Per **P15** these participate in the single per-scope collision pass and
 Python and Java add no name, so they carry no default-specific collision.
 The rename **escape hatch** is the [[properties]] case-mapping override
 (`x-go-name`, …) on the *declaring* field — re-mapping it moves the
-synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` names with it.
+synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` names with it, because
+both are named off the **emitted** member identifier rather than the JSON
+key (`retryCount` + `x-ts-name: attempts` → `DEFAULT_ATTEMPTS`). The
+derivation has to work that way for the hatch to open at all: two members
+that recase alike collide on `DEFAULT_<FIELD>`, and an override that moved
+the members apart while leaving both constants on the JSON-derived name
+would reject with a fix-it the author cannot act on — the only remaining
+escape being a rename of the JSON property, i.e. a change to the wire
+contract (P15, P7.1).
 
 Python and Java materialize-on-read for free (attribute default / getter);
 Go does so via the generated `<Field>OrDefault()` accessor. TypeScript has

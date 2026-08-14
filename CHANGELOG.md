@@ -126,6 +126,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema: An `x-<lang>-name` override on a property did not move two of the
+  identifiers **synthesized from that property**, so a collision on either was
+  rejected with a fix-it the author could not act on. The TypeScript
+  `DEFAULT_<FIELD>` constant and the Go closed-value type `<Type><Field>` (with
+  its value constants) were derived from the JSON key rather than the emitted
+  member identifier: two default-bearing members that recase alike
+  (`retryCount` + `retry_count`) collided on `DEFAULT_RETRY_COUNT`, and the
+  printed `disambiguate with an x-ts-name override` moved the *members* apart
+  while leaving both constants on the colliding name — with no remaining escape
+  short of renaming the JSON property, i.e. changing the wire contract. The Go
+  closed-value type had the same misfire against a declared type name, and
+  disagreed with Java, whose nested value class already followed the override.
+  Both are now named off the emitted member identifier, so the documented escape
+  hatch resolves the clash and Go and Java agree on the synthesized type's name.
+  The governing rule — **a name synthesized from a member moves with that
+  member; a name synthesized from a position stays with the position** — is now
+  stated in PRINCIPLES §15; an inline object hoisted to `<Model><Property>` is
+  position-derived and is still renamed by authoring it in `$defs` instead.
+  Emitted output is unchanged for any schema that does not put a name override
+  on a `default`- or `const`-bearing property.
 - JSON Schema: A file's **root type and a same-file `$defs` entry of the same
   name** silently collapsed into one type. `thing.yaml` declaring a root object
   plus `$defs.Thing` — `Thing` being the name the root derives from the file name

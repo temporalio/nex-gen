@@ -384,7 +384,7 @@ so the check is effectively a deserialize-direction guard there.
 | Composite const (deferred) | `{type:"object", const:{a:1}}`, `{type:"array", const:[1]}` |
 | Non-ASCII / whitespace string value | `{type:"string", const:"user admin"}`, `{type:"string", const:"café"}` |
 | Value un-encodable as an identifier | `{type:"string", const:"-"}` (empty token → Stage 3 reject; override: `x-<lang>-const-name`) |
-| Synthesized-name collision (P15) | Go flat `UserEventKind`/`UserEventKindUser` ⨯ a declared top-level name; a `$defs`-named const reusing an existing type name; two values whose encodings collide (`"user-admin"` ⨯ `"user_admin"` → both `UserAdmin`). Type-name clash → `x-<lang>-name`; value-constant clash → `x-<lang>-const-name`. (Nesting removes the Java anonymous case; Go stays flat → still caught. TS/Python close the type inline and synthesize nothing.) |
+| Synthesized-name collision (P15) | Go flat `UserEventKind`/`UserEventKindUser` ⨯ a declared top-level name; a `$defs`-named const reusing an existing type name; two values whose encodings collide (`"user-admin"` ⨯ `"user_admin"` → both `UserAdmin`). Type-name clash → `x-<lang>-name` on the declaring member, which moves the synthesized type because it is named `<Type><Member>` off the *emitted* member identifier (`kind` + `x-go-name: Category` → `ProbeCategory`); value-constant clash → `x-<lang>-const-name`. (Nesting removes the Java anonymous case; Go stays flat → still caught. TS/Python close the type inline and synthesize nothing.) |
 
 ### Runtime fixtures (validator)
 

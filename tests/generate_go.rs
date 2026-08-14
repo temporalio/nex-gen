@@ -1944,3 +1944,65 @@ fn go_json_cross_module_go_name_override_moves_every_reference() {
     }
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+/// A property carrying a per-language name override alongside a `const` and an
+/// inline object: the closed-value type is member-derived and moves with the
+/// override, while the hoisted shape is position-derived and does not.
+const MEMBER_DERIVED_NAME_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  retryCount:
+    type: integer
+    default: 3
+    x-go-name: Attempts
+  kind:
+    type: string
+    const: widget
+    x-go-name: Category
+  address:
+    type: object
+    x-go-name: Location
+    properties:
+      street: { type: string }
+"#;
+
+/// A name synthesized from a member follows that member's `x-go-name` — the
+/// `<Field>OrDefault()` accessor and the `<Type><Member>` closed-value type (plus
+/// its value constants). A shape named after its *position* does not move.
+/// See `specs/json-schema/PRINCIPLES.md` §15, `specs/json-schema/features/const.md`.
+#[test]
+fn go_json_override_moves_member_derived_names_only() {
+    let temp_dir = unique_output_path("go-json-member-derived-names");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.yaml");
+    fs::write(&input_path, MEMBER_DERIVED_NAME_SCHEMA).unwrap();
+    let output_path = temp_dir.join("probe");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = read_go_output_files(&output_path)
+        .into_values()
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Member-derived: accessor, closed-value type, and its value constant.
+    assert!(rendered.contains("func (m Probe) AttemptsOrDefault() int64 {"));
+    assert!(rendered.contains("type ProbeCategory string"));
+    assert!(rendered.contains("const ProbeCategoryWidget ProbeCategory = \"widget\""));
+    assert!(!rendered.contains("ProbeKind"));
+    // Position-derived: the hoisted shape keeps the position's name.
+    assert!(rendered.contains("Location *ProbeAddress `json:\"address,omitempty\"`"));
+    assert!(rendered.contains("type ProbeAddress struct {"));
+    assert!(!rendered.contains("ProbeLocation"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}

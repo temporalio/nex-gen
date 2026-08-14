@@ -182,6 +182,30 @@ fn write_cross_module_closure(dir: &Path) -> PathBuf {
     input_dir
 }
 
+/// A property carrying a per-language name override alongside a `default`, a
+/// `const`, and an inline object — one schema covering all three synthesized-name
+/// families at once.
+const MEMBER_DERIVED_NAME_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  retryCount:
+    type: integer
+    default: 3
+    x-ts-name: attempts
+    x-go-name: Attempts
+  kind:
+    type: string
+    const: widget
+    x-ts-name: category
+    x-go-name: Category
+  address:
+    type: object
+    x-ts-name: location
+    x-go-name: Location
+    properties:
+      street: { type: string }
+"#;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -1121,5 +1145,45 @@ fn typescript_json_cross_module_ts_name_override_moves_every_reference() {
         assert!(!services.contains(stale), "{stale}\n{services}");
         assert!(!models.contains(stale), "{stale}\n{models}");
     }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A name synthesized from a member follows that member's `x-ts-name`: the
+/// `DEFAULT_<FIELD>` constant is built from the emitted identifier, not the JSON
+/// key. A shape named after its *position* does not move — the hoisted inline
+/// object keeps `<Model><Property>`.
+/// See `specs/json-schema/PRINCIPLES.md` §15 and
+/// `specs/json-schema/features/default.md`.
+#[test]
+fn typescript_json_override_moves_member_derived_names_only() {
+    let temp_dir = unique_output_path("ts-json-member-derived-names");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.yaml");
+    fs::write(&input_path, MEMBER_DERIVED_NAME_SCHEMA).unwrap();
+    let output_path = temp_dir.join("probe");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    // Member-derived: the override moves the constant with the field.
+    assert!(rendered.contains("export const DEFAULT_ATTEMPTS = 3;"));
+    assert!(!rendered.contains("DEFAULT_RETRY_COUNT"));
+    assert!(rendered.contains("attempts?: number;"));
+    // Position-derived: the hoisted shape keeps the position's name even though
+    // the declaring member is renamed.
+    assert!(rendered.contains("location?: ProbeAddress;"));
+    assert!(rendered.contains("export interface ProbeAddress {"));
+    assert!(!rendered.contains("ProbeLocation"));
     fs::remove_dir_all(temp_dir).unwrap();
 }

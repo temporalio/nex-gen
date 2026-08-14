@@ -5937,11 +5937,14 @@ fn collect_synthesized_top_level(
         if values.is_empty() {
             continue;
         }
-        // The Go closed-value defined type is `<Type><Field>` and each value
-        // constant is `<definedType><valueSuffix>` — derived from the recased
-        // field name (the generator names these off `go_field_name`, so the
-        // collision pass matches the emitted identifiers).
-        let defined_type = format!("{type_ident}{}", recase_member(Language::Go, json_name));
+        // The Go closed-value defined type is `<Type><Member>` and each value
+        // constant is `<definedType><valueSuffix>`. Both derive from the *emitted*
+        // member identifier, so an `x-go-name` override moves them with the field
+        // (P15) — and so this pass matches what the generator emits.
+        let defined_type = format!(
+            "{type_ident}{}",
+            member_identifier(Language::Go, json_name, property)
+        );
         top.insert(
             language,
             defined_type.clone(),
@@ -6039,10 +6042,17 @@ fn validate_member_scope(language: Language, model_full_name: &str, schema: &Sch
 }
 
 /// TypeScript `DEFAULT_<FIELD>` constants (module scope). The generator names a
-/// default constant `DEFAULT_<FIELD>` when the field name is unique across the
-/// module's models, else `DEFAULT_<MODEL>_<FIELD>`. Replicate that name and
+/// default constant `DEFAULT_<FIELD>` when the member identifier is unique across
+/// the module's models, else `DEFAULT_<MODEL>_<FIELD>`. Replicate that name and
 /// enter it into the shared module namespace so a genuine clash rejects (P15)
 /// rather than silently coexisting behind the model-name prefix.
+///
+/// The identifier is built from the **emitted member identifier**, so an
+/// `x-ts-name` override on the declaring property moves this constant with it —
+/// a name synthesized *from the member* follows the member (P15). Were it built
+/// from the JSON name, two members that recase alike would collide here with no
+/// way to author around it: the override would move the members apart while
+/// leaving both constants on the colliding name.
 fn collect_ts_default_constants(
     module_key: &str,
     models: &[NsModel],
@@ -6052,20 +6062,19 @@ fn collect_ts_default_constants(
         .iter()
         .filter(|model| model.module_key == module_key)
         .collect();
-    // How many models declare a scalar-default field with this JSON name.
-    let field_count = |json_name: &str| -> usize {
+    // How many models declare a scalar-default field emitting this identifier.
+    let field_count = |member_ident: &str| -> usize {
         group
             .iter()
             .filter(|model| {
-                model
-                    .schema
-                    .properties
-                    .as_ref()
-                    .and_then(|properties| properties.get(json_name))
-                    .and_then(|property| property.extra.get("default"))
-                    .is_some_and(|default| {
-                        !default.is_null() && !default.is_object() && !default.is_array()
+                model.schema.properties.as_ref().is_some_and(|properties| {
+                    properties.iter().any(|(json_name, property)| {
+                        member_identifier(Language::TypeScript, json_name, property) == member_ident
+                            && property.extra.get("default").is_some_and(|default| {
+                                !default.is_null() && !default.is_object() && !default.is_array()
+                            })
                     })
+                })
             })
             .count()
     };
@@ -6080,8 +6089,9 @@ fn collect_ts_default_constants(
             if default.is_null() || default.is_object() || default.is_array() {
                 continue;
             }
-            let field_shouty = json_name.to_shouty_snake_case();
-            let ident = if field_count(json_name) == 1 {
+            let member_ident = member_identifier(Language::TypeScript, json_name, property);
+            let field_shouty = member_ident.to_shouty_snake_case();
+            let ident = if field_count(&member_ident) == 1 {
                 format!("DEFAULT_{field_shouty}")
             } else {
                 format!(
@@ -9036,6 +9046,75 @@ properties:
   userId: { type: string, x-go-name: UserIdent }
 "#;
         parse_for(Language::Go, input).expect("override resolves the Go collision");
+    }
+
+    /// A name synthesized *from a member* follows that member's override (P15).
+    /// Two default-bearing members that recase alike collide on the TS
+    /// `DEFAULT_<FIELD>` constant; the override has to reach the constant, or the
+    /// rejection's own fix-it cannot resolve it and the only escape left is
+    /// renaming the JSON property — a change to the wire contract.
+    #[test]
+    fn default_constant_collision_resolved_by_override() {
+        let colliding = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  retryCount: { type: string, default: "a" }
+  retry_count: { type: string, default: "b" }
+"#;
+        let error = reject_for(Language::TypeScript, colliding);
+        assert!(error.contains("collision"), "{error}");
+
+        let resolved = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  retryCount: { type: string, default: "a" }
+  retry_count: { type: string, default: "b", x-ts-name: retriesTwo }
+"#;
+        parse_for(Language::TypeScript, resolved)
+            .expect("the override moves the DEFAULT_ constant with the member");
+    }
+
+    /// The Go closed-value defined type is `<Type><Member>` off the *emitted*
+    /// member identifier, so an `x-go-name` override moves it out of a clash with
+    /// a declared type — matching Java's nested value class, which already
+    /// followed the override.
+    #[test]
+    fn closed_value_type_collision_resolved_by_override() {
+        // The harness names the file-root model `Api`, so the synthesized
+        // closed-value type is `ApiKind` — which the `$defs` entry then clashes
+        // with.
+        let colliding = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  kind: { type: string, const: widget }
+$defs:
+  ApiKind:
+    type: object
+    properties:
+      x: { type: string }
+"#;
+        let error = reject_for(Language::Go, colliding);
+        assert!(
+            error.contains("collision") && error.contains("ApiKind"),
+            "{error}"
+        );
+
+        let resolved = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  kind: { type: string, const: widget, x-go-name: Category }
+$defs:
+  ApiKind:
+    type: object
+    properties:
+      x: { type: string }
+"#;
+        parse_for(Language::Go, resolved)
+            .expect("the override moves the closed-value type with the member");
     }
 
     #[test]

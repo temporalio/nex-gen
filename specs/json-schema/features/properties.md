@@ -169,7 +169,14 @@ types/consts; the struct method-set for the Go accessor, where Go
 forbids a field/method clash outright). The single collision pass runs
 over that full union and rejects on any coincidence; the `x-*-name`
 override (Stage 4) on the declaring member is the escape hatch for these,
-and re-mapping the member moves every name synthesized *from the member*.
+and re-mapping the member moves every name synthesized *from the member*
+with it — the Go `<Field>OrDefault()` accessor and TS `DEFAULT_<FIELD>`
+constant ([[default]]), the Go closed-value type and Java value class
+([[const]]) are all named off the **emitted** member identifier, not the
+JSON key, so the override reaches them. A name synthesized from a
+**position** rather than a member does not move: an inline object hoisted
+to `<Model><Property>` keeps the position's name (see
+[Naming an inline object shape](#naming-an-inline-object-shape) below).
 A [[const]]/[[enum]] **value constant** is synthesized from the *value*,
 not the member — it shares the same namespace and collision pass but is
 re-mapped by its own `x-<lang>-const-name` override, not `x-*-name`. The
@@ -179,7 +186,12 @@ unstable under schema evolution (P13).
 ### Synthesized type names
 
 The Stage 1–4 algorithm maps *member* names; a synthesized **named type**
-(the [[const]]/[[enum]] value class / defined type) is named separately.
+(the [[const]]/[[enum]] value class / defined type) is named separately —
+but off the **emitted** member identifier, so a Stage 4 override moves it
+along with the member (`kind` + `x-go-name: Category` → `ProbeCategory`,
+Java `Probe.Category`). That is what makes the override a working escape
+hatch for a collision on the synthesized type, and it keeps the two
+languages that synthesize one from disagreeing about its name.
 A const or an enum synthesizes a named type where the language lacks
 literal types (Go defined type, Java value class), for every scalar kind;
 TS and Python close the type inline (a literal / union of literals) and

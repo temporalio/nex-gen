@@ -1616,17 +1616,20 @@ fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) ->
             continue;
         };
         for (field_name, property) in properties {
+            // The constant is named after the emitted member, not the JSON key,
+            // so an `x-ts-name` override moves it too (P15).
+            let member_ident = property.ts_member_name(field_name);
             if let Some(default) = &property.default {
                 default_fields.push((
                     model.model_name.clone(),
-                    field_name.clone(),
+                    member_ident.clone(),
                     typescript_value_literal(default)?,
                 ));
             }
             if let Some(const_value) = &property.const_value {
                 const_fields.push((
                     model.model_name.clone(),
-                    field_name.clone(),
+                    member_ident,
                     typescript_value_literal(const_value)?,
                 ));
             }
@@ -2719,7 +2722,7 @@ fn render_property_value_parser(
     if let Some(const_value) = &property.const_value {
         let const_name = const_const_name(
             &model.model_name,
-            json_name,
+            field_name,
             models,
             ConstNameCollisionKind::Const,
         )?;
@@ -3767,9 +3770,18 @@ fn default_const_name(
     const_name(model_name, field_name, models, kind, "DEFAULT_", "")
 }
 
+/// Names a synthesized module-scope constant after the **emitted member
+/// identifier**, so an `x-ts-name` override on the declaring property moves the
+/// constant with it: a name synthesized *from the member* follows the member
+/// (P15, see specs/json-schema/features/default.md). The JSON name still selects
+/// the property; only the identifier is derived from the override.
+///
+/// Uniqueness is counted over emitted identifiers too. Two members that recase
+/// alike collide here — and the override is what separates them, which it cannot
+/// do if the constant keeps deriving from the JSON name.
 fn const_name(
     model_name: &str,
-    field_name: &str,
+    member_ident: &str,
     models: &[&PlannedJsonType],
     kind: ConstNameCollisionKind,
     prefix: &str,
@@ -3782,23 +3794,24 @@ fn const_name(
         .into_iter()
         .filter(|schema| {
             schema.properties.as_ref().is_some_and(|properties| {
-                properties
-                    .get(field_name)
-                    .is_some_and(|property| match kind {
-                        ConstNameCollisionKind::Const => property.const_value.is_some(),
-                        ConstNameCollisionKind::Default => property.default.is_some(),
-                    })
+                properties.iter().any(|(json_name, property)| {
+                    property.ts_member_name(json_name) == member_ident
+                        && match kind {
+                            ConstNameCollisionKind::Const => property.const_value.is_some(),
+                            ConstNameCollisionKind::Default => property.default.is_some(),
+                        }
+                })
             })
         })
         .count();
 
     let mut name = if field_count == 1 {
-        field_name.to_shouty_snake_case()
+        member_ident.to_shouty_snake_case()
     } else {
         format!(
             "{}_{}",
             model_name.to_shouty_snake_case(),
-            field_name.to_shouty_snake_case()
+            member_ident.to_shouty_snake_case()
         )
     };
     name.insert_str(0, prefix);
