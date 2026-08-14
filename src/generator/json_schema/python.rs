@@ -699,6 +699,9 @@ const JSON_RUNTIME_SYMBOLS: &[&str] = &[
     "ValidationError",
     "Violation",
     "_check_contains",
+    "_check_date_time",
+    "_check_duration",
+    "_check_time",
     "_check_unique_items",
     "_collect",
     "_format_base64",
@@ -785,6 +788,9 @@ fn render_json_runtime_module() -> String {
         "ValidationError",
         "Violation",
         "_check_contains",
+        "_check_date_time",
+        "_check_duration",
+        "_check_time",
         "_check_unique_items",
         "_collect",
         "_format_base64",
@@ -899,11 +905,14 @@ def _transfer_type_convertible(
 "#;
 
 /// Emits the materialized-temporal runtime: the pinned narrowed regexes, the
-/// Gregorian calendar predicate, and the violation-collecting parse / canonical
-/// serialize helpers the converters call for each of the four kinds. See
+/// Gregorian calendar predicate, the violation-collecting parse helpers, the
+/// serialize-side representability predicates, and the canonical formatters the
+/// converters call for each of the four kinds. See
 /// `specs/json-schema/features/format.md`. The parse is generator-owned rather
 /// than `datetime.fromisoformat` alone, which accepts a missing offset and
-/// normalizes differently from the narrowed grammar.
+/// normalizes differently from the narrowed grammar; every value the regex admits
+/// is normalized into a spelling `fromisoformat` cannot raise on, so a rejection
+/// is always an aggregated `Violation` and never a `ValueError` (P11).
 fn render_temporal_helpers(output: &mut String) {
     use crate::json_schema::format::TemporalKind;
     output.push_str(&format!(
@@ -926,6 +935,13 @@ fn render_temporal_helpers(output: &mut String) {
 }
 
 const TEMPORAL_HELPER_BODY: &str = r#"_TEMPORAL_MAX_DURATION_SECONDS = ((1 << 63) - 1) // 1_000_000_000
+# A duration component with more digits than the cap itself is over the cap
+# whatever those digits are, which is how the magnitude is bounded before `int()`
+# sees it: CPython refuses to convert a string of more than 4300 digits.
+_TEMPORAL_MAX_DURATION_DIGITS = len(str(_TEMPORAL_MAX_DURATION_SECONDS))
+# `datetime` resolves to microseconds, and `fromisoformat` before Python 3.11
+# parses only the fraction widths `isoformat` writes.
+_TEMPORAL_FRACTION_DIGITS = 6
 
 
 def _days_in_month(year: int, month: int) -> int:
@@ -945,8 +961,57 @@ def _valid_temporal_calendar(value: str) -> bool:
         year, month, day = int(value[0:4]), int(value[5:7]), int(value[8:10])
     except ValueError:
         return False
+    # `datetime.MINYEAR` is 1, so year 0000 -- which the wire grammar admits and
+    # the other three targets materialize -- has no Python value at all. It is
+    # rejected rather than shifted into range, and `_temporal_reason` says so.
+    if year < datetime.MINYEAR:
+        return False
     maximum = _days_in_month(year, month)
     return maximum > 0 and 1 <= day <= maximum
+
+
+def _temporal_reason(name: str, value: str) -> str:
+    """The reason a rejected temporal string is reported under.
+
+    Year 0000 earns its own clause: it is a valid wire value the other targets
+    accept, so a caller needs to read Python's floor rather than conclude the
+    timestamp was malformed.
+    """
+
+    if value[0:4] == "0000":
+        return (
+            f"must be a valid {name}, got {_quote(value)}: year 0000 is not"
+            f" representable (datetime.MINYEAR is {datetime.MINYEAR})"
+        )
+    return f"must be a valid {name}, got {_quote(value)}"
+
+
+def _temporal_isoformat(value: str) -> str:
+    """Rewrites a wire temporal into the spelling `fromisoformat` accepts.
+
+    `Z` becomes `+00:00`, and the fractional second is padded or truncated to
+    exactly `_TEMPORAL_FRACTION_DIGITS`: before Python 3.11 `fromisoformat`
+    parses only what `isoformat` writes, so an RFC 3339 `.1` or `.1234567` --
+    which every other target accepts -- would otherwise raise. Digits past the
+    sixth are dropped, the loss at `datetime`'s own resolution that P1 allows;
+    the canonical output re-trims the padding, so `.1` still writes as `.1`.
+    """
+
+    normalized = value.upper()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    dot = normalized.find(".")
+    if dot < 0:
+        return normalized
+    end = dot + 1
+    while end < len(normalized) and normalized[end].isdigit():
+        end += 1
+    fraction = normalized[dot + 1 : end].ljust(_TEMPORAL_FRACTION_DIGITS, "0")
+    return (
+        normalized[: dot + 1]
+        + fraction[:_TEMPORAL_FRACTION_DIGITS]
+        + normalized[end:]
+    )
 
 
 def _parse_date_time(
@@ -954,22 +1019,17 @@ def _parse_date_time(
 ) -> datetime.datetime | None:
     if _TEMPORAL_DATE_TIME_RE.match(value) is None or not _valid_temporal_calendar(value):
         violations.append(
-            Violation(path=path, reason=f"must be a valid date-time, got {_quote(value)}")
+            Violation(path=path, reason=_temporal_reason("date-time", value))
         )
         return None
-    normalized = value.upper()
-    if normalized.endswith("Z"):
-        normalized = normalized[:-1] + "+00:00"
-    return datetime.datetime.fromisoformat(normalized)
+    return datetime.datetime.fromisoformat(_temporal_isoformat(value))
 
 
 def _parse_date(
     value: str, path: str, violations: list[Violation]
 ) -> datetime.date | None:
     if _TEMPORAL_DATE_RE.match(value) is None or not _valid_temporal_calendar(value):
-        violations.append(
-            Violation(path=path, reason=f"must be a valid date, got {_quote(value)}")
-        )
+        violations.append(Violation(path=path, reason=_temporal_reason("date", value)))
         return None
     return datetime.date.fromisoformat(value)
 
@@ -978,14 +1038,9 @@ def _parse_time(
     value: str, path: str, violations: list[Violation]
 ) -> datetime.time | None:
     if _TEMPORAL_TIME_RE.match(value) is None:
-        violations.append(
-            Violation(path=path, reason=f"must be a valid time, got {_quote(value)}")
-        )
+        violations.append(Violation(path=path, reason=_temporal_reason("time", value)))
         return None
-    normalized = value.upper()
-    if normalized.endswith("Z"):
-        normalized = normalized[:-1] + "+00:00"
-    return datetime.time.fromisoformat(normalized)
+    return datetime.time.fromisoformat(_temporal_isoformat(value))
 
 
 def _parse_duration(
@@ -993,7 +1048,7 @@ def _parse_duration(
 ) -> datetime.timedelta | None:
     if _TEMPORAL_DURATION_RE.match(value) is None:
         violations.append(
-            Violation(path=path, reason=f"must be a valid duration, got {_quote(value)}")
+            Violation(path=path, reason=_temporal_reason("duration", value))
         )
         return None
     total = 0
@@ -1002,14 +1057,101 @@ def _parse_duration(
         if char.isdigit():
             number += char
             continue
-        total += int(number) * {"H": 3600, "M": 60, "S": 1}[char]
+        digits = number.lstrip("0")
         number = ""
+        if len(digits) > _TEMPORAL_MAX_DURATION_DIGITS:
+            # Over the cap by digit count alone (see the constant), so the
+            # conversion `int()` would refuse is never attempted.
+            total = _TEMPORAL_MAX_DURATION_SECONDS + 1
+            break
+        total += int(digits or "0") * {"H": 3600, "M": 60, "S": 1}[char]
         if total > _TEMPORAL_MAX_DURATION_SECONDS:
-            violations.append(
-                Violation(path=path, reason=f"must be a valid duration, got {_quote(value)}")
-            )
-            return None
+            break
+    if total > _TEMPORAL_MAX_DURATION_SECONDS:
+        violations.append(
+            Violation(path=path, reason=_temporal_reason("duration", value))
+        )
+        return None
     return datetime.timedelta(seconds=total)
+
+
+def _check_temporal_offset(
+    name: str,
+    value: datetime.datetime | datetime.time,
+    offset: datetime.timedelta,
+    path: str,
+    violations: list[Violation],
+) -> None:
+    """Asserts a UTC offset is a whole number of minutes, the finest the wire
+    form spells (`tzinfo` allows seconds, which the offset would silently lose).
+    """
+
+    if offset % datetime.timedelta(minutes=1):
+        violations.append(
+            Violation(
+                path=path,
+                reason=(
+                    f"must be a valid {name}, got {_quote(str(value))}: "
+                    f"the UTC offset {offset} is not a whole number of minutes"
+                ),
+            )
+        )
+
+
+def _check_date_time(
+    value: datetime.datetime, path: str, violations: list[Violation]
+) -> None:
+    """Asserts a datetime is writable as a wire date-time (P12).
+
+    A dataclass is constructed unchecked, so a naive datetime -- with no offset
+    the required wire form could carry -- reaches serialize; without this it
+    would emit a value this module's own parser rejects.
+    """
+
+    offset = value.utcoffset()
+    if offset is None:
+        violations.append(
+            Violation(
+                path=path,
+                reason=(
+                    f"must be a valid date-time, got {_quote(str(value))}: "
+                    "a naive datetime carries no UTC offset"
+                ),
+            )
+        )
+        return
+    _check_temporal_offset("date-time", value, offset, path, violations)
+
+
+def _check_time(value: datetime.time, path: str, violations: list[Violation]) -> None:
+    """Asserts a time is writable as a wire time (P12). The offset is optional in
+    the grammar, so only its precision is held to anything."""
+
+    offset = value.utcoffset()
+    if offset is not None:
+        _check_temporal_offset("time", value, offset, path, violations)
+
+
+def _check_duration(
+    value: datetime.timedelta, path: str, violations: list[Violation]
+) -> None:
+    """Asserts a timedelta is writable as a wire duration (P12): the grammar is
+    unsigned, whole-second and capped, and a `timedelta` is none of those."""
+
+    if value < datetime.timedelta(0):
+        reason = "a duration cannot be negative"
+    elif value % datetime.timedelta(seconds=1):
+        reason = "a duration cannot carry a fraction of a second"
+    elif value.total_seconds() > _TEMPORAL_MAX_DURATION_SECONDS:
+        reason = f"a duration cannot exceed {_TEMPORAL_MAX_DURATION_SECONDS} seconds"
+    else:
+        return
+    violations.append(
+        Violation(
+            path=path,
+            reason=f"must be a valid duration, got {_quote(str(value))}: {reason}",
+        )
+    )
 
 
 def _temporal_frac(microsecond: int) -> str:
@@ -1647,9 +1789,11 @@ fn py_model_needs_serialize_validation(schema: &Schema) -> Result<bool> {
 }
 
 /// Emits the per-value constraint checks over an in-memory `value_expr`,
-/// reusing the same emitters the parse path calls. References, temporal, and
+/// reusing the same emitters the parse path calls. References and
 /// contentEncoding carry no check here — a nested converter validates its own
-/// value, and a materialized repr re-encodes losslessly.
+/// value, and `bytes` re-encodes losslessly. A materialized temporal does carry
+/// one: the native type is wider than the narrowed wire grammar, so it is held to
+/// what that grammar can spell.
 fn render_py_field_checks(
     output: &mut String,
     schema: &Schema,
@@ -1669,6 +1813,18 @@ fn render_py_field_checks(
     if is_py_union(schema) {
         if let Some(union) = classify_py_union(schema, &[])? {
             render_py_union_value_checks(output, &union, value_expr, path_expr, indent)?;
+        }
+        return Ok(());
+    }
+    // A materialized temporal is held to what the wire grammar can spell: a
+    // `datetime` may be naive and a `timedelta` may be negative, sub-second, or
+    // past the cap, none of which has a wire form. Construction is unchecked, so
+    // without this the formatter would emit bytes this module's own parser
+    // rejects (P12).
+    if let Some(kind) = temporal_kind_direct(schema) {
+        if let Some(check) = python_temporal_check_fn(kind) {
+            output.push_str(indent);
+            output.push_str(&format!("{check}({value_expr}, {path_expr}, violations)\n"));
         }
         return Ok(());
     }
@@ -1792,6 +1948,22 @@ fn python_temporal_format_fn(kind: crate::json_schema::format::TemporalKind) -> 
         TemporalKind::Date => "_format_date",
         TemporalKind::Time => "_format_time",
         TemporalKind::Duration => "_format_duration",
+    }
+}
+
+/// The predicate a materialized temporal value is held to before it is written,
+/// or `None` for `date` — every `datetime.date` Python can hold writes a valid
+/// wire date, so there is nothing to assert. See `_check_date_time` in the
+/// runtime for why the other three do have something to assert.
+fn python_temporal_check_fn(
+    kind: crate::json_schema::format::TemporalKind,
+) -> Option<&'static str> {
+    use crate::json_schema::format::TemporalKind;
+    match kind {
+        TemporalKind::DateTime => Some("_check_date_time"),
+        TemporalKind::Time => Some("_check_time"),
+        TemporalKind::Duration => Some("_check_duration"),
+        TemporalKind::Date => None,
     }
 }
 
