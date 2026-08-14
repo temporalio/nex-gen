@@ -156,6 +156,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides, including TypeScript default constants and Go closed-value types.
 - JSON Schema: A root model can no longer silently collapse with a same-named
   `$defs` or synthesized model; the loader reports the conflicting origins.
+- Python: A `const`/`enum` check now tests membership in a tuple of the
+  admissible values (`if value not in (True,)`) in both directions, where the
+  parse side chained one `!=` per member. A boolean `const` emitted
+  `value != True`, which is a lint error in the user's repository (ruff E712)
+  and reads nothing like hand-written Python, and a multi-member `enum` emitted
+  one comparison per member. The parse and serialize sides now share one
+  membership shape.
+- Python: A mistyped **array element** now reports the type it failed to be
+  (`tags[0]`, `expected string`), as an element of every other type already did
+  and as Java reports. A plain `string` element reported a bare
+  `expected element`, which named neither the expected type nor anything the
+  element's own indexed path did not already carry.
 - Python: A declared property named after one of the converter's own locals
   **silently disabled validation**. A property named `violations` rebound the
   violation accumulator, so a payload that broke a constraint was returned as a

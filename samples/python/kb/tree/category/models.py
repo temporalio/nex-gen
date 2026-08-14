@@ -157,7 +157,7 @@ class _PaletteTransferTypeConverter(
                     if not isinstance(swatches_value_element, str):
                         violations.append(
                             Violation(
-                                path=swatches_value_item_path, reason="expected element"
+                                path=swatches_value_item_path, reason="expected string"
                             )
                         )
                     else:

@@ -1782,15 +1782,29 @@ fn render_py_closed_value_check(
     indent: &str,
     reason: &str,
 ) {
-    // The member is typed by the closed set it belongs to, so a direct `!=`
+    // The member is typed by the closed set it belongs to, so a direct comparison
     // against each admissible value is statically dead code. Widening to `object`
     // keeps the runtime check — a value mutated past the type system still has to
     // fail before it reaches the wire (P12).
     let membership = format!(
-        "typing.cast(\"object\", {value_expr}) not in ({},)",
-        compare_exprs.join(", ")
+        "typing.cast(\"object\", {value_expr}) not in {}",
+        py_value_tuple(compare_exprs)
     );
     render_py_violation_if(output, indent, &membership, path_expr, reason);
+}
+
+/// The Python tuple of admissible literals a closed value set is tested against,
+/// with the comma a one-member tuple needs. Membership against a tuple is the
+/// one shape both directions and both keywords use — a `const` is the one-member
+/// `enum` — and it is what keeps the emitted test out of the `!= True` /
+/// `!= None` comparisons a per-member `!=` chain would produce, which read as
+/// unidiomatic Python and are lint errors (ruff E712/E711) in the generated
+/// output (P2).
+fn py_value_tuple(compare_exprs: &[String]) -> String {
+    match compare_exprs {
+        [single] => format!("({single},)"),
+        many => format!("({})", many.join(", ")),
+    }
 }
 
 /// True when a field schema carries a constraint the serialize path must
@@ -4222,11 +4236,7 @@ fn render_py_closed_value_membership(
     indent: &str,
     reason: &str,
 ) {
-    let membership = compare_exprs
-        .iter()
-        .map(|expr| format!("{compared} != {expr}"))
-        .collect::<Vec<_>>()
-        .join(" and ");
+    let membership = format!("{compared} not in {}", py_value_tuple(compare_exprs));
     output.push_str(indent);
     output.push_str(&format!("{keyword} {membership}:\n"));
     output.push_str(indent);
@@ -4316,20 +4326,10 @@ fn render_py_array_elements(
     ));
     render_py_slot_declaration(output, &loop_body, &item_slot, &item_type);
     match &schema.items {
-        Some(item_schema) if is_plain_string_schema(item_schema) => {
-            // A plain string element reports the element-level reason every
-            // target uses for a mistyped member of a string list.
-            output.push_str(&loop_body);
-            output.push_str(&format!("if not isinstance({element_local}, str):\n"));
-            output.push_str(&loop_body);
-            output.push_str(&format!(
-                "    violations.append(Violation(path={item_path_local}, reason=\"expected element\"))\n"
-            ));
-            output.push_str(&loop_body);
-            output.push_str("else:\n");
-            output.push_str(&loop_body);
-            output.push_str(&format!("    {item_slot} = {element_local}\n"));
-        }
+        // Every element kind takes the same parse the value in that position
+        // would take anywhere else, so a mistyped element names the type it
+        // failed to be (`expected string`) at its own index — see
+        // `specs/json-schema/features/items.md`.
         Some(item_schema) => render_value_parser(
             output,
             item_schema,
@@ -4348,19 +4348,6 @@ fn render_py_array_elements(
     output.push_str(&format!("{list_local}.append({item_slot})\n"));
     render_py_array_checks(output, &list_local, path_expr, schema, &body)?;
     Ok(list_local)
-}
-
-/// True when a schema is a bare `string` with nothing else to enforce, which is
-/// the only element shape that takes the element-level reason shortcut.
-fn is_plain_string_schema(schema: &Schema) -> bool {
-    schema.ty.as_ref().and_then(Value::as_str) == Some("string")
-        && schema.const_value.is_none()
-        && schema.enum_values.is_none()
-        && schema.format.is_none()
-        && schema.content_encoding.is_none()
-        && schema.pattern.is_none()
-        && schema.min_length.is_none()
-        && schema.max_length.is_none()
 }
 
 fn render_closed_object_unknown_key_check(output: &mut String, schema: &Schema) {
@@ -4552,16 +4539,21 @@ fn nullable_member_schema(schema: &Schema) -> Option<&Schema> {
 fn py_matcher_condition(matcher: &Schema, elem: &str) -> Result<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(value) = &matcher.const_value {
-        parts.push(format!("{elem} == {}", python_value_literal(value)?));
+        // The one-member case of the closed set below, and emitted the same way:
+        // a tuple membership test rather than a comparison, which a boolean
+        // matcher would render as the unidiomatic `elem == True` (ruff E712).
+        parts.push(format!(
+            "{elem} in {}",
+            py_value_tuple(&[python_value_literal(value)?])
+        ));
     }
     if let Some(values) = &matcher.enum_values {
         let alternatives = values
             .iter()
             .map(python_value_literal)
-            .collect::<Result<Vec<_>>>()?
-            .join(", ");
+            .collect::<Result<Vec<_>>>()?;
         if !alternatives.is_empty() {
-            parts.push(format!("{elem} in ({alternatives},)"));
+            parts.push(format!("{elem} in {}", py_value_tuple(&alternatives)));
         }
     }
     let is_integer = matcher.ty.as_ref().and_then(Value::as_str) == Some("integer");

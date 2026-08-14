@@ -348,7 +348,7 @@ class _CircleTransferTypeConverter(
             kind_value_raw = raw["kind"]
             if not isinstance(kind_value_raw, str):
                 violations.append(Violation(path="kind", reason="expected string"))
-            elif kind_value_raw != "circle":
+            elif kind_value_raw not in ("circle",):
                 violations.append(Violation(path="kind", reason='must equal "circle"'))
             else:
                 kind_value = kind_value_raw
@@ -700,7 +700,7 @@ class _LinkNoteTransferTypeConverter(
             kind_value_raw = raw["kind"]
             if not isinstance(kind_value_raw, str):
                 violations.append(Violation(path="kind", reason="expected string"))
-            elif kind_value_raw != "link":
+            elif kind_value_raw not in ("link",):
                 violations.append(Violation(path="kind", reason='must equal "link"'))
             else:
                 kind_value = kind_value_raw
@@ -994,7 +994,7 @@ class _ShowcaseTransferTypeConverter(
             kind_value_raw = raw["kind"]
             if not isinstance(kind_value_raw, str):
                 violations.append(Violation(path="kind", reason="expected string"))
-            elif kind_value_raw != "showcase":
+            elif kind_value_raw not in ("showcase",):
                 violations.append(
                     Violation(path="kind", reason='must equal "showcase"')
                 )
@@ -1010,7 +1010,7 @@ class _ShowcaseTransferTypeConverter(
                 revision_value_raw, "revision", violations
             )
             if revision_value_parsed is not None:
-                if revision_value_parsed != 1:
+                if revision_value_parsed not in (1,):
                     violations.append(Violation(path="revision", reason="must equal 1"))
                 else:
                     revision_value = revision_value_parsed
@@ -1022,7 +1022,7 @@ class _ShowcaseTransferTypeConverter(
             enabled_value_raw = raw["enabled"]
             if not isinstance(enabled_value_raw, bool):
                 violations.append(Violation(path="enabled", reason="expected boolean"))
-            elif enabled_value_raw != True:
+            elif enabled_value_raw not in (True,):
                 violations.append(Violation(path="enabled", reason="must equal true"))
             else:
                 enabled_value = enabled_value_raw
@@ -1036,11 +1036,7 @@ class _ShowcaseTransferTypeConverter(
             status_value_raw = raw["status"]
             if not isinstance(status_value_raw, str):
                 violations.append(Violation(path="status", reason="expected string"))
-            elif (
-                status_value_raw != "active"
-                and status_value_raw != "inactive"
-                and status_value_raw != "pending"
-            ):
+            elif status_value_raw not in ("active", "inactive", "pending"):
                 violations.append(
                     Violation(
                         path="status",
@@ -1057,11 +1053,7 @@ class _ShowcaseTransferTypeConverter(
             tier_value_raw = raw["tier"]
             tier_value_parsed = _parse_spec_integer(tier_value_raw, "tier", violations)
             if tier_value_parsed is not None:
-                if (
-                    tier_value_parsed != 1
-                    and tier_value_parsed != 2
-                    and tier_value_parsed != 3
-                ):
+                if tier_value_parsed not in (1, 2, 3):
                     violations.append(
                         Violation(
                             path="tier",
@@ -1081,7 +1073,7 @@ class _ShowcaseTransferTypeConverter(
                 and isinstance(scale_value_raw, (int, float))
             ):
                 violations.append(Violation(path="scale", reason="expected number"))
-            elif scale_value_raw != 1.5 and scale_value_raw != 2.5:
+            elif scale_value_raw not in (1.5, 2.5):
                 violations.append(
                     Violation(
                         path="scale",
@@ -1611,7 +1603,7 @@ class _ShowcaseTransferTypeConverter(
                         if not isinstance(tags_value_element, str):
                             violations.append(
                                 Violation(
-                                    path=tags_value_item_path, reason="expected element"
+                                    path=tags_value_item_path, reason="expected string"
                                 )
                             )
                         else:
@@ -1656,7 +1648,7 @@ class _ShowcaseTransferTypeConverter(
                             violations.append(
                                 Violation(
                                     path=aliases_value_item_path,
-                                    reason="expected element",
+                                    reason="expected string",
                                 )
                             )
                         else:
@@ -1685,8 +1677,7 @@ class _ShowcaseTransferTypeConverter(
                         if not isinstance(roles_value_element, str):
                             violations.append(
                                 Violation(
-                                    path=roles_value_item_path,
-                                    reason="expected element",
+                                    path=roles_value_item_path, reason="expected string"
                                 )
                             )
                         else:
@@ -1694,7 +1685,7 @@ class _ShowcaseTransferTypeConverter(
                         roles_value_list.append(roles_value_item)
                     _check_contains(
                         roles_value_list,
-                        lambda element: element == "admin",
+                        lambda element: element in ("admin",),
                         1,
                         2,
                         True,
@@ -2350,11 +2341,7 @@ class _ShowcaseTransferTypeConverter(
         if typing.cast("object", value.enabled) not in (True,):
             violations.append(Violation(path="enabled", reason="must equal true"))
         out["enabled"] = value.enabled
-        if typing.cast("object", value.status) not in (
-            "active",
-            "inactive",
-            "pending",
-        ):
+        if typing.cast("object", value.status) not in ("active", "inactive", "pending"):
             violations.append(
                 Violation(
                     path="status",
@@ -2362,11 +2349,7 @@ class _ShowcaseTransferTypeConverter(
                 )
             )
         out["status"] = value.status
-        if typing.cast("object", value.tier) not in (
-            1,
-            2,
-            3,
-        ):
+        if typing.cast("object", value.tier) not in (1, 2, 3):
             violations.append(
                 Violation(
                     path="tier",
@@ -2374,10 +2357,7 @@ class _ShowcaseTransferTypeConverter(
                 )
             )
         out["tier"] = value.tier
-        if typing.cast("object", value.scale) not in (
-            1.5,
-            2.5,
-        ):
+        if typing.cast("object", value.scale) not in (1.5, 2.5):
             violations.append(
                 Violation(
                     path="scale",
@@ -2584,7 +2564,7 @@ class _ShowcaseTransferTypeConverter(
         if value.roles is not None:
             _check_contains(
                 value.roles,
-                lambda element: element == "admin",
+                lambda element: element in ("admin",),
                 1,
                 2,
                 True,
@@ -2624,10 +2604,7 @@ class _ShowcaseTransferTypeConverter(
             out["idOrName"] = value.id_or_name
         if value.mode is not None:
             if isinstance(value.mode, str):
-                if typing.cast("object", value.mode) not in (
-                    "auto",
-                    "manual",
-                ):
+                if typing.cast("object", value.mode) not in ("auto", "manual"):
                     violations.append(
                         Violation(
                             path="mode",
@@ -3851,7 +3828,7 @@ class _SquareTransferTypeConverter(
             kind_value_raw = raw["kind"]
             if not isinstance(kind_value_raw, str):
                 violations.append(Violation(path="kind", reason="expected string"))
-            elif kind_value_raw != "square":
+            elif kind_value_raw not in ("square",):
                 violations.append(Violation(path="kind", reason='must equal "square"'))
             else:
                 kind_value = kind_value_raw
@@ -3944,7 +3921,7 @@ class _TextNoteTransferTypeConverter(
             kind_value_raw = raw["kind"]
             if not isinstance(kind_value_raw, str):
                 violations.append(Violation(path="kind", reason="expected string"))
-            elif kind_value_raw != "text":
+            elif kind_value_raw not in ("text",):
                 violations.append(Violation(path="kind", reason='must equal "text"'))
             else:
                 kind_value = kind_value_raw
@@ -4513,10 +4490,7 @@ def _showcase_mode_from_transfer_type(
 ) -> typing.Literal["auto", "manual"] | int | None:
     if isinstance(value, str):
         narrowed = typing.cast('typing.Literal["auto", "manual"]', value)
-        if typing.cast("object", narrowed) not in (
-            "auto",
-            "manual",
-        ):
+        if typing.cast("object", narrowed) not in ("auto", "manual"):
             violations.append(
                 Violation(
                     path=path,

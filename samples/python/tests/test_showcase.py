@@ -520,6 +520,22 @@ def test_array_constraints_roundtrip_and_reject() -> None:
     ]
 
 
+def test_array_element_type_mismatch_names_the_expected_type() -> None:
+    """A mistyped element reports the type it failed to be, at its own index.
+
+    Every element kind takes the same parse the value in that position would take
+    anywhere else, so a `string` element reads `expected string` — the same reason a
+    `string` member reports, and the same one Java's element loop and a union's array
+    branch (`measurements[0]`, `expected number`) use. The index in the path is what
+    identifies the element; the reason names the type.
+    """
+    assert parse_violations({**BASE, "tags": [1]}) == [("tags[0]", "expected string")]
+    assert parse_violations({**BASE, "tags": ["a", None, {}]}) == [
+        ("tags[1]", "expected string"),
+        ("tags[2]", "expected string"),
+    ]
+
+
 def test_object_constraints_roundtrip_and_reject() -> None:
     attributes = typing.cast(
         Attributes, expect_roundtrip("attributes.json", Attributes)

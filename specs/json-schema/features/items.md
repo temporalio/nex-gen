@@ -142,6 +142,17 @@ binding) comes from [[type]]'s `"array"` row.
   the field path (`tags[2]`, and for nested arrays `matrix[1][2]`),
   distinct from the dotted member paths [[properties]] uses — so a caller
   can locate the offending element unambiguously (**P11**).
+- **Reason convention.** An element takes the *same* checks — and so the
+  same `reason` text — the value in that position would take anywhere
+  else: a mistyped element reads `expected string` / `expected number`
+  from [[type]]'s row for `T`, and a constraint failure reads that
+  keyword's own reason (`must have length >= 3, got 1`). Nothing about the
+  reason marks it as an element: the bracketed index in the path already
+  does that, which leaves the reason free to name the type or bound that
+  was missed. This holds for an element of a `oneOf` array branch exactly
+  as for a declared array member (see [[oneOf]]). Reason *text* is not held
+  byte-identical across targets (**P11**), but the shape is the same one
+  everywhere.
 - **Element recursion.** Each element validates recursively — an array of
   objects runs each object's own `Validate`, an array of arrays recurses
   again, an array of `$ref` follows the reference (see [[ref]]). A nested

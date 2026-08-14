@@ -9,13 +9,13 @@ from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-APP_ROOT = Path(__file__).resolve().parent
-OUTPUT_PATH = APP_ROOT.parent / "wit" / "type_showcase"
-
 import wit.type_showcase as type_showcase
 import wit.type_showcase.models as type_showcase_models
 import wit.type_showcase.services as type_showcase_services
 from wit.type_showcase._resources import User
+
+APP_ROOT = Path(__file__).resolve().parent
+OUTPUT_PATH = APP_ROOT.parent / "wit" / "type_showcase"
 
 GET_USER_OPERATION_INFO = type_showcase.__nexus_operation_registry__[
     ("TypeShowcase", "GetUser")

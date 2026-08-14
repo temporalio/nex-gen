@@ -142,7 +142,7 @@ class _MessageTransferTypeConverter(
             kind_value_raw = raw["kind"]
             if not isinstance(kind_value_raw, str):
                 violations.append(Violation(path="kind", reason="expected string"))
-            elif kind_value_raw != "text":
+            elif kind_value_raw not in ("text",):
                 violations.append(Violation(path="kind", reason='must equal "text"'))
             else:
                 kind_value = kind_value_raw
@@ -303,7 +303,7 @@ class _RoomTransferTypeConverter(
                             violations.append(
                                 Violation(
                                     path=members_value_item_path,
-                                    reason="expected element",
+                                    reason="expected string",
                                 )
                             )
                         else:

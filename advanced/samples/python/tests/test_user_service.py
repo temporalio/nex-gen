@@ -9,13 +9,13 @@ from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-APP_ROOT = Path(__file__).resolve().parent
-OUTPUT_PATH = APP_ROOT.parent / "wit" / "user_service"
-
 import wit.user_service as user_service
 import wit.user_service.models as user_service_models
 import wit.user_service.services as user_service_services
 from wit.user_service._resources import User
+
+APP_ROOT = Path(__file__).resolve().parent
+OUTPUT_PATH = APP_ROOT.parent / "wit" / "user_service"
 
 GET_USER_OPERATION_INFO = user_service.__nexus_operation_registry__[
     ("UserService", "GetUser")

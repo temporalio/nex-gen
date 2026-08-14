@@ -28,6 +28,7 @@ run cargo fmt --check
 run cargo test --features advanced
 
 for tier in samples advanced/samples; do
+  run_in "$tier/python" uv run ruff check .
   run_in "$tier/python" uv run ruff format --check .
   run_in "$tier/typescript" npm exec -- prettier --check .
   run_in "$tier/go" bash -c 'unformatted="$(gofmt -l .)"; if [ -n "$unformatted" ]; then echo "gofmt required for:" >&2; echo "$unformatted" >&2; exit 1; fi'
