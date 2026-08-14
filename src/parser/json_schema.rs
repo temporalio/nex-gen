@@ -634,7 +634,11 @@ fn api_spec_from_parsed_json_documents(
                 if module_exported {
                     TypeDeclEntry::module_export(declaration)
                 } else {
-                    TypeDeclEntry::new(declaration)
+                    // Declared by another input file. Marking it foreign rather
+                    // than merely "not exported" is what lets a service file that
+                    // declares no types of its own still import these instead of
+                    // re-emitting them into its own module.
+                    TypeDeclEntry::foreign(declaration)
                 },
             )
         })
@@ -6293,7 +6297,7 @@ $defs:
       value: { type: string }
 "##,
         );
-        assert!(spec.types.values().all(|entry| entry.module_exported));
+        assert!(spec.types.values().all(|entry| entry.is_module_export()));
         assert_eq!(spec.types.len(), 2);
     }
 

@@ -5,6 +5,7 @@
 //! a side table produced by a previous pass.
 
 use super::*;
+use crate::spec::ModuleExport;
 
 pub(crate) struct ReachabilityPass;
 
@@ -31,10 +32,17 @@ fn prune(spec: &mut PlannedSpec) {
     let mut reachable = spec
         .types
         .iter()
-        .filter(|(_, entry)| entry.module_exported)
+        .filter(|(_, entry)| entry.is_module_export())
         .map(|(name, _)| name.clone())
         .collect::<BTreeSet<_>>();
-    let has_module_exports = !reachable.is_empty();
+    // Whether this spec's front end assigns declarations to modules at all. A
+    // module that owns nothing still counts as scoped when it carries foreign
+    // declarations, which is how a service file whose every operation type is
+    // `$ref`d from another file avoids re-emitting all of them.
+    let module_scoped = spec
+        .types
+        .values()
+        .any(|entry| entry.module_export != ModuleExport::Unscoped);
     for service in &spec.services {
         for operation in &service.operations {
             pending.extend(
@@ -72,8 +80,8 @@ fn prune(spec: &mut PlannedSpec) {
     spec.types.retain(|name, entry| {
         reachable.contains(name)
             && (!matches!(entry.declaration, TypeDeclSpec::External(_))
-                || !has_module_exports
-                || entry.module_exported)
+                || !module_scoped
+                || entry.is_module_export())
     });
 }
 

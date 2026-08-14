@@ -83,6 +83,17 @@ Per input file `<subpath>/<name>`:
 | **Go** | `<module>.go` in the one flat package (`<module>` = flattened path) | `definitions.go` (same package) | — | — (capitalized = exported) |
 | **Java** | one `<ClassName>.java` per exported class, in a package mirroring `<subpath>/<name>/` | each runtime class its own file in the root package (`ValidationException.java`, `Violation.java`, `SpecNumbers.java`, …) | — | — (`public` = exported) |
 
+**A module emits only the types its own input file declares.** A type reached by
+`$ref` into another file belongs to the module that declares it, and is imported
+from there — never re-emitted into the referencing module, which would put a
+second copy of the type in the package (a redeclaration in Go's flat package, a
+duplicate class file in Java, an import-versus-local-declaration conflict in
+TypeScript, and a shadowed re-import in Python). A service file whose every
+operation type is `$ref`d from elsewhere therefore declares nothing of its own,
+and emits no models file at all — for TypeScript that also means its `index.ts`
+does not re-export `./models`, since a barrel re-exporting a file with no exports
+is itself an error (`TS2306`).
+
 **`_recursive` is Python-only and is a single file at the package root**
 (`<package>/_recursive.py`), **never** per-input. It holds every hoisted
 cross-file SCC in the whole closure. See Recursion below.

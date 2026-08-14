@@ -3056,29 +3056,38 @@ fn render_module_files(
     let json_runtime_files = external_models.render_support_files()?;
     let has_json_runtime_module = json_runtime_files.contains_key(&PathBuf::from("definitions.ts"));
     let mut files = BTreeMap::<PathBuf, String>::new();
+    let models_source = render_models_module(
+        enums,
+        flags,
+        variants,
+        models,
+        external_models,
+        model_fragments,
+        language_imports,
+        support_exports.as_ref(),
+        api_plan,
+        mode,
+    );
+    // A module whose every operation type is `$ref`d from another file declares
+    // nothing of its own. Emitting the empty `models.ts` anyway would leave the
+    // barrel re-exporting a file with no exports, which TypeScript rejects
+    // outright (TS2306, "is not a module").
+    let has_models_module = !is_blank_generated_module(&models_source);
     files.insert(
         "index.ts".into(),
         if mode == GenerationMode::NativeApi {
             render_index_module(services, &model_fragments.type_exported_names)
         } else {
-            render_definitions_only_index_module(services, has_json_runtime_module)
+            render_definitions_only_index_module(
+                services,
+                has_json_runtime_module,
+                has_models_module,
+            )
         },
     );
-    files.insert(
-        "models.ts".into(),
-        render_models_module(
-            enums,
-            flags,
-            variants,
-            models,
-            external_models,
-            model_fragments,
-            language_imports,
-            support_exports.as_ref(),
-            api_plan,
-            mode,
-        ),
-    );
+    if has_models_module {
+        files.insert("models.ts".into(), models_source);
+    }
     if !services.is_empty() {
         files.insert(
             "services.ts".into(),
@@ -3390,9 +3399,20 @@ fn render_generated_module(imports: String, body: String) -> String {
     output
 }
 
+/// Whether a rendered module carries nothing but the generated header, so
+/// emitting it would produce a file with no exports.
+fn is_blank_generated_module(source: &str) -> bool {
+    source
+        .strip_prefix(GENERATED_HEADER)
+        .unwrap_or(source)
+        .trim()
+        .is_empty()
+}
+
 fn render_definitions_only_index_module(
     services: &[RenderedService<'_>],
     has_json_runtime_module: bool,
+    has_models_module: bool,
 ) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
@@ -3400,7 +3420,9 @@ fn render_definitions_only_index_module(
     if !services.is_empty() {
         output.push_str("export * from './services';\n");
     }
-    output.push_str("export * from './models';\n");
+    if has_models_module {
+        output.push_str("export * from './models';\n");
+    }
     if services.iter().any(|service| !service.resources.is_empty()) {
         output.push_str("export * from './resources';\n");
     }

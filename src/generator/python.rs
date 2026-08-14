@@ -305,7 +305,7 @@ fn leaf_export_names(
 fn planned_module_export_model_names(plan: &PlannedSpec) -> BTreeSet<String> {
     plan.types
         .values()
-        .filter(|entry| entry.module_exported)
+        .filter(|entry| entry.is_module_export())
         .filter_map(|entry| match &entry.declaration {
             TypeDeclSpec::Record(record) => Some(record.name.clone()),
             TypeDeclSpec::Enum(enumeration) => Some(enumeration.name.clone()),

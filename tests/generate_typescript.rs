@@ -1243,3 +1243,99 @@ fn typescript_json_rejects_same_type_name_in_two_modules() {
     );
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+/// Writes a closure whose service module declares no types of its own: both
+/// operation types are `$ref`s into sibling files. Returns the input directory.
+fn write_service_only_module_closure(temp_dir: &Path) -> PathBuf {
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(input_dir.join("a")).unwrap();
+    fs::create_dir_all(input_dir.join("b")).unwrap();
+    fs::write(
+        input_dir.join("a/page.json"),
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"title":{"type":"string"}},"required":["title"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("b/note.json"),
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"body":{"type":"string"}},"required":["body"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("svc.nexusrpc.yaml"),
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Svc:
+    fqn: example.v1.Svc
+    operations:
+      one:
+        input: { $ref: "a/page.json" }
+        output: { $ref: "b/note.json" }
+"#,
+    )
+    .unwrap();
+    input_dir
+}
+
+/// A module emits the types it declares; a type it only `$ref`s belongs to the
+/// module that declares it. Reachability pruning inferred "this front end does
+/// not scope by module" from a module owning nothing, so a service file whose
+/// every operation type is `$ref`d from elsewhere re-emitted all of them into
+/// its own module — a second copy of each interface and converter, which
+/// TypeScript rejects (`TS2440`, import conflicts with local declaration) and
+/// which the package barrel then re-exports twice (`TS2308`).
+#[test]
+fn typescript_json_service_module_without_own_types_imports_instead_of_reemitting() {
+    let temp_dir = unique_output_path("ts-json-service-only-module");
+    let input_dir = write_service_only_module_closure(&temp_dir);
+    let output_path = temp_dir.join("out");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    // Each type and its converter are declared exactly once, in the module that
+    // declares the schema.
+    let files = read_typescript_output_files(&output_path)
+        .into_values()
+        .collect::<Vec<_>>()
+        .join("\n");
+    for declaration in [
+        "export interface Page {",
+        "export interface Note {",
+        "export const pageTransferTypeConverter",
+        "export const noteTransferTypeConverter",
+    ] {
+        assert_eq!(
+            files.matches(declaration).count(),
+            1,
+            "expected exactly one `{declaration}`\n{files}"
+        );
+    }
+
+    // The service module declares nothing, so it emits no `models.ts` at all —
+    // an empty one would leave its barrel re-exporting a file with no exports,
+    // which TypeScript rejects (`TS2306`, "is not a module").
+    assert!(!output_path.join("svc/models.ts").exists());
+    let module_index = fs::read_to_string(output_path.join("svc/index.ts")).unwrap();
+    assert!(module_index.contains("export * from './services';"));
+    assert!(!module_index.contains("./models"), "{module_index}");
+
+    // It imports the types from the modules that own them.
+    let services = fs::read_to_string(output_path.join("svc/services.ts")).unwrap();
+    for expected in [
+        "import { pageTransferTypeConverter } from '../a/page/models';",
+        "import { noteTransferTypeConverter } from '../b/note/models';",
+    ] {
+        assert!(services.contains(expected), "{expected}\n{services}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}

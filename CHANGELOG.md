@@ -126,6 +126,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema: A module re-emitted the types it only `$ref`d from **another input
+  file**, instead of importing them, whenever that module declared no types of its
+  own — a service file whose every operation type is a `$ref` elsewhere. Every
+  target emitted a second copy of each referenced type: `Page redeclared in this
+  block` in Go's flat package, a duplicate `Page.java` that failed the build with a
+  generated-file conflict, a TypeScript module that both imported and redeclared
+  the name (`TS2440`), and in Python a barrel importing two copies and silently
+  binding one (P7). The cause was reachability pruning inferring "this front end
+  does not scope declarations by module" from a module owning nothing, which is
+  indistinguishable from "this module declares nothing" while the flag is a
+  `bool`; declarations now record *foreign* distinctly from *unscoped*. A module
+  that declares nothing now emits no models file, and its TypeScript barrel stops
+  re-exporting `./models` — re-exporting a file with no exports is itself an error
+  (`TS2306`). The checked-in samples were unaffected, because every sample service
+  module happens to declare at least one inline operation type.
 - JSON Schema: The P15 collision pass used the wrong scope in two ways, so
   **multi-input** runs accepted schemas that generate uncompilable code. Services
   were only entered into the namespace of the root module, which in multi-input

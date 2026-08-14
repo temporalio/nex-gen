@@ -103,7 +103,7 @@ fn api_spec_from_wit(
             for type_id in interface.types.values() {
                 let full_name = wit_type_full_name(resolve, *type_id);
                 if let Some(entry) = types.get_mut(&full_name) {
-                    entry.module_exported = true;
+                    entry.module_export = crate::spec::ModuleExport::Owned;
                 }
             }
         }
@@ -3580,7 +3580,7 @@ interface types {
         assert_eq!(variant.cases[0].wire_name, "some_value");
         assert_eq!(variant.cases[1].name, "type");
         assert_eq!(variant.cases[1].wire_name, "type");
-        assert!(spec.types["types.choice"].module_exported);
+        assert!(spec.types["types.choice"].is_module_export());
 
         let service = parse(
             Language::Python,
@@ -3593,7 +3593,12 @@ interface api {
 }
 "#,
         );
-        assert!(service.types.values().all(|entry| !entry.module_exported));
+        assert!(
+            service
+                .types
+                .values()
+                .all(|entry| !entry.is_module_export())
+        );
     }
 
     const GENERIC_WIT: &str = r#"

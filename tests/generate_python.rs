@@ -1141,3 +1141,62 @@ fn python_json_rejects_same_type_name_in_two_modules() {
     }
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+/// Re-emitting a `$ref`d type into the referencing service's module produced two
+/// `class Page` in different modules, which the package barrel then imported
+/// twice — `from .a import Page` followed by `from .svc import Page`, silently
+/// binding one copy and dropping the other (P7). It happened whenever the service
+/// module declared no types of its own, because reachability pruning read "this
+/// module owns nothing" as "this front end does not scope by module".
+#[test]
+fn python_json_service_module_without_own_types_does_not_reemit_refs() {
+    let temp_dir = unique_output_path("py-json-service-only-module");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(input_dir.join("a")).unwrap();
+    fs::write(
+        input_dir.join("a/page.json"),
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"title":{"type":"string"}},"required":["title"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("svc.nexusrpc.yaml"),
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Svc:
+    fqn: example.v1.Svc
+    operations:
+      one:
+        input: { $ref: "a/page.json" }
+"#,
+    )
+    .unwrap();
+
+    let output_path = temp_dir.join("out");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_python_package_files(&output_path)
+        .into_values()
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        rendered.matches("class Page(").count(),
+        1,
+        "`Page` must be declared once\n{rendered}"
+    );
+    // The root barrel binds each name exactly once.
+    let barrel = fs::read_to_string(output_path.join("__init__.py")).unwrap();
+    assert_eq!(barrel.matches("import Page").count(), 1, "{barrel}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}

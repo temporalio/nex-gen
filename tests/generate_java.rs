@@ -487,3 +487,60 @@ fn java_json_cross_module_java_name_override_moves_every_reference() {
     }
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+/// Java gives each module its own package and one file per class, so re-emitting
+/// a `$ref`d type into the referencing service's module wrote `Page.java` twice
+/// and the build failed outright with a generated-file conflict. It happened
+/// whenever the service module declared no types of its own.
+#[test]
+fn java_json_service_module_without_own_types_does_not_reemit_refs() {
+    let temp_dir = unique_output_path("java-json-service-only-module");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(input_dir.join("a")).unwrap();
+    fs::write(
+        input_dir.join("a/page.json"),
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"title":{"type":"string"}},"required":["title"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("svc.nexusrpc.yaml"),
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Svc:
+    fqn: example.v1.Svc
+    operations:
+      one:
+        input: { $ref: "a/page.json" }
+"#,
+    )
+    .unwrap();
+
+    let output_path = temp_dir.join("pkg");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("com.example.pkg".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    // `Page` is emitted once, by the module that declares it.
+    let paths = read_java_files(&output_path)
+        .into_keys()
+        .filter(|path| path.file_name().is_some_and(|name| name == "Page.java"))
+        .collect::<Vec<_>>();
+    assert_eq!(paths, vec![PathBuf::from("a/page/Page.java")]);
+    // The service's own package holds only the service.
+    let service = fs::read_to_string(output_path.join("svc/Svc.java")).unwrap();
+    assert!(
+        service.contains("import com.example.pkg.a.page.Page;"),
+        "{service}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
