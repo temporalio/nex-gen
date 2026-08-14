@@ -325,7 +325,6 @@ fn validate_oneof_model_config(
     spec: &ApiSpec,
     message_name: &str,
     model_config: ModelConfig<'_>,
-    _message: &MessageMetadata,
     oneofs: &[ProtoOneofGroup<'_>],
 ) -> Result<()> {
     for oneof in oneofs {
@@ -340,8 +339,8 @@ fn validate_oneof_model_config(
                     field: member_name.to_string(),
                     property: "oneof",
                     reason: format!(
-                        "protobuf oneof member must be represented by grouped field `{}`",
-                        oneof.name
+                        "record field `{}` cannot match a variant case.",
+                        member_name
                     ),
                 });
             }
@@ -384,29 +383,17 @@ fn validate_oneof_model_config(
             });
         }
 
-        let variant_name = match &grouped_field.field_type {
-            TypeSpec::Variant(variant_name) => variant_name,
-            TypeSpec::Option(grouped_type) => match grouped_type.as_ref() {
-                TypeSpec::Variant(variant_name) => variant_name,
-                _ => {
-                    return Err(Error::InvalidTypeOverrideField {
-                        message: message_name.to_string(),
-                        field: oneof.name.to_string(),
-                        property: "type",
-                        reason: "protobuf oneof groups must use `variant` or `option<variant>`"
-                            .to_string(),
-                    });
-                }
-            },
-            _ => {
-                return Err(Error::InvalidTypeOverrideField {
-                    message: message_name.to_string(),
-                    field: oneof.name.to_string(),
-                    property: "type",
-                    reason: "protobuf oneof groups must use `variant` or `option<variant>`"
-                        .to_string(),
-                });
-            }
+        let grouped_type = match &grouped_field.field_type {
+            TypeSpec::Option(grouped_type) => grouped_type.as_ref(),
+            grouped_type => grouped_type,
+        };
+        let TypeSpec::Variant(variant_name) = grouped_type else {
+            return Err(Error::InvalidTypeOverrideField {
+                message: message_name.to_string(),
+                field: oneof.name.to_string(),
+                property: "type",
+                reason: "protobuf oneof groups must use `variant` or `option<variant>`".to_string(),
+            });
         };
         let Some(variant) = spec.variant(variant_name.as_str()) else {
             return Err(Error::InvalidTypeOverrideField {
@@ -497,7 +484,7 @@ fn validate_message_model_config(
     language: Language,
 ) -> Result<()> {
     let oneofs = validated_real_oneofs(message_name, message)?;
-    validate_oneof_model_config(spec, message_name, model_config, message, &oneofs)?;
+    validate_oneof_model_config(spec, message_name, model_config, &oneofs)?;
     for field_name in model_config
         .record
         .fields
