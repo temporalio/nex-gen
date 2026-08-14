@@ -1390,9 +1390,29 @@ fn render_py_violation_if(
     output.push_str("))\n");
 }
 
+/// The largest finite IEEE-754 binary64 magnitude, the range a JSON `number`
+/// carries in every other target (Go `float64`, TS `number`, Java `double`).
+const PY_BINARY64_MAX: &str = "1.7976931348623157e308";
+
 /// Emits the numeric-constraint predicates over `value_expr` (an in-scope
 /// `int`/`float`). `value_expr` is always a bare or dotted name, never a
 /// subscript, so it is safe to interpolate inside a double-quoted f-string.
+///
+/// A `number` is guarded for finiteness first, and every other predicate hangs
+/// off that guard's `else`. Python is the only target that can hold a
+/// non-finite `number` at all: `json.loads` accepts the `Infinity`,
+/// `-Infinity` and `NaN` literals its dialect adds (Go's `json.Unmarshal` and
+/// `JSON.parse` reject the bytes outright, and Jackson rejects them by
+/// default), and it decodes an over-range literal as `inf` or as an unbounded
+/// `int` where Go's `json.Number.Float64` reports a range error. Left
+/// unchecked the value re-serializes as `Infinity`/`NaN` — bytes no other
+/// target can read (P1) — so it is rejected in both directions (P12). It also
+/// has to be rejected *before* the other predicates: `nan` compares false
+/// against every bound, and `math.fmod` raises rather than returns
+/// (`ValueError` on `inf`, `OverflowError` on an int past the binary64 range),
+/// which would escape the aggregated `ValidationError` (P11). An `integer`
+/// needs no guard — `_parse_spec_integer` rejects a non-finite wire value and
+/// caps the magnitude, and an in-memory `int` is always finite.
 fn render_py_numeric_checks(
     output: &mut String,
     value_expr: &str,
@@ -1401,8 +1421,14 @@ fn render_py_numeric_checks(
     indent: &str,
 ) {
     let is_integer = schema.ty.as_ref().and_then(Value::as_str) == Some("integer");
+    let body_indent = if is_integer {
+        indent.to_string()
+    } else {
+        format!("{indent}    ")
+    };
+    let mut body = String::new();
     let mut emit = |condition: String, reason: String| {
-        render_py_violation_if(output, indent, &condition, path_expr, &reason);
+        render_py_violation_if(&mut body, &body_indent, &condition, path_expr, &reason);
     };
     if let Some(min) = &schema.minimum {
         let bound = py_bound_literal(min, is_integer);
@@ -1446,6 +1472,27 @@ fn render_py_numeric_checks(
             condition,
             format!("f\"must be a multiple of {bound}, got {{{value_expr}}}\""),
         );
+    }
+    if is_integer {
+        output.push_str(&body);
+        return;
+    }
+    // The chained comparison is the one finiteness test that never raises:
+    // `math.isfinite` overflows on an int past the binary64 range, while an
+    // `int`/`float` comparison against a float bound is exact for any
+    // magnitude, and `nan` fails it the way every other value out of range
+    // does.
+    render_py_violation_if(
+        output,
+        indent,
+        &format!("not (-{PY_BINARY64_MAX} <= {value_expr} <= {PY_BINARY64_MAX})"),
+        path_expr,
+        &format!("f\"must be a finite number, got {{{value_expr}}}\""),
+    );
+    if !body.is_empty() {
+        output.push_str(indent);
+        output.push_str("else:\n");
+        output.push_str(&body);
     }
 }
 
@@ -1745,7 +1792,12 @@ fn py_field_needs_serialize_check(schema: &Schema) -> bool {
                 || schema.pattern.is_some()
                 || schema.format.is_some()
         }
-        Some("number") | Some("integer") => {
+        // A `number` always carries one: the finiteness guard applies whether or
+        // not a bound is declared, because `json.dumps` would otherwise write an
+        // in-memory `inf`/`nan` out as bytes no other target can read (see
+        // [`render_py_numeric_checks`]).
+        Some("number") => true,
+        Some("integer") => {
             schema.minimum.is_some()
                 || schema.maximum.is_some()
                 || schema.exclusive_minimum.is_some()
@@ -3533,40 +3585,57 @@ fn render_value_parser(
         return Ok(());
     }
 
-    if let Some(const_value) = &schema.const_value {
-        let literal = python_value_literal(const_value)?;
-        let reason =
-            python_string_literal(&format!("must equal {}", py_reason_literal(const_value)));
-        render_py_closed_value_parser(
-            output,
-            std::slice::from_ref(const_value),
-            std::slice::from_ref(&literal),
-            raw_expr,
-            target,
-            &annotation(schema)?,
-            path_expr,
-            indent,
-            &reason,
-        );
-        return Ok(());
-    }
-    if let Some(values) = &schema.enum_values {
+    // A `const` is the one-member case of the closed value set an `enum`
+    // declares, so both take the same parse.
+    if let Some(values) = py_closed_value_set(schema) {
         let literals = values
             .iter()
             .map(python_value_literal)
             .collect::<Result<Vec<_>>>()?;
-        let reason = py_enum_reason(values, raw_expr);
-        render_py_closed_value_parser(
-            output,
-            values,
-            &literals,
-            raw_expr,
-            target,
-            &annotation(schema)?,
-            path_expr,
-            indent,
-            &reason,
-        );
+        let member_type = annotation(schema)?;
+        if py_closed_set_holds_integer(values, &member_type) {
+            // An integral closed set holds an `int`, so the wire number is
+            // normalized through the shared spec-integer parse before the
+            // comparison — the wire `1.0` *is* the integer `1`, and only an
+            // `int` re-serializes as `1` rather than `1.0` (Go routes the same
+            // value through `parseIntegerField`, Java through
+            // `SpecNumbers.specLong`). Normalizing here is also what reinstates
+            // the `1.5` reject and the integer cap for these fields, which a
+            // bare membership test bypasses.
+            let parsed = format!("{slot}_parsed");
+            output.push_str(indent);
+            output.push_str(&format!(
+                "{parsed} = _parse_spec_integer({raw_expr}, {path_expr}, violations)\n"
+            ));
+            output.push_str(indent);
+            output.push_str(&format!("if {parsed} is not None:\n"));
+            // The membership test narrows the normalized `int` to the closed
+            // literal type it declares, so the member takes it as it is — no
+            // cast, unlike the pre-normalization form where the comparison ran
+            // against an `int | float`.
+            render_py_closed_value_membership(
+                output,
+                "if",
+                &literals,
+                &parsed,
+                &parsed,
+                target,
+                path_expr,
+                &format!("{indent}    "),
+                &py_closed_value_reason(schema, values, &parsed),
+            );
+        } else {
+            render_py_closed_value_parser(
+                output,
+                values,
+                &literals,
+                raw_expr,
+                target,
+                path_expr,
+                indent,
+                &py_closed_value_reason(schema, values, raw_expr),
+            );
+        }
         return Ok(());
     }
 
@@ -3742,6 +3811,38 @@ fn py_closed_value_guard(value: &Value, raw_expr: &str) -> Option<(String, &'sta
     }
 }
 
+/// The closed value set a schema declares: the single `const` value, or the
+/// `enum` members. Both are the same assertion — membership in a fixed set —
+/// so both are emitted by one path.
+fn py_closed_value_set(schema: &Schema) -> Option<&[Value]> {
+    schema
+        .const_value
+        .as_ref()
+        .map(std::slice::from_ref)
+        .or(schema.enum_values.as_deref())
+        .filter(|values| !values.is_empty())
+}
+
+/// True when a closed numeric value set holds an `int` at rest: every member is
+/// an integral JSON number, which is exactly when the emitted annotation is a
+/// numeric `typing.Literal[…]`. A float-valued set has no `Literal` form (PEP
+/// 586 admits no float member), falls through to a plain `float`, and keeps the
+/// wire value as it arrived. See `specs/json-schema/features/enum.md`.
+fn py_closed_set_holds_integer(values: &[Value], member_type: &str) -> bool {
+    member_type.starts_with("typing.Literal[") && values.iter().all(Value::is_number)
+}
+
+/// The membership violation reason for a closed value set: a `const` names its
+/// single value, an `enum` names the admissible set and the offending value.
+fn py_closed_value_reason(schema: &Schema, values: &[Value], value_expr: &str) -> String {
+    match &schema.const_value {
+        Some(const_value) => {
+            python_string_literal(&format!("must equal {}", py_reason_literal(const_value)))
+        }
+        None => py_enum_reason(values, value_expr),
+    }
+}
+
 /// Emits the closed-value (`const` single-value / `enum` multi-value) parse: a
 /// kind test, a membership test against the fixed set, and the assignment on
 /// success. See `specs/json-schema/features/{const,enum}.md`.
@@ -3752,17 +3853,11 @@ fn render_py_closed_value_parser(
     compare_exprs: &[String],
     raw_expr: &str,
     target: &str,
-    member_type: &str,
     path_expr: &str,
     indent: &str,
     reason: &str,
 ) {
-    let membership = compare_exprs
-        .iter()
-        .map(|expr| format!("{raw_expr} != {expr}"))
-        .collect::<Vec<_>>()
-        .join(" and ");
-    match values
+    let keyword = match values
         .first()
         .and_then(|value| py_closed_value_guard(value, raw_expr))
     {
@@ -3774,14 +3869,48 @@ fn render_py_closed_value_parser(
                 "    violations.append(Violation(path={path_expr}, reason={}))\n",
                 python_string_literal(kind_reason)
             ));
-            output.push_str(indent);
-            output.push_str(&format!("elif {membership}:\n"));
+            "elif"
         }
-        None => {
-            output.push_str(indent);
-            output.push_str(&format!("if {membership}:\n"));
-        }
-    }
+        None => "if",
+    };
+    // The value reaches the member as it arrived: a string, boolean or float
+    // set narrows to the type it declares through the membership test itself.
+    render_py_closed_value_membership(
+        output,
+        keyword,
+        compare_exprs,
+        raw_expr,
+        raw_expr,
+        target,
+        path_expr,
+        indent,
+        reason,
+    );
+}
+
+/// Emits the membership test of a closed value set and the assignment on
+/// success. `keyword` chains the test onto a preceding kind test (`elif`) or
+/// opens it (`if`); `compared` is the expression held to the set and
+/// `assignment` the value stored once it passes.
+#[allow(clippy::too_many_arguments)]
+fn render_py_closed_value_membership(
+    output: &mut String,
+    keyword: &str,
+    compare_exprs: &[String],
+    compared: &str,
+    assignment: &str,
+    target: &str,
+    path_expr: &str,
+    indent: &str,
+    reason: &str,
+) {
+    let membership = compare_exprs
+        .iter()
+        .map(|expr| format!("{compared} != {expr}"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    output.push_str(indent);
+    output.push_str(&format!("{keyword} {membership}:\n"));
     output.push_str(indent);
     output.push_str(&format!(
         "    violations.append(Violation(path={path_expr}, reason={reason}))\n"
@@ -3789,18 +3918,7 @@ fn render_py_closed_value_parser(
     output.push_str(indent);
     output.push_str("else:\n");
     output.push_str(indent);
-    // A string or boolean value set narrows to its literal type through the
-    // membership test itself. A numeric one does not: the kind test admits
-    // `int | float` (`1.0` is the integer `1`), so the member is cast to the
-    // closed literal type it declares.
-    if member_type.starts_with("typing.Literal[") && values.first().is_some_and(Value::is_number) {
-        output.push_str(&format!(
-            "    {target} = typing.cast({}, {raw_expr})\n",
-            python_string_literal(member_type)
-        ));
-    } else {
-        output.push_str(&format!("    {target} = {raw_expr}\n"));
-    }
+    output.push_str(&format!("    {target} = {assignment}\n"));
 }
 
 /// Emits the elementwise parse of an array. Every element is appended, valid or
