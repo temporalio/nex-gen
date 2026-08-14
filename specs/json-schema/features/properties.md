@@ -77,14 +77,15 @@ from [[type]]; optional/nullable wrapping from [[required]] +
 
 | Aspect | Go | TypeScript | Python | Java |
 |---|---|---|---|---|
-| Aggregate | `struct` | `interface` (**not class**) | Pydantic `BaseModel` | POJO `class` (Java 8; **not records**) |
-| Member | struct field | interface member | model attribute | private field + getter |
-| JSON-name binding | `json:"<name>"` tag | exact key (index access) | `Field(alias="<name>")` / `populate_by_name` | `@JsonProperty("<name>")` |
+| Aggregate | `struct` | `interface` (**not class**) | `@dataclasses.dataclass(slots=True, kw_only=True)` (**not a validating base**) | POJO `class` (Java 8; **not records**) |
+| Member | struct field | interface member | dataclass field | private field + getter |
+| JSON-name binding | `json:"<name>"` tag | exact key (index access) | the wire key, read and written by the converter | `@JsonProperty("<name>")` |
 
 Field naming: JSON member names are mapped to each language's idiomatic
-identifier and the **original JSON name is always pinned** via
-tag/alias/annotation so the wire contract is stable regardless of the
-emitted identifier (**P2**, **P3**). The exact transform, collision
+identifier and the **original JSON name is always pinned** — by a Go
+struct tag, a Java annotation, and in TS/Python by the wire key the
+converter reads and writes — so the wire contract is stable regardless of
+the emitted identifier (**P2**, **P3**). The exact transform, collision
 policy, and escape hatch are specified in [Identifier
 case-mapping](#identifier-case-mapping) below.
 
@@ -204,9 +205,9 @@ namespace and cannot collide with a coincidentally-named top-level type:
 - **Java** — `public static final class Kind` nested in `UserEvent`,
   referenced `UserEvent.Kind`. Java is the only target that cannot inline
   a const/enum, so it is where nesting matters most.
-- **Python** — a const/enum is an inline `Literal[…]`, so there is no
-  named type to nest and nothing synthesized in the module namespace; the
-  fixed value is compared inline in the `model_validator`.
+- **Python** — a const/enum is an inline `typing.Literal[…]`, so there is
+  no named type to nest and nothing synthesized in the module namespace;
+  the fixed value is compared inline in the converter.
 - **TypeScript** — a const/enum is an inline literal / union of literals,
   so there is nothing to nest and nothing synthesized; the validator
   compares the wire value against the inline literal.
@@ -237,7 +238,7 @@ Order:
 ```
 
 That object is a type in every target — a Go struct, a TS interface, a
-Pydantic model, a Java class — so, exactly like an inline [[oneOf]] object
+Python dataclass, a Java class — so, exactly like an inline [[oneOf]] object
 branch, the constraint on it is not its shape but its **name**. It is
 resolved the same way: the shape is **named after the position it was
 written in, moved into `$defs`, and the position rewritten to a `$ref`** at
@@ -310,7 +311,7 @@ per-member dispatch; presence/absence is [[required]], extras are
 |---|---|
 | Go | Custom `UnmarshalJSON` decodes into a shadow of `*json.RawMessage` per member, dispatches each present member through its type helper, collects `Violation{Path, Reason}` into a single `ValidationError`. `Path` is the JSON member name. |
 | TypeScript | Hand-emitted per-member checks over the parsed object; push `Violation { path, reason }` into the list, throw one `ValidationError`. |
-| Python | Pydantic model in strict mode; per-field validation is native and aggregates via `pydantic.ValidationError.errors()` (`loc` = member). |
+| Python | hand-emitted per-member checks over the raw `dict` in the model's `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**); each appends a `Violation { path, reason }` (`path` = the JSON member name) to the list raised as one `ValidationError`. The TypeScript strategy, expressed through the SDK's transfer-type hook. |
 | Java | per-POJO collecting `@JsonDeserialize` (PRINCIPLES Java §5): a two-stage bind that reads the object into a `JsonNode` tree, then dispatches each present member through its spec-strict/constraint helper (see [[type]]), collecting `Violation{path,reason}` into one `ValidationException`. The Go parallel. |
 
 A member subschema validates recursively — nested objects become nested
@@ -320,13 +321,14 @@ aggregates, arrays use [[items]], etc.
 
 `properties` is symmetric across directions: serialize recurses the
 shared `Validate` into each present member (a nested aggregate's own
-`MarshalJSON`/`toTransferType`/`model_dump` validates it), and the JSON-name
-binding (`json` tag / alias / `@JsonProperty`) re-emits each member under
-its **original wire name**, not the case-mapped identifier — so the
-contract is stable in both directions. Member omit-vs-emit-`null` is
-owned by [[required]] + [[nullability]]; the per-member value checks are
-the same predicates the deserializer runs. `path` on a serialize-side
-failure is the JSON member name, identical to deserialize.
+`MarshalJSON`/`toTransferType`/`to_transfer_type` validates it), and the
+JSON-name binding (`json` tag / `@JsonProperty` / the converter's wire key)
+re-emits each member under its **original wire name**, not the case-mapped
+identifier — so the contract is stable in both directions. Member
+omit-vs-emit-`null` is owned by [[required]] + [[nullability]]; the
+per-member value checks are the same predicates the deserializer runs.
+`path` on a serialize-side failure is the JSON member name, identical to
+deserialize.
 
 ## Property-testing matrix
 

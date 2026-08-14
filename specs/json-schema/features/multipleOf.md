@@ -5,10 +5,9 @@ Source: JSON Schema 2020-12, Validation vocabulary, §6.2.1
 
 Asserts that a numeric instance is an exact multiple of a divisor. A pure
 runtime assertion — no type impact. The one numeric keyword with a genuine
-cross-language hazard: **floating-point divisibility does not agree
-value-for-value across the four targets for fractional divisors**, so the
-supported form is narrowed to positive **integer** divisors, where the
-check is exact and portable.
+floating-point hazard: **divisibility has no portable, intent-preserving
+answer for fractional divisors**, so the supported form is narrowed to
+positive **integer** divisors, where the check is exact and portable.
 
 ## Spec summary
 
@@ -39,16 +38,17 @@ Rationale (citing [[PRINCIPLES.md]]):
   - **Integer divisor → exact and portable.** Integer modulo (`integer`
     fields) and IEEE `fmod` (`number` fields) agree value-for-value across
     all four: Go `math.Mod`, Java `%`, JS `%`, and Python `math.fmod`
-    return identical results, and Pydantic's native `multiple_of` matches
-    them for integer divisors (`10.0`/`6.0` accepted, `7.5` rejected,
-    `1e300` accepted for divisor `2`).
-  - **Fractional divisor → the languages disagree.** `fmod` treats the
+    return identical results for integer divisors (`10.0`/`6.0` accepted,
+    `7.5` rejected, `1e300` accepted for divisor `2`).
+  - **Fractional divisor → no defensible answer.** `fmod` treats the
     stored doubles literally, so `0.3 % 0.1 == 0.09999999999999998` and
     `1.1 % 0.1 == 2.77e-17` — i.e. Go/Java/JS/Python all *reject* `0.3`
-    against `multipleOf: 0.1`. Pydantic's native float `multiple_of`,
-    however, is a **tolerant** check and *accepts* `0.3`, `1.1`, and `0.2`.
-    So Python would silently disagree with the other three. This cannot be
-    reconciled without imposing a shared decimal algorithm on every
+    against `multipleOf: 0.1`, which is not what an author writing
+    `multipleOf: 0.1` means. The alternative — a **tolerant** divisibility
+    check, of the kind several validation libraries ship — *accepts* `0.3`,
+    `1.1` and `0.2`, but the tolerance is unspecified and per-library, so
+    any target left on raw `fmod` then disagrees. Neither branch is
+    reconcilable without imposing a shared decimal algorithm on every
     target.
 - **P4 (minimal runtime deps).** A correct fractional check needs decimal
   scaling / big-decimal arithmetic; TypeScript and Go have no native
@@ -100,7 +100,7 @@ integer divisor `m`, identical in both directions (shared `Validate`,
 |---|---|
 | Go | A predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding. Integer field: `if v % m != 0 { push(Violation{Reason: fmt.Sprintf("must be a multiple of %v, got %v", m, v)}) }` (`int64`). Number field: same message when `math.Mod(v, m) != 0` (`float64`). Violations collect into one `ValidationError`. |
 | TypeScript | ``if (v % m !== 0) push(Violation{path, reason: `must be a multiple of ${m}, got ${v}`})`` — `%` is IEEE `fmod`, and integer fields are safe integers so it is exact for both kinds. `m` is an emitted numeric constant. Throw one `ValidationError`. |
-| Python | **Integer field:** native Pydantic `MultipleOf(m)` (`annotated_types`) over `SpecInt` — Python-int modulo, exact, and verified to match (see `pyd_numeric_probe.py`); its message names the divisor (`Input should be a multiple of 2`). **Number field:** an explicit `AfterValidator` raising `must be a multiple of {m}, got {v}` when `math.fmod(v, m) != 0`, rather than Pydantic's native `multiple_of`, so the check is **bit-identical `fmod`** to the other three targets — Pydantic's native float `multiple_of` is *tolerant* and must not be relied on for numbers (it is safe only because we reject the fractional divisors where the tolerance would bite, but standardizing on `fmod` for numbers keeps the predicate provably identical). Aggregates into `pydantic.ValidationError`. |
+| Python | An inline check in the transfer type converter (PRINCIPLES Python §3), emitted the same way TypeScript emits it rather than behind a runtime helper, appending `Violation(path, reason=f"must be a multiple of {m}, got {v}")`. **Integer field:** exact Python-`int` modulo, over the value `_parse_spec_integer` has already normalized. **Number field:** `math.fmod(v, m) != 0` — deliberately the same primitive as the other three rather than any *tolerant* native divisibility check, so the predicate is **bit-identical `fmod`** across targets (a tolerant check would only be safe because we reject the fractional divisors where the tolerance would bite; standardizing on `fmod` keeps the predicate provably identical instead). Aggregates into the single generated `ValidationError`. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the field via the [[type]] `SpecNumbers` helper, then checks `v % m != 0` — `long % long` (integer field) or `double % double` (number field, IEEE `fmod`, matching the others) — pushing a `Violation{path, "must be a multiple of " + m + ", got " + v}` into the single `ValidationException`. Not `BigDecimal.remainder` (would risk decimal-vs-`fmod` divergence on the number path). |
 
 Reason strings name the divisor and offending value (`must be a multiple of

@@ -102,7 +102,7 @@ comparison; a `minContains ≥ 2` (like any [[maxContains]]) **cancels the
 |---|---|
 | Go | `n := 0; for _, e := range v { if matchesContains(e) { n++ } }; if n < min { push(Violation{Path, Reason: fmt.Sprintf("too few matching items: at least %d, got %d", min, n)}) }` — a predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding, collected into one `ValidationError`. |
 | TypeScript | After the `Array.isArray` guard ([[items]]), ``const n = v.filter(matchesContains).length; if (n < min) push(Violation{path, reason: `too few matching items: at least ${min}, got ${n}`})``, throw one `ValidationError`. |
-| Python | A `model_validator` over the decoded `list[T]`: `n = sum(1 for e in v if _matches_contains(e)); if n < min: raise InitErrorDetails(...)`, aggregated into `pydantic.ValidationError`. |
+| Python | `_check_contains` in the transfer type converter tallies `n = sum(1 for e in v if _matches_contains(e))` and on `n < min` appends `Violation(path=…, reason=f"too few matching items: at least {min}, got {n}")` into the single generated `ValidationError`. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) tallies matches over the `List<T>` and on `n < min` pushes a `Violation{path, "too few matching items: at least " + min + ", got " + n}` into the single `ValidationException`. Not bean-validation. |
 
 Reason strings name the concrete bound and offending match count

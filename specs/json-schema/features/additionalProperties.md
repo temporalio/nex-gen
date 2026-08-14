@@ -101,8 +101,9 @@ catch-all member:
   bare `map[string]T`.
 - **Java** — class with `Map<String,T> additionalProperties`, **not** a
   top-level `Map<String,T>`.
-- **Python** — a Pydantic `BaseModel` (`extra='allow'`), extras in
-  `model_extra`, **not** a `dict[str,T]` alias.
+- **Python** — a dataclass with an `additional_properties: dict[str, V] =
+  dataclasses.field(default_factory=dict)` member, **not** a `dict[str,T]`
+  alias.
 - **TypeScript** — an `interface` with an `additionalProperties:
   Record<string,T>` member, **not** an inline index signature or a bare
   `Record<string,T>` alias.
@@ -112,9 +113,9 @@ This buys two things:
 1. **Shape stability** (**P2**/**P13**): adding `properties` later only
    *adds fields/attributes* to the same type — it never changes kind
    ("map alias" → "struct/model"), so downstream call sites keep
-   compiling. Verified the Python instability this avoids
-   (`/tmp/pyd_map_shape.py`): a `dict[str,T]` alias that becomes a
-   `BaseModel` breaks `m["k"]` with `TypeError: not subscriptable`.
+   compiling. The Python instability this avoids: a `dict[str,T]` alias
+   that becomes a dataclass breaks `m["k"]` with `TypeError: not
+   subscriptable`.
 2. **A clean separation of declared keys from extra keys.** Declared
    members are renamed to canonical language identifiers (the
    identifier case-mapping in [[properties]]); extra keys are
@@ -148,8 +149,9 @@ JSON members; the in-memory catch-all is bridged by the generated
 into the catch-all map and spreads them back on write, **not**
 `@JsonAnySetter`/`@JsonAnyGetter` (a class-level custom (de)serializer
 bypasses those), TS hand-emitted ser/deser that lifts top-level extras
-into `additionalProperties` and spreads them back out, Python
-`model_extra`).
+into `additionalProperties` and spreads them back out, Python the
+generated transfer type converter doing the same for
+`additional_properties`).
 
 ## Type mapping
 
@@ -161,24 +163,24 @@ generator guessing their shape (**P13**).
 
 | Case | Go | TypeScript | Python | Java |
 |---|---|---|---|---|
-| Open struct, untyped extras (default / `true`) | struct + `AdditionalProperties map[string]json.RawMessage` | `interface` + `additionalProperties: Record<string, unknown>` | model `extra='allow'` (extras in `model_extra`) | POJO + `Map<String,Object>`, populated/emitted by the collecting (de)serializer (Java §5) |
-| **Typed extras + `properties` (`{type:T}`)** | struct + `AdditionalProperties map[string]T` | `interface` + `additionalProperties: Record<string, T>` | model `extra='allow'` + per-extra `T` validation (extras in `model_extra`) | POJO + `Map<String,T>`, populated/emitted by the collecting (de)serializer (Java §5) with per-extra `T` validation |
-| Closed struct (`false`) | no catch-all field; unknown → error | exact `interface`, no `additionalProperties`; unknown → error | model `extra='forbid'` | no catch-all field; the collecting deserializer (Java §5) flags each undeclared tree key as a `Violation` |
-| Open opaque map (`true`, no props) | struct + `AdditionalProperties map[string]json.RawMessage` (wrapper) | `interface` + `additionalProperties: Record<string, unknown>` (wrapper) | `BaseModel` `extra='allow'` (extras in `model_extra`) | class + `Map<String,Object> additionalProperties` (wrapper) |
-| Typed map (`{type:T}`, no props) | struct + `AdditionalProperties map[string]T` (wrapper) | `interface` + `additionalProperties: Record<string, T>` (wrapper) | `BaseModel` `extra='allow'` + per-extra `T` validation | class + `Map<String,T> additionalProperties` (wrapper) |
-| Closed empty object (`false`, no props) | empty `struct{}`; any member → error | empty `interface`; any member → error | `extra='forbid'`, no fields | empty POJO; the collecting deserializer (Java §5) flags any tree key as a `Violation` |
+| Open struct, untyped extras (default / `true`) | struct + `AdditionalProperties map[string]json.RawMessage` | `interface` + `additionalProperties: Record<string, unknown>` | dataclass + `additional_properties: dict[str, typing.Any]`, populated/emitted by the converter (Python §3) | POJO + `Map<String,Object>`, populated/emitted by the collecting (de)serializer (Java §5) |
+| **Typed extras + `properties` (`{type:T}`)** | struct + `AdditionalProperties map[string]T` | `interface` + `additionalProperties: Record<string, T>` | dataclass + `additional_properties: dict[str, T]`, populated/emitted by the converter (Python §3) with per-extra `T` validation | POJO + `Map<String,T>`, populated/emitted by the collecting (de)serializer (Java §5) with per-extra `T` validation |
+| Closed struct (`false`) | no catch-all field; unknown → error | exact `interface`, no `additionalProperties`; unknown → error | no catch-all member; the converter flags each undeclared key as a `Violation` | no catch-all field; the collecting deserializer (Java §5) flags each undeclared tree key as a `Violation` |
+| Open opaque map (`true`, no props) | struct + `AdditionalProperties map[string]json.RawMessage` (wrapper) | `interface` + `additionalProperties: Record<string, unknown>` (wrapper) | dataclass + `additional_properties: dict[str, typing.Any]` (wrapper) | class + `Map<String,Object> additionalProperties` (wrapper) |
+| Typed map (`{type:T}`, no props) | struct + `AdditionalProperties map[string]T` (wrapper) | `interface` + `additionalProperties: Record<string, T>` (wrapper) | dataclass + `additional_properties: dict[str, T]` (wrapper) + per-extra `T` validation | class + `Map<String,T> additionalProperties` (wrapper) |
+| Closed empty object (`false`, no props) | empty `struct{}`; any member → error | empty `interface`; any member → error | empty dataclass; the converter flags any key as a `Violation` | empty POJO; the collecting deserializer (Java §5) flags any tree key as a `Violation` |
 
-The TS `additionalProperties` member is always present when extras are
-allowed (an empty `{}` when none were received), so the surface is
-uniform whether or not a given instance carried extras.
+The TS `additionalProperties` member and the Python
+`additional_properties` field are always present when extras are allowed
+(empty when none were received — Python via
+`dataclasses.field(default_factory=dict)`), so the surface is uniform
+whether or not a given instance carried extras.
 
 A declared [[properties]] member literally named `additionalProperties`
-collides with the generated catch-all member in **Go**
-(`AdditionalProperties`), **Java** (`additionalProperties`), and **TS**
-(`additionalProperties`) → reject at load time with a diagnostic.
-Python alone is exempt — extras live in Pydantic's `model_extra`, not a
-declared field, so a property named `additionalProperties` is just a
-normal attribute there.
+collides with the generated catch-all member in **all four languages** —
+**Go** (`AdditionalProperties`), **Java** (`additionalProperties`), **TS**
+(`additionalProperties`), **Python** (`additional_properties`) → reject at
+load time with a diagnostic.
 
 ### Why `json.RawMessage`, not `any`, for Go untyped extras
 
@@ -220,7 +222,7 @@ violation aggregates.
 |---|---|---|---|
 | Go | `UnmarshalJSON` routes unmatched keys into `AdditionalProperties`; `MarshalJSON` re-emits them | same routing, but each value goes through `T`'s runtime helper; failures → `Violation{Path:key}` | `UnmarshalJSON` emits `Violation{Path:key, Reason: fmt.Sprintf("unknown property %q", key)}` per unmatched key, collected into one `ValidationError` |
 | TypeScript | deser lifts non-declared keys into the `additionalProperties` Record; reser spreads them back to top-level | same, but each value validated as `T` before going into `additionalProperties` (member stays fully typed `Record<string,T>`) | check parsed keys against the known set; push `Violation{path:key}` per extra, throw one `ValidationError` |
-| Python | `extra='allow'` — extras land in `model_extra`, **round-trip via `model_dump_json`** (verified, `/tmp/pyd_extra_probe.py`) | `extra='allow'` + a post-init validator checks each `model_extra` value is `T`, aggregating per-key failures (verified, `/tmp/pyd_typed_extra.py`) | `extra='forbid'` — Pydantic raises `extra_forbidden` per extra key, aggregated (verified) |
+| Python | `from_transfer_type` lifts non-declared keys into the `additional_properties` dict verbatim; `to_transfer_type` spreads them back to top-level | same, but each value is validated and materialized as `T` before going into `additional_properties` (member stays fully typed `dict[str, T]`) | check parsed keys against `_<MODEL>_DECLARED`; append `Violation(path=key, reason="unknown field")` per extra, raise one `ValidationError` |
 | Java | the per-POJO collecting deserializer (Java §5) routes parsed-tree keys not in the declared set into the `additionalProperties` map; the matching serializer spreads them back | same routing, but each extra value is validated as `T` (bad keys → `Violation{path:key}`) | the collecting deserializer pushes a `Violation{path:key, "unknown property \"" + key + "\""}` per undeclared tree key into the single `ValidationException` — no fail-fast `ignoreUnknown=false`/`UnrecognizedPropertyException` |
 
 ### Per-member `T` validation
@@ -240,11 +242,13 @@ Per language, the mechanism is the one that position already uses:
 - **Go / TypeScript / Java** run the same check emitters a *property* of that
   type runs, over the decoded member inside the member loop — one set of
   predicates, two call sites.
-- **Python** validates and **materializes** each member through a module-level
-  `pydantic.TypeAdapter` over the member's annotation (declared after the classes
-  so a referenced model resolves), then re-encodes each member through that same
-  adapter on the way out. So `model_extra` holds the *declared* member type — an
-  `Inner` instance, an `int` parsed from `1.0`, a `datetime`, `bytes` — rather
+- **Python** validates and **materializes** each member inside the converter's
+  member loop, calling the same `_parse_*` / `_check_*` helpers (or the
+  referenced model's own converter) a *property* of that type calls, then
+  re-encoding each member through the matching `_format_*` / serialize path
+  on the way out. So `additional_properties` holds the *declared* member
+  type — an `Inner` instance, an `int` parsed from `1.0`, a `datetime`,
+  `bytes` — rather
   than the raw wire value.
 - A **closed member value set** (`const`/`enum`) is a validator-only closedness
   in Go and Java: a member has no field to hang a defined type or value class
@@ -259,20 +263,11 @@ dropped from the map or rejected: Go `map[string]*T`, Java
 `Map<String, @Nullable T>`, TypeScript `Record<string, T | null>`, Python
 `T | None`. A present member still carries its own constraints.
 
-Empirical notes (Pydantic 2.13):
-- `extra='allow'` + `strict=True` coexist: declared fields stay strict
-  (`"1"` rejected for an `int`) while extras are preserved.
-- `extra='forbid'` aggregates: `{"id":1,"name":"x","a":1,"b":2}`
-  yields two `extra_forbidden` entries in one `ValidationError`.
-- Typed extras: `{"id":1,"name":"x","a":1,"b":true,"c":"ok"}` against
-  `additionalProperties:{type:string}` yields two `extra_type` entries
-  (`a`, `b`) in one `ValidationError`, while `c` passes and round-trips.
-
 ### Serialize-side (P12)
 
 The catch-all is re-emitted by spreading its members back to top-level
 JSON (Go `MarshalJSON` / TS reserializer / Java the per-POJO collecting
-serializer, Java §5 / Python `model_dump`). Symmetry per mode:
+serializer, Java §5 / Python `to_transfer_type`). Symmetry per mode:
 
 - **Open, untyped** — extras pass through **verbatim**; Go's
   `json.RawMessage` element type guarantees byte-faithful re-emit (no
@@ -331,7 +326,7 @@ unambiguous in both directions.
 - Open opaque map round-trips arbitrary nested JSON unchanged.
 - Pure map (all four languages) decodes into the wrapper's catch-all
   (`AdditionalProperties` member / `additionalProperties` Record /
-  `model_extra`), not a bare map/dict.
+  `additional_properties` dict), not a bare map/dict.
 
 ## Interactions
 

@@ -2,57 +2,159 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
-import pydantic
+import typing_extensions
+import temporalio.converter
 
 from .._definitions import (
-    SpecInt,
-    _emit_set_fields,
+    ValidationError,
+    Violation,
+    _parse_spec_integer,
+    _transfer_type_convertible,
 )
 
 
-class GetCategoryTreeInput(pydantic.BaseModel):
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
+class _GetCategoryTreeInputTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["GetCategoryTreeInput", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["GetCategoryTreeInput"]
+    ) -> "GetCategoryTreeInput":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
 
-    root_id: str = pydantic.Field(alias="rootId")
+        root_id: str = typing.cast("typing.Any", None)
+        if "rootId" not in raw or raw["rootId"] is None:
+            violations.append(Violation(path="rootId", reason="required"))
+        else:
+            root_id_raw = raw["rootId"]
+            if not isinstance(root_id_raw, str):
+                violations.append(Violation(path="rootId", reason="expected string"))
+            else:
+                root_id = root_id_raw
 
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        for key in raw:
+            if key != "rootId":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return GetCategoryTreeInput(
+            root_id=root_id,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "GetCategoryTreeInput") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["rootId"] = value.root_id
+        return out
 
 
-class GetPageInput(pydantic.BaseModel):
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
-
-    page_id: str = pydantic.Field(alias="pageId")
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+@_transfer_type_convertible(_GetCategoryTreeInputTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class GetCategoryTreeInput:
+    root_id: str
 
 
-class PutBlockOutput(pydantic.BaseModel):
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
+class _GetPageInputTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["GetPageInput", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["GetPageInput"]
+    ) -> "GetPageInput":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
 
-    block_id: str = pydantic.Field(alias="blockId")
+        page_id: str = typing.cast("typing.Any", None)
+        if "pageId" not in raw or raw["pageId"] is None:
+            violations.append(Violation(path="pageId", reason="required"))
+        else:
+            page_id_raw = raw["pageId"]
+            if not isinstance(page_id_raw, str):
+                violations.append(Violation(path="pageId", reason="expected string"))
+            else:
+                page_id = page_id_raw
 
-    revision: SpecInt = pydantic.Field()
+        for key in raw:
+            if key != "pageId":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return GetPageInput(
+            page_id=page_id,
+        )
 
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+    @typing_extensions.override
+    def to_transfer_type(self, value: "GetPageInput") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["pageId"] = value.page_id
+        return out
+
+
+@_transfer_type_convertible(_GetPageInputTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class GetPageInput:
+    page_id: str
+
+
+class _PutBlockOutputTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["PutBlockOutput", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["PutBlockOutput"]
+    ) -> "PutBlockOutput":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        block_id: str = typing.cast("typing.Any", None)
+        if "blockId" not in raw or raw["blockId"] is None:
+            violations.append(Violation(path="blockId", reason="required"))
+        else:
+            block_id_raw = raw["blockId"]
+            if not isinstance(block_id_raw, str):
+                violations.append(Violation(path="blockId", reason="expected string"))
+            else:
+                block_id = block_id_raw
+
+        revision: int = typing.cast("typing.Any", None)
+        if "revision" not in raw or raw["revision"] is None:
+            violations.append(Violation(path="revision", reason="required"))
+        else:
+            revision_raw = raw["revision"]
+            revision_parsed = _parse_spec_integer(revision_raw, "revision", violations)
+            if revision_parsed is not None:
+                revision = revision_parsed
+
+        for key in raw:
+            if key != "blockId" and key != "revision":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return PutBlockOutput(
+            block_id=block_id,
+            revision=revision,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "PutBlockOutput") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["blockId"] = value.block_id
+        out["revision"] = value.revision
+        return out
+
+
+@_transfer_type_convertible(_PutBlockOutputTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class PutBlockOutput:
+    block_id: str
+
+    revision: int

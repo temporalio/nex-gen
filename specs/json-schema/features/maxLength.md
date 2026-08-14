@@ -103,13 +103,13 @@ the whole string (see the TS row).
 
 | Language | Strategy |
 |---|---|
-| Go | The comparison is a predicate in the shared `Validate(model)` (`if n := utf8.RuneCountInString(v); n > max { push(Violation{Path, Reason: fmt.Sprintf("length must be <= %d, got %d", max, n)}) }`), which the generated `UnmarshalJSON` calls after decoding; violations collect into one `ValidationError`. **`utf8.RuneCountInString`, not `len`** — `len` is the UTF-8 byte count (verified `len("a😀b") == 6`). |
-| TypeScript | An **allocation-free** surrogate-aware pass that **early-exits** the moment the bound is crossed: walk `v` by UTF-16 unit counting code points (each well-formed high+low surrogate pair is one code point), and stop as soon as the running count exceeds `max`. On the (rare) failure path compute the exact count with the shared `codePointLength(v)` helper for the message: ``push(Violation{path, reason: `length must be <= ${max}, got ${codePointLength(v)}`})``; throw one `ValidationError`. **Never `v.length`** — that is the UTF-16 code-unit count (verified `"a😀b".length === 4`). `max` is an emitted numeric constant. This beats the obvious `[...v].length` (which allocates a full code-point array) ~3.5×, and early-exit bounds work on adversarially long input regardless of `max`. |
-| Python | Pydantic `Annotated[str, Field(max_length=max)]` (equivalently `StringConstraints(max_length=max)`). **Verified to count code points** (pydantic 2.13.4): a single astral emoji — 1 code point but 4 UTF-8 bytes / 2 UTF-16 units — passes `max_length=1`, and two emoji (2 code points) fail. So it is spec-correct without a custom validator, matching the other three. Aggregates in `pydantic.ValidationError`, whose message names the limit (`String should have at most 2 characters`). |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the field node as a `String`, then checks `int n = v.codePointCount(0, v.length()); if (n > max)`, pushing a `Violation{path, "length must be <= " + max + ", got " + n}` into the single `ValidationException`. **`codePointCount(0, length())`, not `length()`** — `length()` is the UTF-16 code-unit count (verified `"a😀b".length() == 4`). Not bean-validation `@Size` — the check is hand-written in the collecting deserializer like every other constraint. |
+| Go | The comparison is a predicate in the shared `Validate(model)` (`if n := utf8.RuneCountInString(v); n > max { push(Violation{Path, Reason: fmt.Sprintf("must have length <= %d, got %d", max, n)}) }`), which the generated `UnmarshalJSON` calls after decoding; violations collect into one `ValidationError`. **`utf8.RuneCountInString`, not `len`** — `len` is the UTF-8 byte count (verified `len("a😀b") == 6`). |
+| TypeScript | An **allocation-free** surrogate-aware pass that **early-exits** the moment the bound is crossed: walk `v` by UTF-16 unit counting code points (each well-formed high+low surrogate pair is one code point), and stop as soon as the running count exceeds `max`. On the (rare) failure path compute the exact count with the shared `codePointLength(v)` helper for the message: ``push(Violation{path, reason: `must have length <= ${max}, got ${codePointLength(v)}`})``; throw one `ValidationError`. **Never `v.length`** — that is the UTF-16 code-unit count (verified `"a😀b".length === 4`). `max` is an emitted numeric constant. This beats the obvious `[...v].length` (which allocates a full code-point array) ~3.5×, and early-exit bounds work on adversarially long input regardless of `max`. |
+| Python | `if (n := len(v)) > max: violations.append(Violation(path=…, reason=f"must have length <= {max}, got {n}"))` in the transfer type converter (PRINCIPLES Python §3). **`len` on a `str` is the code-point count** — a single astral emoji is 1 code point but 4 UTF-8 bytes / 2 UTF-16 units (`len("a😀b") == 3`) — so it is spec-correct with no extra scan, matching the other three. Aggregates into the single generated `ValidationError`. |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the field node as a `String`, then checks `int n = v.codePointCount(0, v.length()); if (n > max)`, pushing a `Violation{path, "must have length <= " + max + ", got " + n}` into the single `ValidationException`. **`codePointCount(0, length())`, not `length()`** — `length()` is the UTF-16 code-unit count (verified `"a😀b".length() == 4`). Not bean-validation `@Size` — the check is hand-written in the collecting deserializer like every other constraint. |
 
 **Informative `reason` strings.** The `Violation` `reason` names the
-**concrete bound and the offending count** — `length must be <= 2, got 3`
+**concrete bound and the offending count** — `must have length <= 2, got 3`
 — per the [[maximum]] convention, so the aggregated error tells the caller
 which limit was crossed and by how much. The bound is an emitted
 compile-time constant; the count is computed at runtime.
@@ -162,7 +162,7 @@ is simply projected from the native value on the encode side.
 
 - `codePointCount(v) == max` → OK (`≤` is inclusive).
 - `v` one code point over `max` → one `ValidationError` whose reason names
-  the bound and count (`length must be <= 2, got 3`).
+  the bound and count (`must have length <= 2, got 3`).
 - **Astral / multi-byte fixtures (the P1 core):** `"a😀b"` counts as **3**
   in all four (not 6/4/4); `"😀😀"` counts as **2**; NFC `"é"` counts as
   **1** and NFD `"e"+U+0301` as **2** — every language agrees on each

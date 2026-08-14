@@ -2,206 +2,483 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
-import pydantic
-import pydantic_core
+import typing_extensions
+import temporalio.converter
 
 from ._definitions import (
-    SpecInt,
-    _emit_set_fields,
-    _reject_explicit_null,
+    ValidationError,
+    Violation,
+    _collect,
+    _parse_spec_integer,
+    _transfer_type_convertible,
 )
 
 
-class GetRoomInput(pydantic.BaseModel):
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
-
-    room_id: str = pydantic.Field(alias="roomId")
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+DEFAULT_PRIORITY = 0
 
 
-class Labels(pydantic.BaseModel):
+_ROOM_DECLARED: frozenset[str] = frozenset(
+    {"roomId", "displayName", "topic", "members", "labels"}
+)
+
+
+class _GetRoomInputTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["GetRoomInput", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["GetRoomInput"]
+    ) -> "GetRoomInput":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        room_id: str = typing.cast("typing.Any", None)
+        if "roomId" not in raw or raw["roomId"] is None:
+            violations.append(Violation(path="roomId", reason="required"))
+        else:
+            room_id_raw = raw["roomId"]
+            if not isinstance(room_id_raw, str):
+                violations.append(Violation(path="roomId", reason="expected string"))
+            else:
+                room_id = room_id_raw
+
+        for key in raw:
+            if key != "roomId":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return GetRoomInput(
+            room_id=room_id,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "GetRoomInput") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["roomId"] = value.room_id
+        return out
+
+
+@_transfer_type_convertible(_GetRoomInputTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class GetRoomInput:
+    room_id: str
+
+
+class _LabelsTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["Labels", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["Labels"]
+    ) -> "Labels":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+        if len(raw) > 50:
+            violations.append(
+                Violation(
+                    path="", reason=f"must have at most 50 properties, got {len(raw)}"
+                )
+            )
+        additional_properties: dict[str, str] = {}
+        for key in raw:
+            member: str = typing.cast("typing.Any", None)
+            member_raw = raw[key]
+            if not isinstance(member_raw, str):
+                violations.append(Violation(path=key, reason="expected string"))
+            else:
+                member = member_raw
+            additional_properties[key] = member
+        if violations:
+            raise ValidationError(violations)
+        return Labels(additional_properties=additional_properties)
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "Labels") -> typing.Any:
+        violations: list[Violation] = []
+        out: dict[str, typing.Any] = {}
+        for key, entry in value.additional_properties.items():
+            out[key] = entry
+        if len(out) > 50:
+            violations.append(
+                Violation(
+                    path="", reason=f"must have at most 50 properties, got {len(out)}"
+                )
+            )
+        if violations:
+            raise ValidationError(violations)
+        return out
+
+
+@_transfer_type_convertible(_LabelsTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class Labels:
     """Arbitrary string key/value labels."""
 
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="allow"
-    )
+    additional_properties: dict[str, str] = dataclasses.field(default_factory=dict)
 
-    @pydantic.model_validator(mode="after")
-    def _validate_extras(self) -> typing.Any:
-        extra = typing.cast(dict[str, object], self.model_extra or {})
-        errors: list[pydantic_core.InitErrorDetails] = []
-        for key, value in list(extra.items()):
-            try:
-                extra[key] = _LABELS_MEMBER.validate_python(value)
-            except pydantic.ValidationError as error:
-                for detail in error.errors():
-                    errors.append(
-                        pydantic_core.InitErrorDetails(
-                            type=pydantic_core.PydanticCustomError(
-                                typing.cast(typing.Any, detail["type"]),
-                                typing.cast(typing.Any, detail["msg"]),
-                            ),
-                            loc=(key, *detail["loc"]),
-                            input=detail["input"],
-                        )
+
+class _MessageTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["Message", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["Message"]
+    ) -> "Message":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        kind: typing.Literal["text"] = typing.cast("typing.Any", None)
+        if "kind" not in raw or raw["kind"] is None:
+            violations.append(Violation(path="kind", reason="required"))
+        else:
+            kind_raw = raw["kind"]
+            if not isinstance(kind_raw, str):
+                violations.append(Violation(path="kind", reason="expected string"))
+            elif kind_raw != "text":
+                violations.append(Violation(path="kind", reason='must equal "text"'))
+            else:
+                kind = kind_raw
+
+        body: str = typing.cast("typing.Any", None)
+        if "body" not in raw or raw["body"] is None:
+            violations.append(Violation(path="body", reason="required"))
+        else:
+            body_raw = raw["body"]
+            if not isinstance(body_raw, str):
+                violations.append(Violation(path="body", reason="expected string"))
+            else:
+                body = body_raw
+
+        reply_to_id: str | None = None
+        if "replyToId" in raw:
+            reply_to_id_raw = raw["replyToId"]
+            if reply_to_id_raw is None:
+                reply_to_id = None
+            else:
+                if not isinstance(reply_to_id_raw, str):
+                    violations.append(
+                        Violation(path="replyToId", reason="expected string")
                     )
-        if len(extra) > 50:
-            errors.append(
-                pydantic_core.InitErrorDetails(
-                    type=pydantic_core.PydanticCustomError(
-                        "too_many_properties",
-                        typing.cast(
-                            typing.Any,
-                            f"must have at most 50 properties, got {len(extra)}",
-                        ),
-                    ),
-                    loc=(),
-                    input=len(extra),
+                else:
+                    reply_to_id = reply_to_id_raw
+
+        priority: int | None = None
+        if "priority" in raw:
+            priority_raw = raw["priority"]
+            if priority_raw is None:
+                violations.append(
+                    Violation(path="priority", reason="explicit null not allowed")
                 )
-            )
-        if errors:
-            raise pydantic.ValidationError.from_exception_data(
-                title=type(self).__name__, line_errors=errors
-            )
-        return self
+            else:
+                priority_parsed = _parse_spec_integer(
+                    priority_raw, "priority", violations
+                )
+                if priority_parsed is not None:
+                    priority = priority_parsed
 
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        _handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return {
-            key: _LABELS_MEMBER.dump_python(value, mode="json", by_alias=True)
-            for key, value in typing.cast(
-                dict[str, object], self.model_extra or {}
-            ).items()
-        }
+        for key in raw:
+            if (
+                key != "kind"
+                and key != "body"
+                and key != "replyToId"
+                and key != "priority"
+            ):
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return Message(
+            kind=kind,
+            body=body,
+            reply_to_id=reply_to_id,
+            priority=priority,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "Message") -> typing.Any:
+        violations: list[Violation] = []
+        out: dict[str, typing.Any] = {}
+        if typing.cast("object", value.kind) not in ("text",):
+            violations.append(Violation(path="kind", reason='must equal "text"'))
+        out["kind"] = value.kind
+        out["body"] = value.body
+        if value.reply_to_id is not None:
+            out["replyToId"] = value.reply_to_id
+        if value.priority is not None:
+            out["priority"] = value.priority
+        if violations:
+            raise ValidationError(violations)
+        return out
 
 
-class Message(pydantic.BaseModel):
+@_transfer_type_convertible(_MessageTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class Message:
     """A chat message."""
 
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
-
-    kind: typing.Literal["text"] = pydantic.Field(default="text")
+    kind: typing.Literal["text"] = "text"
     """Discriminator; always "text"."""
 
-    body: str = pydantic.Field()
+    body: str
 
-    reply_to_id: str | None = pydantic.Field(default=None, alias="replyToId")
+    reply_to_id: str | None = None
     """Id of the message this replies to, if any."""
 
-    priority: SpecInt = pydantic.Field(default=0)
+    priority: int | None = None
     """Delivery priority."""
 
-    @pydantic.model_validator(mode="before")
-    @classmethod
-    def _inject_const_kind(
-        cls,
-        data: object,
-    ) -> object:
-        if isinstance(data, dict):
-            values = typing.cast(dict[str, object], data)
-            if "kind" not in values:
-                data = {**values, "kind": "text"}
-            elif values.get("kind", values.get("kind")) != "text":
-                raise pydantic_core.PydanticCustomError(
-                    "const", 'kind must equal "text"'
+
+class _RoomTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["Room", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(self, value: typing.Any, type_hint: type["Room"]) -> "Room":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        room_id: str = typing.cast("typing.Any", None)
+        if "roomId" not in raw or raw["roomId"] is None:
+            violations.append(Violation(path="roomId", reason="required"))
+        else:
+            room_id_raw = raw["roomId"]
+            if not isinstance(room_id_raw, str):
+                violations.append(Violation(path="roomId", reason="expected string"))
+            else:
+                room_id = room_id_raw
+
+        display_name: str = typing.cast("typing.Any", None)
+        if "displayName" not in raw or raw["displayName"] is None:
+            violations.append(Violation(path="displayName", reason="required"))
+        else:
+            display_name_raw = raw["displayName"]
+            if not isinstance(display_name_raw, str):
+                violations.append(
+                    Violation(path="displayName", reason="expected string")
                 )
-        return typing.cast(object, data)
+            else:
+                display_name = display_name_raw
 
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        topic: str | None = None
+        if "topic" not in raw:
+            violations.append(Violation(path="topic", reason="required"))
+        else:
+            topic_raw = raw["topic"]
+            if topic_raw is None:
+                topic = None
+            else:
+                if not isinstance(topic_raw, str):
+                    violations.append(Violation(path="topic", reason="expected string"))
+                else:
+                    topic = topic_raw
+
+        members: list[str] | None = None
+        if "members" in raw:
+            members_raw = raw["members"]
+            if members_raw is None:
+                violations.append(
+                    Violation(path="members", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(members_raw, list):
+                    violations.append(
+                        Violation(path="members", reason="expected array")
+                    )
+                else:
+                    members_list: list[str] = []
+                    for members_index, members_element in enumerate(
+                        typing.cast("list[typing.Any]", members_raw)
+                    ):
+                        members_item_path = f"members[{members_index}]"
+                        members_item: str = typing.cast("typing.Any", None)
+                        if not isinstance(members_element, str):
+                            violations.append(
+                                Violation(
+                                    path=members_item_path, reason="expected element"
+                                )
+                            )
+                        else:
+                            members_item = members_element
+                        members_list.append(members_item)
+                    members = members_list
+
+        labels: Labels | None = None
+        if "labels" in raw:
+            labels_raw = raw["labels"]
+            if labels_raw is None:
+                violations.append(
+                    Violation(path="labels", reason="explicit null not allowed")
+                )
+            else:
+                try:
+                    labels = _LabelsTransferTypeConverter().from_transfer_type(
+                        labels_raw, Labels
+                    )
+                except ValidationError as error:
+                    _collect(violations, "labels", error)
+
+        additional_properties: dict[str, typing.Any] = {}
+        for key in raw:
+            if key not in _ROOM_DECLARED:
+                additional_properties[key] = raw[key]
+        if violations:
+            raise ValidationError(violations)
+        return Room(
+            room_id=room_id,
+            display_name=display_name,
+            topic=topic,
+            members=members,
+            labels=labels,
+            additional_properties=additional_properties,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "Room") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["roomId"] = value.room_id
+        out["displayName"] = value.display_name
+        out["topic"] = value.topic
+        if value.members is not None:
+            out["members"] = value.members
+        if value.labels is not None:
+            out["labels"] = _LabelsTransferTypeConverter().to_transfer_type(
+                value.labels
+            )
+        for key, entry in value.additional_properties.items():
+            out[key] = entry
+        return out
 
 
-class Room(pydantic.BaseModel):
+@_transfer_type_convertible(_RoomTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class Room:
     """A chat room. Open to forward-compatible extension."""
 
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="allow"
-    )
+    room_id: str
 
-    room_id: str = pydantic.Field(alias="roomId")
+    display_name: str
 
-    display_name: str = pydantic.Field(alias="displayName")
-
-    topic: str | None = pydantic.Field()
+    topic: str | None
     """Room topic; may be explicitly cleared to null."""
 
-    members: list[str] | None = pydantic.Field(default=None)
+    members: list[str] | None = None
 
-    labels: Labels | None = pydantic.Field(default=None)
+    labels: Labels | None = None
 
-    _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
-        {"labels", "members"}
+    additional_properties: dict[str, typing.Any] = dataclasses.field(
+        default_factory=dict
     )
 
-    @pydantic.model_validator(mode="wrap")
-    @classmethod
-    def _reject_null(
-        cls,
-        data: object,
-        handler: typing.Callable[[object], typing.Any],
-    ) -> typing.Any:
-        return _reject_explicit_null(cls, data, handler)
 
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+class _SendMessageInputTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["SendMessageInput", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["SendMessageInput"]
+    ) -> "SendMessageInput":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        room_id: str = typing.cast("typing.Any", None)
+        if "roomId" not in raw or raw["roomId"] is None:
+            violations.append(Violation(path="roomId", reason="required"))
+        else:
+            room_id_raw = raw["roomId"]
+            if not isinstance(room_id_raw, str):
+                violations.append(Violation(path="roomId", reason="expected string"))
+            else:
+                room_id = room_id_raw
+
+        message: Message = typing.cast("typing.Any", None)
+        if "message" not in raw or raw["message"] is None:
+            violations.append(Violation(path="message", reason="required"))
+        else:
+            message_raw = raw["message"]
+            try:
+                message = _MessageTransferTypeConverter().from_transfer_type(
+                    message_raw, Message
+                )
+            except ValidationError as error:
+                _collect(violations, "message", error)
+
+        for key in raw:
+            if key != "roomId" and key != "message":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return SendMessageInput(
+            room_id=room_id,
+            message=message,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "SendMessageInput") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["roomId"] = value.room_id
+        out["message"] = _MessageTransferTypeConverter().to_transfer_type(value.message)
+        return out
 
 
-class SendMessageInput(pydantic.BaseModel):
+@_transfer_type_convertible(_SendMessageInputTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class SendMessageInput:
     """Request to post a message."""
 
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
+    room_id: str
 
-    room_id: str = pydantic.Field(alias="roomId")
-
-    message: Message = pydantic.Field()
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+    message: Message
 
 
-class SendMessageOutput(pydantic.BaseModel):
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
+class _SendMessageOutputTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["SendMessageOutput", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["SendMessageOutput"]
+    ) -> "SendMessageOutput":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
 
-    message_id: str = pydantic.Field(alias="messageId")
+        message_id: str = typing.cast("typing.Any", None)
+        if "messageId" not in raw or raw["messageId"] is None:
+            violations.append(Violation(path="messageId", reason="required"))
+        else:
+            message_id_raw = raw["messageId"]
+            if not isinstance(message_id_raw, str):
+                violations.append(Violation(path="messageId", reason="expected string"))
+            else:
+                message_id = message_id_raw
 
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        for key in raw:
+            if key != "messageId":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return SendMessageOutput(
+            message_id=message_id,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "SendMessageOutput") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["messageId"] = value.message_id
+        return out
 
 
-_LABELS_MEMBER: pydantic.TypeAdapter[typing.Any] = pydantic.TypeAdapter(
-    str, config=pydantic.ConfigDict(strict=True)
-)
+@_transfer_type_convertible(_SendMessageOutputTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class SendMessageOutput:
+    message_id: str

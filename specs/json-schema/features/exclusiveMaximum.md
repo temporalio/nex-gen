@@ -69,7 +69,7 @@ comparison changed to `≥` as the failing test (`v ≥ exclusiveMaximum` → a
 |---|---|
 | Go | The `if v >= exclMax { push(Violation{Reason: fmt.Sprintf("must be < %v, got %v", exclMax, v)}) }` predicate lives in the shared `Validate`, which the generated `UnmarshalJSON` calls after decoding; violations collect into one `ValidationError`. |
 | TypeScript | ``if (v >= exclMax) push(Violation{path, reason: `must be < ${exclMax}, got ${v}`})``. |
-| Python | Pydantic `Lt(exclMax)` (`annotated_types`), composing over `SpecInt` on integer fields (see [[type]] / `pyd_numeric_probe.py`); its message names the bound (`Input should be less than 10`). |
+| Python | `if v >= exclMax: violations.append(Violation(path=…, reason=f"must be < {exclMax}, got {v}"))` in the transfer type converter, after `_parse_spec_integer` normalizes an integer field's wire value (see [[type]]). |
 | Java | Collecting deserializer (PRINCIPLES Java §5) checks `v >= exclMax` via the [[type]] `SpecNumbers` helper, pushing a `Violation{path, "must be < " + exclMax + ", got " + v}` into the `ValidationException`. |
 
 Reason strings name the bound and offending value (`must be < 10, got 10`),

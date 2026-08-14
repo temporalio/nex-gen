@@ -2,71 +2,180 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
-import pydantic
+import typing_extensions
+import temporalio.converter
 
 from ..._definitions import (
-    _emit_set_fields,
-    _reject_explicit_null,
+    ValidationError,
+    Violation,
+    _collect,
+    _transfer_type_convertible,
 )
 
 
-class Category(pydantic.BaseModel):
+class _CategoryTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["Category", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["Category"]
+    ) -> "Category":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        id: str = typing.cast("typing.Any", None)
+        if "id" not in raw or raw["id"] is None:
+            violations.append(Violation(path="id", reason="required"))
+        else:
+            id_raw = raw["id"]
+            if not isinstance(id_raw, str):
+                violations.append(Violation(path="id", reason="expected string"))
+            else:
+                id = id_raw
+
+        name: str = typing.cast("typing.Any", None)
+        if "name" not in raw or raw["name"] is None:
+            violations.append(Violation(path="name", reason="required"))
+        else:
+            name_raw = raw["name"]
+            if not isinstance(name_raw, str):
+                violations.append(Violation(path="name", reason="expected string"))
+            else:
+                name = name_raw
+
+        children: list[Category] | None = None
+        if "children" in raw:
+            children_raw = raw["children"]
+            if children_raw is None:
+                violations.append(
+                    Violation(path="children", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(children_raw, list):
+                    violations.append(
+                        Violation(path="children", reason="expected array")
+                    )
+                else:
+                    children_list: list[Category] = []
+                    for children_index, children_element in enumerate(
+                        typing.cast("list[typing.Any]", children_raw)
+                    ):
+                        children_item_path = f"children[{children_index}]"
+                        children_item: Category = typing.cast("typing.Any", None)
+                        try:
+                            children_item = (
+                                _CategoryTransferTypeConverter().from_transfer_type(
+                                    children_element, Category
+                                )
+                            )
+                        except ValidationError as error:
+                            _collect(violations, children_item_path, error)
+                        children_list.append(children_item)
+                    children = children_list
+
+        for key in raw:
+            if key != "id" and key != "name" and key != "children":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return Category(
+            id=id,
+            name=name,
+            children=children,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "Category") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["id"] = value.id
+        out["name"] = value.name
+        if value.children is not None:
+            out["children"] = [
+                _CategoryTransferTypeConverter().to_transfer_type(element)
+                for element in value.children
+            ]
+        return out
+
+
+@_transfer_type_convertible(_CategoryTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class Category:
     """A node in a self-recursive category tree. The root of this file is itself a type
     (pure JSON Schema file), named Category from the basename.
     """
 
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
+    id: str
 
-    id: str = pydantic.Field()
+    name: str
 
-    name: str = pydantic.Field()
-
-    children: list[Category] | None = pydantic.Field(default=None)
+    children: list[Category] | None = None
     """Sub-categories. A within-file self-cycle via `$ref: '#'`; the possibly-empty array
     is the terminating edge, so it stays in this module.
     """
 
-    _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
-        {"children"}
-    )
 
-    @pydantic.model_validator(mode="wrap")
-    @classmethod
-    def _reject_null(
-        cls,
-        data: object,
-        handler: typing.Callable[[object], typing.Any],
-    ) -> typing.Any:
-        return _reject_explicit_null(cls, data, handler)
+class _PaletteTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["Palette", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["Palette"]
+    ) -> "Palette":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
 
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+        swatches: list[str] = typing.cast("typing.Any", None)
+        if "swatches" not in raw or raw["swatches"] is None:
+            violations.append(Violation(path="swatches", reason="required"))
+        else:
+            swatches_raw = raw["swatches"]
+            if not isinstance(swatches_raw, list):
+                violations.append(Violation(path="swatches", reason="expected array"))
+            else:
+                swatches_list: list[str] = []
+                for swatches_index, swatches_element in enumerate(
+                    typing.cast("list[typing.Any]", swatches_raw)
+                ):
+                    swatches_item_path = f"swatches[{swatches_index}]"
+                    swatches_item: str = typing.cast("typing.Any", None)
+                    if not isinstance(swatches_element, str):
+                        violations.append(
+                            Violation(
+                                path=swatches_item_path, reason="expected element"
+                            )
+                        )
+                    else:
+                        swatches_item = swatches_element
+                    swatches_list.append(swatches_item)
+                swatches = swatches_list
+
+        for key in raw:
+            if key != "swatches":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return Palette(
+            swatches=swatches,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "Palette") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["swatches"] = value.swatches
+        return out
 
 
-class Palette(pydantic.BaseModel):
+@_transfer_type_convertible(_PaletteTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class Palette:
     """A dead $def - defined but never referenced anywhere. Still generated and exported as
     intended reusable API surface (see the $ref spec).
     """
 
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
-
-    swatches: list[str] = pydantic.Field()
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
-
-
-_ = Category.model_rebuild()
+    swatches: list[str]

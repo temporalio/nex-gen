@@ -73,7 +73,7 @@ this table is the bare type only.
 
 Required form below. Optional fields wrap per [[nullability]] (Java
 boxes to `Long`/`Double`/`Boolean`; Go uses `*T`; TS uses `?` on the
-field; Python uses `Optional[T]`).
+field; Python uses `T | None`).
 
 | `type` token | Go | TypeScript | Python | Java |
 |---|---|---|---|---|
@@ -81,7 +81,7 @@ field; Python uses `Optional[T]`).
 | `"integer"` | `int64`             | `number`             | `int`             | `long` |
 | `"number"`  | `float64`           | `number`             | `float`           | `double` |
 | `"boolean"` | `bool`              | `boolean`            | `bool`            | `boolean` |
-| `"object"`  | struct from [[properties]] | interface from [[properties]] (**not classes**) | Pydantic model | POJO class (Java 8; **not records** — see PRINCIPLES Java §1) |
+| `"object"`  | struct from [[properties]] | interface from [[properties]] (**not classes**) | `@dataclasses.dataclass` from [[properties]] (an inline anonymous object schema stays a `dict[str, V]`) | POJO class (Java 8; **not records** — see PRINCIPLES Java §1) |
 | `"array"`   | `[]T` (T from [[items]])   | `T[]`                | `list[T]`         | `List<T>` |
 | `"null"`    | only inside [[nullability]] pattern | only inside [[nullability]] pattern | only inside [[nullability]] pattern | only inside [[nullability]] pattern |
 
@@ -92,8 +92,9 @@ Notes:
   `Double`/`Boolean` for optional fields (see [[nullability]]). The
   primitive-vs-boxed split is what the JVM gives us for free; reference
   types like `String`/`List<T>` use a non-null validator instead.
-- **Python**: `bool <: int`; Pydantic strict mode (the only mode we use)
-  keeps them distinct.
+- **Python**: `bool <: int`, so every generated integer/number check
+  excludes `bool` explicitly — `True` is not `1` on the wire (see the
+  validator mapping).
 
 ## Validator mapping
 
@@ -102,12 +103,12 @@ errors aggregate into the language-native primitive.
 
 | `type` token | Go | TypeScript | Python | Java |
 |---|---|---|---|---|
-| `"string"`  | typed `Unmarshal` into `string` | `typeof v === 'string'` | Pydantic `str` strict | Jackson typed binding |
-| `"integer"` | shadow `*json.Number` → runtime `parseSpecInteger` → `int64` (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) | `typeof v === 'number' && Number.isSafeInteger(v)` (accepts `1.0` natively; caps ±(2^53−1)) | `SpecInt = Annotated[int, BeforeValidator(_parse_spec_integer)]` in runtime | node helper `SpecNumbers.specLong(node, path, errs)` called by the collecting deserializer (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) |
-| `"number"`  | `float64` unmarshal | `typeof v === 'number'` | Pydantic `float` strict | `Double` binding |
-| `"boolean"` | `bool` unmarshal | `typeof v === 'boolean'` | Pydantic `bool` strict (rejects `1`/`0`) | `Boolean` binding |
-| `"object"`  | typed struct unmarshal | `typeof v === 'object' && v !== null && !Array.isArray(v)` | Pydantic model | typed class binding |
-| `"array"`   | typed slice unmarshal | `Array.isArray(v)` | Pydantic `list` | typed `List` binding |
+| `"string"`  | typed `Unmarshal` into `string` | `typeof v === 'string'` | `isinstance(v, str)` | Jackson typed binding |
+| `"integer"` | shadow `*json.Number` → runtime `parseSpecInteger` → `int64` (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) | `typeof v === 'number' && Number.isSafeInteger(v)` (accepts `1.0` natively; caps ±(2^53−1)) | runtime `_parse_spec_integer(v, path, violations)` → `int` (accepts `1.0`, rejects `1.5` and `bool`, caps ±(2^53−1)) | node helper `SpecNumbers.specLong(node, path, errs)` called by the collecting deserializer (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) |
+| `"number"`  | `float64` unmarshal | `typeof v === 'number'` | `isinstance(v, (int, float)) and not isinstance(v, bool)` → `float(v)` | `Double` binding |
+| `"boolean"` | `bool` unmarshal | `typeof v === 'boolean'` | `isinstance(v, bool)` (rejects `1`/`0`) | `Boolean` binding |
+| `"object"`  | typed struct unmarshal | `typeof v === 'object' && v !== null && !Array.isArray(v)` | `isinstance(v, dict)`, then the branch/member converter builds the dataclass | typed class binding |
+| `"array"`   | typed slice unmarshal | `Array.isArray(v)` | `isinstance(v, list)` | typed `List` binding |
 | `"null"`    | `raw == nil` / `bytes.Equal(raw, []byte("null"))` | `v === null` | `v is None` | `v == null` |
 
 Strategy per language:
@@ -148,18 +149,27 @@ Strategy per language:
   `Number.isSafeInteger` (e.g. `9007199254740993` → `9007199254740992`,
   which is `> MAX_SAFE_INTEGER` → rejected). Integer fields therefore
   emit `typeof v === 'number' && Number.isSafeInteger(v)`.
-- **Python**: Pydantic v2 models in strict mode. `pydantic.ValidationError`
-  already aggregates via `.errors()`. Integer fields are typed as
-  `SpecInt = Annotated[int, BeforeValidator(_parse_spec_integer)]` from
-  the generated runtime; the helper explicitly rejects `bool` (closes
-  the `bool <: int` trap), accepts `int`, accepts `float` with zero
-  fractional part. User-facing field type remains `int`.
-  Rationale (empirically verified, Pydantic 2.13): strict mode alone
-  rejects `1.0` and `1e2` (spec-valid integers); lax mode alone accepts
-  `True`, `"1"`, `"1.0"` (spec-invalid). The `BeforeValidator` is the
-  only way to hit the spec exactly. Python ints are unbounded, so the
-  runtime helper also enforces the cross-language cap `±(2^53−1)`:
-  `abs(v) > 9007199254740991` → reject.
+- **Python**: models are inert dataclasses (**PRINCIPLES Python §1**), so
+  every type-classification check is a hand-emitted `isinstance` call in the
+  model's `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**), each
+  mismatch appending a `Violation { path, reason }` to the list the converter
+  raises as one `ValidationError` (**PRINCIPLES Python §2**). Because `bool`
+  is a subclass of `int`, an integer or number check **must exclude `bool`
+  explicitly** — otherwise `True` classifies as `1`. Integer fields stay a
+  plain `int` and run through the generated runtime's
+  `_parse_spec_integer(value, path, violations)`: it rejects `bool`, accepts
+  an `int`, accepts a `float` with zero fractional part (`1.0`, `1e2`), and
+  rejects a fractional one (`1.5`) — the same accept/reject set as Go's
+  `parseSpecInteger` and Java's `SpecNumbers.specLong`, reached by the same
+  mechanism: like the Java helper it **pushes a `Violation` and returns
+  `None`** rather than raising, so one bad integer never aborts the rest of
+  the object's checks (**P11**). Python ints are unbounded, so the helper
+  also enforces the cross-language cap `±(2^53−1)`:
+  `abs(v) > 9007199254740991` → reject. The accepted *values* are identical
+  in all four targets; the `reason` **text** for a rejected number is not —
+  Python follows TypeScript, collapsing both the fractional and the
+  over-cap failure into `expected integer`, where Go names them separately
+  (`not an integer` / the cap message).
 - **Java**: POJOs (Java 8 floor; not records, see PRINCIPLES Java §1)
   bound by the per-POJO collecting deserializer (Java §5) — **no**
   per-field `@JsonDeserialize`, no `Long` binding. It calls a node-based

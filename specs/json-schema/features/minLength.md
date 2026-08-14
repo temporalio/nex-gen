@@ -76,13 +76,13 @@ early-exit, see [[maxLength]]), never the bare `len`/`.length`.
 
 | Language | Strategy |
 |---|---|
-| Go | `if n := utf8.RuneCountInString(v); n < min { push(Violation{Reason: fmt.Sprintf("length must be >= %d, got %d", min, n)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `ValidationError`. |
-| TypeScript | The shared `codePointLength` surrogate-aware scan (see [[maxLength]]) with **early-exit** the moment the running count reaches `min` (pass — no need to count the rest). If the string ends first the full count `n` is already in hand, so the failure path needs **no second pass** (the asymmetry with [[maxLength]], where the over-length case must recount): ``push(Violation{path, reason: `length must be >= ${min}, got ${n}`})``, throw one `ValidationError`. **Never `v.length`** (UTF-16 units). |
-| Python | Pydantic `Annotated[str, Field(min_length=min)]` (`StringConstraints(min_length=min)`) — **verified to count code points** (see [[maxLength]] / `pydantic_length_probe.py`); aggregates in `pydantic.ValidationError`, whose message names the bound (`String should have at least 5 characters`). |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `String`, checks `int n = v.codePointCount(0, v.length()); if (n < min)`, pushing a `Violation{path, "length must be >= " + min + ", got " + n}` into the single `ValidationException`. Not bean-validation `@Size`. |
+| Go | `if n := utf8.RuneCountInString(v); n < min { push(Violation{Reason: fmt.Sprintf("must have length >= %d, got %d", min, n)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `ValidationError`. |
+| TypeScript | The shared `codePointLength` surrogate-aware scan (see [[maxLength]]) with **early-exit** the moment the running count reaches `min` (pass — no need to count the rest). If the string ends first the full count `n` is already in hand, so the failure path needs **no second pass** (the asymmetry with [[maxLength]], where the over-length case must recount): ``push(Violation{path, reason: `must have length >= ${min}, got ${n}`})``, throw one `ValidationError`. **Never `v.length`** (UTF-16 units). |
+| Python | `if (n := len(v)) < min: violations.append(Violation(path=…, reason=f"must have length >= {min}, got {n}"))` in the transfer type converter — `len` on a `str` counts code points (see [[maxLength]]); aggregates into the single generated `ValidationError`. |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `String`, checks `int n = v.codePointCount(0, v.length()); if (n < min)`, pushing a `Violation{path, "must have length >= " + min + ", got " + n}` into the single `ValidationException`. Not bean-validation `@Size`. |
 
 Reason strings name the concrete bound and offending count
-(`length must be >= 5, got 2`), per the [[maximum]] convention.
+(`must have length >= 5, got 2`), per the [[maximum]] convention.
 
 ### Serialize-side (P12)
 
@@ -116,7 +116,7 @@ than being written. See [[maxLength]] serialize note (symmetric).
 
 - `codePointCount(v) == min` → OK (`≥` inclusive).
 - `v` one code point under `min` → one `ValidationError` naming the bound
-  and count (`length must be >= 5, got 4`).
+  and count (`must have length >= 5, got 4`).
 - **Astral fixtures:** `"😀"` counts as **1** (satisfies `minLength:1`);
   the empty string `""` counts as **0**. Every language agrees (see
   [[maxLength]]).
@@ -151,8 +151,7 @@ than being written. See [[maxLength]] serialize note (symmetric).
 ## See also
 
 - [[maxLength]] — the paired inclusive upper bound; owns the shared
-  code-point machinery, the astral/normalization discussion, and the
-  Pydantic open question.
+  code-point machinery and the astral/normalization discussion.
 - [[pattern]] — the other string assertion (regex).
 - [[type]] — supplies the emitted `string`; gates applicability.
 - [[const]], [[default]], [[enum]] — supplied string literals validated

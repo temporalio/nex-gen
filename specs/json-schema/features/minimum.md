@@ -37,8 +37,8 @@ Loader behavior (mirror of [[maximum]] with `≥`):
 - Value not a number → reject.
 - `minimum` on a non-numeric [[type]] → reject (**P7.1**).
 - **On an `integer` field the bound MUST be integer-valued** — `minimum:0.0`
-  accepted (≡ `0`), `minimum:0.5` rejected with a fix-it (same Pydantic
-  build constraint as [[maximum]]).
+  accepted (≡ `0`), `minimum:0.5` rejected with a fix-it (same
+  exact-comparison rationale as [[maximum]]).
 - On a `number` field any finite bound is accepted.
 - `minimum` below the [[type]] integer cap `−(2^53−1)` on an `integer`
   field is redundant (cap already rejects) but allowed.
@@ -68,7 +68,7 @@ comparison:
 |---|---|
 | Go | `if v < min { push(Violation{Reason: fmt.Sprintf("must be >= %v, got %v", min, v)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `ValidationError`. Integer field compares `int64`; number field compares `float64`. |
 | TypeScript | ``if (v < min) push(Violation{path, reason: `must be >= ${min}, got ${v}`})``, throw one `ValidationError`. |
-| Python | Pydantic `Ge(min)` (`annotated_types`), composing over the `SpecInt` `BeforeValidator` on integer fields (normalize `0.0`→`0`, then `Ge`) — verified in `pyd_numeric_probe.py`; aggregates in `pydantic.ValidationError`, whose message already names the bound (`Input should be greater than or equal to 0`). |
+| Python | `if v < min: violations.append(Violation(path=…, reason=f"must be >= {min}, got {v}"))` in the transfer type converter, run after `_parse_spec_integer` normalizes an integer field's wire value (`0.0`→`0`, see [[type]]); aggregates into the single generated `ValidationError`. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the node via the [[type]] `SpecNumbers` helper and checks `v < min` (`long`/`double`), pushing a `Violation{path, "must be >= " + min + ", got " + v}` into the single `ValidationException`. Not bean-validation `@Min`. |
 
 Reason strings name the concrete bound and offending value

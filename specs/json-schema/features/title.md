@@ -7,8 +7,8 @@ A short human-readable label for the schema it sits on. In the spec it is
 a **pure annotation** — it never affects validation, and it never affects
 the emitted *type*. We give it exactly one operational role: it becomes
 the **summary line of the generated doc comment** on the type or member it
-decorates (a Go `//` comment, a TS/Java block comment, a Python docstring
-/ Pydantic `Field(title=…)`). Crucially, and unlike much of the ecosystem,
+decorates (a Go `//` comment, a TS/Java block comment, a Python
+docstring). Crucially, and unlike much of the ecosystem,
 `title` is **never** used to derive a type or field *name* — names come
 from the `$defs` key and the [[properties]] resolved policy, never from
 free-form prose (see Type mapping and Ecosystem variance).
@@ -119,7 +119,7 @@ mechanism — placement, line-wrapping, escaping — is owned by
 |---|---|
 | Go | leading `// ` line of the doc comment above the `type`/field, **led by the identifier name** per Go convention — `// <Name> <title>` (see below). |
 | TypeScript | first line of the `/** … */` JSDoc above the `interface`/field. |
-| Python | first line of the class **docstring**; for a **field**, the native Pydantic `Field(title="…")` argument (Pydantic models `title` first-class, distinct from `description`). |
+| Python | first line of the class **docstring**; for a **field**, the first line of the string literal that follows the field declaration (the attribute-docstring convention documentation tooling reads). |
 | Java | first sentence of the `/** … */` Javadoc above the class/getter. |
 
 **Go — the identifier-led first line.** Idiomatic Go doc comments for an
@@ -245,7 +245,7 @@ we refuse.
   it diverges from the generator's own naming conventions and can cause
   import failures — the subject of issue #5248, "Do not use the title
   attribute to control code generation."
-- **datamodel-code-generator** (Pydantic) exposes `--use-title-as-name`,
+- **datamodel-code-generator** exposes `--use-title-as-name`,
   an **opt-in** flag to use `title` as the class name — off by default,
   precisely because it is surprising.
 

@@ -8,8 +8,8 @@ documentation for a generated type, member, service, or operation. In the
 spec it is a **pure annotation** — it never affects validation, and it
 never affects the emitted *type* or any *identifier*. Its single
 operational role is to become the **body of the generated doc comment**
-(a Go `//` block, a TS JSDoc, a Python docstring / Pydantic
-`Field(description=…)`, a Java Javadoc). Because it is the primary doc
+(a Go `//` block, a TS JSDoc, a Python class or attribute docstring, a
+Java Javadoc). Because it is the primary doc
 source, this spec **owns the shared doc-comment machinery** — assembly
 order, line-wrapping, and per-language escaping — that its sibling
 [[title]] defers to it.
@@ -107,7 +107,7 @@ Per-language block and placement:
 |---|---|
 | Go | `// ` line-comment block above the `type`/field/method, **name-led first line** (see below). |
 | TypeScript | `/** … */` JSDoc above the `interface`/field. |
-| Python | class **docstring** for a type/service; for a **field**, the native Pydantic `Field(description="…")` argument. |
+| Python | class **docstring** for a type/service; for a **field**, an **attribute docstring** — a bare string literal on the line(s) immediately after the field declaration, which every Python documentation tool and editor picks up. |
 | Java | `/** … */` Javadoc above the class/getter/method. |
 
 No new identifier is ever synthesized, so `description` has **no P15

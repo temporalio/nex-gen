@@ -130,7 +130,7 @@ text):
 |---|---|---|
 | Go | a `// Deprecated: This <kind> is deprecated.` paragraph in the doc comment (godoc convention; generic reason — see below) | `gopls` / `staticcheck` SA1019 flag every use; `go doc` renders it. A doc-comment tag, not a keyword. |
 | TypeScript | a bare JSDoc `@deprecated` tag in the `/** … */` block | `tsc` and editors strike-through and warn at call sites. |
-| Python | PEP 702 `@deprecated("…", category=None)` (`typing_extensions` backport / `warnings.deprecated`) on the **type / service / operation**; for a **field**, `Annotated[T, deprecated("…", category=None)]` | static type checkers flag every use; **`category=None` suppresses the access-time `DeprecationWarning`**, so there is no runtime side-effect (parity with the other three). We do *not* emit Pydantic's runtime `Field(deprecated=True)`. |
+| Python | PEP 702 `@deprecated("…", category=None)` (`typing_extensions` backport / `warnings.deprecated`) on the **type / service / operation**; for a **field**, `Annotated[T, deprecated("…", category=None)]` | static type checkers flag every use; **`category=None` suppresses the access-time `DeprecationWarning`**, so there is no runtime side-effect (parity with the other three). |
 | Java | the `@Deprecated` annotation on the type / getter / method, paired with a Javadoc `@deprecated` tag | `javac` warns at every use; IDEs strike-through. |
 
 No new identifier is ever synthesized, so `deprecated` has **no P15
@@ -183,9 +183,9 @@ and re-serializes identically to a non-deprecated one.
 There is **no runtime side-effect in any target** — every marker is a
 compile-/lint-time signal only. Python is deliberately held to this bar:
 its PEP 702 marker is emitted with `category=None`, which suppresses the
-access-time `DeprecationWarning` (see Type mapping), and we do not emit
-Pydantic's runtime `Field(deprecated=True)`. This keeps the four targets
-in parity (P1) — deprecation is purely a generation-time annotation.
+access-time `DeprecationWarning` (see Type mapping). This keeps the four
+targets in parity (P1) — deprecation is purely a generation-time
+annotation.
 
 ## Property-testing matrix
 

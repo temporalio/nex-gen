@@ -387,29 +387,57 @@ fn python_json_example_generation_matches_checked_in_output() {
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
         if example_id == "showcase" {
             let all = rendered.values().cloned().collect::<Vec<_>>().join("\n");
-            // Scalar defaults surface natively via the Pydantic field default.
-            assert!(all.contains("greeting: str = pydantic.Field(default=\"hello\")"));
-            assert!(all.contains("debug: bool = pydantic.Field(default=False)"));
+            // A scalar `default` is advisory: the member is encoded like any other
+            // optional one (so an unset key stays omitted and the wire stays
+            // byte-identical) and the default rides on a `DEFAULT_<FIELD>`
+            // constant the consumer applies, as in TypeScript.
+            assert!(all.contains("greeting: str | None = None"));
+            assert!(all.contains("debug: bool | None = None"));
+            assert!(all.contains("DEFAULT_GREETING"));
+            assert!(all.contains("DEFAULT_DEBUG"));
+            assert!(all.contains("DEFAULT_RETRIES"));
             // `deprecated` → PEP 702 marker (no runtime warning); `title` → docstring.
             assert!(all.contains(
                 "typing_extensions.deprecated(\"This field is deprecated.\", category=None)"
             ));
             assert!(all.contains("Retry budget"));
             // `x-py-name` override (Stage 4): the attribute uses the override
-            // while the wire name is pinned by `Field(alias="legacyId")`.
+            // while the wire name stays `legacyId`, pinned by the converter body.
             assert!(all.contains("legacy_id_py:"));
-            assert!(all.contains("alias=\"legacyId\""));
-            // A free-form object inlines as a mapping — both as a union branch
-            // and (extra="allow" + a member-count validator) as a named model.
+            assert!(all.contains("\"legacyId\""));
+            // A free-form object inlines as a mapping as a union branch, and as a
+            // named model with an explicit `additional_properties` catch-all.
             assert!(all.contains("payload: dict[str, typing.Any] | str | None"));
-            assert!(all.contains("class Extras(pydantic.BaseModel):"));
+            assert!(all.contains("class Extras:"));
+            assert!(
+                all.contains("additional_properties: dict[str, typing.Any] = dataclasses.field(")
+            );
+            // Each model is a plain dataclass carrying a private transfer type
+            // converter, so the default Temporal data converter picks it up. The
+            // registration goes through the runtime's `_transfer_type_convertible`
+            // shim, which erases the converter's value-type parameter — binding it
+            // on the decorated class is circular for a static type checker.
+            assert!(all.contains("@dataclasses.dataclass(slots=True, kw_only=True)"));
+            assert!(all.contains("@_transfer_type_convertible(_ExtrasTransferTypeConverter)"));
+            assert!(all.contains(
+                "def _transfer_type_convertible(\n    converter: type[temporalio.converter.TransferTypeConverter[typing.Any, typing.Any]],\n) -> collections.abc.Callable[[type[_ModelT]], type[_ModelT]]:"
+            ));
+            assert!(
+                all.contains(
+                    "    return temporalio.converter.transfer_type_convertible(converter)"
+                )
+            );
             // A tagged union whose branches are written inline: each branch names
-            // itself with `x-py-name` and becomes a model Pydantic selects on.
-            assert!(all.contains("class TextNote(pydantic.BaseModel):"));
+            // itself with `x-py-name` and becomes a model of its own.
+            assert!(all.contains("class TextNote:"));
             assert!(all.contains("Note: typing.TypeAlias = TextNote | LinkNote"));
+            // A named union cannot be decorated, so its conversion is emitted as
+            // module-private free functions instead.
+            assert!(all.contains("def _note_from_transfer_type("));
+            assert!(all.contains("def _note_to_transfer_type("));
             // The lone inline object branch of a property union derives its name
             // from the union it belongs to.
-            assert!(all.contains("class ShowcaseDetailObject(pydantic.BaseModel):"));
+            assert!(all.contains("class ShowcaseDetailObject:"));
             assert!(all.contains("detail: ShowcaseDetailObject | str | None"));
             assert!(all.contains("must have at most 4 properties"));
         }
@@ -858,8 +886,8 @@ fn python_rejects_support_namespace() {
 }
 
 /// An inline **structured** object `oneOf` branch on a property: the branch is
-/// named `<Union>Object` and emitted as a module-level `BaseModel`, which is what
-/// Pydantic selects on for the object member of the union.
+/// named `<Union>Object` and emitted as a module-level dataclass, which the
+/// union's dispatcher selects for the object member of the union.
 /// See `specs/json-schema/features/oneOf.md` ("Object branches").
 #[test]
 fn python_json_names_inline_object_union_branch() {
@@ -884,7 +912,8 @@ fn python_json_names_inline_object_union_branch() {
     let rendered = fs::read_to_string(output_path.join("models.py")).unwrap();
 
     assert!(rendered.contains("payload: DetailPayloadObject | str | None"));
-    assert!(rendered.contains("class DetailPayloadObject(pydantic.BaseModel):"));
+    assert!(rendered.contains("class DetailPayloadObject:"));
+    assert!(rendered.contains("class _DetailPayloadObjectTransferTypeConverter("));
     assert!(rendered.contains("text: str"));
     // The branch model is part of the module surface, like any named definition.
     let exports = fs::read_to_string(output_path.join("__init__.py")).unwrap();
@@ -892,11 +921,11 @@ fn python_json_names_inline_object_union_branch() {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
-/// Every constraint a **non-object** branch declares rides inside the union
-/// member's own annotation, so Pydantic holds the value to the branch it selected
-/// — the native `Field` bounds innermost, the refinement validators wrapping
-/// them, and the `uniqueItems`/`contains` validators Pydantic has no native form
-/// for. See `specs/json-schema/features/oneOf.md` ("Validator mapping").
+/// Every constraint a **non-object** branch declares is enforced by the union's
+/// dispatcher rather than by the annotation, so the field annotation is the plain
+/// union of the branch types while the bound, the `pattern`, and the
+/// `uniqueItems` check all live in the converter body.
+/// See `specs/json-schema/features/oneOf.md` ("Validator mapping").
 #[test]
 fn python_json_validates_non_object_union_branch_constraints() {
     let temp_dir = unique_output_path("py-json-branch-constraints");
@@ -919,26 +948,27 @@ fn python_json_validates_non_object_union_branch_constraints() {
     .unwrap();
     let rendered = fs::read_to_string(output_path.join("models.py")).unwrap();
 
-    // The string branch: native length bound innermost, `pattern` wrapping it;
-    // the integer branch's bound is its own.
-    assert!(rendered.contains(
-        "value: typing.Annotated[typing.Annotated[str, pydantic.Field(min_length=3)], pydantic.AfterValidator(_check_pattern(\"^[a-z]+\\\\Z\"))] | typing.Annotated[SpecInt, pydantic.Field(ge=1)] | None"
-    ));
-    // The array branch: `minItems` natively, `uniqueItems` through the validator
-    // a position with no declared field of its own needs.
-    assert!(rendered.contains(
-        "typing.Annotated[typing.Annotated[list[float], pydantic.Field(min_length=1)], pydantic.AfterValidator(_check_unique_items)] | typing.Literal[\"auto\", \"manual\"] | None"
-    ));
-    // The validators are imported from the runtime module.
-    assert!(rendered.contains("_check_pattern,"));
-    assert!(rendered.contains("_check_unique_items,"));
+    // The string branch's `minLength`/`pattern` and the integer branch's
+    // `minimum` leave no residue on the annotation: it is the plain branch union.
+    assert!(rendered.contains("value: str | int | None"));
+    // Same for the array branch's `minItems`/`uniqueItems`; a closed value set
+    // still narrows to a `typing.Literal`.
+    assert!(rendered.contains("list[float] | typing.Literal[\"auto\", \"manual\"] | None"));
+    // The branch checks themselves live in the converter body: a `pattern` lowers
+    // to a `.search` against a module-level compiled regex const, `uniqueItems` to
+    // a runtime helper imported from the definitions module.
+    assert!(
+        rendered.contains("_PATTERN_F242E3A159C2422C = re.compile(\"^[a-z]+\\\\Z\", re.ASCII)")
+    );
+    assert!(rendered.contains("if _PATTERN_F242E3A159C2422C.search(value) is None:"));
+    assert!(rendered.contains("_check_unique_items("));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
 /// A union in an element position: the loader names it, so Python emits an
-/// ordinary union alias and Pydantic selects the branch per element. An optional
-/// field whose *elements* are nullable still needs its own `| None` — the
-/// element's `None` is not the field's.
+/// ordinary union alias and the converter dispatches the branch per element. An
+/// optional field whose *elements* are nullable still needs its own `| None` —
+/// the element's `None` is not the field's.
 /// See `specs/json-schema/features/oneOf.md` ("Unions in element positions").
 #[test]
 fn python_json_annotates_element_position_unions() {
@@ -962,7 +992,7 @@ fn python_json_annotates_element_position_unions() {
     .unwrap();
     let rendered = fs::read_to_string(output_path.join("models.py")).unwrap();
 
-    assert!(rendered.contains("BagSegmentsItem: typing.TypeAlias = str | SpecInt"));
+    assert!(rendered.contains("BagSegmentsItem: typing.TypeAlias = str | int"));
     assert!(rendered.contains("segments: list[BagSegmentsItem] | None"));
     assert!(rendered.contains("choices: list[Choice] | None"));
     assert!(rendered.contains("slots: list[str | None] | None"));

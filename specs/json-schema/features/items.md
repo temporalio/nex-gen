@@ -101,7 +101,7 @@ Notes:
 - **Element nullability is the element's own concern.** An element
   schema that is the recognized [[nullability]] `oneOf` pattern makes the
   *elements* nullable — `[]*T` (Go), `(T | null)[]` (TS),
-  `list[Optional[T]]` (Python), `List<@Nullable T>` (Java) — distinct
+  `list[T | None]` (Python), `List<@Nullable T>` (Java) — distinct
   from the array field itself being optional/nullable, which wraps the
   whole collection. The two axes compose (an optional array of nullable
   elements is legal), and neither implies the other: an optional array of
@@ -128,14 +128,14 @@ Notes:
 Per **P10** the array type and every element are validated at the
 (de)serializer boundary; per **P11** element failures aggregate.
 `items` contributes the per-element dispatch; the outer array-type check
-(`Array.isArray` / typed slice / Pydantic `list` / typed `List` binding)
-comes from [[type]]'s `"array"` row.
+(`Array.isArray` / typed slice / `isinstance(v, list)` / typed `List`
+binding) comes from [[type]]'s `"array"` row.
 
 | Language | Strategy |
 |---|---|
 | Go | Custom `UnmarshalJSON` decodes the field into a shadow `[]*json.RawMessage`, then dispatches each element through `T`'s runtime helper, collecting `Violation{Path, Reason}` into the one `ValidationError`. `Path` threads the index: `tags[2]`. |
 | TypeScript | Hand-emitted `Array.isArray` guard, then a per-element loop running `T`'s checks; push `Violation { path: "tags[2]", reason }` per bad element into the list, throw one `ValidationError`. |
-| Python | Pydantic `list[T]` in strict mode; per-element validation is native and aggregates via `pydantic.ValidationError.errors()` (`loc` carries the element index). |
+| Python | The transfer type converter (PRINCIPLES Python §3) guards `isinstance(v, list)`, then loops the raw elements through `T`'s parse helper / converter, appending `Violation(path="tags[2]", reason=…)` per bad element and raising one generated `ValidationError`. The TypeScript parallel. |
 | Java | the per-POJO collecting deserializer (PRINCIPLES Java §5) reads the array node, walks each element through `T`'s spec-strict/constraint helper, and collects `Violation{path:"tags[2]", reason}` into the one `ValidationException`. The Go parallel. |
 
 - **Path convention.** Element failures use bracketed indices appended to
@@ -156,7 +156,7 @@ comes from [[type]]'s `"array"` row.
 
 `items` is symmetric across directions: serialize recurses the shared
 `Validate` into each element (a nested aggregate element runs its own
-`MarshalJSON`/`toTransferType`/`model_dump`; a scalar element re-runs the
+`MarshalJSON`/`toTransferType`/`to_transfer_type`; a scalar element re-runs the
 same predicate the deserializer used) **before emitting a byte**, failing
 with the same aggregated primitive (**P11**), and re-emits elements in
 order (arrays are ordered — unlike object members, element order is part

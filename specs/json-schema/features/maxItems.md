@@ -76,7 +76,7 @@ primitive.
 |---|---|
 | Go | The comparison is a predicate in the shared `Validate(model)` (`if n := len(v); n > max { push(Violation{Path, Reason: fmt.Sprintf("too many items: at most %d, got %d", max, n)}) }`), which the generated `UnmarshalJSON` calls after decoding into the `[]T`; violations collect into one `ValidationError`. |
 | TypeScript | After the `Array.isArray` guard ([[items]]), the shared `Validate`'s `v.length > max` check pushes ``Violation{path, reason: `too many items: at most ${max}, got ${v.length}`}``, throw one `ValidationError`. `max` is an emitted numeric constant. |
-| Python | Pydantic `Annotated[list[T], Field(max_length=max)]` — for sequences `max_length` bounds the element count; aggregates in `pydantic.ValidationError`, whose message names the limit (`List should have at most 3 items`). |
+| Python | After the `isinstance(v, list)` guard ([[items]]), `if (n := len(v)) > max: violations.append(Violation(path=…, reason=f"too many items: at most {max}, got {n}"))` in the transfer type converter (PRINCIPLES Python §3), aggregated into the single generated `ValidationError`. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the array node into the `List<T>`, then checks `int n = v.size(); if (n > max)`, pushing a `Violation{path, "too many items: at most " + max + ", got " + n}` into the single `ValidationException`. Not bean-validation `@Size` — hand-written like every other constraint. |
 
 **Informative `reason` strings.** The `Violation` `reason` names the

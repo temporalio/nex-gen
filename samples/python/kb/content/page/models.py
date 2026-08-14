@@ -2,45 +2,81 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
-import pydantic
+import typing_extensions
+import temporalio.converter
 
 from ..._definitions import (
-    SpecInt,
-    _emit_set_fields,
-    _reject_explicit_null,
+    ValidationError,
+    Violation,
+    _parse_spec_integer,
+    _transfer_type_convertible,
 )
 
 
-class PageMeta(pydantic.BaseModel):
+class _PageMetaTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["PageMeta", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["PageMeta"]
+    ) -> "PageMeta":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        author: str = typing.cast("typing.Any", None)
+        if "author" not in raw or raw["author"] is None:
+            violations.append(Violation(path="author", reason="required"))
+        else:
+            author_raw = raw["author"]
+            if not isinstance(author_raw, str):
+                violations.append(Violation(path="author", reason="expected string"))
+            else:
+                author = author_raw
+
+        word_count: int | None = None
+        if "wordCount" in raw:
+            word_count_raw = raw["wordCount"]
+            if word_count_raw is None:
+                violations.append(
+                    Violation(path="wordCount", reason="explicit null not allowed")
+                )
+            else:
+                word_count_parsed = _parse_spec_integer(
+                    word_count_raw, "wordCount", violations
+                )
+                if word_count_parsed is not None:
+                    word_count = word_count_parsed
+
+        for key in raw:
+            if key != "author" and key != "wordCount":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return PageMeta(
+            author=author,
+            word_count=word_count,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "PageMeta") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        out["author"] = value.author
+        if value.word_count is not None:
+            out["wordCount"] = value.word_count
+        return out
+
+
+@_transfer_type_convertible(_PageMetaTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class PageMeta:
     """Non-cyclic helper. Referenced only by Page, references nothing recursive, so it
     stays in the content_page module even though Page is hoisted.
     """
 
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
+    author: str
 
-    author: str = pydantic.Field()
-
-    word_count: SpecInt | None = pydantic.Field(default=None, alias="wordCount")
-
-    _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
-        {"wordCount", "word_count"}
-    )
-
-    @pydantic.model_validator(mode="wrap")
-    @classmethod
-    def _reject_null(
-        cls,
-        data: object,
-        handler: typing.Callable[[object], typing.Any],
-    ) -> typing.Any:
-        return _reject_explicit_null(cls, data, handler)
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+    word_count: int | None = None

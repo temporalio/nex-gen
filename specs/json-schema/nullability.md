@@ -133,34 +133,40 @@ nullability convention (`x?: T | null` is the optional+nullable form).
 
 ### Python
 
-Use `Optional[T]` (alias for `Union[T, None]`) on the field type.
-Default value is `None` for absence.
+Optional fields widen to `T | None` and default to `None`; required
+fields carry the bare type and no default. Emitted as a plain
+`@dataclasses.dataclass(slots=True, kw_only=True)` (see PRINCIPLES
+Python §1), so the fields below are the whole class — every field is
+keyword-only, which is why a bare-typed field may follow a defaulted
+one:
 
 ```python
-from typing import Optional
-from pydantic import BaseModel
+from __future__ import annotations
 
-class User(BaseModel):
-    id: int                           # required
-    nickname: Optional[int] = None    # optional — None if absent
-    name: str                         # required
-    email: Optional[str] = None       # optional
+import dataclasses
+
+
+@dataclasses.dataclass(slots=True, kw_only=True)
+class User:
+    id: int                      # required
+    nickname: int | None = None  # optional — None if absent
+    name: str                    # required
+    email: str | None = None     # optional
 ```
 
 | `type` token | required | optional |
 |---|---|---|
-| any | `T` | `Optional[T]` (with `= None` default) |
+| any | `T` | `T \| None` (with `= None` default) |
 
-Pydantic strict mode + `Optional[T]` accepts `None` for the optional
-case. At the *value* level absence and explicit `null` both read as
-`None`, but Pydantic's `model_fields_set` records **which keys the wire
-actually carried**, so the distinction is *not* lost at the model level
-— it is recoverable for serialization. The generated
-`@model_serializer` (keyed on `model_fields_set`) therefore round-trips
-optional+nullable **faithfully** (wire `null` → set → re-emitted as
-`null`; wire-absent → unset → omitted), putting Python in the same
-faithful tier as TypeScript (see "Round-trip behavior" and
-"Serialize-side behavior" below, and PRINCIPLES Python §3).
+Absence is `None`. The dataclass itself neither coerces nor checks
+anything: the only path from wire to field is the model's transfer-type
+converter (PRINCIPLES Python §3), whose parse adapter classifies the
+type token outright and so admits no lax coercion (`"1"`→`1`,
+`1`→`True`) that would violate P10/P7. At the value level absence and
+explicit `null` both read as `None`, and a dataclass field has nowhere
+to record which of the two the wire carried, so optional+nullable
+collapses to the same tier as Go and Java (see "Round-trip behavior"
+and "Serialize-side behavior" below).
 
 ## Nullability convention
 
@@ -220,32 +226,33 @@ legal.
 Two nullable states exist: **optional+nullable** (absent / `null` / T)
 and **required+nullable** (`null` / T; absent rejected). They share the
 same emitted *type* in every language; only the presence check differs,
-and TypeScript/Python also differ at the field-modifier level.
+and TypeScript/Python also differ at the declaration level (TS's `?`
+modifier, Python's `= None` default).
 
 **Optional + nullable** (absent OK, `null` OK, T OK):
 
 | `type` token | Java | Go | TypeScript | Python |
 |---|---|---|---|---|
-| `"integer"` | `@Nullable Long`    | `*int64`   | `x?: number \| null`  | `Optional[int] = None` |
-| `"number"`  | `@Nullable Double`  | `*float64` | `x?: number \| null`  | `Optional[float] = None` |
-| `"boolean"` | `@Nullable Boolean` | `*bool`    | `x?: boolean \| null` | `Optional[bool] = None` |
-| `"string"`  | `@Nullable String`  | `*string`  | `x?: string \| null`  | `Optional[str] = None` |
-| `"object"`  | `@Nullable T`       | `*T`       | `x?: T \| null`       | `Optional[T] = None` |
-| `"array"`   | `@Nullable List<T>` | `[]T` (nil = absent or null) | `x?: T[] \| null` | `Optional[list[T]] = None` |
+| `"integer"` | `@Nullable Long`    | `*int64`   | `x?: number \| null`  | `x: int \| None = None` |
+| `"number"`  | `@Nullable Double`  | `*float64` | `x?: number \| null`  | `x: float \| None = None` |
+| `"boolean"` | `@Nullable Boolean` | `*bool`    | `x?: boolean \| null` | `x: bool \| None = None` |
+| `"string"`  | `@Nullable String`  | `*string`  | `x?: string \| null`  | `x: str \| None = None` |
+| `"object"`  | `@Nullable T`       | `*T`       | `x?: T \| null`       | `x: T \| None = None` |
+| `"array"`   | `@Nullable List<T>` | `[]T` (nil = absent or null) | `x?: T[] \| null` | `x: list[T] \| None = None` |
 
 **Required + nullable** (`null` OK, T OK, absent rejected) — same type,
 presence enforced by the validator; TS drops the `?`, Python drops the
-`= None` default (Pydantic v2: `Optional[T]` with no default is
-required-and-nullable):
+`= None` default (a dataclass field with no default must be supplied at
+construction):
 
 | `type` token | Java | Go | TypeScript | Python |
 |---|---|---|---|---|
-| `"integer"` | `@Nullable Long`    | `*int64`   | `x: number \| null`  | `Optional[int]` |
-| `"number"`  | `@Nullable Double`  | `*float64` | `x: number \| null`  | `Optional[float]` |
-| `"boolean"` | `@Nullable Boolean` | `*bool`    | `x: boolean \| null` | `Optional[bool]` |
-| `"string"`  | `@Nullable String`  | `*string`  | `x: string \| null`  | `Optional[str]` |
-| `"object"`  | `@Nullable T`       | `*T`       | `x: T \| null`       | `Optional[T]` |
-| `"array"`   | `@Nullable List<T>` | `[]T` (nil = null) | `x: T[] \| null` | `Optional[list[T]]` |
+| `"integer"` | `@Nullable Long`    | `*int64`   | `x: number \| null`  | `x: int \| None` |
+| `"number"`  | `@Nullable Double`  | `*float64` | `x: number \| null`  | `x: float \| None` |
+| `"boolean"` | `@Nullable Boolean` | `*bool`    | `x: boolean \| null` | `x: bool \| None` |
+| `"string"`  | `@Nullable String`  | `*string`  | `x: string \| null`  | `x: str \| None` |
+| `"object"`  | `@Nullable T`       | `*T`       | `x: T \| null`       | `x: T \| None` |
+| `"array"`   | `@Nullable List<T>` | `[]T` (nil = null) | `x: T[] \| null` | `x: list[T] \| None` |
 
 (Java is `@Nullable` across every nullable column — the annotation
 tracks in-memory nullness, not the wire distinction; see the optionality
@@ -261,31 +268,33 @@ already rely on a validator the type can't express.)
   unambiguously means "the wire sent `null`"; the serializer always
   emits the key (never omits it), and `null` ⟷ `null`. There is no
   absent state to confuse it with.
-- **Optional + nullable round-trips faithfully in TypeScript and
-  Python; collapses in Go and Java.** TS keeps `undefined` (absent) vs
-  `null` distinct in memory. Python reads both as `None` at the value
-  level but tracks `model_fields_set`, so the generated
-  `@model_serializer` re-emits a wire `null` as `null` and omits a
-  wire-absent key. Go (`*T` `nil`) and Java (`null`) genuinely cannot
-  distinguish the two in memory, so they emit a single canonical form
-  — the key is **omitted** (the conservative choice; emitting `null`
-  would fabricate a value the client may never have sent). A client
-  that sent explicit `null` on an optional+nullable field reads it
-  back as absent **in Go/Java only**.
+- **Optional + nullable round-trips faithfully in TypeScript;
+  collapses in Go, Java and Python.** TS keeps `undefined` (absent) vs
+  `null` distinct in memory, so its serializer re-emits a wire `null`
+  as `null` and omits a wire-absent key. Go (`*T` `nil`), Java
+  (`null`) and Python (`None`) genuinely cannot distinguish the two in
+  memory, so they emit a single canonical form — the key is
+  **omitted** (the conservative choice; emitting `null` would
+  fabricate a value the client may never have sent). A client that
+  sent explicit `null` on an optional+nullable field reads it back as
+  absent **in Go/Java/Python**.
 
-**Collapse note (Go / Java only):** the in-memory representations of
-"absent" and "JSON null" are the same (`nil`, `null`), and — unlike
-Python's `model_fields_set` and TS's `undefined` — there is no side
-channel recording which the wire carried, so post-validation user code
-can't recover it. This matches **P8**'s framing — optional and
-nullable are distinct *schema* concerns; runtime collapse is acceptable
-when the language can't represent the difference. Making Go/Java
-faithful would require a presence-tracking wrapper (`Null[T]` / shadow
-bit); this is rejected as ergonomic overhead (P2) that the conservative
-omit avoids.
+**Collapse note (Go / Java / Python):** the in-memory representations of
+"absent" and "JSON null" are the same (`nil`, `null`, `None`), and —
+unlike TS's `undefined` — there is no side channel recording which the
+wire carried, so post-validation user code can't recover it. This
+matches **P8**'s framing — optional and nullable are distinct *schema*
+concerns; runtime collapse is acceptable when the language can't
+represent the difference. Making any of the three faithful would require
+a presence-tracking channel — a `Null[T]` wrapper or shadow bit in
+Go/Java, an `UNSET` sentinel widening every optional field to
+`T | None | UnsetType` or a hidden per-instance presence set in Python;
+each is rejected as ergonomic overhead (P2) that the conservative omit
+avoids, and the sentinel additionally forces every consumer to test
+against a generated marker instead of plain `None`.
 
-TypeScript and Python enforce *and* preserve the distinction; Go and
-Java enforce it at the boundary but collapse it in memory.
+TypeScript enforces *and* preserves the distinction; Go, Java and Python
+enforce it at the boundary but collapse it in memory.
 
 ### Diagnostics
 
@@ -307,10 +316,10 @@ absent) and **null acceptance** (non-nullable = reject `null`; nullable
 
 | State | Java | Go | TS | Python |
 |---|---|---|---|---|
-| **Required, non-nullable** — must be present, must be T | type is `long`/`String`/etc.; emit `field == null` reject + type binding | type is `int64`/`string`/etc.; shadow `*T` field, reject on `nil` | type is `x: T`; emit `parsed.x === undefined \|\| parsed.x === null` reject | Pydantic field with no default → strict mode raises automatically |
-| **Optional, non-nullable** — absent OK, T OK, explicit `null` rejected | strict-variant custom deserializer (see strategy below) | shadow `*json.RawMessage` with explicit `bytes.Equal(*raw, []byte("null"))` reject | `parsed.x === null` rejected; `=== undefined` OK | `model_validator(mode='wrap')` rejects keys present with `None` |
-| **Optional + nullable** — absent OK, `null` OK, T OK | type is `@Nullable Long`/`String`/etc.; no extra check beyond type binding | type is `*int64`/`*string`/etc.; no extra check beyond type binding | type is `x?: T \| null`; both `undefined` and `null` accepted | `Optional[T] = None`; both forms accepted |
-| **Required + nullable** — must be present, `null` OK, T OK, absent rejected | base (non-strict) deserializer accepts `null`; presence enforced (`field`-present check / required-field machinery) | shadow `*json.RawMessage`; reject on absent (`nil` shadow), accept `null` token | type is `x: T \| null`; emit `parsed.x === undefined` reject; `null` accepted | `Optional[T]` with **no** default → required, accepts `None` |
+| **Required, non-nullable** — must be present, must be T | type is `long`/`String`/etc.; emit `field == null` reject + type binding | type is `int64`/`string`/etc.; shadow `*T` field, reject on `nil` | type is `x: T`; emit `parsed.x === undefined \|\| parsed.x === null` reject | type is `x: T` with no default; converter rejects an absent key **and** a `null` token with `required` |
+| **Optional, non-nullable** — absent OK, T OK, explicit `null` rejected | strict-variant custom deserializer (see strategy below) | shadow `*json.RawMessage` with explicit `bytes.Equal(*raw, []byte("null"))` reject | `parsed.x === null` rejected; `=== undefined` OK | type is `x: T \| None = None`; converter branch over the raw dict rejects a key present with `None` (see strategy below) |
+| **Optional + nullable** — absent OK, `null` OK, T OK | type is `@Nullable Long`/`String`/etc.; no extra check beyond type binding | type is `*int64`/`*string`/etc.; no extra check beyond type binding | type is `x?: T \| null`; both `undefined` and `null` accepted | type is `x: T \| None = None`; both absent and `null` accepted, no extra check |
+| **Required + nullable** — must be present, `null` OK, T OK, absent rejected | base (non-strict) deserializer accepts `null`; presence enforced (`field`-present check / required-field machinery) | shadow `*json.RawMessage`; reject on absent (`nil` shadow), accept `null` token | type is `x: T \| null`; emit `parsed.x === undefined` reject; `null` accepted | type is `x: T \| None` with **no** default; converter rejects an absent key, accepts the `null` token as `None` |
 
 ## Serialize-side behavior
 
@@ -326,7 +335,7 @@ optional-non-nullable.
 | required | nullable | empty-value serialize action |
 |---|---|---|
 | optional | non-nullable | **omit** the key (emitting `null` is invalid; `Validate` also rejects an explicit in-memory `null` where the language can hold one) |
-| optional | nullable | **omit** (conservative) in Go/Java; **faithful** in TS/Python — omit if unset, emit `null` if explicitly null |
+| optional | nullable | **omit** (conservative) in Go/Java/Python; **faithful** in TS — omit if `undefined`, emit `null` if explicitly `null` |
 | required | non-nullable | cannot be empty — `Validate` rejects; always emit the value |
 | required | nullable | **emit `key: null`** — omitting violates `required` |
 
@@ -339,12 +348,13 @@ Per-language mechanism (all are *encode-adapter* concerns; the shared
   `MarshalJSON` lets the tags do the work.
 - **TypeScript** — `toTransferType` omits `undefined`, emits `null`; the
   three-state gives faithful optional+nullable for free.
-- **Python** — a generated `@model_serializer(mode='wrap')` emits only
-  `model_fields_set` keys (plus const fields), implementing the whole
-  table; `model_fields_set` drives the faithful optional+nullable
-  behavior. Baked into the model because the default Temporal
-  `pydantic_data_converter` owns the `to_json` call — we don't pass
-  `exclude_unset` ourselves (PRINCIPLES Python §3).
+- **Python** — the model's `to_transfer_type` builds the outgoing dict
+  key by key (PRINCIPLES Python §3): an optional field is written only
+  when its attribute is not `None`; a required+nullable field is always
+  written, as `None` when the attribute is `None` (which encodes to
+  JSON `null`); required-non-nullable, `const` and defaulted fields are
+  always written. Optional+nullable takes the conservative omit — a
+  `None` attribute cannot say whether the wire carried `null`.
 - **Java** — `@JsonInclude(NON_NULL)` on optional fields;
   `@JsonInclude(ALWAYS)` forces the required+nullable `null`;
   optional+nullable collapses to the conservative omit (PRINCIPLES
@@ -404,75 +414,36 @@ No runtime helper needed.
 
 ### Python
 
-A model-level `model_validator(mode='wrap')` wraps Pydantic's
-field-validation pass. It pre-scans the raw input dict for
-optional-non-nullable keys present with `None`, runs the inner
-handler, and combines any pre-errors with field-validation errors
-into a single `ValidationError` — preserving P11 aggregation across
-both sources.
+The model's `from_transfer_type` (PRINCIPLES Python §3) decides the
+three-way per field over the raw decoded dict, structurally identical to
+Go's and Java's:
 
-Each generated model carries a `ClassVar[frozenset]` listing the
-affected field names. The `ClassVar` annotation is required —
-without it Pydantic treats `_NAME` as a private model attribute and
-the validator can't iterate it.
+1. key absent (`name not in raw`) → key absent
+   (required → push `Violation(path, "required")`; optional → leave the
+   field at `None`)
+2. key present and `raw[name] is None` → explicit `null`
+   (optional-non-nullable → push
+   `Violation(path, "explicit null not allowed")`; nullable → accept as
+   `None`)
+3. otherwise → call the type-specific violation-collecting parse helper
+   (e.g. `_parse_spec_integer(raw[name], path, violations)`), which
+   pushes its own `Violation` and returns `None` on a spec violation
 
 ```python
-from typing import ClassVar, Optional
-from pydantic import BaseModel, ValidationError, model_validator
-from pydantic_core import InitErrorDetails, PydanticCustomError
-
-class User(BaseModel):
-    id: SpecInt
-    nickname: Optional[SpecInt] = None        # optional, non-nullable
-    bio: Optional[str] = None                 # optional + nullable
-
-    _OPTIONAL_NON_NULLABLE: ClassVar[frozenset] = frozenset({"nickname"})
-
-    @model_validator(mode="wrap")
-    @classmethod
-    def _reject_explicit_null(cls, data, handler):
-        pre_errs = []
-        if isinstance(data, dict):
-            pre_errs = [
-                InitErrorDetails(
-                    type=PydanticCustomError(
-                        "null_for_nonnullable", "explicit null not allowed"
-                    ),
-                    loc=(f,),
-                    input=None,
-                )
-                for f in cls._OPTIONAL_NON_NULLABLE
-                if f in data and data[f] is None
-            ]
-        try:
-            instance = handler(data)
-        except ValidationError as e:
-            field_errs = [
-                InitErrorDetails(
-                    type=PydanticCustomError(err["type"], err["msg"]),
-                    loc=err["loc"],
-                    input=err.get("input"),
-                )
-                for err in e.errors()
-            ]
-            raise ValidationError.from_exception_data(
-                title=cls.__name__, line_errors=pre_errs + field_errs
-            ) from None
-        if pre_errs:
-            raise ValidationError.from_exception_data(
-                title=cls.__name__, line_errors=pre_errs
-            )
-        return instance
+if "nickname" in raw:                        # optional, non-nullable
+    if raw["nickname"] is None:
+        violations.append(
+            Violation(path="nickname", reason="explicit null not allowed")
+        )
+    else:
+        nickname = _parse_spec_integer(raw["nickname"], "nickname", violations)
 ```
 
-Why `mode='wrap'` rather than `mode='before'`: a `mode='before'`
-validator that raises short-circuits Pydantic's own field validation,
-breaking P11 aggregation across error sources. `mode='wrap'` lets us
-run the inner handler, catch its errors, and combine.
-
-Why not a `BeforeValidator` per field: `BeforeValidator` receives
-only the value, not "was the key present" — the absent-vs-explicit-
-`None` distinction is only recoverable at the dict level.
+The absent-vs-`None` distinction is available here because the converter
+inspects the **raw dict**, before any field is assigned — which is
+exactly why this check can only live in the parse adapter (**P12** layer
+1). Once the value has landed on the dataclass, `None` means only
+"empty", and the wire information the check needs is gone.
 
 ## See also
 

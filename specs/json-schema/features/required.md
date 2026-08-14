@@ -73,10 +73,10 @@ for the non-nullable case (mirrors [[nullability]]):
 
 | `type` token | Required (this keyword) | Optional (name absent from `required`) |
 |---|---|---|
-| `"integer"` | Go `int64` · TS `x: number` · Py `int` · Java `long` | Go `*int64` · TS `x?: number` · Py `Optional[int]` · Java `@Nullable Long` |
-| `"string"`  | Go `string` *(non-null validator)* · TS `x: string` · Py `str` · Java `String` *(non-null; `@NullMarked` default)* | Go `*string` · TS `x?: string` · Py `Optional[str]` · Java `@Nullable String` |
-| `"object"`  | Go `T` *(non-null)* · TS `x: T` · Py `T` · Java `T` *(non-null; `@NullMarked` default)* | Go `*T` · TS `x?: T` · Py `Optional[T]` · Java `@Nullable T` |
-| `"array"`   | Go `[]T` *(non-null)* · TS `x: T[]` · Py `list[T]` · Java `List<T>` *(non-null; `@NullMarked` default)* | Go `[]T` *(nil=absent)* · TS `x?: T[]` · Py `Optional[list[T]]` · Java `@Nullable List<T>` |
+| `"integer"` | Go `int64` · TS `x: number` · Py `int` · Java `long` | Go `*int64` · TS `x?: number` · Py `int \| None = None` · Java `@Nullable Long` |
+| `"string"`  | Go `string` *(non-null validator)* · TS `x: string` · Py `str` · Java `String` *(non-null; `@NullMarked` default)* | Go `*string` · TS `x?: string` · Py `str \| None = None` · Java `@Nullable String` |
+| `"object"`  | Go `T` *(non-null)* · TS `x: T` · Py `T` · Java `T` *(non-null; `@NullMarked` default)* | Go `*T` · TS `x?: T` · Py `T \| None = None` · Java `@Nullable T` |
+| `"array"`   | Go `[]T` *(non-null)* · TS `x: T[]` · Py `list[T]` · Java `List<T>` *(non-null; `@NullMarked` default)* | Go `[]T` *(nil=absent)* · TS `x?: T[]` · Py `list[T] \| None = None` · Java `@Nullable List<T>` |
 
 Reference types (Go slices, TS/Java/Python reference values) can't carry
 "must be present" in the type system, so they lean on the validator. In
@@ -93,10 +93,10 @@ Per **P10**/**P11**. The "Required, non-nullable" row of
 
 | Language | Presence enforcement |
 |---|---|
-| Go | shadow `*json.RawMessage` per member; `nil` → `Violation{Path:name, Reason: fmt.Sprintf("required property %q is missing", name)}`, collected into one `ValidationError`. |
-| TypeScript | `parsed.x === undefined \|\| parsed.x === null` → push ``Violation{path, reason: `required property "${name}" is missing`}``, throw one `ValidationError`. |
-| Python | Pydantic field with no default → strict mode raises automatically (its `missing` error already names the field); aggregated in `pydantic.ValidationError`. |
-| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5): a missing or `null` tree node for a required member → `Violation{path:name, reason: "required property \"" + name + "\" is missing"}`; the strict-vs-non-strict `null`-token logic (Java §4) runs as a helper here, not as a per-field binder. Collected into one `ValidationException`. |
+| Go | shadow `*json.RawMessage` per member; `nil` → `Violation{Path:name, Reason:"required"}`, collected into one `ValidationError`. |
+| TypeScript | `parsed.x === undefined \|\| parsed.x === null` → push `Violation{path:name, reason:"required"}`, throw one `ValidationError`. |
+| Python | in `from_transfer_type` (**PRINCIPLES Python §3**): an absent or `null` key for a required non-nullable member → `Violation(path=name, reason="required")`, appended and the field left unset, so its siblings are still checked; collected into the single `ValidationError`. |
+| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5): a missing or `null` tree node for a required member → `Violation{path:name, reason:"required"}`; the strict-vs-non-strict `null`-token logic (Java §4) runs as a helper here, not as a per-field binder. Collected into one `ValidationException`. |
 
 Required + explicit `null`: for a required **non-nullable** member,
 rejected (may not be `null`) — same machinery as the
@@ -105,9 +105,9 @@ optional-non-nullable null rejection in [[nullability]]. For a required
 
 **Serialize side (P12).** The presence check runs again before emit, off
 the in-memory value: a required member that is empty in memory (Go `nil`
-pointer · TS `undefined` · Python unset · Java `null` reference) is a
-`ValidationError`, so `MarshalJSON`/`toTransferType`/`model_dump` fails
-rather than emitting a malformed object. A required member is therefore
+pointer · TS `undefined` · Python `None` · Java `null` reference) is a
+`ValidationError`, so `MarshalJSON`/`toTransferType`/`to_transfer_type`
+fails rather than emitting a malformed object. A required member is therefore
 **never omitted** on serialize — required-non-nullable always emits its
 value; required+nullable emits the value or `null`, never absent (see the
 [[nullability]] serialize table). This mirrors the deserialize

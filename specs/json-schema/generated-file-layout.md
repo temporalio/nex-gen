@@ -120,20 +120,29 @@ many input files that package aggregates.
 
 - Error types — a **single aggregating error holding a list of
   `Violation { path, reason }`**, identical in spirit across all four
-  targets: Python the Pydantic aggregation machinery (`pydantic.ValidationError`);
-  Go a `ValidationError` struct implementing `error` over `[]Violation`
-  (its `Error()` surfaces every violation — *not* `errors.Join`); TS a
+  targets: Python a `ValidationError(Exception)` over `list[Violation]`
+  (its `str()` enumerates every violation), with `Violation` a frozen
+  dataclass; Go a `ValidationError` struct implementing `error` over
+  `[]Violation` (its `Error()` surfaces every violation — *not*
+  `errors.Join`); TS a
   `ValidationError` class extending `Error` over `Violation[]` (*not* a
   built-in `AggregateError`); Java `ValidationException extends
   JsonMappingException` holding `List<Violation>`. One error type, every
-  violation surfaced in one shot (P11).
-- Spec-number helpers — `parseSpecInteger` (Go), `SpecInt` /
-  `_parse_spec_integer` (Python), `SpecNumbers.specLong` (Java), TS's
-  safe-integer check.
-- Shared (de)serialize scaffolding — the **P12** three-layer base, the
-  Python optional-non-nullable `model_validator` helper. Java's
-  collecting (de)serializer stays per-class, but the shared `Violation` /
-  `ValidationException` / `SpecNumbers` classes live here.
+  violation surfaced in one shot, and the same structured `{path, reason}`
+  in every target (P11).
+- Spec-number helpers — `parseSpecInteger` (Go), `_parse_spec_integer`
+  (Python), `SpecNumbers.specLong` (Java), TS's safe-integer check.
+- Shared (de)serialize scaffolding — the **P12** three-layer base: the
+  temporal and content-encoding parse/format helpers, the constraint
+  checks both directions call, and the helper that re-paths a nested
+  violation list under its parent field (Python `_collect`, TS
+  `collect`). Python additionally keeps its `_transfer_type_convertible`
+  decorator shim here, so the value-type erasure each model registers
+  through is written once rather than per model. The per-model conversion
+  machinery stays with its type —
+  Python's transfer-type converter, Java's collecting (de)serializer —
+  but the shared `Violation` / `ValidationException` / `SpecNumbers`
+  classes live here.
 
 ## Module paths
 
@@ -254,12 +263,15 @@ types:
   ([[ref]]). An SCC spanning **≥2 input files** is a cross-file cycle.
 - **Python**: the cross-file SCC moves wholesale into `_recursive.py` at
   the package root, where it becomes a within-module cycle (topological
-  order + a string forward-ref back-edge + one `model_rebuild()`). It
-  imports the leaf, non-cyclic types it needs from the per-input modules;
-  those modules and the aggregators import the finished classes back from
+  order + a forward-ref back-edge in the annotation). It imports the
+  leaf, non-cyclic types it needs from the per-input modules; those
+  modules and the aggregators import the finished classes back from
   `_recursive.py`, which imports nothing back from them — so the
-  cross-module import cycle is gone. A cycle **within** a single file
-  stays in its module.
+  cross-module import cycle is gone. The hoist is what makes the cycle
+  tractable: a per-input module names its siblings' classes in
+  **module-level `import` statements**, which is a real Python import
+  cycle no annotation treatment can defuse. A cycle **within** a single
+  file stays in its module.
 - **TypeScript**: no recursive file. Type references erase
   (`import type` is always cycle-safe), and the imported *values* — a
   sibling model's transfer type converter, a validator function — are ESM
@@ -275,9 +287,18 @@ types:
 - **Java**: object references handle cycles natively across packages. No
   recursive file.
 
-`model_rebuild()` is a **cycle** concern, not a same-module concern:
-acyclic references emit in topological order with concrete annotations
-and need no rebuild.
+**Python: annotations are lazy, union assignments are not.** Generated
+modules open with `from __future__ import annotations`, so every
+annotation is stored as a string and never evaluated — a dataclass field
+may name a class defined later in the same module, and a *class* cycle
+therefore needs no fix-up step of any kind once the SCC shares a module.
+A named union is the exception, because it is an assignment rather than
+an annotation: the right-hand side of
+`Note: typing.TypeAlias = TextNote | LinkNote` is an ordinary expression
+evaluated when the module runs, so its members must already exist and
+**unions are emitted after every class they reference**. That ordering
+constraint is the only intra-module one; it is orthogonal to the
+cross-module hoist above.
 
 ## Exports / visibility
 

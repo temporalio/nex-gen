@@ -135,8 +135,8 @@ blocks generation and produces no output while ignored.
 1. **Doc-comment rendering (the deferred design).** When supported,
    `examples` renders into the generated doc comment via [[description]]'s
    machinery, using each language's native slot where one exists — JSDoc
-   `@example` (TS), Pydantic `Field(examples=[...])` for a field / an
-   `Examples:` docstring section for a type (Python), a rendered
+   `@example` (TS), an `Examples:` section in the attribute docstring for a
+   field / in the class docstring for a type (Python), a rendered
    `Example:` line (Go godoc, Java Javadoc `{@code …}`). Each array value
    is serialized to a canonical JSON literal; multiple values → multiple
    tags/lines; merged occurrences flatten per the spec's flat-array rule.

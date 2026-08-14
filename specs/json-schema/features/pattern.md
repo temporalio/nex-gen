@@ -226,7 +226,7 @@ with them.
 |---|---|
 | Go | Package-level `var patRe = regexp.MustCompile(<pattern>)` (compiled once at init; the load-time gate already proved it compiles). The shared `Validate` checks `if !patRe.MatchString(v) { push(Violation{Path, Reason: fmt.Sprintf("must match pattern %q, got %q", <pattern>, v)}) }` — `MatchString` is unanchored; RE2 is ASCII-class + rune-`.`. Collected into one `ValidationError`. |
 | TypeScript | Module-level ``const PAT_RE = /<pattern>/u;`` (or `new RegExp(<pattern>, "u")` when the literal can't be spelled). **The `u` flag is mandatory** (code-point `.`; verified). ``if (!PAT_RE.test(v)) push(Violation{path, reason: `must match pattern ${PAT_RE}, got ${JSON.stringify(v)}`})``. `test` is unanchored and — with no `g` flag — stateless. Throw one `ValidationError`. |
-| Python | Module-level `PAT_RE = re.compile(<pattern>, re.ASCII)` (with the `$`→`\Z` normalization applied) and an explicit `AfterValidator` on the field: `if PAT_RE.search(v) is None: raise ValueError(...)`, aggregating into `pydantic.ValidationError`. **`re.search` (unanchored), `re.ASCII` (ASCII `\d\w\s`).** We deliberately do **not** use Pydantic's native `pattern=`/`StringConstraints(pattern=…)`: it matches with pydantic-core's Rust `regex` engine, whose `\d\w\s` are **Unicode** (verified — `^\d+$` accepts Arabic-Indic `٣`, and `\w`/`\s` accept accented letters / NBSP), so it disagrees with our pinned ASCII on 4/32 corpus pairs (pydantic 2.13.4). Its anchoring (unanchored) and dot (code point) *do* match `re.search`, and it rejects lookaround/backref at model-build time — but the class divergence is a hard blocker, so we standardize the runtime match on `re` + `re.ASCII` + `search` for provable P1 (the same reasoning [[multipleOf]] uses to reject Pydantic's tolerant native `multiple_of`). Using the same `regex` crate for the loader's *compile gate* is not contradictory — there we trust it for *compilability*, never for match semantics. |
+| Python | A module-level `_PATTERN_<HEX> = re.compile(<pattern>, re.ASCII)` (with the `$`→`\Z` normalization applied), keyed by the pattern text so identical patterns share one compiled instance per module. Both directions of the model's `_<Model>TransferTypeConverter` inline the check — `if _PATTERN_<HEX>.search(value) is None: violations.append(Violation(path=…, reason=f"must match pattern <pattern>, got {_quote(value)}"))` — collected into the single `ValidationError` (**PRINCIPLES Python §2/§3**). The comparison is emitted inline rather than behind a runtime helper, the same way TypeScript emits it. **`re.search` (unanchored — never `re.match`, which anchors the start, or `fullmatch`), `re.ASCII` (ASCII `\d\w\s`).** |
 | Java | Static `private static final Pattern PAT_RE = Pattern.compile(<pattern>);` (**default flags** — ASCII `\d\w\s`, code-point `.`; with the `$`→`\z` normalization applied). The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `String` and checks `if (!PAT_RE.matcher(v).find())`, pushing a `Violation{path, "must match pattern " + <pattern> + ", got " + v}` into the single `ValidationException`. **`Matcher.find` (unanchored), never `matches()`** (which anchors the whole input — verified footgun). Not bean-validation `@Pattern`. |
 
 **Informative `reason` strings.** The `Violation` `reason` names the
@@ -250,9 +250,12 @@ The match is a shared-`Validate` predicate, so it **re-runs before emit**
 over the decoded value — a model constructed with a non-matching string
 (a Go `string` / Java `String` / Python `str` set to an off-pattern value
 in memory) fails serialize with the same aggregated primitive rather than
-emitting an invalid value. Real teeth in the statically-typed targets,
-where in-memory construction is unchecked. No parse-adapter-only or
-encode-adapter-only logic: the match is pure and direction-agnostic.
+emitting an invalid value. Real teeth in every target, since constructing a
+value in memory is unchecked in all four — a Go struct literal, a TS object
+literal, a Java setter, and an inert Python dataclass alike bypass the parse
+adapter, so the only place the match can be re-asserted is before emit. No
+parse-adapter-only or encode-adapter-only logic: the match is pure and
+direction-agnostic.
 
 **On a materialized node** ([[format]] temporal / [[contentEncoding]]
 bytes) the decoded value is not a `string`, so the regex matches the

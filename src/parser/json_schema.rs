@@ -5861,11 +5861,14 @@ pub(crate) fn build_name_manifest(
                 service.origin_label(),
             )?;
         }
-        // TypeScript `DEFAULT_<FIELD>` / `<FIELD>_CONST` constants and per-model
-        // transfer type converters share the module scope; make them participate
-        // rather than silently coexist (P15).
+        // The Python and TypeScript `DEFAULT_<FIELD>` constants share the module
+        // scope; make them participate rather than silently coexist (P15).
+        if matches!(language, Language::Python | Language::TypeScript) {
+            collect_default_constants(language, module_key, &ns_models, &mut top)?;
+        }
+        // TypeScript additionally emits `<FIELD>_CONST` bindings and a per-model
+        // transfer type converter into that same module scope.
         if language == Language::TypeScript {
-            collect_ts_default_constants(module_key, &ns_models, &mut top)?;
             collect_ts_const_constants(module_key, &ns_models, &mut top)?;
             collect_ts_transfer_type_converters(module_key, &ns_models, &mut top)?;
         }
@@ -5894,28 +5897,17 @@ pub(crate) fn build_name_manifest(
 ///   `./definitions` beside `export *` of the model modules, so a user type of
 ///   either name is silently shadowed out of the package surface (P7). The
 ///   runtime helper functions (`isPlainObject`, `collect`, …) are `camelCase`.
-/// - Python (`src/generator/json/python.rs`): the `UpperCamelCase` runtime type
-///   aliases imported into model modules (`SpecInt`, the materialized temporal
-///   and base64 field aliases). There is no generated `Violation`/error class —
-///   aggregation uses `pydantic.ValidationError`. The other runtime helpers are
-///   `_`-prefixed.
+/// - Python (`src/generator/json/python.rs`): `Violation` (dataclass) and
+///   `ValidationError` (exception) are imported by bare name into every model
+///   module; the other runtime helpers are `_`-prefixed.
 /// - Java (`src/generator/java.rs`): the root-package runtime classes
 ///   `Violation`, `ValidationException`, and `SpecNumbers`, each emitted as its
 ///   own always-present public file and imported into model files.
 ///   (`TemporalSupport`/`Base64Support` are schema-dependent, so excluded.)
 fn boilerplate_idents(language: Language) -> &'static [&'static str] {
     match language {
-        Language::Go => &["Violation", "ValidationError"],
+        Language::Go | Language::Python => &["Violation", "ValidationError"],
         Language::TypeScript => &["Violation", "ValidationError", "TransferTypeConverter"],
-        Language::Python => &[
-            "SpecInt",
-            "DateTimeField",
-            "DateField",
-            "TimeField",
-            "DurationField",
-            "Base64Field",
-            "Base64UrlField",
-        ],
         Language::Java => &["Violation", "ValidationException", "SpecNumbers"],
         _ => &[],
     }
@@ -6116,10 +6108,10 @@ fn validate_member_scope(language: Language, model_full_name: &str, schema: &Sch
     Ok(())
 }
 
-/// TypeScript `DEFAULT_<FIELD>` constants (module scope). The generator names a
-/// default constant `DEFAULT_<FIELD>` when the member identifier is unique across
-/// the module's models, else `DEFAULT_<MODEL>_<FIELD>`. Replicate that name and
-/// enter it into the shared module namespace so a genuine clash rejects (P15)
+/// Python and TypeScript `DEFAULT_<FIELD>` constants (module scope). Both
+/// generators name a default constant `DEFAULT_<FIELD>` when the member is unique
+/// across the module's models, else `DEFAULT_<MODEL>_<FIELD>`. Replicate that name
+/// and enter it into the shared module namespace so a genuine clash rejects (P15)
 /// rather than silently coexisting behind the model-name prefix.
 ///
 /// The identifier is built from the **emitted member identifier**, so an
@@ -6128,7 +6120,8 @@ fn validate_member_scope(language: Language, model_full_name: &str, schema: &Sch
 /// from the JSON name, two members that recase alike would collide here with no
 /// way to author around it: the override would move the members apart while
 /// leaving both constants on the colliding name.
-fn collect_ts_default_constants(
+fn collect_default_constants(
+    language: Language,
     module_key: &str,
     models: &[NsModel],
     top: &mut Namespace,
@@ -6175,7 +6168,7 @@ fn collect_ts_default_constants(
                 )
             };
             top.insert(
-                Language::TypeScript,
+                language,
                 ident,
                 format!("`{}.{json_name}` DEFAULT_ constant", model.full_name),
             )?;
@@ -9659,6 +9652,41 @@ properties:
     }
 
     #[test]
+    fn rejects_colliding_default_constants_python_and_typescript() {
+        // Python and TypeScript hoist a defaulted field's value to a module-level
+        // `DEFAULT_<FIELD>` constant (unprefixed, because each field name occurs
+        // in exactly one model). `fooBar` and `foo_bar` shouty-snake-case to the
+        // same `DEFAULT_FOO_BAR`, a module-scope clash.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  a: { $ref: "#/$defs/A" }
+  b: { $ref: "#/$defs/B" }
+$defs:
+  A:
+    type: object
+    properties:
+      fooBar: { type: string, default: "x" }
+  B:
+    type: object
+    properties:
+      foo_bar: { type: string, default: "y" }
+"##;
+        for language in [Language::Python, Language::TypeScript] {
+            let error = reject_for(language, input);
+            assert!(
+                error.contains("collision") && error.contains("DEFAULT_FOO_BAR"),
+                "{language:?}: {error}"
+            );
+        }
+        // Go and Java keep the default on the model (no module-level constant),
+        // so the same schema is accepted there.
+        parse_for(Language::Go, input).expect("Go emits no DEFAULT_ constants");
+        parse_for(Language::Java, input).expect("Java emits no DEFAULT_ constants");
+    }
+
+    #[test]
     fn rejects_synthesized_operation_input_colliding_with_defs_type() {
         // The synthesized `<Op>Input` type collides with a declared `$defs` type
         // of the same name (top-level module scope, every target).
@@ -10273,9 +10301,10 @@ $defs:
     }
 
     #[test]
-    fn rejects_type_colliding_with_go_runtime_boilerplate() {
+    fn rejects_type_colliding_with_go_and_python_runtime_boilerplate() {
         // Go emits the exported runtime type `ValidationError` into the models'
-        // own package, so a `$defs` type of that name is a package-scope clash.
+        // own package, so a `$defs` type of that name is a package-scope clash;
+        // Python imports the same name into every model module.
         let input = r##"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
@@ -10286,14 +10315,16 @@ $defs:
     type: object
     properties: { a: { type: string } }
 "##;
-        let error = reject_for(Language::Go, input);
-        assert!(
-            error.contains("collision") && error.contains("ValidationError"),
-            "{error}"
-        );
-        // Python aggregates via `pydantic.ValidationError` (a qualified name), so
-        // it emits no top-level `ValidationError` and the same schema is accepted.
-        parse_for(Language::Python, input).expect("Python has no ValidationError boilerplate");
+        for language in [Language::Go, Language::Python] {
+            let error = reject_for(language, input);
+            assert!(
+                error.contains("collision") && error.contains("ValidationError"),
+                "{language:?}: {error}"
+            );
+        }
+        // Java names its aggregate error `ValidationException`, not
+        // `ValidationError`, so the same schema is accepted for Java.
+        parse_for(Language::Java, input).expect("Java has no ValidationError boilerplate");
     }
 
     #[test]
@@ -10315,8 +10346,11 @@ $defs:
             error.contains("collision") && error.contains("Violation"),
             "{error}"
         );
-        // Python has no `Violation` symbol, so it accepts the schema.
-        parse_for(Language::Python, input).expect("Python has no Violation boilerplate");
+        // Java names its aggregate error `ValidationException`; TypeScript has no
+        // such symbol, so that name is accepted.
+        let input = input.replace("Violation", "ValidationException");
+        parse_for(Language::TypeScript, &input)
+            .expect("TypeScript has no ValidationException boilerplate");
     }
 
     #[test]
@@ -10437,10 +10471,8 @@ $defs:
 
     #[test]
     fn rejects_type_colliding_with_java_violation_boilerplate() {
-        // Per the task: Java `$defs: { Violation: {...} }` rejects for Java (Java
-        // emits a public `Violation` record). `Violation` is boilerplate for Go,
-        // TypeScript and Java alike; only Python (which has no `Violation`)
-        // accepts it, so Python is the "not boilerplate" language here.
+        // Java emits a public `Violation` record in the root package, imported
+        // into model files, so a `$defs` type of that name clashes.
         let input = r##"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
@@ -10456,29 +10488,31 @@ $defs:
             error.contains("collision") && error.contains("Violation"),
             "{error}"
         );
-        parse_for(Language::Python, input).expect("Python has no Violation boilerplate");
     }
 
     #[test]
     fn rejects_type_colliding_with_python_runtime_boilerplate() {
-        // Python imports the runtime type alias `SpecInt` into model modules for
-        // any integer field, so a `$defs` type named `SpecInt` clashes.
+        // Python imports the runtime `Violation` dataclass into every model
+        // module by bare name, so a `$defs` type of that name clashes with the
+        // import.
         let input = r##"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
 properties:
-  s: { $ref: "#/$defs/SpecInt" }
+  v: { $ref: "#/$defs/Violation" }
 $defs:
-  SpecInt:
+  Violation:
     type: object
     properties: { a: { type: string } }
 "##;
         let error = reject_for(Language::Python, input);
         assert!(
-            error.contains("collision") && error.contains("SpecInt"),
+            error.contains("collision") && error.contains("Violation"),
             "{error}"
         );
-        // `SpecInt` is Python-specific runtime naming; Go has no such symbol.
-        parse_for(Language::Go, input).expect("Go has no SpecInt boilerplate");
+        // Java names its aggregate error `ValidationException`; Python has no
+        // such symbol, so that name is accepted.
+        let input = input.replace("Violation", "ValidationException");
+        parse_for(Language::Python, &input).expect("Python has no ValidationException boilerplate");
     }
 }

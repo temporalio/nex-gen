@@ -4,143 +4,180 @@ from __future__ import annotations
 
 import base64
 import collections.abc
+import dataclasses
 import datetime
-import math
+import json
 import re
 import typing
-
-import pydantic
-import pydantic.functional_validators
-import pydantic_core
+import temporalio.converter
 
 
 __all__ = [
-    "SpecInt",
-    "DateTimeField",
-    "DateField",
-    "TimeField",
-    "DurationField",
-    "Base64Field",
-    "Base64UrlField",
-    "_check_multiple_of",
-    "_check_pattern",
-    "_check_format",
-    "_check_unique_items",
+    "ValidationError",
+    "Violation",
     "_check_contains",
-    "_reject_explicit_null",
-    "_emit_set_fields",
+    "_check_unique_items",
+    "_collect",
+    "_format_base64",
+    "_format_base64url",
+    "_format_date",
+    "_format_date_time",
+    "_format_duration",
+    "_format_time",
+    "_parse_base64",
+    "_parse_base64url",
+    "_parse_date",
+    "_parse_date_time",
+    "_parse_duration",
+    "_parse_spec_integer",
+    "_parse_time",
+    "_quote",
+    "_transfer_type_convertible",
 ]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Violation:
+    """A single constraint failure, located by JSON path."""
+
+    path: str
+    reason: str
+
+
+class ValidationError(Exception):
+    """Every constraint failure found in one (de)serialization pass."""
+
+    violations: list[Violation]
+
+    def __init__(self, violations: list[Violation]) -> None:
+        self.violations = violations
+        detail = "; ".join(f"{item.path}: {item.reason}" for item in violations)
+        super().__init__(f"{len(violations)} validation error(s): {detail}")
+
+
+def _quote(value: object) -> str:
+    """Renders a value in the JSON form every target quotes offending values in."""
+
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def _collect(violations: list[Violation], path: str, error: ValidationError) -> None:
+    """Re-paths a nested model's violations under `path` and appends them."""
+
+    for inner in error.violations:
+        # A nested violation about the value *itself* carries no path of its own
+        # (a union branch's own constraint, an element-level check), so the
+        # prefix is the whole path -- never a dangling separator (P11).
+        nested = f"{path}.{inner.path}" if inner.path else path
+        violations.append(Violation(path=nested, reason=inner.reason))
+
+
+_ModelT = typing.TypeVar("_ModelT")
+
+
+def _transfer_type_convertible(
+    converter: type[temporalio.converter.TransferTypeConverter[typing.Any, typing.Any]],
+) -> collections.abc.Callable[[type[_ModelT]], type[_ModelT]]:
+    """Registers a transfer type converter on a model class.
+
+    Wraps `temporalio.converter.transfer_type_convertible` to erase the
+    converter's value-type parameter. Binding it directly on the decorated class
+    is circular for a static type checker -- the class's type depends on the
+    decorator, whose value type depends on the class -- which degrades the model
+    to `Unknown`. Erasing it here keeps the decorator idiomatic at each model and
+    resolves the cycle.
+    """
+
+    return temporalio.converter.transfer_type_convertible(converter)
 
 
 _INTEGER_CAP = (1 << 53) - 1
 
 
-def _parse_spec_integer(value: object) -> int:
-    if isinstance(value, bool):
-        raise ValueError("expected integer, got boolean")
-    if isinstance(value, int):
-        out = value
-    elif isinstance(value, float):
+def _parse_spec_integer(
+    value: object, path: str, violations: list[Violation]
+) -> int | None:
+    """Parses a JSON number as a spec integer (`1.0` accepted, `1.5` rejected)."""
+
+    # `bool` is a subclass of `int`, so it must be excluded before the int check.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        violations.append(Violation(path=path, reason="expected integer"))
+        return None
+    if isinstance(value, float):
         if not value.is_integer():
-            raise ValueError("number has a fractional part; not an integer")
+            violations.append(Violation(path=path, reason="expected integer"))
+            return None
         out = int(value)
     else:
-        raise ValueError(f"expected integer, got {type(value).__name__}")
+        out = value
     if abs(out) > _INTEGER_CAP:
-        raise ValueError("integer exceeds +/-(2**53-1) cap")
+        violations.append(Violation(path=path, reason="expected integer"))
+        return None
     return out
 
 
-SpecInt: typing.TypeAlias = typing.Annotated[
-    int, pydantic.functional_validators.BeforeValidator(_parse_spec_integer)
-]
-
-
-def _check_multiple_of(
-    divisor: float,
-) -> typing.Callable[[float], float]:
-    """Builds an AfterValidator asserting `math.fmod`-exact divisibility for number fields."""
-
-    def validate(value: float) -> float:
-        if math.fmod(value, divisor) != 0:
-            raise ValueError(f"must be a multiple of {divisor}, got {value}")
-        return value
-
-    return validate
-
-
-def _check_pattern(
-    pattern: str,
-) -> typing.Callable[[str], str]:
-    """Builds an AfterValidator asserting an unanchored, ASCII-class regex match for string fields."""
-
-    compiled = re.compile(pattern, re.ASCII)
-
-    def validate(value: str) -> str:
-        if compiled.search(value) is None:
-            raise ValueError(f"must match pattern {pattern}, got {value!r}")
-        return value
-
-    return validate
-
-
-def _check_format(
-    format_name: str,
-    pattern: str,
-    max_code_points: int | None = None,
-) -> typing.Callable[[str], str]:
-    """Builds an AfterValidator asserting a value matches a pinned `format` regex (+ optional length guard)."""
-
-    compiled = re.compile(pattern, re.ASCII)
-
-    def validate(value: str) -> str:
-        if (
-            max_code_points is not None and len(value) > max_code_points
-        ) or compiled.search(value) is None:
-            raise ValueError(f"must be a valid {format_name}, got {value!r}")
-        return value
-
-    return validate
-
-
 def _check_unique_items(
-    value: list[typing.Any],
-) -> list[typing.Any]:
-    """An AfterValidator asserting an array's elements are pairwise distinct."""
+    value: list[typing.Any], path: str, violations: list[Violation]
+) -> None:
+    """Asserts an array's elements are pairwise distinct."""
 
-    seen: dict[object, int] = {}
+    seen: list[typing.Any] = []
     for index, element in enumerate(value):
-        if element in seen:
-            raise ValueError(
-                f"duplicate items: element at index {index} equals index {seen[element]}"
-            )
-        seen[element] = index
-    return value
+        for earlier, previous in enumerate(seen):
+            if previous == element:
+                violations.append(
+                    Violation(
+                        path=path,
+                        reason=(
+                            f"duplicate items: element at index {index} "
+                            f"equals index {earlier}"
+                        ),
+                    )
+                )
+                break
+        seen.append(element)
 
 
 def _check_contains(
+    value: list[typing.Any],
     matches: typing.Callable[[typing.Any], bool],
     min_contains: int,
-    max_contains: int | None = None,
-    bounded_min: bool = False,
-) -> typing.Callable[[list[typing.Any]], list[typing.Any]]:
-    """Builds an AfterValidator asserting how many elements match the `contains` schema."""
+    max_contains: int | None,
+    bounded_min: bool,
+    path: str,
+    violations: list[Violation],
+) -> None:
+    """Asserts how many of an array's elements match the `contains` schema."""
 
-    def validate(value: list[typing.Any]) -> list[typing.Any]:
-        match_count = sum(1 for element in value if matches(element))
-        if match_count < min_contains:
-            if bounded_min:
-                raise ValueError(
-                    f"too few matching items: at least {min_contains}, got {match_count}"
+    match_count = sum(1 for element in value if matches(element))
+    if match_count < min_contains:
+        if bounded_min:
+            violations.append(
+                Violation(
+                    path=path,
+                    reason=(
+                        f"too few matching items: at least {min_contains}, "
+                        f"got {match_count}"
+                    ),
                 )
-            raise ValueError("no element matches the required schema")
-        if max_contains is not None and match_count > max_contains:
-            raise ValueError(
-                f"too many matching items: at most {max_contains}, got {match_count}"
             )
-        return value
-
-    return validate
+        else:
+            violations.append(
+                Violation(path=path, reason="no element matches the required schema")
+            )
+    if max_contains is not None and match_count > max_contains:
+        violations.append(
+            Violation(
+                path=path,
+                reason=(
+                    f"too many matching items: at most {max_contains}, "
+                    f"got {match_count}"
+                ),
+            )
+        )
 
 
 _TEMPORAL_DATE_TIME_RE = re.compile(
@@ -177,43 +214,59 @@ def _valid_temporal_calendar(value: str) -> bool:
     return maximum > 0 and 1 <= day <= maximum
 
 
-def _parse_date_time(value: object) -> object:
-    if not isinstance(value, str):
-        return value
+def _parse_date_time(
+    value: str, path: str, violations: list[Violation]
+) -> datetime.datetime | None:
     if _TEMPORAL_DATE_TIME_RE.match(value) is None or not _valid_temporal_calendar(
         value
     ):
-        raise ValueError(f"must be a valid date-time, got {value!r}")
+        violations.append(
+            Violation(
+                path=path, reason=f"must be a valid date-time, got {_quote(value)}"
+            )
+        )
+        return None
     normalized = value.upper()
     if normalized.endswith("Z"):
         normalized = normalized[:-1] + "+00:00"
     return datetime.datetime.fromisoformat(normalized)
 
 
-def _parse_date(value: object) -> object:
-    if not isinstance(value, str):
-        return value
+def _parse_date(
+    value: str, path: str, violations: list[Violation]
+) -> datetime.date | None:
     if _TEMPORAL_DATE_RE.match(value) is None or not _valid_temporal_calendar(value):
-        raise ValueError(f"must be a valid date, got {value!r}")
+        violations.append(
+            Violation(path=path, reason=f"must be a valid date, got {_quote(value)}")
+        )
+        return None
     return datetime.date.fromisoformat(value)
 
 
-def _parse_time(value: object) -> object:
-    if not isinstance(value, str):
-        return value
+def _parse_time(
+    value: str, path: str, violations: list[Violation]
+) -> datetime.time | None:
     if _TEMPORAL_TIME_RE.match(value) is None:
-        raise ValueError(f"must be a valid time, got {value!r}")
+        violations.append(
+            Violation(path=path, reason=f"must be a valid time, got {_quote(value)}")
+        )
+        return None
     normalized = value.upper()
     if normalized.endswith("Z"):
         normalized = normalized[:-1] + "+00:00"
     return datetime.time.fromisoformat(normalized)
 
 
-def _parse_duration(value: object) -> object:
-    if not isinstance(value, str):
-        return value
+def _parse_duration(
+    value: str, path: str, violations: list[Violation]
+) -> datetime.timedelta | None:
     if _TEMPORAL_DURATION_RE.match(value) is None:
-        raise ValueError(f"must be a valid duration, got {value!r}")
+        violations.append(
+            Violation(
+                path=path, reason=f"must be a valid duration, got {_quote(value)}"
+            )
+        )
+        return None
     total = 0
     number = ""
     for char in value[2:]:
@@ -223,7 +276,12 @@ def _parse_duration(value: object) -> object:
         total += int(number) * {"H": 3600, "M": 60, "S": 1}[char]
         number = ""
         if total > _TEMPORAL_MAX_DURATION_SECONDS:
-            raise ValueError(f"must be a valid duration, got {value!r}")
+            violations.append(
+                Violation(
+                    path=path, reason=f"must be a valid duration, got {_quote(value)}"
+                )
+            )
+            return None
     return datetime.timedelta(seconds=total)
 
 
@@ -280,39 +338,18 @@ def _format_duration(value: datetime.timedelta) -> str:
     return out
 
 
-DateTimeField: typing.TypeAlias = typing.Annotated[
-    datetime.datetime,
-    pydantic.BeforeValidator(_parse_date_time),
-    pydantic.PlainSerializer(_format_date_time, return_type=str),
-]
-DateField: typing.TypeAlias = typing.Annotated[
-    datetime.date,
-    pydantic.BeforeValidator(_parse_date),
-    pydantic.PlainSerializer(_format_date, return_type=str),
-]
-TimeField: typing.TypeAlias = typing.Annotated[
-    datetime.time,
-    pydantic.BeforeValidator(_parse_time),
-    pydantic.PlainSerializer(_format_time, return_type=str),
-]
-DurationField: typing.TypeAlias = typing.Annotated[
-    datetime.timedelta,
-    pydantic.BeforeValidator(_parse_duration),
-    pydantic.PlainSerializer(_format_duration, return_type=str),
-]
-
-
 _BASE64_RE = re.compile(
     "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\\Z", re.ASCII
 )
 _BASE64URL_RE = re.compile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?\\Z", re.ASCII)
 
 
-def _parse_base64(value: typing.Any) -> bytes:
-    if isinstance(value, bytes):
-        return value
-    if not isinstance(value, str) or _BASE64_RE.match(value) is None:
-        raise ValueError(f"must be base64-encoded, got {value!r}")
+def _parse_base64(value: str, path: str, violations: list[Violation]) -> bytes | None:
+    if _BASE64_RE.match(value) is None:
+        violations.append(
+            Violation(path=path, reason=f"must be base64-encoded, got {_quote(value)}")
+        )
+        return None
     return base64.b64decode(value, validate=True)
 
 
@@ -320,91 +357,18 @@ def _format_base64(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
-def _parse_base64url(value: typing.Any) -> bytes:
-    if isinstance(value, bytes):
-        return value
-    if not isinstance(value, str) or _BASE64URL_RE.match(value) is None:
-        raise ValueError(f"must be base64url-encoded, got {value!r}")
+def _parse_base64url(
+    value: str, path: str, violations: list[Violation]
+) -> bytes | None:
+    if _BASE64URL_RE.match(value) is None:
+        violations.append(
+            Violation(
+                path=path, reason=f"must be base64url-encoded, got {_quote(value)}"
+            )
+        )
+        return None
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
 def _format_base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
-Base64Field: typing.TypeAlias = typing.Annotated[
-    bytes,
-    pydantic.BeforeValidator(_parse_base64),
-    pydantic.PlainSerializer(_format_base64, return_type=str),
-]
-Base64UrlField: typing.TypeAlias = typing.Annotated[
-    bytes,
-    pydantic.BeforeValidator(_parse_base64url),
-    pydantic.PlainSerializer(_format_base64url, return_type=str),
-]
-
-
-def _reject_explicit_null(
-    cls: type[pydantic.BaseModel],
-    data: object,
-    handler: typing.Callable[[object], typing.Any],
-) -> typing.Any:
-    null_fields = typing.cast(
-        frozenset[str], getattr(cls, "_OPTIONAL_NON_NULLABLE_FIELDS")
-    )
-    raw_data = data
-    pre_errors: list[pydantic_core.InitErrorDetails] = []
-    if isinstance(data, dict):
-        values = typing.cast(dict[str, object], data)
-        pre_errors = [
-            pydantic_core.InitErrorDetails(
-                type=pydantic_core.PydanticCustomError(
-                    "null_for_nonnullable", "explicit null not allowed"
-                ),
-                loc=(field,),
-                input=None,
-            )
-            for field in null_fields
-            if field in values and values[field] is None
-        ]
-    try:
-        instance = handler(raw_data)
-    except pydantic.ValidationError as error:
-        field_errors: list[pydantic_core.InitErrorDetails] = []
-        for error_detail in typing.cast(list[dict[str, object]], error.errors()):
-            loc: tuple[str | int, ...] = tuple(
-                typing.cast(collections.abc.Iterable[str | int], error_detail["loc"])
-            )
-            field_errors.append(
-                pydantic_core.InitErrorDetails(
-                    type=pydantic_core.PydanticCustomError(
-                        typing.cast(typing.Any, error_detail["type"]),
-                        typing.cast(typing.Any, error_detail["msg"]),
-                    ),
-                    loc=loc,
-                    input=error_detail.get("input"),
-                )
-            )
-        raise pydantic.ValidationError.from_exception_data(
-            title=cls.__name__, line_errors=pre_errors + field_errors
-        ) from None
-    if pre_errors:
-        raise pydantic.ValidationError.from_exception_data(
-            title=cls.__name__, line_errors=pre_errors
-        )
-    return instance
-
-
-def _emit_set_fields(
-    model: pydantic.BaseModel,
-    handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-) -> dict[str, object]:
-    dumped = typing.cast(dict[str, object], handler(model))
-    alias_of = {
-        name: (field.alias or name) for name, field in type(model).model_fields.items()
-    }
-    keep = {alias_of.get(name, name) for name in model.model_fields_set}
-    out = {key: value for key, value in dumped.items() if key in keep}
-    if model.model_extra:
-        out.update(typing.cast(dict[str, object], model.model_extra))
-    return out

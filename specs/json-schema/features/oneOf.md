@@ -92,9 +92,10 @@ An object branch is admitted whatever its shape (declared [[properties]], a
 typed map, a free-form object, member-count bounds). The constraint is not
 the shape, it is the **name**: every target has to materialize a *type* for a
 **structured** object branch — Go a defined type to carry the marker method,
-Java a class to `implement` the interface, Python a `BaseModel` for Pydantic
-to select, TS an interface plus the converter that validates its members — and a
-type needs a name. So every object branch must resolve to a determinate name:
+Java a class to `implement` the interface, TS an interface plus the converter
+that validates its members, Python a dataclass plus the converter that validates
+them — and a type needs a name. So every object branch must resolve to a
+determinate name:
 
 - **`$ref` to a named definition** — the definition's name *is* the branch
   type, already emitted with its own validation. The recommended form for
@@ -209,12 +210,12 @@ any other. It doesn't add a sum-type *member*; it marks the whole field
 
 The nullable union needs no new machinery — every target already has a
 nullable channel for the union type: a Go interface is nilable (`nil` =
-`null`), Python wraps in `Optional[...]`, TS adds `| null`, and a Java
+`null`), Python adds `| None`, TS adds `| null`, and a Java
 reference is `@Nullable`. The `null` token selects "no value" exactly as
 the value tokens select their branches; decode/encode of the null state
 follow the [[nullability]] tables over the union type (including the
-optional-vs-null collapse in Go/Java and the faithful round-trip in
-TS/Python). Required-vs-optional and the nullable state remain orthogonal
+optional-vs-null collapse in Go/Java/Python and the faithful round-trip in
+TS). Required-vs-optional and the nullable state remain orthogonal
 (**P8**), so all four presence/null combinations apply to a union just as
 to a scalar.
 
@@ -421,28 +422,60 @@ intact.
 
 ### Python
 
-A `Union` (PEP 604 `X | Y` on 3.10+, `Union[...]` alias otherwise); a
-named `$def` becomes a `TypeAlias`. Pydantic v2 strict mode discriminates
-disjoint kinds natively:
+A PEP 604 union, inline on the field; a named `$def` becomes a
+`TypeAlias`:
 
 ```python
-Foo = Union[Widget, str, list[float]]     # TypeAlias for the $def
+Foo: typing.TypeAlias = Widget | str | list[float]     # TypeAlias for the $def
 ```
 
-For an object tagged union, the const tag becomes a `Literal` field
-([[const]]) and the union carries `Field(discriminator=...)` — Pydantic's
-native discriminated-union feature, which gives O(1) selection and precise
-errors (see "Discriminated object unions" below).
-
-Python inlines the union but **not** a structured object branch's shape:
-Pydantic selects on a model, so such a branch becomes a module-level
-`BaseModel` named by the rule above (`<Union>Object`, or the branch's
-`x-py-name`) and enters the union under that name. The free-form object is
-the exception — `dict[str, Any]` needs no class.
+This is structurally the TypeScript design — a plain type plus an off-type
+converter that owns both directions — with one mechanical difference: a
+`TypeAlias` cannot carry a decorator and `type[A | B]` is not a valid
+annotation, so a union gets **no** `_<Model>TransferTypeConverter` class
+(**PRINCIPLES Python §3**). Its conversion is emitted as a pair of
+module-private free functions instead:
 
 ```python
-class FooObject(BaseModel): ...           # the inline object branch
-Foo = Union[FooObject, str]
+def _foo_from_transfer_type(
+    value: typing.Any, path: str, violations: list[Violation]
+) -> Foo | None: ...
+
+def _foo_to_transfer_type(value: Foo) -> typing.Any: ...
+```
+
+The parse function classifies the wire token, delegates to the selected
+branch, and appends any `Violation` to the caller's list — returning `None`
+on failure so its siblings are still checked (**P11**); the serialize
+function dispatches on the in-memory value's Python type. An inline
+property-level union gets the same pair, named after its position
+(`_<model>_<property>_from_transfer_type` / `_..._to_transfer_type`) — the
+analogue of TS's module-private `serialize<Model><Property>`.
+
+One consequence worth stating: a union carries no *registered* converter, so
+it cannot be a top-level Nexus operation input/output type. That costs
+nothing — the loader already requires operation I/O to be an object type and
+rejects a `oneOf` there ([[services]]) — so a union only ever appears
+nested, where the declaring model's converter calls these functions.
+
+For an object tagged union the `const` tag stays a `typing.Literal` member of
+each branch ([[const]]) and the parse function switches on the discriminant
+value read out of the raw dict (see "Discriminated object unions" below).
+
+Python inlines the union but **not** a structured object branch's shape: the
+branch's members have to be validated, and that validation lives in a
+converter keyed to a type, so such a branch becomes a module-level dataclass
+named by the rule above (`<Union>Object`, or the branch's `x-py-name`) and
+enters the union under that name. The free-form object is the exception —
+`dict[str, typing.Any]` has no declared members to validate and needs no
+class.
+
+```python
+@_transfer_type_convertible(_FooObjectTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class FooObject: ...                      # the inline object branch
+
+Foo: typing.TypeAlias = FooObject | str
 ```
 
 ### Go
@@ -568,11 +601,11 @@ to the union type rather than a scalar:
 |---|---|---|
 | Go | `Foo` (interface) | already nilable — `nil` = `null`; no `*Foo` wrapper |
 | TypeScript | `Foo` | `Foo \| null` (optional adds `?`) |
-| Python | `Union[…]` | `Optional[Union[…]]` |
+| Python | `Foo` (`TypeAlias`) | `Foo \| None` |
 | Java | `Foo` | `@Nullable Foo` |
 
 The presence/null state machine (required+nullable emits `null`, optional
-collapses in Go/Java, faithful in TS/Python) is exactly the
+collapses in Go/Java/Python, faithful in TS) is exactly the
 [[nullability]] serialize/round-trip tables, unchanged — the union type
 simply takes the place of the scalar.
 
@@ -597,11 +630,16 @@ $defs:
   export type Animal = Cat | Dog;
   switch (a.kind) { case "cat": /* Cat */ break; case "dog": /* Dog */ break; }
   ```
-- **Python** — Pydantic native discriminated union:
+- **Python** — dataclass branches plus the union's parse function switching
+  on the tag:
   ```python
-  class Cat(BaseModel): kind: Literal["cat"]; meow: str
-  class Dog(BaseModel): kind: Literal["dog"]; bark: str
-  Animal = Annotated[Union[Cat, Dog], Field(discriminator="kind")]
+  @dataclasses.dataclass(slots=True, kw_only=True)
+  class Cat: kind: typing.Literal["cat"] = "cat"; meow: str
+  @dataclasses.dataclass(slots=True, kw_only=True)
+  class Dog: kind: typing.Literal["dog"] = "dog"; bark: str
+  Animal: typing.TypeAlias = Cat | Dog
+  # _animal_from_transfer_type: raw["kind"] == "cat" → Cat's converter ;
+  #   "dog" → Dog's ; else a Violation naming the admissible values
   ```
 - **Go** — the sealed interface; the container's `UnmarshalJSON` peeks the
   discriminator on an object token, then unmarshals into the concrete
@@ -638,13 +676,15 @@ then delegate**, never a trial-all-branches loop.
 |---|---|
 | Go | The container's collecting `UnmarshalJSON` (shadow `*json.RawMessage` layout, **PRINCIPLES Go** / [[nullability]]) peeks the field's first non-space token, routes to the branch of that kind (`{`→object; `[`→array: `FooArray`; `"`→string: `FooString`; number→the numeric branch via `parseSpecInteger`/spec-number so `1.5` still yields a `Violation`). For an object token with 2+ object branches it further reads the discriminator property and selects the branch with that `const`. It then runs that branch's shared `Validate` and assigns the concrete type to the interface field. No matching kind / unknown discriminator value → `Violation` collected into the single `ValidationError`. |
 | TypeScript | `fromTransferType` is the `typeof`/`Array.isArray` chain shown above; for an object it switches on the discriminant literal (`raw.kind`) and delegates to that branch's converter (e.g. `catTransferTypeConverter.fromTransferType`); the fall-through pushes one `Violation`. Plain checks only (**PRINCIPLES TS §1** — no runtime schema lib). |
-| Python | Pydantic v2 strict `Union` selects by kind; an object tagged union uses `Field(discriminator=...)` for O(1) selection. Zero matches / unknown discriminator raise, aggregated into `pydantic.ValidationError`. |
+| Python | The union's module-private `_<union>_from_transfer_type(value, path, violations)`, called by the declaring model's `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**), classifies the raw value with `isinstance` — `dict`→object, `list`→array, `str`→string, a non-`bool` `int`/`float`→the numeric branch via `_parse_spec_integer`/the spec-number rule so `1.5` still yields a `Violation`, `bool`→boolean, `None`→null. For an object token with 2+ object branches it reads the discriminator key out of the raw dict and delegates to that branch's converter, re-pathing its `ValidationError` under the current path with `_collect`. No decidable branch / unknown discriminator value → a `Violation` appended and `None` returned, so sibling members are still checked and the model's converter raises the one `ValidationError` (**PRINCIPLES Python §2**). |
 | Java | The union interface's static `fromNode` (called by the enclosing POJO's collecting deserializer, **PRINCIPLES Java §5**) switches on the `JsonNode` kind (`isObject`/`isArray`/`isTextual`/`isNumber`/`isBoolean`); for an object with 2+ object branches it peeks the discriminator node and dispatches to the matching POJO's collecting deserializer. On no match / unknown discriminator it pushes a `Violation` into the single `ValidationException` and returns `null`. One dispatcher serves both positions: a named union def and a union written inline on a property. |
 
-Reason strings name **what was expected** — the set of admissible kinds/
-branch types (`expected Widget, string, or number[]`), never a bare
-`oneOf` — per the informative-reason convention the constraint families
-use.
+Reason strings name **what was expected**, never a bare `oneOf`, per the
+informative-reason convention the constraint families use: no decidable
+branch → `expected one of: <labels>` over the admissible kinds / branch
+types; an object whose discriminator value matches no branch →
+`unknown discriminator <field> <value>: expected one of [...]` over the
+admissible tag values. Both strings are identical in all four targets.
 
 ### Branch constraints
 
@@ -663,29 +703,43 @@ violation path (`idOrName`, `shapes[1]`, `choices.primary`):
 |---|---|
 | Go | the synthesized `<Union><Kind>` wrapper's `Validate`, over a conversion back to the underlying type (`string(v)`, `[]float64(v)`). The dispatcher calls it on the selected branch, and the declaring model's `Validate` — which `MarshalJSON` runs first — calls it again before emit. A branch `pattern`/`format` compiles to a package-level regex var keyed by the wrapper type (`fooStringPattern`). |
 | TypeScript | the narrowing chain itself: each `typeof`/`Array.isArray` arm runs the branch's checks over the narrowed value, in `fromIntermediate` and again on the serialize side (a named union in its `Mapper.toIntermediate`, an inline one in the declaring model's, so a branch violation aggregates with its siblings). |
-| Python | the union member's own annotation — the native `pydantic.Field` bounds innermost (next to the type they bound), the refinement validators (`multipleOf`, `pattern`, `format`) wrapping them, and `uniqueItems`/`contains` as the AfterValidators Pydantic has no native form for. Selecting the branch *is* validating it. |
+| Python | the classification arm itself, exactly as in TypeScript: each `isinstance` arm runs the branch's checks over the classified value — the numeric bounds, length bounds, `multipleOf`, and the `pattern`/`format` regex match all inline; only `uniqueItems` and `contains` go through a runtime helper (`_check_unique_items` / `_check_contains`) — in `_<union>_from_transfer_type` and again in `_<union>_to_transfer_type`, so a branch violation aggregates with its siblings. Selecting the branch *is* validating it. |
 | Java | a package-private `validate(path, violations)` on the wrapper class, with its compiled `pattern`/`format` `Pattern` statics. `fromNode` calls it on the wrapper it just built; the interface's static `validate` dispatches on the member's runtime class and is called by the declaring POJO's `Serializer` (and per element/member for a collection of unions) before any wire member is written. |
 
 A **closed value set** (`const`/`enum`) on a branch closes the *type* where the
 target can express that — a TypeScript literal union (`"auto" | "manual" | number`),
-a Python `Literal` — and is a membership check in the validator in Go and Java,
+a Python `typing.Literal` — and is a membership check in the validator in Go and Java,
 which have no field to hang a defined type or value class off (the same treatment a
 typed map's member gets, [[additionalProperties]] §"Per-member `T` validation").
 The accepted value set is identical in all four.
 
 ### Serialize-side (P12)
 
-In the statically typed targets (Go/TS/Java) the in-memory value **is** a
-single branch member, so "exactly one" is structurally guaranteed and the
-encode adapter simply emits the held variant: Go `json.Marshal` on the
-interface marshals its dynamic type (a `FooString`/`FooArray` named type
-serializes as its underlying JSON kind; an object branch emits its
-fields); TS `toTransferType` branches on `typeof`/`Array.isArray` and
-delegates to the member's converter; Java's `Serializer` writes by runtime
-class. The shared `Validate` still **re-runs the selected branch's
-constraints before emit**, so an in-memory member violating its own
-branch's rules fails serialize with the same aggregated primitive rather
-than being written (real teeth where construction is unchecked).
+The in-memory value **is** a single branch member, so "exactly one" is
+structurally guaranteed and the encode adapter simply emits the held
+variant: Go `json.Marshal` on the interface marshals its dynamic type (a
+`FooString`/`FooArray` named type serializes as its underlying JSON kind;
+an object branch emits its fields); TS `toTransferType` branches on
+`typeof`/`Array.isArray` and delegates to the member's converter; Java's
+`Serializer` writes by runtime class; Python's
+`_<union>_to_transfer_type` dispatches on the member's Python type with
+`isinstance` and calls the branch's converter. The shared `Validate` still
+**re-runs the selected branch's constraints before emit**, so an in-memory
+member violating its own branch's rules fails serialize with the same
+aggregated primitive rather than being written (real teeth where
+construction is unchecked).
+
+Python's serialize dispatch tests every branch but the last, then falls
+through to it: given a member typed as the union, the final `isinstance`
+is provably redundant, and emitting it would leave the guard and the
+`expected one of` raise behind it statically unreachable. A member whose
+runtime type contradicts the field's declared union therefore fails inside
+the fallthrough branch's converter rather than with the union's own
+aggregated error. What **P12** guarantees is unchanged — nothing invalid
+reaches the wire, because the failure still happens before a byte is
+written — and the case is one a type checker rejects at the assignment.
+The parse direction, which is the one that sees untrusted input, tests
+every branch and raises `expected one of: <labels>` with no fallthrough.
 
 ## Property-testing matrix
 

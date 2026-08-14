@@ -45,11 +45,8 @@ Loader behavior:
 - **On an `integer` field the bound MUST be integer-valued.** `maximum:5.0`
   is accepted (≡ `5`, honoring the `1.0`-as-integer rule from [[type]]);
   `maximum:5.5` is **rejected** with a fix-it ("use an integer bound, or
-  make the field `number`"). Empirically Pydantic cannot even represent a
-  fractional `le` on an `int` field — `Field(le=5.5)` fails to build with
-  "'le' must be coercible to an integer" — and an integer bound lets
-  all four languages compare against one integer value with no
-  float/round ambiguity.
+  make the field `number`"). An integer bound lets all four languages
+  compare against one integer value with no float/round ambiguity.
 - On a `number` field any finite numeric bound is accepted.
 - A `maximum` larger than the [[type]] integer cap `+(2^53−1)` (or
   `minimum` below `−(2^53−1)`) on an `integer` field is **redundant** (the
@@ -85,7 +82,7 @@ the **shared `Validate`** layer of **P12**).
 |---|---|
 | Go | The comparison is a predicate in the shared `Validate(model)` (`if v > max { push(Violation{Path, Reason: fmt.Sprintf("must be <= %v, got %v", max, v)}) }`), which the generated `UnmarshalJSON` calls after decoding; violations collect into one `ValidationError`. Integer field: compare the decoded `int64` to the integer bound directly (exact). Number field: compare `float64` to the `float64` bound. |
 | TypeScript | ``if (v > max) push(Violation{path, reason: `must be <= ${max}, got ${v}`})``, throw one `ValidationError`. `number` covers both `integer` and `number` fields; `max` is an emitted numeric constant. |
-| Python | Pydantic constraint `Le(max)` (`annotated_types`) on the field. On an `integer` field it composes over the `SpecInt` `BeforeValidator` (see [[type]]): the wire value normalizes (`5.0`→`5`) **then** `Le` applies — verified in `pyd_numeric_probe.py`. Aggregates natively in `pydantic.ValidationError`, whose message **already names the bound** (`Input should be less than or equal to 10`), so no custom string is needed. |
+| Python | An explicit comparison in the transfer type converter (PRINCIPLES Python §3): `if v > max: violations.append(Violation(path=…, reason=f"must be <= {max}, got {v}"))`, aggregated into the single generated `ValidationError`. On an `integer` field it runs **after** `_parse_spec_integer` has normalized the wire value (`5.0`→`5`, see [[type]]), so the comparison is against a Python `int`. `max` is an inlined numeric literal. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the field node via the [[type]] `SpecNumbers` helper, then checks `v > max` (integer field: `long` vs `long`; number field: `double` vs `double`), pushing a `Violation{path, "must be <= " + max + ", got " + v}` into the single `ValidationException`. **Not** bean-validation `@Max` — the check is hand-written in the collecting deserializer like every other constraint. |
 
 **Informative `reason` strings.** The `Violation` `reason` is *not* a bare
@@ -94,8 +91,8 @@ value** — `must be <= 10, got 15` — so the aggregated error tells the caller
 exactly which limit was crossed and by what. The bound is an emitted
 compile-time constant; the actual value is interpolated at runtime. This
 matches [[type]]'s descriptive style (`expected integer`, `exceeds cap`).
-Pydantic's native `Le`/`Ge`/`Lt`/`Gt`/`MultipleOf` already produce this
-form; Go/TS/Java hand-build the equivalent. The rest of the numeric family
+All four targets hand-build the string from the emitted bound and the
+runtime value. The rest of the numeric family
 ([[minimum]], [[exclusiveMaximum]], [[exclusiveMinimum]], [[multipleOf]])
 follows the same convention with its own operator/word.
 
@@ -107,7 +104,8 @@ comparison in `double`; this still agrees value-for-value because both the
 capped value and the bound lie within `±(2^53−1)`, which is exactly
 representable as a double — the probe confirms `(double)cap == cap` (and
 e.g. `(double)cap <= 5.5 == false`). Python normalizes the wire value to
-`int` (`SpecInt`) before `Le`, so it too compares exactly. This is the same
+`int` via `_parse_spec_integer` before comparing, so it too compares
+exactly. This is the same
 cap guarantee the integer runtime helpers lean on in [[type]].
 (This is *why* an integer-field bound is required to be integer-valued: it
 keeps even the mixed integer/float comparison exact and unambiguous.)
@@ -179,9 +177,9 @@ not here.
     `min ≥ exclusiveMax`, or `exclusiveMin ≥ exclusiveMax`.
   - `integer` field: empty iff the interval contains **no integer** (e.g.
     `exclusiveMinimum:1, exclusiveMaximum:2` — nothing strictly between;
-    Pydantic *builds* it but no value passes, so we reject at load
-    instead). `minimum == maximum` on an integer is the one-value case and
-    is fine.
+    each bound is individually well-formed but no value passes, so we
+    reject at load instead). `minimum == maximum` on an integer is the
+    one-value case and is fine.
 - **[[multipleOf]]**: with a range present, if no multiple of the divisor
   lies in the accepted interval the schema is unsatisfiable → reject
   (detail in [[multipleOf]]).

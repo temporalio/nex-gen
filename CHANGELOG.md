@@ -48,6 +48,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same validation as operation-used models, and Java now reports its existing
   lack of protobuf model support instead of silently dropping protobuf
   operation types.
+- Python: Generated JSON-Schema models are now plain
+  `@dataclasses.dataclass(slots=True, kw_only=True)` types instead of
+  `pydantic.BaseModel`s. Each model carries a generated transfer type converter
+  registered with `temporalio.converter.transfer_type_convertible`, so the models
+  work with the **default** Temporal data converter — the
+  `temporalio.contrib.pydantic.pydantic_data_converter` wiring is no longer
+  needed, and `pydantic` is no longer a dependency of generated code. Every field
+  is keyword-only, and the wire name of a member is pinned by the converter
+  rather than by a `Field(alias=...)`.
+- Python: `additionalProperties` is now carried by an explicit
+  `additional_properties: dict[str, V]` member instead of Pydantic's
+  `model_extra` bag, both for an open declared-property object and for a
+  map-shaped model. This matches Go, TypeScript, and Java, and keeps the emitted
+  type's kind stable if `properties` are added to that schema later. Read
+  `model.additional_properties` where `model.model_extra` was read, and construct
+  a map-shaped model as `Labels(additional_properties={...})`.
+- Python: Validation errors are now a generated `ValidationError` over
+  `Violation { path, reason }` — the same structured, aggregating error Go,
+  TypeScript, and Java already surface — instead of `pydantic.ValidationError`.
+  One bad payload reports every violation it contains, with the JSON path of each
+  and a reason naming the concrete bound and the offending value. Both types live
+  in the package's `_definitions` module and are deliberately not re-exported
+  through `__init__.py`, matching the other three languages.
+- Python: An **optional and nullable** member now collapses on round-trip, as it
+  already does in Go and Java. A dataclass has no presence channel, so an absent
+  member and an explicit wire `null` read as the same `None`, and both
+  re-serialize as *omitted*. The set of accepted and rejected values is
+  unchanged — only the byte-identity of an explicit `null` on the way back out.
+- Python: A schema `default` is now **advisory**, matching TypeScript. It is no
+  longer materialized on read: the member is encoded like any other optional one
+  (`T | None = None`, omitted when unset, so the wire stays byte-identical), and
+  the default is emitted as a module-level `DEFAULT_<FIELD>` constant
+  (`DEFAULT_<MODEL>_<FIELD>` when the member name is not unique in the module)
+  for the consumer to apply — `x if x is not None else DEFAULT_X`. Pydantic used
+  to surface the default as the field's value; read the constant instead.
 - JSON Schema: An `x-<lang>-name` alongside a `$ref` is no longer merged as an
   implicit-`allOf` conjunct, which cloned the referenced target into the use site.
   It names the _member_ the reference is bound to and leaves the reference intact

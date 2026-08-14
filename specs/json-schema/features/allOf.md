@@ -291,7 +291,7 @@ $defs:
 `Widget` merges to a single object with `{id, size, name}`, `required:
 [id, name]` — copied fields, no inheritance. Every target emits it as it
 would the hand-written combined object (Go struct, TS `interface`, Python
-`BaseModel`, Java POJO); `Base` and `Sized` remain their own types,
+dataclass, Java POJO); `Base` and `Sized` remain their own types,
 unrelated to `Widget`.
 
 ## Validator mapping

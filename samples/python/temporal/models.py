@@ -2,20 +2,254 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
-import pydantic
+import typing_extensions
+import datetime
+import temporalio.converter
 
 from ._definitions import (
-    DateField,
-    DateTimeField,
-    DurationField,
-    TimeField,
-    _emit_set_fields,
-    _reject_explicit_null,
+    ValidationError,
+    Violation,
+    _format_date,
+    _format_date_time,
+    _format_duration,
+    _format_time,
+    _parse_date,
+    _parse_date_time,
+    _parse_duration,
+    _parse_time,
+    _transfer_type_convertible,
 )
 
 
-class Temporal(pydantic.BaseModel):
+class _TemporalTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["Temporal", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["Temporal"]
+    ) -> "Temporal":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        created_at: datetime.datetime = typing.cast("typing.Any", None)
+        if "createdAt" not in raw or raw["createdAt"] is None:
+            violations.append(Violation(path="createdAt", reason="required"))
+        else:
+            created_at_raw = raw["createdAt"]
+            if not isinstance(created_at_raw, str):
+                violations.append(Violation(path="createdAt", reason="expected string"))
+            else:
+                created_at_parsed = _parse_date_time(
+                    created_at_raw, "createdAt", violations
+                )
+                if created_at_parsed is not None:
+                    created_at = created_at_parsed
+
+        birthday: datetime.date = typing.cast("typing.Any", None)
+        if "birthday" not in raw or raw["birthday"] is None:
+            violations.append(Violation(path="birthday", reason="required"))
+        else:
+            birthday_raw = raw["birthday"]
+            if not isinstance(birthday_raw, str):
+                violations.append(Violation(path="birthday", reason="expected string"))
+            else:
+                birthday_parsed = _parse_date(birthday_raw, "birthday", violations)
+                if birthday_parsed is not None:
+                    birthday = birthday_parsed
+
+        alarm: datetime.time = typing.cast("typing.Any", None)
+        if "alarm" not in raw or raw["alarm"] is None:
+            violations.append(Violation(path="alarm", reason="required"))
+        else:
+            alarm_raw = raw["alarm"]
+            if not isinstance(alarm_raw, str):
+                violations.append(Violation(path="alarm", reason="expected string"))
+            else:
+                alarm_parsed = _parse_time(alarm_raw, "alarm", violations)
+                if alarm_parsed is not None:
+                    alarm = alarm_parsed
+
+        timeout: datetime.timedelta = typing.cast("typing.Any", None)
+        if "timeout" not in raw or raw["timeout"] is None:
+            violations.append(Violation(path="timeout", reason="required"))
+        else:
+            timeout_raw = raw["timeout"]
+            if not isinstance(timeout_raw, str):
+                violations.append(Violation(path="timeout", reason="expected string"))
+            else:
+                timeout_parsed = _parse_duration(timeout_raw, "timeout", violations)
+                if timeout_parsed is not None:
+                    timeout = timeout_parsed
+
+        updated_at: datetime.datetime | None = None
+        if "updatedAt" in raw:
+            updated_at_raw = raw["updatedAt"]
+            if updated_at_raw is None:
+                violations.append(
+                    Violation(path="updatedAt", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(updated_at_raw, str):
+                    violations.append(
+                        Violation(path="updatedAt", reason="expected string")
+                    )
+                else:
+                    updated_at_parsed = _parse_date_time(
+                        updated_at_raw, "updatedAt", violations
+                    )
+                    if updated_at_parsed is not None:
+                        updated_at = updated_at_parsed
+
+        expires_on: datetime.date | None = None
+        if "expiresOn" in raw:
+            expires_on_raw = raw["expiresOn"]
+            if expires_on_raw is None:
+                violations.append(
+                    Violation(path="expiresOn", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(expires_on_raw, str):
+                    violations.append(
+                        Violation(path="expiresOn", reason="expected string")
+                    )
+                else:
+                    expires_on_parsed = _parse_date(
+                        expires_on_raw, "expiresOn", violations
+                    )
+                    if expires_on_parsed is not None:
+                        expires_on = expires_on_parsed
+
+        reminder: datetime.time | None = None
+        if "reminder" in raw:
+            reminder_raw = raw["reminder"]
+            if reminder_raw is None:
+                violations.append(
+                    Violation(path="reminder", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(reminder_raw, str):
+                    violations.append(
+                        Violation(path="reminder", reason="expected string")
+                    )
+                else:
+                    reminder_parsed = _parse_time(reminder_raw, "reminder", violations)
+                    if reminder_parsed is not None:
+                        reminder = reminder_parsed
+
+        retry_delay: datetime.timedelta | None = None
+        if "retryDelay" in raw:
+            retry_delay_raw = raw["retryDelay"]
+            if retry_delay_raw is None:
+                violations.append(
+                    Violation(path="retryDelay", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(retry_delay_raw, str):
+                    violations.append(
+                        Violation(path="retryDelay", reason="expected string")
+                    )
+                else:
+                    retry_delay_parsed = _parse_duration(
+                        retry_delay_raw, "retryDelay", violations
+                    )
+                    if retry_delay_parsed is not None:
+                        retry_delay = retry_delay_parsed
+
+        deleted_at: datetime.datetime | None = None
+        if "deletedAt" in raw:
+            deleted_at_raw = raw["deletedAt"]
+            if deleted_at_raw is None:
+                deleted_at = None
+            else:
+                if not isinstance(deleted_at_raw, str):
+                    violations.append(
+                        Violation(path="deletedAt", reason="expected string")
+                    )
+                else:
+                    deleted_at_parsed = _parse_date_time(
+                        deleted_at_raw, "deletedAt", violations
+                    )
+                    if deleted_at_parsed is not None:
+                        deleted_at = deleted_at_parsed
+
+        archived_on: datetime.date | None = None
+        if "archivedOn" in raw:
+            archived_on_raw = raw["archivedOn"]
+            if archived_on_raw is None:
+                archived_on = None
+            else:
+                if not isinstance(archived_on_raw, str):
+                    violations.append(
+                        Violation(path="archivedOn", reason="expected string")
+                    )
+                else:
+                    archived_on_parsed = _parse_date(
+                        archived_on_raw, "archivedOn", violations
+                    )
+                    if archived_on_parsed is not None:
+                        archived_on = archived_on_parsed
+
+        for key in raw:
+            if (
+                key != "createdAt"
+                and key != "birthday"
+                and key != "alarm"
+                and key != "timeout"
+                and key != "updatedAt"
+                and key != "expiresOn"
+                and key != "reminder"
+                and key != "retryDelay"
+                and key != "deletedAt"
+                and key != "archivedOn"
+            ):
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return Temporal(
+            created_at=created_at,
+            birthday=birthday,
+            alarm=alarm,
+            timeout=timeout,
+            updated_at=updated_at,
+            expires_on=expires_on,
+            reminder=reminder,
+            retry_delay=retry_delay,
+            deleted_at=deleted_at,
+            archived_on=archived_on,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "Temporal") -> typing.Any:
+        violations: list[Violation] = []
+        out: dict[str, typing.Any] = {}
+        out["createdAt"] = _format_date_time(value.created_at)
+        out["birthday"] = _format_date(value.birthday)
+        out["alarm"] = _format_time(value.alarm)
+        out["timeout"] = _format_duration(value.timeout)
+        if value.updated_at is not None:
+            out["updatedAt"] = _format_date_time(value.updated_at)
+        if value.expires_on is not None:
+            out["expiresOn"] = _format_date(value.expires_on)
+        if value.reminder is not None:
+            out["reminder"] = _format_time(value.reminder)
+        if value.retry_delay is not None:
+            out["retryDelay"] = _format_duration(value.retry_delay)
+        if value.deleted_at is not None:
+            out["deletedAt"] = _format_date_time(value.deleted_at)
+        if value.archived_on is not None:
+            out["archivedOn"] = _format_date(value.archived_on)
+        if violations:
+            raise ValidationError(violations)
+        return out
+
+
+@_transfer_type_convertible(_TemporalTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class Temporal:
     """Temporal
     Root object materializing the four RFC 3339 temporal formats as native typed fields:
     date-time (offset & sub-second precision preserved), date, time (offset preserved
@@ -23,70 +257,38 @@ class Temporal(pydantic.BaseModel):
     and nullable members of each.
     """
 
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
-
-    created_at: DateTimeField = pydantic.Field(alias="createdAt")
+    created_at: datetime.datetime
     """Required event timestamp; materialized date-time (offset required, sub-second
     precision & offset preserved on round-trip).
     """
 
-    birthday: DateField = pydantic.Field()
+    birthday: datetime.date
     """Required calendar date; materialized date (YYYY-MM-DD, lossless)."""
 
-    alarm: TimeField = pydantic.Field()
+    alarm: datetime.time
     """Required wall-clock time; materialized time (offset preserved when present,
     otherwise offset-less).
     """
 
-    timeout: DurationField = pydantic.Field()
+    timeout: datetime.timedelta
     """Required time-only duration; materialized duration, canonicalized to PT…H…M…S (e.g.
     PT90M → PT1H30M).
     """
 
-    updated_at: DateTimeField | None = pydantic.Field(default=None, alias="updatedAt")
+    updated_at: datetime.datetime | None = None
     """Optional date-time."""
 
-    expires_on: DateField | None = pydantic.Field(default=None, alias="expiresOn")
+    expires_on: datetime.date | None = None
     """Optional date."""
 
-    reminder: TimeField | None = pydantic.Field(default=None)
+    reminder: datetime.time | None = None
     """Optional time."""
 
-    retry_delay: DurationField | None = pydantic.Field(default=None, alias="retryDelay")
+    retry_delay: datetime.timedelta | None = None
     """Optional duration."""
 
-    deleted_at: DateTimeField | None = pydantic.Field(default=None, alias="deletedAt")
+    deleted_at: datetime.datetime | None = None
     """Optional and nullable date-time (may be absent or explicitly null)."""
 
-    archived_on: DateField | None = pydantic.Field(default=None, alias="archivedOn")
+    archived_on: datetime.date | None = None
     """Optional and nullable date."""
-
-    _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
-        {
-            "expiresOn",
-            "expires_on",
-            "reminder",
-            "retryDelay",
-            "retry_delay",
-            "updatedAt",
-            "updated_at",
-        }
-    )
-
-    @pydantic.model_validator(mode="wrap")
-    @classmethod
-    def _reject_null(
-        cls,
-        data: object,
-        handler: typing.Callable[[object], typing.Any],
-    ) -> typing.Any:
-        return _reject_explicit_null(cls, data, handler)
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)

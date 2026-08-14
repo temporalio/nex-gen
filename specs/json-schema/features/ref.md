@@ -212,7 +212,7 @@ to `_recursive.py` (Python only — see [[generated-file-layout]]).
 | **Go** | pointer `*T` (even when required + non-nullable) | a bare recursive `T` is an infinitely-sized struct (compile error); `[]T`/`map[string]T` already carry indirection |
 | **Java** | bare reference | object fields are references already; recursion is free |
 | **TypeScript** | bare reference | interfaces reference themselves/each other freely |
-| **Python** | string forward annotation + one `model_rebuild()` per SCC | acyclic deps emit in topological order with concrete annotations — **no** rebuild; only a cycle's back-edge forces a forward ref |
+| **Python** | bare reference | `from __future__ import annotations` makes every annotation a string that is never evaluated, so a dataclass references itself and its cycle peers freely; the emitted order is topological only for readability |
 
 **Satisfiability check.** A recursion cycle has a finite instance only if
 **at least one edge in it can terminate**. An edge *terminates* when it

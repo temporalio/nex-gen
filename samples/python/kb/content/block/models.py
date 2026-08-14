@@ -2,43 +2,94 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
-import pydantic
+import typing_extensions
+import temporalio.converter
 
 from ..._definitions import (
-    SpecInt,
-    _emit_set_fields,
-    _reject_explicit_null,
+    ValidationError,
+    Violation,
+    _parse_spec_integer,
+    _transfer_type_convertible,
 )
 
 
-class BlockStyle(pydantic.BaseModel):
+class _BlockStyleTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["BlockStyle", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["BlockStyle"]
+    ) -> "BlockStyle":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        bold: bool | None = None
+        if "bold" in raw:
+            bold_raw = raw["bold"]
+            if bold_raw is None:
+                violations.append(
+                    Violation(path="bold", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(bold_raw, bool):
+                    violations.append(Violation(path="bold", reason="expected boolean"))
+                else:
+                    bold = bold_raw
+
+        indent: int | None = None
+        if "indent" in raw:
+            indent_raw = raw["indent"]
+            if indent_raw is None:
+                violations.append(
+                    Violation(path="indent", reason="explicit null not allowed")
+                )
+            else:
+                indent_parsed = _parse_spec_integer(indent_raw, "indent", violations)
+                if indent_parsed is not None:
+                    indent = indent_parsed
+                    if indent < 0:
+                        violations.append(
+                            Violation(
+                                path="indent", reason=f"must be >= 0, got {indent}"
+                            )
+                        )
+
+        for key in raw:
+            if key != "bold" and key != "indent":
+                violations.append(Violation(path=key, reason="unknown field"))
+        if violations:
+            raise ValidationError(violations)
+        return BlockStyle(
+            bold=bold,
+            indent=indent,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "BlockStyle") -> typing.Any:
+        violations: list[Violation] = []
+        out: dict[str, typing.Any] = {}
+        if value.bold is not None:
+            out["bold"] = value.bold
+        if value.indent is not None:
+            if value.indent < 0:
+                violations.append(
+                    Violation(path="indent", reason=f"must be >= 0, got {value.indent}")
+                )
+            out["indent"] = value.indent
+        if violations:
+            raise ValidationError(violations)
+        return out
+
+
+@_transfer_type_convertible(_BlockStyleTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class BlockStyle:
     """Non-cyclic helper; stays in the content_block module. All members optional."""
 
-    model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(
-        strict=True, populate_by_name=True, extra="forbid"
-    )
+    bold: bool | None = None
 
-    bold: bool | None = pydantic.Field(default=None)
-
-    indent: SpecInt | None = pydantic.Field(default=None, ge=0)
-
-    _OPTIONAL_NON_NULLABLE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
-        {"bold", "indent"}
-    )
-
-    @pydantic.model_validator(mode="wrap")
-    @classmethod
-    def _reject_null(
-        cls,
-        data: object,
-        handler: typing.Callable[[object], typing.Any],
-    ) -> typing.Any:
-        return _reject_explicit_null(cls, data, handler)
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self,
-        handler: typing.Callable[[pydantic.BaseModel], typing.Any],
-    ) -> dict[str, object]:
-        return _emit_set_fields(self, handler)
+    indent: int | None = None

@@ -97,7 +97,7 @@ compares. `matchCount` reuses the [[contains]] matcher predicate
 |---|---|
 | Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding into the `[]T`: `n := 0; for _, e := range v { if matchesContains(e) { n++ } }; if n > max { push(Violation{Path, Reason: fmt.Sprintf("too many matching items: at most %d, got %d", max, n)}) }`, collected into one `ValidationError`. |
 | TypeScript | After the `Array.isArray` guard ([[items]]), the shared `Validate` counts: ``const n = v.filter(matchesContains).length; if (n > max) push(Violation{path, reason: `too many matching items: at most ${max}, got ${n}`})``, throwing one `ValidationError`. `max` is an emitted numeric constant. |
-| Python | A `model_validator` over the decoded `list[T]` (Pydantic v2 has no native `maxContains`): `n = sum(1 for e in v if _matches_contains(e)); if n > max: raise InitErrorDetails(...)`, aggregated into `pydantic.ValidationError`. |
+| Python | `_check_contains` in the transfer type converter tallies `n = sum(1 for e in v if _matches_contains(e))` and on `n > max` appends `Violation(path=…, reason=f"too many matching items: at most {max}, got {n}")` into the single generated `ValidationError`. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `List<T>`, tallies matches against the matcher predicate, and on `n > max` pushes a `Violation{path, "too many matching items: at most " + max + ", got " + n}` into the single `ValidationException`. Not bean-validation. |
 
 **Informative `reason` strings.** The `reason` names the **concrete bound

@@ -60,9 +60,9 @@ The defining choices (citing [[PRINCIPLES.md]]):
   browser-portable stdlib codec, so it gets a small generator-owned
   pure-JS codec (below). We already own the parse/encode adapters
   (PRINCIPLES: shadow-layout `UnmarshalJSON`, the collecting Jackson
-  (de)serializer, the TS transfer type converter, the Python model hooks), so selecting
-  the standard vs URL-safe codec per node is a codec choice, not new
-  machinery.
+  (de)serializer, the TS and Python transfer type converters), so
+  selecting the standard vs URL-safe codec per node is a codec choice, not
+  new machinery.
 - **A native bytes field is the idiomatic shape (P2).** A base64 blob
   modeled as a bare `string` forces every consumer to decode by hand at
   each use site; `[]byte` / `byte[]` / `bytes` / `Uint8Array` is what a
@@ -151,10 +151,11 @@ binding), choosing the standard or URL-safe variant per the declared
   (P4). *(Keeping a canonical `string` in TS — the [[format]]-style
   fallback used for `date`/`duration` — is the alternative in Open
   questions.)*
-- **Python** — we own the codec via the model hooks rather than lean on
-  Pydantic's `Base64Bytes` / `Base64UrlBytes`, for the same reason
-  [[format]] avoids native `datetime` coercion: full control of the
-  accept/reject line and the canonical output. `urlsafe_b64decode`
+- **Python** — the codec is generator-owned, living in the
+  `_parse_base64` / `_parse_base64url` / `_format_base64` /
+  `_format_base64url` runtime helpers rather than in a library bytes type,
+  for the same reason [[format]] owns its temporal parsing: full control of
+  the accept/reject line and the canonical output. `urlsafe_b64decode`
   requires padding, so the unpadded wire is re-padded before decode
   (`s + "=" * (-len(s) % 4)`).
 
@@ -191,7 +192,7 @@ wire is unambiguous and the stdlib decoder below agrees.
 |---|---|
 | Go | Parse adapter: run the encoding's pinned regex over the wire string, pushing a `Violation` on failure; else decode with the codec above → `[]byte`. Encode adapter: re-encode with the same codec. `regexp.MustCompile` compiled once at init. |
 | TypeScript | `fromTransferType`: pinned regex (`/…/u`) — **essential**, since the pure-JS decoder assumes canonical input and won't itself reject malformed text — then the generator-owned decoder → `Uint8Array`. `toTransferType`: the generator-owned encoder. Lookup table + arithmetic; **no `Buffer`/`atob`**, so it runs in the browser. |
-| Python | Parse hook (an `AfterValidator` / model validator): regex over the wire string, then `b64decode(s, validate=True)` (`base64`) or `urlsafe_b64decode(s + pad)` (`base64url`) → `bytes`. Serialize: `@model_serializer` emits `b64encode(b)` / `urlsafe_b64encode(b).rstrip(b"=")` as ASCII. |
+| Python | `_parse_base64(v, path, violations)` / `_parse_base64url(...)`, called from the converter: regex over the wire string, then `b64decode(s, validate=True)` (`base64`) or `urlsafe_b64decode(s + pad)` (`base64url`) → `bytes`; on failure they append a `Violation` and return `None` so the rest of the object still validates. Serialize: `_format_base64` / `_format_base64url` emit `b64encode(b)` / `urlsafe_b64encode(b).rstrip(b"=")` as ASCII. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex over the `String`, then `Base64.getDecoder()` / `getUrlDecoder()` `.decode(s)` → `byte[]`, pushing a `Violation` on failure. The `Serializer` emits with `getEncoder()` / `getUrlEncoder().withoutPadding()`. |
 
 **Informative `reason` strings.** The `Violation` `reason` names the

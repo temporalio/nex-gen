@@ -1,46 +1,31 @@
 import datetime
-import json
-from pathlib import Path
 import typing
 
 import pytest
-from temporalio.api.common.v1 import Payload
-from temporalio.contrib.pydantic import pydantic_data_converter
 
 from temporal import Temporal
+from temporal._definitions import ValidationError
 
-
-WIRE_FIXTURE_DIR = (
-    Path(__file__).resolve().parents[2] / "wire" / "json_schema" / "temporal"
+from tests.json_converter_helper import (
+    converter_for,
+    decode_fixture,
+    encode,
+    load_fixture,
+    violation_pairs,
 )
 
-
-def load_fixture(name: str) -> object:
-    return json.loads((WIRE_FIXTURE_DIR / name).read_text(encoding="utf-8"))
-
-
-def fixture_bytes(name: str) -> bytes:
-    return (WIRE_FIXTURE_DIR / name).read_bytes()
+SUITE = "temporal"
 
 
 def decode(name: str) -> Temporal:
-    payload = Payload(metadata={"encoding": b"json/plain"}, data=fixture_bytes(name))
-    converter = pydantic_data_converter.payload_converter
-    return converter.from_payloads([payload], [Temporal])[0]
-
-
-def encode(model: Temporal) -> object:
-    converter = pydantic_data_converter.payload_converter
-    encoded = converter.to_payloads([model])
-    assert encoded is not None
-    return json.loads(encoded[0].data)
+    return decode_fixture(Temporal, SUITE, name)
 
 
 def test_temporal_roundtrip_full() -> None:
     # Materialized temporals become native datetime/date/time/timedelta and
     # re-serialize (generator-owned) byte-identically for microsecond precision.
     model = decode("temporal-full.json")
-    assert encode(model) == load_fixture("temporal-full.json")
+    assert encode(model) == load_fixture(SUITE, "temporal-full.json")
     assert model.created_at.utcoffset() == datetime.timedelta(hours=2)
     assert model.created_at.microsecond == 123456
     assert model.timeout == datetime.timedelta(minutes=90)
@@ -49,7 +34,7 @@ def test_temporal_roundtrip_full() -> None:
 
 def test_temporal_roundtrip_minimal() -> None:
     assert encode(decode("temporal-minimal.json")) == load_fixture(
-        "temporal-minimal.json"
+        SUITE, "temporal-minimal.json"
     )
 
 
@@ -65,23 +50,92 @@ def test_temporal_canonicalization() -> None:
     }
 
 
-def test_temporal_nulls() -> None:
+def test_temporal_nulls_collapse_on_roundtrip() -> None:
+    # `deletedAt`/`archivedOn` are optional+nullable. A dataclass has no presence
+    # channel, so absent and explicit `null` are the same in-memory state (None)
+    # and both re-serialize as OMITTED. Python now matches Go and Java here (see
+    # samples/go/tests/json_schema_temporal_test.go, TestJSONSchemaTemporalNulls);
+    # only TypeScript still preserves the explicit null.
     model = decode("temporal-nulls.json")
     assert model.deleted_at is None
     assert model.archived_on is None
     assert model.timeout == datetime.timedelta(0)
 
+    wire = typing.cast(
+        "dict[str, typing.Any]", load_fixture(SUITE, "temporal-nulls.json")
+    )
+    assert wire["deletedAt"] is None
+    assert wire["archivedOn"] is None
+    # The explicit nulls are gone from the re-encoded wire; everything else survives.
+    assert encode(model) == {
+        key: value
+        for key, value in wire.items()
+        if key not in ("deletedAt", "archivedOn")
+    }
+
+
+def test_temporal_absent_and_explicit_null_are_indistinguishable() -> None:
+    # The collapse, stated directly: the two payloads produce equal models.
+    base: dict[str, typing.Any] = {
+        "createdAt": "2021-06-15T12:30:45Z",
+        "birthday": "2000-01-01",
+        "alarm": "09:00:00",
+        "timeout": "PT0S",
+    }
+    converter = converter_for(Temporal)
+    absent = converter.from_transfer_type(base, Temporal)
+    explicit_null = converter.from_transfer_type(
+        {**base, "deletedAt": None, "archivedOn": None}, Temporal
+    )
+    assert absent == explicit_null
+
+
+def test_missing_required_members_aggregate() -> None:
+    # P11: one bad payload surfaces every violation it contains, in declared
+    # property order — the aggregation pydantic used to provide for free.
+    with pytest.raises(ValidationError) as excinfo:
+        _ = converter_for(Temporal).from_transfer_type({}, Temporal)
+    assert violation_pairs(excinfo.value) == [
+        ("createdAt", "required"),
+        ("birthday", "required"),
+        ("alarm", "required"),
+        ("timeout", "required"),
+    ]
+
+
+def test_non_object_payload_is_a_single_structural_violation() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        _ = converter_for(Temporal).from_transfer_type("nope", Temporal)
+    assert violation_pairs(excinfo.value) == [("", "expected object")]
+
+
+def test_unknown_member_is_rejected() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        _ = converter_for(Temporal).from_transfer_type(
+            {
+                "createdAt": "2021-06-15T12:30:45Z",
+                "birthday": "2000-01-01",
+                "alarm": "09:00:00",
+                "timeout": "PT0S",
+                "nope": 1,
+            },
+            Temporal,
+        )
+    assert violation_pairs(excinfo.value) == [("nope", "unknown field")]
+
 
 @pytest.mark.parametrize(
-    "field,value",
+    "field,value,format_name",
     [
-        ("createdAt", "2021-12-31T23:59:60Z"),  # leap second
-        ("timeout", "P1Y"),  # calendar duration
-        ("birthday", "2021-02-29"),  # invalid calendar date
-        ("createdAt", "2021-06-15T12:30:45"),  # missing offset
+        ("createdAt", "2021-12-31T23:59:60Z", "date-time"),  # leap second
+        ("timeout", "P1Y", "duration"),  # calendar duration
+        ("birthday", "2021-02-29", "date"),  # invalid calendar date
+        ("createdAt", "2021-06-15T12:30:45", "date-time"),  # missing offset
     ],
 )
-def test_temporal_materialized_narrowing_rejects(field: str, value: str) -> None:
+def test_temporal_materialized_narrowing_rejects(
+    field: str, value: str, format_name: str
+) -> None:
     base: dict[str, typing.Any] = {
         "createdAt": "2021-06-15T12:30:45Z",
         "birthday": "2000-01-01",
@@ -89,5 +143,10 @@ def test_temporal_materialized_narrowing_rejects(field: str, value: str) -> None
         "timeout": "PT0S",
     }
     base[field] = value
-    with pytest.raises(Exception):
-        _ = Temporal.model_validate(base)
+    with pytest.raises(ValidationError) as excinfo:
+        _ = converter_for(Temporal).from_transfer_type(base, Temporal)
+    # The reason names the format and the offending value, rendered in its JSON
+    # form exactly as Go and TypeScript render it.
+    assert violation_pairs(excinfo.value) == [
+        (field, f'must be a valid {format_name}, got "{value}"')
+    ]

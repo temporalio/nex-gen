@@ -151,8 +151,8 @@ wire value against the same set.
 **Python.** The **closed literal set** via `Literal` —
 `Literal["red","green","blue"]`. **`float` members are the exception:**
 `Literal` forbids float members (PEP 586), so a number enum is plain
-`float` and closedness rests on the `model_validator` alone (as in
-[[const]]).
+`float` and closedness rests on the converter's membership check alone (as
+in [[const]]).
 
 **Java.** A generated **value class** wrapping the primitive, carrying one
 known constant per member — a private constructor, a membership `switch`,
@@ -284,12 +284,14 @@ identical in both directions (a pure predicate over the decoded value — the
 |---|---|
 | Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding: `switch v { case ColorRed, ColorGreen, ColorBlue: default: … Violation{Path, Reason: fmt.Sprintf("must be one of [%s], got %q", set, v)} }`, collected into one `ValidationError`. The field is the defined type; the typed constants are both the compared set and the idiomatic setters. |
 | TypeScript | the shared `Validate` predicate tests set membership: ``if (!SET.has(v)) push(Violation{path, reason: `must be one of [...], got ${JSON.stringify(v)}`})``, throwing one `ValidationError`. The field's union type closes it in-language. |
-| Python | a field/`model_validator` testing `v in SET`, raising `InitErrorDetails` into the aggregated `pydantic.ValidationError`. The field is the closed `Literal` (`float` enums are plain `float`, validated the same way). |
+| Python | the transfer type converter (PRINCIPLES Python §3) tests `v not in SET` — a module-level `frozenset` — and appends `Violation(path=…, reason='must be one of [...], got <json>')` into the single generated `ValidationError`. The field is the closed `Literal` (`float` enums are plain `float`, validated the same way). |
 | Java | the aggregating path is the per-POJO collecting deserializer (PRINCIPLES Java §5): a **non-throwing membership lookup** — known value → the constant, otherwise record a `Violation{path, "must be one of [...], got …"}` — so multiple bad fields collect into the single `ValidationException`. The value class's `@JsonCreator fromString` *throws* only on the **standalone/interop** path, where fail-fast is expected. Serialize needs no separate check: the value class can only hold a known constant. |
 
 The reason string names the **expected set and the offending value**
 (`must be one of ["red","green","blue"], got "purple"`), never a bare
-keyword.
+keyword. Go renders the set with no space after the comma; TypeScript and
+Python render `["red", "green", "blue"]` — a divergence in the set's
+rendering only, never in the accepted value set.
 
 ### Serialize-side (P12)
 
@@ -311,8 +313,9 @@ required enum is a [[required]] violation, and Python has no auto-fill step
 (for enum the generator could not pick which member to fill in any case). The serialize
 membership check has teeth wherever an out-of-set value can be set in
 memory before emit: an optional+enum mutated to a wrong value, a Go
-zero-value/mutated field (`Color("")` is not a member), or a Python
-`model_construct` bypass. In TS and Java the value cannot be out of set in
+zero-value/mutated field (`Color("")` is not a member), or any Python
+in-memory assignment (a dataclass validates nothing on construction,
+PRINCIPLES Python §1). In TS and Java the value cannot be out of set in
 memory (union / value class), so the check is effectively a
 deserialize-direction guard there.
 

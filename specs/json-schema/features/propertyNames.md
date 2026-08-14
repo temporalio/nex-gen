@@ -64,7 +64,7 @@ None of its own. The host object's type comes from
 [[additionalProperties]] — all four languages wrap the map in a named
 catch-all member (`AdditionalProperties map[string]T` /
 `Map<String,T> additionalProperties` / `additionalProperties:
-Record<string,T>` / Pydantic `BaseModel` with extras in `model_extra`).
+Record<string,T>` / `additional_properties: dict[str, V]`).
 `propertyNames` only adds a key validator over those keys.
 
 ## Validator mapping
@@ -76,7 +76,7 @@ string against the (string) constraint.
 |---|---|
 | Go | The key-constraint check is a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding: iterate the decoded keys and run the check (compiled `regexp` for [[pattern]], length checks); a failure → `Violation{Path:key, Reason: fmt.Sprintf("invalid property name %q: %s", key, why)}` (`why` is the underlying assertion's reason, e.g. `must match ^[a-z]+$`), collected into one `ValidationError`. |
 | TypeScript | the shared `Validate` predicate over `Object.keys(parsed)` applies the check; a failure → push ``Violation{path:k, reason: `invalid property name "${k}": ${why}`}``, throw one `ValidationError`. |
-| Python | a field/model validator over `__pydantic_extra__` / the dict keys, raising `InitErrorDetails` (message `invalid property name "<key>": <why>`) per bad key into the aggregated `pydantic.ValidationError`. |
+| Python | both directions of the `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**) loop the map's keys and apply the shared key check; a failure appends ``Violation(path=key, reason=f'invalid property name "{key}": {why}')`` per bad key into the single `ValidationError`. |
 | Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5), iterate the parsed tree's keys, apply the shared key check, and push a `Violation{path:key, "invalid property name \"" + key + "\": " + why}` per bad key into the single `ValidationException`. |
 
 Reuses whatever the string-assertion specs ([[pattern]], [[minLength]],

@@ -52,14 +52,14 @@ member keys present on the wire**, taken at the deserialize boundary
 **before** default population (see [[default]]) — a default-filled key is never on
 the wire and does not count (see Interactions). Count the wire object as a
 single number; do **not** sum a declared-fields bucket and an extras
-bucket separately (case-mapping can route a key to either, and in Pydantic
-the two sets overlap).
+bucket separately (case-mapping can route a key to either, and the
+declared-vs-extras split is a language-side artifact, not a wire fact).
 
 | Language | Strategy |
 |---|---|
 | Go | `UnmarshalJSON` counts decoded members (wire keys, pre-population) and hands the count to the shared `Validate`, whose `> max` predicate raises `Violation{Path:"", Reason: fmt.Sprintf("too many properties: at most %d, got %d", max, n)}`; collected into one `ValidationError`. |
 | TypeScript | count `Object.keys(parsed).length` on the raw parsed wire object (before defaults applied); the shared `Validate`'s `> max` check pushes ``Violation{path, reason: `too many properties: at most ${max}, got ${n}`}``, throw one `ValidationError`. |
-| Python | `model_validator`; `len(model_fields_set) > max` — `model_fields_set` already includes extras and excludes default-filled fields, so it is the exact wire-key count; raise into the aggregated `ValidationError`. |
+| Python | `from_transfer_type` counts `len(raw)` on the raw wire dict — one number over the wire object, taken before any default is materialized — and appends `Violation(path="", reason=f"too many properties: at most {max}, got {n}")` when `n > max`, into the single generated `ValidationError`. |
 | Java | the per-POJO collecting deserializer (PRINCIPLES Java §5) counts distinct keys in the parsed tree (`> max`) — one number over the wire object, **not** populated POJO fields + catch-all map summed post-bind; a violation joins the single `ValidationException`. |
 
 ### Serialize-side (P12)
@@ -68,9 +68,10 @@ The count runs again before emit, over the keys that **will actually be
 written** — i.e. *after* default omission and the omit-vs-`null` decision
 (the serialize mirror of "before default population"). A field whose
 default is unset is omitted and does **not** count, exactly as it didn't
-on the way in. `model_fields_set` (Python) is again the exact emitted-key
-count under `exclude_unset`; Go/TS count the members the encoder will
-emit; an over-cap model fails `MarshalJSON`/`toTransferType`/`model_dump`
+on the way in. Each language counts the members its own encoder will
+emit — in Python, `len(out)` on the dict `to_transfer_type` has built —
+and an over-cap model fails
+`MarshalJSON`/`toTransferType`/`to_transfer_type`
 rather than emitting an out-of-bounds object. Because the in-memory model
 can *read* a default as present that *serializes* as absent, a model can
 legitimately fail `maxProperties`/`minProperties` on serialize that

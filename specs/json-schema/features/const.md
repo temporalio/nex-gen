@@ -154,9 +154,11 @@ wrong value is a compile error); the deserialize validator compares the
 wire value against the same literal.
 
 **Python.** The **closed literal** via `Literal` — `Literal["user"]`,
-`Literal[1]`, `Literal[True]`. **`float` consts are the exception:**
-`Literal` forbids float members (PEP 586), so a number const is plain
-`float` and closedness rests on the `model_validator` alone.
+`Literal[1]`, `Literal[True]` — carried as the dataclass field's default so
+a consumer never has to restate the fixed value. **`float` consts are the
+exception:** `Literal` forbids float members (PEP 586), so a number const
+is plain `float` and closedness rests on the converter's equality check
+alone.
 
 **Java.** A generated **value class** wrapping the primitive, for every
 scalar kind — a known constant, a private constructor, and Jackson
@@ -323,7 +325,7 @@ value — the **shared `Validate`** layer of **P12**).
 |---|---|
 | Go | A predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding: `if v != UserEventKindUser { … Violation{Path, Reason: fmt.Sprintf("must equal %q, got %q", UserEventKindUser, v)} }`, collected into one `ValidationError`. The field is the defined type; the typed constant is both the compared value and the idiomatic setter (`UserEvent{Kind: UserEventKindUser}`). |
 | TypeScript | the shared `Validate` predicate compares against the literal: ``if (v !== "user") push(Violation{path, reason: `must equal "user", got ${JSON.stringify(v)}`})``, throwing one `ValidationError`. The field's literal type closes it in-language. |
-| Python | a field/`model_validator` comparing `== "user"` (the literal), raising `InitErrorDetails` into the aggregated `pydantic.ValidationError`. The field is the closed `Literal` (`float` consts are plain `float`, validated the same way). |
+| Python | the transfer type converter (PRINCIPLES Python §3) compares against the literal — `v != "user"` → `Violation(path=…, reason='must equal "user", got <json>')`, the same reason string TypeScript emits — aggregated into the single generated `ValidationError`. The field is the closed `Literal` (`float` consts are plain `float`, validated the same way). |
 | Java | the aggregating path is the per-POJO collecting deserializer (PRINCIPLES Java §5), which does a **non-throwing membership lookup** — known value → the constant, otherwise record a `Violation{path, "must equal \"user\", got …"}` — so multiple bad fields all collect into the single `ValidationException`, consistent with every other §5 constraint helper. The value class's `@JsonCreator fromString` *throws* only on the **standalone/interop** path, where fail-fast is expected. Serialize needs no separate check: the value class can only hold a known constant. |
 
 ### Serialize-side (P12)
@@ -348,12 +350,13 @@ in:
 |---|---|
 | Go | Field typed with the defined type (`Kind UserEventKind`), set idiomatically via the typed value constant (`UserEvent{Kind: UserEventKindUser}`). A forgotten field is the zero value (`UserEventKind("")`), which the shared `Validate` rejects **loudly** on serialize — consistent with how Go treats every required field. optional+const uses a pointer to the defined type + `,omitempty`, validated when non-nil. |
 | TypeScript | The field is the closed literal (`kind: "user"`); a wrong value is a compile error, so a required+const is always correct in memory and emitted by the normal `toTransferType`. optional+const emits when not `undefined`. |
-| Python | Presence follows [[required]] like any field — **no auto-fill**: a required+const absent on the wire is a required violation (Pydantic's own missing-field error), an optional+const absent stays omitted, and a `model_validator` enforces `== "user"` whenever the value is present. A required+const is set by the consumer, so it is already in `model_fields_set` and emits under plain `to_json` (the **default Temporal converter** path); the generated `@model_serializer(mode='wrap')` re-validates it before emit. |
+| Python | Presence follows [[required]] like any field — **no auto-fill on parse**: a required+const absent on the wire is a `"required"` violation, an optional+const absent stays omitted, and `from_transfer_type` enforces `== "user"` whenever the value is present. In memory the dataclass field carries the const as its **default**, so a consumer never has to restate it and `to_transfer_type` always has the right value to write; it re-checks equality before emitting the key. This all runs under the **default Temporal converter** (PRINCIPLES Python §3). |
 | Java | `private final UserEventKind kind = UserEventKind.USER;` for required+const, getter only. The value class can only hold a known constant, so the getter (via `@JsonValue`) emits `"user"` by the normal path. On the way in, the collecting deserializer's membership lookup records a `Violation` for a non-`"user"` wire value. optional+const is a `@Nullable UserEventKind` constructor parameter, validated if non-null. Numeric/boolean consts use their value classes the same way. |
 
 The serialize equality check has teeth only where a wrong value can be
 set in memory before emit: an optional+const set to a wrong value, a Go
-zero-value/mutated field, or a Python `model_construct` bypass. In TS and
+zero-value/mutated field, or any Python in-memory assignment (a dataclass
+validates nothing on construction, PRINCIPLES Python §1). In TS and
 Java required+const the value cannot be wrong in memory (type / `final`),
 so the check is effectively a deserialize-direction guard there.
 

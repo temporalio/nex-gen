@@ -63,13 +63,13 @@ Per **P10**/**P11**. A single `≥` comparison of the **element count**
 against the fixed bound, identical in both directions (shared `Validate`,
 **P12**). Same per-language strategy as [[maxItems]] with `< min` as the
 failing comparison — the count is the decoded collection's native length
-(`len(v)` / `v.length` / list `min_length` / `v.size()`).
+(`len(v)` / `v.length` / `len(v)` / `v.size()`).
 
 | Language | Strategy |
 |---|---|
 | Go | `if n := len(v); n < min { push(Violation{Reason: fmt.Sprintf("too few items: at least %d, got %d", min, n)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `ValidationError`. |
 | TypeScript | After the `Array.isArray` guard ([[items]]), `v.length < min` pushes ``Violation{path, reason: `too few items: at least ${min}, got ${v.length}`}``, throw one `ValidationError`. |
-| Python | Pydantic `Annotated[list[T], Field(min_length=min)]` — for sequences `min_length` bounds the element count; aggregates in `pydantic.ValidationError`, whose message names the bound (`List should have at least 2 items`). |
+| Python | After the `isinstance(v, list)` guard ([[items]]), `if (n := len(v)) < min: violations.append(Violation(path=…, reason=f"too few items: at least {min}, got {n}"))` in the transfer type converter, aggregated into the single generated `ValidationError`. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `List<T>`, checks `int n = v.size(); if (n < min)`, pushing a `Violation{path, "too few items: at least " + min + ", got " + n}` into the single `ValidationException`. Not bean-validation `@Size`. |
 
 Reason strings name the concrete bound and offending count

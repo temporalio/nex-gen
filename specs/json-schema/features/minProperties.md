@@ -51,8 +51,8 @@ member keys present on the wire**, taken at the deserialize boundary
 **before** default population (see [[default]]) — a default-filled key is never on
 the wire and does not count (see Interactions). Count the wire object as a
 single number; do **not** sum a declared-fields bucket and an extras
-bucket separately (case-mapping can route a key to either, and in Pydantic
-the two sets overlap). Same
+bucket separately (case-mapping can route a key to either, and the
+declared-vs-extras split is a language-side artifact, not a wire fact). Same
 per-language strategy as [[maxProperties]] with `< min` as the failing
 comparison:
 
@@ -60,7 +60,7 @@ comparison:
 |---|---|
 | Go | `UnmarshalJSON` counts decoded members (wire keys, pre-population) and hands the count to the shared `Validate`, whose `< min` predicate raises `Violation{Reason: fmt.Sprintf("too few properties: at least %d, got %d", min, n)}`; collected into one `ValidationError`. |
 | TypeScript | count `Object.keys(parsed).length` on the raw parsed wire object (before defaults applied); the shared `Validate`'s `< min` check pushes ``Violation{path, reason: `too few properties: at least ${min}, got ${n}`}`` + throw one `ValidationError`. |
-| Python | `model_validator`; `len(model_fields_set) < min` — `model_fields_set` already includes extras and excludes default-filled fields, so it is the exact wire-key count; raise into aggregated `ValidationError`. |
+| Python | `from_transfer_type` counts `len(raw)` on the raw wire dict — one number over the wire object, taken before any default is materialized — and appends `Violation(path="", reason=f"too few properties: at least {min}, got {n}")` when `n < min`, into the single generated `ValidationError`. |
 | Java | the per-POJO collecting deserializer (PRINCIPLES Java §5) counts distinct keys in the parsed tree (`< min`) — one number over the wire object, **not** POJO fields + catch-all map summed post-bind; a violation joins the single `ValidationException`. |
 
 ### Serialize-side (P12)
@@ -71,10 +71,11 @@ serialize mirror of "before default population"). A field whose default
 is unset is omitted and does **not** count toward the floor, exactly as
 it didn't on the way in — so a model that reads as populated in memory
 (defaults visible) can legitimately fall **under** `minProperties` on the
-wire, and serialize fails (`MarshalJSON`/`toTransferType`/`model_dump`) rather
-than emitting an under-floor object. `model_fields_set` is again the
-exact emitted-key count under `exclude_unset`. See [[maxProperties]]
-serialize note (symmetric).
+wire, and serialize fails
+(`MarshalJSON`/`toTransferType`/`to_transfer_type`) rather than emitting
+an under-floor object; in Python the count is `len(out)` on the dict
+`to_transfer_type` has built. See [[maxProperties]] serialize note
+(symmetric).
 
 ## Property-testing matrix
 

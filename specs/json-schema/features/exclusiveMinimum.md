@@ -62,7 +62,7 @@ failing test (`v ≤ exclusiveMinimum` → a `Violation` reading
 |---|---|
 | Go | `if v <= exclMin { push(Violation{Reason: fmt.Sprintf("must be > %v, got %v", exclMin, v)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `ValidationError`. |
 | TypeScript | ``if (v <= exclMin) push(Violation{path, reason: `must be > ${exclMin}, got ${v}`})``. |
-| Python | Pydantic `Gt(exclMin)` (`annotated_types`), composing over `SpecInt` on integer fields (see [[type]] / `pyd_numeric_probe.py`); its message names the bound (`Input should be greater than 0`). |
+| Python | `if v <= exclMin: violations.append(Violation(path=…, reason=f"must be > {exclMin}, got {v}"))` in the transfer type converter, after `_parse_spec_integer` normalizes an integer field's wire value (see [[type]]). |
 | Java | Collecting deserializer (PRINCIPLES Java §5) checks `v <= exclMin` via the `SpecNumbers` helper, pushing a `Violation{path, "must be > " + exclMin + ", got " + v}` into the `ValidationException`. |
 
 Reason strings name the bound and offending value (`must be > 0, got 0`),
