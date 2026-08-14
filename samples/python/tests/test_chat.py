@@ -13,35 +13,26 @@ from chat._definitions import ValidationError
 from chat.models import DEFAULT_PRIORITY
 
 from tests.json_converter_helper import (
+    canonical_json_bytes,
     converter_for,
-    decode_fixture,
-    encode,
+    encode_bytes,
     load_fixture,
+    roundtrip_fixture,
     violation_pairs,
 )
 
 SUITE = "chat"
 
 
-def expect_roundtrip(
-    name: str,
-    model_type: type[typing.Any],
-    *,
-    collapsed: tuple[str, ...] = (),
-) -> typing.Any:
-    """Decode a fixture through the default converter, re-encode, compare.
+def expect_roundtrip(name: str, model_type: type[typing.Any]) -> typing.Any:
+    """Decode a fixture through the default converter, re-encode, compare **bytes**.
 
-    ``collapsed`` names top-level keys the fixture carries as an explicit `null`
-    on an optional+nullable member: Python now drops them on re-serialize (see
-    :func:`test_message_full_optional_nullable_null_collapses`). Everything else
-    round-trips byte-identically.
+    The members Python cannot re-emit — an explicit `null` on an optional+nullable
+    member, which collapses (see
+    :func:`test_message_full_optional_nullable_null_collapses`) — are declared once
+    in ``COLLAPSED_NULL_MEMBERS``. Everything else matches byte for byte.
     """
-    expected = typing.cast("dict[str, typing.Any]", load_fixture(SUITE, name))
-    for key in collapsed:
-        del expected[key]
-    model = decode_fixture(model_type, SUITE, name)
-    assert encode(model) == expected
-    return model
+    return roundtrip_fixture(model_type, SUITE, name)
 
 
 def test_optional_non_nullable_members_reject_explicit_null() -> None:
@@ -104,12 +95,22 @@ def test_serialize_omits_unset_defaulted_members() -> None:
     unset = Message(body="hello")
     assert unset.priority is None
     assert converter.to_transfer_type(unset) == {"kind": "text", "body": "hello"}
+    # The byte-level form of the claim: the wire the default-bearing member produces
+    # is exactly the wire that omits it. Byte-identity is the whole justification for
+    # keeping `default` off the dataclass field, so it is asserted on bytes.
+    assert encode_bytes(unset) == canonical_json_bytes(
+        {"kind": "text", "body": "hello"}
+    )
 
     assert converter.to_transfer_type(Message(body="hello", priority=7)) == {
         "kind": "text",
         "body": "hello",
         "priority": 7,
     }
+    # A set integer member emits as an integer, never as `7.0`.
+    assert encode_bytes(Message(body="hello", priority=7)) == canonical_json_bytes(
+        {"kind": "text", "body": "hello", "priority": 7}
+    )
     # A `const` member, unlike a `default`, DOES carry its value as the dataclass
     # default — it is the only admissible value, not a suggestion.
     assert unset.kind == "text"
@@ -214,7 +215,7 @@ def test_canonical_wire_fixtures_roundtrip_through_the_default_converter() -> No
 
     full_message = typing.cast(
         Message,
-        expect_roundtrip("message-full.json", Message, collapsed=("replyToId",)),
+        expect_roundtrip("message-full.json", Message),
     )
     assert full_message.reply_to_id is None
     assert full_message.priority == 7

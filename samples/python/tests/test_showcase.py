@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import typing
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from showcase import (
     Address,
     Attributes,
+    Choices,
     Circle,
     ContactPy,
     Extras,
@@ -15,6 +17,8 @@ from showcase import (
     Showcase,
     ShowcaseDetailObject,
     ShowcaseLedgerValue,
+    ShowcaseLocation,
+    ShowcaseRowsItem,
     Square,
     TextNote,
     Widget,
@@ -23,10 +27,11 @@ from showcase._definitions import ValidationError
 from showcase.models import DEFAULT_DEBUG, DEFAULT_GREETING, DEFAULT_RETRIES
 
 from tests.json_converter_helper import (
+    canonical_json_bytes,
     converter_for,
     decode_fixture,
-    encode,
-    load_fixture,
+    encode_bytes,
+    roundtrip_fixture,
     violation_pairs,
 )
 
@@ -49,29 +54,20 @@ BASE: dict[str, typing.Any] = {
 }
 
 
-def expect_roundtrip(
-    name: str,
-    model_type: type[typing.Any],
-    *,
-    collapsed: tuple[str, ...] = (),
-) -> typing.Any:
-    """Decode a fixture through the *default* data converter, re-encode, compare.
+def expect_roundtrip(name: str, model_type: type[typing.Any]) -> typing.Any:
+    """Decode a fixture through the *default* data converter, re-encode, compare **bytes**.
 
-    ``collapsed`` names keys the fixture carries as an explicit `null` on an
-    optional+nullable member; Python drops those on re-serialize. Everything else
-    round-trips byte-identically — including a key the fixture omits on a member
-    carrying a schema `default`, which is advisory and never injected.
+    The only members that may differ are the explicit `null`s
+    ``COLLAPSED_NULL_MEMBERS`` declares on an optional+nullable member, which
+    collapse. Everything else round-trips byte-identically — including a key the
+    fixture omits on a member carrying a schema `default`, which is advisory and
+    never injected.
     """
-    expected = typing.cast("dict[str, typing.Any]", load_fixture(SUITE, name))
-    for key in collapsed:
-        del expected[key]
-    model = decode_fixture(model_type, SUITE, name)
-    assert encode(model) == expected
-    return model
+    return roundtrip_fixture(model_type, SUITE, name)
 
 
-def expect_showcase(name: str, *, collapsed: tuple[str, ...] = ()) -> Showcase:
-    return typing.cast(Showcase, expect_roundtrip(name, Showcase, collapsed=collapsed))
+def expect_showcase(name: str) -> Showcase:
+    return typing.cast(Showcase, expect_roundtrip(name, Showcase))
 
 
 def parse(raw: dict[str, typing.Any]) -> Showcase:
@@ -82,6 +78,42 @@ def parse_violations(raw: dict[str, typing.Any]) -> list[tuple[str, str]]:
     """The ``(path, reason)`` pairs one bad Showcase payload produces."""
     with pytest.raises(ValidationError) as excinfo:
         _ = parse(raw)
+    return violation_pairs(excinfo.value)
+
+
+def wire_with(member: str, literal: str) -> str:
+    """``BASE`` as wire *text*, with ``member`` set to a raw JSON ``literal``.
+
+    Some wire values exist only as text: Python's ``json.loads`` accepts the
+    ``Infinity``/``-Infinity``/``NaN`` literals its dialect adds, decodes ``1e400``
+    to ``inf``, and decodes an integer literal of any length to an unbounded
+    ``int``. Splicing the literal in and parsing it with ``json.loads`` is exactly
+    what the SDK's ``JSONPlainPayloadConverter`` does to an incoming payload, so
+    these values genuinely reach the converter from untrusted bytes.
+    """
+    members = [f"{json.dumps(key)}: {json.dumps(value)}" for key, value in BASE.items()]
+    members.append(f"{json.dumps(member)}: {literal}")
+    return "{" + ", ".join(members) + "}"
+
+
+def parse_wire_violations(member: str, literal: str) -> list[tuple[str, str]]:
+    """The violations raw wire text carrying ``literal`` at ``member`` produces."""
+    raw = typing.cast("dict[str, typing.Any]", json.loads(wire_with(member, literal)))
+    with pytest.raises(ValidationError) as excinfo:
+        _ = parse(raw)
+    return violation_pairs(excinfo.value)
+
+
+def serialize_violations(**replacements: typing.Any) -> list[tuple[str, str]]:
+    """The violations serializing a ``BASE`` model with ``replacements`` produces.
+
+    In-memory construction is unchecked (Python §1), so a value past a bound only
+    surfaces here — and it must surface *before* any wire form exists (P12), which
+    is why the assertion is on the raised violations rather than on output.
+    """
+    model = dataclasses.replace(parse(BASE), **replacements)
+    with pytest.raises(ValidationError) as excinfo:
+        _ = converter_for(Showcase).to_transfer_type(model)
     return violation_pairs(excinfo.value)
 
 
@@ -244,7 +276,7 @@ def test_canonical_wire_fixtures_roundtrip_through_the_default_converter() -> No
 
     # showcase-nulls.json carries `middleName: null` on an optional+nullable
     # member, which collapses and is therefore dropped on re-serialize.
-    nulls = expect_showcase("showcase-nulls.json", collapsed=("middleName",))
+    nulls = expect_showcase("showcase-nulls.json")
     assert nulls.middle_name is None
     # `category` is required+nullable, so ITS explicit null does survive.
     assert nulls.category is None
@@ -297,6 +329,97 @@ def test_integer_semantics() -> None:
         assert parse_violations({**BASE, "count": bad}) == [
             ("count", "expected integer")
         ]
+    # A plain integer member normalizes its wire form too, on bytes.
+    assert encode_bytes(parse({**BASE, "count": 3.0})) == canonical_json_bytes(
+        {**BASE, "count": 3}
+    )
+
+
+def test_integral_closed_value_sets_normalize_to_the_integer_wire_form() -> None:
+    """An integer `const`/`enum` routes the wire value through the spec-integer
+    parse before the membership comparison, so `1.0` becomes an `int` and re-emits
+    as `1` — matching Go's `parseIntegerField` and Java's `SpecNumbers.specLong`.
+
+    Asserted on **bytes**: `1 == 1.0` in Python, so a parsed comparison passes
+    either way and cannot see a closed set that kept its wire `float`.
+    """
+    model = parse({**BASE, "revision": 1.0, "tier": 2.0})
+    # `is int` rather than `== 1`: a `float` would satisfy the equality.
+    assert type(model.revision) is int
+    assert type(model.tier) is int
+    assert encode_bytes(model) == canonical_json_bytes({**BASE, "tier": 2})
+
+    # Routing through the spec-integer parse also reinstates the two checks a
+    # closed numeric set used to bypass entirely: the fractional reject...
+    assert parse_violations({**BASE, "revision": 1.5}) == [
+        ("revision", "expected integer")
+    ]
+    assert parse_violations({**BASE, "tier": 2.5}) == [("tier", "expected integer")]
+    # ...and the +/-(2**53-1) cap, which a value inside the closed set can exceed
+    # only by being outside it — so the cap must be reported before membership.
+    assert parse_violations({**BASE, "revision": 2**53 + 1}) == [
+        ("revision", "expected integer")
+    ]
+    assert parse_violations({**BASE, "tier": -(2**53) - 1}) == [
+        ("tier", "expected integer")
+    ]
+
+    # A **float**-valued closed set has no `Literal` form (PEP 586) and keeps the
+    # wire value as it arrived, so `2.5` stays `2.5` rather than becoming `2`.
+    scaled = parse({**BASE, "scale": 2.5})
+    assert scaled.scale == 2.5
+    assert encode_bytes(scaled) == canonical_json_bytes({**BASE, "scale": 2.5})
+
+
+def test_non_finite_numbers_are_rejected_in_both_directions() -> None:
+    """`Infinity`/`-Infinity`/`NaN` are reachable from the wire — Python's
+    `json.loads` accepts the literals its dialect adds — and every one of them is a
+    violation rather than a crash or a round-trip.
+
+    Bytes Go's `json.Unmarshal`, `JSON.parse` and Jackson all reject must never
+    become a model here, and must never be emitted either (P1/P12).
+    """
+    # `ratio` carries `multipleOf`, whose `math.fmod(inf, 5)` raised `ValueError`
+    # (and `OverflowError` for an out-of-binary64 integer literal) — escaping the
+    # aggregated `ValidationError` entirely (P11).
+    for literal, rendered in [
+        ("Infinity", "inf"),
+        ("-Infinity", "-inf"),
+        ("NaN", "nan"),
+        ("1e400", "inf"),
+    ]:
+        assert parse_wire_violations("ratio", literal) == [
+            ("ratio", f"must be a finite number, got {rendered}")
+        ]
+
+    # A 401-digit integer literal decodes to an unbounded Python `int`, which is
+    # past binary64 without ever being a `float`.
+    digits = "9" * 401
+    assert parse_wire_violations("ratio", digits) == [
+        ("ratio", f"must be a finite number, got {digits}")
+    ]
+
+    # A `number` with **no** other constraint was the worse case: it parsed and
+    # re-serialized `inf` verbatim. `Circle.radius` is one, reached through a union.
+    assert parse_wire_violations("shape", '{"kind": "circle", "radius": Infinity}') == [
+        ("shape.radius", "must be a finite number, got inf")
+    ]
+
+    # The serialize direction: an unchecked dataclass holding `inf` fails before a
+    # byte is written, rather than emitting a value this module's own parser rejects.
+    assert serialize_violations(ratio=float("inf")) == [
+        ("ratio", "must be a finite number, got inf")
+    ]
+    assert serialize_violations(ratio=float("-inf")) == [
+        ("ratio", "must be a finite number, got -inf")
+    ]
+    assert serialize_violations(ratio=float("nan")) == [
+        ("ratio", "must be a finite number, got nan")
+    ]
+    # A finite value on the boundary still serializes.
+    assert encode_bytes(
+        dataclasses.replace(parse(BASE), ratio=5.0)
+    ) == canonical_json_bytes({**BASE, "ratio": 5.0})
 
 
 def test_string_length_constraints_roundtrip_and_reject() -> None:
@@ -700,6 +823,55 @@ def test_array_branch_union_roundtrip_and_reject() -> None:
     ]
 
 
+def test_union_array_branch_types_every_element() -> None:
+    """Once the wire token selects the array branch, the branch decodes
+    **elementwise** — the same element parse a declared array member runs — so a bad
+    element is rejected at its own index.
+
+    The branch used to cast the whole value to `list[float]` and run only
+    `minItems`/`uniqueItems`, so any list at all was admitted: `["a", "b"]`
+    round-tripped verbatim while Go decodes `[]float64` and Java binds a typed
+    list, both rejecting (P1).
+    """
+    assert parse_violations({**BASE, "measurements": [{"x": 1}]}) == [
+        ("measurements[0]", "expected number")
+    ]
+    assert parse_violations({**BASE, "measurements": ["a"]}) == [
+        ("measurements[0]", "expected number")
+    ]
+    # A `bool` is not a number, which is also what resolves the `True == 1`
+    # uniqueness discrepancy at its root: the element is rejected before
+    # `_check_unique_items` ever compares it against a `1`.
+    assert parse_violations({**BASE, "measurements": [1.0, True]}) == [
+        ("measurements[1]", "expected number")
+    ]
+    # A non-finite element is caught per element too.
+    assert parse_wire_violations("measurements", "[Infinity]") == [
+        ("measurements[0]", "must be a finite number, got inf")
+    ]
+
+    two = parse_violations({**BASE, "measurements": ["a", "b"]})
+    assert two[:2] == [
+        ("measurements[0]", "expected number"),
+        ("measurements[1]", "expected number"),
+    ]
+    # `uniqueItems` then compares the two placeholders the rejected elements left
+    # behind and reports one more violation. A declared array member with
+    # `uniqueItems` does exactly the same (`aliases: [1, 2]`), so this is shared
+    # element-placeholder behaviour rather than anything the union adds; the
+    # accepted-and-rejected value set — the part P1 fixes — is unaffected.
+    assert two[2:] == [
+        ("measurements", "duplicate items: element at index 1 equals index 0")
+    ]
+
+    # Valid elements still decode, and re-emit with their wire form intact.
+    values = parse({**BASE, "measurements": [1.5, 2, 3.75]})
+    assert values.measurements == [1.5, 2, 3.75]
+    assert encode_bytes(values) == canonical_json_bytes(
+        {**BASE, "measurements": [1.5, 2, 3.75]}
+    )
+
+
 def test_element_position_unions_roundtrip_and_reject() -> None:
     # Unions in positions with no property of their own: an array element at a
     # named union (`shapes`), an array element at an inline union the loader names
@@ -865,3 +1037,87 @@ def test_serialize_rejects_invalid_in_memory_values() -> None:
             'property "shippingZip" is required when "shippingStreet" is present',
         )
     ]
+
+
+def test_serialize_aggregates_nested_violations_under_their_own_paths() -> None:
+    """P11/P12 on the serialize side: one model with independent failures at
+    several depths reports **all** of them, each fully pathed.
+
+    `to_transfer_type` wrapped no nested conversion, so the first nested
+    `ValidationError` propagated raw — discarding both the parent's already
+    collected violations and its own path prefix. Every nested conversion now funnels
+    through `_collect`, the analogue of Go's `mergeNested`.
+    """
+    model = dataclasses.replace(
+        parse(BASE),
+        # A flat member of the parent itself, which a raw nested error would discard.
+        name="",
+        # A union in an element position, reported at its index.
+        segments=["ab", -1],
+        # A `$ref` member (hoisted inline object), reported under the member.
+        location=ShowcaseLocation(city="", geo=None),
+        # An array of `$ref`, reported at index *and* member.
+        rows=[ShowcaseRowsItem(cell="a1"), ShowcaseRowsItem(cell="")],
+        # A typed map whose member type is a union, reported at key *and* member.
+        choices=Choices(
+            additional_properties={
+                "a": Circle(kind=typing.cast(typing.Any, "nope"), radius=1.0)
+            }
+        ),
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        _ = converter_for(Showcase).to_transfer_type(model)
+    assert violation_pairs(excinfo.value) == [
+        ("name", "must have length >= 1, got 0"),
+        ("segments[1]", "must be >= 0, got -1"),
+        ("location.city", "must have length >= 1, got 0"),
+        ("rows[1].cell", "must have length >= 1, got 0"),
+        ("choices.a.kind", 'must equal "circle"'),
+    ]
+
+    # The nested shapes serialize cleanly when valid — the aggregation above is not
+    # a blanket rejection of nesting.
+    ok = dataclasses.replace(
+        parse(BASE),
+        location=ShowcaseLocation(city="Springfield", geo=None),
+        rows=[ShowcaseRowsItem(cell="a1")],
+    )
+    assert encode_bytes(ok) == canonical_json_bytes(
+        {**BASE, "location": {"city": "Springfield"}, "rows": [{"cell": "a1"}]}
+    )
+
+
+def test_serialize_rejects_a_value_matching_no_union_branch() -> None:
+    """A union's serialize dispatch rejects a value in **no** branch (P12).
+
+    The dispatch falls through to its last branch unguarded once a value has
+    matched, which is deliberate; a value matching nothing used to be emitted
+    verbatim — bytes every parser, including this one, rejects.
+    """
+    # A `float` in a `str | int` union: past static typing only through a cast, and
+    # exactly what an untyped caller or a `typing.Any` boundary produces.
+    assert serialize_violations(id_or_name=typing.cast(typing.Any, 1.5)) == [
+        ("idOrName", "expected one of: string, integer")
+    ]
+    assert serialize_violations(mode=typing.cast(typing.Any, 1.5)) == [
+        ("mode", "expected one of: string, integer")
+    ]
+    # The same on a union mixing object and scalar branches, which names all three.
+    assert serialize_violations(shape_or_name=typing.cast(typing.Any, 1.5)) == [
+        ("shapeOrName", "expected one of: Circle, Square, string")
+    ]
+    # ...and on one whose branches are an array and a string.
+    assert serialize_violations(measurements=typing.cast(typing.Any, 1.5)) == [
+        ("measurements", "expected one of: list[float], string")
+    ]
+    # A no-branch value aggregates with an unrelated failure rather than short-
+    # circuiting it (P11).
+    assert serialize_violations(name="", id_or_name=typing.cast(typing.Any, 1.5)) == [
+        ("name", "must have length >= 1, got 0"),
+        ("idOrName", "expected one of: string, integer"),
+    ]
+    # Each branch's own value still serializes.
+    for value in ("abc", 7):
+        assert encode_bytes(
+            dataclasses.replace(parse(BASE), id_or_name=value)
+        ) == canonical_json_bytes({**BASE, "idOrName": value})

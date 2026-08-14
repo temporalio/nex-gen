@@ -13,10 +13,13 @@ from kb import PutBlockOutput
 from kb._definitions import ValidationError
 
 from tests.json_converter_helper import (
+    canonical_fixture_bytes,
+    canonical_json_bytes,
     converter_for,
     decode_fixture,
-    encode,
+    encode_bytes,
     load_fixture,
+    roundtrip_fixture,
     violation_pairs,
 )
 
@@ -24,10 +27,8 @@ SUITE = "kb"
 
 
 def expect_roundtrip(name: str, model_type: type[typing.Any]) -> typing.Any:
-    """Decode a fixture through the default converter, re-encode, compare."""
-    model = decode_fixture(model_type, SUITE, name)
-    assert encode(model) == load_fixture(SUITE, name)
-    return model
+    """Decode a fixture through the default converter, re-encode, compare **bytes**."""
+    return roundtrip_fixture(model_type, SUITE, name)
 
 
 def test_kb_wire_fixtures_roundtrip_through_the_default_converter() -> None:
@@ -68,9 +69,13 @@ def test_block_back_reference_null_collapses_on_roundtrip() -> None:
 
     block_wire = typing.cast("dict[str, typing.Any]", load_fixture(SUITE, "block.json"))
     assert block_wire["page"] is None
-    assert encode(block) == {
-        key: value for key, value in block_wire.items() if key != "page"
-    }
+    # The collapse, on bytes: `page` is the only difference, and
+    # `canonical_fixture_bytes` derives the expectation from the one central
+    # exception list (`COLLAPSED_NULL_MEMBERS`).
+    assert encode_bytes(block) == canonical_fixture_bytes(SUITE, "block.json")
+    assert encode_bytes(block) == canonical_json_bytes(
+        {key: value for key, value in block_wire.items() if key != "page"}
+    )
 
     page = decode_fixture(Page, SUITE, "page.json")
     assert page.page_id == "page-1"
@@ -81,6 +86,8 @@ def test_block_back_reference_null_collapses_on_roundtrip() -> None:
     assert page.blocks[0].style is not None
     assert page.blocks[0].style.bold is True
 
+    # The collapse holds at depth: the back-reference is dropped from every nested
+    # block, and nothing else about the page changes.
     page_wire = typing.cast("dict[str, typing.Any]", load_fixture(SUITE, "page.json"))
     expected_page = {**page_wire}
     expected_page["blocks"] = [
@@ -91,7 +98,8 @@ def test_block_back_reference_null_collapses_on_roundtrip() -> None:
         }
         for nested in typing.cast("list[typing.Any]", page_wire["blocks"])
     ]
-    assert encode(page) == expected_page
+    assert encode_bytes(page) == canonical_json_bytes(expected_page)
+    assert encode_bytes(page) == canonical_fixture_bytes(SUITE, "page.json")
 
 
 def test_nested_violations_carry_the_parent_path() -> None:

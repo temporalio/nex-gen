@@ -86,6 +86,117 @@ properties:
       - { type: string, enum: [auto, manual] }
 "#;
 
+/// Properties named after the converter body's *own* identifiers — its locals
+/// (`violations`, `raw`, `out`), the builtins it calls (`len`, `int`, `str`,
+/// `bool`, `dict`, `isinstance`), the modules it imports (`typing`, `math`, `re`),
+/// the loop temporaries it uses (`key`, `value`) and the converter method's
+/// parameters (`self`, `type_hint`).
+///
+/// A property may be named anything, so none of these is reserved. No sample
+/// schema declares one, which is why this lives here rather than in the Python
+/// sample suite: the shadow it used to cause was *silently* wrong (the collected
+/// violations were thrown away and an invalid payload came back as a model), so
+/// nothing short of running the generated converter proves it is gone.
+///
+/// The object is open so the catch-all's `_<MODEL>_DECLARED` frozenset — another
+/// name synthesized from these properties — is exercised too.
+const SHADOWED_NAME_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: true
+required: [violations]
+properties:
+  violations: { type: string, minLength: 2 }
+  raw: { type: string }
+  out: { type: string }
+  len: { type: integer }
+  int: { type: integer }
+  str: { type: string }
+  bool: { type: boolean }
+  dict: { type: object, additionalProperties: true }
+  isinstance: { type: string }
+  typing: { type: string }
+  math: { type: number }
+  re: { type: string, pattern: "^[a-z]+$" }
+  key: { type: string }
+  value: { type: string }
+  self: { type: string }
+  typeHint: { type: string }
+"#;
+
+/// Drives the generated converter for `SHADOWED_NAME_SCHEMA` end to end: a valid
+/// payload must round-trip, and an invalid one must raise the aggregated
+/// `ValidationError` with every violation intact in **both** directions.
+const SHADOWED_NAME_RUNTIME_CHECK: &str = r#"
+import sys
+
+root, package = sys.argv[1], sys.argv[2]
+sys.path.insert(0, root)
+models = __import__(package + ".models", fromlist=["*"])
+definitions = __import__(package + "._definitions", fromlist=["*"])
+
+Shadow = models.Shadow
+converter = getattr(Shadow, "__temporal_transfer_type_converter")
+
+valid = {
+    "violations": "ok",
+    "raw": "r",
+    "out": "o",
+    "len": 1,
+    "int": 2,
+    "str": "s",
+    "bool": True,
+    "dict": {"a": 1},
+    "isinstance": "i",
+    "typing": "t",
+    "math": 1.5,
+    "re": "abc",
+    "key": "k",
+    "value": "v",
+    "self": "me",
+    "typeHint": "h",
+    "unknown": [1, 2],
+}
+
+# Every one of `raw`, `len`, `int`, `str`, `bool`, `dict`, `isinstance`, `typing`,
+# `math` and `out` used to crash *every* payload, valid ones included.
+model = converter.from_transfer_type(valid, Shadow)
+assert model.violations == "ok", model.violations
+assert model.type_hint == "h", model.type_hint
+assert model.additional_properties == {"unknown": [1, 2]}, model.additional_properties
+assert converter.to_transfer_type(model) == valid, converter.to_transfer_type(model)
+
+expected = [
+    ("violations", "must have length >= 2, got 1"),
+    ("math", "must be a finite number, got inf"),
+    ("re", 'must match pattern ^[a-z]+\\Z, got "ABC"'),
+]
+
+# The critical case: a property named `violations` rebound the violation
+# accumulator, so the collected violations were discarded and the invalid payload
+# came back as a model. Reaching the `else` here is that silent failure.
+bad = dict(valid, violations="a", re="ABC", math=float("inf"))
+try:
+    converter.from_transfer_type(bad, Shadow)
+except definitions.ValidationError as error:
+    got = [(item.path, item.reason) for item in error.violations]
+    assert got == expected, got
+else:
+    raise AssertionError("an invalid payload was accepted: validation was disabled")
+
+# The serialize body has locals of its own, so it needs the same proof (P12). A
+# dataclass validates nothing on assignment, so the model is simply mutated.
+model.violations = "a"
+model.re = "ABC"
+model.math = float("inf")
+try:
+    converter.to_transfer_type(model)
+except definitions.ValidationError as error:
+    got = [(item.path, item.reason) for item in error.violations]
+    assert got == expected, got
+else:
+    raise AssertionError("an invalid model was serialized: validation was disabled")
+"#;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -351,6 +462,28 @@ for path in sorted(root.rglob("*.py")):
     assert!(status.success());
 }
 
+/// The interpreter the generated packages are exercised with. The advanced
+/// project's environment is the one already provisioned with `temporalio`, which
+/// the generated converters import.
+fn sample_python_interpreter() -> PathBuf {
+    project_root().join("advanced/samples/python/.venv/bin/python")
+}
+
+/// Runs `script` under that interpreter, failing the test on a non-zero exit. Used
+/// where a rendered-output assertion cannot reach the behavior under test — a
+/// silently disabled validator renders perfectly readable code.
+fn assert_python_script_succeeds(script: &str, args: &[&str]) {
+    let status = Command::new(sample_python_interpreter())
+        .args(["-c", script])
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "generated package failed its runtime check"
+    );
+}
+
 fn unique_output_path(label: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -603,6 +736,38 @@ fn python_example_suite_type_checks_and_runs() {
             .unwrap();
         assert!(pytest_status.success(), "pytest failed in {example_dir:?}");
     }
+}
+
+/// The generated JSON-Schema runtime must also *run* on the declared floor,
+/// `requires-python = ">=3.10"` — not merely parse as 3.10 syntax.
+///
+/// `assert_python_310_syntax_compatible` checks the AST at
+/// `feature_version=(3, 10)`, which is a syntax check only, and the project
+/// environments above are whatever interpreter `uv` picked (3.13 here). That left a
+/// real class of bug uncovered: before 3.11, `datetime.fromisoformat` parses only
+/// the fractional-second widths `isoformat` writes, so an RFC 3339 `.1` raised on
+/// 3.10 while passing everywhere else. Every test in the suite was green.
+///
+/// The environment lives outside the project directory so the checked-in one is
+/// untouched and neither `basedpyright` nor `ruff` picks it up (their excludes name
+/// `.venv`). It is created on demand in well under a second from the same locked
+/// `uv.lock`, so this is one extra resolve, not a second maintained lockfile; `uv`
+/// fetches a managed CPython 3.10 if the host has none.
+#[test]
+fn python_json_samples_run_on_the_declared_python_floor() {
+    let root = project_root();
+    let floor_environment = root.join("target/python-floor-venv");
+
+    let status = Command::new("uv")
+        .current_dir(samples_python_root(&root))
+        .env("UV_PROJECT_ENVIRONMENT", &floor_environment)
+        .args(["run", "--python", "3.10", "--locked", "pytest"])
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "the JSON-Schema sample suite failed on Python 3.10, the declared floor"
+    );
 }
 
 #[test]
@@ -1082,7 +1247,7 @@ fn python_json_cross_module_py_name_override_moves_every_reference() {
     .unwrap();
 
     let declaring = fs::read_to_string(output_path.join("content/page/models.py")).unwrap();
-    assert!(declaring.contains("class RenamedPage(pydantic.BaseModel):"));
+    assert!(declaring.contains("class RenamedPage:"));
 
     let services = fs::read_to_string(output_path.join("kb/services.py")).unwrap();
     for expected in [
@@ -1228,5 +1393,98 @@ services:
     // The root barrel binds each name exactly once.
     let barrel = fs::read_to_string(output_path.join("__init__.py")).unwrap();
     assert_eq!(barrel.matches("import Page").count(), 1, "{barrel}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A declared property named after one of the converter's own identifiers must not
+/// shadow it: the parse body holds each property's value in a `<member>_value` slot
+/// local, so the shadow is structurally impossible rather than merely unlisted.
+///
+/// Rendered output is asserted for the mechanism, and the generated package is then
+/// **run**, because the failure this guards against is silent: `violations:
+/// list[Violation] = []` rebound by a `violations` property's local discarded every
+/// collected violation and returned an invalid payload as a model.
+/// See `specs/json-schema/PRINCIPLES.md` (P15) and
+/// `specs/json-schema/features/properties.md`.
+#[test]
+fn python_json_property_names_never_shadow_converter_locals() {
+    let temp_dir = unique_output_path("py-json-shadowed-names");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("shadow.yaml");
+    fs::write(&input_path, SHADOWED_NAME_SCHEMA).unwrap();
+    let output_path = temp_dir.join("shadow_package");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.py")).unwrap();
+
+    // The accumulator, the decoded mapping and the emitted mapping keep their own
+    // names, unshadowed.
+    assert!(rendered.contains("violations: list[Violation] = []"));
+    assert!(rendered.contains("raw = typing.cast(\"dict[str, typing.Any]\", value)"));
+    assert!(rendered.contains("out: dict[str, typing.Any] = {}"));
+    // Every property is held in a `_value` slot instead, and its temporaries hang
+    // off that slot rather than off the bare member identifier.
+    for member in [
+        "violations",
+        "raw",
+        "out",
+        "len",
+        "int",
+        "str",
+        "bool",
+        "dict",
+        "isinstance",
+        "typing",
+        "math",
+        "re",
+        "key",
+        "value",
+        "self",
+        "type_hint",
+    ] {
+        assert!(
+            rendered.contains(&format!("{member}_value")),
+            "no `_value` slot for the `{member}` property"
+        );
+    }
+    // No property is ever assigned to its bare identifier, which is what shadowed.
+    for shadowing in [
+        "\n        violations = ",
+        "\n        raw = raw[",
+        "\n        len = ",
+        "\n        int = ",
+        "\n        str = ",
+        "\n        dict = ",
+        "\n        isinstance = ",
+        "\n        typing = ",
+        "\n        math = ",
+        "\n        re = ",
+        "\n        self = ",
+    ] {
+        assert!(
+            !rendered.contains(shadowing),
+            "a property rebound the converter's own `{}`",
+            shadowing.trim().trim_end_matches(" =").trim()
+        );
+    }
+    // The synthesized catch-all frozenset carries the *wire* names, not the locals.
+    assert!(rendered.contains("_SHADOW_DECLARED: frozenset[str] = frozenset({\"violations\","));
+    assert!(rendered.contains("\"typeHint\"}"));
+
+    assert_python_script_succeeds(
+        SHADOWED_NAME_RUNTIME_CHECK,
+        &[temp_dir.to_str().unwrap(), "shadow_package"],
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }
