@@ -27,29 +27,29 @@ class _PageMetaTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        author: str = typing.cast("typing.Any", None)
+        author_value: str = typing.cast("typing.Any", None)
         if "author" not in raw or raw["author"] is None:
             violations.append(Violation(path="author", reason="required"))
         else:
-            author_raw = raw["author"]
-            if not isinstance(author_raw, str):
+            author_value_raw = raw["author"]
+            if not isinstance(author_value_raw, str):
                 violations.append(Violation(path="author", reason="expected string"))
             else:
-                author = author_raw
+                author_value = author_value_raw
 
-        word_count: int | None = None
+        word_count_value: int | None = None
         if "wordCount" in raw:
-            word_count_raw = raw["wordCount"]
-            if word_count_raw is None:
+            word_count_value_raw = raw["wordCount"]
+            if word_count_value_raw is None:
                 violations.append(
                     Violation(path="wordCount", reason="explicit null not allowed")
                 )
             else:
-                word_count_parsed = _parse_spec_integer(
-                    word_count_raw, "wordCount", violations
+                word_count_value_parsed = _parse_spec_integer(
+                    word_count_value_raw, "wordCount", violations
                 )
-                if word_count_parsed is not None:
-                    word_count = word_count_parsed
+                if word_count_value_parsed is not None:
+                    word_count_value = word_count_value_parsed
 
         for key in raw:
             if key != "author" and key != "wordCount":
@@ -57,8 +57,8 @@ class _PageMetaTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return PageMeta(
-            author=author,
-            word_count=word_count,
+            author=author_value,
+            word_count=word_count_value,
         )
 
     @typing_extensions.override

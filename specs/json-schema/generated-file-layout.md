@@ -62,7 +62,7 @@ collide across files — the loader validates this (see Collisions).
 When the closure is **exactly one input file**, there is no directory tree
 to mirror: the file's output lands **directly at the package root** rather
 than in a per-input subdirectory. A single `chat.yaml` → package `chat/`
-holding `models.py`, `services.py`, the shared `definitions.py`, and the
+holding `models.py`, `services.py`, the shared `_definitions.py`, and the
 `__init__.py` aggregator side by side. No per-input subdirectory, and no
 `_recursive` (a cross-file cycle is impossible with one file). The
 models/services split and the shared-runtime file are still present in
@@ -78,7 +78,7 @@ Per input file `<subpath>/<name>`:
 
 | Language | Per-input module | Shared runtime (once) | Recursive module | Aggregator |
 |---|---|---|---|---|
-| **Python** | `<subpath>/<name>/models.py` (+ `services.py` if it declares services) | `definitions.py` (package root) | `_recursive.py` (package root) | `__init__.py` per directory — the per-input directory, every intermediate directory, and the package root |
+| **Python** | `<subpath>/<name>/models.py` (+ `services.py` if it declares services) | `_definitions.py` (package root) | `_recursive.py` (package root) | `__init__.py` per directory — the per-input directory, every intermediate directory, and the package root |
 | **TypeScript** | `<subpath>/<name>/models.ts` (+ `services.ts`) | `definitions.ts` (package root) | — | `index.ts` per directory (barrels chain upward) |
 | **Go** | `<module>.go` in the one flat package (`<module>` = flattened path) | `definitions.go` (same package) | — | — (capitalized = exported) |
 | **Java** | one `<ClassName>.java` per exported class, in a package mirroring `<subpath>/<name>/` | each runtime class its own file in the root package (`ValidationException.java`, `Violation.java`, `SpecNumbers.java`, …) | — | — (`public` = exported) |
@@ -105,18 +105,20 @@ All output lands at the package root (no per-input subdirectory, no
 
 | Language | Output |
 |---|---|
-| **Python** | `models.py` (+ `services.py`), the shared `definitions.py`, and the `__init__.py` aggregator — the same split as multi-input, flattened to the package root |
+| **Python** | `models.py` (+ `services.py`), the shared `_definitions.py`, and the `__init__.py` aggregator — the same split as multi-input, flattened to the package root |
 | **TypeScript** | `models.ts` (+ `services.ts`), `definitions.ts`, `index.ts` |
 | **Go** | one `<package>.go` (types and services) + the shared `definitions.go` |
 | **Java** | one `.java` per public class + the runtime classes; nothing to aggregate |
 
 ## The shared `definitions` file
 
-Holds the schema-independent runtime, defined once per package (`definitions.py`
-/ `definitions.ts` / `definitions.go`; Java splits it into one class file each). For
-Python/TypeScript/Java it sits at the package root; for Go it sits in the
-one flat package, always as its own `definitions.go` file regardless of how
-many input files that package aggregates.
+Holds the schema-independent runtime, defined once per package
+(`_definitions.py` / `definitions.ts` / `definitions.go`; Java splits it into
+one class file each). For Python/TypeScript/Java it sits at the package root;
+for Go it sits in the one flat package, always as its own `definitions.go`
+file regardless of how many input files that package aggregates. Python's
+file is underscore-prefixed, the language's own marking for a module that is
+generator-internal rather than part of the package's surface.
 
 - Error types — a **single aggregating error holding a list of
   `Violation { path, reason }`**, identical in spirit across all four
@@ -199,7 +201,8 @@ reject costs little.
 ## Collisions
 
 **Go** — one unified namespace per package holds the **reserved generated
-names** (currently `definitions`) plus one entry per input module. Any collision
+names** (`definitions` and `_definitions`, the union across languages) plus one
+entry per input module. Any collision
 in that namespace → **load reject** with a fix-it (`x-output-module`
 override or rename):
 
@@ -221,8 +224,11 @@ distinct modules, so files no longer contend for one flat *module* name. What
 remains is a small set of **reserved generated names** per scope; an input
 file or directory that maps onto one → load reject with the same fix-it:
 
-- at the **package root**: the shared `definitions` runtime module, `_recursive`
-  (Python), and the root aggregator (`__init__` / `index`);
+- at the **package root**: the shared runtime module — **both** spellings,
+  `definitions` (Go/TypeScript) and `_definitions` (Python), are reserved in
+  every target, the union across languages, so an input named either way
+  rejects regardless of which target is being generated — plus `_recursive`
+  (Python) and the root aggregator (`__init__` / `index`);
 - within a **per-input directory**: `models`, `services`, and that
   directory's own aggregator.
 
@@ -310,13 +316,16 @@ bindings:
   types (and services) via `__all__`; each intermediate directory's
   `__init__.py` re-exports its children; the package-root `__init__.py`
   re-exports the whole tree, pulling hoisted types from `_recursive`. The
-  shared runtime (`ValidationError`, etc.) is **not** surfaced through the
-  aggregators — consumers import it directly from `definitions`.
+  shared runtime (`ValidationError`, `Violation`) is **not** surfaced through
+  the aggregators — catching the aggregating error means naming the private
+  module (`from <package>._definitions import ValidationError`). Python is the
+  only target where the error type is reachable through a private name alone;
+  the other three carry it on their public surface.
 - **TypeScript** — `index.ts` per directory: per-input barrels
   `export … from './models'` (and `./services`), intermediate barrels
-  `export * from './<child>'`, and the root barrel re-exports the tree.
-  `ValidationError` is likewise imported directly from `./definitions`, not
-  re-exported.
+  `export * from './<child>'`, and the root barrel re-exports the tree plus
+  the runtime's `ValidationError` and the `Violation` type from
+  `./definitions`.
 - **Go** — no aggregator; capitalized identifiers are exported from the one
   flat package.
 - **Java** — `public` class per file; runtime classes public too.

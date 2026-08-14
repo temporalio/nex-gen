@@ -11,6 +11,9 @@ import temporalio.converter
 from ._definitions import (
     ValidationError,
     Violation,
+    _check_date_time,
+    _check_duration,
+    _check_time,
     _format_date,
     _format_date_time,
     _format_duration,
@@ -35,163 +38,169 @@ class _TemporalTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        created_at: datetime.datetime = typing.cast("typing.Any", None)
+        created_at_value: datetime.datetime = typing.cast("typing.Any", None)
         if "createdAt" not in raw or raw["createdAt"] is None:
             violations.append(Violation(path="createdAt", reason="required"))
         else:
-            created_at_raw = raw["createdAt"]
-            if not isinstance(created_at_raw, str):
+            created_at_value_raw = raw["createdAt"]
+            if not isinstance(created_at_value_raw, str):
                 violations.append(Violation(path="createdAt", reason="expected string"))
             else:
-                created_at_parsed = _parse_date_time(
-                    created_at_raw, "createdAt", violations
+                created_at_value_parsed = _parse_date_time(
+                    created_at_value_raw, "createdAt", violations
                 )
-                if created_at_parsed is not None:
-                    created_at = created_at_parsed
+                if created_at_value_parsed is not None:
+                    created_at_value = created_at_value_parsed
 
-        birthday: datetime.date = typing.cast("typing.Any", None)
+        birthday_value: datetime.date = typing.cast("typing.Any", None)
         if "birthday" not in raw or raw["birthday"] is None:
             violations.append(Violation(path="birthday", reason="required"))
         else:
-            birthday_raw = raw["birthday"]
-            if not isinstance(birthday_raw, str):
+            birthday_value_raw = raw["birthday"]
+            if not isinstance(birthday_value_raw, str):
                 violations.append(Violation(path="birthday", reason="expected string"))
             else:
-                birthday_parsed = _parse_date(birthday_raw, "birthday", violations)
-                if birthday_parsed is not None:
-                    birthday = birthday_parsed
+                birthday_value_parsed = _parse_date(
+                    birthday_value_raw, "birthday", violations
+                )
+                if birthday_value_parsed is not None:
+                    birthday_value = birthday_value_parsed
 
-        alarm: datetime.time = typing.cast("typing.Any", None)
+        alarm_value: datetime.time = typing.cast("typing.Any", None)
         if "alarm" not in raw or raw["alarm"] is None:
             violations.append(Violation(path="alarm", reason="required"))
         else:
-            alarm_raw = raw["alarm"]
-            if not isinstance(alarm_raw, str):
+            alarm_value_raw = raw["alarm"]
+            if not isinstance(alarm_value_raw, str):
                 violations.append(Violation(path="alarm", reason="expected string"))
             else:
-                alarm_parsed = _parse_time(alarm_raw, "alarm", violations)
-                if alarm_parsed is not None:
-                    alarm = alarm_parsed
+                alarm_value_parsed = _parse_time(alarm_value_raw, "alarm", violations)
+                if alarm_value_parsed is not None:
+                    alarm_value = alarm_value_parsed
 
-        timeout: datetime.timedelta = typing.cast("typing.Any", None)
+        timeout_value: datetime.timedelta = typing.cast("typing.Any", None)
         if "timeout" not in raw or raw["timeout"] is None:
             violations.append(Violation(path="timeout", reason="required"))
         else:
-            timeout_raw = raw["timeout"]
-            if not isinstance(timeout_raw, str):
+            timeout_value_raw = raw["timeout"]
+            if not isinstance(timeout_value_raw, str):
                 violations.append(Violation(path="timeout", reason="expected string"))
             else:
-                timeout_parsed = _parse_duration(timeout_raw, "timeout", violations)
-                if timeout_parsed is not None:
-                    timeout = timeout_parsed
+                timeout_value_parsed = _parse_duration(
+                    timeout_value_raw, "timeout", violations
+                )
+                if timeout_value_parsed is not None:
+                    timeout_value = timeout_value_parsed
 
-        updated_at: datetime.datetime | None = None
+        updated_at_value: datetime.datetime | None = None
         if "updatedAt" in raw:
-            updated_at_raw = raw["updatedAt"]
-            if updated_at_raw is None:
+            updated_at_value_raw = raw["updatedAt"]
+            if updated_at_value_raw is None:
                 violations.append(
                     Violation(path="updatedAt", reason="explicit null not allowed")
                 )
             else:
-                if not isinstance(updated_at_raw, str):
+                if not isinstance(updated_at_value_raw, str):
                     violations.append(
                         Violation(path="updatedAt", reason="expected string")
                     )
                 else:
-                    updated_at_parsed = _parse_date_time(
-                        updated_at_raw, "updatedAt", violations
+                    updated_at_value_parsed = _parse_date_time(
+                        updated_at_value_raw, "updatedAt", violations
                     )
-                    if updated_at_parsed is not None:
-                        updated_at = updated_at_parsed
+                    if updated_at_value_parsed is not None:
+                        updated_at_value = updated_at_value_parsed
 
-        expires_on: datetime.date | None = None
+        expires_on_value: datetime.date | None = None
         if "expiresOn" in raw:
-            expires_on_raw = raw["expiresOn"]
-            if expires_on_raw is None:
+            expires_on_value_raw = raw["expiresOn"]
+            if expires_on_value_raw is None:
                 violations.append(
                     Violation(path="expiresOn", reason="explicit null not allowed")
                 )
             else:
-                if not isinstance(expires_on_raw, str):
+                if not isinstance(expires_on_value_raw, str):
                     violations.append(
                         Violation(path="expiresOn", reason="expected string")
                     )
                 else:
-                    expires_on_parsed = _parse_date(
-                        expires_on_raw, "expiresOn", violations
+                    expires_on_value_parsed = _parse_date(
+                        expires_on_value_raw, "expiresOn", violations
                     )
-                    if expires_on_parsed is not None:
-                        expires_on = expires_on_parsed
+                    if expires_on_value_parsed is not None:
+                        expires_on_value = expires_on_value_parsed
 
-        reminder: datetime.time | None = None
+        reminder_value: datetime.time | None = None
         if "reminder" in raw:
-            reminder_raw = raw["reminder"]
-            if reminder_raw is None:
+            reminder_value_raw = raw["reminder"]
+            if reminder_value_raw is None:
                 violations.append(
                     Violation(path="reminder", reason="explicit null not allowed")
                 )
             else:
-                if not isinstance(reminder_raw, str):
+                if not isinstance(reminder_value_raw, str):
                     violations.append(
                         Violation(path="reminder", reason="expected string")
                     )
                 else:
-                    reminder_parsed = _parse_time(reminder_raw, "reminder", violations)
-                    if reminder_parsed is not None:
-                        reminder = reminder_parsed
+                    reminder_value_parsed = _parse_time(
+                        reminder_value_raw, "reminder", violations
+                    )
+                    if reminder_value_parsed is not None:
+                        reminder_value = reminder_value_parsed
 
-        retry_delay: datetime.timedelta | None = None
+        retry_delay_value: datetime.timedelta | None = None
         if "retryDelay" in raw:
-            retry_delay_raw = raw["retryDelay"]
-            if retry_delay_raw is None:
+            retry_delay_value_raw = raw["retryDelay"]
+            if retry_delay_value_raw is None:
                 violations.append(
                     Violation(path="retryDelay", reason="explicit null not allowed")
                 )
             else:
-                if not isinstance(retry_delay_raw, str):
+                if not isinstance(retry_delay_value_raw, str):
                     violations.append(
                         Violation(path="retryDelay", reason="expected string")
                     )
                 else:
-                    retry_delay_parsed = _parse_duration(
-                        retry_delay_raw, "retryDelay", violations
+                    retry_delay_value_parsed = _parse_duration(
+                        retry_delay_value_raw, "retryDelay", violations
                     )
-                    if retry_delay_parsed is not None:
-                        retry_delay = retry_delay_parsed
+                    if retry_delay_value_parsed is not None:
+                        retry_delay_value = retry_delay_value_parsed
 
-        deleted_at: datetime.datetime | None = None
+        deleted_at_value: datetime.datetime | None = None
         if "deletedAt" in raw:
-            deleted_at_raw = raw["deletedAt"]
-            if deleted_at_raw is None:
-                deleted_at = None
+            deleted_at_value_raw = raw["deletedAt"]
+            if deleted_at_value_raw is None:
+                deleted_at_value = None
             else:
-                if not isinstance(deleted_at_raw, str):
+                if not isinstance(deleted_at_value_raw, str):
                     violations.append(
                         Violation(path="deletedAt", reason="expected string")
                     )
                 else:
-                    deleted_at_parsed = _parse_date_time(
-                        deleted_at_raw, "deletedAt", violations
+                    deleted_at_value_parsed = _parse_date_time(
+                        deleted_at_value_raw, "deletedAt", violations
                     )
-                    if deleted_at_parsed is not None:
-                        deleted_at = deleted_at_parsed
+                    if deleted_at_value_parsed is not None:
+                        deleted_at_value = deleted_at_value_parsed
 
-        archived_on: datetime.date | None = None
+        archived_on_value: datetime.date | None = None
         if "archivedOn" in raw:
-            archived_on_raw = raw["archivedOn"]
-            if archived_on_raw is None:
-                archived_on = None
+            archived_on_value_raw = raw["archivedOn"]
+            if archived_on_value_raw is None:
+                archived_on_value = None
             else:
-                if not isinstance(archived_on_raw, str):
+                if not isinstance(archived_on_value_raw, str):
                     violations.append(
                         Violation(path="archivedOn", reason="expected string")
                     )
                 else:
-                    archived_on_parsed = _parse_date(
-                        archived_on_raw, "archivedOn", violations
+                    archived_on_value_parsed = _parse_date(
+                        archived_on_value_raw, "archivedOn", violations
                     )
-                    if archived_on_parsed is not None:
-                        archived_on = archived_on_parsed
+                    if archived_on_value_parsed is not None:
+                        archived_on_value = archived_on_value_parsed
 
         for key in raw:
             if (
@@ -210,35 +219,42 @@ class _TemporalTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return Temporal(
-            created_at=created_at,
-            birthday=birthday,
-            alarm=alarm,
-            timeout=timeout,
-            updated_at=updated_at,
-            expires_on=expires_on,
-            reminder=reminder,
-            retry_delay=retry_delay,
-            deleted_at=deleted_at,
-            archived_on=archived_on,
+            created_at=created_at_value,
+            birthday=birthday_value,
+            alarm=alarm_value,
+            timeout=timeout_value,
+            updated_at=updated_at_value,
+            expires_on=expires_on_value,
+            reminder=reminder_value,
+            retry_delay=retry_delay_value,
+            deleted_at=deleted_at_value,
+            archived_on=archived_on_value,
         )
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Temporal") -> typing.Any:
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        _check_date_time(value.created_at, "createdAt", violations)
         out["createdAt"] = _format_date_time(value.created_at)
         out["birthday"] = _format_date(value.birthday)
+        _check_time(value.alarm, "alarm", violations)
         out["alarm"] = _format_time(value.alarm)
+        _check_duration(value.timeout, "timeout", violations)
         out["timeout"] = _format_duration(value.timeout)
         if value.updated_at is not None:
+            _check_date_time(value.updated_at, "updatedAt", violations)
             out["updatedAt"] = _format_date_time(value.updated_at)
         if value.expires_on is not None:
             out["expiresOn"] = _format_date(value.expires_on)
         if value.reminder is not None:
+            _check_time(value.reminder, "reminder", violations)
             out["reminder"] = _format_time(value.reminder)
         if value.retry_delay is not None:
+            _check_duration(value.retry_delay, "retryDelay", violations)
             out["retryDelay"] = _format_duration(value.retry_delay)
         if value.deleted_at is not None:
+            _check_date_time(value.deleted_at, "deletedAt", violations)
             out["deletedAt"] = _format_date_time(value.deleted_at)
         if value.archived_on is not None:
             out["archivedOn"] = _format_date(value.archived_on)

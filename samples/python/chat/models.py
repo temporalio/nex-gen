@@ -36,15 +36,15 @@ class _GetRoomInputTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        room_id: str = typing.cast("typing.Any", None)
+        room_id_value: str = typing.cast("typing.Any", None)
         if "roomId" not in raw or raw["roomId"] is None:
             violations.append(Violation(path="roomId", reason="required"))
         else:
-            room_id_raw = raw["roomId"]
-            if not isinstance(room_id_raw, str):
+            room_id_value_raw = raw["roomId"]
+            if not isinstance(room_id_value_raw, str):
                 violations.append(Violation(path="roomId", reason="expected string"))
             else:
-                room_id = room_id_raw
+                room_id_value = room_id_value_raw
 
         for key in raw:
             if key != "roomId":
@@ -52,7 +52,7 @@ class _GetRoomInputTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return GetRoomInput(
-            room_id=room_id,
+            room_id=room_id_value,
         )
 
     @typing_extensions.override
@@ -135,54 +135,54 @@ class _MessageTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        kind: typing.Literal["text"] = typing.cast("typing.Any", None)
+        kind_value: typing.Literal["text"] = typing.cast("typing.Any", None)
         if "kind" not in raw or raw["kind"] is None:
             violations.append(Violation(path="kind", reason="required"))
         else:
-            kind_raw = raw["kind"]
-            if not isinstance(kind_raw, str):
+            kind_value_raw = raw["kind"]
+            if not isinstance(kind_value_raw, str):
                 violations.append(Violation(path="kind", reason="expected string"))
-            elif kind_raw != "text":
+            elif kind_value_raw != "text":
                 violations.append(Violation(path="kind", reason='must equal "text"'))
             else:
-                kind = kind_raw
+                kind_value = kind_value_raw
 
-        body: str = typing.cast("typing.Any", None)
+        body_value: str = typing.cast("typing.Any", None)
         if "body" not in raw or raw["body"] is None:
             violations.append(Violation(path="body", reason="required"))
         else:
-            body_raw = raw["body"]
-            if not isinstance(body_raw, str):
+            body_value_raw = raw["body"]
+            if not isinstance(body_value_raw, str):
                 violations.append(Violation(path="body", reason="expected string"))
             else:
-                body = body_raw
+                body_value = body_value_raw
 
-        reply_to_id: str | None = None
+        reply_to_id_value: str | None = None
         if "replyToId" in raw:
-            reply_to_id_raw = raw["replyToId"]
-            if reply_to_id_raw is None:
-                reply_to_id = None
+            reply_to_id_value_raw = raw["replyToId"]
+            if reply_to_id_value_raw is None:
+                reply_to_id_value = None
             else:
-                if not isinstance(reply_to_id_raw, str):
+                if not isinstance(reply_to_id_value_raw, str):
                     violations.append(
                         Violation(path="replyToId", reason="expected string")
                     )
                 else:
-                    reply_to_id = reply_to_id_raw
+                    reply_to_id_value = reply_to_id_value_raw
 
-        priority: int | None = None
+        priority_value: int | None = None
         if "priority" in raw:
-            priority_raw = raw["priority"]
-            if priority_raw is None:
+            priority_value_raw = raw["priority"]
+            if priority_value_raw is None:
                 violations.append(
                     Violation(path="priority", reason="explicit null not allowed")
                 )
             else:
-                priority_parsed = _parse_spec_integer(
-                    priority_raw, "priority", violations
+                priority_value_parsed = _parse_spec_integer(
+                    priority_value_raw, "priority", violations
                 )
-                if priority_parsed is not None:
-                    priority = priority_parsed
+                if priority_value_parsed is not None:
+                    priority_value = priority_value_parsed
 
         for key in raw:
             if (
@@ -195,10 +195,10 @@ class _MessageTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return Message(
-            kind=kind,
-            body=body,
-            reply_to_id=reply_to_id,
-            priority=priority,
+            kind=kind_value,
+            body=body_value,
+            reply_to_id=reply_to_id_value,
+            priority=priority_value,
         )
 
     @typing_extensions.override
@@ -245,82 +245,83 @@ class _RoomTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        room_id: str = typing.cast("typing.Any", None)
+        room_id_value: str = typing.cast("typing.Any", None)
         if "roomId" not in raw or raw["roomId"] is None:
             violations.append(Violation(path="roomId", reason="required"))
         else:
-            room_id_raw = raw["roomId"]
-            if not isinstance(room_id_raw, str):
+            room_id_value_raw = raw["roomId"]
+            if not isinstance(room_id_value_raw, str):
                 violations.append(Violation(path="roomId", reason="expected string"))
             else:
-                room_id = room_id_raw
+                room_id_value = room_id_value_raw
 
-        display_name: str = typing.cast("typing.Any", None)
+        display_name_value: str = typing.cast("typing.Any", None)
         if "displayName" not in raw or raw["displayName"] is None:
             violations.append(Violation(path="displayName", reason="required"))
         else:
-            display_name_raw = raw["displayName"]
-            if not isinstance(display_name_raw, str):
+            display_name_value_raw = raw["displayName"]
+            if not isinstance(display_name_value_raw, str):
                 violations.append(
                     Violation(path="displayName", reason="expected string")
                 )
             else:
-                display_name = display_name_raw
+                display_name_value = display_name_value_raw
 
-        topic: str | None = None
+        topic_value: str | None = None
         if "topic" not in raw:
             violations.append(Violation(path="topic", reason="required"))
         else:
-            topic_raw = raw["topic"]
-            if topic_raw is None:
-                topic = None
+            topic_value_raw = raw["topic"]
+            if topic_value_raw is None:
+                topic_value = None
             else:
-                if not isinstance(topic_raw, str):
+                if not isinstance(topic_value_raw, str):
                     violations.append(Violation(path="topic", reason="expected string"))
                 else:
-                    topic = topic_raw
+                    topic_value = topic_value_raw
 
-        members: list[str] | None = None
+        members_value: list[str] | None = None
         if "members" in raw:
-            members_raw = raw["members"]
-            if members_raw is None:
+            members_value_raw = raw["members"]
+            if members_value_raw is None:
                 violations.append(
                     Violation(path="members", reason="explicit null not allowed")
                 )
             else:
-                if not isinstance(members_raw, list):
+                if not isinstance(members_value_raw, list):
                     violations.append(
                         Violation(path="members", reason="expected array")
                     )
                 else:
-                    members_list: list[str] = []
-                    for members_index, members_element in enumerate(
-                        typing.cast("list[typing.Any]", members_raw)
+                    members_value_list: list[str] = []
+                    for members_value_index, members_value_element in enumerate(
+                        typing.cast("list[typing.Any]", members_value_raw)
                     ):
-                        members_item_path = f"members[{members_index}]"
-                        members_item: str = typing.cast("typing.Any", None)
-                        if not isinstance(members_element, str):
+                        members_value_item_path = f"members[{members_value_index}]"
+                        members_value_item: str = typing.cast("typing.Any", None)
+                        if not isinstance(members_value_element, str):
                             violations.append(
                                 Violation(
-                                    path=members_item_path, reason="expected element"
+                                    path=members_value_item_path,
+                                    reason="expected element",
                                 )
                             )
                         else:
-                            members_item = members_element
-                        members_list.append(members_item)
-                    members = members_list
+                            members_value_item = members_value_element
+                        members_value_list.append(members_value_item)
+                    members_value = members_value_list
 
-        labels: Labels | None = None
+        labels_value: Labels | None = None
         if "labels" in raw:
-            labels_raw = raw["labels"]
-            if labels_raw is None:
+            labels_value_raw = raw["labels"]
+            if labels_value_raw is None:
                 violations.append(
                     Violation(path="labels", reason="explicit null not allowed")
                 )
             else:
                 try:
-                    labels = _LabelsTransferTypeConverter().from_transfer_type(
-                        labels_raw, Labels
+                    labels_value = _LabelsTransferTypeConverter().from_transfer_type(
+                        labels_value_raw, Labels
                     )
                 except ValidationError as error:
                     _collect(violations, "labels", error)
@@ -332,16 +333,17 @@ class _RoomTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return Room(
-            room_id=room_id,
-            display_name=display_name,
-            topic=topic,
-            members=members,
-            labels=labels,
+            room_id=room_id_value,
+            display_name=display_name_value,
+            topic=topic_value,
+            members=members_value,
+            labels=labels_value,
             additional_properties=additional_properties,
         )
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Room") -> typing.Any:
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         out["roomId"] = value.room_id
         out["displayName"] = value.display_name
@@ -349,11 +351,16 @@ class _RoomTransferTypeConverter(
         if value.members is not None:
             out["members"] = value.members
         if value.labels is not None:
-            out["labels"] = _LabelsTransferTypeConverter().to_transfer_type(
-                value.labels
-            )
+            try:
+                out["labels"] = _LabelsTransferTypeConverter().to_transfer_type(
+                    value.labels
+                )
+            except ValidationError as error:
+                _collect(violations, "labels", error)
         for key, entry in value.additional_properties.items():
             out[key] = entry
+        if violations:
+            raise ValidationError(violations)
         return out
 
 
@@ -390,24 +397,24 @@ class _SendMessageInputTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        room_id: str = typing.cast("typing.Any", None)
+        room_id_value: str = typing.cast("typing.Any", None)
         if "roomId" not in raw or raw["roomId"] is None:
             violations.append(Violation(path="roomId", reason="required"))
         else:
-            room_id_raw = raw["roomId"]
-            if not isinstance(room_id_raw, str):
+            room_id_value_raw = raw["roomId"]
+            if not isinstance(room_id_value_raw, str):
                 violations.append(Violation(path="roomId", reason="expected string"))
             else:
-                room_id = room_id_raw
+                room_id_value = room_id_value_raw
 
-        message: Message = typing.cast("typing.Any", None)
+        message_value: Message = typing.cast("typing.Any", None)
         if "message" not in raw or raw["message"] is None:
             violations.append(Violation(path="message", reason="required"))
         else:
-            message_raw = raw["message"]
+            message_value_raw = raw["message"]
             try:
-                message = _MessageTransferTypeConverter().from_transfer_type(
-                    message_raw, Message
+                message_value = _MessageTransferTypeConverter().from_transfer_type(
+                    message_value_raw, Message
                 )
             except ValidationError as error:
                 _collect(violations, "message", error)
@@ -418,15 +425,23 @@ class _SendMessageInputTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return SendMessageInput(
-            room_id=room_id,
-            message=message,
+            room_id=room_id_value,
+            message=message_value,
         )
 
     @typing_extensions.override
     def to_transfer_type(self, value: "SendMessageInput") -> typing.Any:
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         out["roomId"] = value.room_id
-        out["message"] = _MessageTransferTypeConverter().to_transfer_type(value.message)
+        try:
+            out["message"] = _MessageTransferTypeConverter().to_transfer_type(
+                value.message
+            )
+        except ValidationError as error:
+            _collect(violations, "message", error)
+        if violations:
+            raise ValidationError(violations)
         return out
 
 
@@ -452,15 +467,15 @@ class _SendMessageOutputTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        message_id: str = typing.cast("typing.Any", None)
+        message_id_value: str = typing.cast("typing.Any", None)
         if "messageId" not in raw or raw["messageId"] is None:
             violations.append(Violation(path="messageId", reason="required"))
         else:
-            message_id_raw = raw["messageId"]
-            if not isinstance(message_id_raw, str):
+            message_id_value_raw = raw["messageId"]
+            if not isinstance(message_id_value_raw, str):
                 violations.append(Violation(path="messageId", reason="expected string"))
             else:
-                message_id = message_id_raw
+                message_id_value = message_id_value_raw
 
         for key in raw:
             if key != "messageId":
@@ -468,7 +483,7 @@ class _SendMessageOutputTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return SendMessageOutput(
-            message_id=message_id,
+            message_id=message_id_value,
         )
 
     @typing_extensions.override

@@ -27,34 +27,37 @@ class _BlockStyleTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        bold: bool | None = None
+        bold_value: bool | None = None
         if "bold" in raw:
-            bold_raw = raw["bold"]
-            if bold_raw is None:
+            bold_value_raw = raw["bold"]
+            if bold_value_raw is None:
                 violations.append(
                     Violation(path="bold", reason="explicit null not allowed")
                 )
             else:
-                if not isinstance(bold_raw, bool):
+                if not isinstance(bold_value_raw, bool):
                     violations.append(Violation(path="bold", reason="expected boolean"))
                 else:
-                    bold = bold_raw
+                    bold_value = bold_value_raw
 
-        indent: int | None = None
+        indent_value: int | None = None
         if "indent" in raw:
-            indent_raw = raw["indent"]
-            if indent_raw is None:
+            indent_value_raw = raw["indent"]
+            if indent_value_raw is None:
                 violations.append(
                     Violation(path="indent", reason="explicit null not allowed")
                 )
             else:
-                indent_parsed = _parse_spec_integer(indent_raw, "indent", violations)
-                if indent_parsed is not None:
-                    indent = indent_parsed
-                    if indent < 0:
+                indent_value_parsed = _parse_spec_integer(
+                    indent_value_raw, "indent", violations
+                )
+                if indent_value_parsed is not None:
+                    indent_value = indent_value_parsed
+                    if indent_value < 0:
                         violations.append(
                             Violation(
-                                path="indent", reason=f"must be >= 0, got {indent}"
+                                path="indent",
+                                reason=f"must be >= 0, got {indent_value}",
                             )
                         )
 
@@ -64,8 +67,8 @@ class _BlockStyleTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return BlockStyle(
-            bold=bold,
-            indent=indent,
+            bold=bold_value,
+            indent=indent_value,
         )
 
     @typing_extensions.override

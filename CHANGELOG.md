@@ -69,8 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TypeScript, and Java already surface — instead of `pydantic.ValidationError`.
   One bad payload reports every violation it contains, with the JSON path of each
   and a reason naming the concrete bound and the offending value. Both types live
-  in the package's `_definitions` module and are deliberately not re-exported
-  through `__init__.py`, matching the other three languages.
+  in the package's `_definitions` module and are not re-exported through
+  `__init__.py`, so catching the aggregating error takes
+  `from <package>._definitions import ValidationError` — Python is the only
+  target that reaches its error type through a private name (Go's is exported
+  from the one flat package, Java's is `public`, and the TypeScript root barrel
+  re-exports it).
 - Python: An **optional and nullable** member now collapses on round-trip, as it
   already does in Go and Java. A dataclass has no presence channel, so an absent
   member and an explicit wire `null` read as the same `None`, and both
@@ -194,10 +198,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own constraint, an element-level check — was reported with a dangling separator
   (`segments[0].`). The prefix is now the whole path, matching Go and Java.
 - JSON Schema: `uniqueItems` and `contains` were dropped on an array-typed **typed
-  map member** in Python, for want of a native Pydantic form. Both now ride in the
-  member's annotation as AfterValidators, with the same reasons the property
-  position emits (and the same mechanism now serves a `oneOf` branch).
-- JSON Schema: A typed map's members were validated against their type _token_
+  map member** in Python. Both now run in the member's converter through the
+  runtime's `_check_unique_items` / `_check_contains`, with the same reasons the
+  property position emits (and the same mechanism now serves a `oneOf` branch).
+- JSON Schema: A typed map's members were validated against their type *token*
   only, so every constraint the member type declared was silently dropped — a
   string's `minLength`/`maxLength`/`pattern`/`format`, a number's bounds and
   `multipleOf`, an array's `minItems`/`uniqueItems`/`contains`, a `const`/`enum`
@@ -205,11 +209,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directions, with the member's key as the violation path. Python additionally
   validated only that a member was a _string_, leaving an object, union, or
   numeric member unchecked and unmaterialized; members now validate and
-  materialize through the member type's own annotation, so `model_extra` holds the
-  declared type (an `Inner`, an `int` parsed from `1.0`, a `datetime`, `bytes`) and
-  re-encodes through it on the way out. TypeScript checked members on the way in
-  but not on the way out, and dropped a nullable value's constraints in both
-  positions (a member's _and_ a declared field's).
+  materialize through the member type's own converter, so
+  `additional_properties` holds the declared type (an `Inner`, an `int` parsed
+  from `1.0`, a `datetime`, `bytes`) and re-encodes through it on the way out.
+  TypeScript checked members on the way in but not on the way out, and dropped
+  a nullable value's constraints in both positions (a member's *and* a
+  declared field's).
 - JSON Schema: A **nullable** typed-map member (`additionalProperties` as the
   nullability `oneOf`) was mishandled: Go typed the member `T` and dropped a
   `null` member from the map entirely, and Java rejected it. A null member is now

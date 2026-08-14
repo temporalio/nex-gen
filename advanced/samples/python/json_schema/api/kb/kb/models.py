@@ -27,15 +27,15 @@ class _GetCategoryTreeInputTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        root_id: str = typing.cast("typing.Any", None)
+        root_id_value: str = typing.cast("typing.Any", None)
         if "rootId" not in raw or raw["rootId"] is None:
             violations.append(Violation(path="rootId", reason="required"))
         else:
-            root_id_raw = raw["rootId"]
-            if not isinstance(root_id_raw, str):
+            root_id_value_raw = raw["rootId"]
+            if not isinstance(root_id_value_raw, str):
                 violations.append(Violation(path="rootId", reason="expected string"))
             else:
-                root_id = root_id_raw
+                root_id_value = root_id_value_raw
 
         for key in raw:
             if key != "rootId":
@@ -43,7 +43,7 @@ class _GetCategoryTreeInputTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return GetCategoryTreeInput(
-            root_id=root_id,
+            root_id=root_id_value,
         )
 
     @typing_extensions.override
@@ -71,15 +71,15 @@ class _GetPageInputTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        page_id: str = typing.cast("typing.Any", None)
+        page_id_value: str = typing.cast("typing.Any", None)
         if "pageId" not in raw or raw["pageId"] is None:
             violations.append(Violation(path="pageId", reason="required"))
         else:
-            page_id_raw = raw["pageId"]
-            if not isinstance(page_id_raw, str):
+            page_id_value_raw = raw["pageId"]
+            if not isinstance(page_id_value_raw, str):
                 violations.append(Violation(path="pageId", reason="expected string"))
             else:
-                page_id = page_id_raw
+                page_id_value = page_id_value_raw
 
         for key in raw:
             if key != "pageId":
@@ -87,7 +87,7 @@ class _GetPageInputTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return GetPageInput(
-            page_id=page_id,
+            page_id=page_id_value,
         )
 
     @typing_extensions.override
@@ -115,24 +115,26 @@ class _PutBlockOutputTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        block_id: str = typing.cast("typing.Any", None)
+        block_id_value: str = typing.cast("typing.Any", None)
         if "blockId" not in raw or raw["blockId"] is None:
             violations.append(Violation(path="blockId", reason="required"))
         else:
-            block_id_raw = raw["blockId"]
-            if not isinstance(block_id_raw, str):
+            block_id_value_raw = raw["blockId"]
+            if not isinstance(block_id_value_raw, str):
                 violations.append(Violation(path="blockId", reason="expected string"))
             else:
-                block_id = block_id_raw
+                block_id_value = block_id_value_raw
 
-        revision: int = typing.cast("typing.Any", None)
+        revision_value: int = typing.cast("typing.Any", None)
         if "revision" not in raw or raw["revision"] is None:
             violations.append(Violation(path="revision", reason="required"))
         else:
-            revision_raw = raw["revision"]
-            revision_parsed = _parse_spec_integer(revision_raw, "revision", violations)
-            if revision_parsed is not None:
-                revision = revision_parsed
+            revision_value_raw = raw["revision"]
+            revision_value_parsed = _parse_spec_integer(
+                revision_value_raw, "revision", violations
+            )
+            if revision_value_parsed is not None:
+                revision_value = revision_value_parsed
 
         for key in raw:
             if key != "blockId" and key != "revision":
@@ -140,8 +142,8 @@ class _PutBlockOutputTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return PutBlockOutput(
-            block_id=block_id,
-            revision=revision,
+            block_id=block_id_value,
+            revision=revision_value,
         )
 
     @typing_extensions.override

@@ -105,7 +105,7 @@ errors aggregate into the language-native primitive.
 |---|---|---|---|---|
 | `"string"`  | typed `Unmarshal` into `string` | `typeof v === 'string'` | `isinstance(v, str)` | Jackson typed binding |
 | `"integer"` | shadow `*json.Number` → runtime `parseSpecInteger` → `int64` (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) | `typeof v === 'number' && Number.isSafeInteger(v)` (accepts `1.0` natively; caps ±(2^53−1)) | runtime `_parse_spec_integer(v, path, violations)` → `int` (accepts `1.0`, rejects `1.5` and `bool`, caps ±(2^53−1)) | node helper `SpecNumbers.specLong(node, path, errs)` called by the collecting deserializer (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) |
-| `"number"`  | `float64` unmarshal | `typeof v === 'number'` | `isinstance(v, (int, float)) and not isinstance(v, bool)` → `float(v)` | `Double` binding |
+| `"number"`  | `float64` unmarshal | `typeof v === 'number'` | `not isinstance(v, bool) and isinstance(v, (int, float))`, stored as-is | `Double` binding |
 | `"boolean"` | `bool` unmarshal | `typeof v === 'boolean'` | `isinstance(v, bool)` (rejects `1`/`0`) | `Boolean` binding |
 | `"object"`  | typed struct unmarshal | `typeof v === 'object' && v !== null && !Array.isArray(v)` | `isinstance(v, dict)`, then the branch/member converter builds the dataclass | typed class binding |
 | `"array"`   | typed slice unmarshal | `Array.isArray(v)` | `isinstance(v, list)` | typed `List` binding |
@@ -155,8 +155,12 @@ Strategy per language:
   mismatch appending a `Violation { path, reason }` to the list the converter
   raises as one `ValidationError` (**PRINCIPLES Python §2**). Because `bool`
   is a subclass of `int`, an integer or number check **must exclude `bool`
-  explicitly** — otherwise `True` classifies as `1`. Integer fields stay a
-  plain `int` and run through the generated runtime's
+  explicitly** — otherwise `True` classifies as `1`. A classified `number` is
+  stored **exactly as it arrived**, never coerced: an integral `5` stays an
+  `int` in a `float`-annotated member, because `float(5)` would re-serialize
+  as `5.0` where Go and TypeScript emit `5` — a per-language nicety paid for
+  in round-trip byte-identity, which **P1** does not permit. Integer fields
+  stay a plain `int` and run through the generated runtime's
   `_parse_spec_integer(value, path, violations)`: it rejects `bool`, accepts
   an `int`, accepts a `float` with zero fractional part (`1.0`, `1e2`), and
   rejects a fractional one (`1.5`) — the same accept/reject set as Go's

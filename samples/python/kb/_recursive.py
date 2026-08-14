@@ -32,66 +32,70 @@ class _BlockTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        block_id: str = typing.cast("typing.Any", None)
+        block_id_value: str = typing.cast("typing.Any", None)
         if "blockId" not in raw or raw["blockId"] is None:
             violations.append(Violation(path="blockId", reason="required"))
         else:
-            block_id_raw = raw["blockId"]
-            if not isinstance(block_id_raw, str):
+            block_id_value_raw = raw["blockId"]
+            if not isinstance(block_id_value_raw, str):
                 violations.append(Violation(path="blockId", reason="expected string"))
             else:
-                block_id = block_id_raw
+                block_id_value = block_id_value_raw
 
-        order: int = typing.cast("typing.Any", None)
+        order_value: int = typing.cast("typing.Any", None)
         if "order" not in raw or raw["order"] is None:
             violations.append(Violation(path="order", reason="required"))
         else:
-            order_raw = raw["order"]
-            order_parsed = _parse_spec_integer(order_raw, "order", violations)
-            if order_parsed is not None:
-                order = order_parsed
-                if order < 0:
+            order_value_raw = raw["order"]
+            order_value_parsed = _parse_spec_integer(
+                order_value_raw, "order", violations
+            )
+            if order_value_parsed is not None:
+                order_value = order_value_parsed
+                if order_value < 0:
                     violations.append(
-                        Violation(path="order", reason=f"must be >= 0, got {order}")
+                        Violation(
+                            path="order", reason=f"must be >= 0, got {order_value}"
+                        )
                     )
 
-        text: str | None = None
+        text_value: str | None = None
         if "text" in raw:
-            text_raw = raw["text"]
-            if text_raw is None:
+            text_value_raw = raw["text"]
+            if text_value_raw is None:
                 violations.append(
                     Violation(path="text", reason="explicit null not allowed")
                 )
             else:
-                if not isinstance(text_raw, str):
+                if not isinstance(text_value_raw, str):
                     violations.append(Violation(path="text", reason="expected string"))
                 else:
-                    text = text_raw
+                    text_value = text_value_raw
 
-        style: BlockStyle | None = None
+        style_value: BlockStyle | None = None
         if "style" in raw:
-            style_raw = raw["style"]
-            if style_raw is None:
+            style_value_raw = raw["style"]
+            if style_value_raw is None:
                 violations.append(
                     Violation(path="style", reason="explicit null not allowed")
                 )
             else:
                 try:
-                    style = getattr(
+                    style_value = getattr(
                         BlockStyle, "__temporal_transfer_type_converter"
-                    ).from_transfer_type(style_raw, BlockStyle)
+                    ).from_transfer_type(style_value_raw, BlockStyle)
                 except ValidationError as error:
                     _collect(violations, "style", error)
 
-        page: Page | None = None
+        page_value: Page | None = None
         if "page" in raw:
-            page_raw = raw["page"]
-            if page_raw is None:
-                page = None
+            page_value_raw = raw["page"]
+            if page_value_raw is None:
+                page_value = None
             else:
                 try:
-                    page = _PageTransferTypeConverter().from_transfer_type(
-                        page_raw, Page
+                    page_value = _PageTransferTypeConverter().from_transfer_type(
+                        page_value_raw, Page
                     )
                 except ValidationError as error:
                     _collect(violations, "page", error)
@@ -108,11 +112,11 @@ class _BlockTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return Block(
-            block_id=block_id,
-            order=order,
-            text=text,
-            style=style,
-            page=page,
+            block_id=block_id_value,
+            order=order_value,
+            text=text_value,
+            style=style_value,
+            page=page_value,
         )
 
     @typing_extensions.override
@@ -128,11 +132,17 @@ class _BlockTransferTypeConverter(
         if value.text is not None:
             out["text"] = value.text
         if value.style is not None:
-            out["style"] = getattr(
-                BlockStyle, "__temporal_transfer_type_converter"
-            ).to_transfer_type(value.style)
+            try:
+                out["style"] = getattr(
+                    BlockStyle, "__temporal_transfer_type_converter"
+                ).to_transfer_type(value.style)
+            except ValidationError as error:
+                _collect(violations, "style", error)
         if value.page is not None:
-            out["page"] = _PageTransferTypeConverter().to_transfer_type(value.page)
+            try:
+                out["page"] = _PageTransferTypeConverter().to_transfer_type(value.page)
+            except ValidationError as error:
+                _collect(violations, "page", error)
         if violations:
             raise ValidationError(violations)
         return out
@@ -173,65 +183,65 @@ class _PageTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        page_id: str = typing.cast("typing.Any", None)
+        page_id_value: str = typing.cast("typing.Any", None)
         if "pageId" not in raw or raw["pageId"] is None:
             violations.append(Violation(path="pageId", reason="required"))
         else:
-            page_id_raw = raw["pageId"]
-            if not isinstance(page_id_raw, str):
+            page_id_value_raw = raw["pageId"]
+            if not isinstance(page_id_value_raw, str):
                 violations.append(Violation(path="pageId", reason="expected string"))
             else:
-                page_id = page_id_raw
+                page_id_value = page_id_value_raw
 
-        title: str = typing.cast("typing.Any", None)
+        title_value: str = typing.cast("typing.Any", None)
         if "title" not in raw or raw["title"] is None:
             violations.append(Violation(path="title", reason="required"))
         else:
-            title_raw = raw["title"]
-            if not isinstance(title_raw, str):
+            title_value_raw = raw["title"]
+            if not isinstance(title_value_raw, str):
                 violations.append(Violation(path="title", reason="expected string"))
             else:
-                title = title_raw
+                title_value = title_value_raw
 
-        meta: PageMeta = typing.cast("typing.Any", None)
+        meta_value: PageMeta = typing.cast("typing.Any", None)
         if "meta" not in raw or raw["meta"] is None:
             violations.append(Violation(path="meta", reason="required"))
         else:
-            meta_raw = raw["meta"]
+            meta_value_raw = raw["meta"]
             try:
-                meta = getattr(
+                meta_value = getattr(
                     PageMeta, "__temporal_transfer_type_converter"
-                ).from_transfer_type(meta_raw, PageMeta)
+                ).from_transfer_type(meta_value_raw, PageMeta)
             except ValidationError as error:
                 _collect(violations, "meta", error)
 
-        blocks: list[Block] | None = None
+        blocks_value: list[Block] | None = None
         if "blocks" in raw:
-            blocks_raw = raw["blocks"]
-            if blocks_raw is None:
+            blocks_value_raw = raw["blocks"]
+            if blocks_value_raw is None:
                 violations.append(
                     Violation(path="blocks", reason="explicit null not allowed")
                 )
             else:
-                if not isinstance(blocks_raw, list):
+                if not isinstance(blocks_value_raw, list):
                     violations.append(Violation(path="blocks", reason="expected array"))
                 else:
-                    blocks_list: list[Block] = []
-                    for blocks_index, blocks_element in enumerate(
-                        typing.cast("list[typing.Any]", blocks_raw)
+                    blocks_value_list: list[Block] = []
+                    for blocks_value_index, blocks_value_element in enumerate(
+                        typing.cast("list[typing.Any]", blocks_value_raw)
                     ):
-                        blocks_item_path = f"blocks[{blocks_index}]"
-                        blocks_item: Block = typing.cast("typing.Any", None)
+                        blocks_value_item_path = f"blocks[{blocks_value_index}]"
+                        blocks_value_item: Block = typing.cast("typing.Any", None)
                         try:
-                            blocks_item = (
+                            blocks_value_item = (
                                 _BlockTransferTypeConverter().from_transfer_type(
-                                    blocks_element, Block
+                                    blocks_value_element, Block
                                 )
                             )
                         except ValidationError as error:
-                            _collect(violations, blocks_item_path, error)
-                        blocks_list.append(blocks_item)
-                    blocks = blocks_list
+                            _collect(violations, blocks_value_item_path, error)
+                        blocks_value_list.append(blocks_value_item)
+                    blocks_value = blocks_value_list
 
         for key in raw:
             if key != "pageId" and key != "title" and key != "meta" and key != "blocks":
@@ -239,25 +249,36 @@ class _PageTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return Page(
-            page_id=page_id,
-            title=title,
-            meta=meta,
-            blocks=blocks,
+            page_id=page_id_value,
+            title=title_value,
+            meta=meta_value,
+            blocks=blocks_value,
         )
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Page") -> typing.Any:
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         out["pageId"] = value.page_id
         out["title"] = value.title
-        out["meta"] = getattr(
-            PageMeta, "__temporal_transfer_type_converter"
-        ).to_transfer_type(value.meta)
+        try:
+            out["meta"] = getattr(
+                PageMeta, "__temporal_transfer_type_converter"
+            ).to_transfer_type(value.meta)
+        except ValidationError as error:
+            _collect(violations, "meta", error)
         if value.blocks is not None:
-            out["blocks"] = [
-                _BlockTransferTypeConverter().to_transfer_type(element)
-                for element in value.blocks
-            ]
+            blocks_out: list[typing.Any] = []
+            for blocks_index, blocks_element in enumerate(value.blocks):
+                try:
+                    blocks_out.append(
+                        _BlockTransferTypeConverter().to_transfer_type(blocks_element)
+                    )
+                except ValidationError as error:
+                    _collect(violations, f"blocks[{blocks_index}]", error)
+            out["blocks"] = blocks_out
+        if violations:
+            raise ValidationError(violations)
         return out
 
 

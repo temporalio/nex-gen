@@ -27,55 +27,55 @@ class _CategoryTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        id: str = typing.cast("typing.Any", None)
+        id_value: str = typing.cast("typing.Any", None)
         if "id" not in raw or raw["id"] is None:
             violations.append(Violation(path="id", reason="required"))
         else:
-            id_raw = raw["id"]
-            if not isinstance(id_raw, str):
+            id_value_raw = raw["id"]
+            if not isinstance(id_value_raw, str):
                 violations.append(Violation(path="id", reason="expected string"))
             else:
-                id = id_raw
+                id_value = id_value_raw
 
-        name: str = typing.cast("typing.Any", None)
+        name_value: str = typing.cast("typing.Any", None)
         if "name" not in raw or raw["name"] is None:
             violations.append(Violation(path="name", reason="required"))
         else:
-            name_raw = raw["name"]
-            if not isinstance(name_raw, str):
+            name_value_raw = raw["name"]
+            if not isinstance(name_value_raw, str):
                 violations.append(Violation(path="name", reason="expected string"))
             else:
-                name = name_raw
+                name_value = name_value_raw
 
-        children: list[Category] | None = None
+        children_value: list[Category] | None = None
         if "children" in raw:
-            children_raw = raw["children"]
-            if children_raw is None:
+            children_value_raw = raw["children"]
+            if children_value_raw is None:
                 violations.append(
                     Violation(path="children", reason="explicit null not allowed")
                 )
             else:
-                if not isinstance(children_raw, list):
+                if not isinstance(children_value_raw, list):
                     violations.append(
                         Violation(path="children", reason="expected array")
                     )
                 else:
-                    children_list: list[Category] = []
-                    for children_index, children_element in enumerate(
-                        typing.cast("list[typing.Any]", children_raw)
+                    children_value_list: list[Category] = []
+                    for children_value_index, children_value_element in enumerate(
+                        typing.cast("list[typing.Any]", children_value_raw)
                     ):
-                        children_item_path = f"children[{children_index}]"
-                        children_item: Category = typing.cast("typing.Any", None)
+                        children_value_item_path = f"children[{children_value_index}]"
+                        children_value_item: Category = typing.cast("typing.Any", None)
                         try:
-                            children_item = (
+                            children_value_item = (
                                 _CategoryTransferTypeConverter().from_transfer_type(
-                                    children_element, Category
+                                    children_value_element, Category
                                 )
                             )
                         except ValidationError as error:
-                            _collect(violations, children_item_path, error)
-                        children_list.append(children_item)
-                    children = children_list
+                            _collect(violations, children_value_item_path, error)
+                        children_value_list.append(children_value_item)
+                    children_value = children_value_list
 
         for key in raw:
             if key != "id" and key != "name" and key != "children":
@@ -83,21 +83,31 @@ class _CategoryTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return Category(
-            id=id,
-            name=name,
-            children=children,
+            id=id_value,
+            name=name_value,
+            children=children_value,
         )
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Category") -> typing.Any:
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         out["id"] = value.id
         out["name"] = value.name
         if value.children is not None:
-            out["children"] = [
-                _CategoryTransferTypeConverter().to_transfer_type(element)
-                for element in value.children
-            ]
+            children_out: list[typing.Any] = []
+            for children_index, children_element in enumerate(value.children):
+                try:
+                    children_out.append(
+                        _CategoryTransferTypeConverter().to_transfer_type(
+                            children_element
+                        )
+                    )
+                except ValidationError as error:
+                    _collect(violations, f"children[{children_index}]", error)
+            out["children"] = children_out
+        if violations:
+            raise ValidationError(violations)
         return out
 
 
@@ -130,30 +140,30 @@ class _PaletteTransferTypeConverter(
             raise ValidationError([Violation(path="", reason="expected object")])
         raw = typing.cast("dict[str, typing.Any]", value)
 
-        swatches: list[str] = typing.cast("typing.Any", None)
+        swatches_value: list[str] = typing.cast("typing.Any", None)
         if "swatches" not in raw or raw["swatches"] is None:
             violations.append(Violation(path="swatches", reason="required"))
         else:
-            swatches_raw = raw["swatches"]
-            if not isinstance(swatches_raw, list):
+            swatches_value_raw = raw["swatches"]
+            if not isinstance(swatches_value_raw, list):
                 violations.append(Violation(path="swatches", reason="expected array"))
             else:
-                swatches_list: list[str] = []
-                for swatches_index, swatches_element in enumerate(
-                    typing.cast("list[typing.Any]", swatches_raw)
+                swatches_value_list: list[str] = []
+                for swatches_value_index, swatches_value_element in enumerate(
+                    typing.cast("list[typing.Any]", swatches_value_raw)
                 ):
-                    swatches_item_path = f"swatches[{swatches_index}]"
-                    swatches_item: str = typing.cast("typing.Any", None)
-                    if not isinstance(swatches_element, str):
+                    swatches_value_item_path = f"swatches[{swatches_value_index}]"
+                    swatches_value_item: str = typing.cast("typing.Any", None)
+                    if not isinstance(swatches_value_element, str):
                         violations.append(
                             Violation(
-                                path=swatches_item_path, reason="expected element"
+                                path=swatches_value_item_path, reason="expected element"
                             )
                         )
                     else:
-                        swatches_item = swatches_element
-                    swatches_list.append(swatches_item)
-                swatches = swatches_list
+                        swatches_value_item = swatches_value_element
+                    swatches_value_list.append(swatches_value_item)
+                swatches_value = swatches_value_list
 
         for key in raw:
             if key != "swatches":
@@ -161,7 +171,7 @@ class _PaletteTransferTypeConverter(
         if violations:
             raise ValidationError(violations)
         return Palette(
-            swatches=swatches,
+            swatches=swatches_value,
         )
 
     @typing_extensions.override
