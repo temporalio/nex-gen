@@ -469,9 +469,10 @@ the same identifier the type declaration uses, so an `x-ts-name` override
 moves the type and its converter together. Because it is derived and
 lower-camel-casing folds names the type namespace keeps apart (`HTTPError`
 and `HttpError` both yield `httpErrorTransferTypeConverter`), the converter
-identifier also enters the module's identifier namespace for the
-PRINCIPLES §15 collision pass: a fold rejects at load with a fix-it rather
-than emitting one `export const` twice. Converters declared in another
+identifier also enters TypeScript's identifier namespace for the
+PRINCIPLES §15 collision pass — which the package barrel makes run-wide, so
+the converter is checked against every module's, not just its own: a fold
+rejects at load with a fix-it rather than emitting one `export const` twice. Converters declared in another
 input file's module import as **values** from that module (beside the
 type-only model import), following the same module resolution as any
 cross-module reference ([[ref]], [[generated-file-layout]]).

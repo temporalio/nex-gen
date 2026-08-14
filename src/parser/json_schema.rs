@@ -5781,11 +5781,23 @@ pub(crate) fn build_name_manifest(
         return Ok(manifest);
     }
 
-    // Each emitted scope gets its own top-level namespace. For most targets that
-    // is the module, which maps to one emitted file set. **Go is different**: it
-    // flattens every module into a single package, so two same-named types in
-    // different modules are redeclarations in one package — its scope is the whole
-    // closure, and `None` below means "every module at once".
+    // Each emitted scope gets its own top-level namespace. Which scope that is
+    // depends on how the target resolves a name across the emitted file set, so
+    // it is a property of the generator's layout rather than of the schema:
+    //
+    // - **Go, TypeScript, Python** resolve run-wide, so `None` below means "every
+    //   module at once". Go flattens every module into a single package, so two
+    //   same-named types in different modules are plain redeclarations. TS and
+    //   Python do keep a namespace per module, but each emits a root barrel that
+    //   re-exports every module's top-level names into one namespace — `index.ts`
+    //   with `export *` per module, and `__init__.py` with named re-exports — so a
+    //   name emitted twice collides there. TypeScript rejects the barrel (TS2308,
+    //   "has already exported a member named ..."); Python silently binds whichever
+    //   import runs last, which is exactly the silent incorrectness P7 forbids.
+    // - **Java and .NET** resolve per module: each module lands in its own
+    //   sub-package/namespace (`com.example.api.content.page`,
+    //   `Nexgen.Generated.Content.Page`) and neither emits an aggregating barrel,
+    //   so the same type name in two modules is two distinct qualified names.
     //
     // A module with services but no models still has a scope, so its service
     // identifiers are checked against the boilerplate.
@@ -5794,7 +5806,7 @@ pub(crate) fn build_name_manifest(
         .map(|model| model.module_key.clone())
         .chain(services.iter().map(|service| service.module_key.clone()))
         .collect();
-    let scopes: Vec<Option<String>> = if language == Language::Go {
+    let scopes: Vec<Option<String>> = if scope_is_run_wide(language) {
         vec![None]
     } else {
         module_keys.into_iter().map(Some).collect()
@@ -5902,6 +5914,25 @@ fn boilerplate_idents(language: Language) -> &'static [&'static str] {
         ],
         Language::Java => &["Violation", "ValidationException", "SpecNumbers"],
         _ => &[],
+    }
+}
+
+/// Whether `language` resolves top-level names across the whole run rather than
+/// per module — that is, whether two modules may each declare the same name.
+///
+/// This is a property of the emitted layout, not of the schema:
+///
+/// - Go flattens every module into one package, so a name emitted twice is a
+///   redeclaration in that package.
+/// - TypeScript and Python do emit a namespace per module, but both also emit a
+///   root barrel (`index.ts` / `__init__.py`) that lifts every module's top-level
+///   names into a single namespace, so a name emitted twice collides there.
+/// - Java and .NET give each module its own sub-package/namespace and emit no
+///   aggregating barrel, so the same name in two modules stays unambiguous.
+const fn scope_is_run_wide(language: Language) -> bool {
+    match language {
+        Language::Go | Language::TypeScript | Language::Python => true,
+        Language::Java | Language::Dotnet | Language::Ruby => false,
     }
 }
 

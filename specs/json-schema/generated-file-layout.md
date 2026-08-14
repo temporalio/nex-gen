@@ -189,13 +189,15 @@ override or rename):
 - a **type name** declared by two different input files — `a/page.json`
   and `b/page.json` both emitting `Page` is one redeclaration in the flat
   package, so Go's collision scope is the whole run rather than the module
-  (see [[ref]] and PRINCIPLES §15); the diagnostic names both modules;
+  (see [[ref]] and PRINCIPLES §15); the diagnostic names both modules.
+  TypeScript and Python reject the same closure, by way of their barrels
+  rather than a flat package — see below;
 - a generated **service binding** colliding with a model (or synthesized
   I/O) type — service `ChatService` against a `$defs/ChatService`; see
   [[services]], which shares this one namespace.
 
-**Python / TypeScript / Java** — nesting keeps distinct input files in
-distinct modules, so files no longer contend for one flat name. What
+**Python / TypeScript / Java / .NET** — nesting keeps distinct input files in
+distinct modules, so files no longer contend for one flat *module* name. What
 remains is a small set of **reserved generated names** per scope; an input
 file or directory that maps onto one → load reject with the same fix-it:
 
@@ -203,6 +205,24 @@ file or directory that maps onto one → load reject with the same fix-it:
   (Python), and the root aggregator (`__init__` / `index`);
 - within a **per-input directory**: `models`, `services`, and that
   directory's own aggregator.
+
+Distinct modules do **not**, however, buy every target a distinct *type*
+namespace, because two of them re-aggregate:
+
+- **TypeScript and Python** emit a root barrel that lifts every module's
+  top-level names into one namespace — `index.ts` re-exports each module with
+  `export *`, `__init__.py` re-exports them by name — so a type name declared
+  by two input files collides there and is rejected run-wide, exactly as in
+  Go's flat package. Left to the target, TypeScript rejects the barrel
+  (`TS2308`, "has already exported a member named `Page`") and Python silently
+  binds whichever import runs last, dropping the other model off the package
+  surface — the silent incorrectness P7 forbids. Names synthesized beside a
+  type travel with it, so TypeScript's `<model>TransferTypeConverter` collides
+  in the same breath as the interface.
+- **Java and .NET** give each module its own sub-package/namespace
+  (`com.example.api.content.page`, `Nexgen.Generated.Content.Page`) and emit
+  no aggregating barrel, so two input files may each declare a `Page` and stay
+  unambiguous. Their scope really is the module.
 
 Within a single module's exported namespace the type/service/synthesized-name
 collision surface is unchanged (service `ChatService` in `services.py`

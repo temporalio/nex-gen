@@ -1076,3 +1076,68 @@ fn python_json_cross_module_py_name_override_moves_every_reference() {
     }
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+/// The package barrel (`__init__.py`) re-exports every module by name, so two
+/// modules declaring the same type name produce `from .a import Page` followed by
+/// `from .b import Page`. Python raises nothing: the second binding silently wins
+/// and `__all__` lists the name once, so `from pkg import Page` quietly resolves to
+/// the wrong model. That silent incorrectness is what P7 forbids, so the generator
+/// rejects at load. See `specs/json-schema/PRINCIPLES.md` §15.
+#[test]
+fn python_json_rejects_same_type_name_in_two_modules() {
+    let temp_dir = unique_output_path("py-json-barrel-collision");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(input_dir.join("a")).unwrap();
+    fs::create_dir_all(input_dir.join("b")).unwrap();
+    fs::write(
+        input_dir.join("a/page.json"),
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"title":{"type":"string"}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("b/page.json"),
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"count":{"type":"integer"}}}"#,
+    )
+    .unwrap();
+
+    let request = |output: &str| GenerateRequest {
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_dir.clone()],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join(output),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    };
+
+    let error = generate_to_file(&request("out"))
+        .expect_err("two modules declaring `Page` collide in the package barrel")
+        .to_string();
+    // The diagnostic names both modules — the bare type name appears twice and
+    // would otherwise read as one declaration seen twice.
+    assert!(error.contains("collision"), "{error}");
+    assert!(error.contains("a/page#Page"), "{error}");
+    assert!(error.contains("b/page#Page"), "{error}");
+    assert!(error.contains("x-py-name"), "{error}");
+
+    // The documented escape hatch resolves it, and the barrel then re-exports both.
+    fs::write(
+        input_dir.join("b/page.json"),
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","x-py-name":"BPage","additionalProperties":false,"properties":{"count":{"type":"integer"}}}"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("out-renamed");
+    generate_to_file(&request("out-renamed")).expect("the override resolves the collision");
+    let barrel = fs::read_to_string(output_path.join("__init__.py")).unwrap();
+    for expected in [
+        "from .a import Page",
+        "from .b import BPage",
+        "\"BPage\",",
+        "\"Page\",",
+    ] {
+        assert!(barrel.contains(expected), "{expected}\n{barrel}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}

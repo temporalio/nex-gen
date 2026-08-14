@@ -153,7 +153,10 @@ a reference from another input file names exactly the identifier the
 declaring file's own module emits — including its `x-<lang>-name`
 override, which the referencing file does not restate.
 
-**Collision.** All type names occupy **one package-wide namespace**
+**Collision.** For Go, TypeScript and Python all type names occupy **one
+package-wide namespace** — Go flattens to a single package, and the TypeScript
+and Python barrels re-aggregate every module into one. Java and .NET resolve
+per module instead, so there the namespace is the module
 ([[generated-file-layout]]). A collision → **load reject, no mangling**;
 the escape hatch is `x-<lang>-name` / root `title` (**P15**, scope
 widened from per-object to per-package). Consistent with [[properties]],

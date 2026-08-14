@@ -2032,6 +2032,11 @@ services:
     operations:
       one:
         input: { $ref: "a/page.json" }
+        output:
+          type: object
+          additionalProperties: false
+          properties: { ok: { type: boolean } }
+          required: [ok]
       two:
         input: { $ref: "b/page.json" }
 "##,
@@ -2058,18 +2063,20 @@ services:
     assert!(error.contains("b/page#Page"), "{error}");
 
     // The same closure is fine in a language whose modules are separate scopes.
+    // Java gives each module its own sub-package (`…pkg.a.page`, `…pkg.b.page`)
+    // and emits no aggregating barrel, so the two `Page` classes stay distinct.
     generate_to_file(&GenerateRequest {
-        language: nexgen::language::Language::Python,
+        language: nexgen::language::Language::Java,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
-        output_path: temp_dir.join("out-py"),
+        output_path: temp_dir.join("pkg"),
         format: false,
         generate_native_api: false,
-        java_package_name: None,
+        java_package_name: Some("com.example.pkg".to_string()),
         ts_date_time_types: Default::default(),
     })
-    .expect("separate Python modules keep `Page` apart");
+    .expect("separate Java packages keep `Page` apart");
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

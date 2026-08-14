@@ -1187,3 +1187,59 @@ fn typescript_json_override_moves_member_derived_names_only() {
     assert!(!rendered.contains("ProbeLocation"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+/// The package barrel (`index.ts`) re-exports every module with `export *`, so two
+/// modules declaring the same type name land in one namespace there. TypeScript
+/// rejects that barrel outright (TS2308, "has already exported a member named
+/// `Page`"), and the model's `<model>TransferTypeConverter` collides alongside the
+/// type — so the generator must reject at load instead of emitting uncompilable
+/// output. See `specs/json-schema/PRINCIPLES.md` §15.
+#[test]
+fn typescript_json_rejects_same_type_name_in_two_modules() {
+    let temp_dir = unique_output_path("ts-json-barrel-collision");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(input_dir.join("a")).unwrap();
+    fs::create_dir_all(input_dir.join("b")).unwrap();
+    let page = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"title":{"type":"string"}}}"#;
+    fs::write(input_dir.join("a/page.json"), page).unwrap();
+    fs::write(input_dir.join("b/page.json"), page).unwrap();
+
+    let request = |output: &str| GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_dir.clone()],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join(output),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    };
+
+    let error = generate_to_file(&request("out"))
+        .expect_err("two modules declaring `Page` collide in the package barrel")
+        .to_string();
+    // The diagnostic names both modules — the bare type name appears twice and
+    // would otherwise read as one declaration seen twice.
+    assert!(error.contains("collision"), "{error}");
+    assert!(error.contains("a/page#Page"), "{error}");
+    assert!(error.contains("b/page#Page"), "{error}");
+    assert!(error.contains("x-ts-name"), "{error}");
+
+    // The documented escape hatch resolves it, and moves the converter with the
+    // type so the barrel re-exports two distinct pairs.
+    fs::write(
+        input_dir.join("b/page.json"),
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","x-ts-name":"BPage","additionalProperties":false,"properties":{"title":{"type":"string"}}}"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("out-renamed");
+    generate_to_file(&request("out-renamed")).expect("the override resolves the collision");
+    let models = fs::read_to_string(output_path.join("b/page/models.ts")).unwrap();
+    assert!(models.contains("export interface BPage {"), "{models}");
+    assert!(
+        models.contains("export const bPageTransferTypeConverter"),
+        "{models}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}

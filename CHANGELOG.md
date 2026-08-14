@@ -138,9 +138,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scope is the whole input closure; its diagnostic names the module each
   declaration came from (`a/page#Page` and `b/page#Page`), which it could not do
   while two same-named models in different modules produced identical origin text
-  and were mistaken for one declaration seen twice. The other three targets are
-  unchanged — separate modules keep the names apart, as
-  `generated-file-layout.md` already specified.
+  and were mistaken for one declaration seen twice.
+- JSON Schema: TypeScript and Python had the same cross-module defect as Go, by a
+  different route: both emit a **root barrel** that lifts every module's top-level
+  names into one namespace — `index.ts` re-exporting each module with `export *`,
+  `__init__.py` re-exporting them by name — so two input files each declaring a
+  `Page` collide there. TypeScript emitted a barrel the compiler rejects (`TS2308`,
+  and the model's `pageTransferTypeConverter` collided alongside the interface),
+  while **Python emitted silently wrong code**: `from .a import Page` followed by
+  `from .b import Page` binds the second and drops the first off the package
+  surface, so `from pkg import Page` quietly resolved to the wrong model (P7). Both
+  now reject at load with the same module-qualified diagnostic Go gives, resolvable
+  with `x-ts-name` / `x-py-name`. Java and .NET are genuinely unaffected: each
+  module lands in its own sub-package/namespace and neither emits an aggregating
+  barrel, so two `Page` classes stay distinct — verified against both generators
+  rather than assumed.
 - JSON Schema: A TypeScript service identifier was derived as a *type* name in the
   collision pass while the generator emits a lower-camel `const`, so the pass
   rejected a service and a model of the same name — `chatService` and
