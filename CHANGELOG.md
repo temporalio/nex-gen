@@ -152,6 +152,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides, including TypeScript default constants and Go closed-value types.
 - JSON Schema: A root model can no longer silently collapse with a same-named
   `$defs` or synthesized model; the loader reports the conflicting origins.
+- Python: A declared property named after one of the converter's own locals
+  **silently disabled validation**. A property named `violations` rebound the
+  violation accumulator, so a payload that broke a constraint was returned as a
+  model instead of raising; ten other names (`raw`, `len`, `int`, `str`, `bool`,
+  `dict`, `isinstance`, `typing`, `math`, `out`) crashed the converter on every
+  payload. The parse body now holds each property's value in a `<member>_value`
+  slot local, which cannot coincide with a runtime local, a builtin, an imported
+  module, or a synthesized module-level name — so no property name can shadow
+  anything (P15).
+- Python: The module-level names the generator synthesizes beyond
+  `DEFAULT_<FIELD>` — the `_<MODEL>_DECLARED` declared-key sets, the union
+  `_<base>_{from,to}_transfer_type` functions, the `_<Model>TransferTypeConverter`
+  classes, and the `_PATTERN_<HEX>` compiled regexes — now participate in the P15
+  collision pass. Two types whose `x-py-name` overrides differ only in case
+  (`ContactPy` / `ContactPY`) previously emitted one `_CONTACT_PY_DECLARED` for
+  both, and the loser's declared properties leaked into its catch-all; such a
+  schema is now rejected at load with a fix-it diagnostic. An inline union's
+  functions are also named from the member's *emitted* identifier, so an
+  `x-py-name` override moves them.
+- JSON Schema: `_definitions` is now a reserved input-module name alongside
+  `definitions`. Python emits its shared runtime as `_definitions.py`, so an input
+  named `_definitions.yaml` emitted a `_definitions/` package directory at that
+  module's own import path — shadowing it and breaking every generated
+  `from .._definitions import ...`.
 - JSON Schema: A **non-object `oneOf` branch's own constraints** were dropped in
   three of four languages: only Go carried them, in the synthesized
   `<Union><Kind>` variant's `Validate`. TypeScript cast the narrowed value

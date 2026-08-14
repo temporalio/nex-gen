@@ -149,8 +149,34 @@ fn is_union_type_name(name: &str) -> bool {
 }
 
 /// The private converter class a model's wire contract lives in.
-fn converter_class_name(model_name: &str) -> String {
+pub(crate) fn converter_class_name(model_name: &str) -> String {
     format!("_{model_name}TransferTypeConverter")
+}
+
+/// The converter body's local holding one declared property's parsed value,
+/// until the final keyword-argument construction reads it back.
+///
+/// The name is **not** the member identifier: `from_transfer_type` is one Python
+/// scope, so a property-derived local shares it with the converter's own locals
+/// (`violations`, `raw`), with the runtime helpers and modules the body calls
+/// (`_collect`, `typing`, `re`, `math`), and with the builtins it calls
+/// (`isinstance`, `len`, `int`). A member identifier used verbatim would shadow
+/// any of them — a property named `violations` silently rebound the violation
+/// accumulator and dropped every collected violation, which is exactly the
+/// silently-wrong output P15 exists to prevent.
+///
+/// The `_value` suffix makes that structurally impossible instead of
+/// blocklisting names: no fixed local, builtin, imported module, or synthesized
+/// module-level identifier (`DEFAULT_<FIELD>`, `_PATTERN_<HEX>`,
+/// `_<MODEL>_DECLARED`, `_<base>_{from,to}_transfer_type`,
+/// `_<Model>TransferTypeConverter`) ends in `_value`. It stays collision-free
+/// *within* the property family too: every temporary this position needs appends
+/// a further suffix (`_raw`, `_parsed`, `_list`, `_index`, `_element`, `_item`,
+/// `_path`), none of which ends in `_value`, so no property's slot can be
+/// another property's temporary and distinct members (already one P15 scope)
+/// stay distinct here.
+fn parse_slot_local(field_name: &str) -> String {
+    format!("{field_name}_value")
 }
 
 /// The expression that reaches a referenced model's converter. A model declared
@@ -166,31 +192,33 @@ fn converter_expr(model_name: &str) -> String {
 }
 
 /// The `_<base>_{from,to}_transfer_type` function-name base for a named union.
-fn union_fn_base(model_name: &str) -> String {
+pub(crate) fn union_fn_base(model_name: &str) -> String {
     model_name.to_snake_case()
 }
 
 /// The function-name base for an **inline** (property-level) union, mirroring the
-/// `<Model><Property>` synthesized-name rule.
-fn inline_union_fn_base(model_name: &str, json_name: &str) -> String {
+/// `<Model><Property>` synthesized-name rule. `member_ident` is the member's
+/// *emitted* identifier, so a `x-py-name` override moves this name with it — P15's
+/// escape hatch has to reach every name synthesized from the property.
+pub(crate) fn inline_union_fn_base(model_name: &str, member_ident: &str) -> String {
     format!(
         "{}_{}",
         model_name.to_snake_case(),
-        json_name.to_snake_case()
+        member_ident.to_snake_case()
     )
 }
 
-fn union_parse_fn(base: &str) -> String {
+pub(crate) fn union_parse_fn(base: &str) -> String {
     format!("_{base}_from_transfer_type")
 }
 
-fn union_serialize_fn(base: &str) -> String {
+pub(crate) fn union_serialize_fn(base: &str) -> String {
     format!("_{base}_to_transfer_type")
 }
 
 /// The module-level `frozenset` of declared wire keys an open object splits its
 /// catch-all on, mirroring TypeScript's `<MODEL>_DECLARED`.
-fn declared_fields_const_name(model_name: &str) -> String {
+pub(crate) fn declared_fields_const_name(model_name: &str) -> String {
     format!("_{}_DECLARED", model_name.to_shouty_snake_case())
 }
 
@@ -1354,7 +1382,7 @@ const CONTAINS_HELPER_BODY: &str = r#"def _check_contains(
 /// The module-level compiled-regex const name for a `pattern`, keyed by the
 /// (normalized) pattern text so identical patterns share one compiled instance
 /// per module. Stable FNV-1a hash → a valid Python identifier.
-fn py_pattern_const_name(pattern: &str) -> String {
+pub(crate) fn py_pattern_const_name(pattern: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in pattern.as_bytes() {
         hash ^= u64::from(*byte);
@@ -2982,7 +3010,7 @@ fn render_union_transfer_functions(output: &mut String, models: &[&PlannedJsonTy
             let Some(union) = classify_py_union(property, models)? else {
                 continue;
             };
-            let base = inline_union_fn_base(&model.model_name, json_name);
+            let base = inline_union_fn_base(&model.model_name, &property.py_member_name(json_name));
             let member_type = annotation(property)?;
             render_union_parse_function(output, &base, &member_type, &union)?;
             // The enclosing property already runs the branch checks on the way
@@ -3239,7 +3267,12 @@ fn render_model_parser_body(
     }
     output.push_str(&format!("return {}(\n", model.model_name));
     for field_name in &fields {
-        output.push_str(&format!("    {field_name}={field_name},\n"));
+        // The member identifier names the keyword; the value comes off the
+        // property's slot local (see `parse_slot_local`).
+        output.push_str(&format!(
+            "    {field_name}={},\n",
+            parse_slot_local(field_name)
+        ));
     }
     if open {
         output.push_str("    additional_properties=additional_properties,\n");
@@ -3367,7 +3400,10 @@ fn render_model_serializer_body(
             let inline_union = match classify_py_union(property, models)? {
                 Some(union) if union.needs_serializer() => Some(format!(
                     "{}({value_expr})",
-                    union_serialize_fn(&inline_union_fn_base(&model.model_name, json_name))
+                    union_serialize_fn(&inline_union_fn_base(
+                        &model.model_name,
+                        &property.py_member_name(json_name)
+                    ))
                 )),
                 _ => None,
             };
@@ -3677,11 +3713,13 @@ fn render_property_parser(
     property: &Schema,
     required: bool,
 ) -> Result<()> {
-    let field_name = property.py_member_name(json_name);
+    // Every local this position binds hangs off the property's slot name, never
+    // off the member identifier itself (see `parse_slot_local`).
+    let slot = parse_slot_local(&property.py_member_name(json_name));
     let member_type = annotation(property)?;
     let key = python_string_literal(json_name);
     let path_expr = python_string_literal(json_name);
-    let raw_local = format!("{field_name}_raw");
+    let raw_local = format!("{slot}_raw");
     let nullable = allows_null(property);
 
     // Not yet assigned; a failure to parse records a violation, so the
@@ -3691,7 +3729,7 @@ fn render_property_parser(
     } else {
         optional_annotation(&member_type)
     };
-    render_py_slot_declaration(output, "", &field_name, &declared_type);
+    render_py_slot_declaration(output, "", &slot, &declared_type);
 
     if required {
         if nullable {
@@ -3705,14 +3743,7 @@ fn render_property_parser(
         output.push_str("else:\n");
         output.push_str(&format!("    {raw_local} = raw[{key}]\n"));
         render_property_value_parser(
-            output,
-            model,
-            models,
-            json_name,
-            property,
-            &field_name,
-            &raw_local,
-            "    ",
+            output, model, models, json_name, property, &slot, &raw_local, "    ",
         )?;
         return Ok(());
     }
@@ -3721,14 +3752,7 @@ fn render_property_parser(
     output.push_str(&format!("    {raw_local} = raw[{key}]\n"));
     if nullable {
         render_property_value_parser(
-            output,
-            model,
-            models,
-            json_name,
-            property,
-            &field_name,
-            &raw_local,
-            "    ",
+            output, model, models, json_name, property, &slot, &raw_local, "    ",
         )?;
         return Ok(());
     }
@@ -3738,14 +3762,7 @@ fn render_property_parser(
     ));
     output.push_str("    else:\n");
     render_property_value_parser(
-        output,
-        model,
-        models,
-        json_name,
-        property,
-        &field_name,
-        &raw_local,
-        "        ",
+        output, model, models, json_name, property, &slot, &raw_local, "        ",
     )
 }
 
@@ -3763,7 +3780,7 @@ fn render_property_value_parser(
     // An inline `oneOf` sum type dispatches through the module's union parser (a
     // `$ref` at a named union routes through the reference path below).
     if classify_py_union(property, models)?.is_some() {
-        let base = inline_union_fn_base(&model.model_name, json_name);
+        let base = inline_union_fn_base(&model.model_name, &property.py_member_name(json_name));
         let parsed = format!("{target}_parsed");
         output.push_str(indent);
         output.push_str(&format!(

@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{Error, Result};
+// The P15 collision pass names every synthesized identifier through the emitter's
+// own naming helpers, so the load-time check cannot drift from what is emitted.
+use crate::generator::json_schema::python;
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelSpec, LanguageStringSpec,
@@ -302,7 +305,7 @@ fn api_spec_tree_from_json_schema_sources(
             return Err(Error::InvalidJsonSchema {
                 path: source.path.clone(),
                 reason: format!(
-                    "input `{}` maps to the reserved module name `{segment}`, which collides with a generated file (models/services/definitions/index/_recursive); rename the input file or directory",
+                    "input `{}` maps to the reserved module name `{segment}`, which collides with a generated file (models/services/definitions/_definitions/index/_recursive/__init__); rename the input file or directory",
                     source.relative_path.display()
                 ),
             });
@@ -392,10 +395,24 @@ fn insert_leaf_at(
 /// `specs/json-schema/generated-file-layout.md`). Reserving the union means a name
 /// reserved in *any* target is rejected for *all*, keeping the flat package
 /// coherent everywhere.
+///
+/// Both spellings of the shared runtime module are reserved, because the targets
+/// spell it differently: Go and TypeScript emit `definitions.go` / `definitions.ts`,
+/// while Python emits `_definitions.py` (module-private, like the `_recursive.py`
+/// hoist module beside it). An input named `_definitions.yaml` would otherwise
+/// emit a `_definitions/` package *directory* at the runtime module's own import
+/// path — and a package shadows a sibling module, so every
+/// `from .._definitions import ...` in the tree fails at import.
 fn is_reserved_module_name(segment: &str) -> bool {
     matches!(
         segment,
-        "definitions" | "_recursive" | "models" | "services" | "index" | "__init__"
+        "definitions"
+            | "_definitions"
+            | "_recursive"
+            | "models"
+            | "services"
+            | "index"
+            | "__init__"
     )
 }
 
@@ -5872,6 +5889,12 @@ pub(crate) fn build_name_manifest(
             collect_ts_const_constants(module_key, &ns_models, &mut top)?;
             collect_ts_transfer_type_converters(module_key, &ns_models, &mut top)?;
         }
+        // Everything else the Python emitter synthesizes at module scope: the
+        // converter classes, the declared-key frozensets, the union conversion
+        // functions, and the compiled-pattern constants (P15).
+        if language == Language::Python {
+            collect_python_module_idents(module_key, &ns_models, &mut top)?;
+        }
     }
 
     Ok(manifest)
@@ -6233,6 +6256,197 @@ fn collect_ts_const_constants(
                 ident,
                 format!("`{}.{json_name}` _CONST constant", model.full_name),
             )?;
+        }
+    }
+    Ok(())
+}
+
+/// The remaining module-scope identifiers the Python JSON-Schema generator
+/// synthesizes, entered into the same namespace as the user types, services, and
+/// `DEFAULT_<FIELD>` constants so a coincidence rejects at load instead of one
+/// definition silently overwriting the other (P15).
+///
+/// Each is named by [`build_name_manifest`]'s resolved `type_ident`, so a
+/// type-level `x-py-name` override moves all of them together — and every ident
+/// is computed by the *generator's* own naming helper, never re-derived here, so
+/// the check cannot drift from what is emitted:
+///
+/// - `_<Model>TransferTypeConverter` — the converter class carrying the model's
+///   whole wire contract (class models only; a union has no converter class).
+/// - `_<MODEL>_DECLARED` — the declared-key `frozenset` an *open* object splits
+///   its catch-all on. `to_shouty_snake_case` is not injective over the verbatim
+///   overrides (`ContactPy` and `ContactPY` both shout to `CONTACT_PY`), which is
+///   how a declared property used to leak into the catch-all of whichever model
+///   lost the race.
+/// - `_<base>_from_transfer_type` / `_<base>_to_transfer_type` — a union's
+///   conversion functions. `to_snake_case` is likewise non-injective, and a named
+///   union's base can also coincide with an inline (`<model>_<member>`) one.
+/// - `_PATTERN_<HEX>` — the shared compiled regexes. Identical pattern text
+///   *intentionally* shares one constant, so the origin is keyed by that text:
+///   a repeat is deduplication (accepted), while two distinct patterns landing on
+///   one name — or a user type overridden to that shape — is a collision.
+/// - the converter bodies' own locals ([`PYTHON_CONVERTER_BODY_LOCALS`]).
+fn collect_python_module_idents(
+    module_key: &str,
+    models: &[NsModel],
+    top: &mut Namespace,
+) -> Result<()> {
+    let language = Language::Python;
+    // A converter body reads the module's own classes and constants by bare name
+    // while binding these locals in the same scope, so a module-level identifier
+    // spelled like one of them is shadowed inside every body that binds it.
+    // Nothing *derived* lands here — user types are `UpperCamelCase` and the
+    // synthesized names are `_`-prefixed or shouty — so this only ever fires on a
+    // verbatim `x-py-name` that spells a runtime local (P15).
+    for local in PYTHON_CONVERTER_BODY_LOCALS {
+        top.insert(
+            language,
+            (*local).to_string(),
+            format!("generated converter-body local `{local}`"),
+        )?;
+    }
+    for model in models.iter().filter(|m| m.module_key == module_key) {
+        let origin = |what: &str| format!("`{}` {what}", model.full_name);
+        // A sum-type def is emitted as a `TypeAlias` whose conversion lives in a
+        // pair of module-private free functions, so it has no converter class and
+        // no declared-key set. This one predicate covers the emitter's
+        // `is_python_union_model` / `is_py_union` pair: they can only disagree on a
+        // branch typed `["string", "null"]`, a form the loader has already
+        // rejected by the time the manifest is built.
+        if is_sum_type_union(&model.schema) {
+            let base = python::union_fn_base(&model.type_ident);
+            top.insert(
+                language,
+                python::union_parse_fn(&base),
+                origin("union parse function"),
+            )?;
+            top.insert(
+                language,
+                python::union_serialize_fn(&base),
+                origin("union serialize function"),
+            )?;
+        } else {
+            top.insert(
+                language,
+                python::converter_class_name(&model.type_ident),
+                origin("transfer-type converter class"),
+            )?;
+            if python_open_object(&model.schema) {
+                top.insert(
+                    language,
+                    python::declared_fields_const_name(&model.type_ident),
+                    origin("declared-key frozenset"),
+                )?;
+            }
+        }
+        // An inline (property-level) union gets its own function pair, named
+        // `<model>_<member>` — so a member-level `x-py-name` moves it.
+        for (json_name, property) in model.schema.properties.iter().flatten() {
+            if !is_sum_type_union(property) {
+                continue;
+            }
+            let base = python::inline_union_fn_base(
+                &model.type_ident,
+                &member_identifier(language, json_name, property),
+            );
+            top.insert(
+                language,
+                python::union_parse_fn(&base),
+                origin(&format!("`{json_name}` inline union parse function")),
+            )?;
+            top.insert(
+                language,
+                python::union_serialize_fn(&base),
+                origin(&format!("`{json_name}` inline union serialize function")),
+            )?;
+        }
+        collect_python_pattern_constants(&model.schema, top)?;
+    }
+    Ok(())
+}
+
+/// Every fixed identifier a generated Python converter body binds or receives:
+/// the accumulator and wire dictionaries, the loop and dispatch temporaries, and
+/// the function parameters. The property-derived slots are absent by
+/// construction — they are suffixed `_value` precisely so they cannot coincide
+/// with anything here (see the generator's `parse_slot_local`).
+const PYTHON_CONVERTER_BODY_LOCALS: &[&str] = &[
+    "additional_properties",
+    "entry",
+    "error",
+    "items",
+    "key",
+    "member",
+    "narrowed",
+    "number",
+    "out",
+    "parsed",
+    "path",
+    "raw",
+    "self",
+    "tag",
+    "tagged",
+    "type_hint",
+    "value",
+    "violations",
+];
+
+/// Mirrors the Python emitter's `is_open_object`: a declared-property object that
+/// stays open to unknown members, which is what gives it the catch-all — and the
+/// module-level declared-key set the catch-all is split on.
+fn python_open_object(schema: &Schema) -> bool {
+    schema.ty.as_ref().and_then(Value::as_str) == Some("object")
+        && schema
+            .properties
+            .as_ref()
+            .is_some_and(|properties| !properties.is_empty())
+        && schema.additional_properties.as_ref() != Some(&Value::Bool(false))
+}
+
+/// Walks every string position that hoists a compiled regex — mirroring the
+/// emitter's `collect_schema_patterns` — and enters each constant under an origin
+/// keyed by the pattern text, so identical patterns dedupe and distinct ones
+/// collide.
+fn collect_python_pattern_constants(schema: &Schema, top: &mut Namespace) -> Result<()> {
+    let insert = |pattern: &str, top: &mut Namespace| -> Result<()> {
+        let emitted = crate::json_schema::pattern::rewrite_end_anchor(pattern, r"\Z");
+        top.insert(
+            Language::Python,
+            python::py_pattern_const_name(&emitted),
+            format!("compiled pattern constant for {emitted:?}"),
+        )
+    };
+    if let Some(Value::String(pattern)) = schema.extra.get("pattern") {
+        insert(pattern, top)?;
+    }
+    if let Some(Value::String(format)) = schema.extra.get("format")
+        && let Some(check) = crate::json_schema::format::check_for(format)
+    {
+        insert(&check.pattern, top)?;
+    }
+    for property in schema
+        .properties
+        .iter()
+        .flat_map(|entries| entries.values())
+    {
+        collect_python_pattern_constants(property, top)?;
+    }
+    if let Some(items) = &schema.items {
+        collect_python_pattern_constants(items, top)?;
+    }
+    for branch in schema.one_of.iter().flatten() {
+        collect_python_pattern_constants(branch, top)?;
+    }
+    // A key-shape subschema and a typed map's member schema are both carried as
+    // raw values here; decode them the same way the emitter does.
+    for nested in [
+        schema.extra.get("propertyNames"),
+        schema.additional_properties.as_ref(),
+    ] {
+        if let Some(value @ Value::Object(_)) = nested
+            && let Ok(subschema) = serde_json::from_value::<Schema>(value.clone())
+        {
+            collect_python_pattern_constants(&subschema, top)?;
         }
     }
     Ok(())
@@ -9687,6 +9901,194 @@ $defs:
     }
 
     #[test]
+    fn rejects_colliding_declared_field_sets_python() {
+        // An open object hoists its declared wire keys to a module-level
+        // `_<MODEL>_DECLARED` frozenset. `to_shouty_snake_case` is not injective
+        // over the verbatim type overrides — `ContactPy` and `ContactPY` both
+        // shout to `CONTACT_PY` — and the loser's declared property would leak
+        // into the winner's catch-all instead (P13/P15).
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  a: { $ref: "#/$defs/Alpha" }
+  b: { $ref: "#/$defs/Beta" }
+$defs:
+  Alpha:
+    x-py-name: ContactPy
+    type: object
+    properties:
+      count: { type: integer }
+  Beta:
+    x-py-name: ContactPY
+    type: object
+    properties:
+      b: { type: string }
+"##;
+        let error = reject_for(Language::Python, input);
+        assert!(
+            error.contains("collision") && error.contains("_CONTACT_PY_DECLARED"),
+            "{error}"
+        );
+        // The overrides are Python-only, so every other target sees `Alpha` and
+        // `Beta` and is unaffected.
+        for language in [Language::Go, Language::TypeScript, Language::Java] {
+            parse_for(language, input)
+                .unwrap_or_else(|error| panic!("{language:?} sees no override: {error}"));
+        }
+    }
+
+    #[test]
+    fn rejects_colliding_converter_class_python() {
+        // A model's converter class is `_<Model>TransferTypeConverter`; a verbatim
+        // type override can name a *type* that exact identifier.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  a: { $ref: "#/$defs/Contact" }
+  b: { $ref: "#/$defs/Other" }
+$defs:
+  Contact:
+    type: object
+    properties:
+      count: { type: integer }
+  Other:
+    x-py-name: _ContactTransferTypeConverter
+    type: object
+    properties:
+      b: { type: string }
+"##;
+        let error = reject_for(Language::Python, input);
+        assert!(
+            error.contains("collision") && error.contains("_ContactTransferTypeConverter"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_colliding_union_functions_python() {
+        // A union's conversion lives in `_<base>_{from,to}_transfer_type` free
+        // functions: `to_snake_case` on the named union `FooBar` and the
+        // `<model>_<member>` base of `Foo.bar`'s inline union both give `foo_bar`.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  u: { $ref: "#/$defs/FooBar" }
+  f: { $ref: "#/$defs/Foo" }
+$defs:
+  FooBar:
+    oneOf:
+      - { type: string }
+      - { type: integer }
+  Foo:
+    type: object
+    additionalProperties: false
+    properties:
+      bar:
+        oneOf:
+          - { type: string }
+          - { type: boolean }
+"##;
+        let error = reject_for(Language::Python, input);
+        assert!(
+            error.contains("collision") && error.contains("_foo_bar_from_transfer_type"),
+            "{error}"
+        );
+        // P15's escape hatch has to reach the synthesized function name too: the
+        // member override renames the inline union's functions with the member.
+        let renamed = input.replace(
+            "      bar:\n        oneOf:",
+            "      bar:\n        x-py-name: renamed\n        oneOf:",
+        );
+        parse_for(Language::Python, &renamed)
+            .expect("an `x-py-name` override moves the inline union's function names");
+    }
+
+    #[test]
+    fn rejects_type_colliding_with_pattern_constant_python() {
+        // A `pattern` is hoisted to a module-level compiled-regex constant named
+        // `_PATTERN_<FNV-1a of the pattern text>`; `^a` hashes to this one. A
+        // verbatim type override can name a type that identifier.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  a: { type: string, pattern: "^a" }
+  b: { $ref: "#/$defs/Other" }
+$defs:
+  Other:
+    x-py-name: _PATTERN_09572B07B5E46120
+    type: object
+    properties:
+      b: { type: string }
+"##;
+        assert_eq!(
+            python::py_pattern_const_name("^a"),
+            "_PATTERN_09572B07B5E46120"
+        );
+        let error = reject_for(Language::Python, input);
+        assert!(
+            error.contains("collision") && error.contains("_PATTERN_09572B07B5E46120"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_type_named_after_a_converter_body_local_python() {
+        // The mirror image of a member shadowing a runtime local: a converter body
+        // reads the module's classes by bare name while binding `raw`, so a *type*
+        // overridden to `raw` is shadowed inside every body that parses one.
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  a: { $ref: "#/$defs/Other" }
+$defs:
+  Other:
+    x-py-name: raw
+    type: object
+    properties:
+      b: { type: string }
+"##;
+        let error = reject_for(Language::Python, input);
+        assert!(
+            error.contains("collision") && error.contains("`raw`"),
+            "{error}"
+        );
+        // Only Python binds that local, and only the Python override renames the
+        // type, so the other targets are unaffected.
+        for language in [Language::Go, Language::TypeScript, Language::Java] {
+            parse_for(language, input)
+                .unwrap_or_else(|error| panic!("{language:?} sees no override: {error}"));
+        }
+    }
+
+    #[test]
+    fn accepts_repeated_pattern_across_positions_python() {
+        // One compiled constant per *distinct* pattern text is deliberate
+        // deduplication, not a collision: the same pattern in several positions
+        // (and the same `format`'s pinned regex twice) shares one constant.
+        parse_for(
+            Language::Python,
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  a: { type: string, pattern: "^a" }
+  b: { type: string, pattern: "^a" }
+  c:
+    type: array
+    items: { type: string, pattern: "^a" }
+  d: { type: string, format: "email" }
+  e: { type: string, format: "email" }
+"##,
+        )
+        .expect("identical patterns share one module constant");
+    }
+
+    #[test]
     fn rejects_synthesized_operation_input_colliding_with_defs_type() {
         // The synthesized `<Op>Input` type collides with a declared `$defs` type
         // of the same name (top-level module scope, every target).
@@ -9945,6 +10347,36 @@ properties:
             .expect_err("a source mapping to a reserved module name should be rejected")
             .to_string();
         assert!(error.contains("reserved module name"), "{error}");
+    }
+
+    #[test]
+    fn rejects_shared_runtime_module_names() {
+        // Both spellings of the shared runtime module are reserved for every
+        // target: `definitions` (Go/TypeScript) and `_definitions` (Python). A
+        // `_definitions` input emits a package directory at the Python runtime
+        // module's own import path, which shadows it and breaks every
+        // `from .._definitions import ...` in the tree.
+        for segment in ["definitions", "_definitions", "_recursive"] {
+            for language in [
+                Language::Python,
+                Language::TypeScript,
+                Language::Go,
+                Language::Java,
+            ] {
+                let sources = vec![
+                    module_collision_source(&format!("{segment}.yaml"), "Shadow"),
+                    module_collision_source("other.yaml", "Other"),
+                ];
+                let error = api_spec_tree_from_json_schema_sources(language, sources)
+                    .err()
+                    .unwrap_or_else(|| panic!("`{segment}` must be rejected for {language:?}"))
+                    .to_string();
+                assert!(
+                    error.contains("reserved module name") && error.contains(segment),
+                    "{language:?}: {error}"
+                );
+            }
+        }
     }
 
     #[test]
