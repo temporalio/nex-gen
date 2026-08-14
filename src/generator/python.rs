@@ -367,7 +367,7 @@ impl PythonExternalModels {
         api_plan: &PlannedSpec,
     ) -> Result<RenderedModelFragments> {
         let mut fragments = RenderedModelFragments::default();
-        fragments.extend(render_record_models(models, api_plan, self));
+        fragments.extend(render_record_models(models, api_plan, self)?);
         fragments.extend(self.json.render_models()?);
         Ok(fragments)
     }
@@ -445,10 +445,14 @@ impl PythonExternalModels {
 
     fn render_record_wire_block(
         &self,
+        api_plan: &PlannedSpec,
         model: &RenderedModel,
         planned_model: &RecordSpec<PlannedFamily>,
-    ) -> Option<RenderedRecordWireBlock> {
-        self.proto.render_record_wire_block(model, planned_model)
+    ) -> Result<Option<RenderedRecordWireBlock>> {
+        self.proto
+            .render_record_wire_block(api_plan, model, planned_model, &|value_type| {
+                resolve_python_value_type(api_plan, self, value_type)
+            })
     }
 }
 
@@ -1661,10 +1665,6 @@ impl<'a> ApiPlanner<'a> {
         field: &RecordFieldSpec<PlannedFamily>,
     ) -> Result<RenderedField> {
         let attr_name = python_field_name(&field.name);
-        let proto_field_plan =
-            self.external_models
-                .proto
-                .field_plan(self.api_plan, record, field)?;
 
         if let PlannedType::Map(key, value) = &field.field_type {
             let key_type = self.resolve_planned_value_type(key)?;
@@ -1684,8 +1684,6 @@ impl<'a> ApiPlanner<'a> {
                 default_expr: Some("dataclasses.field(default_factory=dict)".to_string()),
                 wire_value_type: value_type,
                 imports,
-                proto_oneof: None,
-                proto_generic_carrier: proto_field_plan.generic_carrier,
             });
         }
 
@@ -1709,18 +1707,10 @@ impl<'a> ApiPlanner<'a> {
                 default_expr: Some("dataclasses.field(default_factory=list)".to_string()),
                 wire_value_type: resolved_type.clone(),
                 imports: resolved_type.imports,
-                proto_oneof: None,
-                proto_generic_carrier: proto_field_plan.generic_carrier,
             });
         }
 
-        let proto_oneof = self.build_proto_oneof(proto_field_plan.oneof.as_ref())?;
-        let mut imports = resolved_type.imports.clone();
-        if let Some(oneof) = &proto_oneof {
-            for case in &oneof.cases {
-                imports.extend(&case.payload_type.imports);
-            }
-        }
+        let imports = resolved_type.imports.clone();
 
         if let Some(default_value) = &field.default_value {
             let default_expr = enum_default_expr(&resolved_type, &default_value.enum_case);
@@ -1737,8 +1727,6 @@ impl<'a> ApiPlanner<'a> {
                 default_expr: Some(default_expr.clone()),
                 wire_value_type: resolved_type.clone(),
                 imports,
-                proto_oneof,
-                proto_generic_carrier: proto_field_plan.generic_carrier,
             });
         }
 
@@ -1756,8 +1744,6 @@ impl<'a> ApiPlanner<'a> {
                 default_expr: None,
                 wire_value_type: resolved_type.clone(),
                 imports,
-                proto_oneof,
-                proto_generic_carrier: proto_field_plan.generic_carrier,
             });
         }
 
@@ -1774,34 +1760,7 @@ impl<'a> ApiPlanner<'a> {
             default_expr: Some("None".to_string()),
             wire_value_type: resolved_type.clone(),
             imports,
-            proto_oneof,
-            proto_generic_carrier: proto_field_plan.generic_carrier,
         })
-    }
-
-    fn build_proto_oneof(
-        &mut self,
-        plan: Option<&python_proto::ProtoOneofPlan>,
-    ) -> Result<Option<RenderedProtoOneof>> {
-        let Some(plan) = plan else {
-            return Ok(None);
-        };
-        let cases = plan
-            .cases
-            .iter()
-            .map(|case| -> Result<_> {
-                Ok(RenderedProtoOneofCase {
-                    tag: case.tag.clone(),
-                    proto_name: case.proto_name.clone(),
-                    payload_type: self.resolve_planned_value_type(&case.payload)?,
-                    generic_carrier: case.generic_carrier,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Some(RenderedProtoOneof {
-            name: plan.name.clone(),
-            cases,
-        }))
     }
 
     fn build_public_sourced_field(
@@ -1821,191 +1780,240 @@ impl<'a> ApiPlanner<'a> {
         &mut self,
         value_type: &PlannedType,
     ) -> Result<ResolvedFieldType> {
-        let api_plan = self.api_plan;
-        let resolved = match value_type {
-            PlannedType::TypeParameter(parameter) => ResolvedFieldType {
-                annotation: parameter.name.clone(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                wire_conversion: None,
-            },
-            PlannedType::Float => ResolvedFieldType {
-                annotation: "float".to_string(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                wire_conversion: None,
-            },
-            PlannedType::Int(_) => ResolvedFieldType {
-                annotation: "int".to_string(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                wire_conversion: None,
-            },
-            PlannedType::Bool => ResolvedFieldType {
-                annotation: "bool".to_string(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                wire_conversion: None,
-            },
-            PlannedType::String => ResolvedFieldType {
-                annotation: "str".to_string(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                wire_conversion: None,
-            },
-            PlannedType::Bytes => ResolvedFieldType {
-                annotation: "bytes".to_string(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                wire_conversion: None,
-            },
+        self.ensure_rendered_value_type(value_type)?;
+        resolve_python_value_type(self.api_plan, &self.external_models, value_type)
+    }
+
+    fn ensure_rendered_value_type(&mut self, value_type: &PlannedType) -> Result<()> {
+        match value_type {
             PlannedType::Enum(enum_type) => {
-                if let Some(enum_spec) = api_plan.enum_decl(&enum_type.full_name) {
+                if let Some(enum_spec) = self.api_plan.enum_decl(&enum_type.full_name) {
                     self.ensure_rendered_enum(enum_spec);
                 }
-                ResolvedFieldType {
-                    annotation: enum_type.name.clone(),
-                    imports: PythonImports::default(),
-                    kind: ResolvedFieldKind::Enum,
-                    wire_conversion: None,
-                }
             }
-            value_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(
-                _,
-            ))) => self
-                .external_models
-                .resolved_external_field_type(value_type)
-                .expect("proto enum field type should exist"),
             PlannedType::Flags(flags_type) => {
-                if let Some(flags_spec) = api_plan.flags_decl(&flags_type.full_name) {
+                if let Some(flags_spec) = self.api_plan.flags_decl(&flags_type.full_name) {
                     self.ensure_rendered_flags(flags_spec);
-                }
-                ResolvedFieldType {
-                    annotation: flags_type.name.clone(),
-                    imports: PythonImports::default(),
-                    kind: ResolvedFieldKind::Scalar,
-                    wire_conversion: None,
                 }
             }
             PlannedType::Variant(variant_type) => {
-                if let Some(variant_spec) = api_plan.variant(&variant_type.full_name) {
+                if let Some(variant_spec) = self.api_plan.variant(&variant_type.full_name) {
                     self.ensure_rendered_variant(variant_spec)?;
                 }
-                ResolvedFieldType {
-                    annotation: python_generic_record_annotation(
-                        &variant_type.name,
-                        &api_plan
-                            .variant_type_parameters(&variant_type.full_name, Language::Python),
-                    ),
-                    imports: PythonImports::default(),
-                    kind: ResolvedFieldKind::Scalar,
-                    wire_conversion: None,
-                }
             }
-            message_type @ (PlannedType::External(ExternalTypeSpec::Proto(
-                PlannedProtoType::Message(_),
-            ))
-            | PlannedType::Record(_)) => {
-                let conversion = self.resolve_message_value_conversion(message_type)?;
-                let annotation = if let PlannedType::Record(record) = message_type {
-                    python_generic_record_annotation(
-                        &conversion.annotation,
-                        &api_plan.record_type_parameters(&record.full_name, Language::Python),
-                    )
-                } else {
-                    conversion.annotation.clone()
-                };
-                ResolvedFieldType {
-                    annotation,
-                    imports: conversion.imports.clone(),
-                    kind: ResolvedFieldKind::Message,
-                    wire_conversion: Some(conversion),
-                }
-            }
-            value_type @ PlannedType::External(ExternalTypeSpec::Json(_)) => self
-                .external_models
-                .resolved_external_field_type(value_type)
-                .expect("json model field type should exist"),
-            PlannedType::Resource(resource) => ResolvedFieldType {
-                annotation: resource.type_name.clone(),
-                imports: PythonImports::default(),
-                kind: ResolvedFieldKind::Scalar,
-                wire_conversion: None,
-            },
+            PlannedType::Record(_) => self.ensure_rendered_model(value_type)?,
             PlannedType::Option(inner) | PlannedType::List(inner) => {
-                let inner = self.resolve_planned_value_type(inner)?;
-                ResolvedFieldType {
-                    annotation: format!("list[{}]", inner.annotation),
-                    imports: inner.imports,
-                    kind: ResolvedFieldKind::Scalar,
-                    wire_conversion: None,
-                }
+                self.ensure_rendered_value_type(inner)?;
             }
             PlannedType::Map(key, value) => {
-                let key = self.resolve_planned_value_type(key)?;
-                let value = self.resolve_planned_value_type(value)?;
-                let mut imports = key.imports;
-                imports.extend(&value.imports);
-                ResolvedFieldType {
-                    annotation: format!("dict[{}, {}]", key.annotation, value.annotation),
-                    imports,
-                    kind: ResolvedFieldKind::Scalar,
-                    wire_conversion: None,
-                }
+                self.ensure_rendered_value_type(key)?;
+                self.ensure_rendered_value_type(value)?;
             }
             PlannedType::Tuple(items) => {
-                let items = items
-                    .iter()
-                    .map(|item| {
-                        self.resolve_planned_value_type(item)
-                            .map(|resolved| resolved.annotation)
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                ResolvedFieldType {
-                    annotation: format!("tuple[{}]", items.join(", ")),
-                    imports: PythonImports::default(),
-                    kind: ResolvedFieldKind::Scalar,
-                    wire_conversion: None,
+                for item in items {
+                    self.ensure_rendered_value_type(item)?;
                 }
             }
             PlannedType::Result { ok, err } => {
-                let ok = ok
-                    .as_ref()
-                    .map(|ok| self.resolve_planned_value_type(ok))
-                    .transpose()?;
-                let err = err
-                    .as_ref()
-                    .map(|err| self.resolve_planned_value_type(err))
-                    .transpose()?;
-                let mut imports = PythonImports::default();
-                if let Some(ok) = &ok {
-                    imports.extend(&ok.imports);
+                if let Some(ok) = ok {
+                    self.ensure_rendered_value_type(ok)?;
                 }
-                if let Some(err) = &err {
-                    imports.extend(&err.imports);
-                }
-                ResolvedFieldType {
-                    annotation: python_result_annotation(
-                        ok.as_ref().map(|ok| ok.annotation.clone()),
-                        err.as_ref().map(|err| err.annotation.clone()),
-                    ),
-                    imports,
-                    kind: ResolvedFieldKind::Scalar,
-                    wire_conversion: None,
+                if let Some(err) = err {
+                    self.ensure_rendered_value_type(err)?;
                 }
             }
-            PlannedType::External(ExternalTypeSpec::Alias {
-                type_name, target, ..
-            }) => {
-                let mut resolved = self.resolve_planned_value_type(target)?;
-                if let Some(annotation) = type_name.for_language(Language::Python) {
-                    resolved.annotation = annotation.to_string();
-                }
-                resolved
+            PlannedType::External(ExternalTypeSpec::Alias { target, .. }) => {
+                self.ensure_rendered_value_type(target)?;
             }
-        };
-        Ok(resolved)
+            PlannedType::TypeParameter(_)
+            | PlannedType::Float
+            | PlannedType::Int(_)
+            | PlannedType::Bool
+            | PlannedType::String
+            | PlannedType::Bytes
+            | PlannedType::External(_)
+            | PlannedType::Resource(_) => {}
+        }
+        Ok(())
     }
+}
+
+fn resolve_python_value_type(
+    api_plan: &PlannedSpec,
+    external_models: &PythonExternalModels,
+    value_type: &PlannedType,
+) -> Result<ResolvedFieldType> {
+    let resolved = match value_type {
+        PlannedType::TypeParameter(parameter) => ResolvedFieldType {
+            annotation: parameter.name.clone(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            wire_conversion: None,
+        },
+        PlannedType::Float => ResolvedFieldType {
+            annotation: "float".to_string(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            wire_conversion: None,
+        },
+        PlannedType::Int(_) => ResolvedFieldType {
+            annotation: "int".to_string(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            wire_conversion: None,
+        },
+        PlannedType::Bool => ResolvedFieldType {
+            annotation: "bool".to_string(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            wire_conversion: None,
+        },
+        PlannedType::String => ResolvedFieldType {
+            annotation: "str".to_string(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            wire_conversion: None,
+        },
+        PlannedType::Bytes => ResolvedFieldType {
+            annotation: "bytes".to_string(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            wire_conversion: None,
+        },
+        PlannedType::Enum(enum_type) => ResolvedFieldType {
+            annotation: enum_type.name.clone(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Enum,
+            wire_conversion: None,
+        },
+        value_type @ PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(_))) => {
+            external_models
+                .resolved_external_field_type(value_type)
+                .expect("proto enum field type should exist")
+        }
+        PlannedType::Flags(flags_type) => ResolvedFieldType {
+            annotation: flags_type.name.clone(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            wire_conversion: None,
+        },
+        PlannedType::Variant(variant_type) => ResolvedFieldType {
+            annotation: python_generic_record_annotation(
+                &variant_type.name,
+                &api_plan.variant_type_parameters(&variant_type.full_name, Language::Python),
+            ),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            wire_conversion: None,
+        },
+        message_type @ (PlannedType::External(ExternalTypeSpec::Proto(
+            PlannedProtoType::Message(_),
+        ))
+        | PlannedType::Record(_)) => {
+            let planned_record = match message_type {
+                PlannedType::Record(record) => api_plan.record(&record.full_name),
+                _ => None,
+            };
+            let conversion = external_models
+                .wire_conversion(message_type, planned_record)
+                .expect("message conversion should be model-shaped");
+            let annotation = if let PlannedType::Record(record) = message_type {
+                python_generic_record_annotation(
+                    &conversion.annotation,
+                    &api_plan.record_type_parameters(&record.full_name, Language::Python),
+                )
+            } else {
+                conversion.annotation.clone()
+            };
+            ResolvedFieldType {
+                annotation,
+                imports: conversion.imports.clone(),
+                kind: ResolvedFieldKind::Message,
+                wire_conversion: Some(conversion),
+            }
+        }
+        value_type @ PlannedType::External(ExternalTypeSpec::Json(_)) => external_models
+            .resolved_external_field_type(value_type)
+            .expect("json model field type should exist"),
+        PlannedType::Resource(resource) => ResolvedFieldType {
+            annotation: resource.type_name.clone(),
+            imports: PythonImports::default(),
+            kind: ResolvedFieldKind::Scalar,
+            wire_conversion: None,
+        },
+        PlannedType::Option(inner) | PlannedType::List(inner) => {
+            let inner = resolve_python_value_type(api_plan, external_models, inner)?;
+            ResolvedFieldType {
+                annotation: format!("list[{}]", inner.annotation),
+                imports: inner.imports,
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            }
+        }
+        PlannedType::Map(key, value) => {
+            let key = resolve_python_value_type(api_plan, external_models, key)?;
+            let value = resolve_python_value_type(api_plan, external_models, value)?;
+            let mut imports = key.imports;
+            imports.extend(&value.imports);
+            ResolvedFieldType {
+                annotation: format!("dict[{}, {}]", key.annotation, value.annotation),
+                imports,
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            }
+        }
+        PlannedType::Tuple(items) => {
+            let items = items
+                .iter()
+                .map(|item| {
+                    resolve_python_value_type(api_plan, external_models, item)
+                        .map(|resolved| resolved.annotation)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            ResolvedFieldType {
+                annotation: format!("tuple[{}]", items.join(", ")),
+                imports: PythonImports::default(),
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            }
+        }
+        PlannedType::Result { ok, err } => {
+            let ok = ok
+                .as_ref()
+                .map(|ok| resolve_python_value_type(api_plan, external_models, ok))
+                .transpose()?;
+            let err = err
+                .as_ref()
+                .map(|err| resolve_python_value_type(api_plan, external_models, err))
+                .transpose()?;
+            let mut imports = PythonImports::default();
+            if let Some(ok) = &ok {
+                imports.extend(&ok.imports);
+            }
+            if let Some(err) = &err {
+                imports.extend(&err.imports);
+            }
+            ResolvedFieldType {
+                annotation: python_result_annotation(
+                    ok.as_ref().map(|ok| ok.annotation.clone()),
+                    err.as_ref().map(|err| err.annotation.clone()),
+                ),
+                imports,
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            }
+        }
+        PlannedType::External(ExternalTypeSpec::Alias {
+            type_name, target, ..
+        }) => {
+            let mut resolved = resolve_python_value_type(api_plan, external_models, target)?;
+            if let Some(annotation) = type_name.for_language(Language::Python) {
+                resolved.annotation = annotation.to_string();
+            }
+            resolved
+        }
+    };
+    Ok(resolved)
 }
 
 fn collect_python_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageImportSpec> {
@@ -2096,7 +2104,7 @@ fn render_record_models(
     models: &[&RenderedModel],
     api_plan: &PlannedSpec,
     external_models: &PythonExternalModels,
-) -> RenderedModelFragments {
+) -> Result<RenderedModelFragments> {
     let mut body = String::new();
     let type_parameters = models
         .iter()
@@ -2117,7 +2125,8 @@ fn render_record_models(
         let planned_model = api_plan
             .record(&model.full_name)
             .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
-        let wire_block = external_models.render_record_wire_block(model, planned_model);
+        let wire_block =
+            external_models.render_record_wire_block(api_plan, model, planned_model)?;
         if let Some(wire_block) = &wire_block {
             for line in &wire_block.pre_class_lines {
                 body.push_str(line);
@@ -2143,14 +2152,14 @@ fn render_record_models(
         }
     }
 
-    RenderedModelFragments {
+    Ok(RenderedModelFragments {
         body,
         post_model_statements: String::new(),
         module_imports,
         relative_imports: BTreeMap::new(),
         exported_names: models.iter().map(|model| model.name.clone()).collect(),
         allows_private_wire_access: false,
-    }
+    })
 }
 
 fn render_record_model(
@@ -2606,22 +2615,6 @@ pub(in crate::generator) struct RenderedField {
     pub(in crate::generator) default_expr: Option<String>,
     pub(in crate::generator) wire_value_type: ResolvedFieldType,
     pub(in crate::generator) imports: PythonImports,
-    pub(in crate::generator) proto_oneof: Option<RenderedProtoOneof>,
-    pub(in crate::generator) proto_generic_carrier: Option<python_proto::ProtoGenericCarrier>,
-}
-
-#[derive(Debug, Clone)]
-pub(in crate::generator) struct RenderedProtoOneof {
-    pub(in crate::generator) name: String,
-    pub(in crate::generator) cases: Vec<RenderedProtoOneofCase>,
-}
-
-#[derive(Debug, Clone)]
-pub(in crate::generator) struct RenderedProtoOneofCase {
-    pub(in crate::generator) tag: String,
-    pub(in crate::generator) proto_name: String,
-    pub(in crate::generator) payload_type: ResolvedFieldType,
-    pub(in crate::generator) generic_carrier: Option<python_proto::ProtoGenericCarrier>,
 }
 
 #[derive(Debug, Default)]
@@ -2755,7 +2748,7 @@ pub(in crate::generator) struct PythonImports {
 }
 
 impl PythonImports {
-    fn extend(&mut self, other: &Self) {
+    pub(in crate::generator) fn extend(&mut self, other: &Self) {
         self.module_imports
             .extend(other.module_imports.iter().cloned());
     }
