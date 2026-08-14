@@ -1939,7 +1939,7 @@ export const showcaseTransferTypeConverter =
           raw.tags.forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
-              violations.push({ path: `tags[${index}]`, reason: "expected element" });
+              violations.push({ path: `tags[${index}]`, reason: "expected string" });
             } else {
               item = element;
             }
@@ -1973,10 +1973,7 @@ export const showcaseTransferTypeConverter =
           raw.aliases.forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
-              violations.push({
-                path: `aliases[${index}]`,
-                reason: "expected element",
-              });
+              violations.push({ path: `aliases[${index}]`, reason: "expected string" });
             } else {
               item = element;
             }
@@ -2011,7 +2008,7 @@ export const showcaseTransferTypeConverter =
           raw.roles.forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
-              violations.push({ path: `roles[${index}]`, reason: "expected element" });
+              violations.push({ path: `roles[${index}]`, reason: "expected string" });
             } else {
               item = element;
             }

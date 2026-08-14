@@ -46,6 +46,20 @@ function expectRoundTrip<T>(name: string, converter: TransferTypeConverter<T>): 
   return value;
 }
 
+// The structured violations a rejected payload produces, in order — for the
+// assertions that pin an exact `{ path, reason }` set rather than one message.
+function parseViolations(raw: unknown): { path: string; reason: string }[] {
+  try {
+    new ShowcaseMapper().fromIntermediate(raw);
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return error.violations.map(({ path, reason }) => ({ path, reason }));
+    }
+    throw error;
+  }
+  throw new Error("expected the payload to be rejected");
+}
+
 describe("json-schema showcase generated definitions", () => {
   test("roundtrips canonical wire fixtures through the Temporal converter", () => {
     const minimal = expectRoundTrip(
@@ -302,6 +316,36 @@ describe("json-schema showcase generated definitions", () => {
       roles: ["admin"],
     });
     expect(ok.roles).toEqual(["admin"]);
+  });
+
+  test("a mistyped array element names the type it failed to be", () => {
+    // Every element kind takes the same parse the value in that position would
+    // take anywhere else, so a `string` element reads `expected string` — the
+    // same reason a `string` member reports, and the one Python's element loop
+    // and Java's report. The bracketed index in the path identifies the element;
+    // the reason names the type (specs/json-schema/features/items.md). Because
+    // the element takes that ordinary parse, a *constrained* element's own
+    // `minLength`/`maxLength`/`pattern`/`format` are enforced there too.
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+
+    expect(parseViolations({ ...base, tags: [1, "b"] })).toEqual([
+      { path: "tags[0]", reason: "expected string" },
+    ]);
+    expect(parseViolations({ ...base, tags: ["a", null, {}] })).toEqual([
+      { path: "tags[1]", reason: "expected string" },
+      { path: "tags[2]", reason: "expected string" },
+    ]);
   });
 
   test("enforces pattern constraints with RE2-safe portable semantics", () => {

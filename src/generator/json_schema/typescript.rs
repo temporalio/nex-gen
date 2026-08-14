@@ -3276,31 +3276,21 @@ fn render_array_parser(
         } else {
             format!("`${{{path_expr}}}[${{{index}}}]`")
         };
-        if element_schema.ty.as_ref().and_then(Value::as_str) == Some("string") {
-            output.push_str(indent);
-            output.push_str(&format!("    if (typeof {element} !== 'string') {{\n"));
-            output.push_str(indent);
-            output.push_str("      violations.push({ path: ");
-            output.push_str(&item_path_expr);
-            output.push_str(", reason: 'expected element' });\n");
-            output.push_str(indent);
-            output.push_str("    } else {\n");
-            output.push_str(indent);
-            output.push_str(&format!("      {item} = {element};\n"));
-            output.push_str(indent);
-            output.push_str("    }\n");
-        } else {
-            render_value_parser_at_depth(
-                output,
-                element_schema,
-                &element,
-                &item,
-                &item_path_expr,
-                &format!("{indent}    "),
-                false,
-                depth + 1,
-            );
-        }
+        // Every element kind takes the same parse the value in that position
+        // would take anywhere else, so a `string` element's own constraints
+        // (`minLength`, `pattern`, `format`, …) are enforced and a mistyped
+        // element names the type it failed to be (`expected string`) at its own
+        // index — see `specs/json-schema/features/items.md`.
+        render_value_parser_at_depth(
+            output,
+            element_schema,
+            &element,
+            &item,
+            &item_path_expr,
+            &format!("{indent}    "),
+            false,
+            depth + 1,
+        );
     } else {
         output.push_str(indent);
         output.push_str(&format!("    {item} = {element} as unknown;\n"));

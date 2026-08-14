@@ -336,10 +336,7 @@ export const roomTransferTypeConverter =
           raw.members.forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
-              violations.push({
-                path: `members[${index}]`,
-                reason: "expected element",
-              });
+              violations.push({ path: `members[${index}]`, reason: "expected string" });
             } else {
               item = element;
             }

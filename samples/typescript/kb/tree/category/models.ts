@@ -130,7 +130,7 @@ export const paletteTransferTypeConverter =
             if (typeof element !== "string") {
               violations.push({
                 path: `swatches[${index}]`,
-                reason: "expected element",
+                reason: "expected string",
               });
             } else {
               item = element;

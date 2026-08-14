@@ -156,6 +156,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides, including TypeScript default constants and Go closed-value types.
 - JSON Schema: A root model can no longer silently collapse with a same-named
   `$defs` or synthesized model; the loader reports the conflicting origins.
+- TypeScript: A **`string` array element's own constraints are now enforced**.
+  An element schema of `type: string` took a bare `typeof` check, so an
+  `items: { type: string, minLength: 3, pattern: "^[a-z]+$" }` array accepted
+  `["a"]` and `["A"]` — payloads Go, Python and Java all reject — and the
+  element's compiled pattern constant was emitted but never referenced. Every
+  element kind now takes the same parse the value in that position takes
+  anywhere else, so `minLength`, `maxLength`, `pattern` and `format` fire at the
+  element's own index (`codes[0]`, `must have length >= 3, got 1`).
+- TypeScript: A mistyped **array element** now reports the type it failed to be
+  (`tags[0]`, `expected string`), as an element of every other type already did
+  and as Python and Java report. A `string` element reported a bare
+  `expected element`, which named neither the expected type nor anything the
+  element's own indexed path did not already carry.
 - Python: A `const`/`enum` check now tests membership in a tuple of the
   admissible values (`if value not in (True,)`) in both directions, where the
   parse side chained one `!=` per member. A boolean `const` emitted
