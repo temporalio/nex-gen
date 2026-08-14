@@ -133,7 +133,7 @@ The read-side surfacing synthesizes **one new identifier in two targets**
 | Target | Synthesized identifier | Scope | Collision risk |
 |---|---|---|---|
 | Go | `<Field>OrDefault()` method | struct method-set | a **declared** member whose name maps to `<Field>OrDefault` (Go forbids a field and method of the same name — a **hard compile error**); another `<Field>OrDefault` from a sibling field |
-| TypeScript | `DEFAULT_<FIELD>` const | module | another `DEFAULT_<FIELD>` from a field that case-maps the same ([[const]] synthesizes no TS identifier — the value is an inline literal) |
+| TypeScript | `DEFAULT_<FIELD>` const | module | another `DEFAULT_<FIELD>` from a field that case-maps the same. [[const]] synthesizes no named *type* in TS (the type closes to an inline literal) but does emit a module-scope `<FIELD>_CONST` binding holding the wire value, which shares this scope — unexported, yet still a redeclaration error if it coincides |
 | Python | none (native Pydantic field `default=`) | — | — |
 | Java | none (default folds into the existing getter) | — | — |
 

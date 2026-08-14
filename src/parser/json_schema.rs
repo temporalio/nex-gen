@@ -5807,11 +5807,12 @@ pub(crate) fn build_name_manifest(
                 )?;
             }
         }
-        // TypeScript `DEFAULT_<FIELD>` constants and per-model transfer type
-        // converters share the module scope; make them participate rather than
-        // silently coexist (P15).
+        // TypeScript `DEFAULT_<FIELD>` / `<FIELD>_CONST` constants and per-model
+        // transfer type converters share the module scope; make them participate
+        // rather than silently coexist (P15).
         if language == Language::TypeScript {
             collect_ts_default_constants(module_key, &ns_models, &mut top)?;
+            collect_ts_const_constants(module_key, &ns_models, &mut top)?;
             collect_ts_transfer_type_converters(module_key, &ns_models, &mut top)?;
         }
     }
@@ -6103,6 +6104,67 @@ fn collect_ts_default_constants(
                 Language::TypeScript,
                 ident,
                 format!("`{}.{json_name}` DEFAULT_ constant", model.full_name),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// TypeScript `<FIELD>_CONST` constants (module scope). A `const`-bearing member
+/// emits a module-level constant holding the fixed wire value, named
+/// `<FIELD>_CONST` when the member identifier is unique across the module's
+/// models, else `<MODEL>_<FIELD>_CONST`. The constant is not exported, but it is
+/// still a module-scope binding: a clash with any other module-scope identifier
+/// is a TypeScript redeclaration error, so it belongs in the collision pass
+/// (P15) rather than being emitted twice.
+///
+/// Like the `DEFAULT_` constant, the identifier is built from the **emitted
+/// member identifier**, so an `x-ts-name` override moves it with the member.
+fn collect_ts_const_constants(
+    module_key: &str,
+    models: &[NsModel],
+    top: &mut Namespace,
+) -> Result<()> {
+    let group: Vec<&NsModel> = models
+        .iter()
+        .filter(|model| model.module_key == module_key)
+        .collect();
+    // How many models declare a `const` member emitting this identifier.
+    let field_count = |member_ident: &str| -> usize {
+        group
+            .iter()
+            .filter(|model| {
+                model.schema.properties.as_ref().is_some_and(|properties| {
+                    properties.iter().any(|(json_name, property)| {
+                        member_identifier(Language::TypeScript, json_name, property) == member_ident
+                            && property.extra.contains_key("const")
+                    })
+                })
+            })
+            .count()
+    };
+    for model in &group {
+        let Some(properties) = &model.schema.properties else {
+            continue;
+        };
+        for (json_name, property) in properties {
+            if !property.extra.contains_key("const") {
+                continue;
+            }
+            let member_ident = member_identifier(Language::TypeScript, json_name, property);
+            let field_shouty = member_ident.to_shouty_snake_case();
+            let ident = if field_count(&member_ident) == 1 {
+                format!("{field_shouty}_CONST")
+            } else {
+                format!(
+                    "{}_{field_shouty}_CONST",
+                    model.type_ident.to_shouty_snake_case()
+                )
+            };
+            top.insert(
+                Language::TypeScript,
+                ident,
+                format!("`{}.{json_name}` _CONST constant", model.full_name),
             )?;
         }
     }
@@ -9115,6 +9177,60 @@ $defs:
 "#;
         parse_for(Language::Go, resolved)
             .expect("the override moves the closed-value type with the member");
+    }
+
+    /// A `const` member's `<FIELD>_CONST` binding is module-scope, so it takes
+    /// part in the collision pass even though it is not exported. Two of them can
+    /// coincide through the model-name disambiguator — `A.kind` is prefixed
+    /// (`kind` is not unique) to `A_KIND_CONST`, which is exactly what the unique
+    /// `C.aKind` produces unprefixed. Emitting both is a duplicate `const` in one
+    /// module, a TypeScript `SyntaxError`.
+    #[test]
+    fn const_constant_collision_rejects_and_is_resolved_by_override() {
+        let colliding = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+$defs:
+  A:
+    type: object
+    properties:
+      kind: { type: string, const: one }
+  B:
+    type: object
+    properties:
+      kind: { type: string, const: two }
+  C:
+    type: object
+    properties:
+      aKind: { type: string, const: three }
+"#;
+        let error = reject_for(Language::TypeScript, colliding);
+        assert!(
+            error.contains("collision") && error.contains("A_KIND_CONST"),
+            "{error}"
+        );
+
+        let resolved = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+$defs:
+  A:
+    type: object
+    properties:
+      kind: { type: string, const: one }
+  B:
+    type: object
+    properties:
+      kind: { type: string, const: two }
+  C:
+    type: object
+    properties:
+      aKind: { type: string, const: three, x-ts-name: cKind }
+"#;
+        parse_for(Language::TypeScript, resolved)
+            .expect("the override moves the _CONST binding with the member");
     }
 
     #[test]
