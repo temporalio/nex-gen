@@ -646,6 +646,13 @@ pub(in crate::generator) fn render_external_models(
     for model in &union_models {
         let schema = decode_schema(model)?;
         push_section(&mut body);
+        body.push_str(&model.model_name);
+        body.push_str(": typing.TypeAlias = ");
+        body.push_str(&annotation(&schema)?);
+        body.push('\n');
+        // A module-level variable docstring *follows* its assignment — the same
+        // placement a dataclass member's docstring takes. Emitted before it, the
+        // string would document whatever statement precedes the alias.
         render_python_docstring(
             &mut body,
             "",
@@ -654,10 +661,6 @@ pub(in crate::generator) fn render_external_models(
             None,
             false,
         );
-        body.push_str(&model.model_name);
-        body.push_str(": typing.TypeAlias = ");
-        body.push_str(&annotation(&schema)?);
-        body.push('\n');
     }
 
     // Each is emitted only when the rendered body actually references the module
@@ -1774,6 +1777,12 @@ fn py_field_needs_serialize_check(schema: &Schema) -> bool {
     if schema.const_value.is_some() || schema.enum_values.is_some() {
         return true;
     }
+    // A sum type always has something to check: even with no constraint on any
+    // branch, the member is held to matching *some* branch (see
+    // `render_py_union_value_checks`).
+    if is_py_union(schema) {
+        return true;
+    }
     // An inline sum type: any branch that declares something is re-checked
     // against the member it holds. A `$ref` branch validates through its own
     // converter, so only the non-reference branches count.
@@ -1845,10 +1854,12 @@ fn py_model_needs_serialize_validation(schema: &Schema) -> Result<bool> {
 /// contentEncoding carry no check here — a nested converter validates its own
 /// value, and `bytes` re-encodes losslessly. A materialized temporal does carry
 /// one: the native type is wider than the narrowed wire grammar, so it is held to
-/// what that grammar can spell.
+/// what that grammar can spell. `models` resolves a union branch's `$ref` to the
+/// shape it names; a position that cannot hold a union passes none.
 fn render_py_field_checks(
     output: &mut String,
     schema: &Schema,
+    models: &[&PlannedJsonType],
     value_expr: &str,
     path_expr: &str,
     indent: &str,
@@ -1856,15 +1867,14 @@ fn render_py_field_checks(
     // A nullability wrapper's constraints live on its non-null branch; the
     // caller has already guarded the value against `None`.
     if let Some(non_null) = nullable_member_schema(schema) {
-        return render_py_field_checks(output, non_null, value_expr, path_expr, indent);
+        return render_py_field_checks(output, non_null, models, value_expr, path_expr, indent);
     }
     // An inline sum type narrows to the branch it holds and runs that branch's
-    // own checks. The branches that matter here are the non-object ones, which
-    // need no `$ref` resolution; an object branch validates through its own
-    // converter instead.
+    // own checks. An object branch validates through its own converter instead,
+    // and contributes only its arm of the no-branch-matched test.
     if is_py_union(schema) {
-        if let Some(union) = classify_py_union(schema, &[])? {
-            render_py_union_value_checks(output, &union, value_expr, path_expr, indent)?;
+        if let Some(union) = classify_py_union(schema, models)? {
+            render_py_union_value_checks(output, &union, models, value_expr, path_expr, indent)?;
         }
         return Ok(());
     }
@@ -2704,7 +2714,9 @@ fn render_py_union_parse(
         // The token has selected the branch; the value is now held to everything
         // the branch declares (P12 — the same predicates a property of that type
         // runs). A branch whose declared type is narrower than its token is cast
-        // to it once, and the checks run over the narrowed name.
+        // to it once, and the checks run over the narrowed name. A branch is a
+        // scalar or array shape, never a union of its own, so its checks need no
+        // model list to resolve branch `$ref`s with.
         let selected = match (&variant.parse_fn, variant.token) {
             // A materialized branch parses through its runtime helper; the token
             // guard has already established the wire is a string.
@@ -2720,7 +2732,7 @@ fn render_py_union_parse(
             (None, PyToken::Integer) => {
                 output.push_str(&inner);
                 output.push_str(&format!("number = int({value_expr})\n"));
-                render_py_field_checks(output, &variant.schema, "number", path_expr, &inner)?;
+                render_py_field_checks(output, &variant.schema, &[], "number", path_expr, &inner)?;
                 if variant.narrowed {
                     output.push_str(&inner);
                     output.push_str(&format!(
@@ -2732,26 +2744,44 @@ fn render_py_union_parse(
                     "number".to_string()
                 }
             }
-            (None, PyToken::Array) => {
-                output.push_str(&inner);
-                output.push_str(&format!(
-                    "items = typing.cast({}, {value_expr})\n",
-                    python_string_literal(&variant.py_type)
-                ));
-                render_py_field_checks(output, &variant.schema, "items", path_expr, &inner)?;
-                "items".to_string()
-            }
+            // An array branch is decoded elementwise, exactly as a declared array
+            // member is: the `list` token selects the branch, but it says nothing
+            // about what the elements are, and `list[float]` admits only numbers
+            // (P1 — Go and Java decode into a typed list and reject a bad
+            // element). The array-level predicates then run over the built list.
+            (None, PyToken::Array) => render_py_array_elements(
+                output,
+                &variant.schema,
+                value_expr,
+                path_expr,
+                &inner,
+                "items",
+            )?,
             _ if variant.narrowed => {
                 output.push_str(&inner);
                 output.push_str(&format!(
                     "narrowed = typing.cast({}, {value_expr})\n",
                     python_string_literal(&variant.py_type)
                 ));
-                render_py_field_checks(output, &variant.schema, "narrowed", path_expr, &inner)?;
+                render_py_field_checks(
+                    output,
+                    &variant.schema,
+                    &[],
+                    "narrowed",
+                    path_expr,
+                    &inner,
+                )?;
                 "narrowed".to_string()
             }
             _ => {
-                render_py_field_checks(output, &variant.schema, value_expr, path_expr, &inner)?;
+                render_py_field_checks(
+                    output,
+                    &variant.schema,
+                    &[],
+                    value_expr,
+                    path_expr,
+                    &inner,
+                )?;
                 value_expr.to_string()
             }
         };
@@ -2818,13 +2848,19 @@ fn render_py_union_object_branch(
     output.push_str("    return None\n");
 }
 
+/// The local a union's in-memory value is widened through before the
+/// no-branch-matched test. See [`render_py_union_value_checks`].
+const PY_UNION_CANDIDATE: &str = "candidate";
+
 /// Emits the constraint checks a union's **in-memory** value is held to, narrowed
 /// to the branch it holds: one guarded block per non-object branch that declares
-/// anything (P12). Object branches carry their own validation in their model's
-/// converter, so they contribute no block.
+/// anything (P12), then the terminal test that *some* branch matched at all.
+/// Object branches carry their own validation in their model's converter, so they
+/// contribute no constraint block — only their arm of that terminal test.
 fn render_py_union_value_checks(
     output: &mut String,
     union: &PyUnion,
+    models: &[&PlannedJsonType],
     value_expr: &str,
     path_expr: &str,
     indent: &str,
@@ -2834,6 +2870,7 @@ fn render_py_union_value_checks(
         render_py_field_checks(
             &mut body,
             &variant.schema,
+            models,
             value_expr,
             path_expr,
             &format!("{indent}    "),
@@ -2845,6 +2882,41 @@ fn render_py_union_value_checks(
         output.push_str(&format!("if {}:\n", variant.memory_guard(value_expr)));
         output.push_str(&body);
     }
+
+    // Nothing enforces a Python annotation at runtime, so a member holding a value
+    // admitted by *no* branch is a real state — and one the per-branch blocks above
+    // say nothing about, since each is guarded by its own kind test. Left
+    // unreported it would serialize verbatim, emitting bytes every parser
+    // (Python's own included) rejects, so it is the same aggregated violation the
+    // parse side reports for an inadmissible wire token (P12: both directions run
+    // the same checks). The value is widened to `object` first: read through the
+    // declared union a closed set of guards can be provably exhaustive, which puts
+    // the violation in code pyright reports as unreachable — and the widening
+    // costs nothing, because the guards are the runtime tests either way. The
+    // serialize *dispatch* is unaffected and still falls through to its last
+    // branch unguarded (see `render_py_union_serialize`).
+    let mut guards: Vec<String> = union
+        .variants
+        .iter()
+        .map(|variant| py_negatable(&variant.memory_guard(PY_UNION_CANDIDATE)))
+        .collect();
+    if union.nullable {
+        guards.push(format!("{PY_UNION_CANDIDATE} is None"));
+    }
+    if guards.is_empty() {
+        return Ok(());
+    }
+    output.push_str(indent);
+    output.push_str(&format!(
+        "{PY_UNION_CANDIDATE} = typing.cast(\"object\", {value_expr})\n"
+    ));
+    output.push_str(indent);
+    output.push_str(&format!("if not ({}):\n", guards.join(" or ")));
+    output.push_str(indent);
+    output.push_str(&format!(
+        "    violations.append(Violation(path={path_expr}, reason={}))\n",
+        python_string_literal(&format!("expected one of: {}", union.admissible()))
+    ));
     Ok(())
 }
 
@@ -2899,7 +2971,7 @@ fn render_union_transfer_functions(output: &mut String, models: &[&PlannedJsonTy
         render_union_parse_function(output, &base, &model.model_name, &union)?;
         // A named union has no enclosing property to run its branch checks, so
         // it collects its own and raises the one aggregated error (P11/P12).
-        render_union_serialize_function(output, &base, &model.model_name, &union, true)?;
+        render_union_serialize_function(output, &base, &model.model_name, &union, models, true)?;
     }
     for model in models {
         let schema = decode_schema(model)?;
@@ -2917,7 +2989,14 @@ fn render_union_transfer_functions(output: &mut String, models: &[&PlannedJsonTy
             // out, so the serializer is pure dispatch — and is only needed when
             // some member's in-memory form differs from its wire form.
             if union.needs_serializer() {
-                render_union_serialize_function(output, &base, &member_type, &union, false)?;
+                render_union_serialize_function(
+                    output,
+                    &base,
+                    &member_type,
+                    &union,
+                    models,
+                    false,
+                )?;
             }
         }
     }
@@ -2944,6 +3023,7 @@ fn render_union_serialize_function(
     base: &str,
     member_type: &str,
     union: &PyUnion,
+    models: &[&PlannedJsonType],
     with_checks: bool,
 ) -> Result<()> {
     push_section(output);
@@ -2953,7 +3033,7 @@ fn render_union_serialize_function(
     ));
     if with_checks {
         let mut checks = String::new();
-        render_py_union_value_checks(&mut checks, union, "value", "\"\"", "    ")?;
+        render_py_union_value_checks(&mut checks, union, models, "value", "\"\"", "    ")?;
         if !checks.is_empty() {
             output.push_str("    violations: list[Violation] = []\n");
             output.push_str(&checks);
@@ -3223,9 +3303,12 @@ fn render_model_serializer_body(
 ) -> Result<()> {
     // Serialize-side (P12): re-run the shared field validation over the
     // in-memory model and raise the aggregated `ValidationError` before emitting
-    // the wire object — both directions over one set of check emitters.
-    let needs_validation = py_model_needs_serialize_validation(schema)?;
-    if needs_validation {
+    // the wire object — both directions over one set of check emitters. A nested
+    // conversion aggregates into the same list, so the violations declared here
+    // also hold everything the members below report (P11).
+    let needs_violations =
+        py_model_needs_serialize_validation(schema)? || py_model_serialize_can_raise(schema)?;
+    if needs_violations {
         output.push_str("violations: list[Violation] = []\n");
     }
     output.push_str("out: dict[str, typing.Any] = {}\n");
@@ -3233,14 +3316,22 @@ fn render_model_serializer_body(
     if let Some(shape) = py_map_shape(schema)? {
         output.push_str("for key, entry in value.additional_properties.items():\n");
         if let Some(value_schema) = &shape.value_schema {
-            render_py_member_check(output, value_schema, "entry", "key", "    ")?;
+            render_py_member_check(output, value_schema, models, "entry", "key", "    ")?;
         }
-        let entry = match &shape.value_schema {
-            Some(value_schema) => serialize_expr(value_schema, "entry", 0),
-            None => "entry".to_string(),
-        };
-        output.push_str(&format!("    out[key] = {entry}\n"));
-        if needs_validation {
+        match &shape.value_schema {
+            Some(value_schema) => render_py_serialize_value(
+                output,
+                value_schema,
+                PySerializeSink::Assign("out[key]"),
+                "entry",
+                "key",
+                "    ",
+                "entry",
+            )?,
+            // Free-form members carry no declared shape to convert through.
+            None => output.push_str("    out[key] = entry\n"),
+        }
+        if needs_violations {
             render_py_property_count_checks(output, "len(out)", schema, "");
             if let Some(subschema) = &schema.property_names {
                 render_py_property_name_checks(output, "out", subschema, "");
@@ -3258,6 +3349,8 @@ fn render_model_serializer_body(
             let field_name = property.py_member_name(json_name);
             let value_expr = format!("value.{field_name}");
             let key = python_string_literal(json_name);
+            let target = format!("out[{key}]");
+            let path_expr = python_string_literal(json_name);
             // An optional member is emitted under an `is not None` guard, so the
             // nullability wrapper's own `None` branch is already ruled out and the
             // transform is taken straight from the member's non-null shape.
@@ -3269,23 +3362,50 @@ fn render_model_serializer_body(
                 _ => property,
             };
             // A union whose members need a transform goes through the module's
-            // union serializer; everything else is a plain expression.
-            let assignment = match classify_py_union(property, models)? {
-                Some(union) if union.needs_serializer() => format!(
+            // union serializer, which is the one conversion not derivable from the
+            // schema alone (it is named after this property's position).
+            let inline_union = match classify_py_union(property, models)? {
+                Some(union) if union.needs_serializer() => Some(format!(
                     "{}({value_expr})",
                     union_serialize_fn(&inline_union_fn_base(&model.model_name, json_name))
-                ),
-                _ => serialize_expr(emitted, &value_expr, 0),
+                )),
+                _ => None,
             };
-            if required.contains(json_name) {
-                render_py_serialize_property_check(output, json_name, property, "")?;
-                output.push_str(&format!("out[{key}] = {assignment}\n"));
-            } else {
+            let guarded = !required.contains(json_name);
+            let indent = if guarded {
                 // Absent and explicit `null` collapsed to `None` on the way in,
                 // so both re-serialize as omitted.
                 output.push_str(&format!("if {value_expr} is not None:\n"));
-                render_py_serialize_property_check(output, json_name, property, "    ")?;
-                output.push_str(&format!("    out[{key}] = {assignment}\n"));
+                "    "
+            } else {
+                ""
+            };
+            render_py_serialize_property_check(
+                output, json_name, property, models, guarded, indent,
+            )?;
+            match inline_union {
+                Some(call) if py_serialize_can_raise(property) => render_py_serialize_call(
+                    output,
+                    PySerializeSink::Assign(&target),
+                    &call,
+                    &path_expr,
+                    indent,
+                ),
+                // A dispatch over scalar branches alone materializes values; it
+                // never validates, so there is nothing to re-path.
+                Some(call) => {
+                    output.push_str(indent);
+                    output.push_str(&format!("{target} = {call}\n"));
+                }
+                None => render_py_serialize_value(
+                    output,
+                    emitted,
+                    PySerializeSink::Assign(&target),
+                    &value_expr,
+                    &path_expr,
+                    indent,
+                    &field_name,
+                )?,
             }
         }
     }
@@ -3293,7 +3413,7 @@ fn render_model_serializer_body(
         output.push_str("for key, entry in value.additional_properties.items():\n");
         output.push_str("    out[key] = entry\n");
     }
-    if needs_validation {
+    if needs_violations {
         // Object member-count and cross-field constraints over the to-be-emitted
         // wire key set (`out` holds every distinct wire key, JSON-named).
         render_py_property_count_checks(output, "len(out)", schema, "");
@@ -3305,25 +3425,198 @@ fn render_model_serializer_body(
     Ok(())
 }
 
+/// Where one value's wire form goes: assigned to a target, or appended to the
+/// list an enclosing array is building.
+#[derive(Debug, Clone, Copy)]
+enum PySerializeSink<'a> {
+    Assign(&'a str),
+    Append(&'a str),
+}
+
+impl PySerializeSink<'_> {
+    fn statement(self, expr: &str) -> String {
+        match self {
+            Self::Assign(target) => format!("{target} = {expr}"),
+            Self::Append(list) => format!("{list}.append({expr})"),
+        }
+    }
+}
+
+/// True when any of a model's members converts through a call that can raise, so
+/// its serializer needs the violation list even with no constraint of its own.
+fn py_model_serialize_can_raise(schema: &Schema) -> Result<bool> {
+    if let Some(value_schema) = typed_map_value_schema(schema)?
+        && py_serialize_can_raise(&value_schema)
+    {
+        return Ok(true);
+    }
+    Ok(schema
+        .properties
+        .iter()
+        .flatten()
+        .any(|(_, property)| py_serialize_can_raise(property)))
+}
+
+/// True when a value's wire form is produced by a nested converter or a union
+/// dispatcher — the calls that raise their own `ValidationError`, whose violations
+/// are relative to the nested value and so have to be re-pathed and merged into
+/// the caller's list rather than left to propagate (P11; Go's `mergeNested`).
+fn py_serialize_can_raise(schema: &Schema) -> bool {
+    if schema.reference.is_some() {
+        return true;
+    }
+    if is_py_union(schema) {
+        // Only an object (or nested-union) branch converts through a call; a union
+        // of plain scalars is emitted as-is, and its checks run at this level.
+        return schema
+            .one_of
+            .iter()
+            .flatten()
+            .any(|branch| branch.reference.is_some());
+    }
+    if let Some(non_null) = nullable_member_schema(schema) {
+        return py_serialize_can_raise(non_null);
+    }
+    match schema.items.as_deref() {
+        Some(items) => py_serialize_can_raise(items),
+        None => false,
+    }
+}
+
+/// Emits the statements that put one value's wire form into `sink`, descending
+/// into arrays so every nested conversion runs under its own `try` and reports at
+/// its own path (`segments[1]`, `location.city`). A value that needs no converting
+/// call is a plain assignment, exactly as before.
+#[allow(clippy::too_many_arguments)]
+fn render_py_serialize_value(
+    output: &mut String,
+    schema: &Schema,
+    sink: PySerializeSink<'_>,
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+    slot: &str,
+) -> Result<()> {
+    if !py_serialize_can_raise(schema) {
+        output.push_str(indent);
+        output.push_str(&sink.statement(&serialize_expr(schema, value_expr, 0)));
+        output.push('\n');
+        return Ok(());
+    }
+    // A nullability wrapper: `None` is the wire value, and the non-null branch
+    // carries the conversion.
+    if let Some(non_null) = nullable_member_schema(schema) {
+        output.push_str(indent);
+        output.push_str(&format!("if {value_expr} is None:\n"));
+        output.push_str(indent);
+        output.push_str("    ");
+        output.push_str(&sink.statement("None"));
+        output.push('\n');
+        output.push_str(indent);
+        output.push_str("else:\n");
+        return render_py_serialize_value(
+            output,
+            non_null,
+            sink,
+            value_expr,
+            path_expr,
+            &format!("{indent}    "),
+            slot,
+        );
+    }
+    if schema.ty.as_ref().and_then(Value::as_str) == Some("array")
+        && let Some(items) = schema.items.as_deref()
+    {
+        // Elementwise, so a bad element is reported at its own index and the rest
+        // of the list is still converted (P11).
+        let list_local = format!("{slot}_out");
+        let index_local = format!("{slot}_index");
+        let element_local = format!("{slot}_element");
+        output.push_str(indent);
+        output.push_str(&format!("{list_local}: list[typing.Any] = []\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "for {index_local}, {element_local} in enumerate({value_expr}):\n"
+        ));
+        let loop_body = format!("{indent}    ");
+        render_py_serialize_value(
+            output,
+            items,
+            PySerializeSink::Append(&list_local),
+            &element_local,
+            &py_indexed_path(path_expr, &index_local),
+            &loop_body,
+            &format!("{slot}_item"),
+        )?;
+        output.push_str(indent);
+        output.push_str(&sink.statement(&list_local));
+        output.push('\n');
+        return Ok(());
+    }
+    render_py_serialize_call(
+        output,
+        sink,
+        &serialize_expr(schema, value_expr, 0),
+        path_expr,
+        indent,
+    );
+    Ok(())
+}
+
+/// Emits one converting call under a `try`, re-pathing its violations under
+/// `path_expr` and merging them into the caller's list — the analogue of Go's
+/// `mergeNested`, so a nested failure neither escapes alone nor discards the
+/// violations already collected (P11/P12).
+fn render_py_serialize_call(
+    output: &mut String,
+    sink: PySerializeSink<'_>,
+    call_expr: &str,
+    path_expr: &str,
+    indent: &str,
+) {
+    output.push_str(indent);
+    output.push_str("try:\n");
+    output.push_str(indent);
+    output.push_str("    ");
+    output.push_str(&sink.statement(call_expr));
+    output.push('\n');
+    output.push_str(indent);
+    output.push_str("except ValidationError as error:\n");
+    output.push_str(indent);
+    output.push_str(&format!("    _collect(violations, {path_expr}, error)\n"));
+}
+
 /// Emits the serialize-side validation of one declared property, guarding a
-/// nullable member so the checks only fire on a materialized value. The caller
-/// owns the optional (`is not None`) guard.
+/// nullable member so the checks only fire on a materialized value. `guarded` says
+/// the caller has already established the member is not `None` — as the optional
+/// members' emit guard does — in which case repeating the test here would be a
+/// comparison pyright reports as unnecessary (and basedpyright fails the build
+/// over), so only a *required* nullable member guards itself.
 fn render_py_serialize_property_check(
     output: &mut String,
     json_name: &str,
     property: &Schema,
+    models: &[&PlannedJsonType],
+    guarded: bool,
     indent: &str,
 ) -> Result<()> {
     let value_expr = format!("value.{}", property.py_member_name(json_name));
     let path_expr = python_string_literal(json_name);
-    let guard_null = allows_null(property);
+    let guard_null = allows_null(property) && !guarded;
     let body_indent = if guard_null {
         format!("{indent}    ")
     } else {
         indent.to_string()
     };
     let mut body = String::new();
-    render_py_field_checks(&mut body, property, &value_expr, &path_expr, &body_indent)?;
+    render_py_field_checks(
+        &mut body,
+        property,
+        models,
+        &value_expr,
+        &path_expr,
+        &body_indent,
+    )?;
     if body.is_empty() {
         return Ok(());
     }
@@ -3341,6 +3634,7 @@ fn render_py_serialize_property_check(
 fn render_py_member_check(
     output: &mut String,
     value_schema: &Schema,
+    models: &[&PlannedJsonType],
     value_expr: &str,
     path_expr: &str,
     indent: &str,
@@ -3352,7 +3646,14 @@ fn render_py_member_check(
         indent.to_string()
     };
     let mut body = String::new();
-    render_py_field_checks(&mut body, value_schema, value_expr, path_expr, &body_indent)?;
+    render_py_field_checks(
+        &mut body,
+        value_schema,
+        models,
+        value_expr,
+        path_expr,
+        &body_indent,
+    )?;
     if body.is_empty() {
         return Ok(());
     }
@@ -3935,6 +4236,42 @@ fn render_array_parser(
     indent: &str,
     slot: &str,
 ) -> Result<()> {
+    output.push_str(indent);
+    output.push_str(&format!("if not isinstance({raw_expr}, list):\n"));
+    output.push_str(indent);
+    output.push_str(&format!(
+        "    violations.append(Violation(path={path_expr}, reason=\"expected array\"))\n"
+    ));
+    output.push_str(indent);
+    output.push_str("else:\n");
+    let list_local = render_py_array_elements(
+        output,
+        schema,
+        raw_expr,
+        path_expr,
+        &format!("{indent}    "),
+        slot,
+    )?;
+    output.push_str(indent);
+    output.push_str(&format!("    {target} = {list_local}\n"));
+    Ok(())
+}
+
+/// Emits the elementwise parse of a value the caller has *already* established is
+/// a `list`: every element through its own declared type, then the array-level
+/// predicates over the built list. Returns the name of the local holding it, so a
+/// caller that only needs the value takes it without a copy. Split out of
+/// [`render_array_parser`] so a union branch — whose token guard is that same
+/// `isinstance` test — reuses it without re-testing (a redundant guard would trip
+/// pyright's narrowing diagnostics).
+fn render_py_array_elements(
+    output: &mut String,
+    schema: &Schema,
+    raw_expr: &str,
+    path_expr: &str,
+    body: &str,
+    slot: &str,
+) -> Result<String> {
     let item_slot = format!("{slot}_item");
     let list_local = format!("{slot}_list");
     let index_local = format!("{slot}_index");
@@ -3947,15 +4284,7 @@ fn render_array_parser(
         .transpose()?
         .unwrap_or_else(|| "typing.Any".to_string());
 
-    output.push_str(indent);
-    output.push_str(&format!("if not isinstance({raw_expr}, list):\n"));
-    output.push_str(indent);
-    output.push_str(&format!(
-        "    violations.append(Violation(path={path_expr}, reason=\"expected array\"))\n"
-    ));
-    output.push_str(indent);
-    output.push_str("else:\n");
-    let body = format!("{indent}    ");
+    let body = body.to_string();
     output.push_str(&body);
     output.push_str(&format!("{list_local}: list[{item_type}] = []\n"));
     output.push_str(&body);
@@ -4001,9 +4330,7 @@ fn render_array_parser(
     output.push_str(&loop_body);
     output.push_str(&format!("{list_local}.append({item_slot})\n"));
     render_py_array_checks(output, &list_local, path_expr, schema, &body)?;
-    output.push_str(&body);
-    output.push_str(&format!("{target} = {list_local}\n"));
-    Ok(())
+    Ok(list_local)
 }
 
 /// True when a schema is a bare `string` with nothing else to enforce, which is
