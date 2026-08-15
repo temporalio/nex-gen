@@ -2941,9 +2941,10 @@ fn render_py_union_value_checks(
     // the same checks). The value is widened to `object` first: read through the
     // declared union a closed set of guards can be provably exhaustive, which puts
     // the violation in code pyright reports as unreachable — and the widening
-    // costs nothing, because the guards are the runtime tests either way. The
-    // serialize *dispatch* is unaffected and still falls through to its last
-    // branch unguarded (see `render_py_union_serialize`).
+    // costs nothing, because the guards are the runtime tests either way. This
+    // test is also what makes the dispatch's unguarded last branch safe, so a
+    // union that has a serializer runs it inside that function rather than at the
+    // enclosing member (see `render_union_serialize_function`).
     let mut guards: Vec<String> = union
         .variants
         .iter()
@@ -2970,12 +2971,13 @@ fn render_py_union_value_checks(
 }
 
 /// Emits the dispatch of a union's `_<base>_to_transfer_type`. Unlike the parse
-/// side, which is handed an untyped wire value, this direction receives the
-/// declared union, so each guard *narrows* it and the final branch is whatever is
-/// left over. Guarding that one as well would be provably redundant — and would
-/// put an unreachable `expected one of` raise behind it — so it is emitted as the
-/// fallthrough instead. When no branch transforms its value at all the dispatch
-/// collapses to returning it unchanged.
+/// side, which is handed an untyped wire value, this direction runs only after
+/// the checks above it have established that the value matches *some* branch, so
+/// each guard narrows a set already known to be inhabited and the final branch is
+/// whatever is left over. Guarding that one as well would be provably redundant —
+/// and would put an unreachable `expected one of` raise behind it — so it is
+/// emitted as the fallthrough instead. When no branch transforms its value at all
+/// the dispatch collapses to returning it unchanged.
 fn render_py_union_serialize(output: &mut String, union: &PyUnion, value_expr: &str, indent: &str) {
     if union.nullable {
         output.push_str(indent);
@@ -3018,9 +3020,7 @@ fn render_union_transfer_functions(output: &mut String, models: &[&PlannedJsonTy
         };
         let base = union_fn_base(&model.model_name);
         render_union_parse_function(output, &base, &model.model_name, &union)?;
-        // A named union has no enclosing property to run its branch checks, so
-        // it collects its own and raises the one aggregated error (P11/P12).
-        render_union_serialize_function(output, &base, &model.model_name, &union, models, true)?;
+        render_union_serialize_function(output, &base, &model.model_name, &union, models)?;
     }
     for model in models {
         let schema = decode_schema(model)?;
@@ -3034,18 +3034,11 @@ fn render_union_transfer_functions(output: &mut String, models: &[&PlannedJsonTy
             let base = inline_union_fn_base(&model.model_name, &property.py_member_name(json_name));
             let member_type = annotation(property)?;
             render_union_parse_function(output, &base, &member_type, &union)?;
-            // The enclosing property already runs the branch checks on the way
-            // out, so the serializer is pure dispatch — and is only needed when
-            // some member's in-memory form differs from its wire form.
+            // Only needed when some branch's in-memory form differs from its wire
+            // form; otherwise the member is emitted as-is and the enclosing
+            // property runs its checks inline.
             if union.needs_serializer() {
-                render_union_serialize_function(
-                    output,
-                    &base,
-                    &member_type,
-                    &union,
-                    models,
-                    false,
-                )?;
+                render_union_serialize_function(output, &base, &member_type, &union, models)?;
             }
         }
     }
@@ -3067,28 +3060,32 @@ fn render_union_parse_function(
     render_py_union_parse(output, union, "value", "path", "    ")
 }
 
+/// Emits a union's `_<base>_to_transfer_type`: the value's checks, the raise that
+/// aggregates them, then the dispatch. The order is the point — the dispatch's
+/// last branch is unguarded, so a value matching no branch has to fail here, as
+/// the union's own aggregated `ValidationError`, rather than reach a converter
+/// that would raise whatever its first attribute access raises. Callers report the
+/// checks' violations under the member's path through `_collect` (P11), which is
+/// what the checks' empty `path` is for.
 fn render_union_serialize_function(
     output: &mut String,
     base: &str,
     member_type: &str,
     union: &PyUnion,
     models: &[&PlannedJsonType],
-    with_checks: bool,
 ) -> Result<()> {
     push_section(output);
     output.push_str(&format!(
         "def {}(value: {member_type}) -> typing.Any:\n",
         union_serialize_fn(base)
     ));
-    if with_checks {
-        let mut checks = String::new();
-        render_py_union_value_checks(&mut checks, union, models, "value", "\"\"", "    ")?;
-        if !checks.is_empty() {
-            output.push_str("    violations: list[Violation] = []\n");
-            output.push_str(&checks);
-            output.push_str("    if violations:\n");
-            output.push_str("        raise ValidationError(violations)\n");
-        }
+    let mut checks = String::new();
+    render_py_union_value_checks(&mut checks, union, models, "value", "\"\"", "    ")?;
+    if !checks.is_empty() {
+        output.push_str("    violations: list[Violation] = []\n");
+        output.push_str(&checks);
+        output.push_str("    if violations:\n");
+        output.push_str("        raise ValidationError(violations)\n");
     }
     render_py_union_serialize(output, union, "value", "    ");
     Ok(())
@@ -3441,19 +3438,15 @@ fn render_model_serializer_body(
                 output, json_name, property, models, guarded, indent,
             )?;
             match inline_union {
-                Some(call) if py_serialize_can_raise(property) => render_py_serialize_call(
+                // Every union serializer validates before dispatching, so the
+                // call always needs its violations re-pathed under this member.
+                Some(call) => render_py_serialize_call(
                     output,
                     PySerializeSink::Assign(&target),
                     &call,
                     &path_expr,
                     indent,
                 ),
-                // A dispatch over scalar branches alone materializes values; it
-                // never validates, so there is nothing to re-path.
-                Some(call) => {
-                    output.push_str(indent);
-                    output.push_str(&format!("{target} = {call}\n"));
-                }
                 None => render_py_serialize_value(
                     output,
                     emitted,
@@ -3518,6 +3511,11 @@ fn py_model_serialize_can_raise(schema: &Schema) -> Result<bool> {
 /// dispatcher — the calls that raise their own `ValidationError`, whose violations
 /// are relative to the nested value and so have to be re-pathed and merged into
 /// the caller's list rather than left to propagate (P11; Go's `mergeNested`).
+///
+/// A property routing through a `_<base>_to_transfer_type` is not decided here —
+/// `render_model_serializer_body` sees the union's own classification and always
+/// re-paths that call, because every union serializer validates before
+/// dispatching.
 fn py_serialize_can_raise(schema: &Schema) -> bool {
     if schema.reference.is_some() {
         return true;
@@ -3649,6 +3647,11 @@ fn render_py_serialize_call(
 /// members' emit guard does — in which case repeating the test here would be a
 /// comparison pyright reports as unnecessary (and basedpyright fails the build
 /// over), so only a *required* nullable member guards itself.
+///
+/// A union the member converts through a `_<base>_to_transfer_type` is the one
+/// exception: that function runs the union's checks itself, ahead of a dispatch
+/// its last branch leaves unguarded, and the caller re-paths what it raises. Any
+/// check emitted here would be that same check reported twice.
 fn render_py_serialize_property_check(
     output: &mut String,
     json_name: &str,
@@ -3657,6 +3660,9 @@ fn render_py_serialize_property_check(
     guarded: bool,
     indent: &str,
 ) -> Result<()> {
+    if classify_py_union(property, models)?.is_some_and(|union| union.needs_serializer()) {
+        return Ok(());
+    }
     let value_expr = format!("value.{}", property.py_member_name(json_name));
     let path_expr = python_string_literal(json_name);
     let guard_null = allows_null(property) && !guarded;

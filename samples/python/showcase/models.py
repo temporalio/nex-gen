@@ -2633,42 +2633,11 @@ class _ShowcaseTransferTypeConverter(
                 )
             out["payload"] = value.payload
         if value.detail is not None:
-            candidate = typing.cast("object", value.detail)
-            if not (
-                isinstance(candidate, ShowcaseDetailObject)
-                or isinstance(candidate, str)
-            ):
-                violations.append(
-                    Violation(
-                        path="detail",
-                        reason="expected one of: ShowcaseDetailObject, string",
-                    )
-                )
             try:
                 out["detail"] = _showcase_detail_to_transfer_type(value.detail)
             except ValidationError as error:
                 _collect(violations, "detail", error)
         if value.shape_or_name is not None:
-            if isinstance(value.shape_or_name, str):
-                if len(value.shape_or_name) > 32:
-                    violations.append(
-                        Violation(
-                            path="shapeOrName",
-                            reason=f"must have length <= 32, got {len(value.shape_or_name)}",
-                        )
-                    )
-            candidate = typing.cast("object", value.shape_or_name)
-            if not (
-                isinstance(candidate, Circle)
-                or isinstance(candidate, Square)
-                or isinstance(candidate, str)
-            ):
-                violations.append(
-                    Violation(
-                        path="shapeOrName",
-                        reason="expected one of: Circle, Square, string",
-                    )
-                )
             try:
                 out["shapeOrName"] = _showcase_shape_or_name_to_transfer_type(
                     value.shape_or_name
@@ -4545,6 +4514,14 @@ def _showcase_detail_from_transfer_type(
 
 
 def _showcase_detail_to_transfer_type(value: ShowcaseDetailObject | str) -> typing.Any:
+    violations: list[Violation] = []
+    candidate = typing.cast("object", value)
+    if not (isinstance(candidate, ShowcaseDetailObject) or isinstance(candidate, str)):
+        violations.append(
+            Violation(path="", reason="expected one of: ShowcaseDetailObject, string")
+        )
+    if violations:
+        raise ValidationError(violations)
     if isinstance(value, ShowcaseDetailObject):
         return _ShowcaseDetailObjectTransferTypeConverter().to_transfer_type(value)
     return value
@@ -4590,6 +4567,23 @@ def _showcase_shape_or_name_from_transfer_type(
 def _showcase_shape_or_name_to_transfer_type(
     value: Circle | Square | str,
 ) -> typing.Any:
+    violations: list[Violation] = []
+    if isinstance(value, str):
+        if len(value) > 32:
+            violations.append(
+                Violation(path="", reason=f"must have length <= 32, got {len(value)}")
+            )
+    candidate = typing.cast("object", value)
+    if not (
+        isinstance(candidate, Circle)
+        or isinstance(candidate, Square)
+        or isinstance(candidate, str)
+    ):
+        violations.append(
+            Violation(path="", reason="expected one of: Circle, Square, string")
+        )
+    if violations:
+        raise ValidationError(violations)
     if isinstance(value, Circle):
         return _CircleTransferTypeConverter().to_transfer_type(value)
     if isinstance(value, Square):

@@ -86,6 +86,86 @@ properties:
       - { type: string, enum: [auto, manual] }
 "#;
 
+/// A property-position union whose **last** branch converts through a model's
+/// converter. Nothing in the annotation stops a member holding a value no branch
+/// admits, and the serialize dispatch guards every branch but the last, so that
+/// value reaches the last branch's converter — which fails on whatever attribute
+/// it reads first. `mixed`'s last branch is a scalar, so its fallthrough returns
+/// the bad value instead: same missing check, quieter symptom.
+const UNION_DISPATCH_FALLTHROUGH_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  pick:
+    oneOf:
+      - { $ref: "#/$defs/Circle" }
+      - { $ref: "#/$defs/Square" }
+  mixed:
+    oneOf:
+      - { $ref: "#/$defs/Circle" }
+      - { type: string, minLength: 2 }
+$defs:
+  Circle:
+    type: object
+    required: [kind, radius]
+    properties:
+      kind: { type: string, const: circle }
+      radius: { type: number }
+  Square:
+    type: object
+    required: [kind, side]
+    properties:
+      kind: { type: string, const: square }
+      side: { type: number }
+"##;
+
+/// Drives the generated converter for `UNION_DISPATCH_FALLTHROUGH_SCHEMA`: a
+/// member matching no branch must raise the union's own aggregated
+/// `ValidationError`, at the member's path, alongside every other violation the
+/// model collected — not the `AttributeError` the fallthrough branch's converter
+/// used to raise, which escaped the `except ValidationError` and discarded them.
+const UNION_DISPATCH_FALLTHROUGH_RUNTIME_CHECK: &str = r#"
+import sys
+
+root, package = sys.argv[1], sys.argv[2]
+sys.path.insert(0, root)
+models = __import__(package + ".models", fromlist=["*"])
+definitions = __import__(package + "._definitions", fromlist=["*"])
+
+Bag, Circle = models.Bag, models.Circle
+ValidationError = definitions.ValidationError
+converter = getattr(Bag, "__temporal_transfer_type_converter")
+
+valid = {"pick": {"kind": "circle", "radius": 1.5}, "mixed": "ok"}
+model = converter.from_transfer_type(valid, Bag)
+assert converter.to_transfer_type(model) == valid, converter.to_transfer_type(model)
+
+# Neither member is admitted by any branch: `pick` used to reach
+# `_SquareTransferTypeConverter` and raise `AttributeError: 'int' object has no
+# attribute 'kind'`, taking `mixed`'s violation down with it.
+try:
+    converter.to_transfer_type(Bag(pick=42, mixed=7, additional_properties={}))
+except ValidationError as error:
+    reported = [(violation.path, violation.reason) for violation in error.violations]
+else:
+    raise AssertionError("serializing members no branch admits did not raise")
+
+assert reported == [
+    ("pick", "expected one of: Circle, Square"),
+    ("mixed", "expected one of: Circle, string"),
+], reported
+
+# A branch's own constraint is still reported under the member's path, not the
+# empty path the union function collects it at.
+try:
+    converter.to_transfer_type(Bag(pick=Circle(kind="circle", radius=1.5), mixed="x", additional_properties={}))
+except ValidationError as error:
+    reported = [(violation.path, violation.reason) for violation in error.violations]
+else:
+    raise AssertionError("a short string branch did not raise")
+
+assert reported == [("mixed", "must have length >= 2, got 1")], reported
+"#;
+
 /// Properties named after the converter body's *own* identifiers — its locals
 /// (`violations`, `raw`, `out`), the builtins it calls (`len`, `int`, `str`,
 /// `bool`, `dict`, `isinstance`), the modules it imports (`typing`, `math`, `re`),
@@ -1127,6 +1207,72 @@ fn python_json_validates_non_object_union_branch_constraints() {
     );
     assert!(rendered.contains("if _PATTERN_F242E3A159C2422C.search(value) is None:"));
     assert!(rendered.contains("_check_unique_items("));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A union that converts through a `_<base>_to_transfer_type` runs its checks
+/// *inside* that function, ahead of the dispatch, so the unguarded last branch is
+/// only ever reached by a value some branch admits. The enclosing member emits no
+/// check of its own and re-paths what the function raises.
+/// See `specs/json-schema/features/oneOf.md` ("Serialize-side (P12)").
+#[test]
+fn python_json_union_serializer_validates_before_dispatching() {
+    let temp_dir = unique_output_path("py-json-union-dispatch");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bag.yaml");
+    fs::write(&input_path, UNION_DISPATCH_FALLTHROUGH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bag_package");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.py")).unwrap();
+
+    // The checks precede the dispatch, and the raise separates them: the last
+    // branch's converter is unreachable for a value no branch admits.
+    let dispatch = rendered
+        .split_once("def _bag_pick_to_transfer_type(value: Circle | Square) -> typing.Any:\n")
+        .expect("no serialize function for the `pick` union")
+        .1;
+    assert!(dispatch.starts_with(concat!(
+        "    violations: list[Violation] = []\n",
+        "    candidate = typing.cast(\"object\", value)\n",
+        "    if not (isinstance(candidate, Circle) or isinstance(candidate, Square)):\n",
+        "        violations.append(Violation(path=\"\", reason=\"expected one of: Circle, Square\"))\n",
+        "    if violations:\n",
+        "        raise ValidationError(violations)\n",
+        "    if isinstance(value, Circle):\n",
+    )),
+    "the `pick` dispatch is not preceded by the no-branch-matched test:\n{dispatch}");
+
+    // The enclosing member holds no copy of that test; it only re-paths.
+    let member = rendered
+        .split_once("        if value.pick is not None:\n")
+        .expect("no serialize block for the `pick` member")
+        .1;
+    assert!(
+        member.starts_with(concat!(
+            "            try:\n",
+            "                out[\"pick\"] = _bag_pick_to_transfer_type(value.pick)\n",
+            "            except ValidationError as error:\n",
+            "                _collect(violations, \"pick\", error)\n",
+        )),
+        "the `pick` member repeats the union's checks:\n{member}"
+    );
+
+    assert_python_script_succeeds(
+        UNION_DISPATCH_FALLTHROUGH_RUNTIME_CHECK,
+        &[temp_dir.to_str().unwrap(), "bag_package"],
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

@@ -702,7 +702,7 @@ violation path (`idOrName`, `shapes[1]`, `choices.primary`):
 | Language | Where a non-object branch's constraints live |
 |---|---|
 | Go | the synthesized `<Union><Kind>` wrapper's `Validate`, over a conversion back to the underlying type (`string(v)`, `[]float64(v)`). The dispatcher calls it on the selected branch, and the declaring model's `Validate` — which `MarshalJSON` runs first — calls it again before emit. A branch `pattern`/`format` compiles to a package-level regex var keyed by the wrapper type (`fooStringPattern`). |
-| TypeScript | the narrowing chain itself: each `typeof`/`Array.isArray` arm runs the branch's checks over the narrowed value, in `fromIntermediate` and again on the serialize side (a named union in its `Mapper.toIntermediate`, an inline one in the declaring model's, so a branch violation aggregates with its siblings). |
+| TypeScript | the narrowing chain itself: each `typeof`/`Array.isArray` arm runs the branch's checks over the narrowed value, in `fromTransferType` and again on the serialize side (a named union in its own converter's `toTransferType`, an inline one in the declaring model's, so a branch violation aggregates with its siblings). |
 | Python | the classification arm itself, exactly as in TypeScript: each `isinstance` arm runs the branch's checks over the classified value — the numeric bounds, length bounds, `multipleOf`, and the `pattern`/`format` regex match all inline; only `uniqueItems` and `contains` go through a runtime helper (`_check_unique_items` / `_check_contains`) — in `_<union>_from_transfer_type` and again in `_<union>_to_transfer_type`, so a branch violation aggregates with its siblings. Selecting the branch *is* validating it. |
 | Java | a package-private `validate(path, violations)` on the wrapper class, with its compiled `pattern`/`format` `Pattern` statics. `fromNode` calls it on the wrapper it just built; the interface's static `validate` dispatches on the member's runtime class and is called by the declaring POJO's `Serializer` (and per element/member for a collection of unions) before any wire member is written. |
 
@@ -730,16 +730,26 @@ aggregated primitive rather than being written (real teeth where
 construction is unchecked).
 
 Python's serialize dispatch tests every branch but the last, then falls
-through to it: given a member typed as the union, the final `isinstance`
-is provably redundant, and emitting it would leave the guard and the
-`expected one of` raise behind it statically unreachable. A member whose
-runtime type contradicts the field's declared union therefore fails inside
-the fallthrough branch's converter rather than with the union's own
-aggregated error. What **P12** guarantees is unchanged — nothing invalid
-reaches the wire, because the failure still happens before a byte is
-written — and the case is one a type checker rejects at the assignment.
-The parse direction, which is the one that sees untrusted input, tests
-every branch and raises `expected one of: <labels>` with no fallthrough.
+through to it. The fallthrough is safe by **precondition**:
+`_<union>_to_transfer_type` runs the union's checks — each branch's own
+constraints and the no-branch-matched test — and raises the aggregated
+`ValidationError` *before* the dispatch, so a value that reaches the
+guards is already known to match some branch and the final `isinstance`
+is redundant. Emitting it anyway would leave the guard and the
+`expected one of` raise behind it statically unreachable.
+
+Those checks live in that function for every union that has one, named or
+inline, which is what puts them ahead of the dispatch — the only place
+that can stop it. A union no branch of which transforms its value needs no
+such function at all: the member is emitted as-is and the declaring
+model's converter runs the checks inline. Either way the violations are
+reported under the member's path — a union function collects them at the
+empty path and the declaring converter re-paths them through `_collect`
+(**P11**) — and aggregate with the member's siblings.
+
+The parse direction, which is handed untrusted input rather than a value
+of the declared union type, tests every branch and raises
+`expected one of: <labels>` with no fallthrough.
 
 ## Property-testing matrix
 
