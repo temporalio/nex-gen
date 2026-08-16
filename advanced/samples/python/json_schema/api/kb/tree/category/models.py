@@ -15,9 +15,6 @@ from ..._definitions import (
 )
 
 
-# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false
-
-
 class _CategoryTransferTypeConverter(
     temporalio.converter.TransferTypeConverter["Category", typing.Any]
 ):
@@ -125,7 +122,7 @@ class Category:
 
     name: str
 
-    children: typing.Optional[list[Category]] = None
+    children: list[Category] | None = None
     """Sub-categories. A within-file self-cycle via `$ref: '#'`; the possibly-empty array
     is the terminating edge, so it stays in this module.
     """

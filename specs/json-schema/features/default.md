@@ -117,14 +117,14 @@ Loader behavior:
 **None of its own.** `default` does not change the emitted type — the
 type comes from [[type]] + [[nullability]], and `default` implies the
 member is **optional**, so it takes the optional form (`*T` / `x?: T` /
-`typing.Optional[T]` / boxed-or-`@Nullable`). The default value never appears
+`T | None` / boxed-or-`@Nullable`). The default value never appears
 in the field itself in any target. What `default` *does* add is the
 **read-side surfacing mechanism** and the generated default value itself,
 which differ per language:
 
 | Language | Set-ness signal (omit-unset) | Read-side surfacing of the default |
 |---|---|---|
-| Python | private `_<field>: typing.Optional[T]` | **native property** — `@property def field(self) -> T` returns the private value when set and the scalar default otherwise. A setter accepts `typing.Optional[T]`; assigning `None` restores unset. Models with defaults receive a generated keyword-only constructor so `Model(field=...)` remains the public construction API. |
+| Python | private `_<field>: T | None` | **native property** — `@property def field(self) -> T` returns the private value when set and the scalar default otherwise. A setter accepts `T | None`; assigning `None` restores unset. Models with defaults receive a generated keyword-only constructor so `Model(field=...)` remains the public construction API. |
 | Java | `null` field + `@JsonInclude(NON_NULL)` | **native** — the generated **getter** returns the default when the backing field is `null` (`return nickname != null ? nickname : "anon";`). Getters already exist in the POJO design (PRINCIPLES Java §1). |
 | TypeScript | `undefined` (the `?` field) | **advisory** — interfaces have no methods (PRINCIPLES TS §2), so the consumer applies the default with the native `?? DEFAULT_X`; the generator emits `export const DEFAULT_X = "anon"`. No accessor needed; `??` is the idiom. |
 | Go | `*T` `nil` + `,omitempty` | **generated accessor** — a `func (m M) <Field>OrDefault() T` returns `*m.Field` when set and the default literal when `nil` (`func (u User) NicknameOrDefault() string { if u.Nickname != nil { return *u.Nickname }; return "anon" }`). The bare field stays `*T` (set-ness intact); the accessor is the materialize-on-read path. Emitted **only** for default-bearing fields. Modeled on proto3's `GetX()` — the same omit-default-on-wire + accessor-materializes-default pattern already familiar to Temporal users. Named `<Field>OrDefault` rather than `Get<Field>` to read as "the value, or its default" and to avoid implying a getter on every field. Alternative approaches considered: (a) advisory constant (`DEFAULT_X` + caller nil-checks) — pushes nil-checks to every call site; (b) populate on deserialize — destroys set-ness, forces deep-equals, breaks P9. |

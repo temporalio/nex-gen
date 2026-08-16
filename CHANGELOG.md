@@ -42,9 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Python: JSON Schema model properties that are optional or nullable now use
-  `typing.Optional[T]` on the public dataclass surface. Default-bearing properties
-  now expose mutable same-name properties backed by private optional fields: reads
+- Python: JSON Schema default-bearing properties now expose mutable same-name
+  properties backed by private `T | None` fields: reads
   materialize the schema default, while converters preserve unset state and omit it
   from the wire. The public keyword constructor remains compatible, explicit values
   (including the default itself) remain present on the wire, assigning `None` resets

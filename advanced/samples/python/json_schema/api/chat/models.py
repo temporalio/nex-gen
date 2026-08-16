@@ -16,9 +16,6 @@ from ._definitions import (
 )
 
 
-# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false
-
-
 _ROOM_DECLARED: frozenset[str] = frozenset(
     {"roomId", "displayName", "topic", "members", "labels"}
 )
@@ -228,10 +225,10 @@ class Message:
 
     body: str
 
-    reply_to_id: typing.Optional[str] = None
+    reply_to_id: str | None = None
     """Id of the message this replies to, if any."""
 
-    _priority: typing.Optional[int] = dataclasses.field(default=None, repr=False)
+    _priority: int | None = dataclasses.field(default=None, repr=False)
     """Delivery priority."""
 
     def __init__(
@@ -239,9 +236,9 @@ class Message:
         *,
         kind: typing.Literal["text"] = "text",
         body: str,
-        reply_to_id: typing.Optional[str] = None,
-        priority: typing.Optional[int] = None,
-        _priority: typing.Optional[int] = None,
+        reply_to_id: str | None = None,
+        priority: int | None = None,
+        _priority: int | None = None,
     ) -> None:
         self.kind = kind
         self.body = body
@@ -254,7 +251,7 @@ class Message:
         return self._priority if self._priority is not None else 0
 
     @priority.setter
-    def priority(self, value: typing.Optional[int]) -> None:
+    def priority(self, value: int | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]
         self._priority = value
 
 
@@ -396,12 +393,12 @@ class Room:
 
     display_name: str
 
-    topic: typing.Optional[str]
+    topic: str | None
     """Room topic; may be explicitly cleared to null."""
 
-    members: typing.Optional[list[str]] = None
+    members: list[str] | None = None
 
-    labels: typing.Optional[Labels] = None
+    labels: Labels | None = None
 
     additional_properties: dict[str, typing.Any] = dataclasses.field(
         default_factory=dict

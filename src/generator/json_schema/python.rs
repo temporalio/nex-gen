@@ -640,12 +640,7 @@ pub(in crate::generator) fn render_external_models(
 
     set_module_context(json_models)?;
 
-    // `typing.Optional` is the intentional public spelling for JSON Schema
-    // properties, and a default property's setter deliberately accepts `None`
-    // even though its getter materializes a non-optional value. Keep generated
-    // modules quiet under basedpyright without weakening any other diagnostic.
-    let mut body =
-        String::from("# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false\n");
+    let mut body = String::new();
     // Module-level constants first: the shared compiled `pattern`/`format`
     // regexes and the declared-key sets an open object splits its catch-all on.
     render_pattern_regexes(&mut body, json_models)?;
@@ -3090,7 +3085,7 @@ fn render_model_dataclass(
             output.push_str(&storage_name);
             output.push_str(": ");
             if property.default.is_some() {
-                output.push_str(&model_optional_annotation(&member_type));
+                output.push_str(&optional_annotation(&member_type));
                 output.push_str(" = dataclasses.field(default=None, repr=False)");
             } else if let Some(const_value) = &property.const_value {
                 // The only admissible value, so it is the field's default — a
@@ -3098,7 +3093,7 @@ fn render_model_dataclass(
                 if required.contains(json_name) {
                     output.push_str(&member_type);
                 } else {
-                    output.push_str(&model_optional_annotation(&member_type));
+                    output.push_str(&optional_annotation(&member_type));
                 }
                 output.push_str(" = ");
                 output.push_str(&python_value_literal(const_value)?);
@@ -3106,12 +3101,12 @@ fn render_model_dataclass(
                 // Required and nullable keeps the `| None` (an explicit null is
                 // the value) but takes no default: the member must be supplied.
                 if allows_null(property) {
-                    output.push_str(&model_optional_annotation(&member_type));
+                    output.push_str(&optional_annotation(&member_type));
                 } else {
                     output.push_str(&member_type);
                 }
             } else {
-                output.push_str(&model_optional_annotation(&member_type));
+                output.push_str(&optional_annotation(&member_type));
                 output.push_str(" = None");
             }
             output.push('\n');
@@ -3164,7 +3159,7 @@ fn render_model_init(output: &mut String, schema: &Schema) -> Result<()> {
             output.push_str(": ");
             if property.default.is_some() || !required.contains(json_name) || allows_null(property)
             {
-                output.push_str(&model_optional_annotation(&member_type));
+                output.push_str(&optional_annotation(&member_type));
             } else {
                 output.push_str(&member_type);
             }
@@ -3200,7 +3195,7 @@ fn render_model_init(output: &mut String, schema: &Schema) -> Result<()> {
             }
             output.push_str(&format!(
                 "        _{field_name}: {} = None,\n",
-                model_optional_annotation(&member_type)
+                optional_annotation(&member_type),
             ));
         }
     }
@@ -3268,8 +3263,8 @@ fn render_default_properties(output: &mut String, schema: &Schema) -> Result<()>
             python_value_literal(default)?
         ));
         output.push_str(&format!(
-            "\n    @{field_name}.setter\n    def {field_name}(self, value: {}) -> None:\n        self._{field_name} = value\n",
-            model_optional_annotation(&member_type)
+            "\n    @{field_name}.setter\n    def {field_name}(self, value: {}) -> None:  # pyright: ignore[reportPropertyTypeMismatch]\n        self._{field_name} = value\n",
+            optional_annotation(&member_type)
         ));
     }
     Ok(())
@@ -4921,17 +4916,6 @@ fn optional_annotation(annotation: &str) -> String {
     } else {
         format!("{annotation} | None")
     }
-}
-
-/// Model-property syntax uses `typing.Optional[T]`; converter/helper annotations
-/// deliberately retain their existing `T | None` spelling.
-fn model_optional_annotation(annotation: &str) -> String {
-    let members = split_top_level_union(annotation)
-        .into_iter()
-        .filter(|member| *member != "None")
-        .collect::<Vec<_>>();
-    let inner = members.join(" | ");
-    format!("typing.Optional[{inner}]")
 }
 
 /// True when the annotation itself already admits `None` — a `None` member of

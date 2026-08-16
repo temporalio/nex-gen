@@ -668,9 +668,11 @@ fn python_json_example_generation_matches_checked_in_output() {
             let all = rendered.values().cloned().collect::<Vec<_>>().join("\n");
             // A default-bearing property materializes on read while its private
             // optional storage retains unset state for wire omission.
-            assert!(all.contains("_greeting: typing.Optional[str]"));
+            assert!(all.contains("_greeting: str | None"));
             assert!(all.contains("def greeting(self) -> str:"));
-            assert!(all.contains("def greeting(self, value: typing.Optional[str])"));
+            assert!(all.contains(
+                "def greeting(self, value: str | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]"
+            ));
             assert!(!all.contains("DEFAULT_GREETING"));
             assert!(!all.contains("DEFAULT_DEBUG"));
             assert!(!all.contains("DEFAULT_RETRIES"));
@@ -685,7 +687,7 @@ fn python_json_example_generation_matches_checked_in_output() {
             assert!(all.contains("\"legacyId\""));
             // A free-form object inlines as a mapping as a union branch, and as a
             // named model with an explicit `additional_properties` catch-all.
-            assert!(all.contains("payload: typing.Optional[dict[str, typing.Any] | str]"));
+            assert!(all.contains("payload: dict[str, typing.Any] | str | None"));
             assert!(all.contains("class Extras:"));
             assert!(
                 all.contains("additional_properties: dict[str, typing.Any] = dataclasses.field(")
@@ -716,7 +718,7 @@ fn python_json_example_generation_matches_checked_in_output() {
             // The lone inline object branch of a property union derives its name
             // from the union it belongs to.
             assert!(all.contains("class ShowcaseDetailObject:"));
-            assert!(all.contains("detail: typing.Optional[ShowcaseDetailObject | str]"));
+            assert!(all.contains("detail: ShowcaseDetailObject | str | None"));
             assert!(all.contains("must have at most 4 properties"));
         }
         fs::remove_dir_all(output_path).unwrap();
@@ -1221,7 +1223,7 @@ fn python_json_names_inline_object_union_branch() {
     .unwrap();
     let rendered = fs::read_to_string(output_path.join("models.py")).unwrap();
 
-    assert!(rendered.contains("payload: typing.Optional[DetailPayloadObject | str]"));
+    assert!(rendered.contains("payload: DetailPayloadObject | str | None"));
     assert!(rendered.contains("class DetailPayloadObject:"));
     assert!(rendered.contains("class _DetailPayloadObjectTransferTypeConverter("));
     assert!(rendered.contains("text: str"));
@@ -1260,12 +1262,10 @@ fn python_json_validates_non_object_union_branch_constraints() {
 
     // The string branch's `minLength`/`pattern` and the integer branch's
     // `minimum` leave no residue on the annotation: it is the plain branch union.
-    assert!(rendered.contains("value: typing.Optional[str | int]"));
+    assert!(rendered.contains("value: str | int | None"));
     // Same for the array branch's `minItems`/`uniqueItems`; a closed value set
     // still narrows to a `typing.Literal`.
-    assert!(
-        rendered.contains("typing.Optional[list[float] | typing.Literal[\"auto\", \"manual\"]]")
-    );
+    assert!(rendered.contains("list[float] | typing.Literal[\"auto\", \"manual\"] | None"));
     // The branch checks themselves live in the converter body: a `pattern` lowers
     // to a `.search` against a module-level compiled regex const, `uniqueItems` to
     // a runtime helper imported from the definitions module.
@@ -1371,9 +1371,9 @@ fn python_json_annotates_element_position_unions() {
     let rendered = fs::read_to_string(output_path.join("models.py")).unwrap();
 
     assert!(rendered.contains("BagSegmentsItem: typing.TypeAlias = str | int"));
-    assert!(rendered.contains("segments: typing.Optional[list[BagSegmentsItem]]"));
-    assert!(rendered.contains("choices: typing.Optional[list[Choice]]"));
-    assert!(rendered.contains("slots: typing.Optional[list[str | None]]"));
+    assert!(rendered.contains("segments: list[BagSegmentsItem] | None"));
+    assert!(rendered.contains("choices: list[Choice] | None"));
+    assert!(rendered.contains("slots: list[str | None] | None"));
     let exports = fs::read_to_string(output_path.join("__init__.py")).unwrap();
     assert!(exports.contains("BagSegmentsItem"));
     fs::remove_dir_all(temp_dir).unwrap();
@@ -1473,7 +1473,7 @@ fn python_json_cross_module_py_name_override_moves_every_reference() {
     let models = fs::read_to_string(output_path.join("kb/models.py")).unwrap();
     for expected in [
         "from ..content.page.models import RenamedPage",
-        "    page: typing.Optional[RenamedPage]",
+        "    page: RenamedPage | None",
     ] {
         assert!(models.contains(expected), "{expected}\n{models}");
     }
@@ -1703,7 +1703,7 @@ fn python_json_property_names_never_shadow_converter_locals() {
 }
 
 #[test]
-fn python_json_model_properties_use_optional_and_defaults_preserve_presence() {
+fn python_json_model_properties_use_union_none_and_defaults_preserve_presence() {
     let temp_dir = unique_output_path("py-json-dataclass-default");
     fs::create_dir_all(&temp_dir).unwrap();
     let input_path = temp_dir.join("model.yaml");
@@ -1725,18 +1725,20 @@ fn python_json_model_properties_use_optional_and_defaults_preserve_presence() {
     let rendered = fs::read_to_string(output_path.join("models.py")).unwrap();
 
     assert!(rendered.contains("required_plain: str"));
-    assert!(rendered.contains("required_nullable: typing.Optional[int]"));
-    assert!(rendered.contains("optional_plain: typing.Optional[bool] = None"));
-    assert!(rendered.contains("optional_nullable: typing.Optional[str] = None"));
-    assert!(rendered.contains("nullable_items: typing.Optional[list[str | None]] = None"));
-    assert!(rendered.contains(
-        "_salutation: typing.Optional[typing.Annotated[str, typing_extensions.deprecated"
-    ));
+    assert!(rendered.contains("required_nullable: int | None"));
+    assert!(rendered.contains("optional_plain: bool | None = None"));
+    assert!(rendered.contains("optional_nullable: str | None = None"));
+    assert!(rendered.contains("nullable_items: list[str | None] | None = None"));
+    assert!(rendered.contains("_salutation: typing.Annotated[str, typing_extensions.deprecated"));
     assert!(rendered.contains("def salutation(self) -> typing.Annotated[str,"));
-    assert!(rendered.contains("value: typing.Optional[typing.Annotated["));
+    assert!(rendered.contains("value: typing.Annotated["));
     assert!(rendered.contains("if value._salutation is not None:"));
     assert!(!rendered.contains("DEFAULT_SALUTATION"));
-    // Converter/helper annotations intentionally retain the compact union style.
+    assert!(!rendered.contains("reportDeprecated=false"));
+    assert!(!rendered.contains("reportPropertyTypeMismatch=false"));
+    assert!(!rendered.contains("reportDeprecated"));
+    assert!(rendered.contains("# pyright: ignore[reportPropertyTypeMismatch]"));
+    // Converter/helper annotations use the same compact union style.
     assert!(rendered.contains("optional_plain_value: bool | None = None"));
     assert!(rendered.contains("nullable_items_value: list[str | None] | None = None"));
 

@@ -15,9 +15,6 @@ from ..._definitions import (
 )
 
 
-# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false
-
-
 class _BlockStyleTransferTypeConverter(
     temporalio.converter.TransferTypeConverter["BlockStyle", typing.Any]
 ):
@@ -96,6 +93,6 @@ class _BlockStyleTransferTypeConverter(
 class BlockStyle:
     """Non-cyclic helper; stays in the content_block module. All members optional."""
 
-    bold: typing.Optional[bool] = None
+    bold: bool | None = None
 
-    indent: typing.Optional[int] = None
+    indent: int | None = None

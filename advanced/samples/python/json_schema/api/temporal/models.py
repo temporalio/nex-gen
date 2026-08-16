@@ -26,9 +26,6 @@ from ._definitions import (
 )
 
 
-# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false
-
-
 class _TemporalTransferTypeConverter(
     temporalio.converter.TransferTypeConverter["Temporal", typing.Any]
 ):
@@ -294,20 +291,20 @@ class Temporal:
     PT90M → PT1H30M).
     """
 
-    updated_at: typing.Optional[datetime.datetime] = None
+    updated_at: datetime.datetime | None = None
     """Optional date-time."""
 
-    expires_on: typing.Optional[datetime.date] = None
+    expires_on: datetime.date | None = None
     """Optional date."""
 
-    reminder: typing.Optional[datetime.time] = None
+    reminder: datetime.time | None = None
     """Optional time."""
 
-    retry_delay: typing.Optional[datetime.timedelta] = None
+    retry_delay: datetime.timedelta | None = None
     """Optional duration."""
 
-    deleted_at: typing.Optional[datetime.datetime] = None
+    deleted_at: datetime.datetime | None = None
     """Optional and nullable date-time (may be absent or explicitly null)."""
 
-    archived_on: typing.Optional[datetime.date] = None
+    archived_on: datetime.date | None = None
     """Optional and nullable date."""

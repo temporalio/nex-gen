@@ -25,9 +25,6 @@ from ._definitions import (
 )
 
 
-# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false
-
-
 _PATTERN_CD24623C0C29CA35 = re.compile("^[A-Z]{2,4}\\Z", re.ASCII)
 _PATTERN_B4BA2CA20EB1B963 = re.compile(
     "^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+\\Z", re.ASCII
@@ -179,9 +176,9 @@ class Address:
 
     street: str
 
-    city: typing.Optional[str] = None
+    city: str | None = None
 
-    zip: typing.Optional[int] = None
+    zip: int | None = None
 
     additional_properties: dict[str, typing.Any] = dataclasses.field(
         default_factory=dict
@@ -559,11 +556,11 @@ class ContactPy:
     `$ref`, while the wire `$ref` name stays `Contact`.
     """
 
-    email: typing.Optional[str] = None
+    email: str | None = None
 
-    shipping_street: typing.Optional[str] = None
+    shipping_street: str | None = None
 
-    shipping_zip: typing.Optional[str] = None
+    shipping_zip: str | None = None
 
     additional_properties: dict[str, typing.Any] = dataclasses.field(
         default_factory=dict
@@ -968,9 +965,9 @@ class _SettingsTransferTypeConverter(
 class Settings:
     """A closed object; unknown members are rejected."""
 
-    theme: typing.Optional[str] = None
+    theme: str | None = None
 
-    font_size: typing.Optional[int] = None
+    font_size: int | None = None
 
 
 class _ShowcaseTransferTypeConverter(
@@ -2871,86 +2868,87 @@ class Showcase:
     active: bool
     """Required boolean scalar."""
 
-    nickname: typing.Optional[str] = None
+    nickname: str | None = None
     """Optional short name, at most 12 code points."""
 
-    code: typing.Optional[str] = None
+    code: str | None = None
     """Optional code, 2 to 5 code points. Counted in Unicode code points, so a multi-byte
     value (e.g. "a😀b", 3 code points / 6 UTF-8 bytes) is valid.
     """
 
-    sku: typing.Optional[str] = None
+    sku: str | None = None
     """Optional product code: 2 to 4 uppercase ASCII letters, anchored (`^[A-Z]{2,4}$`).
     Exercises the RE2-safe `pattern` gate.
     """
 
-    phrase: typing.Optional[str] = None
+    phrase: str | None = None
     """Optional two-word phrase separated by whitespace (`^\\S+\\s\\S+$`). Exercises the
     loader's `\\s`/`\\S` → ASCII-class normalization and the per-target `$` end-anchor
     rewrite (Python `\\Z` / Java `\\z`), so a Unicode space (NBSP) and a trailing newline
     are rejected consistently across all four languages.
     """
 
-    request_id: typing.Optional[str] = None
+    request_id: str | None = None
     """Optional request identifier; asserted RFC 4122 UUID via `format: uuid`. Stays
     `string`-typed (format assertion, no materialization); the pinned regex is validated
     identically across all four languages.
     """
 
-    contact_email: typing.Optional[str] = None
+    contact_email: str | None = None
     """Optional contact address; asserted ASCII dot-atom `format: email` (single `@`,
     >=2-label domain, total length <= 254, guard-before-regex).
     """
 
-    host: typing.Optional[str] = None
+    host: str | None = None
     """Optional host name; asserted RFC 1123 `format: hostname` (LDH labels, total length
     <= 253).
     """
 
-    homepage: typing.Optional[str] = None
+    homepage: str | None = None
     """Optional homepage; asserted RFC 3986 `format: uri` (scheme required, ASCII only; an
     IP-literal host is validated by the spliced ipv6 grammar).
     """
 
-    gateway: typing.Optional[str] = None
+    gateway: str | None = None
     """Optional gateway address; asserted dotted-quad IPv4 via format ipv4."""
 
-    blob: typing.Optional[bytes] = None
+    blob: bytes | None = None
     """Optional binary payload carried as a `contentEncoding: base64` string, materialized
     to native bytes (Go []byte, TS Uint8Array, Python bytes, Java byte[]). The wire is
     canonical padded standard base64; a malformed value is rejected by the pinned regex
     before decode.
     """
 
-    url_blob: typing.Optional[bytes] = None
+    url_blob: bytes | None = None
     """Optional binary payload carried as a `contentEncoding: base64url` string (URL-safe
     alphabet, unpadded, RFC 4648 §5), materialized to the same native bytes type. The
     same bytes encode to a different wire than base64 ("Pj4+" vs "Pj4-").
     """
 
-    _retries: typing.Optional[int] = dataclasses.field(default=None, repr=False)
+    _retries: int | None = dataclasses.field(default=None, repr=False)
     """Retry budget
     Optional integer with a schema default.
     """
 
-    verbose: typing.Optional[bool] = None
+    verbose: bool | None = None
 
-    _greeting: typing.Optional[str] = dataclasses.field(default=None, repr=False)
+    _greeting: str | None = dataclasses.field(default=None, repr=False)
     """Greeting
     Optional string with a schema default, surfaced on read.
     """
 
-    _debug: typing.Optional[bool] = dataclasses.field(default=None, repr=False)
+    _debug: bool | None = dataclasses.field(default=None, repr=False)
     """Debug flag
     Optional boolean with a schema default.
     """
 
-    legacy_id_py: typing.Optional[
+    legacy_id_py: (
         typing.Annotated[
             str,
             typing_extensions.deprecated("This field is deprecated.", category=None),
         ]
-    ] = None
+        | None
+    ) = None
     """Deprecated legacy identifier; prefer `requestId`. Exercises the native deprecation
     marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python PEP 702
     @deprecated). Also exercises the property-level `x-<lang>-name` override (the Stage
@@ -2960,34 +2958,34 @@ class Showcase:
     @JsonProperty).
     """
 
-    middle_name: typing.Optional[str] = None
+    middle_name: str | None = None
     """Optional and nullable; may be absent or explicitly null."""
 
-    category: typing.Optional[str]
+    category: str | None
     """Required but nullable; may be explicitly cleared to null."""
 
-    priority: typing.Optional[int] = None
+    priority: int | None = None
     """Optional integer bounded to the inclusive range [1, 10]."""
 
-    level: typing.Optional[int] = None
+    level: int | None = None
     """Optional integer that must be strictly greater than 0."""
 
-    ratio: typing.Optional[float] = None
+    ratio: float | None = None
     """Optional number that must be a non-negative multiple of 5."""
 
-    step: typing.Optional[int] = None
+    step: int | None = None
     """Optional integer that must be a multiple of 3."""
 
-    tags: typing.Optional[list[str]] = None
+    tags: list[str] | None = None
     """Ordered list of free-form tags; 1 to 5 entries."""
 
-    aliases: typing.Optional[list[str]] = None
+    aliases: list[str] | None = None
     """Alternate names; each must be distinct."""
 
-    roles: typing.Optional[list[str]] = None
+    roles: list[str] | None = None
     """Access roles; must contain between one and two "admin" entries."""
 
-    id_or_name: typing.Optional[str | int] = None
+    id_or_name: str | int | None = None
     """Disjoint-kind union (oneOf sum type): the wire value is either a string of at least
     3 code points or an integer of at least 1, selected by its JSON token. Not a member
     of a discriminated union — the token itself is the selector. Each branch also
@@ -2996,14 +2994,14 @@ class Showcase:
     violation.
     """
 
-    mode: typing.Optional[typing.Literal["auto", "manual"] | int] = None
+    mode: typing.Literal["auto", "manual"] | int | None = None
     """A union whose string branch is a **closed value set**: either one of two named modes
     or an unbounded non-negative integer. The branch narrows to its own admissible
     values (a Go/Java membership check, a TypeScript literal union, a Python `Literal`),
     so an unknown string is a Violation while any non-negative integer is accepted.
     """
 
-    payload: typing.Optional[dict[str, typing.Any] | str] = None
+    payload: dict[str, typing.Any] | str | None = None
     """Mixed-kind union whose object branch is an inline free-form object: the wire value
     is either an arbitrary object (members carried verbatim) or a string, selected by
     its JSON token. The free-form object is the one object branch that needs no type
@@ -3011,7 +3009,7 @@ class Showcase:
     `<Union>Object`.
     """
 
-    detail: typing.Optional[ShowcaseDetailObject | str] = None
+    detail: ShowcaseDetailObject | str | None = None
     """Mixed-kind union whose object branch is an inline *structured* object, written
     directly on the property rather than in `$defs`. It is the only object branch of
     this union, so it derives its name from the union it belongs to —
@@ -3019,7 +3017,7 @@ class Showcase:
     own constraints and it stays open to unknown ones.
     """
 
-    shape_or_name: typing.Optional[Circle | Square | str] = None
+    shape_or_name: Circle | Square | str | None = None
     """Tagged object union mixed with a scalar kind: the two selector layers compose — the
     JSON token picks object-vs-string, and, for an object, the shared required `kind`
     const picks Circle-vs-Square. Written inline on the property, so the union itself is
@@ -3030,7 +3028,7 @@ class Showcase:
     validate through their own models.
     """
 
-    measurements: typing.Optional[list[float] | str] = None
+    measurements: list[float] | str | None = None
     """Mixed-kind union with an array branch: the wire value is either a non-empty list of
     distinct numbers or a lowercase preset name, selected by its JSON token. An array
     branch has no definition to take a name from, so Go and Java emit it as the
@@ -3040,72 +3038,72 @@ class Showcase:
     string's `pattern` — so the array-vs-string choice is validated as well as selected.
     """
 
-    shapes: typing.Optional[list[Shape]] = None
+    shapes: list[Shape] | None = None
     """A list whose element type is a named union: every element is routed to exactly one
     branch by the union's own selector, and its index carries into the violation path
     (`shapes[1]`). Go and Java cannot decode a sealed interface as a whole, so the
     element decodes through the union's dispatcher one at a time.
     """
 
-    segments: typing.Optional[list[ShowcaseSegmentsItem]] = None
+    segments: list[ShowcaseSegmentsItem] | None = None
     """A list whose element union is written **inline**. An element has no name of its own,
     so the union is named after its position — `ShowcaseSegmentsItem` — moved into
     `$defs`, and the element becomes a `$ref` at it; from there it is an ordinary named
     union in every language.
     """
 
-    slots: typing.Optional[list[str | None]] = None
+    slots: list[str | None] | None = None
     """A list of **nullable elements** — the two-branch nullability `oneOf` rather than a
     sum type, so nothing is named: the elements themselves become nullable (`[]*string`,
     `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list
     stays a list.
     """
 
-    grid: typing.Optional[list[list[int]]] = None
+    grid: list[list[int]] | None = None
     """A nested array: `items` at depth two. Each level decodes elementwise, so a bad
     element is reported at its own two-dimensional index (`grid[1][0]`).
     """
 
-    location: typing.Optional[ShowcaseLocation] = None
+    location: ShowcaseLocation | None = None
 
-    audit: typing.Optional[ShowcaseAudit] = None
+    audit: ShowcaseAudit | None = None
     """A nullable inline object. The nullability wrapper emits no type of its own, so the
     object inside it takes the property's name — `ShowcaseAudit`, the same name it would
     take written plainly: adding or removing nullability never renames the type.
     """
 
-    rows: typing.Optional[list[ShowcaseRowsItem]] = None
+    rows: list[ShowcaseRowsItem] | None = None
     """A list whose element is an inline object, named after its position
     (`ShowcaseRowsItem`) exactly as an inline element *union* is.
     """
 
-    ledger_py: typing.Optional[ShowcaseLedger] = None
+    ledger_py: ShowcaseLedger | None = None
 
-    metadata: typing.Optional[ShowcaseMetadata] = None
+    metadata: ShowcaseMetadata | None = None
 
-    quotas: typing.Optional[Quotas] = None
+    quotas: Quotas | None = None
 
-    tokens: typing.Optional[Tokens] = None
+    tokens: Tokens | None = None
 
-    nicknames: typing.Optional[Nicknames] = None
+    nicknames: Nicknames | None = None
 
-    choices: typing.Optional[Choices] = None
+    choices: Choices | None = None
 
-    extras: typing.Optional[Extras] = None
+    extras: Extras | None = None
 
-    shape: typing.Optional[Shape] = None
+    shape: Shape | None = None
 
-    note: typing.Optional[Note] = None
+    note: Note | None = None
 
-    address: typing.Optional[Address] = None
+    address: Address | None = None
 
-    labels: typing.Optional[Labels] = None
+    labels: Labels | None = None
 
-    settings: typing.Optional[Settings] = None
+    settings: Settings | None = None
 
-    attributes: typing.Optional[Attributes] = None
+    attributes: Attributes | None = None
 
-    contact: typing.Optional[ContactPy] = None
+    contact: ContactPy | None = None
 
     def __init__(
         self,
@@ -3119,68 +3117,65 @@ class Showcase:
         name: str,
         count: int,
         active: bool,
-        nickname: typing.Optional[str] = None,
-        code: typing.Optional[str] = None,
-        sku: typing.Optional[str] = None,
-        phrase: typing.Optional[str] = None,
-        request_id: typing.Optional[str] = None,
-        contact_email: typing.Optional[str] = None,
-        host: typing.Optional[str] = None,
-        homepage: typing.Optional[str] = None,
-        gateway: typing.Optional[str] = None,
-        blob: typing.Optional[bytes] = None,
-        url_blob: typing.Optional[bytes] = None,
-        retries: typing.Optional[int] = None,
-        verbose: typing.Optional[bool] = None,
-        greeting: typing.Optional[str] = None,
-        debug: typing.Optional[bool] = None,
-        legacy_id_py: typing.Optional[
-            typing.Annotated[
-                str,
-                typing_extensions.deprecated(
-                    "This field is deprecated.", category=None
-                ),
-            ]
-        ] = None,
-        middle_name: typing.Optional[str] = None,
-        category: typing.Optional[str],
-        priority: typing.Optional[int] = None,
-        level: typing.Optional[int] = None,
-        ratio: typing.Optional[float] = None,
-        step: typing.Optional[int] = None,
-        tags: typing.Optional[list[str]] = None,
-        aliases: typing.Optional[list[str]] = None,
-        roles: typing.Optional[list[str]] = None,
-        id_or_name: typing.Optional[str | int] = None,
-        mode: typing.Optional[typing.Literal["auto", "manual"] | int] = None,
-        payload: typing.Optional[dict[str, typing.Any] | str] = None,
-        detail: typing.Optional[ShowcaseDetailObject | str] = None,
-        shape_or_name: typing.Optional[Circle | Square | str] = None,
-        measurements: typing.Optional[list[float] | str] = None,
-        shapes: typing.Optional[list[Shape]] = None,
-        segments: typing.Optional[list[ShowcaseSegmentsItem]] = None,
-        slots: typing.Optional[list[str | None]] = None,
-        grid: typing.Optional[list[list[int]]] = None,
-        location: typing.Optional[ShowcaseLocation] = None,
-        audit: typing.Optional[ShowcaseAudit] = None,
-        rows: typing.Optional[list[ShowcaseRowsItem]] = None,
-        ledger_py: typing.Optional[ShowcaseLedger] = None,
-        metadata: typing.Optional[ShowcaseMetadata] = None,
-        quotas: typing.Optional[Quotas] = None,
-        tokens: typing.Optional[Tokens] = None,
-        nicknames: typing.Optional[Nicknames] = None,
-        choices: typing.Optional[Choices] = None,
-        extras: typing.Optional[Extras] = None,
-        shape: typing.Optional[Shape] = None,
-        note: typing.Optional[Note] = None,
-        address: typing.Optional[Address] = None,
-        labels: typing.Optional[Labels] = None,
-        settings: typing.Optional[Settings] = None,
-        attributes: typing.Optional[Attributes] = None,
-        contact: typing.Optional[ContactPy] = None,
-        _retries: typing.Optional[int] = None,
-        _greeting: typing.Optional[str] = None,
-        _debug: typing.Optional[bool] = None,
+        nickname: str | None = None,
+        code: str | None = None,
+        sku: str | None = None,
+        phrase: str | None = None,
+        request_id: str | None = None,
+        contact_email: str | None = None,
+        host: str | None = None,
+        homepage: str | None = None,
+        gateway: str | None = None,
+        blob: bytes | None = None,
+        url_blob: bytes | None = None,
+        retries: int | None = None,
+        verbose: bool | None = None,
+        greeting: str | None = None,
+        debug: bool | None = None,
+        legacy_id_py: typing.Annotated[
+            str,
+            typing_extensions.deprecated("This field is deprecated.", category=None),
+        ]
+        | None = None,
+        middle_name: str | None = None,
+        category: str | None,
+        priority: int | None = None,
+        level: int | None = None,
+        ratio: float | None = None,
+        step: int | None = None,
+        tags: list[str] | None = None,
+        aliases: list[str] | None = None,
+        roles: list[str] | None = None,
+        id_or_name: str | int | None = None,
+        mode: typing.Literal["auto", "manual"] | int | None = None,
+        payload: dict[str, typing.Any] | str | None = None,
+        detail: ShowcaseDetailObject | str | None = None,
+        shape_or_name: Circle | Square | str | None = None,
+        measurements: list[float] | str | None = None,
+        shapes: list[Shape] | None = None,
+        segments: list[ShowcaseSegmentsItem] | None = None,
+        slots: list[str | None] | None = None,
+        grid: list[list[int]] | None = None,
+        location: ShowcaseLocation | None = None,
+        audit: ShowcaseAudit | None = None,
+        rows: list[ShowcaseRowsItem] | None = None,
+        ledger_py: ShowcaseLedger | None = None,
+        metadata: ShowcaseMetadata | None = None,
+        quotas: Quotas | None = None,
+        tokens: Tokens | None = None,
+        nicknames: Nicknames | None = None,
+        choices: Choices | None = None,
+        extras: Extras | None = None,
+        shape: Shape | None = None,
+        note: Note | None = None,
+        address: Address | None = None,
+        labels: Labels | None = None,
+        settings: Settings | None = None,
+        attributes: Attributes | None = None,
+        contact: ContactPy | None = None,
+        _retries: int | None = None,
+        _greeting: str | None = None,
+        _debug: bool | None = None,
     ) -> None:
         self.kind = kind
         self.revision = revision
@@ -3252,7 +3247,7 @@ class Showcase:
         return self._retries if self._retries is not None else 3
 
     @retries.setter
-    def retries(self, value: typing.Optional[int]) -> None:
+    def retries(self, value: int | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]
         self._retries = value
 
     @property
@@ -3263,7 +3258,7 @@ class Showcase:
         return self._greeting if self._greeting is not None else "hello"
 
     @greeting.setter
-    def greeting(self, value: typing.Optional[str]) -> None:
+    def greeting(self, value: str | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]
         self._greeting = value
 
     @property
@@ -3274,7 +3269,7 @@ class Showcase:
         return self._debug if self._debug is not None else False
 
     @debug.setter
-    def debug(self, value: typing.Optional[bool]) -> None:
+    def debug(self, value: bool | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]
         self._debug = value
 
 
@@ -3425,7 +3420,7 @@ class _ShowcaseDetailObjectTransferTypeConverter(
 class ShowcaseDetailObject:
     code: str
 
-    hint: typing.Optional[str] = None
+    hint: str | None = None
 
     additional_properties: dict[str, typing.Any] = dataclasses.field(
         default_factory=dict
@@ -3654,7 +3649,7 @@ class ShowcaseLocation:
 
     city: str
 
-    geo: typing.Optional[ShowcaseLocationGeo] = None
+    geo: ShowcaseLocationGeo | None = None
 
     additional_properties: dict[str, typing.Any] = dataclasses.field(
         default_factory=dict
@@ -3769,9 +3764,9 @@ class _ShowcaseLocationGeoTransferTypeConverter(
 @_transfer_type_convertible(_ShowcaseLocationGeoTransferTypeConverter)
 @dataclasses.dataclass(slots=True, kw_only=True)
 class ShowcaseLocationGeo:
-    lat: typing.Optional[float] = None
+    lat: float | None = None
 
-    lon: typing.Optional[float] = None
+    lon: float | None = None
 
     additional_properties: dict[str, typing.Any] = dataclasses.field(
         default_factory=dict
@@ -4333,11 +4328,11 @@ class Widget:
 
     id: str
 
-    kind: typing.Optional[str] = None
+    kind: str | None = None
 
     name: str
 
-    size: typing.Optional[int] = None
+    size: int | None = None
     """Optional integer with two allOf branches tightened to [10, 20]."""
 
     additional_properties: dict[str, typing.Any] = dataclasses.field(
@@ -4412,7 +4407,7 @@ class WidgetBase:
 
     id: str
 
-    kind: typing.Optional[str] = None
+    kind: str | None = None
 
     additional_properties: dict[str, typing.Any] = dataclasses.field(
         default_factory=dict
