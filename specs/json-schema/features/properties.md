@@ -78,7 +78,7 @@ from [[type]]; optional/nullable wrapping from [[required]] +
 | Aspect | Go | TypeScript | Python | Java |
 |---|---|---|---|---|
 | Aggregate | `struct` | `interface` (**not class**) | `@dataclasses.dataclass(slots=True, kw_only=True)` (**not a validating base**) | POJO `class` (Java 8; **not records**) |
-| Member | struct field | interface member | dataclass field | private field + getter |
+| Member | struct field | interface member | dataclass field; default-bearing property over private storage | private field + getter |
 | JSON-name binding | `json:"<name>"` tag | exact key (index access) | the wire key, read and written by the converter | `@JsonProperty("<name>")` |
 
 Field naming: JSON member names are mapped to each language's idiomatic
@@ -163,16 +163,17 @@ collisions are evaluated only for languages being generated.
 The check is not limited to declared members. The generator also
 synthesizes identifiers from member/type names — [[const]]'s named type
 (Go defined type / Java value class), the Go `<Field>OrDefault()`
-accessor and TS `DEFAULT_<FIELD>` constant ([[default]]), the [[enum]]
+accessor, TS `DEFAULT_<FIELD>` constant, and Python `_<field>` default
+backing slot ([[default]]), the [[enum]]
 value class — and these enter the **same per-scope namespace** as the
 declared names and each other (package/module scope for package-level
-types/consts; the struct method-set for the Go accessor, where Go
-forbids a field/method clash outright). The single collision pass runs
+types/consts; the struct method-set for the Go accessor; the Python class
+scope for the backing slot). The single collision pass runs
 over that full union and rejects on any coincidence; the `x-*-name`
 override (Stage 4) on the declaring member is the escape hatch for these,
 and re-mapping the member moves every name synthesized *from the member*
-with it — the Go `<Field>OrDefault()` accessor and TS `DEFAULT_<FIELD>`
-constant ([[default]]), the Go closed-value type and Java value class
+with it — the Go `<Field>OrDefault()` accessor, TS `DEFAULT_<FIELD>`
+constant, Python `_<field>` backing slot ([[default]]), the Go closed-value type and Java value class
 ([[const]]) are all named off the **emitted** member identifier, not the
 JSON key, so the override reaches them. A name synthesized from a
 **position** rather than a member does not move: an inline object hoisted

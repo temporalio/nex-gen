@@ -16,7 +16,7 @@ from ._definitions import (
 )
 
 
-DEFAULT_PRIORITY = 0
+# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false
 
 
 _ROOM_DECLARED: frozenset[str] = frozenset(
@@ -211,15 +211,15 @@ class _MessageTransferTypeConverter(
         out["body"] = value.body
         if value.reply_to_id is not None:
             out["replyToId"] = value.reply_to_id
-        if value.priority is not None:
-            out["priority"] = value.priority
+        if value._priority is not None:
+            out["priority"] = value._priority
         if violations:
             raise ValidationError(violations)
         return out
 
 
 @_transfer_type_convertible(_MessageTransferTypeConverter)
-@dataclasses.dataclass(slots=True, kw_only=True)
+@dataclasses.dataclass(slots=True, kw_only=True, init=False)
 class Message:
     """A chat message."""
 
@@ -228,11 +228,34 @@ class Message:
 
     body: str
 
-    reply_to_id: str | None = None
+    reply_to_id: typing.Optional[str] = None
     """Id of the message this replies to, if any."""
 
-    priority: int | None = None
+    _priority: typing.Optional[int] = dataclasses.field(default=None, repr=False)
     """Delivery priority."""
+
+    def __init__(
+        self,
+        *,
+        kind: typing.Literal["text"] = "text",
+        body: str,
+        reply_to_id: typing.Optional[str] = None,
+        priority: typing.Optional[int] = None,
+        _priority: typing.Optional[int] = None,
+    ) -> None:
+        self.kind = kind
+        self.body = body
+        self.reply_to_id = reply_to_id
+        self._priority = _priority if _priority is not None else priority
+
+    @property
+    def priority(self) -> int:
+        """Delivery priority."""
+        return self._priority if self._priority is not None else 0
+
+    @priority.setter
+    def priority(self, value: typing.Optional[int]) -> None:
+        self._priority = value
 
 
 class _RoomTransferTypeConverter(
@@ -373,12 +396,12 @@ class Room:
 
     display_name: str
 
-    topic: str | None
+    topic: typing.Optional[str]
     """Room topic; may be explicitly cleared to null."""
 
-    members: list[str] | None = None
+    members: typing.Optional[list[str]] = None
 
-    labels: Labels | None = None
+    labels: typing.Optional[Labels] = None
 
     additional_properties: dict[str, typing.Any] = dataclasses.field(
         default_factory=dict

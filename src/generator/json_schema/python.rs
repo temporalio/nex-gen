@@ -167,8 +167,8 @@ pub(crate) fn converter_class_name(model_name: &str) -> String {
 ///
 /// The `_value` suffix makes that structurally impossible instead of
 /// blocklisting names: no fixed local, builtin, imported module, or synthesized
-/// module-level identifier (`DEFAULT_<FIELD>`, `_PATTERN_<HEX>`,
-/// `_<MODEL>_DECLARED`, `_<base>_{from,to}_transfer_type`,
+/// module-level identifier (`_PATTERN_<HEX>`, `_<MODEL>_DECLARED`,
+/// `_<base>_{from,to}_transfer_type`,
 /// `_<Model>TransferTypeConverter`) ends in `_value`. It stays collision-free
 /// *within* the property family too: every temporary this position needs appends
 /// a further suffix (`_raw`, `_parsed`, `_list`, `_index`, `_element`, `_item`,
@@ -640,11 +640,14 @@ pub(in crate::generator) fn render_external_models(
 
     set_module_context(json_models)?;
 
-    let mut body = String::new();
-    // Module-level constants first: the advisory `DEFAULT_<FIELD>` values, the
-    // shared compiled `pattern`/`format` regexes, and the declared-key sets an
-    // open object splits its catch-all on.
-    render_default_constants(&mut body, json_models)?;
+    // `typing.Optional` is the intentional public spelling for JSON Schema
+    // properties, and a default property's setter deliberately accepts `None`
+    // even though its getter materializes a non-optional value. Keep generated
+    // modules quiet under basedpyright without weakening any other diagnostic.
+    let mut body =
+        String::from("# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false\n");
+    // Module-level constants first: the shared compiled `pattern`/`format`
+    // regexes and the declared-key sets an open object splits its catch-all on.
     render_pattern_regexes(&mut body, json_models)?;
     for model in &class_models {
         let schema = decode_schema(model)?;
@@ -2091,85 +2094,6 @@ fn python_content_encoding_format_fn(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Module-level constants
-// ---------------------------------------------------------------------------
-
-/// Emits the advisory `DEFAULT_<FIELD>` constants. A schema `default` is not the
-/// dataclass field default — the member is encoded like any other optional one so
-/// the wire stays byte-identical — and the consumer applies the constant on read
-/// (`x if x is not None else DEFAULT_X`), exactly as in TypeScript. See
-/// `specs/json-schema/features/default.md`.
-fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) -> Result<()> {
-    let mut constants = Vec::new();
-    for model in models {
-        let schema = decode_schema(model)?;
-        let Some(properties) = &schema.properties else {
-            continue;
-        };
-        for (json_name, property) in properties {
-            let Some(default) = &property.default else {
-                continue;
-            };
-            constants.push((
-                default_const_name(
-                    &model.model_name,
-                    &property.py_member_name(json_name),
-                    models,
-                )?,
-                python_value_literal(default)?,
-            ));
-        }
-    }
-    if constants.is_empty() {
-        return Ok(());
-    }
-    push_section(output);
-    for (name, value) in constants {
-        output.push_str(&name);
-        output.push_str(" = ");
-        output.push_str(&value);
-        output.push('\n');
-    }
-    Ok(())
-}
-
-/// `DEFAULT_<FIELD>` when exactly one model in the module declares a defaulted
-/// member emitting that identifier, else `DEFAULT_<MODEL>_<FIELD>`. The name is
-/// built from the **emitted member identifier**, as TypeScript's is, so an
-/// `x-py-name` override on the declaring property moves the constant with it — a
-/// name synthesized *from the member* follows the member (P15). The loader
-/// replicates this rule to reserve the name in the module namespace, so the two
-/// must stay in step.
-fn default_const_name(
-    model_name: &str,
-    member_ident: &str,
-    models: &[&PlannedJsonType],
-) -> Result<String> {
-    let field_count = models
-        .iter()
-        .map(|model| decode_schema(model))
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
-        .filter(|schema| {
-            schema.properties.as_ref().is_some_and(|properties| {
-                properties.iter().any(|(json_name, property)| {
-                    property.py_member_name(json_name) == member_ident && property.default.is_some()
-                })
-            })
-        })
-        .count();
-    Ok(if field_count == 1 {
-        format!("DEFAULT_{}", member_ident.to_shouty_snake_case())
-    } else {
-        format!(
-            "DEFAULT_{}_{}",
-            model_name.to_shouty_snake_case(),
-            member_ident.to_shouty_snake_case()
-        )
-    })
-}
-
 /// Emits one compiled regex per distinct `pattern` / `format` source across the
 /// module's schemas, so a check reads a shared pre-compiled object rather than
 /// recompiling per call. `re.ASCII` pins the character classes the loader
@@ -3116,9 +3040,20 @@ fn render_model_dataclass(
         "@_transfer_type_convertible({})\n",
         converter_class_name(&model.model_name)
     ));
+    let has_defaults = schema.properties.as_ref().is_some_and(|properties| {
+        properties
+            .values()
+            .any(|property| property.default.is_some())
+    });
     // Every member is keyword-only: JSON Schema interleaves required and
-    // optional properties freely, so a positional order is never safe.
-    output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
+    // optional properties freely, so a positional order is never safe. Models
+    // with schema defaults need a handwritten initializer so the public keyword
+    // can initialize its private presence-bearing slot.
+    if has_defaults {
+        output.push_str("@dataclasses.dataclass(slots=True, kw_only=True, init=False)\n");
+    } else {
+        output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
+    }
     output.push_str("class ");
     output.push_str(&model.model_name);
     output.push_str(":\n");
@@ -3146,26 +3081,37 @@ fn render_model_dataclass(
                     "typing.Annotated[{member_type}, typing_extensions.deprecated(\"This field is deprecated.\", category=None)]"
                 );
             }
+            let storage_name = if property.default.is_some() {
+                format!("_{field_name}")
+            } else {
+                field_name.clone()
+            };
             output.push_str("    ");
-            output.push_str(&field_name);
+            output.push_str(&storage_name);
             output.push_str(": ");
-            if let Some(const_value) = &property.const_value {
+            if property.default.is_some() {
+                output.push_str(&model_optional_annotation(&member_type));
+                output.push_str(" = dataclasses.field(default=None, repr=False)");
+            } else if let Some(const_value) = &property.const_value {
                 // The only admissible value, so it is the field's default — a
-                // schema `default`, being a suggestion, is not (see
-                // `render_default_constants`).
-                output.push_str(&member_type);
+                // schema `default`, being a suggestion, is not.
+                if required.contains(json_name) {
+                    output.push_str(&member_type);
+                } else {
+                    output.push_str(&model_optional_annotation(&member_type));
+                }
                 output.push_str(" = ");
                 output.push_str(&python_value_literal(const_value)?);
             } else if required.contains(json_name) {
                 // Required and nullable keeps the `| None` (an explicit null is
                 // the value) but takes no default: the member must be supplied.
                 if allows_null(property) {
-                    output.push_str(&optional_annotation(&member_type));
+                    output.push_str(&model_optional_annotation(&member_type));
                 } else {
                     output.push_str(&member_type);
                 }
             } else {
-                output.push_str(&optional_annotation(&member_type));
+                output.push_str(&model_optional_annotation(&member_type));
                 output.push_str(" = None");
             }
             output.push('\n');
@@ -3189,8 +3135,142 @@ fn render_model_dataclass(
             catch_all_annotation(schema)?
         ));
     }
+    if has_defaults {
+        render_model_init(output, schema)?;
+        render_default_properties(output, schema)?;
+    }
     if members == 0 {
         output.push_str("\n    pass\n");
+    }
+    Ok(())
+}
+
+/// Emits the public keyword-only constructor for a dataclass whose defaulted
+/// properties are backed by private presence-bearing fields.
+fn render_model_init(output: &mut String, schema: &Schema) -> Result<()> {
+    let required = required_fields(schema);
+    output.push_str("\n    def __init__(\n        self,\n        *,\n");
+    if let Some(properties) = &schema.properties {
+        for (json_name, property) in properties {
+            let field_name = property.py_member_name(json_name);
+            let mut member_type = annotation(property)?;
+            if property.deprecated == Some(true) {
+                member_type = format!(
+                    "typing.Annotated[{member_type}, typing_extensions.deprecated(\"This field is deprecated.\", category=None)]"
+                );
+            }
+            output.push_str("        ");
+            output.push_str(&field_name);
+            output.push_str(": ");
+            if property.default.is_some() || !required.contains(json_name) || allows_null(property)
+            {
+                output.push_str(&model_optional_annotation(&member_type));
+            } else {
+                output.push_str(&member_type);
+            }
+            if let Some(const_value) = &property.const_value {
+                output.push_str(" = ");
+                output.push_str(&python_value_literal(const_value)?);
+            } else if !required.contains(json_name) {
+                output.push_str(" = None");
+            }
+            output.push_str(",\n");
+        }
+    }
+    if is_python_map_model(schema) || is_open_object(schema) {
+        output.push_str(&format!(
+            "        additional_properties: dict[str, {}] | None = None,\n",
+            catch_all_annotation(schema)?
+        ));
+    }
+    // `dataclasses.replace()` reconstructs from declared dataclass field names,
+    // which are the private backing names here. Accept those private keywords so
+    // replacing an unrelated field preserves raw default presence/value state.
+    if let Some(properties) = &schema.properties {
+        for (json_name, property) in properties {
+            if property.default.is_none() {
+                continue;
+            }
+            let field_name = property.py_member_name(json_name);
+            let mut member_type = annotation(property)?;
+            if property.deprecated == Some(true) {
+                member_type = format!(
+                    "typing.Annotated[{member_type}, typing_extensions.deprecated(\"This field is deprecated.\", category=None)]"
+                );
+            }
+            output.push_str(&format!(
+                "        _{field_name}: {} = None,\n",
+                model_optional_annotation(&member_type)
+            ));
+        }
+    }
+    output.push_str("    ) -> None:\n");
+    let mut assignments = 0usize;
+    if let Some(properties) = &schema.properties {
+        for (json_name, property) in properties {
+            assignments += 1;
+            let field_name = property.py_member_name(json_name);
+            let target = if property.default.is_some() {
+                format!("_{field_name}")
+            } else {
+                field_name.clone()
+            };
+            if property.default.is_some() {
+                output.push_str(&format!(
+                    "        self.{target} = _{field_name} if _{field_name} is not None else {field_name}\n"
+                ));
+            } else {
+                output.push_str(&format!("        self.{target} = {field_name}\n"));
+            }
+        }
+    }
+    if is_python_map_model(schema) || is_open_object(schema) {
+        assignments += 1;
+        output.push_str(
+            "        self.additional_properties = (\n            {} if additional_properties is None else additional_properties\n        )\n",
+        );
+    }
+    if assignments == 0 {
+        output.push_str("        pass\n");
+    }
+    Ok(())
+}
+
+fn render_default_properties(output: &mut String, schema: &Schema) -> Result<()> {
+    let Some(properties) = &schema.properties else {
+        return Ok(());
+    };
+    for (json_name, property) in properties {
+        let Some(default) = &property.default else {
+            continue;
+        };
+        let field_name = property.py_member_name(json_name);
+        let mut member_type = annotation(nullable_member_schema(property).unwrap_or(property))?;
+        if property.deprecated == Some(true) {
+            member_type = format!(
+                "typing.Annotated[{member_type}, typing_extensions.deprecated(\"This field is deprecated.\", category=None)]"
+            );
+        }
+        output.push_str(&format!(
+            "\n    @property\n    def {field_name}(self) -> {member_type}:\n"
+        ));
+        render_python_docstring(
+            output,
+            "        ",
+            compose_python_doc(property.title.as_deref(), property.description.as_deref())
+                .as_deref(),
+            &[],
+            None,
+            false,
+        );
+        output.push_str(&format!(
+            "        return self._{field_name} if self._{field_name} is not None else {}\n",
+            python_value_literal(default)?
+        ));
+        output.push_str(&format!(
+            "\n    @{field_name}.setter\n    def {field_name}(self, value: {}) -> None:\n        self._{field_name} = value\n",
+            model_optional_annotation(&member_type)
+        ));
     }
     Ok(())
 }
@@ -3398,7 +3478,11 @@ fn render_model_serializer_body(
     if let Some(properties) = &schema.properties {
         for (json_name, property) in properties {
             let field_name = property.py_member_name(json_name);
-            let value_expr = format!("value.{field_name}");
+            let value_expr = if property.default.is_some() {
+                format!("value._{field_name}")
+            } else {
+                format!("value.{field_name}")
+            };
             let key = python_string_literal(json_name);
             let target = format!("out[{key}]");
             let path_expr = python_string_literal(json_name);
@@ -4837,6 +4921,17 @@ fn optional_annotation(annotation: &str) -> String {
     } else {
         format!("{annotation} | None")
     }
+}
+
+/// Model-property syntax uses `typing.Optional[T]`; converter/helper annotations
+/// deliberately retain their existing `T | None` spelling.
+fn model_optional_annotation(annotation: &str) -> String {
+    let members = split_top_level_union(annotation)
+        .into_iter()
+        .filter(|member| *member != "None")
+        .collect::<Vec<_>>();
+    let inner = members.join(" | ");
+    format!("typing.Optional[{inner}]")
 }
 
 /// True when the annotation itself already admits `None` — a `None` member of

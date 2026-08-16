@@ -15,6 +15,9 @@ from ..._definitions import (
 )
 
 
+# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false
+
+
 class _PageMetaTransferTypeConverter(
     temporalio.converter.TransferTypeConverter["PageMeta", typing.Any]
 ):
@@ -79,4 +82,4 @@ class PageMeta:
 
     author: str
 
-    word_count: int | None = None
+    word_count: typing.Optional[int] = None

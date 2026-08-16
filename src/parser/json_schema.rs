@@ -5878,9 +5878,10 @@ pub(crate) fn build_name_manifest(
                 service.origin_label(),
             )?;
         }
-        // The Python and TypeScript `DEFAULT_<FIELD>` constants share the module
-        // scope; make them participate rather than silently coexist (P15).
-        if matches!(language, Language::Python | Language::TypeScript) {
+        // TypeScript `DEFAULT_<FIELD>` constants share the module scope; make
+        // them participate rather than silently coexist (P15). Python surfaces
+        // defaults through properties and emits no module-level constant.
+        if language == Language::TypeScript {
             collect_default_constants(language, module_key, &ns_models, &mut top)?;
         }
         // TypeScript additionally emits `<FIELD>_CONST` bindings and a per-model
@@ -6058,9 +6059,9 @@ fn collect_synthesized_top_level(
 }
 
 /// Per-model member-scope collision checks (one scope per aggregate): two
-/// members that recase/override to the same identifier collide; and in Go the
-/// synthesized `<Field>OrDefault()` accessor shares the struct method-set, so a
-/// field/accessor clash is a hard compile error.
+/// members that recase/override to the same identifier collide. Synthesized
+/// member-scope names participate too: Go's `<Field>OrDefault()` method and
+/// Python's private `_<field>` storage for a default-bearing property.
 fn validate_member_scope(language: Language, model_full_name: &str, schema: &Schema) -> Result<()> {
     let Some(properties) = &schema.properties else {
         return Ok(());
@@ -6099,6 +6100,25 @@ fn validate_member_scope(language: Language, model_full_name: &str, schema: &Sch
             format!("`{model_full_name}` additional-properties catch-all"),
         )?;
     }
+    // A Python default-bearing property stores presence in `_<field>`. The
+    // backing slot and every declared member occupy the same class namespace;
+    // `x-py-name` moves both the public property and its backing name.
+    if language == Language::Python {
+        for (json_name, property) in properties {
+            let Some(default) = property.extra.get("default") else {
+                continue;
+            };
+            if default.is_null() || default.is_object() || default.is_array() {
+                continue;
+            }
+            let member = member_identifier(language, json_name, property);
+            scope.insert(
+                language,
+                format!("_{member}"),
+                format!("`{model_full_name}.{json_name}` default backing field"),
+            )?;
+        }
+    }
     // Go `<Field>OrDefault()` accessor (scalar `default` on an optional member).
     if language == Language::Go {
         let required: BTreeSet<&str> = schema
@@ -6131,8 +6151,8 @@ fn validate_member_scope(language: Language, model_full_name: &str, schema: &Sch
     Ok(())
 }
 
-/// Python and TypeScript `DEFAULT_<FIELD>` constants (module scope). Both
-/// generators name a default constant `DEFAULT_<FIELD>` when the member is unique
+/// TypeScript `DEFAULT_<FIELD>` constants (module scope). The generator names a
+/// default constant `DEFAULT_<FIELD>` when the member is unique
 /// across the module's models, else `DEFAULT_<MODEL>_<FIELD>`. Replicate that name
 /// and enter it into the shared module namespace so a genuine clash rejects (P15)
 /// rather than silently coexisting behind the model-name prefix.
@@ -6262,8 +6282,8 @@ fn collect_ts_const_constants(
 }
 
 /// The remaining module-scope identifiers the Python JSON-Schema generator
-/// synthesizes, entered into the same namespace as the user types, services, and
-/// `DEFAULT_<FIELD>` constants so a coincidence rejects at load instead of one
+/// synthesizes, entered into the same namespace as the user types and services
+/// so a coincidence rejects at load instead of one
 /// definition silently overwriting the other (P15).
 ///
 /// Each is named by [`build_name_manifest`]'s resolved `type_ident`, so a
@@ -9866,16 +9886,13 @@ properties:
     }
 
     #[test]
-    fn rejects_colliding_default_constants_python_and_typescript() {
-        // Python and TypeScript hoist a defaulted member's value to a module-level
+    fn rejects_colliding_default_constants_typescript() {
+        // TypeScript hoists a defaulted member's value to a module-level
         // `DEFAULT_<FIELD>` constant, named off the **emitted** member identifier.
         // Two members that stay distinct as identifiers (`fooBar` / `foo_bar`, held
         // apart by their overrides) still shout to one `DEFAULT_FOO_BAR`, and the
         // model-name qualification cannot separate two members of one model.
-        for (language, override_key) in [
-            (Language::Python, "x-py-name"),
-            (Language::TypeScript, "x-ts-name"),
-        ] {
+        for (language, override_key) in [(Language::TypeScript, "x-ts-name")] {
             let input = format!(
                 r##"
 $schema: https://json-schema.org/draft/2020-12/schema
@@ -9930,10 +9947,38 @@ $defs:
     properties:
       foo_bar: { type: string, default: "y" }
 "##;
-        for language in [Language::Python, Language::TypeScript] {
-            parse_for(language, across_models)
-                .expect("`DEFAULT_<MODEL>_<FIELD>` keeps the two apart");
-        }
+        parse_for(Language::TypeScript, across_models)
+            .expect("`DEFAULT_<MODEL>_<FIELD>` keeps the two apart");
+        parse_for(Language::Python, across_models)
+            .expect("Python emits properties rather than DEFAULT_ constants");
+    }
+
+    #[test]
+    fn rejects_python_default_backing_field_collision() {
+        let colliding = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+properties:
+  greeting: { type: string, default: hello }
+  raw: { type: string, x-py-name: _greeting }
+"#;
+        let error = reject_for(Language::Python, colliding);
+        assert!(
+            error.contains("collision") && error.contains("_greeting"),
+            "{error}"
+        );
+
+        let resolved = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+properties:
+  greeting: { type: string, default: hello, x-py-name: salutation }
+  raw: { type: string, x-py-name: _greeting }
+"#;
+        parse_for(Language::Python, resolved)
+            .expect("x-py-name moves the property and its private backing field");
     }
 
     #[test]

@@ -53,11 +53,9 @@ WIRE_FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "wire" / "json_schema"
 #: is the only target that still round-trips the explicit ``null``.
 #:
 #: Nothing else belongs here. In particular a schema ``default`` is **not** an
-#: entry: it is advisory, the field stays ``T | None = None`` with the value on a
-#: ``DEFAULT_<FIELD>`` constant, so an unset defaulted key is omitted on the way
-#: out exactly as it was absent on the way in — which is *why* the fixtures that
-#: omit one (``showcase-minimal.json``, ``message-minimal.json``) round-trip
-#: byte-identically, and the reason that design was chosen.
+#: entry: its public property materializes the default, while a private optional
+#: backing field retains presence so an unset key is omitted on the way out
+#: exactly as it was absent on the way in.
 #:
 #: A path is dot-separated; a ``[]`` segment means "every element of this array".
 COLLAPSED_NULL_MEMBERS: dict[tuple[str, str], tuple[str, ...]] = {

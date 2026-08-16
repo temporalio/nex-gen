@@ -24,7 +24,6 @@ from showcase import (
     Widget,
 )
 from showcase._definitions import ValidationError
-from showcase.models import DEFAULT_DEBUG, DEFAULT_GREETING, DEFAULT_RETRIES
 
 from tests.json_converter_helper import (
     canonical_json_bytes,
@@ -127,11 +126,11 @@ def test_const_and_enum_value_sets() -> None:
     assert minimal.status == "active"
     assert minimal.tier == 1
     assert minimal.scale == 1.5
-    # A `default` is advisory: it is NOT the dataclass field default, so an unset
-    # member stays `None` and is omitted on the way back out.
-    assert minimal.retries is None
-    assert minimal.greeting is None
-    assert minimal.debug is None
+    # Public properties materialize defaults without populating the private
+    # presence-bearing fields, so the values still omit on the way back out.
+    assert minimal.retries == 3
+    assert minimal.greeting == "hello"
+    assert minimal.debug is False
     assert converter_for(Showcase).to_transfer_type(minimal) == BASE
 
     # A `const` member, unlike a `default`, DOES carry its value as the dataclass
@@ -246,18 +245,11 @@ def test_canonical_wire_fixtures_roundtrip_through_the_default_converter() -> No
     assert minimal.count == 3
     assert minimal.active is True
     assert minimal.category == "tools"
-    # Scalar defaults of each kind: unset on the wire, so unset in memory and
-    # omitted on re-serialize (expect_showcase asserted byte-identity above). The
-    # consumer applies the emitted DEFAULT_<FIELD> constant on read, exactly as in
-    # TypeScript.
-    assert minimal.retries is None
-    assert (minimal.retries if minimal.retries is not None else DEFAULT_RETRIES) == 3
-    assert minimal.greeting is None
-    assert (
-        minimal.greeting if minimal.greeting is not None else DEFAULT_GREETING
-    ) == "hello"
-    assert minimal.debug is None
-    assert (minimal.debug if minimal.debug is not None else DEFAULT_DEBUG) is False
+    # Scalar defaults materialize through properties while their unset private
+    # values remain omitted on re-serialize (byte-identity asserted above).
+    assert minimal.retries == 3
+    assert minimal.greeting == "hello"
+    assert minimal.debug is False
 
     full = expect_showcase("showcase-full.json")
     assert full.retries == 5

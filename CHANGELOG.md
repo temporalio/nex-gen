@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Python: JSON Schema model properties that are optional or nullable now use
+  `typing.Optional[T]` on the public dataclass surface. Default-bearing properties
+  now expose mutable same-name properties backed by private optional fields: reads
+  materialize the schema default, while converters preserve unset state and omit it
+  from the wire. The public keyword constructor remains compatible, explicit values
+  (including the default itself) remain present on the wire, assigning `None` resets
+  the field to unset, and Python no longer emits module-level `DEFAULT_*` constants.
 - Protobuf-backed models now consistently generate conversions in both
   directions whenever they are reachable. Go and TypeScript emit previously
   suppressed complementary helpers, operation-free exported models receive the
@@ -80,13 +87,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   member and an explicit wire `null` read as the same `None`, and both
   re-serialize as *omitted*. The set of accepted and rejected values is
   unchanged — only the byte-identity of an explicit `null` on the way back out.
-- Python: A schema `default` is now **advisory**, matching TypeScript. It is no
-  longer materialized on read: the member is encoded like any other optional one
-  (`T | None = None`, omitted when unset, so the wire stays byte-identical), and
-  the default is emitted as a module-level `DEFAULT_<FIELD>` constant
-  (`DEFAULT_<MODEL>_<FIELD>` when the member name is not unique in the module)
-  for the consumer to apply — `x if x is not None else DEFAULT_X`. Pydantic used
-  to surface the default as the field's value; read the constant instead.
 - JSON Schema: An `x-<lang>-name` alongside a `$ref` is no longer merged as an
   implicit-`allOf` conjunct, which cloned the referenced target into the use site.
   It names the _member_ the reference is bound to and leaves the reference intact

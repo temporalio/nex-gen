@@ -15,6 +15,9 @@ from .._definitions import (
 )
 
 
+# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false
+
+
 class _GetCategoryTreeInputTransferTypeConverter(
     temporalio.converter.TransferTypeConverter["GetCategoryTreeInput", typing.Any]
 ):

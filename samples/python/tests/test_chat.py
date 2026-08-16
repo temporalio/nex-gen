@@ -10,7 +10,6 @@ from chat import (
     SendMessageOutput,
 )
 from chat._definitions import ValidationError
-from chat.models import DEFAULT_PRIORITY
 
 from tests.json_converter_helper import (
     canonical_json_bytes,
@@ -85,15 +84,11 @@ def test_required_members_and_unknown_fields_aggregate() -> None:
 
 
 def test_serialize_omits_unset_defaulted_members() -> None:
-    # `priority` carries `default: 0`, which is **advisory**: it is not the
-    # dataclass field default, so an unset `priority` stays `None` and is OMITTED
-    # on serialize, keeping the wire byte-identical to the fixtures. The default is
-    # exposed as the module-level `DEFAULT_PRIORITY` constant the consumer applies,
-    # exactly as TypeScript does (Go uses `PriorityOrDefault()`, Java
-    # `@JsonInclude(NON_NULL)`).
+    # The property materializes `default: 0` on read, while its private backing
+    # field retains the unset state used by the converter.
     converter = converter_for(Message)
     unset = Message(body="hello")
-    assert unset.priority is None
+    assert unset.priority == 0
     assert converter.to_transfer_type(unset) == {"kind": "text", "body": "hello"}
     # The byte-level form of the claim: the wire the default-bearing member produces
     # is exactly the wire that omits it. Byte-identity is the whole justification for
@@ -111,22 +106,23 @@ def test_serialize_omits_unset_defaulted_members() -> None:
     assert encode_bytes(Message(body="hello", priority=7)) == canonical_json_bytes(
         {"kind": "text", "body": "hello", "priority": 7}
     )
+    # Explicitly assigning the schema default still marks the property present.
+    unset.priority = 0
+    assert converter.to_transfer_type(unset)["priority"] == 0
+    # Assigning None restores the unset state without changing the read value.
+    unset.priority = None
+    assert unset.priority == 0
+    assert "priority" not in converter.to_transfer_type(unset)
     # A `const` member, unlike a `default`, DOES carry its value as the dataclass
     # default — it is the only admissible value, not a suggestion.
     assert unset.kind == "text"
 
 
-def test_default_constants_are_advisory() -> None:
-    # The advisory contract, stated directly: reading a defaulted member applies
-    # the emitted constant, and doing so changes nothing about the wire.
-    assert DEFAULT_PRIORITY == 0
+def test_default_property_materializes_without_changing_the_wire() -> None:
     message = converter_for(Message).from_transfer_type(
         {"kind": "text", "body": "hi"}, Message
     )
-    assert message.priority is None
-    assert (
-        message.priority if message.priority is not None else DEFAULT_PRIORITY
-    ) == DEFAULT_PRIORITY
+    assert message.priority == 0
     assert "priority" not in converter_for(Message).to_transfer_type(message)
 
 
@@ -208,10 +204,9 @@ def test_canonical_wire_fixtures_roundtrip_through_the_default_converter() -> No
     assert message.kind == "text"
     assert message.body == "hi"
     assert message.reply_to_id is None
-    # `priority` is unset on the wire, so it stays unset in memory and omitted on
-    # the way back out; the schema default is advisory (DEFAULT_PRIORITY).
-    assert message.priority is None
-    assert (message.priority if message.priority is not None else DEFAULT_PRIORITY) == 0
+    # The public property materializes the default while the private presence
+    # state remains unset and omitted on the way back out.
+    assert message.priority == 0
 
     full_message = typing.cast(
         Message,

@@ -20,6 +20,9 @@ from .content.block.models import BlockStyle
 from .content.page.models import PageMeta
 
 
+# pyright: reportDeprecated=false, reportPropertyTypeMismatch=false
+
+
 class _BlockTransferTypeConverter(
     temporalio.converter.TransferTypeConverter["Block", typing.Any]
 ):
@@ -163,11 +166,11 @@ class Block:
     integer field.
     """
 
-    text: str | None = None
+    text: typing.Optional[str] = None
 
-    style: BlockStyle | None = None
+    style: typing.Optional[BlockStyle] = None
 
-    page: Page | None = None
+    page: typing.Optional[Page] = None
     """Optional back-reference to the containing page - closes the Page <-> Block cycle.
     Optional + nullable, so this edge terminates.
     """
@@ -296,7 +299,7 @@ class Page:
 
     meta: PageMeta
 
-    blocks: list[Block] | None = None
+    blocks: typing.Optional[list[Block]] = None
     """Ordered content blocks. Cross-file `$ref` to block.json (same directory); the array
     is the terminating edge of the cycle.
     """

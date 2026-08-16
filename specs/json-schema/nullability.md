@@ -133,30 +133,29 @@ nullability convention (`x?: T | null` is the optional+nullable form).
 
 ### Python
 
-Optional fields widen to `T | None` and default to `None`; required
-fields carry the bare type and no default. Emitted as a plain
-`@dataclasses.dataclass(slots=True, kw_only=True)` (see PRINCIPLES
-Python §1), so the fields below are the whole class — every field is
-keyword-only, which is why a bare-typed field may follow a defaulted
-one:
+Optional or nullable model properties use `typing.Optional[T]`; required
+non-nullable properties carry bare `T`. Nested nullable values and the
+converter/helper annotations keep their `T | None` spelling. Every public
+constructor argument is keyword-only (see PRINCIPLES Python §1):
 
 ```python
 from __future__ import annotations
 
 import dataclasses
+import typing
 
 
 @dataclasses.dataclass(slots=True, kw_only=True)
 class User:
     id: int                      # required
-    nickname: int | None = None  # optional — None if absent
+    nickname: typing.Optional[int] = None  # optional — None if absent
     name: str                    # required
-    email: str | None = None     # optional
+    email: typing.Optional[str] = None     # optional
 ```
 
 | `type` token | required | optional |
 |---|---|---|
-| any | `T` | `T \| None` (with `= None` default) |
+| any | `T` | `typing.Optional[T]` (with `= None` default) |
 
 Absence is `None`. The dataclass itself neither coerces nor checks
 anything: the only path from wire to field is the model's transfer-type
@@ -233,12 +232,12 @@ modifier, Python's `= None` default).
 
 | `type` token | Java | Go | TypeScript | Python |
 |---|---|---|---|---|
-| `"integer"` | `@Nullable Long`    | `*int64`   | `x?: number \| null`  | `x: int \| None = None` |
-| `"number"`  | `@Nullable Double`  | `*float64` | `x?: number \| null`  | `x: float \| None = None` |
-| `"boolean"` | `@Nullable Boolean` | `*bool`    | `x?: boolean \| null` | `x: bool \| None = None` |
-| `"string"`  | `@Nullable String`  | `*string`  | `x?: string \| null`  | `x: str \| None = None` |
-| `"object"`  | `@Nullable T`       | `*T`       | `x?: T \| null`       | `x: T \| None = None` |
-| `"array"`   | `@Nullable List<T>` | `[]T` (nil = absent or null) | `x?: T[] \| null` | `x: list[T] \| None = None` |
+| `"integer"` | `@Nullable Long`    | `*int64`   | `x?: number \| null`  | `x: typing.Optional[int] = None` |
+| `"number"`  | `@Nullable Double`  | `*float64` | `x?: number \| null`  | `x: typing.Optional[float] = None` |
+| `"boolean"` | `@Nullable Boolean` | `*bool`    | `x?: boolean \| null` | `x: typing.Optional[bool] = None` |
+| `"string"`  | `@Nullable String`  | `*string`  | `x?: string \| null`  | `x: typing.Optional[str] = None` |
+| `"object"`  | `@Nullable T`       | `*T`       | `x?: T \| null`       | `x: typing.Optional[T] = None` |
+| `"array"`   | `@Nullable List<T>` | `[]T` (nil = absent or null) | `x?: T[] \| null` | `x: typing.Optional[list[T]] = None` |
 
 **Required + nullable** (`null` OK, T OK, absent rejected) — same type,
 presence enforced by the validator; TS drops the `?`, Python drops the
@@ -247,12 +246,12 @@ construction):
 
 | `type` token | Java | Go | TypeScript | Python |
 |---|---|---|---|---|
-| `"integer"` | `@Nullable Long`    | `*int64`   | `x: number \| null`  | `x: int \| None` |
-| `"number"`  | `@Nullable Double`  | `*float64` | `x: number \| null`  | `x: float \| None` |
-| `"boolean"` | `@Nullable Boolean` | `*bool`    | `x: boolean \| null` | `x: bool \| None` |
-| `"string"`  | `@Nullable String`  | `*string`  | `x: string \| null`  | `x: str \| None` |
-| `"object"`  | `@Nullable T`       | `*T`       | `x: T \| null`       | `x: T \| None` |
-| `"array"`   | `@Nullable List<T>` | `[]T` (nil = null) | `x: T[] \| null` | `x: list[T] \| None` |
+| `"integer"` | `@Nullable Long`    | `*int64`   | `x: number \| null`  | `x: typing.Optional[int]` |
+| `"number"`  | `@Nullable Double`  | `*float64` | `x: number \| null`  | `x: typing.Optional[float]` |
+| `"boolean"` | `@Nullable Boolean` | `*bool`    | `x: boolean \| null` | `x: typing.Optional[bool]` |
+| `"string"`  | `@Nullable String`  | `*string`  | `x: string \| null`  | `x: typing.Optional[str]` |
+| `"object"`  | `@Nullable T`       | `*T`       | `x: T \| null`       | `x: typing.Optional[T]` |
+| `"array"`   | `@Nullable List<T>` | `[]T` (nil = null) | `x: T[] \| null` | `x: typing.Optional[list[T]]` |
 
 (Java is `@Nullable` across every nullable column — the annotation
 tracks in-memory nullness, not the wire distinction; see the optionality
@@ -317,9 +316,9 @@ absent) and **null acceptance** (non-nullable = reject `null`; nullable
 | State | Java | Go | TS | Python |
 |---|---|---|---|---|
 | **Required, non-nullable** — must be present, must be T | type is `long`/`String`/etc.; emit `field == null` reject + type binding | type is `int64`/`string`/etc.; shadow `*T` field, reject on `nil` | type is `x: T`; emit `parsed.x === undefined \|\| parsed.x === null` reject | type is `x: T` with no default; converter rejects an absent key **and** a `null` token with `required` |
-| **Optional, non-nullable** — absent OK, T OK, explicit `null` rejected | strict-variant custom deserializer (see strategy below) | shadow `*json.RawMessage` with explicit `bytes.Equal(*raw, []byte("null"))` reject | `parsed.x === null` rejected; `=== undefined` OK | type is `x: T \| None = None`; converter branch over the raw dict rejects a key present with `None` (see strategy below) |
-| **Optional + nullable** — absent OK, `null` OK, T OK | type is `@Nullable Long`/`String`/etc.; no extra check beyond type binding | type is `*int64`/`*string`/etc.; no extra check beyond type binding | type is `x?: T \| null`; both `undefined` and `null` accepted | type is `x: T \| None = None`; both absent and `null` accepted, no extra check |
-| **Required + nullable** — must be present, `null` OK, T OK, absent rejected | base (non-strict) deserializer accepts `null`; presence enforced (`field`-present check / required-field machinery) | shadow `*json.RawMessage`; reject on absent (`nil` shadow), accept `null` token | type is `x: T \| null`; emit `parsed.x === undefined` reject; `null` accepted | type is `x: T \| None` with **no** default; converter rejects an absent key, accepts the `null` token as `None` |
+| **Optional, non-nullable** — absent OK, T OK, explicit `null` rejected | strict-variant custom deserializer (see strategy below) | shadow `*json.RawMessage` with explicit `bytes.Equal(*raw, []byte("null"))` reject | `parsed.x === null` rejected; `=== undefined` OK | type is `x: typing.Optional[T] = None`; converter branch over the raw dict rejects a key present with `None` (see strategy below) |
+| **Optional + nullable** — absent OK, `null` OK, T OK | type is `@Nullable Long`/`String`/etc.; no extra check beyond type binding | type is `*int64`/`*string`/etc.; no extra check beyond type binding | type is `x?: T \| null`; both `undefined` and `null` accepted | type is `x: typing.Optional[T] = None`; both absent and `null` accepted, no extra check |
+| **Required + nullable** — must be present, `null` OK, T OK, absent rejected | base (non-strict) deserializer accepts `null`; presence enforced (`field`-present check / required-field machinery) | shadow `*json.RawMessage`; reject on absent (`nil` shadow), accept `null` token | type is `x: T \| null`; emit `parsed.x === undefined` reject; `null` accepted | type is `x: typing.Optional[T]` with **no** default; converter rejects an absent key, accepts the `null` token as `None` |
 
 ## Serialize-side behavior
 

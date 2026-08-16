@@ -7,9 +7,8 @@ Supplies a fallback value for an absent member. In the spec it is a pure
 **annotation** — it never affects validation pass/fail. We give it the
 **off-the-wire, materialized-on-read** operational semantics: set-ness tracked,
 omit-unset on serialize (no deep-equals), materialized **on read** via a
-generated `<Field>OrDefault()` accessor in Go, a native getter in Java, and
-a generated `DEFAULT_<FIELD>` constant the consumer applies in TypeScript
-and Python.
+generated `<Field>OrDefault()` accessor in Go, native getters in Java and
+Python, and a generated `DEFAULT_<FIELD>` constant in TypeScript.
 
 ## Spec summary
 
@@ -118,14 +117,14 @@ Loader behavior:
 **None of its own.** `default` does not change the emitted type — the
 type comes from [[type]] + [[nullability]], and `default` implies the
 member is **optional**, so it takes the optional form (`*T` / `x?: T` /
-`T | None = None` / boxed-or-`@Nullable`). The default value never appears
+`typing.Optional[T]` / boxed-or-`@Nullable`). The default value never appears
 in the field itself in any target. What `default` *does* add is the
 **read-side surfacing mechanism** and the generated default value itself,
 which differ per language:
 
 | Language | Set-ness signal (omit-unset) | Read-side surfacing of the default |
 |---|---|---|
-| Python | `None` (the `T \| None = None` field) | **advisory** — a dataclass carries no methods (PRINCIPLES Python §1), so the consumer applies the default with `x if x is not None else DEFAULT_X`; the generator emits a module-level `DEFAULT_X = "anon"`. No accessor needed. |
+| Python | private `_<field>: typing.Optional[T]` | **native property** — `@property def field(self) -> T` returns the private value when set and the scalar default otherwise. A setter accepts `typing.Optional[T]`; assigning `None` restores unset. Models with defaults receive a generated keyword-only constructor so `Model(field=...)` remains the public construction API. |
 | Java | `null` field + `@JsonInclude(NON_NULL)` | **native** — the generated **getter** returns the default when the backing field is `null` (`return nickname != null ? nickname : "anon";`). Getters already exist in the POJO design (PRINCIPLES Java §1). |
 | TypeScript | `undefined` (the `?` field) | **advisory** — interfaces have no methods (PRINCIPLES TS §2), so the consumer applies the default with the native `?? DEFAULT_X`; the generator emits `export const DEFAULT_X = "anon"`. No accessor needed; `??` is the idiom. |
 | Go | `*T` `nil` + `,omitempty` | **generated accessor** — a `func (m M) <Field>OrDefault() T` returns `*m.Field` when set and the default literal when `nil` (`func (u User) NicknameOrDefault() string { if u.Nickname != nil { return *u.Nickname }; return "anon" }`). The bare field stays `*T` (set-ness intact); the accessor is the materialize-on-read path. Emitted **only** for default-bearing fields. Modeled on proto3's `GetX()` — the same omit-default-on-wire + accessor-materializes-default pattern already familiar to Temporal users. Named `<Field>OrDefault` rather than `Get<Field>` to read as "the value, or its default" and to avoid implying a getter on every field. Alternative approaches considered: (a) advisory constant (`DEFAULT_X` + caller nil-checks) — pushes nil-checks to every call site; (b) populate on deserialize — destroys set-ness, forces deep-equals, breaks P9. |
@@ -139,14 +138,13 @@ The read-side surfacing synthesizes **one new identifier in three targets**
 |---|---|---|---|
 | Go | `<Field>OrDefault()` method | struct method-set | a **declared** member whose name maps to `<Field>OrDefault` (Go forbids a field and method of the same name — a **hard compile error**); another `<Field>OrDefault` from a sibling field |
 | TypeScript | `DEFAULT_<FIELD>` const | module | another `DEFAULT_<FIELD>` from a field that case-maps the same. [[const]] synthesizes no named *type* in TS (the type closes to an inline literal) but does emit a module-scope `<FIELD>_CONST` binding holding the wire value, which shares this scope — unexported, yet still a redeclaration error if it coincides |
-| Python | `DEFAULT_<FIELD>` const | module | another `DEFAULT_<FIELD>` from a field that case-maps the same ([[const]] synthesizes no Python identifier — the value is an inline `Literal`) |
+| Python | `_<field>` backing slot | class/member | a declared member overridden to that private identifier; another backing slot after member mapping |
 | Java | none (default folds into the existing getter) | — | — |
 
-The constant is named `DEFAULT_<FIELD>`, or **`DEFAULT_<MODEL>_<FIELD>`**
-when that member identifier is not unique across the module's models — the
-same qualification rule in TypeScript and Python, since both put the constant
-in module scope. Qualification separates two *models*; two members of **one**
-model that shout alike are a collision it cannot resolve, and rejects.
+The TypeScript constant is named `DEFAULT_<FIELD>`, or
+**`DEFAULT_<MODEL>_<FIELD>`** when that member identifier is not unique across
+the module's models. Python emits no `DEFAULT_*` binding: its private backing
+slot is exactly the emitted member identifier prefixed with `_`.
 
 Per **P15** these participate in the single per-scope collision pass and
 **reject at load** on any coincidence — never auto-mangled (a
@@ -154,8 +152,8 @@ Per **P15** these participate in the single per-scope collision pass and
 Java adds no name, so it carries no default-specific collision.
 The rename **escape hatch** is the [[properties]] case-mapping override
 (`x-go-name`, …) on the *declaring* field — re-mapping it moves the
-synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` names with it, because
-both are named off the **emitted** member identifier rather than the JSON
+synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` / `_<field>` names with it,
+because all are named off the **emitted** member identifier rather than the JSON
 key (`retryCount` + `x-ts-name: attempts` → `DEFAULT_ATTEMPTS`). The
 derivation has to work that way for the hatch to open at all: two members
 that recase alike collide on `DEFAULT_<FIELD>`, and an override that moved
@@ -164,11 +162,10 @@ would reject with a fix-it the author cannot act on — the only remaining
 escape being a rename of the JSON property, i.e. a change to the wire
 contract (P15, P7.1).
 
-Java materializes-on-read for free (the getter); Go does so via the
-generated `<Field>OrDefault()` accessor. TypeScript and Python have no
-method on the model (interfaces, PRINCIPLES TS §2; inert dataclasses,
-PRINCIPLES Python §1), so both lean on a generated constant the consumer
-applies — an idiomatic stand-in for the same thing. In every language the
+Java materializes-on-read through its getter; Go does so via the generated
+`<Field>OrDefault()` accessor, and Python through a generated property.
+TypeScript interfaces have no methods, so TypeScript alone leans on a generated
+constant the consumer applies. In every language the
 **bare field still carries set-ness** (`nil` / `undefined` / `None` /
 `null`); the default is layered on read, never written back into the field,
 so omit-on-serialize stays faithful.
@@ -201,7 +198,7 @@ default. Mechanisms:
 |---|---|
 | Go | `*T` with `,omitempty` → `nil` omitted by the stdlib encoder via the type-alias `MarshalJSON`. Pointer-to-zero-value still emits, so set-ness ≡ pointer-presence. |
 | TypeScript | `toTransferType` skips keys whose value is `undefined` when building the transfer value (PRINCIPLES TS §4). |
-| Python | `to_transfer_type` skips a key whose attribute is `None` when building the intermediate dict, exactly as it does for any other optional member. |
+| Python | `to_transfer_type` reads the private backing slot and skips the key when that slot is `None`; it never reads the materializing public property. |
 | Java | `@JsonInclude(NON_NULL)` — `null` (unset) omitted; getter still returns the default to the consumer. |
 
 Three consequences that the count specs already encode:
@@ -236,7 +233,7 @@ Three consequences that the count specs already encode:
 | **Array default (deferred)** | `{type:"array", items:{type:"string"}, default:["a"]}` |
 | `default: null` (degenerate) | `{oneOf:[{type:"string"},{type:"null"}], default:null}` |
 | With `const` | `{type:"string", const:"v1", default:"v1"}` |
-| Synthesized-name collision (P15) | a field `nickname` with a `default` **and** a sibling member mapping to `NicknameOrDefault` (Go field/method clash); two `DEFAULT_<FIELD>` consts that case-map the same after qualification (TS / Python) |
+| Synthesized-name collision (P15) | a field `nickname` with a `default` **and** a sibling member mapping to `NicknameOrDefault` (Go field/method clash); two `DEFAULT_<FIELD>` consts that case-map the same after qualification (TS); a Python sibling explicitly renamed to `_nickname` (private-backing clash) |
 
 ### Runtime fixtures (validator / adapters)
 
@@ -303,4 +300,4 @@ with those features — see Loader behavior.)
 - [[type]] — the default value must be valid for the declared type.
 - [[properties]] — hosts the member subschema and the set-ness machinery,
   and owns the case-mapping + collision/escape-hatch policy that governs
-  the synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` names (P15).
+  the synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` / `_<field>` names (P15).
