@@ -8,8 +8,8 @@ from chat import (
     Room,
     SendMessageInput,
     SendMessageOutput,
+    ValidationError,
 )
-from chat._definitions import ValidationError
 
 from tests.json_converter_helper import (
     canonical_json_bytes,

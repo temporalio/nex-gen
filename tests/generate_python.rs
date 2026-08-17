@@ -453,6 +453,21 @@ fn read_python_package_files(dir: &Path) -> BTreeMap<PathBuf, String> {
     files
 }
 
+fn assert_python_validation_exports(package_init: &str) {
+    for expected in [
+        "from ._definitions import (",
+        "    ValidationError,",
+        "    Violation,",
+        "    \"ValidationError\",",
+        "    \"Violation\",",
+    ] {
+        assert!(
+            package_init.contains(expected),
+            "{expected}\n{package_init}"
+        );
+    }
+}
+
 fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
     files
         .into_iter()
@@ -664,6 +679,10 @@ fn python_json_example_generation_matches_checked_in_output() {
         let expected =
             read_python_package_files(&python_json_definitions_output_path(&root, example_id));
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        let package_init = rendered
+            .get(&PathBuf::from("__init__.py"))
+            .expect("JSON Schema package should include a root __init__.py");
+        assert_python_validation_exports(package_init);
         if example_id == "showcase" {
             let all = rendered.values().cloned().collect::<Vec<_>>().join("\n");
             // A default-bearing property materializes on read while its private
@@ -734,6 +753,10 @@ fn python_json_api_example_generation_matches_checked_in_output() {
         let rendered = read_python_package_files(&output_path);
         let expected = read_python_package_files(&python_json_api_output_path(&root, example_id));
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
+        let package_init = rendered
+            .get(&PathBuf::from("__init__.py"))
+            .expect("JSON Schema package should include a root __init__.py");
+        assert_python_validation_exports(package_init);
         fs::remove_dir_all(output_path).unwrap();
     }
 }

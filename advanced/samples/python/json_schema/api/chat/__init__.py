@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from ._definitions import (
+    ValidationError,
+    Violation,
+)
 import collections.abc
 import typing
 
@@ -11,6 +15,8 @@ from .services import ChatServiceClient
 from . import services as _services
 
 __all__ = [
+    "ValidationError",
+    "Violation",
     "ChatServiceClient",
 ]
 

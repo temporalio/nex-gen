@@ -10,7 +10,7 @@ from kb import GetCategoryTreeInput
 from kb import GetPageInput
 from kb import Page
 from kb import PutBlockOutput
-from kb._definitions import ValidationError
+from kb import ValidationError
 
 from tests.json_converter_helper import (
     canonical_fixture_bytes,

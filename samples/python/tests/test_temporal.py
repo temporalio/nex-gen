@@ -4,11 +4,10 @@ import typing
 
 import pytest
 
-from temporal import Temporal
+from temporal import Temporal, ValidationError
 from temporal._definitions import (
     _TEMPORAL_FRACTION_DIGITS,
     _TEMPORAL_MAX_DURATION_SECONDS,
-    ValidationError,
     _temporal_isoformat,
 )
 

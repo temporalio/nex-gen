@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - WIT signal-with-start request models now carry Temporal headers while keeping
   them out of generated convenience operation APIs.
+- Python JSON Schema packages now export `ValidationError` and `Violation`
+  from their root `__init__.py`; callers no longer need to import the private
+  `_definitions` module.
 - Added grouped protobuf `oneof` authoring and bidirectional Python conversion,
   including required and optional oneofs, scaffolding through `add-rpc` and
   `add-message`, and explicit diagnostics for unsupported target backends.

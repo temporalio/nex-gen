@@ -21,9 +21,10 @@ from showcase import (
     ShowcaseRowsItem,
     Square,
     TextNote,
+    ValidationError,
+    Violation,
     Widget,
 )
-from showcase._definitions import ValidationError
 
 from tests.json_converter_helper import (
     canonical_json_bytes,
@@ -35,6 +36,13 @@ from tests.json_converter_helper import (
 )
 
 SUITE = "showcase"
+
+
+def test_validation_types_are_exported_from_the_package() -> None:
+    violation = Violation(path="name", reason="required")
+    error = ValidationError([violation])
+    assert error.violations == [violation]
+
 
 # The ten required members of Showcase; every negative payload starts here so the
 # only violations reported are the ones under test. Mirrors the `base` object the

@@ -5923,7 +5923,8 @@ pub(crate) fn build_name_manifest(
 ///   runtime helper functions (`isPlainObject`, `collect`, …) are `camelCase`.
 /// - Python (`src/generator/json/python.rs`): `Violation` (dataclass) and
 ///   `ValidationError` (exception) are imported by bare name into every model
-///   module; the other runtime helpers are `_`-prefixed.
+///   module and re-exported by the root package barrel; the other runtime helpers
+///   are `_`-prefixed.
 /// - Java (`src/generator/java.rs`): the root-package runtime classes
 ///   `Violation`, `ValidationException`, and `SpecNumbers`, each emitted as its
 ///   own always-present public file and imported into model files.

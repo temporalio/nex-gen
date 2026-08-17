@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from ._definitions import (
+    ValidationError,
+    Violation,
+)
 from .models import Temporal
 
 __all__ = [
+    "ValidationError",
+    "Violation",
     "Temporal",
 ]
