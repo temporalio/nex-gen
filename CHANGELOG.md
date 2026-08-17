@@ -42,62 +42,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Python: JSON Schema default-bearing properties now expose mutable same-name
-  properties backed by private `T | None` fields: reads
-  materialize the schema default, while converters preserve unset state and omit it
-  from the wire. The public keyword constructor remains compatible, explicit values
-  (including the default itself) remain present on the wire, deleting the property
-  resets the field to unset, and Python no longer emits module-level `DEFAULT_*`
-  constants.
+- Python: JSON Schema output now uses slotted, keyword-only dataclasses and the
+  default Temporal converter instead of Pydantic. Generated transfer converters
+  preserve wire names and unknown fields in `additional_properties`, aggregate
+  structured validation errors, collapse absent and explicit-null optional values
+  to `None`, and surface schema defaults through mutable properties (`del field`
+  restores unset) rather than `DEFAULT_*` constants.
 - Protobuf-backed models now consistently generate conversions in both
   directions whenever they are reachable. Go and TypeScript emit previously
   suppressed complementary helpers, operation-free exported models receive the
   same validation as operation-used models, and Java now reports its existing
   lack of protobuf model support instead of silently dropping protobuf
   operation types.
-- Python: Generated JSON-Schema models are now plain
-  `@dataclasses.dataclass(slots=True, kw_only=True)` types instead of
-  `pydantic.BaseModel`s. Each model carries a generated transfer type converter
-  registered with `temporalio.converter.transfer_type_convertible`, so the models
-  work with the **default** Temporal data converter — the
-  `temporalio.contrib.pydantic.pydantic_data_converter` wiring is no longer
-  needed, and `pydantic` is no longer a dependency of generated code. Every field
-  is keyword-only, and the wire name of a member is pinned by the converter
-  rather than by a `Field(alias=...)`.
-- Python: `additionalProperties` is now carried by an explicit
-  `additional_properties: dict[str, V]` member instead of Pydantic's
-  `model_extra` bag, both for an open declared-property object and for a
-  map-shaped model. This matches Go, TypeScript, and Java, and keeps the emitted
-  type's kind stable if `properties` are added to that schema later. Read
-  `model.additional_properties` where `model.model_extra` was read, and construct
-  a map-shaped model as `Labels(additional_properties={...})`.
-- Python: Validation errors are now a generated `ValidationError` over
-  `Violation { path, reason }` — the same structured, aggregating error Go,
-  TypeScript, and Java already surface — instead of `pydantic.ValidationError`.
-  One bad payload reports every violation it contains, with the JSON path of each
-  and a reason naming the concrete bound and the offending value. Both types live
-  in the package's `_definitions` module and are not re-exported through
-  `__init__.py`, so catching the aggregating error takes
-  `from <package>._definitions import ValidationError` — Python is the only
-  target that reaches its error type through a private name (Go's is exported
-  from the one flat package, Java's is `public`, and the TypeScript root barrel
-  re-exports it).
-- Python: An **optional and nullable** member now collapses on round-trip, as it
-  already does in Go and Java. A dataclass has no presence channel, so an absent
-  member and an explicit wire `null` read as the same `None`, and both
-  re-serialize as *omitted*. The set of accepted and rejected values is
-  unchanged — only the byte-identity of an explicit `null` on the way back out.
 - JSON Schema: An `x-<lang>-name` alongside a `$ref` is no longer merged as an
   implicit-`allOf` conjunct, which cloned the referenced target into the use site.
   It names the _member_ the reference is bound to and leaves the reference intact
   — the one sibling keyword treated this way, because it asserts nothing about the
   value, and the only way to rename a member whose type is a `$ref` (a member
   named `class` was otherwise unfixable in Python and Java).
-- TypeScript: JSON models now export companion `TransferTypeConverter`
-  instances with `fromTransferType`/`toTransferType`, replacing the previous
-  mapper classes and intermediate-value terminology.
-- TypeScript: JSON Schema operations now attach their model converters as
-  `inputType`/`outputType` metadata. WIT-generated operations are unchanged.
+- TypeScript: JSON Schema models now export `TransferTypeConverter` instances
+  (`fromTransferType`/`toTransferType`), and generated operations reference them
+  through `inputType`/`outputType`. Converter names follow resolved model names,
+  participate in collision checks, and require the nexus-rpc type-info API.
 - Generating into an existing `--output` directory no longer deletes it first.
   The directory is written into instead, so pre-existing files and
   subdirectories are preserved; generated files are still overwritten in place.
@@ -147,64 +113,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- JSON Schema: Modules that own no types now import foreign `$ref` targets
-  without re-emitting duplicate declarations.
-- JSON Schema: Identifier collisions now use each target's actual emitted
-  namespace, including Go's flat package and the TypeScript/Python root barrels.
-  TypeScript service constants are checked under their emitted lower-camel names.
-- JSON Schema: Member-derived synthesized names now follow `x-<lang>-name`
-  overrides, including TypeScript default constants and Go closed-value types.
-- JSON Schema: A root model can no longer silently collapse with a same-named
-  `$defs` or synthesized model; the loader reports the conflicting origins.
-- TypeScript: A **`string` array element's own constraints are now enforced**.
-  An element schema of `type: string` took a bare `typeof` check, so an
-  `items: { type: string, minLength: 3, pattern: "^[a-z]+$" }` array accepted
-  `["a"]` and `["A"]` — payloads Go, Python and Java all reject — and the
-  element's compiled pattern constant was emitted but never referenced. Every
-  element kind now takes the same parse the value in that position takes
-  anywhere else, so `minLength`, `maxLength`, `pattern` and `format` fire at the
-  element's own index (`codes[0]`, `must have length >= 3, got 1`).
-- TypeScript: A mistyped **array element** now reports the type it failed to be
-  (`tags[0]`, `expected string`), as an element of every other type already did
-  and as Python and Java report. A `string` element reported a bare
-  `expected element`, which named neither the expected type nor anything the
-  element's own indexed path did not already carry.
-- Python: A `const`/`enum` check now tests membership in a tuple of the
-  admissible values (`if value not in (True,)`) in both directions, where the
-  parse side chained one `!=` per member. A boolean `const` emitted
-  `value != True`, which is a lint error in the user's repository (ruff E712)
-  and reads nothing like hand-written Python, and a multi-member `enum` emitted
-  one comparison per member. The parse and serialize sides now share one
-  membership shape.
-- Python: A mistyped **array element** now reports the type it failed to be
-  (`tags[0]`, `expected string`), as an element of every other type already did
-  and as Java reports. A plain `string` element reported a bare
-  `expected element`, which named neither the expected type nor anything the
-  element's own indexed path did not already carry.
-- Python: A declared property named after one of the converter's own locals
-  **silently disabled validation**. A property named `violations` rebound the
-  violation accumulator, so a payload that broke a constraint was returned as a
-  model instead of raising; ten other names (`raw`, `len`, `int`, `str`, `bool`,
-  `dict`, `isinstance`, `typing`, `math`, `out`) crashed the converter on every
-  payload. The parse body now holds each property's value in a `<member>_value`
-  slot local, which cannot coincide with a runtime local, a builtin, an imported
-  module, or a synthesized module-level name — so no property name can shadow
-  anything (P15).
-- Python: The module-level names the generator synthesizes beyond
-  `DEFAULT_<FIELD>` — the `_<MODEL>_DECLARED` declared-key sets, the union
-  `_<base>_{from,to}_transfer_type` functions, the `_<Model>TransferTypeConverter`
-  classes, and the `_PATTERN_<HEX>` compiled regexes — now participate in the P15
-  collision pass. Two types whose `x-py-name` overrides differ only in case
-  (`ContactPy` / `ContactPY`) previously emitted one `_CONTACT_PY_DECLARED` for
-  both, and the loser's declared properties leaked into its catch-all; such a
-  schema is now rejected at load with a fix-it diagnostic. An inline union's
-  functions are also named from the member's *emitted* identifier, so an
-  `x-py-name` override moves them.
-- JSON Schema: `_definitions` is now a reserved input-module name alongside
-  `definitions`. Python emits its shared runtime as `_definitions.py`, so an input
-  named `_definitions.yaml` emitted a `_definitions/` package directory at that
-  module's own import path — shadowing it and breaking every generated
-  `from .._definitions import ...`.
+- JSON Schema: Cross-input emission and naming now follow each target's actual
+  scope and `x-<lang>-name` overrides. Foreign types are imported rather than
+  duplicated, empty TypeScript model modules are omitted, member-derived names
+  stay aligned, and root/`$defs`/synthesized collisions fail at load time.
+- TypeScript: String array elements now enforce their own constraints and report
+  type errors at the indexed element path.
+- Python: Closed-value checks now use tuple membership, array-element errors name
+  the expected type, converter locals cannot be shadowed by properties, and all
+  synthesized module names participate in collision checks. `_definitions` is
+  reserved for the generated runtime module.
 - JSON Schema: A **non-object `oneOf` branch's own constraints** were dropped in
   three of four languages: only Go carried them, in the synthesized
   `<Union><Kind>` variant's `Validate`. TypeScript cast the narrowed value
@@ -301,8 +219,6 @@ array"` at runtime, though `items.md` accepts them. Both now decode elementwise,
   a time.") added that package to the import block, and an unused import is a Go
   compile error. Package use is now read off the emitted code, not the doc
   comments.
-- JSON Schema: Cross-file `$ref` and operation references now honor the target
-  model's `x-<lang>-name` override.
 - JSON Schema: A `oneOf` with an inline object branch generated uncompilable Go
   (a marker method on an undeclared `<Union>Object` type) and uncompilable
   TypeScript (a converter named after the anonymous `Record<string, unknown>`
