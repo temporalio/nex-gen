@@ -3263,8 +3263,10 @@ fn render_default_properties(output: &mut String, schema: &Schema) -> Result<()>
             python_value_literal(default)?
         ));
         output.push_str(&format!(
-            "\n    @{field_name}.setter\n    def {field_name}(self, value: {}) -> None:  # pyright: ignore[reportPropertyTypeMismatch]\n        self._{field_name} = value\n",
-            optional_annotation(&member_type)
+            "\n    @{field_name}.setter\n    def {field_name}(self, value: {member_type}) -> None:\n        self._{field_name} = value\n"
+        ));
+        output.push_str(&format!(
+            "\n    @{field_name}.deleter\n    def {field_name}(self) -> None:\n        self._{field_name} = None\n"
         ));
     }
     Ok(())

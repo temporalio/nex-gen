@@ -46,8 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   properties backed by private `T | None` fields: reads
   materialize the schema default, while converters preserve unset state and omit it
   from the wire. The public keyword constructor remains compatible, explicit values
-  (including the default itself) remain present on the wire, assigning `None` resets
-  the field to unset, and Python no longer emits module-level `DEFAULT_*` constants.
+  (including the default itself) remain present on the wire, deleting the property
+  resets the field to unset, and Python no longer emits module-level `DEFAULT_*`
+  constants.
 - Protobuf-backed models now consistently generate conversions in both
   directions whenever they are reachable. Go and TypeScript emit previously
   suppressed complementary helpers, operation-free exported models receive the

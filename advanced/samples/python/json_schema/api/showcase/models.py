@@ -3247,8 +3247,12 @@ class Showcase:
         return self._retries if self._retries is not None else 3
 
     @retries.setter
-    def retries(self, value: int | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]
+    def retries(self, value: int) -> None:
         self._retries = value
+
+    @retries.deleter
+    def retries(self) -> None:
+        self._retries = None
 
     @property
     def greeting(self) -> str:
@@ -3258,8 +3262,12 @@ class Showcase:
         return self._greeting if self._greeting is not None else "hello"
 
     @greeting.setter
-    def greeting(self, value: str | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]
+    def greeting(self, value: str) -> None:
         self._greeting = value
+
+    @greeting.deleter
+    def greeting(self) -> None:
+        self._greeting = None
 
     @property
     def debug(self) -> bool:
@@ -3269,8 +3277,12 @@ class Showcase:
         return self._debug if self._debug is not None else False
 
     @debug.setter
-    def debug(self, value: bool | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]
+    def debug(self, value: bool) -> None:
         self._debug = value
+
+    @debug.deleter
+    def debug(self) -> None:
+        self._debug = None
 
 
 class _ShowcaseAuditTransferTypeConverter(

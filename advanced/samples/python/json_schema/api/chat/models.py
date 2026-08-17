@@ -251,8 +251,12 @@ class Message:
         return self._priority if self._priority is not None else 0
 
     @priority.setter
-    def priority(self, value: int | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]
+    def priority(self, value: int) -> None:
         self._priority = value
+
+    @priority.deleter
+    def priority(self) -> None:
+        self._priority = None
 
 
 class _RoomTransferTypeConverter(

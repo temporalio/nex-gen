@@ -109,8 +109,8 @@ def test_serialize_omits_unset_defaulted_members() -> None:
     # Explicitly assigning the schema default still marks the property present.
     unset.priority = 0
     assert converter.to_transfer_type(unset)["priority"] == 0
-    # Assigning None restores the unset state without changing the read value.
-    unset.priority = None
+    # Deleting the property restores the unset state without changing the read value.
+    del unset.priority
     assert unset.priority == 0
     assert "priority" not in converter.to_transfer_type(unset)
     # A `const` member, unlike a `default`, DOES carry its value as the dataclass

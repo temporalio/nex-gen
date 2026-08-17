@@ -337,7 +337,7 @@ assert explicit_default != unset
 unset.salutation = "bye"
 assert unset.salutation == "bye"
 assert converter.to_transfer_type(unset)["greeting"] == "bye"
-unset.salutation = None
+del unset.salutation
 assert unset.salutation == "hello"
 assert "greeting" not in converter.to_transfer_type(unset)
 assert unset == other
@@ -670,9 +670,8 @@ fn python_json_example_generation_matches_checked_in_output() {
             // optional storage retains unset state for wire omission.
             assert!(all.contains("_greeting: str | None"));
             assert!(all.contains("def greeting(self) -> str:"));
-            assert!(all.contains(
-                "def greeting(self, value: str | None) -> None:  # pyright: ignore[reportPropertyTypeMismatch]"
-            ));
+            assert!(all.contains("def greeting(self, value: str) -> None:"));
+            assert!(all.contains("@greeting.deleter\n    def greeting(self) -> None:"));
             assert!(!all.contains("DEFAULT_GREETING"));
             assert!(!all.contains("DEFAULT_DEBUG"));
             assert!(!all.contains("DEFAULT_RETRIES"));
@@ -1732,12 +1731,13 @@ fn python_json_model_properties_use_union_none_and_defaults_preserve_presence() 
     assert!(rendered.contains("_salutation: typing.Annotated[str, typing_extensions.deprecated"));
     assert!(rendered.contains("def salutation(self) -> typing.Annotated[str,"));
     assert!(rendered.contains("value: typing.Annotated["));
+    assert!(rendered.contains("@salutation.deleter\n    def salutation(self) -> None:"));
     assert!(rendered.contains("if value._salutation is not None:"));
     assert!(!rendered.contains("DEFAULT_SALUTATION"));
     assert!(!rendered.contains("reportDeprecated=false"));
     assert!(!rendered.contains("reportPropertyTypeMismatch=false"));
     assert!(!rendered.contains("reportDeprecated"));
-    assert!(rendered.contains("# pyright: ignore[reportPropertyTypeMismatch]"));
+    assert!(!rendered.contains("reportPropertyTypeMismatch"));
     // Converter/helper annotations use the same compact union style.
     assert!(rendered.contains("optional_plain_value: bool | None = None"));
     assert!(rendered.contains("nullable_items_value: list[str | None] | None = None"));
