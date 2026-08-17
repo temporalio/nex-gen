@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - WIT signal-with-start request models now carry Temporal headers while keeping
   them out of generated convenience operation APIs.
+- .NET proto-backed models now use Temporal SDK transfer-type converters. The
+  generated output requires `Temporalio` 1.18.0 or newer; generic proto-backed
+  .NET models report an explicit unsupported-conversion error until the SDK
+  supports generic converter registration.
 - Python JSON Schema packages now export `ValidationError` and `Violation`
   from their root `__init__.py`; callers no longer need to import the private
   `_definitions` module.

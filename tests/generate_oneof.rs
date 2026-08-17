@@ -154,6 +154,19 @@ fn unsupported_backend_rejects_reachable_generic_proto_carrier() {
 }
 
 #[test]
+fn dotnet_rejects_generic_proto_models_until_sdk_supports_generic_converters() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_generic_carrier_fixture(temp.path());
+    let error = generate(Language::Dotnet, &path).unwrap_err();
+    assert!(
+        error.to_string().contains(
+            "dotnet protobuf transfer-type conversion does not yet support generic model"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
 fn typescript_emits_a_complete_conversion_pair() {
     let temp = tempfile::tempdir().unwrap();
     let path = write_fixture(temp.path(), true, true, true);

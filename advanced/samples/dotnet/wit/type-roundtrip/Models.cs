@@ -6,13 +6,15 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using Temporalio.Converters;
 using Nexgen.Support;
 
 namespace Nexgen.TypeRoundtripService
 {
 
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(ActivityOptions.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public class ActivityOptions : Nexgen.Support.ITemporalIntermediate
+    public class ActivityOptions
     {
         public ActivityOptions(Temporalio.Common.RetryPolicy retryPolicy)
         {
@@ -24,22 +26,22 @@ namespace Nexgen.TypeRoundtripService
         public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
         public Temporalio.Common.Priority? Priority { get; init; }
 
-        public static ActivityOptions TemporalFromIntermediate(Temporalio.Api.Activity.V1.ActivityOptions wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        internal static ActivityOptions FromTransferType(Temporalio.Api.Activity.V1.ActivityOptions wire)
         {
-            return new ActivityOptions(Nexgen.Support.ProtoExtensions.FromRetryPolicyProto(wire.RetryPolicy, payloadConverter))
+            return new ActivityOptions(Nexgen.Support.ProtoExtensions.FromRetryPolicyProto(wire.RetryPolicy))
             {
-                TaskQueue = wire.TaskQueue == null ? null : Nexgen.Support.ProtoExtensions.FromTaskQueueProto(wire.TaskQueue, payloadConverter),
-                ScheduleToCloseTimeout = wire.ScheduleToCloseTimeout == null ? null : Nexgen.Support.ProtoExtensions.FromDurationProto(wire.ScheduleToCloseTimeout, payloadConverter),
-                Priority = wire.Priority == null ? null : Nexgen.Support.ProtoExtensions.FromPriorityProto(wire.Priority, payloadConverter),
+                TaskQueue = wire.TaskQueue == null ? null : Nexgen.Support.ProtoExtensions.FromTaskQueueProto(wire.TaskQueue),
+                ScheduleToCloseTimeout = wire.ScheduleToCloseTimeout == null ? null : Nexgen.Support.ProtoExtensions.FromDurationProto(wire.ScheduleToCloseTimeout),
+                Priority = wire.Priority == null ? null : Nexgen.Support.ProtoExtensions.FromPriorityProto(wire.Priority),
             };
         }
 
-        public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        internal Temporalio.Api.Activity.V1.ActivityOptions ToTransferType()
         {
             var proto = new Temporalio.Api.Activity.V1.ActivityOptions();
             if (TaskQueue is { } taskQueue)
             {
-                proto.TaskQueue = Nexgen.Support.ProtoExtensions.ToTaskQueueProto(taskQueue, payloadConverter);
+                proto.TaskQueue = Nexgen.Support.ProtoExtensions.ToTaskQueueProto(taskQueue);
             }
             proto.RetryPolicy = RetryPolicy.ToProto();
             if (ScheduleToCloseTimeout is { } scheduleToCloseTimeout)
@@ -53,29 +55,48 @@ namespace Nexgen.TypeRoundtripService
             return proto;
         }
 
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            public System.Type TransferType => typeof(Temporalio.Api.Activity.V1.ActivityOptions);
+
+            public object? ToTransferType(object? value) => value is null ? null : ((ActivityOptions)value).ToTransferType();
+
+            public object? FromTransferType(object? transferType) => transferType is null ? null : ActivityOptions.FromTransferType((Temporalio.Api.Activity.V1.ActivityOptions)transferType);
+        }
+
     }
 
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(FailureContainer.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public class FailureContainer : Nexgen.Support.ITemporalIntermediate
+    public class FailureContainer
     {
         public System.Exception? Failure { get; init; }
 
-        public static FailureContainer TemporalFromIntermediate(Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        internal static FailureContainer FromTransferType(Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes wire)
         {
             return new FailureContainer()
             {
-                Failure = wire.Failure == null ? null : Nexgen.Support.ProtoExtensions.FromFailureProto(wire.Failure, payloadConverter),
+                Failure = wire.Failure == null ? null : Nexgen.Support.ProtoExtensions.FromFailureProto(wire.Failure),
             };
         }
 
-        public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)
+        internal Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes ToTransferType()
         {
             var proto = new Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes();
             if (Failure is { } failure)
             {
-                proto.Failure = Nexgen.Support.ProtoExtensions.ToFailureProto(failure, payloadConverter);
+                proto.Failure = Nexgen.Support.ProtoExtensions.ToFailureProto(failure);
             }
             return proto;
+        }
+
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            public System.Type TransferType => typeof(Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes);
+
+            public object? ToTransferType(object? value) => value is null ? null : ((FailureContainer)value).ToTransferType();
+
+            public object? FromTransferType(object? transferType) => transferType is null ? null : FailureContainer.FromTransferType((Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes)transferType);
         }
 
     }

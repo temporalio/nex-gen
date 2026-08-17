@@ -674,6 +674,15 @@ export const ActivityOptions = {
 Required fields are validated in `from_proto` -- missing required proto fields
 raise a `ValueError` (Python) or throw an `Error` (TypeScript).
 
+### .NET transfer-type conversion
+
+For a non-generic proto-backed .NET record, nexgen emits a
+`TemporalTransferTypeConverter` attribute and companion
+`ITemporalTransferTypeConverter`. The Temporal .NET SDK uses the companion to
+convert between the public model and its protobuf transfer type during payload
+serialization, so generated callers continue to use the public model. This
+requires `Temporalio` 1.18.0 or newer.
+
 ### Sourced Fields
 
 Fields annotated with `@nexus.source` are not exposed in the user-facing API.
@@ -1259,6 +1268,11 @@ as `typing.Any`. `Payloads` fields continue to decode as untyped sequences.
 
 Type parameters are also unsupported in resources, map keys, function-signature
 metadata, or resource-bound generic operations.
+
+.NET also rejects every generic proto-backed record: the current SDK transfer
+type converter registration cannot instantiate an open generic converter. The
+generator reports this explicitly rather than emitting a model that cannot be
+serialized through the SDK.
 
 Generic variants retain each target's normal tagged representation: tagged
 tuples in Python, tagged object unions in TypeScript, sealed interfaces and

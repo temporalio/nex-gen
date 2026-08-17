@@ -76,6 +76,13 @@ impl<'a> ApiPlanner<'a> {
             "System.CodeDom.Compiler",
             "System.Collections.Generic",
         ];
+        if models.iter().any(|model| {
+            self.external_models
+                .model_transfer_converter_attribute(model)
+                .is_some()
+        }) {
+            imports.push("Temporalio.Converters");
+        }
         if self.external_model_fragments.has_models() {
             imports.push("System.Text.Json");
             imports.push("System.Text.Json.Serialization");
@@ -591,6 +598,13 @@ impl<'a> ApiPlanner<'a> {
 
     fn render_model(&self, output: &mut String, model: &PlannedModel) {
         render_xml_summary(output, "", dotnet_doc(model.doc()), model.experimental);
+        if let Some(attribute) = self
+            .external_models
+            .model_transfer_converter_attribute(model)
+        {
+            output.push_str(&attribute);
+            output.push('\n');
+        }
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         let access = self.model_access(model);
@@ -2063,6 +2077,10 @@ impl DotNetExternalModels {
         support_namespace: Option<&str>,
     ) -> Option<String> {
         self.proto.model_wire_interface(model, support_namespace)
+    }
+
+    fn model_transfer_converter_attribute(&self, model: &PlannedModel) -> Option<String> {
+        self.proto.model_transfer_converter_attribute(model)
     }
 
     fn model_uses_support_extensions(&self, model: &PlannedModel, api_plan: &PlannedSpec) -> bool {

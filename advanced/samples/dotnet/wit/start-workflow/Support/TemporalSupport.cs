@@ -9,6 +9,7 @@ using System.Reflection;
 using Google.Protobuf.WellKnownTypes;
 using Temporalio.Common;
 using Temporalio.Converters;
+using Temporalio.Nexus;
 using Temporalio.Workflows;
 using ApiCommon = Temporalio.Api.Common.V1;
 using ApiDeployment = Temporalio.Api.Deployment.V1;
@@ -60,6 +61,23 @@ namespace Nexgen.Support
 
     internal static class ProtoExtensions
     {
+        private static IPayloadConverter CurrentUserPayloadConverter() =>
+            NexusOperationExecutionContext.HasCurrent ?
+                NexusOperationExecutionContext.Current.TemporalClient.Options.DataConverter.PayloadConverter :
+                Workflow.PayloadConverter;
+
+        private static IPayloadConverter FailurePayloadConverter()
+        {
+            try
+            {
+                return CurrentUserPayloadConverter();
+            }
+            catch (InvalidOperationException)
+            {
+                return DataConverter.Default.PayloadConverter;
+            }
+        }
+
         internal static ApiCommon.WorkflowType ToWorkflowTypeProto(this string value, IPayloadConverter? payloadConverter = null) =>
             new() { Name = value };
 
@@ -73,15 +91,15 @@ namespace Nexgen.Support
             value.Name;
 
         internal static ApiCommon.Payload ToPayload(object? value, IPayloadConverter? payloadConverter = null) =>
-            (payloadConverter ?? Workflow.PayloadConverter).ToPayload(value);
+            (payloadConverter ?? CurrentUserPayloadConverter()).ToPayload(value);
 
         internal static object? FromPayload(ApiCommon.Payload payload, IPayloadConverter? payloadConverter = null) =>
-            (payloadConverter ?? Workflow.PayloadConverter).ToValue<object?>(payload);
+            (payloadConverter ?? CurrentUserPayloadConverter()).ToValue<object?>(payload);
 
         internal static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values, IPayloadConverter? payloadConverter = null)
         {
             var payloads = new ApiCommon.Payloads();
-            payloads.Payloads_.AddRange((payloadConverter ?? Workflow.PayloadConverter).ToPayloads(values as IReadOnlyCollection<object?> ?? new List<object?>(values)));
+            payloads.Payloads_.AddRange((payloadConverter ?? CurrentUserPayloadConverter()).ToPayloads(values as IReadOnlyCollection<object?> ?? new List<object?>(values)));
             return payloads;
         }
 
@@ -89,10 +107,10 @@ namespace Nexgen.Support
             payloads.Payloads_.Select(payload => FromPayload(payload, payloadConverter)).ToArray();
 
         internal static ApiFailure.Failure ToFailureProto(this Exception value, IPayloadConverter? payloadConverter = null) =>
-            DataConverter.Default.FailureConverter.ToFailure(value, payloadConverter ?? Workflow.PayloadConverter);
+            DataConverter.Default.FailureConverter.ToFailure(value, payloadConverter ?? FailurePayloadConverter());
 
         internal static Exception FromFailureProto(ApiFailure.Failure value, IPayloadConverter? payloadConverter = null) =>
-            DataConverter.Default.FailureConverter.ToException(value, payloadConverter ?? Workflow.PayloadConverter);
+            DataConverter.Default.FailureConverter.ToException(value, payloadConverter ?? FailurePayloadConverter());
 
         internal static Duration ToProto(this TimeSpan value, IPayloadConverter? payloadConverter = null) =>
             Duration.FromTimeSpan(value);

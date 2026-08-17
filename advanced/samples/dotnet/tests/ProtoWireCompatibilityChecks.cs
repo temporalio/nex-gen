@@ -17,7 +17,8 @@ namespace Nexgen.DotNetExamples.Tests
         [Fact]
         public void ActivityOptionsIntermediateFixturesDecodeToUserType()
         {
-            var converter = new TemporalIntermediatePayloadConverter();
+            var payloadConverter = new Temporalio.Converters.DefaultPayloadConverter();
+            var transferConverter = new ActivityOptions.TransferTypeConverter();
 
             foreach (var fixtureName in new[]
             {
@@ -33,7 +34,9 @@ namespace Nexgen.DotNetExamples.Tests
                 Assert.DoesNotContain(
                     payload.Metadata,
                     item => item.Key.Contains("temporal-wire", StringComparison.Ordinal));
-                AssertActivityOptionsModel(converter.ToValue(payload, typeof(ActivityOptions)));
+                AssertActivityOptionsModel(
+                    transferConverter.FromTransferType(
+                        payloadConverter.ToValue(payload, transferConverter.TransferType)));
             }
         }
 
@@ -65,7 +68,8 @@ namespace Nexgen.DotNetExamples.Tests
                 },
             };
 
-            var model = FailureContainer.TemporalFromIntermediate(wire, payloadConverter);
+            var transferConverter = new FailureContainer.TransferTypeConverter();
+            var model = Assert.IsType<FailureContainer>(transferConverter.FromTransferType(wire));
             var failure = Assert.IsType<Temporalio.Exceptions.ApplicationFailureException>(
                 model.Failure);
             Assert.Equal("decoded outer failure", failure.Message);
@@ -77,16 +81,15 @@ namespace Nexgen.DotNetExamples.Tests
 
             var roundTripped = Assert.IsType<
                 Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes>(
-                model.TemporalToIntermediate(payloadConverter));
+                transferConverter.ToTransferType(model));
             Assert.Equal("decoded outer failure", roundTripped.Failure.Message);
             Assert.Equal(
                 "OuterFailure",
                 roundTripped.Failure.ApplicationFailureInfo.Type);
             Assert.Equal("inner failure", roundTripped.Failure.Cause.Message);
 
-            var absent = FailureContainer.TemporalFromIntermediate(
-                new Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes(),
-                payloadConverter);
+            var absent = Assert.IsType<FailureContainer>(transferConverter.FromTransferType(
+                new Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes()));
             Assert.Null(absent.Failure);
         }
 

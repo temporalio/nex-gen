@@ -18,7 +18,7 @@ pub(in crate::generator) struct ModelBackend;
 impl ModelBackend {
     pub(in crate::generator) fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
         for (_, record) in api_plan.records() {
-            validate_record_conversion(record)?;
+            validate_record_conversion(api_plan, record)?;
         }
         Ok(())
     }
@@ -158,15 +158,22 @@ impl ModelBackend {
 
     pub(in crate::generator) fn model_wire_interface(
         &self,
-        model: &RecordSpec<PlannedFamily>,
-        support_namespace: Option<&str>,
+        _model: &RecordSpec<PlannedFamily>,
+        _support_namespace: Option<&str>,
     ) -> Option<String> {
-        if !self.model_needs_wire_method(model) {
-            return None;
-        }
-        let interface_name =
-            qualify_dotnet_support_reference("ITemporalIntermediate", support_namespace);
-        Some(interface_name)
+        None
+    }
+
+    pub(in crate::generator) fn model_transfer_converter_attribute(
+        &self,
+        model: &RecordSpec<PlannedFamily>,
+    ) -> Option<String> {
+        self.model_needs_wire_method(model).then(|| {
+            let type_name = csharp_type_name(&model.name);
+            format!(
+                "[Temporalio.Converters.TemporalTransferTypeConverter(typeof({type_name}.TransferTypeConverter))]"
+            )
+        })
     }
 
     pub(in crate::generator) fn render_model_wire_methods(
@@ -179,7 +186,7 @@ impl ModelBackend {
         if !self.model_needs_wire_method(model) {
             return false;
         }
-        render_model_to_proto_method(self, output, model, api_plan, support_namespace);
+        render_model_transfer_converter(self, output, model, api_plan, support_namespace);
         true
     }
 
@@ -244,13 +251,8 @@ impl ModelBackend {
                             .and_then(|model| model.data.proto.as_ref())
                             .expect("wire method model should have proto backing"),
                     );
-                    if let Some(payload_converter_expr) = payload_converter_expr {
-                        format!(
-                            "({raw_type}){source_expr}.TemporalToIntermediate({payload_converter_expr})"
-                        )
-                    } else {
-                        format!("({raw_type}){source_expr}.TemporalToIntermediate()")
-                    }
+                    let _ = payload_converter_expr;
+                    format!("({raw_type}){source_expr}.ToTransferType()")
                 } else {
                     self.message_to_wire_expr(
                         model_type,
@@ -353,10 +355,23 @@ impl ModelBackend {
     }
 }
 
-fn validate_record_conversion(record: &RecordSpec<PlannedFamily>) -> Result<()> {
+fn validate_record_conversion(
+    api_plan: &PlannedSpec,
+    record: &RecordSpec<PlannedFamily>,
+) -> Result<()> {
     let Some(proto) = &record.data.proto else {
         return Ok(());
     };
+    if dotnet_proto_type_name_for_info(proto) != csharp_type_name(&record.name)
+        && !api_plan
+            .record_type_parameters(&record.full_name, Language::Dotnet)
+            .is_empty()
+    {
+        return Err(Error::UnsupportedProtoGenericModelTransferConversion {
+            language: Language::Dotnet,
+            message: proto.full_name.clone(),
+        });
+    }
     for (field_name, field) in record
         .fields
         .iter()
@@ -486,7 +501,7 @@ pub(crate) fn dotnet_from_proto_converter(model_type: &PlannedType) -> Option<&s
         .and_then(|replacement| replacement.from_proto.for_language(Language::Dotnet))
 }
 
-fn render_model_to_proto_method(
+fn render_model_transfer_converter(
     backend: &ModelBackend,
     output: &mut String,
     model: &RecordSpec<PlannedFamily>,
@@ -501,7 +516,9 @@ fn render_model_to_proto_method(
             .expect("model to proto method requires proto backing"),
     );
     render_model_from_wire_method(output, model, api_plan, support_namespace, &raw_type);
-    output.push_str("    public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n");
+    output.push_str("    internal ");
+    output.push_str(&raw_type);
+    output.push_str(" ToTransferType()\n    {\n");
     output.push_str("        var proto = new ");
     output.push_str(&raw_type);
     output.push_str("();\n");
@@ -516,7 +533,7 @@ fn render_model_to_proto_method(
             false,
             api_plan,
             support_namespace,
-            Some("payloadConverter"),
+            None,
         ));
         output.push_str(";\n");
     }
@@ -533,6 +550,22 @@ fn render_model_to_proto_method(
     }
     output.push_str("        return proto;\n");
     output.push_str("    }\n\n");
+    let type_name = csharp_type_name(&model.name);
+    output.push_str("    public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter\n    {\n");
+    output.push_str("        public System.Type TransferType => typeof(");
+    output.push_str(&raw_type);
+    output.push_str(");\n\n");
+    output.push_str(
+        "        public object? ToTransferType(object? value) => value is null ? null : ((",
+    );
+    output.push_str(&type_name);
+    output.push_str(")value).ToTransferType();\n\n");
+    output.push_str("        public object? FromTransferType(object? transferType) => transferType is null ? null : ");
+    output.push_str(&type_name);
+    output.push_str(".FromTransferType((");
+    output.push_str(&raw_type);
+    output.push_str(")transferType);\n");
+    output.push_str("    }\n\n");
 }
 
 fn render_model_from_wire_method(
@@ -543,13 +576,11 @@ fn render_model_from_wire_method(
     raw_type: &str,
 ) {
     let type_name = csharp_type_name(&model.name);
-    output.push_str("    public static ");
+    output.push_str("    internal static ");
     output.push_str(&type_name);
-    output.push_str(" TemporalFromIntermediate(");
+    output.push_str(" FromTransferType(");
     output.push_str(raw_type);
-    output.push_str(
-        " wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n",
-    );
+    output.push_str(" wire)\n    {\n");
     let required_fields = model
         .model_fields()
         .filter(|(_, field)| field.required)
@@ -620,7 +651,7 @@ fn field_from_wire_expr(
             });
         return optional_message_from_wire_expr(
             source_expr,
-            &format!("{converter}({{value}}, payloadConverter)"),
+            &format!("{converter}({{value}})"),
             optional,
         );
     }
@@ -690,7 +721,7 @@ fn value_from_wire_expr(
                 .unwrap_or_else(|| csharp_type_name(&record.model_name));
             optional_message_from_wire_expr(
                 source_expr,
-                &format!("{model_name}.TemporalFromIntermediate({{value}}, payloadConverter)"),
+                &format!("{model_name}.FromTransferType({{value}})"),
                 optional,
             )
         }
@@ -718,7 +749,7 @@ fn proto_message_from_wire_expr(
         .and_then(|replacement| replacement.from_proto.for_language(Language::Dotnet))
         .map(|converter| {
             let converter = qualify_dotnet_support_reference(converter, support_namespace);
-            format!("{converter}({{value}}, payloadConverter)")
+            format!("{converter}({{value}})")
         })
         .unwrap_or_else(|| "{value}".to_string());
     optional_message_from_wire_expr(source_expr, &conversion, optional)
@@ -829,7 +860,7 @@ fn field_to_proto_expr(
                     field_name
                 )
             });
-        return format!("{converter}({source_expr}, payloadConverter)");
+        return format!("{converter}({source_expr})");
     }
     backend.field_kind_to_wire_expr(
         &field.field_type,
@@ -837,7 +868,7 @@ fn field_to_proto_expr(
         !field.required,
         api_plan,
         support_namespace,
-        Some("payloadConverter"),
+        None,
     )
 }
 

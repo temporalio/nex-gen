@@ -507,15 +507,16 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(!rendered.contains("var wireRequest = request.ToProto();"));
     assert!(rendered.contains("svc.SignalWithStartWorkflow(request)"));
     assert!(rendered.contains(
-        "internal class SignalWithStartWorkflowRequest : Nexgen.Support.ITemporalIntermediate"
+        "[Temporalio.Converters.TemporalTransferTypeConverter(typeof(SignalWithStartWorkflowRequest.TransferTypeConverter))]"
     ));
-    assert!(!rendered.contains("ITemporalIntermediate<"));
-    assert!(
-        rendered.contains("public static SignalWithStartWorkflowRequest TemporalFromIntermediate(")
-    );
-    assert!(!rendered.contains("public Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest TemporalToIntermediate("));
     assert!(rendered.contains(
-        "public object TemporalToIntermediate(Temporalio.Converters.IPayloadConverter? payloadConverter = null)"
+        "public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter"
+    ));
+    assert!(!rendered.contains("ITemporalIntermediate"));
+    assert!(rendered.contains("internal static SignalWithStartWorkflowRequest FromTransferType("));
+    assert!(!rendered.contains("TemporalToIntermediate("));
+    assert!(rendered.contains(
+        "internal Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest ToTransferType()"
     ));
     assert!(!rendered.contains(
         "public Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest ToProto(Temporalio.Converters.IPayloadConverter? payloadConverter = null)"
@@ -526,7 +527,9 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("using Nexgen.Support;"));
     assert!(rendered.contains("Nexgen.Support.ProtoExtensions.ToWorkflowTypeProto(Workflow"));
     assert!(rendered.contains("Nexgen.Support.ProtoExtensions.ToTaskQueueProto(TaskQueue"));
-    assert!(rendered.contains("proto.UserMetadata = (Temporalio.Api.Sdk.V1.UserMetadata)userMetadata.TemporalToIntermediate(payloadConverter);"));
+    assert!(rendered.contains(
+        "proto.UserMetadata = (Temporalio.Api.Sdk.V1.UserMetadata)userMetadata.ToTransferType();"
+    ));
     assert!(!rendered.contains("var wireRequest = ToProto(request);"));
     assert!(!rendered.contains("private static Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest ToProto(SignalWithStartWorkflowRequest request)"));
     assert!(!rendered.contains("Temporalio.Api.Taskqueue.V1.TaskQueue"));
@@ -535,13 +538,12 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("proto.RetryPolicy = retryPolicy.ToProto();"));
     assert!(rendered.contains("proto.WorkflowExecutionTimeout = executionTimeout.ToProto();"));
     assert!(rendered.contains("public IReadOnlyCollection<object?>? Args { get; init; }"));
-    assert!(rendered.contains(
-        "proto.Input = Nexgen.Support.ProtoExtensions.ToPayloads(args, payloadConverter);"
-    ));
+    assert!(rendered.contains("proto.Input = Nexgen.Support.ProtoExtensions.ToPayloads(args);"));
     assert!(rendered.contains("Args = args,"));
-    assert!(rendered.contains(
-        "proto.Summary = Nexgen.Support.ProtoExtensions.ToPayload(staticSummary, payloadConverter);"
-    ));
+    assert!(
+        rendered
+            .contains("proto.Summary = Nexgen.Support.ProtoExtensions.ToPayload(staticSummary);")
+    );
     assert!(rendered.contains(
         "internal static ApiCommon.Payload ToPayload(object? value, IPayloadConverter? payloadConverter = null)"
     ));
