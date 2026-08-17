@@ -22,7 +22,7 @@ mod operation_binding;
 mod operation_lowering;
 mod proto;
 mod reachability;
-mod resource_binding;
+mod resource_resolution;
 mod selection;
 mod type_planning;
 
@@ -35,7 +35,7 @@ pub(crate) use operation_binding::{
 pub(crate) use operation_lowering::{OperationLoweredFamily, OperationLoweringPass};
 pub(crate) use proto::{message_model_name, relative_descriptor_name};
 pub(crate) use reachability::ReachabilityPass;
-pub(crate) use resource_binding::{
+pub(crate) use resource_resolution::{
     RequestPlan, RequestPlanSource, ResolvedResourceBindingSource, ResolvedResourceMethodBinding,
     ResolvedResourceReturnSpec, ResolvedResourceSpec, ResourceBoundData, ResourceBoundFamily,
     ResourceResolutionPass,
