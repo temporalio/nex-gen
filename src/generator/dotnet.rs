@@ -121,9 +121,9 @@ impl<'a> ApiPlanner<'a> {
             "System",
             "System.CodeDom.Compiler",
             "System.Collections.Generic",
+            "System.Threading.Tasks",
+            "NexusRpc",
         ];
-        imports.push("System.Threading.Tasks");
-        imports.push("NexusRpc");
         if has_endpoint_operations {
             imports.push("Temporalio.Converters");
         }
