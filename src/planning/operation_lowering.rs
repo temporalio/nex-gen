@@ -139,7 +139,6 @@ fn resource_result_fields(
                 RecordFieldSpec {
                     name: field_name.clone(),
                     doc: None,
-                    defaults_doc: None,
                     annotation: None,
                     flattened_annotation: None,
                     field_type: TypeSpec::String,
