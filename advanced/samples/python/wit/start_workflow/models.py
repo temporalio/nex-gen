@@ -39,24 +39,23 @@ class _StartWorkflowRequestTransferTypeConverter(
         value: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest,
         type_hint: type["StartWorkflowRequest"],
     ) -> "StartWorkflowRequest":
-        proto = value
-        if not proto.HasField("workflow_type"):
+        if not value.HasField("workflow_type"):
             raise ValueError("missing required field StartWorkflowRequest.workflow")
-        workflow = workflow_type_from_proto(proto.workflow_type)
-        if not proto.workflow_id:
+        workflow = workflow_type_from_proto(value.workflow_type)
+        if not value.workflow_id:
             raise ValueError("missing required field StartWorkflowRequest.workflow_id")
-        workflow_id = proto.workflow_id
-        if not proto.HasField("task_queue"):
+        workflow_id = value.workflow_id
+        if not value.HasField("task_queue"):
             raise ValueError("missing required field StartWorkflowRequest.task_queue")
-        task_queue = task_queue_from_proto(proto.task_queue)
+        task_queue = task_queue_from_proto(value.task_queue)
         return StartWorkflowRequest(
             workflow=workflow,
             workflow_id=workflow_id,
             task_queue=task_queue,
-            workflow_start_delay=duration_from_proto(proto.workflow_start_delay)
-            if proto.HasField("workflow_start_delay")
+            workflow_start_delay=duration_from_proto(value.workflow_start_delay)
+            if value.HasField("workflow_start_delay")
             else None,
-            namespace=proto.namespace,
+            namespace=value.namespace,
         )
 
     @typing_extensions.override
@@ -107,9 +106,8 @@ class _StartWorkflowResultTransferTypeConverter(
         value: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
         type_hint: type["StartWorkflowResult"],
     ) -> "StartWorkflowResult":
-        proto = value
         return StartWorkflowResult(
-            run_id=proto.run_id if bool(proto.run_id) else None,
+            run_id=value.run_id if bool(value.run_id) else None,
         )
 
     @typing_extensions.override
@@ -150,20 +148,19 @@ class _CancelWorkflowRequestTransferTypeConverter(
         value: temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest,
         type_hint: type["CancelWorkflowRequest"],
     ) -> "CancelWorkflowRequest":
-        proto = value
-        if not proto.HasField("workflow_execution"):
+        if not value.HasField("workflow_execution"):
             raise ValueError(
                 "missing required field CancelWorkflowRequest.workflow_execution"
             )
         workflow_execution = (
             _WorkflowExecutionTransferTypeConverter().from_transfer_type(
-                proto.workflow_execution, WorkflowExecution
+                value.workflow_execution, WorkflowExecution
             )
         )
         return CancelWorkflowRequest(
-            namespace=proto.namespace,
+            namespace=value.namespace,
             workflow_execution=workflow_execution,
-            reason=proto.reason if bool(proto.reason) else None,
+            reason=value.reason if bool(value.reason) else None,
         )
 
     @typing_extensions.override
@@ -208,13 +205,12 @@ class _WorkflowExecutionTransferTypeConverter(
         value: temporalio.api.common.v1.message_pb2.WorkflowExecution,
         type_hint: type["WorkflowExecution"],
     ) -> "WorkflowExecution":
-        proto = value
-        if not proto.workflow_id:
+        if not value.workflow_id:
             raise ValueError("missing required field WorkflowExecution.workflow_id")
-        workflow_id = proto.workflow_id
+        workflow_id = value.workflow_id
         return WorkflowExecution(
             workflow_id=workflow_id,
-            run_id=proto.run_id if bool(proto.run_id) else None,
+            run_id=value.run_id if bool(value.run_id) else None,
         )
 
     @typing_extensions.override

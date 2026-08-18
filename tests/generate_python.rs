@@ -759,26 +759,25 @@ fn python_standalone_proto_oneof_models_are_exported_and_converted() {
         .expect("standalone Python package should include __init__.py");
 
     assert!(models.contains("class Outcome(typing.Generic[OutputT]):"));
+    assert!(models.contains("\"Outcome[typing.Any]\""));
     assert!(models.contains("OutcomeValue = ("));
     assert!(models.contains("    value: OutcomeValue[OutputT]\n"));
     assert!(!models.contains("value: OutcomeValue[OutputT] | None"));
     assert!(!models.contains("class Failure:"));
     assert!(!models.contains("class Payloads:"));
-    assert!(models.contains("_oneof_value_case = proto.WhichOneof(\"value\")"));
+    assert!(models.contains("_oneof_value_case = value.WhichOneof(\"value\")"));
     assert!(models.contains(
         "if _oneof_value_case is None:\n            raise ValueError(\"missing required field Outcome.value\")"
     ));
     assert!(models.contains(
-        "_oneof_value = (\"success\", typing.cast(typing.Any, payloads_from_proto(proto.success)))"
+        "_oneof_value = (\"success\", payloads_from_proto(value.success, [output_type])[0])"
     ));
-    assert!(models.contains("_oneof_value = (\"failure\", failure_from_proto(proto.failure))"));
+    assert!(models.contains("_oneof_value = (\"failure\", failure_from_proto(value.failure))"));
     assert!(models.contains("if value.value[0] == \"success\":"));
     assert!(models.contains(
         "if value.value is None:\n            raise ValueError(\"missing required field Outcome.value\")"
     ));
-    assert!(models.contains(
-        "message.success.CopyFrom(payloads_to_proto(typing.cast(collections.abc.Sequence[typing.Any], value.value[1])))"
-    ));
+    assert!(models.contains("message.success.CopyFrom(payloads_to_proto([value.value[1]]))"));
     assert!(models.contains("elif value.value[0] == \"failure\":"));
     assert!(models.contains("message.failure.CopyFrom(failure_to_proto(value.value[1]))"));
     assert!(models.contains("raise ValueError(f\"unknown protobuf oneof tag Outcome.value:"));
@@ -790,7 +789,7 @@ fn python_standalone_proto_oneof_models_are_exported_and_converted() {
     assert!(models.contains("reason: str"));
     assert!(models.contains("request_id: str"));
     assert!(models.contains("class WorkflowExecution:"));
-    assert!(models.contains("_oneof_activity_case = proto.WhichOneof(\"activity\")"));
+    assert!(models.contains("_oneof_activity_case = value.WhichOneof(\"activity\")"));
     assert!(
         models.contains("if _oneof_activity_case is None:\n            _oneof_activity = None")
     );
@@ -813,23 +812,22 @@ fn python_proto_generics_propagate_payload_type_hints() {
         .expect("proto generic models should include the Temporal converter support module");
 
     assert!(models.contains("class PayloadBackedEnvelope(typing.Generic[OutputT, ContextT]):"));
+    assert!(models.contains("\"PayloadBackedEnvelope[typing.Any, typing.Any]\""));
+    assert!(models.contains("\"PayloadBackedOutput[typing.Any]\""));
+    assert!(models.contains("\"PayloadBackedContext[typing.Any]\""));
     assert!(models.contains(
-        "_output_type, _context_type = typing.get_args(type_hint) or (typing.Any, typing.Any)"
+        "output_type, context_type = typing.get_args(type_hint) or (typing.Any, typing.Any)"
     ));
     assert!(models.contains(
-        "_PayloadBackedOutputTransferTypeConverter().from_transfer_type(proto.provider, PayloadBackedOutput[_output_type])"
+        "_PayloadBackedOutputTransferTypeConverter().from_transfer_type(value.provider, PayloadBackedOutput[output_type])"
     ));
     assert!(models.contains(
-        "_PayloadBackedContextTransferTypeConverter().from_transfer_type(proto.scaler, PayloadBackedContext[_context_type])"
+        "_PayloadBackedContextTransferTypeConverter().from_transfer_type(value.scaler, PayloadBackedContext[context_type])"
     ));
-    assert!(models.contains("_output_type, = typing.get_args(type_hint) or (typing.Any,)"));
-    assert!(models.contains(
-        "payload_from_proto(proto.details, typing.cast(type[typing.Any], _output_type))"
-    ));
-    assert!(models.contains("_context_type, = typing.get_args(type_hint) or (typing.Any,)"));
-    assert!(models.contains(
-        "payload_from_proto(proto.details, typing.cast(type[typing.Any], _context_type))"
-    ));
+    assert!(models.contains("output_type, = typing.get_args(type_hint) or (typing.Any,)"));
+    assert!(models.contains("payload_from_proto(value.details, output_type)"));
+    assert!(models.contains("context_type, = typing.get_args(type_hint) or (typing.Any,)"));
+    assert!(models.contains("payload_from_proto(value.details, context_type)"));
     assert!(support.contains("type_hint: type[typing.Any] | None = None,"));
     assert!(support.contains("converter.from_payload(_clone_payload(proto), type_hint)"));
 }

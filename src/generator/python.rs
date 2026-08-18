@@ -7800,9 +7800,9 @@ class Example(enum.Enum):
                 "raise ValueError(\"missing required field ActivityOptions.retry_policy\")"
             )
         );
-        assert!(type_roundtrip_output.contains("if not proto.HasField(\"retry_policy\"):\n            raise ValueError(\"missing required field ActivityOptions.retry_policy\")"));
+        assert!(type_roundtrip_output.contains("if not value.HasField(\"retry_policy\"):\n            raise ValueError(\"missing required field ActivityOptions.retry_policy\")"));
         assert!(type_roundtrip_output.contains("retry_policy_from_proto("));
-        assert!(type_roundtrip_output.contains("proto.retry_policy"));
+        assert!(type_roundtrip_output.contains("value.retry_policy"));
         assert!(!type_roundtrip_output.contains("async def retry_policy_operation("));
         assert!(type_roundtrip_output.contains("async def activity_options_operation("));
         assert!(type_roundtrip_output.contains("task_queue: str | None = None,"));

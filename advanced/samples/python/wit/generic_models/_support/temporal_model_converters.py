@@ -102,11 +102,13 @@ def payloads_to_proto(
 
 def payloads_from_proto(
     proto: common_pb2.Payloads,
-) -> list[object]:
-    return list(
-        temporalio.nexus.system._current_user_payload_converter().from_payloads_wrapper(
-            proto
-        )
+    type_hints: list[typing.Any] | None = None,
+) -> list[typing.Any]:
+    if not proto.payloads:
+        return []
+    return temporalio.nexus.system._current_user_payload_converter().from_payloads(
+        proto.payloads,
+        type_hints,
     )
 
 
@@ -144,17 +146,31 @@ def _payload_to_value(
     )
 
 
+_PayloadT = typing.TypeVar("_PayloadT")
+
+
+@typing.overload
+def payload_from_proto(
+    proto: common_pb2.Payload,
+    type_hint: type[_PayloadT],
+) -> _PayloadT: ...
+
+
+@typing.overload
+def payload_from_proto(
+    proto: common_pb2.Payload,
+    type_hint: None = None,
+) -> typing.Any: ...
+
+
 def payload_from_proto(
     proto: common_pb2.Payload,
     type_hint: type[typing.Any] | None = None,
-) -> object:
+) -> typing.Any:
     converter = temporalio.nexus.system._current_user_payload_converter()
     if type_hint is None:
-        return typing.cast(object, converter.from_payload(_clone_payload(proto)))
-    return typing.cast(
-        object,
-        converter.from_payload(_clone_payload(proto), type_hint),
-    )
+        return converter.from_payload(_clone_payload(proto))
+    return converter.from_payload(_clone_payload(proto), type_hint)
 
 
 def payload_to_proto(

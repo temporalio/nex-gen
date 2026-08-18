@@ -22,7 +22,8 @@ OutputT = typing.TypeVar("OutputT")
 
 class _PayloadBackedContextTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        typing.Any, temporalio.api.compute.v1.scaler_pb2.ComputeScaler
+        "PayloadBackedContext[typing.Any]",
+        temporalio.api.compute.v1.scaler_pb2.ComputeScaler,
     ]
 ):
     transfer_type: type[temporalio.api.compute.v1.scaler_pb2.ComputeScaler] | None = (
@@ -33,18 +34,12 @@ class _PayloadBackedContextTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.compute.v1.scaler_pb2.ComputeScaler,
-        type_hint: type[typing.Any],
-    ) -> typing.Any:
-        proto = value
-        (_context_type,) = typing.get_args(type_hint) or (typing.Any,)
-        if not proto.HasField("details"):
+        type_hint: type["PayloadBackedContext[typing.Any]"],
+    ) -> "PayloadBackedContext[typing.Any]":
+        (context_type,) = typing.get_args(type_hint) or (typing.Any,)
+        if not value.HasField("details"):
             raise ValueError("missing required field PayloadBackedContext.details")
-        details = typing.cast(
-            typing.Any,
-            payload_from_proto(
-                proto.details, typing.cast(type[typing.Any], _context_type)
-            ),
-        )
+        details = payload_from_proto(value.details, context_type)
         return PayloadBackedContext(
             details=details,
         )
@@ -52,7 +47,7 @@ class _PayloadBackedContextTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: typing.Any,
+        value: "PayloadBackedContext[typing.Any]",
     ) -> temporalio.api.compute.v1.scaler_pb2.ComputeScaler:
         message = temporalio.api.compute.v1.scaler_pb2.ComputeScaler()
         message.details.CopyFrom(payload_to_proto(value.details))
@@ -72,7 +67,8 @@ class PayloadBackedContext(typing.Generic[ContextT]):
 
 class _PayloadBackedEnvelopeTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        typing.Any, temporalio.api.compute.v1.config_pb2.ComputeConfigScalingGroup
+        "PayloadBackedEnvelope[typing.Any, typing.Any]",
+        temporalio.api.compute.v1.config_pb2.ComputeConfigScalingGroup,
     ]
 ):
     transfer_type: (
@@ -83,22 +79,21 @@ class _PayloadBackedEnvelopeTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.compute.v1.config_pb2.ComputeConfigScalingGroup,
-        type_hint: type[typing.Any],
-    ) -> typing.Any:
-        proto = value
-        _output_type, _context_type = typing.get_args(type_hint) or (
+        type_hint: type["PayloadBackedEnvelope[typing.Any, typing.Any]"],
+    ) -> "PayloadBackedEnvelope[typing.Any, typing.Any]":
+        output_type, context_type = typing.get_args(type_hint) or (
             typing.Any,
             typing.Any,
         )
-        if not proto.HasField("provider"):
+        if not value.HasField("provider"):
             raise ValueError("missing required field PayloadBackedEnvelope.provider")
         provider = _PayloadBackedOutputTransferTypeConverter().from_transfer_type(
-            proto.provider, PayloadBackedOutput[_output_type]
+            value.provider, PayloadBackedOutput[output_type]
         )
-        if not proto.HasField("scaler"):
+        if not value.HasField("scaler"):
             raise ValueError("missing required field PayloadBackedEnvelope.scaler")
         scaler = _PayloadBackedContextTransferTypeConverter().from_transfer_type(
-            proto.scaler, PayloadBackedContext[_context_type]
+            value.scaler, PayloadBackedContext[context_type]
         )
         return PayloadBackedEnvelope(
             provider=provider,
@@ -108,7 +103,7 @@ class _PayloadBackedEnvelopeTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: typing.Any,
+        value: "PayloadBackedEnvelope[typing.Any, typing.Any]",
     ) -> temporalio.api.compute.v1.config_pb2.ComputeConfigScalingGroup:
         message = temporalio.api.compute.v1.config_pb2.ComputeConfigScalingGroup()
         message.provider.CopyFrom(
@@ -134,7 +129,8 @@ class PayloadBackedEnvelope(typing.Generic[OutputT, ContextT]):
 
 class _PayloadBackedOutputTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        typing.Any, temporalio.api.compute.v1.provider_pb2.ComputeProvider
+        "PayloadBackedOutput[typing.Any]",
+        temporalio.api.compute.v1.provider_pb2.ComputeProvider,
     ]
 ):
     transfer_type: (
@@ -145,18 +141,12 @@ class _PayloadBackedOutputTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.compute.v1.provider_pb2.ComputeProvider,
-        type_hint: type[typing.Any],
-    ) -> typing.Any:
-        proto = value
-        (_output_type,) = typing.get_args(type_hint) or (typing.Any,)
-        if not proto.HasField("details"):
+        type_hint: type["PayloadBackedOutput[typing.Any]"],
+    ) -> "PayloadBackedOutput[typing.Any]":
+        (output_type,) = typing.get_args(type_hint) or (typing.Any,)
+        if not value.HasField("details"):
             raise ValueError("missing required field PayloadBackedOutput.details")
-        details = typing.cast(
-            typing.Any,
-            payload_from_proto(
-                proto.details, typing.cast(type[typing.Any], _output_type)
-            ),
-        )
+        details = payload_from_proto(value.details, output_type)
         return PayloadBackedOutput(
             details=details,
         )
@@ -164,7 +154,7 @@ class _PayloadBackedOutputTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: typing.Any,
+        value: "PayloadBackedOutput[typing.Any]",
     ) -> temporalio.api.compute.v1.provider_pb2.ComputeProvider:
         message = temporalio.api.compute.v1.provider_pb2.ComputeProvider()
         message.details.CopyFrom(payload_to_proto(value.details))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import typing
 
 import pytest
@@ -17,6 +18,11 @@ from wit.proto_oneof.models import (
 )
 
 
+@dataclasses.dataclass
+class SuccessfulOutput:
+    message: str
+
+
 def test_proto_oneof_success_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         temporalio.nexus.system,
@@ -24,12 +30,16 @@ def test_proto_oneof_success_round_trip(monkeypatch: pytest.MonkeyPatch) -> None
         lambda: PayloadConverter.default,
     )
     converter = _OutcomeTransferTypeConverter()
+    model: Outcome[SuccessfulOutput] = Outcome(
+        value=("success", SuccessfulOutput(message="hello"))
+    )
 
-    wire = converter.to_transfer_type(Outcome(value=("success", ["hello", 7])))
+    wire = converter.to_transfer_type(model)
     assert wire.WhichOneof("value") == "success"
 
-    decoded = converter.from_transfer_type(wire, Outcome)
-    assert decoded == Outcome(value=("success", ["hello", 7]))
+    decoded = converter.from_transfer_type(wire, Outcome[SuccessfulOutput])
+    assert decoded == model
+    assert isinstance(decoded.value[1], SuccessfulOutput)
 
 
 def test_required_proto_oneof_failure_round_trip() -> None:

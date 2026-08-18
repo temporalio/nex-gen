@@ -39,22 +39,21 @@ class _ActivityOptionsTransferTypeConverter(
         value: temporalio.api.activity.v1.message_pb2.ActivityOptions,
         type_hint: type["ActivityOptions"],
     ) -> "ActivityOptions":
-        proto = value
-        if not proto.HasField("retry_policy"):
+        if not value.HasField("retry_policy"):
             raise ValueError("missing required field ActivityOptions.retry_policy")
-        retry_policy = retry_policy_from_proto(proto.retry_policy)
+        retry_policy = retry_policy_from_proto(value.retry_policy)
         return ActivityOptions(
-            task_queue=task_queue_from_proto(proto.task_queue)
-            if proto.HasField("task_queue")
+            task_queue=task_queue_from_proto(value.task_queue)
+            if value.HasField("task_queue")
             else None,
             retry_policy=retry_policy,
             schedule_to_close_timeout=duration_from_proto(
-                proto.schedule_to_close_timeout
+                value.schedule_to_close_timeout
             )
-            if proto.HasField("schedule_to_close_timeout")
+            if value.HasField("schedule_to_close_timeout")
             else None,
-            priority=priority_from_proto(proto.priority)
-            if proto.HasField("priority")
+            priority=priority_from_proto(value.priority)
+            if value.HasField("priority")
             else None,
         )
 
@@ -104,10 +103,9 @@ class _FailureContainerTransferTypeConverter(
         value: temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes,
         type_hint: type["FailureContainer"],
     ) -> "FailureContainer":
-        proto = value
         return FailureContainer(
-            failure=failure_from_proto(proto.failure)
-            if proto.HasField("failure")
+            failure=failure_from_proto(value.failure)
+            if value.HasField("failure")
             else None,
         )
 
