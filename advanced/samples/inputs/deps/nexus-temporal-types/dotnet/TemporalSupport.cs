@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Threading;
 using Google.Protobuf.WellKnownTypes;
 using Temporalio.Common;
 using Temporalio.Converters;
-using Temporalio.Nexus;
 using Temporalio.Workflows;
 using ApiCommon = Temporalio.Api.Common.V1;
 using ApiDeployment = Temporalio.Api.Deployment.V1;
@@ -56,110 +56,137 @@ namespace Nexgen.Support
         }
     }
 
-    internal static class ProtoExtensions
+    internal static class SystemNexusConverterContext
     {
-        private static IPayloadConverter CurrentUserPayloadConverter() =>
-            NexusOperationExecutionContext.HasCurrent ?
-                NexusOperationExecutionContext.Current.TemporalClient.Options.DataConverter.PayloadConverter :
-                Workflow.PayloadConverter;
+        private static readonly AsyncLocal<ConverterContext?> CurrentLocal = new();
 
-        private static IPayloadConverter FailurePayloadConverter()
+        internal static IPayloadConverter PayloadConverter => Current.PayloadConverter;
+
+        internal static IFailureConverter FailureConverter => Current.FailureConverter;
+
+        private static ConverterContext Current => CurrentLocal.Value ?? throw new InvalidOperationException(
+            "The System Nexus converter context is only available while a System Nexus transfer type converter is executing.");
+
+        internal static IDisposable Push(
+            IPayloadConverter payloadConverter,
+            IFailureConverter failureConverter)
         {
-            try
-            {
-                return CurrentUserPayloadConverter();
-            }
-            catch (InvalidOperationException)
-            {
-                return DataConverter.Default.PayloadConverter;
-            }
+            var previous = CurrentLocal.Value;
+            CurrentLocal.Value = new(payloadConverter, failureConverter);
+            return new PopOnDispose(previous);
         }
 
-        internal static ApiCommon.WorkflowType ToWorkflowTypeProto(this string value, IPayloadConverter? payloadConverter = null) =>
+        private sealed record ConverterContext(
+            IPayloadConverter PayloadConverter,
+            IFailureConverter FailureConverter);
+
+        private sealed class PopOnDispose : IDisposable
+        {
+            private readonly ConverterContext? previous;
+            private bool disposed;
+
+            internal PopOnDispose(ConverterContext? previous) => this.previous = previous;
+
+            public void Dispose()
+            {
+                if (!disposed)
+                {
+                    CurrentLocal.Value = previous;
+                    disposed = true;
+                }
+            }
+        }
+    }
+
+    internal static class ProtoExtensions
+    {
+        internal static ApiCommon.WorkflowType ToWorkflowTypeProto(this string value) =>
             new() { Name = value };
 
-        internal static string FromWorkflowTypeProto(ApiCommon.WorkflowType value, IPayloadConverter? payloadConverter = null) =>
+        internal static string FromWorkflowTypeProto(ApiCommon.WorkflowType value) =>
             value.Name;
 
-        internal static ApiTaskQueue.TaskQueue ToTaskQueueProto(this string value, IPayloadConverter? payloadConverter = null) =>
+        internal static ApiTaskQueue.TaskQueue ToTaskQueueProto(this string value) =>
             new() { Name = value };
 
-        internal static string FromTaskQueueProto(ApiTaskQueue.TaskQueue value, IPayloadConverter? payloadConverter = null) =>
+        internal static string FromTaskQueueProto(ApiTaskQueue.TaskQueue value) =>
             value.Name;
 
-        internal static ApiCommon.Payload ToPayload(object? value, IPayloadConverter? payloadConverter = null) =>
-            (payloadConverter ?? CurrentUserPayloadConverter()).ToPayload(value);
+        internal static ApiCommon.Payload ToPayload(object? value) =>
+            SystemNexusConverterContext.PayloadConverter.ToPayload(value);
 
-        internal static object? FromPayload(ApiCommon.Payload payload, IPayloadConverter? payloadConverter = null) =>
-            (payloadConverter ?? CurrentUserPayloadConverter()).ToValue<object?>(payload);
+        internal static object? FromPayload(ApiCommon.Payload payload) =>
+            SystemNexusConverterContext.PayloadConverter.ToValue<object?>(payload);
 
-        internal static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values, IPayloadConverter? payloadConverter = null)
+        internal static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values)
         {
             var payloads = new ApiCommon.Payloads();
-            payloads.Payloads_.AddRange((payloadConverter ?? CurrentUserPayloadConverter()).ToPayloads(values as IReadOnlyCollection<object?> ?? new List<object?>(values)));
+            payloads.Payloads_.AddRange(SystemNexusConverterContext.PayloadConverter.ToPayloads(values as IReadOnlyCollection<object?> ?? new List<object?>(values)));
             return payloads;
         }
 
-        internal static IReadOnlyCollection<object?> FromPayloads(ApiCommon.Payloads payloads, IPayloadConverter? payloadConverter = null) =>
-            payloads.Payloads_.Select(payload => FromPayload(payload, payloadConverter)).ToArray();
+        internal static IReadOnlyCollection<object?> FromPayloads(ApiCommon.Payloads payloads) =>
+            payloads.Payloads_.Select(FromPayload).ToArray();
 
-        internal static ApiFailure.Failure ToFailureProto(this Exception value, IPayloadConverter? payloadConverter = null) =>
-            DataConverter.Default.FailureConverter.ToFailure(value, payloadConverter ?? FailurePayloadConverter());
+        internal static ApiFailure.Failure ToFailureProto(this Exception value) =>
+            SystemNexusConverterContext.FailureConverter.ToFailure(
+                value, SystemNexusConverterContext.PayloadConverter);
 
-        internal static Exception FromFailureProto(ApiFailure.Failure value, IPayloadConverter? payloadConverter = null) =>
-            DataConverter.Default.FailureConverter.ToException(value, payloadConverter ?? FailurePayloadConverter());
+        internal static Exception FromFailureProto(ApiFailure.Failure value) =>
+            SystemNexusConverterContext.FailureConverter.ToException(
+                value, SystemNexusConverterContext.PayloadConverter);
 
-        internal static Duration ToProto(this TimeSpan value, IPayloadConverter? payloadConverter = null) =>
+        internal static Duration ToProto(this TimeSpan value) =>
             Duration.FromTimeSpan(value);
 
-        internal static TimeSpan FromDurationProto(Duration value, IPayloadConverter? payloadConverter = null) =>
+        internal static TimeSpan FromDurationProto(Duration value) =>
             value.ToTimeSpan();
 
-        internal static ApiCommon.RetryPolicy ToProto(this Temporalio.Common.RetryPolicy value, IPayloadConverter? payloadConverter = null) =>
+        internal static ApiCommon.RetryPolicy ToProto(this Temporalio.Common.RetryPolicy value) =>
             ToRetryPolicy(value);
 
-        internal static Temporalio.Common.RetryPolicy FromRetryPolicyProto(ApiCommon.RetryPolicy value, IPayloadConverter? payloadConverter = null) =>
+        internal static Temporalio.Common.RetryPolicy FromRetryPolicyProto(ApiCommon.RetryPolicy value) =>
             FromRetryPolicy(value);
 
-        internal static ApiCommon.Memo ToProto(this IReadOnlyDictionary<string, object?> value, IPayloadConverter? payloadConverter = null) =>
-            ToMemo(value, payloadConverter);
+        internal static ApiCommon.Memo ToProto(this IReadOnlyDictionary<string, object?> value) =>
+            ToMemo(value);
 
-        internal static IReadOnlyDictionary<string, object?> FromMemoProto(ApiCommon.Memo value, IPayloadConverter? payloadConverter = null) =>
+        internal static IReadOnlyDictionary<string, object?> FromMemoProto(ApiCommon.Memo value) =>
             value.Fields.ToDictionary(
                 item => item.Key,
-                item => FromPayload(item.Value, payloadConverter));
+                item => FromPayload(item.Value));
 
-        internal static ApiCommon.Header ToHeaderProto(this IReadOnlyDictionary<string, object?> value, IPayloadConverter? payloadConverter = null)
+        internal static ApiCommon.Header ToHeaderProto(this IReadOnlyDictionary<string, object?> value)
         {
             var header = new ApiCommon.Header();
             foreach (var item in value)
             {
-                header.Fields.Add(item.Key, ToPayload(item.Value, payloadConverter));
+                header.Fields.Add(item.Key, ToPayload(item.Value));
             }
             return header;
         }
 
-        internal static IReadOnlyDictionary<string, object?> FromHeaderProto(ApiCommon.Header value, IPayloadConverter? payloadConverter = null) =>
+        internal static IReadOnlyDictionary<string, object?> FromHeaderProto(ApiCommon.Header value) =>
             value.Fields.ToDictionary(
                 item => item.Key,
-                item => FromPayload(item.Value, payloadConverter));
+                item => FromPayload(item.Value));
 
-        internal static ApiCommon.Priority ToProto(this Temporalio.Common.Priority value, IPayloadConverter? payloadConverter = null) =>
+        internal static ApiCommon.Priority ToProto(this Temporalio.Common.Priority value) =>
             ToPriority(value);
 
-        internal static Temporalio.Common.Priority FromPriorityProto(ApiCommon.Priority value, IPayloadConverter? payloadConverter = null) =>
+        internal static Temporalio.Common.Priority FromPriorityProto(ApiCommon.Priority value) =>
             new(
                 value.PriorityKey == 0 ? null : value.PriorityKey,
                 value.FairnessKey,
                 value.FairnessWeight == 0 ? null : (float)value.FairnessWeight);
 
-        internal static ApiWorkflow.VersioningOverride ToProto(this Temporalio.Common.VersioningOverride value, IPayloadConverter? payloadConverter = null) =>
+        internal static ApiWorkflow.VersioningOverride ToProto(this Temporalio.Common.VersioningOverride value) =>
             ToVersioningOverride(value);
 
-        internal static Temporalio.Common.SearchAttributeCollection FromSearchAttributesProto(ApiCommon.SearchAttributes value, IPayloadConverter? payloadConverter = null) =>
+        internal static Temporalio.Common.SearchAttributeCollection FromSearchAttributesProto(ApiCommon.SearchAttributes value) =>
             Temporalio.Common.SearchAttributeCollection.FromProto(value);
 
-        internal static Temporalio.Common.VersioningOverride? FromVersioningOverrideProto(ApiWorkflow.VersioningOverride versioningOverride, IPayloadConverter? payloadConverter = null)
+        internal static Temporalio.Common.VersioningOverride? FromVersioningOverrideProto(ApiWorkflow.VersioningOverride versioningOverride)
         {
             if (versioningOverride.AutoUpgrade)
             {
@@ -214,7 +241,7 @@ namespace Nexgen.Support
             return retryPolicy;
         }
 
-        private static ApiCommon.Memo ToMemo(IReadOnlyDictionary<string, object?> memo, IPayloadConverter? payloadConverter)
+        private static ApiCommon.Memo ToMemo(IReadOnlyDictionary<string, object?> memo)
         {
             var proto = new ApiCommon.Memo();
             foreach (var item in memo)
@@ -223,7 +250,7 @@ namespace Nexgen.Support
                 {
                     throw new ArgumentException($"Memo value for {item.Key} is null", nameof(memo));
                 }
-                proto.Fields.Add(item.Key, ToPayload(item.Value, payloadConverter));
+                proto.Fields.Add(item.Key, ToPayload(item.Value));
             }
             return proto;
         }

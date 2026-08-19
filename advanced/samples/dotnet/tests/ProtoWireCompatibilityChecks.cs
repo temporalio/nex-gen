@@ -44,6 +44,10 @@ namespace Nexgen.DotNetExamples.Tests
         public void FailureIntermediateUsesSdkFailureConverter()
         {
             var payloadConverter = new Temporalio.Converters.DefaultPayloadConverter();
+            // TODO: Remove once the SDK scopes this context around System Nexus transfer conversion.
+            using var converterContext = SystemNexusConverterContext.Push(
+                payloadConverter,
+                Temporalio.Converters.DataConverter.Default.FailureConverter);
             var wire = new Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes
             {
                 Failure = new Temporalio.Api.Failure.V1.Failure

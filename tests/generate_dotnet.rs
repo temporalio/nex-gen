@@ -544,30 +544,30 @@ fn dotnet_renders_proto_backed_temporal_types() {
         rendered
             .contains("proto.Summary = Nexgen.Support.ProtoExtensions.ToPayload(staticSummary);")
     );
-    assert!(rendered.contains(
-        "internal static ApiCommon.Payload ToPayload(object? value, IPayloadConverter? payloadConverter = null)"
-    ));
+    assert!(rendered.contains("internal static ApiCommon.Payload ToPayload(object? value)"));
     assert!(
         rendered
-            .contains("internal static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values, IPayloadConverter? payloadConverter = null)")
+            .contains("internal static ApiCommon.Payloads ToPayloads(IEnumerable<object?> values)")
     );
     assert!(!rendered.contains("ToProto(this object? value)"));
     assert!(!rendered.contains("ToProto(this IEnumerable<object?> value)"));
-    assert!(rendered.contains(
-        "internal static Duration ToProto(this TimeSpan value, IPayloadConverter? payloadConverter = null)"
-    ));
+    assert!(rendered.contains("internal static Duration ToProto(this TimeSpan value)"));
     assert!(!rendered.contains(" FromProto("));
     assert!(rendered.contains("internal static class TemporalWorkflowContext"));
     assert!(rendered.contains("internal static class TemporalFunctionNames"));
+    assert!(rendered.contains("internal static class SystemNexusConverterContext"));
     assert!(rendered.contains("internal static class ProtoExtensions"));
+    assert!(rendered.contains("SystemNexusConverterContext.PayloadConverter.ToPayload(value)"));
+    assert!(rendered.contains("SystemNexusConverterContext.FailureConverter.ToFailure("));
+    assert!(!rendered.contains("CurrentUserPayloadConverter"));
     assert!(
         rendered.contains(
-            "internal static ApiCommon.WorkflowType ToWorkflowTypeProto(this string value, IPayloadConverter? payloadConverter = null)"
+            "internal static ApiCommon.WorkflowType ToWorkflowTypeProto(this string value)"
         )
     );
     assert!(
         rendered
-            .contains("internal static ApiTaskQueue.TaskQueue ToTaskQueueProto(this string value, IPayloadConverter? payloadConverter = null)")
+            .contains("internal static ApiTaskQueue.TaskQueue ToTaskQueueProto(this string value)")
     );
     assert!(!rendered.contains("ToProto(default("));
     assert!(!rendered.contains("internal static TProto ToProto<TProto>(this string value)"));

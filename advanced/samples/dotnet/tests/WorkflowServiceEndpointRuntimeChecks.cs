@@ -74,6 +74,10 @@ namespace Nexgen.DotNetExamples.Tests
                 .AddNexusService(serviceHandler);
             using var worker = new TemporalWorker(client, workerOptions);
 
+            // TODO: Remove once the SDK scopes this context around System Nexus transfer conversion.
+            using var converterContext = SystemNexusConverterContext.Push(
+                DataConverter.Default.PayloadConverter,
+                DataConverter.Default.FailureConverter);
             var result = await worker.ExecuteAsync(async () =>
             {
                 var endpoint = await env.CreateNexusEndpointAsync("temporal-system", taskQueue);
