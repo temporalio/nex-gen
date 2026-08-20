@@ -5767,7 +5767,7 @@ fn operation_input_alias_name(
     operation: &RenderedOperation<'_>,
 ) -> String {
     format!(
-        "_{}Request",
+        "{}Input",
         typescript_operation_function_name(service, operation).to_upper_camel_case()
     )
 }
@@ -6255,11 +6255,9 @@ mod tests {
         assert!(!output.contains("export enum WorkflowIdConflictPolicy"));
         assert!(!output.contains("signalWithStartWorkflowExecution("));
         assert!(output.contains("export async function signalWithStartWorkflow<"));
-        assert!(output.contains("type _SignalWithStartWorkflowRequest<WorkflowFn extends"));
+        assert!(output.contains("type SignalWithStartWorkflowInput<WorkflowFn extends"));
         assert!(output.contains("headers?: never"));
-        assert!(
-            output.contains("request: _SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>,")
-        );
+        assert!(output.contains("request: SignalWithStartWorkflowInput<WorkflowFn, SignalValue>,"));
         assert!(output.contains("const client = workflow.createNexusServiceClient({"));
         assert!(!output.contains("export class WorkflowServiceClient"));
         assert!(!output.contains("from './temporal_model_converters.ts'"));

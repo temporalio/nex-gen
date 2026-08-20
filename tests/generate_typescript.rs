@@ -690,9 +690,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(!rendered.contains("export { WorkflowService } from './services';"));
     assert!(!rendered.contains("export type { SignalWithStartWorkflowResponse"));
     assert!(rendered.contains("headers?: never"));
-    assert!(
-        rendered.contains("request: _SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>,")
-    );
+    assert!(rendered.contains("request: SignalWithStartWorkflowInput<WorkflowFn, SignalValue>,"));
     assert!(rendered.contains("const client = workflow.createNexusServiceClient({"));
     assert!(!rendered.contains("export class WorkflowServiceClient"));
     assert!(rendered.contains("): Promise<workflow.ExternalWorkflowHandle> {"));
