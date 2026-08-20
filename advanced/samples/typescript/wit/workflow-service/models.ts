@@ -16,6 +16,8 @@ import {
   payloadToProto,
   memoFromProto,
   memoToProto,
+  headerFromProto,
+  headerToProto,
   durationFromProto,
   durationToProto,
   searchAttributesFromProto,
@@ -223,6 +225,7 @@ export type SignalWithStartWorkflowRequest<
      * fixed on the workflow execution and cannot be updated.
      */
     staticDetails?: string;
+    headers?: common.Headers;
   },
   (
     | {
@@ -408,6 +411,10 @@ export function signalWithStartWorkflowRequestFromProto<
                   ? undefined
                   : (payloadFromProto(proto.userMetadata.details) as common.Payload))!,
               ),
+    headers:
+      proto.header == null
+        ? undefined
+        : (headerFromProto(proto.header) as common.Headers),
   };
 }
 
@@ -493,6 +500,7 @@ export function signalWithStartWorkflowRequestToProto<
                 ? undefined
                 : configuredPayloadConverter().toPayload(model.staticDetails),
           },
+    header: model.headers == null ? undefined : headerToProto(model.headers),
     namespace: workflowNamespace(),
   };
 }

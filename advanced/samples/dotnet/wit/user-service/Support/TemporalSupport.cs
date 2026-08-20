@@ -114,6 +114,21 @@ namespace Nexgen.Support
                 item => item.Key,
                 item => FromPayload(item.Value, payloadConverter));
 
+        internal static ApiCommon.Header ToHeaderProto(this IReadOnlyDictionary<string, object?> value, IPayloadConverter? payloadConverter = null)
+        {
+            var header = new ApiCommon.Header();
+            foreach (var item in value)
+            {
+                header.Fields.Add(item.Key, ToPayload(item.Value, payloadConverter));
+            }
+            return header;
+        }
+
+        internal static IReadOnlyDictionary<string, object?> FromHeaderProto(ApiCommon.Header value, IPayloadConverter? payloadConverter = null) =>
+            value.Fields.ToDictionary(
+                item => item.Key,
+                item => FromPayload(item.Value, payloadConverter));
+
         internal static ApiCommon.Priority ToProto(this Temporalio.Common.Priority value, IPayloadConverter? payloadConverter = null) =>
             ToPriority(value);
 

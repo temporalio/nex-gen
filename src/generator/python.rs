@@ -7668,8 +7668,8 @@ class Example(enum.Enum):
         assert!(output.contains("if value.id_conflict_policy is not None:"));
         assert!(output.contains("workflow_id_conflict_policy_to_proto(value.id_conflict_policy)"));
         assert!(output.contains("message.input.CopyFrom(payloads_to_proto(value.args))"));
-        assert!(!output.contains("header:"));
-        assert!(!output.contains("header_to_proto("));
+        assert!(output.contains("headers: collections.abc.Mapping[str, typing.Any] | None = None"));
+        assert!(output.contains("message.header.CopyFrom(header_to_proto(value.headers))"));
         assert!(!output.contains("links:"));
         assert!(!output.contains("link_to_proto("));
         assert!(output.contains("async def _signal_with_start_workflow("));

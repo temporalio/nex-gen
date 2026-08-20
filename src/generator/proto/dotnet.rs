@@ -190,7 +190,7 @@ impl ModelBackend {
     ) -> bool {
         model.sourced_fields().any(|(_, field, _)| {
             self.field_kind_uses_support_extensions(&field.field_type, api_plan)
-        }) || model.public_fields().any(|(field_name, field)| {
+        }) || model.model_fields().any(|(field_name, field)| {
             function_args_field_uses_logical_storage(model, field_name, field)
                 || self.field_kind_uses_support_extensions(&field.field_type, api_plan)
         })
@@ -520,7 +520,7 @@ fn render_model_to_proto_method(
         ));
         output.push_str(";\n");
     }
-    for (field_name, field) in model.public_fields() {
+    for (field_name, field) in model.model_fields() {
         render_field_to_proto_assignment(
             backend,
             output,
@@ -551,7 +551,7 @@ fn render_model_from_wire_method(
         " wire, Temporalio.Converters.IPayloadConverter? payloadConverter = null)\n    {\n",
     );
     let required_fields = model
-        .public_fields()
+        .model_fields()
         .filter(|(_, field)| field.required)
         .collect::<Vec<_>>();
     output.push_str("        return new ");

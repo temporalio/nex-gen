@@ -764,8 +764,13 @@ pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordFieldVisibility {
     Public,
+    /// Present in generated models and wire conversion, but omitted from
+    /// generated operation convenience APIs.
+    ApiOmitted,
     Omitted,
-    Sourced { source_expr: String },
+    Sourced {
+        source_expr: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -846,6 +851,20 @@ impl<F: TypeFamily> RecordSpec<F> {
         self.fields
             .iter()
             .filter(|(_, field)| field.visibility == RecordFieldVisibility::Public)
+            .map(|(name, field)| (name.as_str(), field))
+    }
+
+    /// Fields represented by the generated model, including fields hidden from
+    /// operation convenience APIs and excluding sourced fields.
+    pub fn model_fields(&self) -> impl Iterator<Item = (&str, &RecordFieldSpec<F>)> {
+        self.fields
+            .iter()
+            .filter(|(_, field)| {
+                matches!(
+                    field.visibility,
+                    RecordFieldVisibility::Public | RecordFieldVisibility::ApiOmitted
+                )
+            })
             .map(|(name, field)| (name.as_str(), field))
     }
 

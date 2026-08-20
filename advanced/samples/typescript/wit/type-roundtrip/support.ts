@@ -156,6 +156,14 @@ export function memoToProto(
   };
 }
 
+export function headerFromProto(proto: temporal.api.common.v1.IHeader): common.Headers {
+  return proto.fields ?? {};
+}
+
+export function headerToProto(header: common.Headers): temporal.api.common.v1.IHeader {
+  return { fields: header };
+}
+
 export function durationFromProto(proto: google.protobuf.IDuration): common.Duration {
   return durationToMillis(proto)!;
 }

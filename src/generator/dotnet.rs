@@ -68,7 +68,7 @@ impl<'a> ApiPlanner<'a> {
             .collect::<Vec<_>>();
         let needs_result = models.iter().any(|model| {
             model
-                .public_fields()
+                .model_fields()
                 .any(|(_, field)| field_kind_uses_result(&field.field_type))
         });
         let mut imports = vec![
@@ -621,7 +621,7 @@ impl<'a> ApiPlanner<'a> {
         }
         output.push_str("\n{\n");
         self.render_model_constructor(output, access, &type_name, model);
-        for (field_name, field) in model.public_fields() {
+        for (field_name, field) in model.model_fields() {
             render_field_xml_doc(output, "    ", field);
             output.push_str("    public ");
             output.push_str(&self.model_field_type(model, field_name, field));
@@ -938,7 +938,7 @@ impl<'a> ApiPlanner<'a> {
         model: &PlannedModel,
     ) {
         let required_fields = model
-            .public_fields()
+            .model_fields()
             .filter(|(_, field)| field.required)
             .collect::<Vec<_>>();
         if required_fields.is_empty() {

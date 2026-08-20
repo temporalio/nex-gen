@@ -38,6 +38,7 @@ type signalWithStartWorkflowRequest struct {
 	VersioningOverride       client.VersioningOverride
 	StartDelay               *time.Duration
 	UserMetadata             *UserMetadata
+	Headers                  map[string]any
 }
 
 func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflowservice.SignalWithStartWorkflowExecutionRequest, error) {
@@ -150,6 +151,13 @@ func (m signalWithStartWorkflowRequest) toProto(ctx workflow.Context) (*workflow
 			return nil, err
 		}
 		message.UserMetadata = converted
+	}
+	{
+		converted, err := headerToProto(ctx, m.Headers)
+		if err != nil {
+			return nil, err
+		}
+		message.Header = converted
 	}
 	message.Namespace = workflow.GetInfo(ctx).Namespace
 	return message, nil
@@ -276,6 +284,13 @@ func signalWithStartWorkflowRequestFromProto(ctx workflow.Context, proto *workfl
 			return value, err
 		}
 		value.UserMetadata = &converted
+	}
+	{
+		converted, err := headerFromProto(ctx, proto.GetHeader())
+		if err != nil {
+			return value, err
+		}
+		value.Headers = converted
 	}
 	return value, nil
 }

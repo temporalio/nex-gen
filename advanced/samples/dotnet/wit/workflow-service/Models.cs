@@ -136,6 +136,7 @@ namespace Temporalio.Workflows
         /// </summary>
         public System.TimeSpan? StartDelay { get; init; }
         public UserMetadata? UserMetadata { get; init; }
+        public IReadOnlyDictionary<string, object?>? Headers { get; init; }
         private string? _namespace;
         public string Namespace
         {
@@ -162,6 +163,7 @@ namespace Temporalio.Workflows
                 VersioningOverride = wire.VersioningOverride == null ? null : Nexgen.Support.ProtoExtensions.FromVersioningOverrideProto(wire.VersioningOverride, payloadConverter),
                 StartDelay = wire.WorkflowStartDelay == null ? null : Nexgen.Support.ProtoExtensions.FromDurationProto(wire.WorkflowStartDelay, payloadConverter),
                 UserMetadata = wire.UserMetadata == null ? null : UserMetadata.TemporalFromIntermediate(wire.UserMetadata, payloadConverter),
+                Headers = wire.Header == null ? null : Nexgen.Support.ProtoExtensions.FromHeaderProto(wire.Header, payloadConverter),
             };
         }
 
@@ -232,6 +234,10 @@ namespace Temporalio.Workflows
             if (UserMetadata is { } userMetadata)
             {
                 proto.UserMetadata = (Temporalio.Api.Sdk.V1.UserMetadata)userMetadata.TemporalToIntermediate(payloadConverter);
+            }
+            if (Headers is { } headers)
+            {
+                proto.Header = Nexgen.Support.ProtoExtensions.ToHeaderProto(headers, payloadConverter);
             }
             return proto;
         }

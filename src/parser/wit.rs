@@ -1162,6 +1162,7 @@ fn build_fields_from_record(
             .unwrap_or(&field.name)
             .to_string();
         let omit_directive = directive(&directives, "omit", path, &field_context)?;
+        let api_omit_directive = directive(&directives, "api-omit", path, &field_context)?;
         let proto_field_name =
             directive_value(&directives, "proto-field", path, &field_context, "value")?
                 .unwrap_or_else(|| field.name.to_snake_case());
@@ -1179,6 +1180,15 @@ fn build_fields_from_record(
                 reason: format!(
                     "{field_context} maps to duplicate proto field `{proto_field_name}`"
                 ),
+            });
+        }
+
+        if omit_directive.is_some() && api_omit_directive.is_some() {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context: field_context,
+                directive: "@nexus.api-omit".to_string(),
+                reason: "cannot be combined with `@nexus.omit`".to_string(),
             });
         }
 
@@ -1246,6 +1256,24 @@ fn build_fields_from_record(
             build_field_default(resolve, &field.ty, default_directive, path, &field_context)?;
         let required = !is_optional_type(resolve, &field.ty) && field_default.is_none();
         let source = build_source_call(&directives, path, &field_context, language)?;
+        if let Some(api_omit_directive) = api_omit_directive {
+            if !api_omit_directive.args.is_empty() {
+                return Err(Error::InvalidWitDirective {
+                    path: path.to_path_buf(),
+                    context: field_context,
+                    directive: "@nexus.api-omit".to_string(),
+                    reason: "field-level api-omit does not take arguments".to_string(),
+                });
+            }
+            if source.is_some() {
+                return Err(Error::InvalidWitDirective {
+                    path: path.to_path_buf(),
+                    context: field_context,
+                    directive: "@nexus.api-omit".to_string(),
+                    reason: "cannot be combined with `@nexus.source`".to_string(),
+                });
+            }
+        }
         let annotation =
             directive(&directives, "type", path, &field_context)?.map(directive_language_string);
         let flattened_annotation = directive(&directives, "flattened-type", path, &field_context)?
@@ -1274,7 +1302,13 @@ fn build_fields_from_record(
                 required,
                 visibility: source
                     .map(|source_expr| RecordFieldVisibility::Sourced { source_expr })
-                    .unwrap_or(RecordFieldVisibility::Public),
+                    .unwrap_or_else(|| {
+                        if api_omit_directive.is_some() {
+                            RecordFieldVisibility::ApiOmitted
+                        } else {
+                            RecordFieldVisibility::Public
+                        }
+                    }),
                 function,
                 data: (),
             },

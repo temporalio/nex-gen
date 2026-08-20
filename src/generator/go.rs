@@ -1212,33 +1212,30 @@ impl<'a> ApiPlanner<'a> {
                 .fields
                 .iter()
                 .enumerate()
-                .map(|(index, field)| {
+                .filter_map(|(index, field)| {
                     let planned_field =
                         planned_fields.as_ref().and_then(|fields| fields.get(index));
-                    let function =
-                        planned_field.and_then(|planned_field| match &planned_field.role {
-                            PlannedFieldRole::Function(function) if planned_field.required => {
-                                Some(function.clone())
-                            }
-                            _ => None,
-                        });
-                    let function_args =
-                        planned_field.and_then(|planned_field| match &planned_field.role {
-                            PlannedFieldRole::FunctionArgs(function) => Some(function.clone()),
-                            _ => None,
-                        });
-                    let embed_in_options = planned_field.is_some_and(|planned_field| {
-                        !planned_field.required
-                            && field_kind_is_flattened_message(&planned_field.kind, self.api_plan)
-                    });
-                    let default_punning_zero = planned_field
-                        .filter(|planned_field| !planned_field.required && !embed_in_options)
-                        .and_then(|planned_field| {
+                    let planned_field = planned_field?;
+                    let function = match &planned_field.role {
+                        PlannedFieldRole::Function(function) if planned_field.required => {
+                            Some(function.clone())
+                        }
+                        _ => None,
+                    };
+                    let function_args = match &planned_field.role {
+                        PlannedFieldRole::FunctionArgs(function) => Some(function.clone()),
+                        _ => None,
+                    };
+                    let embed_in_options = !planned_field.required
+                        && field_kind_is_flattened_message(&planned_field.kind, self.api_plan);
+                    let default_punning_zero = (!planned_field.required && !embed_in_options)
+                        .then(|| {
                             public_default_punning_zero_for_field(
                                 &planned_field.kind,
                                 &field.go_type,
                             )
-                        });
+                        })
+                        .flatten();
                     let public_go_type = if default_punning_zero.is_some() {
                         field
                             .go_type
@@ -1248,7 +1245,7 @@ impl<'a> ApiPlanner<'a> {
                     } else {
                         field.go_type.clone()
                     };
-                    RenderedUnpackedParam {
+                    Some(RenderedUnpackedParam {
                         field_name: field.name.clone(),
                         doc: field.doc.clone(),
                         param_name: go_unexported_name(&field.name),
@@ -1259,7 +1256,7 @@ impl<'a> ApiPlanner<'a> {
                         function_args,
                         required: field.required,
                         embed_in_options,
-                    }
+                    })
                 })
                 .collect()
         });
@@ -1536,7 +1533,7 @@ impl<'a> ApiPlanner<'a> {
                     .api_plan
                     .record_type_parameters(&planned_model.full_name, Language::Go);
                 let planned_fields = planned_model
-                    .public_fields()
+                    .model_fields()
                     .map(|(field_name, field)| {
                         planned_field(planned_model, field_name, field, self.api_plan)
                     })
@@ -2800,7 +2797,7 @@ fn parse_go_import(type_expr: &str) -> (Option<String>, String) {
 /// annotations that embed a module path (e.g. `go.temporal.io/sdk/temporal.RetryPolicy`).
 fn collect_imports_from_plan(api_plan: &PlannedSpec, imports: &mut BTreeSet<String>) {
     for (_, model) in api_plan.records() {
-        for (_, field) in model.public_fields() {
+        for (_, field) in model.model_fields() {
             collect_imports_from_value_type(
                 &planned_field_kind(&field.field_type, api_plan),
                 imports,

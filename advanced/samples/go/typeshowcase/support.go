@@ -240,6 +240,36 @@ func memoFromProto(ctx workflow.Context, memo *common.Memo) (map[string]any, err
 	return result, nil
 }
 
+func headerToProto(ctx workflow.Context, header map[string]any) (*common.Header, error) {
+	if header == nil {
+		return nil, nil
+	}
+	fields := make(map[string]*common.Payload, len(header))
+	for key, value := range header {
+		payload, err := payloadToProto(ctx, value)
+		if err != nil {
+			return nil, fmt.Errorf("encode workflow header error: %v", err)
+		}
+		fields[key] = payload
+	}
+	return &common.Header{Fields: fields}, nil
+}
+
+func headerFromProto(ctx workflow.Context, header *common.Header) (map[string]any, error) {
+	if header == nil {
+		return nil, nil
+	}
+	result := make(map[string]any, len(header.GetFields()))
+	for key, payload := range header.GetFields() {
+		value, err := payloadFromProto(ctx, payload)
+		if err != nil {
+			return nil, err
+		}
+		result[key] = value
+	}
+	return result, nil
+}
+
 // --- SearchAttributes (temporal.api.common.v1.SearchAttributes) ---
 
 func searchAttributesToProto(_ workflow.Context, searchAttributes *temporal.SearchAttributes) (*common.SearchAttributes, error) {

@@ -15,6 +15,8 @@ import temporalio.converter
 from ._support import (
     duration_from_proto,
     duration_to_proto,
+    header_from_proto,
+    header_to_proto,
     memo_from_proto,
     memo_to_proto,
     payload_from_proto,
@@ -130,6 +132,9 @@ class _SignalWithStartWorkflowRequestTransferTypeConverter(
             if value.HasField("user_metadata")
             else None,
             namespace=value.namespace,
+            headers=header_from_proto(value.header)
+            if value.HasField("header")
+            else None,
         )
 
     @typing_extensions.override
@@ -188,6 +193,8 @@ class _SignalWithStartWorkflowRequestTransferTypeConverter(
                 )
             )
         message.namespace = value.namespace
+        if value.headers is not None:
+            message.header.CopyFrom(header_to_proto(value.headers))
         return message
 
 
@@ -223,6 +230,7 @@ class SignalWithStartWorkflowRequest:
     start_delay: datetime.timedelta | None = None
     user_metadata: UserMetadata | None = None
     namespace: str = dataclasses.field(default_factory=workflow_namespace)
+    headers: collections.abc.Mapping[str, typing.Any] | None = None
 
 
 class _UserMetadataTransferTypeConverter(

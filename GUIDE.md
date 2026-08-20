@@ -709,6 +709,20 @@ identity: placeholder,
 request-id: placeholder,
 ```
 
+### API-omitted fields
+
+Fields annotated with `@nexus.api-omit` remain on generated models and are
+included in proto conversion, but do not appear in generated convenience
+operation APIs. Use this when generated code must carry a wire field without
+making it a public operation parameter.
+
+```wit
+/// @nexus.api-omit
+headers: option<header>,
+```
+
+`@nexus.api-omit` cannot be combined with `@nexus.omit` or `@nexus.source`.
+
 ### Flattened Records
 
 A record annotated with `@nexus.flatten-in-api` has its fields "promoted" into

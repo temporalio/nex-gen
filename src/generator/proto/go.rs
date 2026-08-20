@@ -1420,7 +1420,7 @@ fn build_field_conversions(
     backend: &ModelBackend,
 ) -> Result<Vec<RenderedFieldConversion>> {
     planned_model
-        .public_fields()
+        .model_fields()
         .enumerate()
         .map(|(index, (field_name, field))| {
             let planned_field = planned_field(planned_model, field_name, field, api_plan);
