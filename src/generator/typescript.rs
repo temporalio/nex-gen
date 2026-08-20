@@ -5658,16 +5658,16 @@ fn render_operation_function(
         if input.api_omitted_fields.is_empty() {
             output.push_str(&input.annotation);
         } else {
-            output.push_str("Omit<");
             output.push_str(&input.annotation);
-            output.push_str(", ");
+            output.push_str(" & { ");
             for (index, field) in input.api_omitted_fields.iter().enumerate() {
                 if index > 0 {
-                    output.push_str(" | ");
+                    output.push_str("; ");
                 }
-                output.push_str(&typescript_string_literal(field));
+                output.push_str(&field);
+                output.push_str("?: never");
             }
-            output.push('>');
+            output.push_str(" }");
         }
         output.push_str(",\n");
     }
@@ -6206,7 +6206,7 @@ mod tests {
         assert!(!output.contains("signalWithStartWorkflowExecution("));
         assert!(output.contains("export async function signalWithStartWorkflow<"));
         assert!(output.contains(
-            "request: Omit<SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>, \"headers\">,"
+            "request: SignalWithStartWorkflowRequest<WorkflowFn, SignalValue> & { headers?: never },"
         ));
         assert!(output.contains("const client = workflow.createNexusServiceClient({"));
         assert!(!output.contains("export class WorkflowServiceClient"));

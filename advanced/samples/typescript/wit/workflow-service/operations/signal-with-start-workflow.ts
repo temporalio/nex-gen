@@ -20,7 +20,9 @@ export async function signalWithStartWorkflow<
     any[]
   >,
 >(
-  request: Omit<SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>, "headers">,
+  request: SignalWithStartWorkflowRequest<WorkflowFn, SignalValue> & {
+    headers?: never;
+  },
 ): Promise<workflow.ExternalWorkflowHandle> {
   const client = workflow.createNexusServiceClient({
     service: workflowService,
