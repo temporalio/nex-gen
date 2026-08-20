@@ -98,7 +98,15 @@ fn linked_inputs_path(root: &Path) -> PathBuf {
 }
 
 fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
-    vec![input_path(root, example_id), linked_inputs_path(root)]
+    let input = input_path(root, example_id);
+    let mut paths = vec![input.clone()];
+    if fs::read_to_string(&input)
+        .unwrap()
+        .contains("use nexus:temporal-types/")
+    {
+        paths.push(linked_inputs_path(root));
+    }
+    paths
 }
 
 fn typescript_root(root: &Path) -> PathBuf {
@@ -235,19 +243,18 @@ fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[Pa
 fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_path: &Path) {
     ensure_typescript_dependencies(&typescript_root(root));
 
-    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nexgen"));
+    command
+        .arg("typescript")
+        .args(example_input_paths(root, example_id))
         .args([
-            "typescript",
-            input_path(root, example_id).to_str().unwrap(),
-            linked_inputs_path(root).to_str().unwrap(),
             "--descriptors",
             descriptor_path(root).to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
             "--native-api",
-        ])
-        .status()
-        .unwrap();
+        ]);
+    let status = command.status().unwrap();
     assert!(status.success());
 
     let format_status = Command::new("npm")

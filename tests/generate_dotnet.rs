@@ -56,7 +56,15 @@ fn input_path(root: &Path, example_id: &str) -> PathBuf {
 }
 
 fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
-    vec![input_path(root, example_id), linked_inputs_path(root)]
+    let input = input_path(root, example_id);
+    let mut paths = vec![input.clone()];
+    if fs::read_to_string(&input)
+        .unwrap()
+        .contains("use nexus:temporal-types/")
+    {
+        paths.push(linked_inputs_path(root));
+    }
+    paths
 }
 
 fn dotnet_output_path(root: &Path, example_id: &str) -> PathBuf {
@@ -155,19 +163,18 @@ fn generate_dotnet_files(
 }
 
 fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
-    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nexgen"));
+    command
+        .arg("dotnet")
+        .args(example_input_paths(root, example_id))
         .args([
-            "dotnet",
-            input_path(root, example_id).to_str().unwrap(),
-            linked_inputs_path(root).to_str().unwrap(),
             "--descriptors",
             descriptor_path(root).to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
             "--native-api",
-        ])
-        .status()
-        .unwrap();
+        ]);
+    let status = command.status().unwrap();
     assert!(status.success());
 }
 

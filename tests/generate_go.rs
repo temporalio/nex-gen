@@ -124,7 +124,15 @@ fn linked_inputs_path(root: &Path) -> PathBuf {
 }
 
 fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
-    vec![input_path(root, example_id), linked_inputs_path(root)]
+    let input = input_path(root, example_id);
+    let mut paths = vec![input.clone()];
+    if fs::read_to_string(&input)
+        .unwrap()
+        .contains("use nexus:temporal-types/")
+    {
+        paths.push(linked_inputs_path(root));
+    }
+    paths
 }
 
 fn go_root(root: &Path) -> PathBuf {
@@ -213,19 +221,18 @@ fn read_go_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
 }
 
 fn generate_formatted_go_output(root: &Path, example_id: &str, output_path: &Path) {
-    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nexgen"));
+    command
+        .arg("go")
+        .args(example_input_paths(root, example_id))
         .args([
-            "go",
-            input_path(root, example_id).to_str().unwrap(),
-            linked_inputs_path(root).to_str().unwrap(),
             "--descriptors",
             descriptor_path(root).to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
             "--native-api",
-        ])
-        .status()
-        .unwrap();
+        ]);
+    let status = command.status().unwrap();
     assert!(status.success());
 
     let format_status = Command::new("gofmt")
@@ -915,12 +922,7 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     let service_rendered = rendered
         .split("### functionexecution.go")
         .nth(1)
-        .and_then(|contents| contents.split("### support.go").next())
         .expect("functionexecution.go should be rendered");
-    let support_rendered = rendered
-        .split("### support.go")
-        .nth(1)
-        .expect("support.go should be rendered");
 
     assert!(service_rendered.contains("\"reflect\""));
     assert!(service_rendered.contains("\"runtime\""));
@@ -935,15 +937,6 @@ fn go_function_fields_accept_strings_or_exact_function_pointers() {
     assert!(!service_rendered.contains("func getWorkflowDataConverter"));
     assert!(!service_rendered.contains("type nexgenOperationFuture struct"));
     assert!(!service_rendered.contains("type OperationFuture interface"));
-    assert!(support_rendered.contains("\"reflect\""));
-    assert!(!support_rendered.contains("\"runtime\""));
-    assert!(!support_rendered.contains("\"strings\""));
-    assert!(!support_rendered.contains("\"errors\""));
-    assert!(!support_rendered.contains("func nexgenFunctionName[F any](value F) string"));
-    assert!(!support_rendered.contains("func nexgenWorkflowDataConverter"));
-    assert!(support_rendered.contains("func getWorkflowDataConverter"));
-    assert!(!support_rendered.contains("type nexgenOperationFuture struct"));
-
     // Internal request structs remain wire-shaped without public API docs.
     assert!(rendered.contains("type executeFunctionRequest struct {\n\tFunction string"));
     assert!(rendered.contains("type executeNamedFunctionRequest struct {\n\tFunction string"));

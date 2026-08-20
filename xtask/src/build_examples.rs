@@ -247,8 +247,8 @@ fn reset_example_output_directory(language_root: &Path, output_path: &Path) -> R
 
 fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Result<()> {
     let input_path = example_input_path(repo_root, example_id);
-    let mut input_paths = vec![input_path];
-    input_paths.extend(example_linked_input_paths(repo_root));
+    let mut input_paths = vec![input_path.clone()];
+    input_paths.extend(example_linked_input_paths(repo_root, &input_path)?);
     let output_path = example_output_path(repo_root, language, example_id);
     let language_root = advanced_language_root(repo_root, language);
     reset_example_output_directory(&language_root, &output_path)?;
@@ -363,9 +363,16 @@ fn json_example_input_path(root: &Path, id: &str) -> PathBuf {
     }
     input_root.join(format!("{id}.yaml"))
 }
-fn example_linked_input_paths(root: &Path) -> Vec<PathBuf> {
+fn example_linked_input_paths(root: &Path, input_path: &Path) -> Result<Vec<PathBuf>> {
+    let input = fs::read_to_string(input_path).map_err(|source| Error::ReadFile {
+        path: input_path.to_path_buf(),
+        source,
+    })?;
+    if !input.contains("use nexus:temporal-types/") {
+        return Ok(Vec::new());
+    }
     let path = root.join("advanced/samples/inputs/deps");
-    path.is_dir().then_some(path).into_iter().collect()
+    Ok(path.is_dir().then_some(path).into_iter().collect())
 }
 fn example_output_path(root: &Path, language: Language, id: &str) -> PathBuf {
     let root = advanced_language_root(root, language);
