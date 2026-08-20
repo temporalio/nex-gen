@@ -3968,6 +3968,7 @@ fn render_operation_module(
     api_plan: &PlannedSpec,
 ) -> String {
     let mut body = String::new();
+    render_operation_input_alias(&mut body, service, operation);
     render_operation_function(&mut body, service, operation);
     let mut imports = String::new();
     render_typescript_namespace_imports(
@@ -5658,16 +5659,7 @@ fn render_operation_function(
         if input.api_omitted_fields.is_empty() {
             output.push_str(&input.annotation);
         } else {
-            output.push_str(&input.annotation);
-            output.push_str(" & { ");
-            for (index, field) in input.api_omitted_fields.iter().enumerate() {
-                if index > 0 {
-                    output.push_str("; ");
-                }
-                output.push_str(&field);
-                output.push_str("?: never");
-            }
-            output.push_str(" }");
+            output.push_str(&operation_input_alias_reference(service, operation, input));
         }
         output.push_str(",\n");
     }
@@ -5768,6 +5760,64 @@ fn render_operation_function(
         }
     }
     output.push_str("}\n");
+}
+
+fn operation_input_alias_name(
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) -> String {
+    format!(
+        "_{}Request",
+        typescript_operation_function_name(service, operation).to_upper_camel_case()
+    )
+}
+
+fn operation_input_alias_reference(
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    input: &RenderedOperationInput,
+) -> String {
+    let parameters = input
+        .type_parameters
+        .iter()
+        .map(|parameter| parameter.name.as_str())
+        .collect::<Vec<_>>();
+    format!(
+        "{}{}",
+        operation_input_alias_name(service, operation),
+        if parameters.is_empty() {
+            String::new()
+        } else {
+            format!("<{}>", parameters.join(", "))
+        }
+    )
+}
+
+fn render_operation_input_alias(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) {
+    let Some(input) = &operation.input else {
+        return;
+    };
+    if input.api_omitted_fields.is_empty() {
+        return;
+    }
+    output.push_str("type ");
+    output.push_str(&operation_input_alias_name(service, operation));
+    output.push_str(&render_type_parameter_list(&input.type_parameters));
+    output.push_str(" = ");
+    output.push_str(&input.annotation);
+    output.push_str(" & { ");
+    for (index, field) in input.api_omitted_fields.iter().enumerate() {
+        if index > 0 {
+            output.push_str("; ");
+        }
+        output.push_str(field);
+        output.push_str("?: never");
+    }
+    output.push_str(" };\n\n");
 }
 
 fn render_resource_constructor(
@@ -6205,9 +6255,11 @@ mod tests {
         assert!(!output.contains("export enum WorkflowIdConflictPolicy"));
         assert!(!output.contains("signalWithStartWorkflowExecution("));
         assert!(output.contains("export async function signalWithStartWorkflow<"));
-        assert!(output.contains(
-            "request: SignalWithStartWorkflowRequest<WorkflowFn, SignalValue> & { headers?: never },"
-        ));
+        assert!(output.contains("type _SignalWithStartWorkflowRequest<WorkflowFn extends"));
+        assert!(output.contains("headers?: never"));
+        assert!(
+            output.contains("request: _SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>,")
+        );
         assert!(output.contains("const client = workflow.createNexusServiceClient({"));
         assert!(!output.contains("export class WorkflowServiceClient"));
         assert!(!output.contains("from './temporal_model_converters.ts'"));

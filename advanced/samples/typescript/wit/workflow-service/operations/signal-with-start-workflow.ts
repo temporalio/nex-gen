@@ -5,6 +5,15 @@ import { workflowService } from "../services";
 import { signalWithStartWorkflowRequestToProto } from "../models";
 import type { SignalWithStartWorkflowRequest } from "../models";
 
+type _SignalWithStartWorkflowRequest<
+  WorkflowFn extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  SignalValue extends workflow.SignalDefinition<any[]> = workflow.SignalDefinition<
+    any[]
+  >,
+> = SignalWithStartWorkflowRequest<WorkflowFn, SignalValue> & { headers?: never };
+
 /**
  * Signal a workflow, starting it first if needed.
  *
@@ -20,9 +29,7 @@ export async function signalWithStartWorkflow<
     any[]
   >,
 >(
-  request: SignalWithStartWorkflowRequest<WorkflowFn, SignalValue> & {
-    headers?: never;
-  },
+  request: _SignalWithStartWorkflowRequest<WorkflowFn, SignalValue>,
 ): Promise<workflow.ExternalWorkflowHandle> {
   const client = workflow.createNexusServiceClient({
     service: workflowService,
