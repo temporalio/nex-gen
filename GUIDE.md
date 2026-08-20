@@ -23,7 +23,7 @@ of `@nexus` directives.
   - [Resource Return Binding](#resource-return-binding)
   - [Edge Cases and Error Conditions](#edge-cases-and-error-conditions)
 - [Proto-Backed Models](#proto-backed-models)
-  - [from_proto and to_proto](#from_proto-and-to_proto)
+  - [Transfer-Type Conversion](#transfer-type-conversion)
   - [Sourced Fields](#sourced-fields)
   - [Omitted Fields](#omitted-fields)
   - [Flattened Records](#flattened-records)
@@ -115,9 +115,8 @@ export interface PostalAddress {
 }
 ```
 
-TypeScript always emits a companion `const` alongside the interface. For
-WIT-direct records it is empty; for proto-backed records it gains `fromProto()`
-and `toProto()` methods.
+For proto-backed records, TypeScript also emits top-level `fromProto` and
+`toProto` conversion functions alongside the interface.
 
 ### Enums
 
@@ -603,9 +602,11 @@ name, the generator raises an error.
 ## Proto-Backed Models
 
 When a WIT record is annotated with `@nexus.proto`, the generator produces
-`from_proto()` / `to_proto()` conversion methods alongside the model.
+code that converts between the public model and its protobuf transfer type.
+Generated callers continue to accept and return the public model; conversion is
+performed by the target SDK or generated operation helpers.
 
-### from_proto and to_proto
+### Transfer-Type Conversion
 
 ```wit
 /// @nexus.proto "temporal.api.activity.v1.ActivityOptions"
@@ -618,27 +619,28 @@ record activity-options {
 **Python:**
 
 ```python
+class _ActivityOptionsTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["ActivityOptions", ProtoActivityOptions]
+):
+    def from_transfer_type(self, value, type_hint) -> "ActivityOptions":
+        return ActivityOptions(
+            task_queue=task_queue_from_proto(value.task_queue)
+                if value.HasField("task_queue") else None,
+            retry_policy=retry_policy_from_proto(value.retry_policy),
+        )
+
+    def to_transfer_type(self, value: "ActivityOptions") -> ProtoActivityOptions:
+        message = ProtoActivityOptions()
+        if value.task_queue is not None:
+            message.task_queue.CopyFrom(task_queue_to_proto(value.task_queue))
+        message.retry_policy.CopyFrom(retry_policy_to_proto(value.retry_policy))
+        return message
+
+@temporalio.converter.transfer_type_convertible(_ActivityOptionsTransferTypeConverter)
 @dataclasses.dataclass(slots=True, kw_only=True)
 class ActivityOptions:
     task_queue: str | None = None
     retry_policy: temporalio.common.RetryPolicy
-
-    @classmethod
-    def from_proto(cls, proto) -> ActivityOptions:
-        if not proto.HasField("retry_policy"):
-            raise ValueError("missing required field ActivityOptions.retry_policy")
-        return cls(
-            task_queue=task_queue_from_proto(proto.task_queue)
-                if proto.HasField("task_queue") else None,
-            retry_policy=retry_policy_from_proto(proto.retry_policy),
-        )
-
-    def to_proto(self):
-        message = ...ActivityOptions()
-        if self.task_queue is not None:
-            message.task_queue.CopyFrom(task_queue_to_proto(self.task_queue))
-        message.retry_policy.CopyFrom(retry_policy_to_proto(self.retry_policy))
-        return message
 ```
 
 **TypeScript:**
@@ -649,30 +651,14 @@ export interface ActivityOptions {
     retryPolicy: common.RetryPolicy;
 }
 
-export const ActivityOptions = {
-    fromProto(proto: temporal.api.activity.v1.IActivityOptions | null | undefined) {
-        if (proto == null) return undefined;
-        return {
-            taskQueue: proto.taskQueue == null ? undefined
-                : taskQueueFromProto(proto.taskQueue),
-            retryPolicy: requiredField(
-                retryPolicyFromProto(requiredField(proto.retryPolicy, ...)), ...
-            ),
-        };
-    },
-    toProto(model: ActivityOptions | null | undefined) {
-        if (model == null) return undefined;
-        return {
-            taskQueue: model.taskQueue == null ? undefined
-                : taskQueueToProto(model.taskQueue),
-            retryPolicy: retryPolicyToProto(model.retryPolicy),
-        };
-    },
-};
-```
+export function activityOptionsFromProto(
+    proto: temporal.api.activity.v1.IActivityOptions | null | undefined,
+): ActivityOptions | undefined { /* ... */ }
 
-Required fields are validated in `from_proto` -- missing required proto fields
-raise a `ValueError` (Python) or throw an `Error` (TypeScript).
+export function activityOptionsToProto(
+    model: ActivityOptions | null | undefined,
+): temporal.api.activity.v1.IActivityOptions | undefined { /* ... */ }
+```
 
 ### .NET transfer-type conversion
 
@@ -683,10 +669,16 @@ convert between the public model and its protobuf transfer type during payload
 serialization, so generated callers continue to use the public model. This
 requires `Temporalio` 1.18.0 or newer.
 
+The generated Python transfer-type converter is registered with
+`@temporalio.converter.transfer_type_convertible`. TypeScript exposes named
+conversion functions. These conversion APIs are generated implementation
+details; use the generated Nexus operation APIs rather than calling them
+directly.
+
 ### Sourced Fields
 
 Fields annotated with `@nexus.source` are not exposed in the user-facing API.
-Instead, the `to_proto()` method calls a support function to obtain the value.
+Instead, transfer-type conversion calls a support function to obtain the value.
 
 ```wit
 record start-workflow-request {
@@ -696,7 +688,8 @@ record start-workflow-request {
 }
 ```
 
-The `namespace` field does not appear as a constructor parameter. In `to_proto()`:
+The `namespace` field does not appear as a constructor parameter. During
+transfer-type conversion:
 
 ```python
 message.namespace = workflow_namespace()   # auto-injected
@@ -944,9 +937,9 @@ class StartWorkflowRequest:
     workflow: collections.abc.Callable[..., str]
     args: list[typing.Any] | None = None
 
-    def to_proto(self):
-        if self.args is not None:
-            message.input.CopyFrom(payloads_to_proto(self.args))
+    def to_transfer_type(self, value: "StartWorkflowRequest"):
+        if value.args is not None:
+            message.input.CopyFrom(payloads_to_proto(value.args))
         return message
 ```
 
@@ -1075,7 +1068,8 @@ is just `signal_name`.
 type signal-function = placeholder;
 ```
 
-Generated Python imports and calls the converter in `to_proto()`:
+Generated Python imports and calls the converter during transfer-type
+conversion:
 
 ```python
 from ._support import signal_function_to_proto
@@ -1085,10 +1079,10 @@ class SignalWithStartWorkflowRequest:
     signal: str | collections.abc.Callable[..., None | collections.abc.Awaitable[None]]
     signal_args: list[typing.Any] | None = None
 
-    def to_proto(self):
-        message.signal_name = signal_function_to_proto(self.signal)
-        if self.signal_args is not None:
-            message.signal_input.CopyFrom(payloads_to_proto(self.signal_args))
+    def to_transfer_type(self, value: "SignalWithStartWorkflowRequest"):
+        message.signal_name = signal_function_to_proto(value.signal)
+        if value.signal_args is not None:
+            message.signal_input.CopyFrom(payloads_to_proto(value.signal_args))
         return message
 ```
 
@@ -1200,9 +1194,9 @@ package nexus:temporal-types@1.0.0;
 **Placement:** Type alias, record, or enum
 **Syntax:** `@nexus.proto "<fully.qualified.proto.MessageName>"`
 
-Maps a WIT type to a protobuf message or enum. The generator produces
-`from_proto()` / `to_proto()` methods and validates field mappings against the
-proto descriptor. Requires `--descriptors` on the CLI.
+Maps a WIT type to a protobuf message or enum. The generator emits
+target-specific transfer-type conversion code and validates field mappings
+against the proto descriptor. Requires `--descriptors` on the CLI.
 
 ```wit
 /// @nexus.proto "temporal.api.activity.v1.ActivityOptions"
@@ -1370,7 +1364,8 @@ parameter. The function must be defined in the support file.
 namespace: string,
 ```
 
-In `to_proto()`, this becomes `message.namespace = workflow_namespace()`.
+During transfer-type conversion, this becomes
+`message.namespace = workflow_namespace()`.
 
 Cannot be combined with `@nexus.default`.
 
