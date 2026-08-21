@@ -115,8 +115,9 @@ export interface PostalAddress {
 }
 ```
 
-For proto-backed records, TypeScript also emits top-level `fromProto` and
-`toProto` conversion functions alongside the interface.
+TypeScript always emits a companion `const` alongside the interface. For
+WIT-direct records it is empty; for proto-backed records it gains `fromProto()`
+and `toProto()` methods.
 
 ### Enums
 
@@ -688,22 +689,31 @@ export interface ActivityOptions {
     retryPolicy: common.RetryPolicy;
 }
 
-export function activityOptionsFromProto(
-    proto: temporal.api.activity.v1.IActivityOptions | null | undefined,
-): ActivityOptions | undefined { /* ... */ }
-
-export function activityOptionsToProto(
-    model: ActivityOptions | null | undefined,
-): temporal.api.activity.v1.IActivityOptions | undefined { /* ... */ }
+export const ActivityOptions = {
+    fromProto(proto: temporal.api.activity.v1.IActivityOptions | null | undefined) {
+        if (proto == null) return undefined;
+        return {
+            taskQueue: proto.taskQueue == null ? undefined
+                : taskQueueFromProto(proto.taskQueue),
+            retryPolicy: requiredField(
+                retryPolicyFromProto(requiredField(proto.retryPolicy, ...)), ...
+            ),
+        };
+    },
+    toProto(model: ActivityOptions | null | undefined) {
+        if (model == null) return undefined;
+        return {
+            taskQueue: model.taskQueue == null ? undefined
+                : taskQueueToProto(model.taskQueue),
+            retryPolicy: retryPolicyToProto(model.retryPolicy),
+        };
+    },
+};
 ```
 
-The generated Python transfer-type converter is registered with
-`@temporalio.converter.transfer_type_convertible`; TypeScript exposes named
-conversion functions; and .NET uses a `TemporalTransferTypeConverter`
-attribute and `ITemporalTransferTypeConverter`. These conversion APIs are
-generated implementation details; use the generated Nexus operation APIs
-rather than calling them directly. .NET output requires `Temporalio` 1.18.0 or
-newer.
+Required fields are validated in `from_proto` -- missing required proto fields
+raise a `ValueError` (Python) or throw an `Error` (TypeScript). .NET output
+requires `Temporalio` 1.18.0 or newer.
 
 ### Sourced Fields
 
