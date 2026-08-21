@@ -643,6 +643,43 @@ class ActivityOptions:
     retry_policy: temporalio.common.RetryPolicy
 ```
 
+**.NET:**
+```csharp
+[TemporalTransferTypeConverter(typeof(ActivityOptions.TransferTypeConverter))]
+public class ActivityOptions
+{
+    public ActivityOptions(Temporalio.Common.RetryPolicy retryPolicy)
+    {
+        RetryPolicy = retryPolicy;
+    }
+
+    public string? TaskQueue { get; init; }
+    public Temporalio.Common.RetryPolicy RetryPolicy { get; }
+
+    internal static ActivityOptions FromTransferType(
+        Temporalio.Api.Activity.V1.ActivityOptions wire) { /* ... */ }
+
+    internal Temporalio.Api.Activity.V1.ActivityOptions ToTransferType()
+        { /* ... */ }
+
+    public sealed class TransferTypeConverter : ITemporalTransferTypeConverter
+    {
+        public Type TransferType =>
+            typeof(Temporalio.Api.Activity.V1.ActivityOptions);
+
+        public object? ToTransferType(object? value) => value is null
+            ? null
+            : ((ActivityOptions)value).ToTransferType();
+
+        public object? FromTransferType(object? transferType) =>
+            transferType is null
+                ? null
+                : ActivityOptions.FromTransferType(
+                    (Temporalio.Api.Activity.V1.ActivityOptions)transferType);
+    }
+}
+```
+
 **TypeScript:**
 
 ```typescript
@@ -660,20 +697,13 @@ export function activityOptionsToProto(
 ): temporal.api.activity.v1.IActivityOptions | undefined { /* ... */ }
 ```
 
-### .NET transfer-type conversion
-
-For a non-generic proto-backed .NET record, nexgen emits a
-`TemporalTransferTypeConverter` attribute and companion
-`ITemporalTransferTypeConverter`. The Temporal .NET SDK uses the companion to
-convert between the public model and its protobuf transfer type during payload
-serialization, so generated callers continue to use the public model. This
-requires `Temporalio` 1.18.0 or newer.
-
 The generated Python transfer-type converter is registered with
-`@temporalio.converter.transfer_type_convertible`. TypeScript exposes named
-conversion functions. These conversion APIs are generated implementation
-details; use the generated Nexus operation APIs rather than calling them
-directly.
+`@temporalio.converter.transfer_type_convertible`; TypeScript exposes named
+conversion functions; and .NET uses a `TemporalTransferTypeConverter`
+attribute and `ITemporalTransferTypeConverter`. These conversion APIs are
+generated implementation details; use the generated Nexus operation APIs
+rather than calling them directly. .NET output requires `Temporalio` 1.18.0 or
+newer.
 
 ### Sourced Fields
 
