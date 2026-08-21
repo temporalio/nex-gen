@@ -7,10 +7,7 @@ use nexgen::language::Language;
 #[cfg(feature = "advanced")]
 use nexgen::parser::write_prepared_wit_directory;
 #[cfg(feature = "advanced")]
-use nexgen::{
-    AddMessageRequest, AddRpcRequest, BuildExamplesRequest, add_message_to_file, add_rpc_to_file,
-    build_examples, build_json_examples,
-};
+use nexgen::{AddMessageRequest, AddRpcRequest, add_message_to_file, add_rpc_to_file};
 use nexgen::{GenerateRequest, generate_to_file};
 
 #[derive(Parser)]
@@ -35,12 +32,6 @@ enum Commands {
     Python(GenerateArgs),
     #[command(alias = "ts", about = "Generate TypeScript bindings (alias: ts)")]
     Typescript(TypescriptGenerateArgs),
-    #[cfg(feature = "advanced")]
-    #[command(about = "Rebuild the checked-in WIT example outputs")]
-    BuildExamples(BuildExamplesArgs),
-    #[cfg(feature = "advanced")]
-    #[command(about = "Rebuild the checked-in JSON schema example outputs")]
-    BuildJsonExamples(BuildExamplesArgs),
     #[cfg(feature = "advanced")]
     #[command(
         about = "Add an RPC scaffold to an existing WIT file, or generate standalone WIT for one RPC"
@@ -115,15 +106,6 @@ impl From<CliTsDateTimeTypes> for TsDateTimeTypes {
 
 #[cfg(feature = "advanced")]
 #[derive(Args)]
-struct BuildExamplesArgs {
-    #[arg(long = "lang", value_enum)]
-    langs: Vec<ExampleCliLanguage>,
-    #[arg(value_name = "EXAMPLE_ID")]
-    example_ids: Vec<String>,
-}
-
-#[cfg(feature = "advanced")]
-#[derive(Args)]
 struct AddRpcArgs {
     #[arg(long, required = true)]
     descriptors: Vec<PathBuf>,
@@ -155,29 +137,6 @@ struct DebugWitDirArgs {
     inputs: Vec<PathBuf>,
     #[arg(long)]
     output: PathBuf,
-}
-
-#[cfg(feature = "advanced")]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-enum ExampleCliLanguage {
-    Dotnet,
-    Go,
-    Java,
-    Python,
-    Typescript,
-}
-
-#[cfg(feature = "advanced")]
-impl From<ExampleCliLanguage> for Language {
-    fn from(value: ExampleCliLanguage) -> Self {
-        match value {
-            ExampleCliLanguage::Dotnet => Language::Dotnet,
-            ExampleCliLanguage::Go => Language::Go,
-            ExampleCliLanguage::Java => Language::Java,
-            ExampleCliLanguage::Python => Language::Python,
-            ExampleCliLanguage::Typescript => Language::TypeScript,
-        }
-    }
 }
 
 fn main() -> ExitCode {
@@ -215,16 +174,6 @@ fn main() -> ExitCode {
             args.ts_date_time_types.into(),
             None,
         )),
-        #[cfg(feature = "advanced")]
-        Commands::BuildExamples(args) => build_examples(&BuildExamplesRequest {
-            languages: args.langs.into_iter().map(Language::from).collect(),
-            example_ids: args.example_ids,
-        }),
-        #[cfg(feature = "advanced")]
-        Commands::BuildJsonExamples(args) => build_json_examples(&BuildExamplesRequest {
-            languages: args.langs.into_iter().map(Language::from).collect(),
-            example_ids: args.example_ids,
-        }),
         #[cfg(feature = "advanced")]
         Commands::AddRpc(args) => add_rpc_to_file(&AddRpcRequest {
             descriptor_paths: args.descriptors,

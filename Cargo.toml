@@ -17,6 +17,10 @@ include = [
     "/specs/json-schema/corpora/format_uri/*.body",
 ]
 
+[workspace]
+members = ["xtask"]
+resolver = "2"
+
 [[bin]]
 name = "nexgen"
 path = "src/main.rs"
