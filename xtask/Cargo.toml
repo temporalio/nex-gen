@@ -6,4 +6,5 @@ publish = false
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
+heck = "0.5"
 nexgen = { path = ".." }

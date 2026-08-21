@@ -2,7 +2,9 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use nexgen::language::Language;
-use nexgen::{BuildExamplesRequest, build_examples, build_json_examples};
+
+mod build_examples;
+use build_examples::{BuildExamplesRequest, build_examples, build_json_examples};
 
 #[derive(Parser)]
 #[command(about = "Repository maintenance tasks for nexgen")]
