@@ -45,12 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Python: JSON Schema output now uses slotted, keyword-only dataclasses and the
-  default Temporal converter instead of Pydantic. Generated transfer converters
-  preserve wire names and unknown fields in `additional_properties`, aggregate
-  structured validation errors, collapse absent and explicit-null optional values
-  to `None`, and surface schema defaults through mutable properties (`del field`
-  restores unset) rather than `DEFAULT_*` constants.
 - Protobuf-backed models now consistently generate conversions in both
   directions whenever they are reachable. Go and TypeScript emit previously
   suppressed complementary helpers, operation-free exported models receive the
@@ -64,9 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value, and the only way to rename a member whose type is a `$ref` (a member
   named `class` was otherwise unfixable in Python and Java).
 - TypeScript: JSON Schema models now export `TransferTypeConverter` instances
-  (`fromTransferType`/`toTransferType`), and generated operations reference them
-  through `inputType`/`outputType`. Converter names follow resolved model names,
-  participate in collision checks, and require the nexus-rpc type-info API.
+  (`fromTransferType`/`toTransferType`) instead of mapper classes, and generated
+  operations reference them through `inputType`/`outputType`. Converter names
+  follow resolved model names, participate in collision checks, and require the
+  nexus-rpc type-info API.
 - Generating into an existing `--output` directory no longer deletes it first.
   The directory is written into instead, so pre-existing files and
   subdirectories are preserved; generated files are still overwritten in place.
@@ -98,6 +93,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+- Python: JSON Schema output now uses slotted, keyword-only dataclasses instead
+  of Pydantic and works with the default Temporal converter, removing the
+  Pydantic dependency and contrib converter wiring. Generated transfer converters
+  preserve wire names, carry unknown fields in `additional_properties` instead of
+  `model_extra`, aggregate structured validation errors, collapse absent and
+  explicit-null optional-and-nullable values to `None`, and surface schema
+  defaults through mutable properties whose deleter restores unset state.
 - Java: A map-shaped model (a pure typed map — `additionalProperties` with no
   declared `properties`) now names its catch-all member `additionalProperties`,
   matching the struct-shaped POJOs and the other languages (Go
