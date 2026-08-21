@@ -249,7 +249,7 @@ namespace Temporalio.Workflows
             }
             if (Headers is { } headers)
             {
-                proto.Header = Nexgen.Support.ProtoExtensions.ToHeaderProto(headers, payloadConverter);
+                proto.Header = Nexgen.Support.ProtoExtensions.ToHeaderProto(headers);
             }
             return proto;
         }
