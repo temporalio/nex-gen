@@ -74,7 +74,6 @@ impl ModelBackend {
                 planned_record,
                 None,
                 None,
-                None,
             ),
         })
     }
@@ -156,14 +155,6 @@ impl ModelBackend {
         })
     }
 
-    pub(in crate::generator) fn model_wire_interface(
-        &self,
-        _model: &RecordSpec<PlannedFamily>,
-        _support_namespace: Option<&str>,
-    ) -> Option<String> {
-        None
-    }
-
     pub(in crate::generator) fn model_transfer_converter_attribute(
         &self,
         model: &RecordSpec<PlannedFamily>,
@@ -210,7 +201,6 @@ impl ModelBackend {
         optional: bool,
         api_plan: &PlannedSpec,
         support_namespace: Option<&str>,
-        payload_converter_expr: Option<&str>,
     ) -> String {
         match kind {
             PlannedType::List(_) | PlannedType::Map(_, _) => source_expr.to_string(),
@@ -224,7 +214,6 @@ impl ModelBackend {
                 },
                 Some(api_plan),
                 support_namespace,
-                payload_converter_expr,
             ),
         }
     }
@@ -237,7 +226,6 @@ impl ModelBackend {
         planned_record: Option<&RecordSpec<PlannedFamily>>,
         api_plan: Option<&PlannedSpec>,
         support_namespace: Option<&str>,
-        payload_converter_expr: Option<&str>,
     ) -> String {
         let _ = optional;
         match value {
@@ -251,15 +239,9 @@ impl ModelBackend {
                             .and_then(|model| model.data.proto.as_ref())
                             .expect("wire method model should have proto backing"),
                     );
-                    let _ = payload_converter_expr;
                     format!("({raw_type}){source_expr}.ToTransferType()")
                 } else {
-                    self.message_to_wire_expr(
-                        model_type,
-                        source_expr,
-                        support_namespace,
-                        payload_converter_expr,
-                    )
+                    self.message_to_wire_expr(model_type, source_expr, support_namespace)
                 }
             }
             PlannedType::Resource(_) => source_expr.to_string(),
@@ -277,7 +259,6 @@ impl ModelBackend {
                 },
                 api_plan,
                 support_namespace,
-                payload_converter_expr,
             ),
             _ => source_expr.to_string(),
         }
@@ -288,7 +269,6 @@ impl ModelBackend {
         model_type: &PlannedType,
         source_expr: &str,
         support_namespace: Option<&str>,
-        payload_converter_expr: Option<&str>,
     ) -> String {
         if matches!(
             model_type,
@@ -297,9 +277,6 @@ impl ModelBackend {
         {
             if let Some(converter) = dotnet_to_proto_converter(model_type) {
                 let converter = qualify_dotnet_support_reference(converter, support_namespace);
-                if let Some(payload_converter_expr) = payload_converter_expr {
-                    return format!("{converter}({source_expr}, {payload_converter_expr})");
-                }
                 return format!("{converter}({source_expr})");
             }
             format!("{source_expr}.ToProto()")
@@ -533,7 +510,6 @@ fn render_model_transfer_converter(
             false,
             api_plan,
             support_namespace,
-            None,
         ));
         output.push_str(";\n");
     }
@@ -868,7 +844,6 @@ fn field_to_proto_expr(
         !field.required,
         api_plan,
         support_namespace,
-        None,
     )
 }
 

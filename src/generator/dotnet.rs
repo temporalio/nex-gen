@@ -626,13 +626,6 @@ impl<'a> ApiPlanner<'a> {
             );
             output.push('>');
         }
-        if let Some(wire_interface) = self
-            .external_models
-            .model_wire_interface(model, self.support_namespace)
-        {
-            output.push_str(" : ");
-            output.push_str(&wire_interface);
-        }
         output.push_str("\n{\n");
         self.render_model_constructor(output, access, &type_name, model);
         for (field_name, field) in model.model_fields() {
@@ -2069,14 +2062,6 @@ impl DotNetExternalModels {
 
     fn model_needs_wire_method(&self, model: &PlannedModel) -> bool {
         self.proto.model_needs_wire_method(model)
-    }
-
-    fn model_wire_interface(
-        &self,
-        model: &PlannedModel,
-        support_namespace: Option<&str>,
-    ) -> Option<String> {
-        self.proto.model_wire_interface(model, support_namespace)
     }
 
     fn model_transfer_converter_attribute(&self, model: &PlannedModel) -> Option<String> {
