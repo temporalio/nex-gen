@@ -52,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same public case classes without using the JSON representation.
 - Added grouped protobuf `oneof` authoring and bidirectional Python conversion,
   including required and optional oneofs, scaffolding through `add-rpc` and
-  `add-message`, and explicit diagnostics for unsupported target backends.
+  `add-message`, generated Python case dataclasses for the backing WIT variants,
+  and explicit diagnostics for unsupported target backends.
 - Python proto-backed generic records may use Temporal `Payload` and `Payloads`
   fields (including oneof members) as runtime value carriers. Decoding preserves
   concrete runtime type arguments through nested models and `Payload` values.
@@ -176,6 +177,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python WIT variant values now use generated case objects instead of tagged
   tuples. Existing callers must construct and match the exported case classes.
   WIT `result<T, E>` and JSON Schema `oneOf` behavior are unchanged.
+- Python variants that back protobuf `oneof` fields now use generated case
+  dataclasses instead of tagged tuples. Python variants outside protobuf-backed
+  models retain their tagged tuple representation.
 - Java: A map-shaped model (a pure typed map — `additionalProperties` with no
   declared `properties`) now names its catch-all member `additionalProperties`,
   matching the struct-shaped POJOs and the other languages (Go
