@@ -1,0 +1,3 @@
+# Changelog entries are independent, append-only additions under Unreleased.
+# Keep both sides when concurrent branches add entries at the same location.
+CHANGELOG.md merge=union
