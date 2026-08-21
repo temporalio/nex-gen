@@ -94,10 +94,8 @@ public final class Metrics {
                     violations.add(new Violation(key, "explicit null not allowed"));
                     continue;
                 }
-                if (!element.isNumber()) {
-                    violations.add(new Violation(key, "expected number value"));
-                } else {
-                    double value = element.doubleValue();
+                Double value = SpecNumbers.specDouble(element, key, violations);
+                if (value != null) {
                     if (!Double.isFinite(value)) {
                         violations.add(new Violation(key, "must be a finite number, got " + value));
                     }

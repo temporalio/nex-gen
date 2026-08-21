@@ -1305,15 +1305,39 @@ def _format_base64url(value: bytes) -> str:
 
 /// Emits the `_check_unique_items` runtime helper: asserts pairwise-distinct
 /// elements, reporting the first duplicate's index and the index it repeats --
-/// the same reason every other target emits. Comparison is by `==` over a list
-/// rather than hashing, because a generated model is a non-frozen dataclass and
-/// therefore unhashable; arrays are small and correctness beats the O(n^2) (P2).
+/// the same reason every other target emits. Comparison follows JSON value
+/// equality (notably, booleans are distinct from numbers) over a list rather
+/// than hashing; arrays are small and correctness beats the O(n^2) (P2).
 /// See `specs/json-schema/features/uniqueItems.md`.
 fn render_unique_items_helper(output: &mut String) {
     output.push_str(UNIQUE_ITEMS_HELPER_BODY);
 }
 
-const UNIQUE_ITEMS_HELPER_BODY: &str = r#"def _check_unique_items(
+const UNIQUE_ITEMS_HELPER_BODY: &str = r#"def _json_values_equal(left: typing.Any, right: typing.Any) -> bool:
+    """Compares JSON values without Python's bool-as-int equality leak."""
+
+    left_is_number = isinstance(left, (int, float)) and not isinstance(left, bool)
+    right_is_number = isinstance(right, (int, float)) and not isinstance(right, bool)
+    if left_is_number or right_is_number:
+        return left_is_number and right_is_number and left == right
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, list):
+        left_list = typing.cast("list[typing.Any]", left)
+        right_list = typing.cast("list[typing.Any]", right)
+        return len(left_list) == len(right_list) and all(
+            _json_values_equal(a, b) for a, b in zip(left_list, right_list)
+        )
+    if isinstance(left, dict):
+        left_dict = typing.cast("dict[typing.Any, typing.Any]", left)
+        right_dict = typing.cast("dict[typing.Any, typing.Any]", right)
+        return left_dict.keys() == right_dict.keys() and all(
+            _json_values_equal(left_dict[key], right_dict[key]) for key in left_dict
+        )
+    return left == right
+
+
+def _check_unique_items(
     value: list[typing.Any], path: str, violations: list[Violation]
 ) -> None:
     """Asserts an array's elements are pairwise distinct."""
@@ -1321,7 +1345,7 @@ const UNIQUE_ITEMS_HELPER_BODY: &str = r#"def _check_unique_items(
     seen: list[typing.Any] = []
     for index, element in enumerate(value):
         for earlier, previous in enumerate(seen):
-            if previous == element:
+            if _json_values_equal(previous, element):
                 violations.append(
                     Violation(
                         path=path,
@@ -4410,10 +4434,9 @@ fn render_py_closed_value_membership(
     output.push_str(&format!("    {target} = {assignment}\n"));
 }
 
-/// Emits the elementwise parse of an array. Every element is appended, valid or
-/// not — an element that failed has already recorded a violation, so the built
-/// list only reaches the caller when it is whole (which is also what keeps a
-/// legitimately-null element from being mistaken for a failure).
+/// Emits the elementwise parse of an array. The typed list contains only
+/// successfully converted elements and never escapes when any violation exists;
+/// sibling array keywords are evaluated separately over the original wire list.
 #[allow(clippy::too_many_arguments)]
 fn render_array_parser(
     output: &mut String,
@@ -4465,6 +4488,7 @@ fn render_py_array_elements(
     let index_local = format!("{slot}_index");
     let element_local = format!("{slot}_element");
     let item_path_local = format!("{item_slot}_path");
+    let violation_count_local = format!("{item_slot}_violation_count");
     let item_type = schema
         .items
         .as_ref()
@@ -4485,6 +4509,8 @@ fn render_py_array_elements(
         "{item_path_local} = {}\n",
         py_indexed_path(path_expr, &index_local)
     ));
+    output.push_str(&loop_body);
+    output.push_str(&format!("{violation_count_local} = len(violations)\n"));
     render_py_slot_declaration(output, &loop_body, &item_slot, &item_type);
     match &schema.items {
         // Every element kind takes the same parse the value in that position
@@ -4506,8 +4532,13 @@ fn render_py_array_elements(
         }
     }
     output.push_str(&loop_body);
-    output.push_str(&format!("{list_local}.append({item_slot})\n"));
-    render_py_array_checks(output, &list_local, path_expr, schema, &body)?;
+    output.push_str(&format!("if len(violations) == {violation_count_local}:\n"));
+    output.push_str(&loop_body);
+    output.push_str(&format!("    {list_local}.append({item_slot})\n"));
+    // Array-level keywords are siblings of `items`: they inspect the original
+    // instance even when one or more elements fail conversion.
+    let raw_array = format!("typing.cast(\"list[typing.Any]\", {raw_expr})");
+    render_py_array_checks(output, &raw_array, path_expr, schema, &body)?;
     Ok(list_local)
 }
 

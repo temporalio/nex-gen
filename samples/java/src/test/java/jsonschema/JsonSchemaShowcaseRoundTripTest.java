@@ -290,6 +290,36 @@ final class JsonSchemaShowcaseRoundTripTest {
                         Showcase.class));
         assertTrue(messageChain(dupItems).contains("duplicate items: element at index 1 equals index 0"), messageChain(dupItems));
 
+        RuntimeException badOnlyTag = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(("{" + base + ",\"tags\":[1]}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badOnlyTag).contains("tags[0]"), messageChain(badOnlyTag));
+        assertFalse(messageChain(badOnlyTag).contains("must have at least 1 items"), messageChain(badOnlyTag));
+
+        RuntimeException distinctBadAliases = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(("{" + base + ",\"aliases\":[1,2]}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertFalse(messageChain(distinctBadAliases).contains("duplicate items"), messageChain(distinctBadAliases));
+
+        RuntimeException duplicateBadAliases = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(("{" + base + ",\"aliases\":[1,1]}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(duplicateBadAliases).contains("duplicate items: element at index 1 equals index 0"), messageChain(duplicateBadAliases));
+
+        RuntimeException badRoleWithRawMatch = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(("{" + base + ",\"roles\":[1,\"admin\"]}").getBytes(StandardCharsets.UTF_8)),
+                        Showcase.class,
+                        Showcase.class));
+        assertTrue(messageChain(badRoleWithRawMatch).contains("roles[0]"), messageChain(badRoleWithRawMatch));
+        assertFalse(messageChain(badRoleWithRawMatch).contains("too few matching items"), messageChain(badRoleWithRawMatch));
+
         RuntimeException missingContains = assertThrows(RuntimeException.class, () ->
                 CONVERTER.fromPayload(
                         jsonPayload(("{" + base + ",\"roles\":[\"user\"]}").getBytes(StandardCharsets.UTF_8)),
@@ -1202,6 +1232,38 @@ final class JsonSchemaShowcaseRoundTripTest {
             assertTrue(messageChain(error).contains((String) testCase[0]), messageChain(error));
             assertTrue(messageChain(error).contains("finite number"), messageChain(error));
         }
+
+        String base =
+                "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","
+                        + "\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,"
+                        + "\"category\":\"tools\"";
+        String[][] overflowing = new String[][] {
+            {"score", ",\"score\":1e400}"},
+            {"metricOrLabel", ",\"metricOrLabel\":1e400}"},
+            {"numberGrid[0][0]", ",\"numberGrid\":[[1e400]]}"},
+            {"cpu", ",\"metrics\":{\"cpu\":1e400}}"},
+        };
+        for (String[] testCase : overflowing) {
+            RuntimeException error = assertThrows(RuntimeException.class, () ->
+                    CONVERTER.fromPayload(
+                            jsonPayload((base + testCase[1]).getBytes(StandardCharsets.UTF_8)),
+                            Showcase.class,
+                            Showcase.class));
+            assertTrue(messageChain(error).contains(testCase[0]), messageChain(error));
+            assertTrue(messageChain(error).contains("finite number"), messageChain(error));
+        }
+    }
+
+    @Test
+    void numberSpellingsRoundTripByMathematicalValue() throws IOException {
+        Showcase value = decode("showcase-number-values.json", Showcase.class);
+        CONVERTER.toPayload(value).orElseThrow(AssertionError::new);
+        java.util.List<Double> numbers = value.getNumberGrid().get(0);
+        assertTrue(numbers.get(0) == 0.0d);
+        assertEquals(5.0d, numbers.get(1));
+        assertEquals(1000.0d, numbers.get(2));
+        assertEquals(Double.MAX_VALUE, numbers.get(3));
+        assertEquals(Double.MIN_VALUE, numbers.get(4));
     }
 
     /**

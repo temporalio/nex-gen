@@ -110,9 +110,9 @@ None. The emitted collection type is [[items]]'s `[]T` / `T[]` /
 
 ## Validator mapping
 
-Per **P10**/**P11**. A single **existence** scan over the decoded elements,
-identical in both directions (a pure predicate over the decoded value — the
-**shared `Validate`** layer of **P12**). Each element is tested against the
+Per **P10**/**P11**. A single **existence** scan. Deserialize scans the
+original wire elements, including elements that fail [[items]] conversion;
+serialize scans decoded elements. Each element is tested against the
 scalar matcher predicate — the same shared predicate the matcher's own
 keywords define ([[const]]/[[enum]] equality, [[minimum]]/[[maximum]]
 range, [[pattern]] regex, [[minLength]]/[[maxLength]], [[multipleOf]]) —
@@ -127,10 +127,10 @@ pushed.
 
 | Language | Strategy |
 |---|---|
-| Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding into the `[]T`: `matched := false; for _, e := range v { if matchesContains(e) { matched = true; break } }; if !matched { push(Violation{Path, Reason: "no element matches the required schema"}) }`, collected into one `ValidationError`. `matchesContains` reuses the matcher's own scalar predicates. |
-| TypeScript | After the `Array.isArray` guard ([[items]]), the shared `Validate` scans: ``if (!v.some(e => matchesContains(e))) push(Violation{path, reason})``, throwing one `ValidationError`. |
-| Python | The transfer type converter (PRINCIPLES Python §3) calls `_check_contains(v, …, path, violations)`, which scans `any(_matches_contains(e) for e in v)` and on no match appends `Violation(path, reason)` into the single generated `ValidationError`. `_matches_contains` reuses the matcher's own scalar predicates. Because the check is a plain call rather than a hook keyed on a declared field, positions with no field of their own — a typed map's member, a [[oneOf]] branch — run the identical call with the identical reasons. |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `List<T>`, scans against the matcher predicate, and on no match pushes a `Violation{path, reason}` into the single `ValidationException`. Not bean-validation. |
+| Go | Deserialize scans the original `json.RawMessage` elements with the matcher's scalar parser and predicates; serialize scans the typed slice in shared `Validate`. A miss collects one violation into `ValidationError`. |
+| TypeScript | After the `Array.isArray` guard ([[items]]), deserialize scans the raw array and serialize scans the typed array with the same scalar matcher predicates. A miss pushes one violation. |
+| Python | The transfer converter calls `_check_contains` with the raw list on deserialize and the typed list on serialize. The matcher uses the same scalar predicates in either direction, including for typed-map members and [[oneOf]] branches. |
+| Java | The per-POJO collecting deserializer scans the original `JsonNode` elements with the matcher type guard and predicates; serialize scans the typed `List<T>`. A miss pushes one violation into the single `ValidationException`. Not bean-validation. |
 
 Reason strings name **what was required**, not a bare keyword — the matcher
 is described by its own constraint (`no element equals "admin"` for a

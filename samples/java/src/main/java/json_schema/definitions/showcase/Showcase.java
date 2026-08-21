@@ -494,15 +494,25 @@ public final class Showcase {
                 for (int index = 0; index < node.size(); index++) {
                     JsonNode element = node.get(index);
                     String elementPath = path + "[" + index + "]";
-                    if (!element.isNumber()) {
-                        violations.add(new Violation(elementPath, "expected number"));
-                    } else {
-                        items.add(element.doubleValue());
+                    Double parsed = SpecNumbers.specDouble(element, elementPath, violations);
+                    if (parsed != null) {
+                        items.add(parsed);
                     }
                 }
-                MeasurementsArray wrapped = new MeasurementsArray(items);
-                wrapped.validate(path, violations);
-                return wrapped;
+                if (node.size() < 1) {
+                    violations.add(new Violation(path, "must have at least 1 items, got " + node.size()));
+                }
+                java.util.Map<Object, Integer> rawSeen = new java.util.HashMap<>();
+                for (int rawIndex = 0; rawIndex < node.size(); rawIndex++) {
+                    Object rawKey = SpecNumbers.valueKey(node.get(rawIndex));
+                    Integer priorIndex = rawSeen.get(rawKey);
+                    if (priorIndex != null) {
+                        violations.add(new Violation(path, "duplicate items: element at index " + rawIndex + " equals index " + priorIndex));
+                    } else {
+                        rawSeen.put(rawKey, rawIndex);
+                    }
+                }
+                return new MeasurementsArray(items);
             }
             if (node.isTextual()) {
                 MeasurementsString wrapped = new MeasurementsString(node.textValue());
@@ -626,7 +636,11 @@ public final class Showcase {
     public interface MetricOrLabel {
         static @Nullable MetricOrLabel fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
             if (node.isNumber()) {
-                MetricOrLabelNumber wrapped = new MetricOrLabelNumber(node.doubleValue());
+                Double parsed = SpecNumbers.specDouble(node, path, violations);
+                if (parsed == null) {
+                    return null;
+                }
+                MetricOrLabelNumber wrapped = new MetricOrLabelNumber(parsed);
                 wrapped.validate(path, violations);
                 return wrapped;
             }
@@ -747,9 +761,10 @@ public final class Showcase {
                         violations.add(new Violation(elementPath, nested.getMessage()));
                     }
                 }
-                AddressListOrLabelArray wrapped = new AddressListOrLabelArray(items);
-                wrapped.validate(path, violations);
-                return wrapped;
+                if (node.size() < 1) {
+                    violations.add(new Violation(path, "must have at least 1 items, got " + node.size()));
+                }
+                return new AddressListOrLabelArray(items);
             }
             if (node.isTextual()) {
                 AddressListOrLabelString wrapped = new AddressListOrLabelString(node.textValue());
@@ -2594,10 +2609,8 @@ public final class Showcase {
                 } else if (field.isNull()) {
                     violations.add(new Violation("scale", "explicit null not allowed"));
                 } else {
-                    if (!field.isNumber()) {
-                        violations.add(new Violation("scale", "expected number"));
-                    } else {
-                        double scaleValue = field.doubleValue();
+                    Double scaleValue = SpecNumbers.specDouble(field, "scale", violations);
+                    if (scaleValue != null) {
                         if (scaleValue == 1.5) {
                             scale = Scale.SCALE_1_5;
                         } else if (scaleValue == 2.5) {
@@ -2983,15 +2996,14 @@ public final class Showcase {
                 } else if (field.isNull()) {
                     violations.add(new Violation("ratio", "explicit null not allowed"));
                 } else {
-                    if (!field.isNumber()) {
-                        violations.add(new Violation("ratio", "expected number"));
-                    } else {
-                        ratio = field.doubleValue();
-                        if (ratio < 5.0) {
-                            violations.add(new Violation("ratio", "must be >= 5, got " + ratio));
+                    Double numberValue = SpecNumbers.specDouble(field, "ratio", violations);
+                    if (numberValue != null) {
+                        ratio = numberValue;
+                        if (numberValue < 5.0) {
+                            violations.add(new Violation("ratio", "must be >= 5, got " + numberValue));
                         }
-                        if (ratio % 5.0 != 0) {
-                            violations.add(new Violation("ratio", "must be a multiple of 5, got " + ratio));
+                        if (numberValue % 5.0 != 0) {
+                            violations.add(new Violation("ratio", "must be a multiple of 5, got " + numberValue));
                         }
                     }
                 }
@@ -3003,10 +3015,9 @@ public final class Showcase {
                 } else if (field.isNull()) {
                     violations.add(new Violation("score", "explicit null not allowed"));
                 } else {
-                    if (!field.isNumber()) {
-                        violations.add(new Violation("score", "expected number"));
-                    } else {
-                        score = field.doubleValue();
+                    Double numberValue = SpecNumbers.specDouble(field, "score", violations);
+                    if (numberValue != null) {
+                        score = numberValue;
                     }
                 }
             }
@@ -3047,11 +3058,11 @@ public final class Showcase {
                             }
                         }
                         tags = items;
-                        if (items.size() < 1) {
-                            violations.add(new Violation("tags", "must have at least 1 items, got " + items.size()));
+                        if (field.size() < 1) {
+                            violations.add(new Violation("tags", "must have at least 1 items, got " + field.size()));
                         }
-                        if (items.size() > 5) {
-                            violations.add(new Violation("tags", "must have at most 5 items, got " + items.size()));
+                        if (field.size() > 5) {
+                            violations.add(new Violation("tags", "must have at most 5 items, got " + field.size()));
                         }
                     }
                 }
@@ -3077,14 +3088,14 @@ public final class Showcase {
                             }
                         }
                         aliases = items;
-                        java.util.Map<String, Integer> seen = new java.util.HashMap<>();
-                        for (int index = 0; index < items.size(); index++) {
-                            String element = items.get(index);
-                            Integer priorIndex = seen.get(element);
+                        java.util.Map<Object, Integer> rawSeen = new java.util.HashMap<>();
+                        for (int rawIndex = 0; rawIndex < field.size(); rawIndex++) {
+                            Object rawKey = SpecNumbers.valueKey(field.get(rawIndex));
+                            Integer priorIndex = rawSeen.get(rawKey);
                             if (priorIndex != null) {
-                                violations.add(new Violation("aliases", "duplicate items: element at index " + index + " equals index " + priorIndex));
+                                violations.add(new Violation("aliases", "duplicate items: element at index " + rawIndex + " equals index " + priorIndex));
                             } else {
-                                seen.put(element, index);
+                                rawSeen.put(rawKey, rawIndex);
                             }
                         }
                     }
@@ -3111,17 +3122,17 @@ public final class Showcase {
                             }
                         }
                         roles = items;
-                        int matchCount = 0;
-                        for (String element : items) {
-                            if ("admin".equals(element)) {
-                                matchCount++;
+                        int rawMatchCount = 0;
+                        for (JsonNode rawElement : field) {
+                            if (rawElement.isTextual() && ("admin".equals(rawElement.textValue()))) {
+                                rawMatchCount++;
                             }
                         }
-                        if (matchCount < 1) {
-                            violations.add(new Violation("roles", "too few matching items: at least 1, got " + matchCount));
+                        if (rawMatchCount < 1) {
+                            violations.add(new Violation("roles", "too few matching items: at least 1, got " + rawMatchCount));
                         }
-                        if (matchCount > 2) {
-                            violations.add(new Violation("roles", "too many matching items: at most 2, got " + matchCount));
+                        if (rawMatchCount > 2) {
+                            violations.add(new Violation("roles", "too many matching items: at most 2, got " + rawMatchCount));
                         }
                     }
                 }
@@ -3314,10 +3325,9 @@ public final class Showcase {
                                 for (int index1 = 0; index1 < element.size(); index1++) {
                                     JsonNode element1 = element.get(index1);
                                     String path1 = elementPath + "[" + index1 + "]";
-                                    if (!element1.isNumber()) {
-                                        violations.add(new Violation(path1, "expected number"));
-                                    } else {
-                                        items1.add(element1.doubleValue());
+                                    Double parsed = SpecNumbers.specDouble(element1, path1, violations);
+                                    if (parsed != null) {
+                                        items1.add(parsed);
                                     }
                                 }
                                 items.add(items1);

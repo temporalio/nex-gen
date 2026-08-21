@@ -1,0 +1,21 @@
+{
+  "kind": "showcase",
+  "revision": 1,
+  "enabled": true,
+  "status": "active",
+  "tier": 1,
+  "scale": 1.5,
+  "name": "Numeric spellings",
+  "count": 1,
+  "active": true,
+  "category": "tools",
+  "score": 5.0,
+  "numberGrid": [
+    [-0.0, 5e0, 1e3, 1.7976931348623157e308, 5e-324]
+  ],
+  "metricOrLabel": 5e0,
+  "metrics": {
+    "large": 1.7976931348623157e308,
+    "subnormal": 5e-324
+  }
+}

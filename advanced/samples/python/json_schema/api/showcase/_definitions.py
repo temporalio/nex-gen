@@ -122,6 +122,30 @@ def _parse_spec_integer(
     return out
 
 
+def _json_values_equal(left: typing.Any, right: typing.Any) -> bool:
+    """Compares JSON values without Python's bool-as-int equality leak."""
+
+    left_is_number = isinstance(left, (int, float)) and not isinstance(left, bool)
+    right_is_number = isinstance(right, (int, float)) and not isinstance(right, bool)
+    if left_is_number or right_is_number:
+        return left_is_number and right_is_number and left == right
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, list):
+        left_list = typing.cast("list[typing.Any]", left)
+        right_list = typing.cast("list[typing.Any]", right)
+        return len(left_list) == len(right_list) and all(
+            _json_values_equal(a, b) for a, b in zip(left_list, right_list)
+        )
+    if isinstance(left, dict):
+        left_dict = typing.cast("dict[typing.Any, typing.Any]", left)
+        right_dict = typing.cast("dict[typing.Any, typing.Any]", right)
+        return left_dict.keys() == right_dict.keys() and all(
+            _json_values_equal(left_dict[key], right_dict[key]) for key in left_dict
+        )
+    return left == right
+
+
 def _check_unique_items(
     value: list[typing.Any], path: str, violations: list[Violation]
 ) -> None:
@@ -130,7 +154,7 @@ def _check_unique_items(
     seen: list[typing.Any] = []
     for index, element in enumerate(value):
         for earlier, previous in enumerate(seen):
-            if previous == element:
+            if _json_values_equal(previous, element):
                 violations.append(
                     Violation(
                         path=path,

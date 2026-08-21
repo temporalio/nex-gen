@@ -399,6 +399,20 @@ fn java_json_rejects_non_finite_numbers_in_every_serialize_position() {
         assert!(root.contains(expected), "{expected}\n{root}");
     }
 
+    for expected in [
+        "SpecNumbers.specDouble(field, \"scalar\", violations)",
+        "SpecNumbers.specDouble(node, path, violations)",
+    ] {
+        assert!(
+            rendered.values().any(|source| source.contains(expected)),
+            "{expected}"
+        );
+    }
+    assert!(
+        root.matches("SpecNumbers.specDouble(").count() >= 2,
+        "{root}"
+    );
+
     let map = &rendered[&PathBuf::from("Values.java")];
     for expected in [
         "for (Map.Entry<String, List<Double>> entry : value.additionalProperties.entrySet()) {",
@@ -407,6 +421,11 @@ fn java_json_rejects_non_finite_numbers_in_every_serialize_position() {
     ] {
         assert!(map.contains(expected), "{expected}\n{map}");
     }
+    assert!(map.contains("SpecNumbers.specDouble("), "{map}");
+
+    let numbers = &rendered[&PathBuf::from("SpecNumbers.java")];
+    assert!(numbers.contains("public static @Nullable Double specDouble("));
+    assert!(numbers.contains("!Double.isFinite(value)"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

@@ -65,6 +65,7 @@ class _CategoryTransferTypeConverter(
                         typing.cast("list[typing.Any]", children_value_raw)
                     ):
                         children_value_item_path = f"children[{children_value_index}]"
+                        children_value_item_violation_count = len(violations)
                         children_value_item: Category = typing.cast("typing.Any", None)
                         try:
                             children_value_item = (
@@ -74,7 +75,8 @@ class _CategoryTransferTypeConverter(
                             )
                         except ValidationError as error:
                             _collect(violations, children_value_item_path, error)
-                        children_value_list.append(children_value_item)
+                        if len(violations) == children_value_item_violation_count:
+                            children_value_list.append(children_value_item)
                     children_value = children_value_list
 
         for key in raw:
@@ -153,6 +155,7 @@ class _PaletteTransferTypeConverter(
                     typing.cast("list[typing.Any]", swatches_value_raw)
                 ):
                     swatches_value_item_path = f"swatches[{swatches_value_index}]"
+                    swatches_value_item_violation_count = len(violations)
                     swatches_value_item: str = typing.cast("typing.Any", None)
                     if not isinstance(swatches_value_element, str):
                         violations.append(
@@ -162,7 +165,8 @@ class _PaletteTransferTypeConverter(
                         )
                     else:
                         swatches_value_item = swatches_value_element
-                    swatches_value_list.append(swatches_value_item)
+                    if len(violations) == swatches_value_item_violation_count:
+                        swatches_value_list.append(swatches_value_item)
                 swatches_value = swatches_value_list
 
         for key in raw:

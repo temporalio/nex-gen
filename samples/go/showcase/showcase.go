@@ -313,9 +313,20 @@ func unmarshalShowcaseAddressListOrLabel(raw json.RawMessage, path string, errs 
 					arr = append(arr, value0)
 				}
 			}
+			if n := len(elems0); n < 1 {
+				*errs = append(*errs, Violation{path, fmt.Sprintf("must have at least 1 items, got %d", n)})
+			}
 		}
 		v := ShowcaseAddressListOrLabelArray(arr)
-		mergeNested(errs, path, v.Validate())
+		{
+			unionErrs := errs
+			errs := *unionErrs
+			for i0, v0 := range arr {
+				p0 := fmt.Sprintf("%s[%d]", path, i0)
+				mergeNested(&errs, p0, v0.Validate())
+			}
+			*unionErrs = errs
+		}
 		return v, true
 	case '"':
 		var s string
@@ -545,9 +556,41 @@ func unmarshalShowcaseMeasurements(raw json.RawMessage, path string, errs *[]Vio
 					arr = append(arr, value0)
 				}
 			}
+			if n := len(elems0); n < 1 {
+				*errs = append(*errs, Violation{path, fmt.Sprintf("must have at least 1 items, got %d", n)})
+			}
+			{
+				rawSeen0 := make(map[string]int, len(elems0))
+				for rawIndex0, rawElement0 := range elems0 {
+					var rawValue0 any
+					if err := json.Unmarshal(rawElement0, &rawValue0); err != nil {
+						continue
+					}
+					if rawNumber0, ok := rawValue0.(float64); ok && rawNumber0 == 0 {
+						rawValue0 = float64(0)
+					}
+					rawKeyBytes0, _ := json.Marshal(rawValue0)
+					rawKey0 := string(rawKeyBytes0)
+					if priorIndex0, ok := rawSeen0[rawKey0]; ok {
+						*errs = append(*errs, Violation{path, fmt.Sprintf("duplicate items: element at index %d equals index %d", rawIndex0, priorIndex0)})
+					} else {
+						rawSeen0[rawKey0] = rawIndex0
+					}
+				}
+			}
 		}
 		v := ShowcaseMeasurementsArray(arr)
-		mergeNested(errs, path, v.Validate())
+		{
+			unionErrs := errs
+			errs := *unionErrs
+			for i0, v0 := range arr {
+				p0 := fmt.Sprintf("%s[%d]", path, i0)
+				if math.IsNaN(v0) || math.IsInf(v0, 0) {
+					errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", v0)})
+				}
+			}
+			*unionErrs = errs
+		}
 		return v, true
 	case '"':
 		var s string
@@ -2998,12 +3041,12 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 					m.Tags = append(m.Tags, value0)
 				}
 			}
-		}
-		if n := len(m.Tags); n < 1 {
-			errs = append(errs, Violation{"tags", fmt.Sprintf("must have at least 1 items, got %d", n)})
-		}
-		if n := len(m.Tags); n > 5 {
-			errs = append(errs, Violation{"tags", fmt.Sprintf("must have at most 5 items, got %d", n)})
+			if n := len(elems0); n < 1 {
+				errs = append(errs, Violation{"tags", fmt.Sprintf("must have at least 1 items, got %d", n)})
+			}
+			if n := len(elems0); n > 5 {
+				errs = append(errs, Violation{"tags", fmt.Sprintf("must have at most 5 items, got %d", n)})
+			}
 		}
 	}
 	if raw := get("aliases"); raw == nil {
@@ -3025,14 +3068,23 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 					m.Aliases = append(m.Aliases, value0)
 				}
 			}
-		}
-		{
-			seen := make(map[string]int, len(m.Aliases))
-			for i, e := range m.Aliases {
-				if j, ok := seen[e]; ok {
-					errs = append(errs, Violation{"aliases", fmt.Sprintf("duplicate items: element at index %d equals index %d", i, j)})
-				} else {
-					seen[e] = i
+			{
+				rawSeen0 := make(map[string]int, len(elems0))
+				for rawIndex0, rawElement0 := range elems0 {
+					var rawValue0 any
+					if err := json.Unmarshal(rawElement0, &rawValue0); err != nil {
+						continue
+					}
+					if rawNumber0, ok := rawValue0.(float64); ok && rawNumber0 == 0 {
+						rawValue0 = float64(0)
+					}
+					rawKeyBytes0, _ := json.Marshal(rawValue0)
+					rawKey0 := string(rawKeyBytes0)
+					if priorIndex0, ok := rawSeen0[rawKey0]; ok {
+						errs = append(errs, Violation{"aliases", fmt.Sprintf("duplicate items: element at index %d equals index %d", rawIndex0, priorIndex0)})
+					} else {
+						rawSeen0[rawKey0] = rawIndex0
+					}
 				}
 			}
 		}
@@ -3056,19 +3108,18 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 					m.Roles = append(m.Roles, value0)
 				}
 			}
-		}
-		{
-			matchCount := 0
-			for _, e := range m.Roles {
-				if e == "admin" {
-					matchCount++
+			rawMatchCount0 := 0
+			for _, rawElement0 := range elems0 {
+				var rawCandidate0 string
+				if err := json.Unmarshal(rawElement0, &rawCandidate0); err == nil && (rawCandidate0 == "admin") {
+					rawMatchCount0++
 				}
 			}
-			if matchCount < 1 {
-				errs = append(errs, Violation{"roles", fmt.Sprintf("too few matching items: at least 1, got %d", matchCount)})
+			if rawMatchCount0 < 1 {
+				errs = append(errs, Violation{"roles", fmt.Sprintf("too few matching items: at least 1, got %d", rawMatchCount0)})
 			}
-			if matchCount > 2 {
-				errs = append(errs, Violation{"roles", fmt.Sprintf("too many matching items: at most 2, got %d", matchCount)})
+			if rawMatchCount0 > 2 {
+				errs = append(errs, Violation{"roles", fmt.Sprintf("too many matching items: at most 2, got %d", rawMatchCount0)})
 			}
 		}
 	}

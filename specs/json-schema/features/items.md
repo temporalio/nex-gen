@@ -159,6 +159,13 @@ binding) comes from [[type]]'s `"array"` row.
   array decodes one loop per level, each level's loop variables carrying
   their depth so an inner element never shadows the level above it, and each
   level appending its own index to the path (`matrix[1][2]`).
+- **Sibling array keywords inspect the original instance.** The parse adapter
+  may build a partial typed collection while aggregating bad `items`, but
+  [[minItems]], [[maxItems]], [[uniqueItems]], and [[contains]] evaluate the
+  complete wire array. A failed element is neither removed nor replaced by a
+  typed placeholder for those checks. Indexed element violations are emitted
+  first, followed by array-level violations in keyword order. The rule applies
+  recursively, including arrays in union branches and typed-map members.
 - **Materializing elements use their ordinary adapters.** A temporal
   [[format]] or [[contentEncoding]] in `items` is parsed and serialized through
   the same generator-owned adapter as a declared property, at every nesting

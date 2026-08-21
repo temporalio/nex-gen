@@ -316,11 +316,9 @@ bindings:
   types (and services) via `__all__`; each intermediate directory's
   `__init__.py` re-exports its children; the package-root `__init__.py`
   re-exports the whole tree, pulling hoisted types from `_recursive`. The
-  shared runtime (`ValidationError`, `Violation`) is **not** surfaced through
-  the aggregators — catching the aggregating error means naming the private
-  module (`from <package>._definitions import ValidationError`). Python is the
-  only target where the error type is reachable through a private name alone;
-  the other three carry it on their public surface.
+  package root also exports the shared `ValidationError` and `Violation`, so
+  callers catch or inspect validation failures without importing the private
+  `_definitions` module.
 - **TypeScript** — `index.ts` per directory: per-input barrels
   `export … from './models'` (and `./services`), intermediate barrels
   `export * from './<child>'`, and the root barrel re-exports the tree plus

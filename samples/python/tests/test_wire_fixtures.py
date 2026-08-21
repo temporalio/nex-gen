@@ -78,6 +78,7 @@ WIRE_FIXTURES: dict[tuple[str, str], type[typing.Any]] = {
     ("showcase", "showcase-measurements-string.json"): showcase.Showcase,
     ("showcase", "showcase-metrics.json"): showcase.Showcase,
     ("showcase", "showcase-minimal.json"): showcase.Showcase,
+    ("showcase", "showcase-number-values.json"): showcase.Showcase,
     ("showcase", "showcase-note-link.json"): showcase.Showcase,
     ("showcase", "showcase-note-text.json"): showcase.Showcase,
     ("showcase", "showcase-nulls.json"): showcase.Showcase,
@@ -116,8 +117,8 @@ def test_every_wire_fixture_is_declared() -> None:
     assert NON_CANONICAL_FIXTURES <= on_disk
 
 
-def test_every_wire_fixture_roundtrips_byte_identically() -> None:
-    """P1 on bytes, for every fixture but the documented exceptions."""
+def test_every_wire_fixture_roundtrips_by_json_value() -> None:
+    """P1 by JSON value, for every fixture but documented normalizations."""
     for (suite, name), model_type in sorted(WIRE_FIXTURES.items()):
         if (suite, name) in NON_CANONICAL_FIXTURES:
             # Deliberately non-canonical input; its expected bytes are asserted by

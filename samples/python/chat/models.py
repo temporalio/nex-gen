@@ -322,6 +322,7 @@ class _RoomTransferTypeConverter(
                         typing.cast("list[typing.Any]", members_value_raw)
                     ):
                         members_value_item_path = f"members[{members_value_index}]"
+                        members_value_item_violation_count = len(violations)
                         members_value_item: str = typing.cast("typing.Any", None)
                         if not isinstance(members_value_element, str):
                             violations.append(
@@ -332,7 +333,8 @@ class _RoomTransferTypeConverter(
                             )
                         else:
                             members_value_item = members_value_element
-                        members_value_list.append(members_value_item)
+                        if len(violations) == members_value_item_violation_count:
+                            members_value_list.append(members_value_item)
                     members_value = members_value_list
 
         labels_value: Labels | None = None

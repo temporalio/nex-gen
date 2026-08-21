@@ -3539,14 +3539,12 @@ fn render_array_parser(
     output.push_str("    }\n");
     output.push_str(indent);
     output.push_str("  });\n");
+    // Sibling array keywords inspect the wire array, not the successfully
+    // converted subset. A bad `items` element therefore cannot fabricate a
+    // minItems failure or make two distinct raw elements look like duplicate
+    // conversion placeholders.
     if schema.has_array_constraints() {
-        render_ts_array_checks(
-            output,
-            &format!("{target}!"),
-            path_expr,
-            schema,
-            &format!("{indent}  "),
-        );
+        render_ts_array_checks(output, raw_expr, path_expr, schema, &format!("{indent}  "));
     }
     output.push_str(indent);
     output.push_str("}\n");

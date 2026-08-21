@@ -60,17 +60,18 @@ None. Constraint lives only in the validator.
 ## Validator mapping
 
 Per **P10**/**P11**. A single `≥` comparison of the **element count**
-against the fixed bound, identical in both directions (shared `Validate`,
-**P12**). Same per-language strategy as [[maxItems]] with `< min` as the
-failing comparison — the count is the decoded collection's native length
+against the fixed bound. On deserialize the count is the original wire
+array's length even if an element fails [[items]] conversion; on serialize it
+is the decoded collection's native length. Same per-language strategy as
+[[maxItems]] with `< min` as the failing comparison
 (`len(v)` / `v.length` / `len(v)` / `v.size()`).
 
 | Language | Strategy |
 |---|---|
-| Go | `if n := len(v); n < min { push(Violation{Reason: fmt.Sprintf("too few items: at least %d, got %d", min, n)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `ValidationError`. |
-| TypeScript | After the `Array.isArray` guard ([[items]]), `v.length < min` pushes ``Violation{path, reason: `too few items: at least ${min}, got ${v.length}`}``, throw one `ValidationError`. |
-| Python | After the `isinstance(v, list)` guard ([[items]]), `if (n := len(v)) < min: violations.append(Violation(path=…, reason=f"too few items: at least {min}, got {n}"))` in the transfer type converter, aggregated into the single generated `ValidationError`. |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `List<T>`, checks `int n = v.size(); if (n < min)`, pushing a `Violation{path, "too few items: at least " + min + ", got " + n}` into the single `ValidationException`. Not bean-validation `@Size`. |
+| Go | `UnmarshalJSON` checks `len(rawArray) < min` after collecting indexed item violations; serialize checks the typed slice in shared `Validate`. Both collect into one `ValidationError`. |
+| TypeScript | After the `Array.isArray` guard ([[items]]), deserialize checks `raw.length < min` after parsing the elements; serialize checks the typed array. A failure pushes ``Violation{path, reason: `too few items: at least ${min}, got ${raw.length}`}``. |
+| Python | After the `isinstance(raw, list)` guard ([[items]]), the transfer converter checks `len(raw) < min` after parsing the elements; serialize checks the typed list. Both aggregate into the generated `ValidationError`. |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) checks `node.size() < min` after parsing the elements; serialize checks the typed `List<T>`. Both push a structured violation into the single `ValidationException`. Not bean-validation `@Size`. |
 
 Reason strings name the concrete bound and offending count
 (`too few items: at least 2, got 1`), per the [[maxProperties]]

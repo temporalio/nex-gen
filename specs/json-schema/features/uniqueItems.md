@@ -84,22 +84,22 @@ None. The emitted collection type is [[items]]'s `[]T` / `T[]` /
 
 ## Validator mapping
 
-Per **P10**/**P11**. A single **all-distinct** check over the decoded
-elements, identical in both directions (a pure predicate over the decoded
-value — the **shared `Validate`** layer of **P12**). Every element that
+Per **P10**/**P11**. A single **all-distinct** check. Deserialize compares
+the original wire elements, including elements that fail [[items]] conversion;
+serialize compares decoded elements. Every element that
 repeats an earlier one is reported, naming both indexes; equality is the
 same value comparison [[enum]] uses (exact `==` for numbers — see below).
 Because the element [[type]] is scalar, Go, TypeScript and Java track seen
-values in their native hash/set primitive; Python compares by `==` over a
-list instead, because a generated model is a non-frozen dataclass and
+values in their native hash/set primitive; Python uses a JSON-aware equality
+walk over a list (so `true` is distinct from `1`) because a generated model is a non-frozen dataclass and
 therefore unhashable (see the Python row).
 
 | Language | Strategy |
 |---|---|
-| Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding into the `[]T`: `seen := make(map[T]int, len(v)); for i, e := range v { if j, ok := seen[e]; ok { push(Violation{Path, Reason: fmt.Sprintf("duplicate items: element at index %d equals index %d", i, j)}) } else { seen[e] = i } }`, collected into one `ValidationError`. The scalar element type is a comparable map key. |
-| TypeScript | After the `Array.isArray` guard ([[items]]), the shared `Validate` walks the array tracking a `Set`: ``if (seen.has(e)) push(Violation{path, reason: `duplicate items: element at index ${i} equals index ${seen.get(e)}`}); else seen.set(e, i)``, throwing one `ValidationError`. `Set`/`Map` compare scalars by value. |
-| Python | The runtime's `_check_unique_items(value, path, violations)`, called from both directions of the `_<Model>TransferTypeConverter` over the `list[T]`: it walks the list accumulating seen elements and appends a `Violation` naming the colliding indexes for each element that repeats an earlier one, into the single `ValidationError`. Comparison is `==` against the accumulated list, **not** a `set`/`dict` — `@dataclasses.dataclass` without `frozen=True` sets `__hash__ = None`, so a model element is unhashable and would raise; arrays are small and correctness beats the O(n²) (**P2**). One helper serves every position — a declared field, a typed map's member, a [[oneOf]] branch — with the identical reason. |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `List<T>`, walks it against a `HashSet<T>`, and on a repeat pushes a `Violation{path, "duplicate items: element at index i equals index j"}` into the single `ValidationException`. Not bean-validation. |
+| Go | Deserialize normalizes each original `json.RawMessage` to a JSON value key and tracks the first raw index; serialize performs the equivalent typed-slice walk in shared `Validate`. Both collect duplicate-index violations into one `ValidationError`. |
+| TypeScript | After the `Array.isArray` guard ([[items]]), deserialize walks the raw array with a `Map` before returning the typed result; serialize walks the typed array. `Map` uses value equality for the supported scalar elements. |
+| Python | The runtime's `_check_unique_items(value, path, violations)` is called with the raw list on deserialize and the typed list on serialize. It uses a JSON-aware equality walk, **not** a `set`/`dict`, so booleans stay distinct from numbers and composite raw values compare structurally. Arrays are small and correctness beats the O(n²) (**P2**). |
+| Java | The per-POJO collecting deserializer walks the original `JsonNode` array using `SpecNumbers.valueKey` for JSON numeric equality; serialize walks the typed `List<T>`. Both report the colliding indexes in the single `ValidationException`. Not bean-validation. |
 
 Reason strings name the **colliding positions** (`duplicate items: element
 at index 3 equals index 1`) per the count-family convention — the

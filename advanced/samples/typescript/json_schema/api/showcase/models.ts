@@ -2283,16 +2283,16 @@ export const showcaseTransferTypeConverter =
               tags!.push(item);
             }
           });
-          if (tags!.length < 1) {
+          if (raw.tags.length < 1) {
             violations.push({
               path: "tags",
-              reason: `must have at least 1 items, got ${tags!.length}`,
+              reason: `must have at least 1 items, got ${raw.tags.length}`,
             });
           }
-          if (tags!.length > 5) {
+          if (raw.tags.length > 5) {
             violations.push({
               path: "tags",
-              reason: `must have at most 5 items, got ${tags!.length}`,
+              reason: `must have at most 5 items, got ${raw.tags.length}`,
             });
           }
         }
@@ -2319,7 +2319,7 @@ export const showcaseTransferTypeConverter =
           });
           {
             const seen = new Map<unknown, number>();
-            aliases!.forEach((element, index) => {
+            raw.aliases.forEach((element, index) => {
               if (seen.has(element)) {
                 violations.push({
                   path: "aliases",
@@ -2353,7 +2353,9 @@ export const showcaseTransferTypeConverter =
             }
           });
           {
-            const matchCount = roles!.filter((element) => element === "admin").length;
+            const matchCount = raw.roles.filter(
+              (element) => element === "admin",
+            ).length;
             if (matchCount < 1) {
               violations.push({
                 path: "roles",
@@ -2561,15 +2563,15 @@ export const showcaseTransferTypeConverter =
                 measurementsArrayBranch!.push(item);
               }
             });
-            if (measurementsArrayBranch!.length < 1) {
+            if (raw.measurements.length < 1) {
               violations.push({
                 path: "measurements",
-                reason: `must have at least 1 items, got ${measurementsArrayBranch!.length}`,
+                reason: `must have at least 1 items, got ${raw.measurements.length}`,
               });
             }
             {
               const seen = new Map<unknown, number>();
-              measurementsArrayBranch!.forEach((element, index) => {
+              raw.measurements.forEach((element, index) => {
                 if (seen.has(element)) {
                   violations.push({
                     path: "measurements",
@@ -2992,10 +2994,10 @@ export const showcaseTransferTypeConverter =
                 addressListOrLabelArrayBranch!.push(item);
               }
             });
-            if (addressListOrLabelArrayBranch!.length < 1) {
+            if (raw.addressListOrLabel.length < 1) {
               violations.push({
                 path: "addressListOrLabel",
-                reason: `must have at least 1 items, got ${addressListOrLabelArrayBranch!.length}`,
+                reason: `must have at least 1 items, got ${raw.addressListOrLabel.length}`,
               });
             }
           }

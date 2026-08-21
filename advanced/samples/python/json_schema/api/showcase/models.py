@@ -1820,6 +1820,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", tags_value_raw)
                     ):
                         tags_value_item_path = f"tags[{tags_value_index}]"
+                        tags_value_item_violation_count = len(violations)
                         tags_value_item: str = typing.cast("typing.Any", None)
                         if not isinstance(tags_value_element, str):
                             violations.append(
@@ -1829,19 +1830,20 @@ class _ShowcaseTransferTypeConverter(
                             )
                         else:
                             tags_value_item = tags_value_element
-                        tags_value_list.append(tags_value_item)
-                    if len(tags_value_list) < 1:
+                        if len(violations) == tags_value_item_violation_count:
+                            tags_value_list.append(tags_value_item)
+                    if len(typing.cast("list[typing.Any]", tags_value_raw)) < 1:
                         violations.append(
                             Violation(
                                 path="tags",
-                                reason=f"must have at least 1 items, got {len(tags_value_list)}",
+                                reason=f"must have at least 1 items, got {len(typing.cast('list[typing.Any]', tags_value_raw))}",
                             )
                         )
-                    if len(tags_value_list) > 5:
+                    if len(typing.cast("list[typing.Any]", tags_value_raw)) > 5:
                         violations.append(
                             Violation(
                                 path="tags",
-                                reason=f"must have at most 5 items, got {len(tags_value_list)}",
+                                reason=f"must have at most 5 items, got {len(typing.cast('list[typing.Any]', tags_value_raw))}",
                             )
                         )
                     tags_value = tags_value_list
@@ -1864,6 +1866,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", aliases_value_raw)
                     ):
                         aliases_value_item_path = f"aliases[{aliases_value_index}]"
+                        aliases_value_item_violation_count = len(violations)
                         aliases_value_item: str = typing.cast("typing.Any", None)
                         if not isinstance(aliases_value_element, str):
                             violations.append(
@@ -1874,8 +1877,13 @@ class _ShowcaseTransferTypeConverter(
                             )
                         else:
                             aliases_value_item = aliases_value_element
-                        aliases_value_list.append(aliases_value_item)
-                    _check_unique_items(aliases_value_list, "aliases", violations)
+                        if len(violations) == aliases_value_item_violation_count:
+                            aliases_value_list.append(aliases_value_item)
+                    _check_unique_items(
+                        typing.cast("list[typing.Any]", aliases_value_raw),
+                        "aliases",
+                        violations,
+                    )
                     aliases_value = aliases_value_list
 
         roles_value: list[str] | None = None
@@ -1894,6 +1902,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", roles_value_raw)
                     ):
                         roles_value_item_path = f"roles[{roles_value_index}]"
+                        roles_value_item_violation_count = len(violations)
                         roles_value_item: str = typing.cast("typing.Any", None)
                         if not isinstance(roles_value_element, str):
                             violations.append(
@@ -1903,9 +1912,10 @@ class _ShowcaseTransferTypeConverter(
                             )
                         else:
                             roles_value_item = roles_value_element
-                        roles_value_list.append(roles_value_item)
+                        if len(violations) == roles_value_item_violation_count:
+                            roles_value_list.append(roles_value_item)
                     _check_contains(
-                        roles_value_list,
+                        typing.cast("list[typing.Any]", roles_value_raw),
                         lambda element: element in ("admin",),
                         1,
                         2,
@@ -2015,13 +2025,15 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", shapes_value_raw)
                     ):
                         shapes_value_item_path = f"shapes[{shapes_value_index}]"
+                        shapes_value_item_violation_count = len(violations)
                         shapes_value_item: Shape = typing.cast("typing.Any", None)
                         shapes_value_item_parsed = _shape_from_transfer_type(
                             shapes_value_element, shapes_value_item_path, violations
                         )
                         if shapes_value_item_parsed is not None:
                             shapes_value_item = shapes_value_item_parsed
-                        shapes_value_list.append(shapes_value_item)
+                        if len(violations) == shapes_value_item_violation_count:
+                            shapes_value_list.append(shapes_value_item)
                     shapes_value = shapes_value_list
 
         segments_value: list[ShowcaseSegmentsItem] | None = None
@@ -2042,6 +2054,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", segments_value_raw)
                     ):
                         segments_value_item_path = f"segments[{segments_value_index}]"
+                        segments_value_item_violation_count = len(violations)
                         segments_value_item: ShowcaseSegmentsItem = typing.cast(
                             "typing.Any", None
                         )
@@ -2054,7 +2067,8 @@ class _ShowcaseTransferTypeConverter(
                         )
                         if segments_value_item_parsed is not None:
                             segments_value_item = segments_value_item_parsed
-                        segments_value_list.append(segments_value_item)
+                        if len(violations) == segments_value_item_violation_count:
+                            segments_value_list.append(segments_value_item)
                     segments_value = segments_value_list
 
         slots_value: list[str | None] | None = None
@@ -2073,6 +2087,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", slots_value_raw)
                     ):
                         slots_value_item_path = f"slots[{slots_value_index}]"
+                        slots_value_item_violation_count = len(violations)
                         slots_value_item: str | None = None
                         if slots_value_element is None:
                             slots_value_item = None
@@ -2093,7 +2108,8 @@ class _ShowcaseTransferTypeConverter(
                                             reason=f"must have length >= 2, got {len(slots_value_element)}",
                                         )
                                     )
-                        slots_value_list.append(slots_value_item)
+                        if len(violations) == slots_value_item_violation_count:
+                            slots_value_list.append(slots_value_item)
                     slots_value = slots_value_list
 
         grid_value: list[list[int]] | None = None
@@ -2112,6 +2128,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", grid_value_raw)
                     ):
                         grid_value_item_path = f"grid[{grid_value_index}]"
+                        grid_value_item_violation_count = len(violations)
                         grid_value_item: list[int] = typing.cast("typing.Any", None)
                         if not isinstance(grid_value_element, list):
                             violations.append(
@@ -2130,6 +2147,7 @@ class _ShowcaseTransferTypeConverter(
                                 grid_value_item_item_path = (
                                     grid_value_item_path + f"[{grid_value_item_index}]"
                                 )
+                                grid_value_item_item_violation_count = len(violations)
                                 grid_value_item_item: int = typing.cast(
                                     "typing.Any", None
                                 )
@@ -2140,9 +2158,14 @@ class _ShowcaseTransferTypeConverter(
                                 )
                                 if grid_value_item_item_parsed is not None:
                                     grid_value_item_item = grid_value_item_item_parsed
-                                grid_value_item_list.append(grid_value_item_item)
+                                if (
+                                    len(violations)
+                                    == grid_value_item_item_violation_count
+                                ):
+                                    grid_value_item_list.append(grid_value_item_item)
                             grid_value_item = grid_value_item_list
-                        grid_value_list.append(grid_value_item)
+                        if len(violations) == grid_value_item_violation_count:
+                            grid_value_list.append(grid_value_item)
                     grid_value = grid_value_list
 
         number_grid_value: list[list[float]] | None = None
@@ -2165,6 +2188,7 @@ class _ShowcaseTransferTypeConverter(
                         number_grid_value_item_path = (
                             f"numberGrid[{number_grid_value_index}]"
                         )
+                        number_grid_value_item_violation_count = len(violations)
                         number_grid_value_item: list[float] = typing.cast(
                             "typing.Any", None
                         )
@@ -2188,6 +2212,9 @@ class _ShowcaseTransferTypeConverter(
                                 number_grid_value_item_item_path = (
                                     number_grid_value_item_path
                                     + f"[{number_grid_value_item_index}]"
+                                )
+                                number_grid_value_item_item_violation_count = len(
+                                    violations
                                 )
                                 number_grid_value_item_item: float = typing.cast(
                                     "typing.Any", None
@@ -2219,11 +2246,16 @@ class _ShowcaseTransferTypeConverter(
                                                 reason=f"must be a finite number, got {number_grid_value_item_element}",
                                             )
                                         )
-                                number_grid_value_item_list.append(
-                                    number_grid_value_item_item
-                                )
+                                if (
+                                    len(violations)
+                                    == number_grid_value_item_item_violation_count
+                                ):
+                                    number_grid_value_item_list.append(
+                                        number_grid_value_item_item
+                                    )
                             number_grid_value_item = number_grid_value_item_list
-                        number_grid_value_list.append(number_grid_value_item)
+                        if len(violations) == number_grid_value_item_violation_count:
+                            number_grid_value_list.append(number_grid_value_item)
                     number_grid_value = number_grid_value_list
 
         links_value: list[str] | None = None
@@ -2242,6 +2274,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", links_value_raw)
                     ):
                         links_value_item_path = f"links[{links_value_index}]"
+                        links_value_item_violation_count = len(violations)
                         links_value_item: str = typing.cast("typing.Any", None)
                         if not isinstance(links_value_element, str):
                             violations.append(
@@ -2261,7 +2294,8 @@ class _ShowcaseTransferTypeConverter(
                                         reason=f"must be a valid uri, got {_quote(links_value_element)}",
                                     )
                                 )
-                        links_value_list.append(links_value_item)
+                        if len(violations) == links_value_item_violation_count:
+                            links_value_list.append(links_value_item)
                     links_value = links_value_list
 
         addresses_value: list[Address] | None = None
@@ -2284,6 +2318,7 @@ class _ShowcaseTransferTypeConverter(
                         addresses_value_item_path = (
                             f"addresses[{addresses_value_index}]"
                         )
+                        addresses_value_item_violation_count = len(violations)
                         addresses_value_item: Address = typing.cast("typing.Any", None)
                         try:
                             addresses_value_item = (
@@ -2293,7 +2328,8 @@ class _ShowcaseTransferTypeConverter(
                             )
                         except ValidationError as error:
                             _collect(violations, addresses_value_item_path, error)
-                        addresses_value_list.append(addresses_value_item)
+                        if len(violations) == addresses_value_item_violation_count:
+                            addresses_value_list.append(addresses_value_item)
                     addresses_value = addresses_value_list
 
         address_book_value: AddressBook | None = None
@@ -2329,6 +2365,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", dates_value_raw)
                     ):
                         dates_value_item_path = f"dates[{dates_value_index}]"
+                        dates_value_item_violation_count = len(violations)
                         dates_value_item: datetime.date = typing.cast(
                             "typing.Any", None
                         )
@@ -2344,7 +2381,8 @@ class _ShowcaseTransferTypeConverter(
                             )
                             if dates_value_item_parsed is not None:
                                 dates_value_item = dates_value_item_parsed
-                        dates_value_list.append(dates_value_item)
+                        if len(violations) == dates_value_item_violation_count:
+                            dates_value_list.append(dates_value_item)
                     dates_value = dates_value_list
 
         date_index_value: DateIndex | None = None
@@ -2380,6 +2418,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", blobs_value_raw)
                     ):
                         blobs_value_item_path = f"blobs[{blobs_value_index}]"
+                        blobs_value_item_violation_count = len(violations)
                         blobs_value_item: bytes = typing.cast("typing.Any", None)
                         if not isinstance(blobs_value_element, str):
                             violations.append(
@@ -2393,7 +2432,8 @@ class _ShowcaseTransferTypeConverter(
                             )
                             if blobs_value_item_parsed is not None:
                                 blobs_value_item = blobs_value_item_parsed
-                        blobs_value_list.append(blobs_value_item)
+                        if len(violations) == blobs_value_item_violation_count:
+                            blobs_value_list.append(blobs_value_item)
                     blobs_value = blobs_value_list
 
         blob_index_value: BlobIndex | None = None
@@ -2512,6 +2552,7 @@ class _ShowcaseTransferTypeConverter(
                         typing.cast("list[typing.Any]", rows_value_raw)
                     ):
                         rows_value_item_path = f"rows[{rows_value_index}]"
+                        rows_value_item_violation_count = len(violations)
                         rows_value_item: ShowcaseRowsItem = typing.cast(
                             "typing.Any", None
                         )
@@ -2521,7 +2562,8 @@ class _ShowcaseTransferTypeConverter(
                             )
                         except ValidationError as error:
                             _collect(violations, rows_value_item_path, error)
-                        rows_value_list.append(rows_value_item)
+                        if len(violations) == rows_value_item_violation_count:
+                            rows_value_list.append(rows_value_item)
                     rows_value = rows_value_list
 
         ledger_py_value: ShowcaseLedger | None = None
@@ -5576,6 +5618,7 @@ def _showcase_measurements_from_transfer_type(
             typing.cast("list[typing.Any]", value)
         ):
             items_item_path = path + f"[{items_index}]"
+            items_item_violation_count = len(violations)
             items_item: float = typing.cast("typing.Any", None)
             if not (
                 not isinstance(items_element, bool)
@@ -5595,15 +5638,16 @@ def _showcase_measurements_from_transfer_type(
                             reason=f"must be a finite number, got {items_element}",
                         )
                     )
-            items_list.append(items_item)
-        if len(items_list) < 1:
+            if len(violations) == items_item_violation_count:
+                items_list.append(items_item)
+        if len(typing.cast("list[typing.Any]", value)) < 1:
             violations.append(
                 Violation(
                     path=path,
-                    reason=f"must have at least 1 items, got {len(items_list)}",
+                    reason=f"must have at least 1 items, got {len(typing.cast('list[typing.Any]', value))}",
                 )
             )
-        _check_unique_items(items_list, path, violations)
+        _check_unique_items(typing.cast("list[typing.Any]", value), path, violations)
         return items_list
     if isinstance(value, str):
         if _PATTERN_F242E3A159C2422C.search(value) is None:
@@ -5648,6 +5692,7 @@ def _showcase_address_list_or_label_from_transfer_type(
             typing.cast("list[typing.Any]", value)
         ):
             items_item_path = path + f"[{items_index}]"
+            items_item_violation_count = len(violations)
             items_item: Address = typing.cast("typing.Any", None)
             try:
                 items_item = _AddressTransferTypeConverter().from_transfer_type(
@@ -5655,12 +5700,13 @@ def _showcase_address_list_or_label_from_transfer_type(
                 )
             except ValidationError as error:
                 _collect(violations, items_item_path, error)
-            items_list.append(items_item)
-        if len(items_list) < 1:
+            if len(violations) == items_item_violation_count:
+                items_list.append(items_item)
+        if len(typing.cast("list[typing.Any]", value)) < 1:
             violations.append(
                 Violation(
                     path=path,
-                    reason=f"must have at least 1 items, got {len(items_list)}",
+                    reason=f"must have at least 1 items, got {len(typing.cast('list[typing.Any]', value))}",
                 )
             )
         return items_list

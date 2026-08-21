@@ -363,6 +363,23 @@ func TestJSONSchemaShowcaseArrayConstraints(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "duplicate items: element at index 1 equals index 0")
 
+	// Sibling array keywords inspect the original wire array even when every
+	// element fails `items` conversion.
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"tags":[1]}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tags[0]")
+	require.NotContains(t, err.Error(), "must have at least 1 items")
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"aliases":[1,2]}`)), &out)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "duplicate items")
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"aliases":[1,1]}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate items: element at index 1 equals index 0")
+	err = dc.FromPayload(jsonPayload([]byte(base+`,"roles":[1,"admin"]}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "roles[0]")
+	require.NotContains(t, err.Error(), "too few matching items")
+
 	// Missing required contains match (roles has no "admin").
 	err = dc.FromPayload(jsonPayload([]byte(base+`,"roles":["user"]}`)), &out)
 	require.Error(t, err)
@@ -380,6 +397,12 @@ func TestJSONSchemaShowcaseArrayConstraints(t *testing.T) {
 	_, serr := dc.ToPayload(bad)
 	require.Error(t, serr)
 	require.Contains(t, serr.Error(), "duplicate items: element at index 1 equals index 0")
+}
+
+func TestJSONSchemaShowcaseNumberValueRoundTrip(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+	value := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-number-values.json")
+	require.Equal(t, []float64{math.Copysign(0, -1), 5, 1000, math.MaxFloat64, math.SmallestNonzeroFloat64}, value.NumberGrid[0])
 }
 
 // TestJSONSchemaShowcaseObjectConstraints round-trips the object-constrained

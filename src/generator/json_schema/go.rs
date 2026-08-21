@@ -654,6 +654,97 @@ fn render_go_array_checks(
     }
 }
 
+/// Emits deserialize-side array checks over the original `json.RawMessage`
+/// elements. The typed slice is allowed to omit failed conversions internally,
+/// but sibling array keywords must still see the complete wire instance.
+fn render_go_raw_array_checks(
+    output: &mut String,
+    elements: &str,
+    path: &str,
+    schema: &Schema,
+    indent: &str,
+    level: usize,
+    errs: &GoErrsBinding,
+) {
+    let errs_value = errs.value;
+    if let Some(min) = schema.min_items {
+        output.push_str(&format!("{indent}if n := len({elements}); n < {min} {{\n"));
+        output.push_str(&format!(
+            "{indent}\t{errs_value} = append({errs_value}, Violation{{{path}, fmt.Sprintf(\"must have at least {min} items, got %d\", n)}})\n{indent}}}\n"
+        ));
+    }
+    if let Some(max) = schema.max_items {
+        output.push_str(&format!("{indent}if n := len({elements}); n > {max} {{\n"));
+        output.push_str(&format!(
+            "{indent}\t{errs_value} = append({errs_value}, Violation{{{path}, fmt.Sprintf(\"must have at most {max} items, got %d\", n)}})\n{indent}}}\n"
+        ));
+    }
+    if schema.unique_items == Some(true) {
+        output.push_str(&format!(
+            "{indent}{{\n{indent}\trawSeen{level} := make(map[string]int, len({elements}))\n{indent}\tfor rawIndex{level}, rawElement{level} := range {elements} {{\n{indent}\t\tvar rawValue{level} any\n{indent}\t\tif err := json.Unmarshal(rawElement{level}, &rawValue{level}); err != nil {{\n{indent}\t\t\tcontinue\n{indent}\t\t}}\n{indent}\t\tif rawNumber{level}, ok := rawValue{level}.(float64); ok && rawNumber{level} == 0 {{\n{indent}\t\t\trawValue{level} = float64(0)\n{indent}\t\t}}\n{indent}\t\trawKeyBytes{level}, _ := json.Marshal(rawValue{level})\n{indent}\t\trawKey{level} := string(rawKeyBytes{level})\n{indent}\t\tif priorIndex{level}, ok := rawSeen{level}[rawKey{level}]; ok {{\n{indent}\t\t\t{errs_value} = append({errs_value}, Violation{{{path}, fmt.Sprintf(\"duplicate items: element at index %d equals index %d\", rawIndex{level}, priorIndex{level})}})\n{indent}\t\t}} else {{\n{indent}\t\t\trawSeen{level}[rawKey{level}] = rawIndex{level}\n{indent}\t\t}}\n{indent}\t}}\n{indent}}}\n"
+        ));
+    }
+    if let Some(matcher) = &schema.contains {
+        let element_ty = schema
+            .items
+            .as_deref()
+            .and_then(nullable_non_null_schema)
+            .or(schema.items.as_deref())
+            .and_then(|item| item.ty.as_ref())
+            .and_then(Value::as_str);
+        let candidate = format!("rawCandidate{level}");
+        let condition = go_matcher_condition(matcher, &candidate, element_ty);
+        let effective_min = schema.min_contains.unwrap_or(1);
+        output.push_str(&format!("{indent}rawMatchCount{level} := 0\n"));
+        output.push_str(&format!(
+            "{indent}for _, rawElement{level} := range {elements} {{\n"
+        ));
+        match element_ty {
+            Some("integer") => {
+                output.push_str(&format!(
+                    "{indent}\tdecoder{level} := json.NewDecoder(bytes.NewReader(rawElement{level}))\n{indent}\tdecoder{level}.UseNumber()\n{indent}\tvar rawNumber{level} json.Number\n{indent}\tif err := decoder{level}.Decode(&rawNumber{level}); err == nil {{\n{indent}\t\tif {candidate}, err := parseSpecInteger(rawNumber{level}); err == nil && ({condition}) {{\n{indent}\t\t\trawMatchCount{level}++\n{indent}\t\t}}\n{indent}\t}}\n"
+                ));
+            }
+            Some("number") => {
+                output.push_str(&format!(
+                    "{indent}\tvar {candidate} float64\n{indent}\tif err := json.Unmarshal(rawElement{level}, &{candidate}); err == nil && math.IsInf({candidate}, 0) == false && ({condition}) {{\n{indent}\t\trawMatchCount{level}++\n{indent}\t}}\n"
+                ));
+            }
+            Some("boolean") => {
+                output.push_str(&format!(
+                    "{indent}\tvar {candidate} bool\n{indent}\tif err := json.Unmarshal(rawElement{level}, &{candidate}); err == nil && ({condition}) {{\n{indent}\t\trawMatchCount{level}++\n{indent}\t}}\n"
+                ));
+            }
+            _ => {
+                output.push_str(&format!(
+                    "{indent}\tvar {candidate} string\n{indent}\tif err := json.Unmarshal(rawElement{level}, &{candidate}); err == nil && ({condition}) {{\n{indent}\t\trawMatchCount{level}++\n{indent}\t}}\n"
+                ));
+            }
+        }
+        output.push_str(&format!("{indent}}}\n"));
+        if effective_min > 0 {
+            output.push_str(&format!(
+                "{indent}if rawMatchCount{level} < {effective_min} {{\n"
+            ));
+            if schema.min_contains.is_some() {
+                output.push_str(&format!(
+                    "{indent}\t{errs_value} = append({errs_value}, Violation{{{path}, fmt.Sprintf(\"too few matching items: at least {effective_min}, got %d\", rawMatchCount{level})}})\n"
+                ));
+            } else {
+                output.push_str(&format!(
+                    "{indent}\t{errs_value} = append({errs_value}, Violation{{{path}, \"no element matches the required schema\"}})\n"
+                ));
+            }
+            output.push_str(&format!("{indent}}}\n"));
+        }
+        if let Some(max) = schema.max_contains {
+            output.push_str(&format!(
+                "{indent}if rawMatchCount{level} > {max} {{\n{indent}\t{errs_value} = append({errs_value}, Violation{{{path}, fmt.Sprintf(\"too many matching items: at most {max}, got %d\", rawMatchCount{level})}})\n{indent}}}\n"
+            ));
+        }
+    }
+}
+
 /// Emits the object member-count predicates (`minProperties`/`maxProperties`)
 /// over `count_expr` (an `int` giving the number of distinct wire member keys —
 /// one number over the whole object, never a per-bucket sum), appending
@@ -2111,7 +2202,27 @@ fn render_go_scalar_variant_decode(
             return;
         }
     }
-    output.push_str("\t\tmergeNested(errs, path, v.Validate())\n");
+    if underlying.starts_with("[]") {
+        // Item validation renders against a value-owned accumulator. Adapt the
+        // union dispatcher's pointer here without re-running array-level
+        // constraints against the partially converted typed slice.
+        output.push_str("\t\t{\n\t\t\tunionErrs := errs\n\t\t\terrs := *unionErrs\n");
+        render_go_array_items_validate(
+            output,
+            "\t\t\t",
+            "arr",
+            "path",
+            &variant.schema,
+            &variant.go_type,
+            UNION_VARIANT_POSITION,
+            model_names,
+            unions,
+            0,
+        );
+        output.push_str("\t\t\t*unionErrs = errs\n\t\t}\n");
+    } else {
+        output.push_str("\t\tmergeNested(errs, path, v.Validate())\n");
+    }
     output.push_str("\t\treturn v, true\n");
 }
 
@@ -2882,15 +2993,6 @@ fn render_property_unmarshal(
             0,
             &GoErrsBinding::BY_VALUE,
         );
-        if property.has_array_constraints() {
-            render_go_array_checks(
-                output,
-                &format!("m.{field}"),
-                &go_string_literal(json_name),
-                property,
-                "\t\t",
-            );
-        }
         output.push_str("\t}\n");
         return Ok(());
     }
@@ -3327,7 +3429,11 @@ fn render_go_array_position_unmarshal(
             ));
         }
     }
-    output.push_str(&format!("{inner}}}\n{indent}}}\n"));
+    output.push_str(&format!("{inner}}}\n"));
+    if array.has_array_constraints() {
+        render_go_raw_array_checks(output, &elems, path, array, &inner, level, errs);
+    }
+    output.push_str(&format!("{indent}}}\n"));
 }
 
 /// Decodes a materialized temporal field: read the wire `string` (presence /

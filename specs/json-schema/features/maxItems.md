@@ -66,18 +66,18 @@ None. The emitted collection type is [[items]]'s `[]T` / `T[]` /
 ## Validator mapping
 
 Per **P10**/**P11**. A single `≤` comparison of the **element count**
-against the fixed bound, identical in both directions (a pure predicate
-over the decoded value — the **shared `Validate`** layer of **P12**). The
-count is the decoded collection's native length; unlike [[maxLength]]
+against the fixed bound. On deserialize it counts the original wire array
+even if an element fails [[items]] conversion; on serialize it uses the
+decoded collection's native length. Unlike [[maxLength]]
 there is no unit subtlety, so each language uses its bare length
 primitive.
 
 | Language | Strategy |
 |---|---|
-| Go | The comparison is a predicate in the shared `Validate(model)` (`if n := len(v); n > max { push(Violation{Path, Reason: fmt.Sprintf("too many items: at most %d, got %d", max, n)}) }`), which the generated `UnmarshalJSON` calls after decoding into the `[]T`; violations collect into one `ValidationError`. |
-| TypeScript | After the `Array.isArray` guard ([[items]]), the shared `Validate`'s `v.length > max` check pushes ``Violation{path, reason: `too many items: at most ${max}, got ${v.length}`}``, throw one `ValidationError`. `max` is an emitted numeric constant. |
-| Python | After the `isinstance(v, list)` guard ([[items]]), `if (n := len(v)) > max: violations.append(Violation(path=…, reason=f"too many items: at most {max}, got {n}"))` in the transfer type converter (PRINCIPLES Python §3), aggregated into the single generated `ValidationError`. |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the array node into the `List<T>`, then checks `int n = v.size(); if (n > max)`, pushing a `Violation{path, "too many items: at most " + max + ", got " + n}` into the single `ValidationException`. Not bean-validation `@Size` — hand-written like every other constraint. |
+| Go | `UnmarshalJSON` checks `len(rawArray) > max` after collecting indexed item violations; serialize checks the typed slice in shared `Validate`. Both collect into one `ValidationError`. |
+| TypeScript | After the `Array.isArray` guard ([[items]]), deserialize checks `raw.length > max` after parsing the elements; serialize checks the typed array. A failure pushes ``Violation{path, reason: `too many items: at most ${max}, got ${raw.length}`}``. |
+| Python | After the `isinstance(raw, list)` guard ([[items]]), the transfer converter checks `len(raw) > max` after parsing the elements; serialize checks the typed list. Both aggregate into the generated `ValidationError`. |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) checks `node.size() > max` after parsing the elements; serialize checks the typed `List<T>`. Both push a structured violation into the single `ValidationException`. Not bean-validation `@Size`. |
 
 **Informative `reason` strings.** The `Violation` `reason` names the
 **concrete bound and the offending count** — `too many items: at most 3,

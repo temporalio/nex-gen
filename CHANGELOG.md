@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- JSON Schema numbers round-trip by mathematical JSON value rather than token
+  spelling: whitespace, object-member order, and spellings such as `5`, `5.0`,
+  and `5e0` are not identity-bearing. Generated Java keeps idiomatic `double`
+  serialization rather than applying a Java-only spelling normalization.
+
 - Protobuf-backed models now consistently generate conversions in both
   directions whenever they are reachable. Go and TypeScript emit previously
   suppressed complementary helpers, operation-free exported models receive the
@@ -117,6 +122,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[GeneratedCode]` attribute now read `nexgen`.
 
 ### Fixed
+
+- Java now rejects numeric JSON tokens outside the finite binary64 domain (for
+  example `1e400`) with an aggregated, fully pathed violation in ordinary
+  properties, union branches, nested arrays, and typed-map members.
+- JSON Schema `minItems`, `maxItems`, `uniqueItems`, and `contains` now inspect
+  the original wire array in every target even when one or more elements fail
+  `items`. Failed conversions no longer fabricate count or duplicate results;
+  indexed violations precede sibling array-keyword violations at every depth.
 
 - JSON Schema converters now apply scalar, reference, union, nested-array,
   temporal, and content-encoding handling recursively inside array elements and

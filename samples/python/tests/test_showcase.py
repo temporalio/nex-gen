@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import math
 import typing
 
 import pytest
@@ -63,11 +64,11 @@ BASE: dict[str, typing.Any] = {
 
 
 def expect_roundtrip(name: str, model_type: type[typing.Any]) -> typing.Any:
-    """Decode a fixture through the *default* data converter, re-encode, compare **bytes**.
+    """Decode through the default converter and compare the re-emitted JSON value.
 
     The only members that may differ are the explicit `null`s
     ``COLLAPSED_NULL_MEMBERS`` declares on an optional+nullable member, which
-    collapse. Everything else round-trips byte-identically — including a key the
+    collapse. Everything else round-trips by JSON value — including a key the
     fixture omits on a member carrying a schema `default`, which is advisory and
     never injected.
     """
@@ -519,6 +520,9 @@ def test_array_constraints_roundtrip_and_reject() -> None:
     assert parse_violations({**BASE, "roles": ["admin", "admin", "admin"]}) == [
         ("roles", "too many matching items: at most 2, got 3")
     ]
+    assert parse_violations({**BASE, "roles": [1, "admin"]}) == [
+        ("roles[0]", "expected string")
+    ]
 
 
 def test_array_element_type_mismatch_names_the_expected_type() -> None:
@@ -531,10 +535,31 @@ def test_array_element_type_mismatch_names_the_expected_type() -> None:
     identifies the element; the reason names the type.
     """
     assert parse_violations({**BASE, "tags": [1]}) == [("tags[0]", "expected string")]
+    assert parse_violations({**BASE, "aliases": [1, 2]}) == [
+        ("aliases[0]", "expected string"),
+        ("aliases[1]", "expected string"),
+    ]
+    assert parse_violations({**BASE, "aliases": [1, 1]}) == [
+        ("aliases[0]", "expected string"),
+        ("aliases[1]", "expected string"),
+        ("aliases", "duplicate items: element at index 1 equals index 0"),
+    ]
     assert parse_violations({**BASE, "tags": ["a", None, {}]}) == [
         ("tags[1]", "expected string"),
         ("tags[2]", "expected string"),
     ]
+
+
+def test_number_roundtrip_preserves_mathematical_values() -> None:
+    value = expect_showcase("showcase-number-values.json")
+    assert value.number_grid is not None
+    numbers = value.number_grid[0]
+    assert numbers[:3] == [0.0, 5.0, 1000.0]
+    assert numbers[3] == float.fromhex("0x1.fffffffffffffp+1023")
+    assert numbers[4] == float.fromhex("0x0.0000000000001p-1022")
+    # Signed zero is deliberately not identity-bearing.
+    assert numbers[0] == 0.0
+    assert math.isfinite(numbers[3]) and math.isfinite(numbers[4])
 
 
 def test_object_constraints_roundtrip_and_reject() -> None:
@@ -868,17 +893,9 @@ def test_union_array_branch_types_every_element() -> None:
     ]
 
     two = parse_violations({**BASE, "measurements": ["a", "b"]})
-    assert two[:2] == [
+    assert two == [
         ("measurements[0]", "expected number"),
         ("measurements[1]", "expected number"),
-    ]
-    # `uniqueItems` then compares the two placeholders the rejected elements left
-    # behind and reports one more violation. A declared array member with
-    # `uniqueItems` does exactly the same (`aliases: [1, 2]`), so this is shared
-    # element-placeholder behaviour rather than anything the union adds; the
-    # accepted-and-rejected value set — the part P1 fixes — is unaffected.
-    assert two[2:] == [
-        ("measurements", "duplicate items: element at index 1 equals index 0")
     ]
 
     # Valid elements still decode, and re-emit with their wire form intact.

@@ -200,10 +200,9 @@ public final class Square implements ChoicesValue, Shape, Showcase.ShapeOrName {
                 } else if (field.isNull()) {
                     violations.add(new Violation("side", "explicit null not allowed"));
                 } else {
-                    if (!field.isNumber()) {
-                        violations.add(new Violation("side", "expected number"));
-                    } else {
-                        side = field.doubleValue();
+                    Double numberValue = SpecNumbers.specDouble(field, "side", violations);
+                    if (numberValue != null) {
+                        side = numberValue;
                     }
                 }
             }

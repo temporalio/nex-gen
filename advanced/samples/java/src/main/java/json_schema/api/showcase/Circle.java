@@ -200,10 +200,9 @@ public final class Circle implements ChoicesValue, Shape, Showcase.ShapeOrName {
                 } else if (field.isNull()) {
                     violations.add(new Violation("radius", "explicit null not allowed"));
                 } else {
-                    if (!field.isNumber()) {
-                        violations.add(new Violation("radius", "expected number"));
-                    } else {
-                        radius = field.doubleValue();
+                    Double numberValue = SpecNumbers.specDouble(field, "radius", violations);
+                    if (numberValue != null) {
+                        radius = numberValue;
                     }
                 }
             }

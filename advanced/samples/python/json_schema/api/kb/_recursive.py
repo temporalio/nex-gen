@@ -231,6 +231,7 @@ class _PageTransferTypeConverter(
                         typing.cast("list[typing.Any]", blocks_value_raw)
                     ):
                         blocks_value_item_path = f"blocks[{blocks_value_index}]"
+                        blocks_value_item_violation_count = len(violations)
                         blocks_value_item: Block = typing.cast("typing.Any", None)
                         try:
                             blocks_value_item = (
@@ -240,7 +241,8 @@ class _PageTransferTypeConverter(
                             )
                         except ValidationError as error:
                             _collect(violations, blocks_value_item_path, error)
-                        blocks_value_list.append(blocks_value_item)
+                        if len(violations) == blocks_value_item_violation_count:
+                            blocks_value_list.append(blocks_value_item)
                     blocks_value = blocks_value_list
 
         for key in raw:

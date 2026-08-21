@@ -95,6 +95,13 @@ Notes:
 - **Python**: `bool <: int`, so every generated integer/number check
   excludes `bool` explicitly — `True` is not `1` on the wire (see the
   validator mapping).
+- **Number range and identity**: `number` is the finite IEEE-754 binary64
+  domain shared by all four targets. A numeric token whose correctly rounded
+  value overflows to infinity (for example `1e400`) is rejected. Accepted
+  numbers round-trip by mathematical value, not source spelling: `5`, `5.0`,
+  and `5e0` are equivalent, as are positive and negative zero. Each target may
+  use its idiomatic JSON serializer; Java therefore continues to emit an
+  integral `double` with its normal `.0` spelling.
 
 ## Validator mapping
 
@@ -105,7 +112,7 @@ errors aggregate into the language-native primitive.
 |---|---|---|---|---|
 | `"string"`  | typed `Unmarshal` into `string` | `typeof v === 'string'` | `isinstance(v, str)` | Jackson typed binding |
 | `"integer"` | shadow `*json.Number` → runtime `parseSpecInteger` → `int64` (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) | `typeof v === 'number' && Number.isSafeInteger(v)` (accepts `1.0` natively; caps ±(2^53−1)) | runtime `_parse_spec_integer(v, path, violations)` → `int` (accepts `1.0`, rejects `1.5` and `bool`, caps ±(2^53−1)) | node helper `SpecNumbers.specLong(node, path, errs)` called by the collecting deserializer (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) |
-| `"number"`  | `float64` unmarshal | `typeof v === 'number'` | `not isinstance(v, bool) and isinstance(v, (int, float))`, stored as-is | `Double` binding |
+| `"number"`  | finite `float64` parse | `typeof v === 'number' && Number.isFinite(v)` | numeric, non-`bool`, and finite-binary64 check, stored as-is | node helper `SpecNumbers.specDouble(node, path, errs)` (numeric and finite) |
 | `"boolean"` | `bool` unmarshal | `typeof v === 'boolean'` | `isinstance(v, bool)` (rejects `1`/`0`) | `Boolean` binding |
 | `"object"`  | typed struct unmarshal | `typeof v === 'object' && v !== null && !Array.isArray(v)` | `isinstance(v, dict)`, then the branch/member converter builds the dataclass | typed class binding |
 | `"array"`   | typed slice unmarshal | `Array.isArray(v)` | `isinstance(v, list)` | typed `List` binding |
@@ -155,9 +162,8 @@ Strategy per language:
   is a subclass of `int`, an integer or number check **must exclude `bool`
   explicitly** — otherwise `True` classifies as `1`. A classified `number` is
   stored **exactly as it arrived**, never coerced: an integral `5` stays an
-  `int` in a `float`-annotated member, because `float(5)` would re-serialize
-  as `5.0` where Go and TypeScript emit `5` — a per-language nicety paid for
-  in round-trip byte-identity, which **P1** does not permit. Integer fields
+  `int` in a `float`-annotated member. This is idiomatic and preserves its
+  value; P1 does not require the re-emitted numeric lexeme to match. Integer fields
   stay a plain `int` and run through the generated runtime's
   `_parse_spec_integer(value, path, violations)`: it rejects `bool`, accepts
   an `int`, accepts a `float` with zero fractional part (`1.0`, `1e2`), and
@@ -174,8 +180,10 @@ Strategy per language:
   (`not an integer` / the cap message).
 - **Java**: POJOs (Java 8 floor; not records, see PRINCIPLES Java §1)
   bound by the per-POJO collecting deserializer (Java §5) — **no**
-  per-field `@JsonDeserialize`, no `Long` binding. It calls a node-based
-  runtime helper per integer field; the helper takes the field's
+  per-field `@JsonDeserialize`, no `Long`/`Double` binding. It calls node-based
+  runtime helpers per numeric field; `SpecNumbers.specDouble` rejects a
+  non-number or a token such as `1e400` whose `doubleValue()` is not finite,
+  while `specLong` additionally enforces integer semantics. Each helper takes the field's
   `JsonNode`, and on a bad value **pushes a `Violation` and returns
   `null`** (it never throws, so aggregation stays a clean list-append):
   ```java

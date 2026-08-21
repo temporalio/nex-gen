@@ -1057,7 +1057,7 @@ fn typescript_json_validates_non_object_union_branch_constraints() {
     assert!(rendered.contains("if ([...(value as string)].length < 3) {"));
     assert!(rendered.contains("if (!PATTERN_C182F89FDB221836.test((value as string))) {"));
     assert!(rendered.contains("if ((value as number) < 1) {"));
-    assert!(rendered.contains("if (listOrNameArrayBranch!.length < 1) {"));
+    assert!(rendered.contains("if (raw.listOrName.length < 1) {"));
     assert!(rendered.contains("duplicate items: element at index ${index}"));
     assert!(rendered.contains(
         "if ((listOrName as \"auto\" | \"manual\") !== \"auto\" && (listOrName as \"auto\" | \"manual\") !== \"manual\") {"

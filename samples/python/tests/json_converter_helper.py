@@ -19,11 +19,9 @@ through the converter object directly.
 it so the generated ``ValidationError`` surfaces unwrapped (the payload converter
 would otherwise wrap it).
 
-Round-trip assertions run on **bytes** (:func:`encode_bytes` against
-:func:`canonical_fixture_bytes`), never on a parsed value: a parsed comparison
-cannot see the wire form of a number, and `1 == 1.0` in Python, so it silently
-admits an ``integer`` member that re-emitted as ``1.0``. :func:`encode` remains
-available for the rare assertion that really is about structure.
+Round-trip assertions compare parsed JSON values. JSON number spelling is not
+identity-bearing: ``5``, ``5.0``, and ``5e0`` carry the same mathematical
+value, just as whitespace and object-member order carry no identity.
 """
 
 from __future__ import annotations
@@ -203,24 +201,15 @@ def decode_fixture(cls: type[T], suite: str, name: str) -> T:
 
 
 def roundtrip_fixture(cls: type[T], suite: str, name: str) -> T:
-    """Decode a canonical wire fixture and assert the re-emitted **bytes** match.
-
-    The byte-level statement of P1: a payload one language accepts round-trips
-    through any other unchanged. The comparison is against
-    :func:`canonical_fixture_bytes`, never against a parsed value.
-
-    The failure message spells both sides out: pytest rewrites assertions only in
-    test modules, so a bare ``assert`` here would report nothing but
-    ``AssertionError`` — and a one-character difference in a long payload is
-    otherwise unfindable.
-    """
+    """Decode a fixture and assert the re-emitted JSON value is unchanged."""
     model = decode_fixture(cls, suite, name)
     emitted = encode_bytes(model)
-    expected = canonical_fixture_bytes(suite, name)
-    assert emitted == expected, (
-        f"{suite}/{name} did not round-trip byte-identically\n"
-        f"  emitted:  {emitted.decode()}\n"
-        f"  expected: {expected.decode()}"
+    expected = json.loads(canonical_fixture_bytes(suite, name))
+    actual = json.loads(emitted)
+    assert actual == expected, (
+        f"{suite}/{name} did not round-trip by JSON value\n"
+        f"  emitted:  {actual!r}\n"
+        f"  expected: {expected!r}"
     )
     return model
 

@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/** Shared spec-number parsing enforcing the JSON Schema integer semantics. */
+/** Shared spec-number parsing enforcing the JSON Schema numeric semantics. */
 public final class SpecNumbers {
     public static final long INTEGER_CAP = (1L << 53) - 1;
 
@@ -31,5 +31,41 @@ public final class SpecNumbers {
             return null;
         }
         return node.longValue();
+    }
+
+    /** Returns whether a node is an accepted spec integer without recording a violation. */
+    public static boolean isSpecLong(JsonNode node) {
+        if (!node.isNumber()) {
+            return false;
+        }
+        double value = node.doubleValue();
+        return Double.isFinite(value) && value == Math.floor(value)
+                && value >= -(double) INTEGER_CAP && value <= (double) INTEGER_CAP;
+    }
+
+    /**
+     * Parses a JSON number as a finite binary64 value. Adds a
+     * {@link Violation} and returns {@code null} on failure.
+     */
+    public static @Nullable Double specDouble(JsonNode node, String path, List<Violation> violations) {
+        if (!node.isNumber()) {
+            violations.add(new Violation(path, "expected number"));
+            return null;
+        }
+        double value = node.doubleValue();
+        if (!Double.isFinite(value)) {
+            violations.add(new Violation(path, "must be a finite number, got " + value));
+            return null;
+        }
+        return value;
+    }
+
+    /** Returns a JSON-value equality key, normalizing numeric spellings and signed zero. */
+    public static Object valueKey(JsonNode node) {
+        if (!node.isNumber()) {
+            return node;
+        }
+        double value = node.doubleValue();
+        return value == 0.0d ? Double.valueOf(0.0d) : Double.valueOf(value);
     }
 }
