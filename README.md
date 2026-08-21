@@ -31,15 +31,20 @@ subtly wrong in one language.
 
 ## Installation
 
-Under development; not yet published to package registries. For now, build the
-`nexgen` binary from source:
+Download the archive for your platform from the
+[latest GitHub release](https://github.com/temporalio/nexgen/releases/latest):
 
-```bash
-cargo build --release   # produces target/release/nexgen
-```
+| Platform | Archive target |
+| --- | --- |
+| Linux (x86-64) | `x86_64-unknown-linux-gnu` |
+| Linux (Arm64) | `aarch64-unknown-linux-gnu` |
+| macOS (Intel) | `x86_64-apple-darwin` |
+| macOS (Apple silicon) | `aarch64-apple-darwin` |
+| Windows (x86-64) | `x86_64-pc-windows-msvc` |
+| Windows (Arm64) | `aarch64-pc-windows-msvc` |
 
-Or run it straight from the repo with `cargo run -- <args>` (the examples below
-use this form). Prebuilt binaries will be distributed via GitHub releases.
+Extract the archive, then move `nexgen` (`nexgen.exe` on Windows) to a directory
+on your `PATH`.
 
 ## Usage
 

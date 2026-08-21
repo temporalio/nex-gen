@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `5e0` are not identity-bearing. Generated Java keeps idiomatic `double`
   serialization rather than applying a Java-only spelling normalization.
 
+- Generated source headers now include the version of the `nexgen` binary that
+  produced them.
 - Protobuf-backed models now consistently generate conversions in both
   directions whenever they are reachable. Go and TypeScript emit previously
   suppressed complementary helpers, operation-free exported models receive the
