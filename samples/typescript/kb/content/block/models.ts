@@ -148,13 +148,27 @@ export const blockTransferTypeConverter =
         out.text = value.text;
       }
       if (value.style !== undefined) {
-        out.style = blockStyleTransferTypeConverter.toTransferType(value.style);
+        out.style = (() => {
+          try {
+            return blockStyleTransferTypeConverter.toTransferType(value.style);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "style", error);
+            return undefined;
+          }
+        })();
       }
       if (value.page !== undefined) {
         out.page =
           value.page === null
             ? null
-            : pageTransferTypeConverter.toTransferType(value.page);
+            : (() => {
+                try {
+                  return pageTransferTypeConverter.toTransferType(value.page);
+                } catch (error) {
+                  __nexgenDefinitions.collect(violations, "page", error);
+                  return undefined;
+                }
+              })();
       }
       if (violations.length) {
         throw new __nexgenDefinitions.ValidationError(violations);

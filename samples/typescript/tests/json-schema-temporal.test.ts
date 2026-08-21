@@ -58,10 +58,24 @@ describe("json-schema temporal (--js-temporal-repr=string, default)", () => {
       { createdAt: "2021-06-15T12:30:45Z", timeout: "P1Y" },
       { createdAt: "2021-06-15T12:30:45Z", birthday: "2021-02-29", timeout: "PT0S" },
       { createdAt: "2021-06-15T12:30:45", timeout: "PT0S" },
+      { createdAt: "0000-01-01T00:00:00Z", timeout: "PT0S" },
+      { createdAt: "2021-06-15T12:30:45Z", birthday: "0000-01-01", timeout: "PT0S" },
     ]) {
       const body = { birthday: "2000-01-01", alarm: "09:00:00", ...bad };
       expect(() => converter.fromTransferType(body)).toThrow();
     }
+
+    expect(
+      converter.fromTransferType({
+        createdAt: "0001-01-01T00:00:00Z",
+        birthday: "0001-01-01",
+        alarm: "00:00:00",
+        timeout: "PT0S",
+      }),
+    ).toMatchObject({
+      createdAt: "0001-01-01T00:00:00Z",
+      birthday: "0001-01-01",
+    });
   });
 });
 
@@ -81,6 +95,17 @@ describe("json-schema temporal (--js-temporal-repr=date)", () => {
     >;
     expect(serialized.createdAt).toBe("2021-06-15T10:30:45.123Z");
     expect(serialized.timeout).toBe("PT1H30M");
+  });
+
+  test("invalid Dates fail through the aggregated path-aware validator", () => {
+    const value = decodeFixture(
+      dateTemporalTransferTypeConverter,
+      bytes("temporal-full.json"),
+    );
+    value.createdAt = new Date(Number.NaN);
+    expect(() => encodeModel(dateTemporalTransferTypeConverter, value)).toThrow(
+      /createdAt.*valid date-time/,
+    );
   });
 });
 

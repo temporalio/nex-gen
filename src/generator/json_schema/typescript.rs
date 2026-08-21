@@ -129,6 +129,16 @@ fn ts_temporal_parse_fn(kind: TemporalKind) -> String {
     format!("{DEFINITIONS_NAMESPACE}.{name}")
 }
 
+fn ts_temporal_validate_fn(kind: TemporalKind) -> String {
+    let name = match kind {
+        TemporalKind::DateTime => "validateTemporalDateTime",
+        TemporalKind::Date => "validateTemporalDate",
+        TemporalKind::Time => "validateTemporalTime",
+        TemporalKind::Duration => "validateTemporalDuration",
+    };
+    format!("{DEFINITIONS_NAMESPACE}.{name}")
+}
+
 /// The serialize expression for a materialized temporal value. `string`-stored
 /// temporals (all of `string` mode, plus `date`/`time`/`duration` in `date` mode
 /// and `time` in `temporal` mode) are already canonical and pass through; the
@@ -154,7 +164,18 @@ fn ts_temporal_serialize_call(
         TemporalKind::Duration => "serializeTemporalDuration",
         TemporalKind::Time => unreachable!("time is always a string"),
     };
-    format!("{DEFINITIONS_NAMESPACE}.{func}({value_expr})")
+    let call = format!("{DEFINITIONS_NAMESPACE}.{func}({value_expr})");
+    // `Date#toISOString` throws a RangeError for an invalid Date. The ordinary
+    // serialize-side validator has already added a path-aware violation, so do
+    // not let the wire mapper bypass that aggregated ValidationError while the
+    // model is still assembling its output object.
+    if matches!(
+        (kind, repr),
+        (TemporalKind::DateTime, TsDateTimeTypes::Date)
+    ) {
+        return format!("Number.isFinite({value_expr}.getTime()) ? {call} : undefined");
+    }
+    call
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -268,19 +289,20 @@ fn render_ts_numeric_checks(
     indent: &str,
 ) {
     let is_integer = schema.ty.as_ref().and_then(Value::as_str) == Some("integer");
+    let mut body = String::new();
     let mut emit = |condition: String, reason: String| {
-        output.push_str(indent);
-        output.push_str("if (");
-        output.push_str(&condition);
-        output.push_str(") {\n");
-        output.push_str(indent);
-        output.push_str("  violations.push({ path: ");
-        output.push_str(path_expr);
-        output.push_str(", reason: `");
-        output.push_str(&reason);
-        output.push_str("` });\n");
-        output.push_str(indent);
-        output.push_str("}\n");
+        body.push_str(indent);
+        body.push_str("if (");
+        body.push_str(&condition);
+        body.push_str(") {\n");
+        body.push_str(indent);
+        body.push_str("  violations.push({ path: ");
+        body.push_str(path_expr);
+        body.push_str(", reason: `");
+        body.push_str(&reason);
+        body.push_str("` });\n");
+        body.push_str(indent);
+        body.push_str("}\n");
     };
     if let Some(min) = &schema.minimum {
         let bound = ts_bound_literal(min, is_integer);
@@ -316,6 +338,27 @@ fn render_ts_numeric_checks(
             format!("{value_expr} % {bound} !== 0"),
             format!("must be a multiple of {bound}, got ${{{value_expr}}}"),
         );
+    }
+    if is_integer {
+        output.push_str(&body);
+        return;
+    }
+
+    output.push_str(indent);
+    output.push_str(&format!("if (!Number.isFinite({value_expr})) {{\n"));
+    output.push_str(indent);
+    output.push_str(&format!(
+        "  violations.push({{ path: {path_expr}, reason: `must be a finite number, got ${{{value_expr}}}` }});\n"
+    ));
+    output.push_str(indent);
+    output.push_str("}");
+    if body.is_empty() {
+        output.push('\n');
+    } else {
+        output.push_str(" else {\n");
+        output.push_str(&body);
+        output.push_str(indent);
+        output.push_str("}\n");
     }
 }
 
@@ -788,6 +831,14 @@ fn field_needs_serialize_check(schema: &Schema) -> bool {
     if let Some(non_null) = nullable_non_null_schema(schema) {
         return field_needs_serialize_check(non_null);
     }
+    // A nested converter may reject a mutated in-memory value. The containing
+    // converter needs its own collection so it can re-path that failure.
+    if schema.reference.is_some() {
+        return true;
+    }
+    if temporal_kind_direct(schema).is_some() {
+        return true;
+    }
     if schema.const_value.is_some() || schema.enum_values.is_some() {
         return true;
     }
@@ -799,13 +850,21 @@ fn field_needs_serialize_check(schema: &Schema) -> bool {
             .one_of
             .iter()
             .flatten()
-            .filter(|branch| branch.reference.is_none())
             .any(field_needs_serialize_check);
     }
     match schema.ty.as_ref().and_then(Value::as_str) {
         Some("string") => schema.has_string_constraints(),
-        Some("number") | Some("integer") => schema.has_numeric_constraints(),
-        Some("array") => schema.has_array_constraints(),
+        // `number` always carries the wire-wide finiteness predicate, even when
+        // the schema declares no numeric bound.
+        Some("number") => true,
+        Some("integer") => schema.has_numeric_constraints(),
+        Some("array") => {
+            schema.has_array_constraints()
+                || schema
+                    .items
+                    .as_deref()
+                    .is_some_and(field_needs_serialize_check)
+        }
         _ => false,
     }
 }
@@ -879,10 +938,29 @@ fn render_ts_field_checks(
     path_expr: &str,
     indent: &str,
 ) {
+    render_ts_field_checks_at_depth(output, schema, value_expr, path_expr, indent, 0);
+}
+
+fn render_ts_field_checks_at_depth(
+    output: &mut String,
+    schema: &Schema,
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+    depth: usize,
+) {
     // A nullability wrapper's constraints live on its non-null branch; the caller
     // has already guarded the value against `null`.
     if let Some(non_null) = nullable_non_null_schema(schema) {
-        render_ts_field_checks(output, non_null, value_expr, path_expr, indent);
+        render_ts_field_checks_at_depth(output, non_null, value_expr, path_expr, indent, depth);
+        return;
+    }
+    if let Some(kind) = temporal_kind_direct(schema) {
+        output.push_str(indent);
+        output.push_str(&format!(
+            "{}({value_expr}, {path_expr}, violations);\n",
+            ts_temporal_validate_fn(kind)
+        ));
         return;
     }
     if is_ts_union(schema) {
@@ -926,11 +1004,54 @@ fn render_ts_field_checks(
         Some("string") if schema.has_string_constraints() => {
             render_ts_string_checks(output, value_expr, path_expr, schema, indent);
         }
-        Some("number") | Some("integer") if schema.has_numeric_constraints() => {
+        Some("number") => {
             render_ts_numeric_checks(output, value_expr, path_expr, schema, indent);
         }
-        Some("array") if schema.has_array_constraints() => {
-            render_ts_array_checks(output, value_expr, path_expr, schema, indent);
+        Some("integer") if schema.has_numeric_constraints() => {
+            render_ts_numeric_checks(output, value_expr, path_expr, schema, indent);
+        }
+        Some("array") => {
+            if schema.has_array_constraints() {
+                render_ts_array_checks(output, value_expr, path_expr, schema, indent);
+            }
+            if let Some(items) = schema.items.as_deref()
+                && field_needs_serialize_check(items)
+            {
+                let suffix = if depth == 0 {
+                    String::new()
+                } else {
+                    depth.to_string()
+                };
+                let element = format!("element{suffix}");
+                let index = format!("index{suffix}");
+                output.push_str(indent);
+                output.push_str(&format!(
+                    "{value_expr}.forEach(({element}, {index}) => {{\n"
+                ));
+                let item_path = ts_indexed_path(path_expr, &index);
+                let item_indent = format!("{indent}  ");
+                let check_indent = if allows_null(items) {
+                    output.push_str(&item_indent);
+                    output.push_str(&format!("if ({element} !== null) {{\n"));
+                    format!("{item_indent}  ")
+                } else {
+                    item_indent.clone()
+                };
+                render_ts_field_checks_at_depth(
+                    output,
+                    items,
+                    &element,
+                    &item_path,
+                    &check_indent,
+                    depth + 1,
+                );
+                if allows_null(items) {
+                    output.push_str(&item_indent);
+                    output.push_str("}\n");
+                }
+                output.push_str(indent);
+                output.push_str("});\n");
+            }
         }
         _ => {}
     }
@@ -1241,18 +1362,35 @@ fn render_json_runtime_module() -> String {
     output
 }
 
-/// True when any property of the model materializes a `contentEncoding`.
+fn schema_uses_content_encoding(schema: &Schema) -> bool {
+    content_encoding_direct(schema).is_some()
+        || schema
+            .properties
+            .as_ref()
+            .is_some_and(|properties| properties.values().any(schema_uses_content_encoding))
+        || schema
+            .items
+            .as_deref()
+            .is_some_and(schema_uses_content_encoding)
+        || schema
+            .one_of
+            .as_ref()
+            .is_some_and(|branches| branches.iter().any(schema_uses_content_encoding))
+        || schema
+            .additional_properties
+            .as_ref()
+            .and_then(Value::as_object)
+            .and_then(|value| serde_json::from_value::<Schema>(Value::Object(value.clone())).ok())
+            .as_ref()
+            .is_some_and(schema_uses_content_encoding)
+}
+
+/// True when any materialized position in the model uses `contentEncoding`.
 fn model_uses_content_encoding(model: &PlannedJsonType) -> bool {
     let Ok(schema) = decode_schema(model) else {
         return false;
     };
-    schema.properties.as_ref().is_some_and(|properties| {
-        properties.values().any(|property| {
-            content_encoding_direct(property).is_some()
-                || nullable_non_null_schema(property)
-                    .is_some_and(|inner| content_encoding_direct(inner).is_some())
-        })
-    })
+    schema_uses_content_encoding(&schema)
 }
 
 /// Emits the generator-owned pure-JS `contentEncoding` codec: the pinned
@@ -1359,18 +1497,32 @@ export function bytesToBase64Url(bytes: Uint8Array): string {
 }
 "####;
 
-/// True when any property of the model materializes a temporal `format`.
+fn schema_uses_temporal(schema: &Schema) -> bool {
+    temporal_kind_direct(schema).is_some()
+        || schema
+            .properties
+            .as_ref()
+            .is_some_and(|properties| properties.values().any(schema_uses_temporal))
+        || schema.items.as_deref().is_some_and(schema_uses_temporal)
+        || schema
+            .one_of
+            .as_ref()
+            .is_some_and(|branches| branches.iter().any(schema_uses_temporal))
+        || schema
+            .additional_properties
+            .as_ref()
+            .and_then(Value::as_object)
+            .and_then(|value| serde_json::from_value::<Schema>(Value::Object(value.clone())).ok())
+            .as_ref()
+            .is_some_and(schema_uses_temporal)
+}
+
+/// True when any materialized position in the model uses a temporal `format`.
 fn model_uses_temporal(model: &PlannedJsonType) -> bool {
     let Ok(schema) = decode_schema(model) else {
         return false;
     };
-    schema.properties.as_ref().is_some_and(|properties| {
-        properties.values().any(|property| {
-            temporal_kind_direct(property).is_some()
-                || nullable_non_null_schema(property)
-                    .is_some_and(|inner| temporal_kind_direct(inner).is_some())
-        })
-    })
+    schema_uses_temporal(&schema)
 }
 
 /// Emits the materialized-temporal runtime for the active repr: the pinned
@@ -1481,6 +1633,42 @@ fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
             "\nexport function serializeTemporalDuration(value: Temporal.Duration): string {\n  return formatTemporalDuration(value.total({ unit: 'seconds' }));\n}\n",
         );
     }
+
+    let date_time_wire = match repr {
+        TsDateTimeTypes::String => "value",
+        TsDateTimeTypes::Date => "serializeTemporalDateTime(value)",
+        TsDateTimeTypes::Temporal => "serializeTemporalDateTime(value)",
+    };
+    output.push_str(&format!(
+        "\nexport function validateTemporalDateTime(value: {dt_type}, path: string, violations: Violation[]): void {{\n"
+    ));
+    if repr == TsDateTimeTypes::Date {
+        output.push_str("  if (!Number.isFinite(value.getTime())) {\n    violations.push({ path, reason: `must be a valid date-time, got ${JSON.stringify(value)}` });\n    return;\n  }\n");
+    }
+    output.push_str(&format!("  const wire = {date_time_wire};\n"));
+    output.push_str("  if (!TEMPORAL_DATE_TIME_RE.test(wire) || !validTemporalCalendar(wire)) {\n    violations.push({ path, reason: `must be a valid date-time, got ${JSON.stringify(wire)}` });\n  }\n}\n");
+
+    let date_wire = if repr == TsDateTimeTypes::Temporal {
+        "serializeTemporalDate(value)"
+    } else {
+        "value"
+    };
+    output.push_str(&format!(
+        "\nexport function validateTemporalDate(value: {date_type}, path: string, violations: Violation[]): void {{\n  const wire = {date_wire};\n"
+    ));
+    output.push_str("  if (!TEMPORAL_DATE_RE.test(wire) || !validTemporalCalendar(wire)) {\n    violations.push({ path, reason: `must be a valid date, got ${JSON.stringify(wire)}` });\n  }\n}\n");
+
+    output.push_str("\nexport function validateTemporalTime(value: string, path: string, violations: Violation[]): void {\n  if (!TEMPORAL_TIME_RE.test(value)) {\n    violations.push({ path, reason: `must be a valid time, got ${JSON.stringify(value)}` });\n  }\n}\n");
+
+    let duration_wire = if repr == TsDateTimeTypes::Temporal {
+        "serializeTemporalDuration(value)"
+    } else {
+        "value"
+    };
+    output.push_str(&format!(
+        "\nexport function validateTemporalDuration(value: {dur_type}, path: string, violations: Violation[]): void {{\n  const wire = {duration_wire};\n"
+    ));
+    output.push_str("  if (!TEMPORAL_DURATION_RE.test(wire) || temporalDurationSeconds(wire) === undefined) {\n    violations.push({ path, reason: `must be a valid duration, got ${JSON.stringify(wire)}` });\n  }\n}\n");
 }
 
 const TS_TEMPORAL_COMMON: &str = r#"const TEMPORAL_DATE_TIME_CAP = /^(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/u;
@@ -1506,6 +1694,9 @@ function validTemporalCalendar(value: string): boolean {
   const year = Number(value.slice(0, 4));
   const month = Number(value.slice(5, 7));
   const day = Number(value.slice(8, 10));
+  if (year < 1) {
+    return false;
+  }
   const max = daysInTemporalMonth(year, month);
   return max > 0 && day >= 1 && day <= max;
 }
@@ -2055,6 +2246,31 @@ fn render_ts_union_parse(
         if let Some(guard) = ts_variant_guard(variant, raw_expr) {
             clause(output, &guard);
         }
+        if variant.is_array {
+            // The array token only selects the branch. Its elements still take
+            // the ordinary recursive parser so references, temporals, bytes,
+            // nested arrays, and their indexed violations are preserved.
+            let array_target = format!("{target}ArrayBranch");
+            output.push_str(indent);
+            output.push_str(&format!(
+                "  let {array_target}: {} = undefined as unknown as {};\n",
+                variant.ts_type, variant.ts_type
+            ));
+            render_array_parser(
+                output,
+                &variant.schema,
+                raw_expr,
+                &array_target,
+                path_expr,
+                &format!("{indent}  "),
+                0,
+            );
+            output.push_str(indent);
+            output.push_str(&format!(
+                "  if ({array_target} !== undefined) {{\n    {target} = {array_target};\n  }}\n"
+            ));
+            continue;
+        }
         output.push_str(indent);
         output.push_str(&format!(
             "  {target} = {raw_expr} as {};\n",
@@ -2180,8 +2396,15 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
                 ));
             }
         } else if variant.is_array {
+            let member = format!("({value_expr} as {})", variant.ts_type);
+            // Array branches recurse through the same collecting mapper as an
+            // ordinary model property. A referenced child can reject a mutated
+            // in-memory value, and that failure must retain its element index
+            // before the enclosing inline/named union prefixes its own path.
+            let root_path = typescript_string_literal("");
+            let serialized = serialize_expr_collecting(&variant.schema, &member, &root_path);
             output.push_str(&format!(
-                "  if (Array.isArray({value_expr})) {{\n    return {value_expr};\n  }}\n"
+                "  if (Array.isArray({value_expr})) {{\n    const out = {serialized};\n    if (violations.length) {{\n      throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n    }}\n    return out;\n  }}\n"
             ));
         } else if variant.is_integer {
             output.push_str(&format!(
@@ -2206,9 +2429,8 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
 
 /// The module-private serializer function an **inline** (property-level) union
 /// needs when a member's in-memory form differs from its wire form — an object
-/// branch, whose converter spreads `additionalProperties` back out. A union of
-/// scalars, arrays, and free-form objects needs none: the member already *is* the
-/// wire value, so the property is assigned verbatim.
+/// branch, whose converter spreads `additionalProperties` back out, or an array
+/// branch whose element mapper changes its in-memory representation.
 fn ts_inline_union_serializer(
     model_name: &str,
     json_name: &str,
@@ -2219,11 +2441,10 @@ fn ts_inline_union_serializer(
         return None;
     }
     let union = classify_ts_union(property, models)?;
-    if !union
-        .variants
-        .iter()
-        .any(|variant| variant.converter.is_some())
-    {
+    if !union.variants.iter().any(|variant| {
+        variant.converter.is_some()
+            || (variant.is_array && serialize_expr(&variant.schema, "value") != "value")
+    }) {
         return None;
     }
     // Named off the union itself (`<Model><Property>`, the synthesized-name rule)
@@ -2253,6 +2474,9 @@ fn render_ts_inline_union_serializers(
             output.push_str(&format!(
                 "\nfunction {name}(value: {}): unknown {{\n",
                 type_annotation(property)?
+            ));
+            output.push_str(&format!(
+                "  const violations: {DEFINITIONS_NAMESPACE}.Violation[] = [];\n"
             ));
             render_ts_union_serialize(output, &union, "value");
             output.push_str("}\n");
@@ -2366,12 +2590,12 @@ fn render_model_transfer_type_converter(
         split_transfer_type_converter(output, &model.model_name);
         // A named union has no enclosing model to aggregate into, so it collects
         // its own branch violations and throws the one aggregated error (P11/P12).
+        output.push_str(&format!(
+            "    const violations: {DEFINITIONS_NAMESPACE}.Violation[] = [];\n"
+        ));
         let mut checks = String::new();
         render_ts_union_value_checks(&mut checks, &union, "value", "''", "    ");
         if !checks.is_empty() {
-            output.push_str(&format!(
-                "    const violations: {DEFINITIONS_NAMESPACE}.Violation[] = [];\n"
-            ));
             output.push_str(&checks);
             output.push_str("    if (violations.length) {\n");
             output.push_str(&format!(
@@ -2523,7 +2747,7 @@ fn render_model_serializer_body(
         // A typed member re-serializes through its own mapper; an untyped one
         // (`additionalProperties: true`) is carried verbatim (P13).
         let entry = match &shape.value_schema {
-            Some(value_schema) => serialize_expr(value_schema, "entry"),
+            Some(value_schema) => serialize_expr_collecting(value_schema, "entry", "key"),
             None => "entry".to_string(),
         };
         output.push_str(&format!("    out[key] = {entry};\n"));
@@ -2555,10 +2779,18 @@ fn render_model_serializer_body(
             let value_expr = format!("value.{field_name}");
             // A union whose members need a transform goes through the module's
             // inline-union serializer; everything else is a plain expression.
+            let path_expr = typescript_string_literal(json_name);
             let assignment =
                 match ts_inline_union_serializer(&model.model_name, json_name, property, models) {
-                    Some((name, _)) => format!("{name}({value_expr})"),
-                    None => serialize_expr(property, &value_expr),
+                    Some((name, _)) => {
+                        let call = format!("{name}({value_expr})");
+                        if field_needs_serialize_check(property) {
+                            collect_serialize_expr(&call, &path_expr)
+                        } else {
+                            call
+                        }
+                    }
+                    None => serialize_expr_collecting(property, &value_expr, &path_expr),
                 };
             if required.contains(json_name) {
                 render_ts_serialize_property_check(output, json_name, property, "  ");
@@ -2983,15 +3215,7 @@ fn render_value_parser_at_depth(
             output.push_str(" = ");
             output.push_str(raw_expr);
             output.push_str(";\n");
-            if schema.has_numeric_constraints() {
-                render_ts_numeric_checks(
-                    output,
-                    raw_expr,
-                    path_expr,
-                    schema,
-                    &format!("{indent}  "),
-                );
-            }
+            render_ts_numeric_checks(output, raw_expr, path_expr, schema, &format!("{indent}  "));
             output.push_str(indent);
             output.push_str("}\n");
         }
@@ -3221,6 +3445,19 @@ fn render_enum_parser(
     );
 }
 
+fn ts_indexed_path(path_expr: &str, index_expr: &str) -> String {
+    if let Some(path) = string_literal_value(path_expr) {
+        format!("`{path}[${{{index_expr}}}]`")
+    } else if let Some(path) = path_expr
+        .strip_prefix('`')
+        .and_then(|path| path.strip_suffix('`'))
+    {
+        format!("`{path}[${{{index_expr}}}]`")
+    } else {
+        format!("`${{{path_expr}}}[${{{index_expr}}}]`")
+    }
+}
+
 fn render_array_parser(
     output: &mut String,
     schema: &Schema,
@@ -3271,11 +3508,7 @@ fn render_array_parser(
     output.push_str(&item_annotation);
     output.push_str(";\n");
     if let Some(element_schema) = &schema.items {
-        let item_path_expr = if let Some(field_name) = string_literal_value(path_expr) {
-            format!("`{field_name}[${{{index}}}]`")
-        } else {
-            format!("`${{{path_expr}}}[${{{index}}}]`")
-        };
+        let item_path_expr = ts_indexed_path(path_expr, &index);
         // Every element kind takes the same parse the value in that position
         // would take anywhere else, so a `string` element's own constraints
         // (`minLength`, `pattern`, `format`, …) are enforced and a mistyped
@@ -3373,7 +3606,7 @@ fn render_collect_helper(output: &mut String) {
     // A nested violation about the value *itself* carries no path of its own (a
     // union branch's own constraint, an element-level check), so the prefix is
     // the whole path — never `segments[0].` with a dangling separator (P11).
-    output.push_str("      const nested = inner.path ? `${path}.${inner.path}` : path;\n");
+    output.push_str("      const nested = !inner.path ? path : inner.path.startsWith('[') ? `${path}${inner.path}` : `${path}.${inner.path}`;\n");
     output.push_str("      violations.push({ path: nested, reason: inner.reason });\n");
     output.push_str("    }\n");
     output.push_str("  } else {\n");
@@ -3435,6 +3668,43 @@ fn serialize_expr(schema: &Schema, value_expr: &str) -> String {
         }
     }
     value_expr.to_string()
+}
+
+fn collect_serialize_expr(expr: &str, path_expr: &str) -> String {
+    format!(
+        "(() => {{ try {{ return {expr}; }} catch (error) {{ {DEFINITIONS_NAMESPACE}.collect(violations, {path_expr}, error); return undefined; }} }})()"
+    )
+}
+
+/// The ordinary serialize mapper with nested converter failures folded into the
+/// current model's collector. Arrays recurse with their own index path, so a
+/// child failure is reported as `field[1].member` rather than escaping at the
+/// child's unqualified path.
+fn serialize_expr_collecting(schema: &Schema, value_expr: &str, path_expr: &str) -> String {
+    if let Some(reference) = &schema.reference {
+        let model_name = reference_model_name(reference);
+        let call = format!(
+            "{}.toTransferType({value_expr})",
+            ts_transfer_type_converter_name(&model_name)
+        );
+        return collect_serialize_expr(&call, path_expr);
+    }
+    if let Some(non_null) = nullable_non_null_schema(schema) {
+        let converted = serialize_expr_collecting(non_null, value_expr, path_expr);
+        if converted != value_expr {
+            return format!("{value_expr} === null ? null : {converted}");
+        }
+    }
+    if schema.ty.as_ref().and_then(Value::as_str) == Some("array")
+        && let Some(items) = schema.items.as_deref()
+    {
+        let item_path = ts_indexed_path(path_expr, "index");
+        let element = serialize_expr_collecting(items, "element", &item_path);
+        if element != "element" {
+            return format!("{value_expr}.map((element, index) => {element})");
+        }
+    }
+    serialize_expr(schema, value_expr)
 }
 
 fn decode_schema(model: &PlannedJsonType) -> Result<Schema> {

@@ -71,6 +71,8 @@ func TestJSONSchemaTemporalMaterializedNarrowing(t *testing.T) {
 		{"calendar-duration", "2021-06-15T12:30:45Z", "2000-01-01", "09:00:00", "P1Y", "duration"},
 		{"invalid-date", "2021-06-15T12:30:45Z", "2021-02-29", "09:00:00", "PT0S", "date"},
 		{"missing-offset", "2021-06-15T12:30:45", "2000-01-01", "09:00:00", "PT0S", "date-time"},
+		{"year-zero-date-time", "0000-01-01T00:00:00Z", "2000-01-01", "09:00:00", "PT0S", "date-time"},
+		{"year-zero-date", "2021-06-15T12:30:45Z", "0000-01-01", "09:00:00", "PT0S", "date"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,4 +83,13 @@ func TestJSONSchemaTemporalMaterializedNarrowing(t *testing.T) {
 			require.Contains(t, err.Error(), tc.want)
 		})
 	}
+
+	var firstYear temporal.Temporal
+	err := dc.FromPayload(
+		jsonPayload([]byte(`{"createdAt":"0001-01-01T00:00:00Z","birthday":"0001-01-01","alarm":"00:00:00","timeout":"PT0S"}`)),
+		&firstYear,
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, firstYear.CreatedAt.Year())
+	require.Equal(t, 1, firstYear.Birthday.Year())
 }

@@ -306,29 +306,81 @@ export const temporalTransferTypeConverter =
     public toTransferType(value: Temporal): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
-      out.createdAt = __nexgenDefinitions.serializeTemporalDateTime(value.createdAt);
+      __nexgenDefinitions.validateTemporalDateTime(
+        value.createdAt,
+        "createdAt",
+        violations,
+      );
+      out.createdAt = Number.isFinite(value.createdAt.getTime())
+        ? __nexgenDefinitions.serializeTemporalDateTime(value.createdAt)
+        : undefined;
+      __nexgenDefinitions.validateTemporalDate(value.birthday, "birthday", violations);
       out.birthday = value.birthday;
+      __nexgenDefinitions.validateTemporalTime(value.alarm, "alarm", violations);
       out.alarm = value.alarm;
+      __nexgenDefinitions.validateTemporalDuration(
+        value.timeout,
+        "timeout",
+        violations,
+      );
       out.timeout = value.timeout;
       if (value.updatedAt !== undefined) {
-        out.updatedAt = __nexgenDefinitions.serializeTemporalDateTime(value.updatedAt);
+        __nexgenDefinitions.validateTemporalDateTime(
+          value.updatedAt,
+          "updatedAt",
+          violations,
+        );
+        out.updatedAt = Number.isFinite(value.updatedAt.getTime())
+          ? __nexgenDefinitions.serializeTemporalDateTime(value.updatedAt)
+          : undefined;
       }
       if (value.expiresOn !== undefined) {
+        __nexgenDefinitions.validateTemporalDate(
+          value.expiresOn,
+          "expiresOn",
+          violations,
+        );
         out.expiresOn = value.expiresOn;
       }
       if (value.reminder !== undefined) {
+        __nexgenDefinitions.validateTemporalTime(
+          value.reminder,
+          "reminder",
+          violations,
+        );
         out.reminder = value.reminder;
       }
       if (value.retryDelay !== undefined) {
+        __nexgenDefinitions.validateTemporalDuration(
+          value.retryDelay,
+          "retryDelay",
+          violations,
+        );
         out.retryDelay = value.retryDelay;
       }
       if (value.deletedAt !== undefined) {
+        if (value.deletedAt !== null) {
+          __nexgenDefinitions.validateTemporalDateTime(
+            value.deletedAt,
+            "deletedAt",
+            violations,
+          );
+        }
         out.deletedAt =
           value.deletedAt === null
             ? null
-            : __nexgenDefinitions.serializeTemporalDateTime(value.deletedAt);
+            : Number.isFinite(value.deletedAt.getTime())
+              ? __nexgenDefinitions.serializeTemporalDateTime(value.deletedAt)
+              : undefined;
       }
       if (value.archivedOn !== undefined) {
+        if (value.archivedOn !== null) {
+          __nexgenDefinitions.validateTemporalDate(
+            value.archivedOn,
+            "archivedOn",
+            violations,
+          );
+        }
         out.archivedOn = value.archivedOn === null ? null : value.archivedOn;
       }
       if (violations.length) {

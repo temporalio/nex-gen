@@ -85,6 +85,102 @@ properties:
       - { type: string, enum: [auto, manual] }
 "#;
 
+/// Array branches of inline unions must take the same recursive conversion path
+/// as an ordinary array property. Each item kind below has a visibly different
+/// in-memory and wire representation.
+const UNION_ARRAY_TRANSFORM_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  events:
+    oneOf:
+      - type: array
+        minItems: 1
+        items: { type: string, format: date-time }
+      - { type: string }
+  blobs:
+    oneOf:
+      - type: array
+        items: { type: string, contentEncoding: base64 }
+      - { type: boolean }
+  children:
+    oneOf:
+      - type: array
+        items: { $ref: "#/$defs/Child" }
+      - { type: integer }
+$defs:
+  Child:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name: { type: string, minLength: 2 }
+"##;
+
+/// `number` finiteness is an implicit wire constraint at every materialized
+/// position, including branches, nested elements, and typed-map members.
+const NON_FINITE_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  scalar: { type: number }
+  choice:
+    oneOf:
+      - { type: number }
+      - { type: string }
+  nested:
+    type: array
+    items:
+      type: array
+      items: { type: number }
+  metrics: { $ref: "#/$defs/Metrics" }
+$defs:
+  Metrics:
+    type: object
+    additionalProperties: { type: number }
+"##;
+
+/// Runtime support discovery must recurse through arrays, union branches, and
+/// typed maps instead of looking only at direct model properties.
+const NESTED_RUNTIME_SUPPORT_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  dates:
+    type: array
+    items: { type: string, format: date }
+  encoded:
+    oneOf:
+      - type: array
+        items: { type: string, contentEncoding: base64url }
+      - { type: boolean }
+  timestampMap: { $ref: "#/$defs/TimestampMap" }
+$defs:
+  TimestampMap:
+    type: object
+    additionalProperties: { type: string, format: date-time }
+"##;
+
+const NATIVE_TEMPORAL_SERIALIZE_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  occurredAt: { type: string, format: date-time }
+  history:
+    type: array
+    items: { type: string, format: date-time }
+  businessDay: { type: string, format: date }
+required: [occurredAt, history, businessDay]
+"#;
+
+const NULLABLE_CONSTRAINED_ARRAY_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  slots:
+    type: array
+    items:
+      oneOf:
+        - { type: string, minLength: 2 }
+        - { type: "null" }
+required: [slots]
+"#;
+
 /// A service whose two operations are each one-sided: one declares only an
 /// `input`, the other only an `output`.
 const ONE_SIDED_OPERATION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
@@ -514,7 +610,7 @@ fn typescript_json_example_generation_matches_checked_in_output() {
             // from the union it belongs to.
             assert!(all.contains("detail?: ShowcaseDetailObject | string;"));
             assert!(all.contains("export interface ShowcaseDetailObject {"));
-            assert!(all.contains("out.detail = serializeShowcaseDetail(value.detail);"));
+            assert!(all.contains("serializeShowcaseDetail(value.detail)"));
             // Each operation carries its models' converters as operation type
             // info; the `x-ts-name` override flows into the converter identifier.
             assert!(all.contains(
@@ -924,7 +1020,7 @@ fn typescript_json_names_inline_object_union_branch() {
     assert!(rendered.contains(
         "function serializeDetailPayload(value: DetailPayloadObject | string): unknown {"
     ));
-    assert!(rendered.contains("out.payload = serializeDetailPayload(value.payload);"));
+    assert!(rendered.contains("serializeDetailPayload(value.payload)"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
@@ -961,7 +1057,7 @@ fn typescript_json_validates_non_object_union_branch_constraints() {
     assert!(rendered.contains("if ([...(value as string)].length < 3) {"));
     assert!(rendered.contains("if (!PATTERN_C182F89FDB221836.test((value as string))) {"));
     assert!(rendered.contains("if ((value as number) < 1) {"));
-    assert!(rendered.contains("if ((listOrName as number[]).length < 1) {"));
+    assert!(rendered.contains("if (listOrNameArrayBranch!.length < 1) {"));
     assert!(rendered.contains("duplicate items: element at index ${index}"));
     assert!(rendered.contains(
         "if ((listOrName as \"auto\" | \"manual\") !== \"auto\" && (listOrName as \"auto\" | \"manual\") !== \"manual\") {"
@@ -970,6 +1066,229 @@ fn typescript_json_validates_non_object_union_branch_constraints() {
     // the model's own violations before the wire object is built.
     assert!(rendered.contains("if ([...(value.value as string)].length < 3) {"));
     assert!(rendered.contains("if ((value.value as number) < 1) {"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_json_recursively_converts_union_array_branches() {
+    let temp_dir = unique_output_path("ts-json-union-array-transform");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.yaml");
+    fs::write(&input_path, UNION_ARRAY_TRANSFORM_SCHEMA).unwrap();
+    let output_path = temp_dir.join("probe");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: nexgen::generator::TsDateTimeTypes::Date,
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    assert!(rendered.contains("let item: Date"), "{rendered}");
+    assert!(
+        rendered.contains("parseTemporalDateTime(element, `events[${index}]`, violations)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("must have at least 1 items"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("base64ToBytes(element, `blobs[${index}]`, violations)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("childTransferTypeConverter.fromTransferType(element)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("serializeTemporalDateTime(element)"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("bytesToBase64(element)"), "{rendered}");
+    assert!(
+        rendered.contains("childTransferTypeConverter.toTransferType(element)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("map((element, index)"),
+        "indexed serialize mapper missing\n{rendered}"
+    );
+    assert!(
+        rendered.contains("collect(violations, `[${index}]`, error)"),
+        "indexed child failure collection missing\n{rendered}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_json_rejects_non_finite_numbers_at_every_position() {
+    let temp_dir = unique_output_path("ts-json-non-finite");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.yaml");
+    fs::write(&input_path, NON_FINITE_SCHEMA).unwrap();
+    let output_path = temp_dir.join("probe");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    for expected in [
+        "Number.isFinite(raw.scalar)",
+        "Number.isFinite((choice as number))",
+        "Number.isFinite(element1)",
+        "`nested[${index}][${index1}]`",
+        "Number.isFinite(entry)",
+        "must be a finite number",
+    ] {
+        assert!(rendered.contains(expected), "{expected}\n{rendered}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_json_detects_nested_runtime_support() {
+    let temp_dir = unique_output_path("ts-json-nested-runtime-support");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.yaml");
+    fs::write(&input_path, NESTED_RUNTIME_SUPPORT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("probe");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let definitions = fs::read_to_string(output_path.join("definitions.ts")).unwrap();
+    assert!(definitions.contains("parseTemporalDate("), "{definitions}");
+    assert!(
+        definitions.contains("parseTemporalDateTime("),
+        "{definitions}"
+    );
+    assert!(definitions.contains("base64UrlToBytes("), "{definitions}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_json_validates_native_temporals_before_serializing() {
+    for (label, repr) in [
+        ("date", nexgen::generator::TsDateTimeTypes::Date),
+        ("temporal", nexgen::generator::TsDateTimeTypes::Temporal),
+    ] {
+        let temp_dir = unique_output_path(&format!("ts-json-native-temporal-{label}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let input_path = temp_dir.join("probe.yaml");
+        fs::write(&input_path, NATIVE_TEMPORAL_SERIALIZE_SCHEMA).unwrap();
+        let output_path = temp_dir.join("probe");
+
+        generate_to_file(&GenerateRequest {
+            language: nexgen::language::Language::TypeScript,
+            input_paths: vec![input_path],
+            support_paths: Vec::new(),
+            descriptor_paths: Vec::new(),
+            output_path: output_path.clone(),
+            format: false,
+            generate_native_api: false,
+            java_package_name: None,
+            ts_date_time_types: repr,
+        })
+        .unwrap();
+        let models = fs::read_to_string(output_path.join("models.ts")).unwrap();
+        let definitions = fs::read_to_string(output_path.join("definitions.ts")).unwrap();
+
+        assert!(
+            models.contains(
+                "validateTemporalDateTime(value.occurredAt, \"occurredAt\", violations);"
+            ),
+            "{models}"
+        );
+        assert!(definitions.contains("if (year < 1)"), "{definitions}");
+        assert!(
+            definitions
+                .contains("!TEMPORAL_DATE_TIME_RE.test(wire) || !validTemporalCalendar(wire)"),
+            "{definitions}"
+        );
+        if repr == nexgen::generator::TsDateTimeTypes::Temporal {
+            assert!(
+                models.contains(
+                    "validateTemporalDate(value.businessDay, \"businessDay\", violations);"
+                ),
+                "{models}"
+            );
+        } else {
+            assert!(
+                models.contains(
+                    "Number.isFinite(value.occurredAt.getTime()) ? __nexgenDefinitions.serializeTemporalDateTime(value.occurredAt) : undefined"
+                ),
+                "{models}"
+            );
+            assert!(
+                models.contains(
+                    "Number.isFinite(element.getTime()) ? __nexgenDefinitions.serializeTemporalDateTime(element) : undefined"
+                ),
+                "{models}"
+            );
+        }
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+}
+
+#[test]
+fn typescript_json_guards_nullable_array_elements_during_serialize_validation() {
+    let temp_dir = unique_output_path("ts-json-nullable-constrained-items");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.yaml");
+    fs::write(&input_path, NULLABLE_CONSTRAINED_ARRAY_SCHEMA).unwrap();
+    let output_path = temp_dir.join("probe");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    assert!(
+        rendered
+            .contains("value.slots.forEach((element, index) => {\n      if (element !== null) {"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("if ([...element].length < 2) {"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("path: `slots[${index}]`"), "{rendered}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
@@ -1007,9 +1326,7 @@ fn typescript_json_maps_element_position_unions() {
     assert!(rendered.contains("choiceTransferTypeConverter.fromTransferType(element)"));
     // A map member runs the member converter in both directions.
     assert!(rendered.contains("entriesValueTransferTypeConverter.fromTransferType(raw[key])"));
-    assert!(
-        rendered.contains("out[key] = entriesValueTransferTypeConverter.toTransferType(entry);")
-    );
+    assert!(rendered.contains("entriesValueTransferTypeConverter.toTransferType(entry)"));
     // Element nullability is the element's own concern, and parenthesized.
     assert!(rendered.contains("slots?: (string | null)[];"));
     fs::remove_dir_all(temp_dir).unwrap();

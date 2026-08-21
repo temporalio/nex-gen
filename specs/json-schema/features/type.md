@@ -126,9 +126,7 @@ Strategy per language:
       if err != nil { return 0, err }
       if f != math.Trunc(f) { return 0, errFractional }         // "1.5" → reject
       if f < -integerCap || f > integerCap { return 0, errRange } // > ±(2^53-1) → reject
-      i, err := n.Int64()
-      if err != nil { return 0, err }                            // belt-and-suspenders
-      return i, nil                                              // "1", "1.0", "1e2"
+      return int64(f), nil                                       // "1", "1.0", "1e2"
   }
   ```
   User-facing field stays plain `int64`. The Go primitive holds ±2^63,
@@ -225,13 +223,16 @@ before emit:
   `ValidationError`, not silently emitted. Go `int64` / Java `long` hold
   magnitudes the cap forbids, and Python ints are unbounded, so this
   check has real teeth on the out-path.
-- **TS `number` non-finiteness.** `JSON.stringify` silently turns `NaN`
-  and `±Infinity` into `null` (empirically verified — a P7 violation on
-  the *out* path). The serializer rejects non-finite numbers for
-  `integer`/`number` fields (`Number.isFinite`, plus
-  `Number.isSafeInteger` for `integer`) before stringifying. This is the
-  only language where the encoder must add a numeric check the type
-  system doesn't already give.
+- **`number` finiteness.** Every target rejects `NaN` and `±Infinity`
+  before emit with `must be a finite number`; the check applies recursively
+  to properties, union branches, array elements (at every depth), and typed-map
+  members. The runtimes otherwise disagree (`JSON.stringify` produces `null`,
+  Go's encoder returns an unstructured error, and Python/Jackson may emit a
+  non-JSON extension), so delegating to the encoder would violate P1/P11.
+  TypeScript uses `Number.isFinite`; Go uses `math.IsNaN`/`math.IsInf`; Python
+  uses an exact comparison against the binary64 finite range (which also safely
+  handles unbounded integers); Java uses `Double.isFinite`. Integer validation
+  keeps its existing cap/integrality checks and is necessarily finite already.
 
 `object`/`array`/`string`/`boolean` carry no extra serialize check
 beyond structural recursion into nested `Validate` and the

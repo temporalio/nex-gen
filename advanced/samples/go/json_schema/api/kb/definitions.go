@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -67,6 +69,9 @@ func mergeNested(errs *[]Violation, path string, err error) {
 			} else {
 				p = path + "." + v.Path
 			}
+			if strings.HasPrefix(v.Path, "[") {
+				p = path + v.Path
+			}
 			*errs = append(*errs, Violation{p, v.Reason})
 		}
 		return
@@ -82,21 +87,77 @@ var (
 )
 
 func parseSpecInteger(n json.Number) (int64, error) {
-	f, err := n.Float64()
-	if err != nil {
-		return 0, err
+	s := n.String()
+	negative := strings.HasPrefix(s, "-")
+	if negative {
+		s = s[1:]
 	}
-	if f != math.Trunc(f) {
+	exponentText := ""
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		exponentText = s[i+1:]
+		s = s[:i]
+	}
+	fractionalDigits := int64(0)
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		fractionalDigits = int64(len(s) - i - 1)
+		s = s[:i] + s[i+1:]
+	}
+	digits := strings.TrimLeft(s, "0")
+	if digits == "" {
+		return 0, nil
+	}
+	var exponent int64
+	if exponentText != "" {
+		var err error
+		exponent, err = strconv.ParseInt(exponentText, 10, 64)
+		if err != nil {
+			if strings.HasPrefix(exponentText, "-") {
+				return 0, errFractional
+			}
+			return 0, errRange
+		}
+	}
+	if exponent < -int64(len(digits)) {
 		return 0, errFractional
 	}
-	if f < -integerCap || f > integerCap {
+	scale := exponent - fractionalDigits
+	if scale < 0 {
+		trim := -scale
+		if trim > int64(len(digits)) || strings.Trim(digits[len(digits)-int(trim):], "0") != "" {
+			return 0, errFractional
+		}
+		digits = digits[:len(digits)-int(trim)]
+	} else {
+		if scale > int64(len("9007199254740991")) {
+			return 0, errRange
+		}
+		digits += strings.Repeat("0", int(scale))
+	}
+	const capText = "9007199254740991"
+	if len(digits) > len(capText) || len(digits) == len(capText) && digits > capText {
 		return 0, errRange
 	}
-	i, err := n.Int64()
+	v, err := strconv.ParseInt(digits, 10, 64)
 	if err != nil {
-		return 0, err
+		return 0, errRange
 	}
-	return i, nil
+	if negative {
+		v = -v
+	}
+	return v, nil
+}
+
+func isNilValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }
 
 func isNull(raw json.RawMessage) bool {
@@ -173,8 +234,8 @@ func parseNumberField(raw *json.RawMessage, path string, required, nullable bool
 		return 0, false
 	}
 	f, err := n.Float64()
-	if err != nil {
-		*errs = append(*errs, Violation{path, "expected number"})
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		*errs = append(*errs, Violation{path, "expected finite number"})
 		return 0, false
 	}
 	return f, true
@@ -202,6 +263,10 @@ func parseBoolField(raw *json.RawMessage, path string, required, nullable bool, 
 }
 
 func marshalField(out map[string]json.RawMessage, key string, v any, errs *[]Violation) {
+	if len(*errs) > 0 {
+		out[key] = json.RawMessage("null")
+		return
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		mergeNested(errs, key, err)

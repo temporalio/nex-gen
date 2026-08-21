@@ -3,6 +3,7 @@ package kb
 
 import (
 	"encoding/json"
+	"fmt"
 )
 
 // Category A node in a self-recursive category tree. The root of this file is itself a type (pure JSON Schema file), named Category from the basename.
@@ -19,6 +20,10 @@ type Category struct {
 // listing any violations.
 func (m Category) Validate() error {
 	var errs []Violation
+	for i0, v0 := range m.Children {
+		p0 := fmt.Sprintf("%s[%d]", "children", i0)
+		mergeNested(&errs, p0, v0.Validate())
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -56,8 +61,26 @@ func (m *Category) UnmarshalJSON(data []byte) error {
 	if raw := get("children"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"children", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Children); err != nil {
-		errs = append(errs, Violation{"children", "expected array"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"children", "expected array"})
+		} else {
+			m.Children = make([]Category, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "children", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				var value0 Category
+				if err := json.Unmarshal(e0, &value0); err != nil {
+					mergeNested(&errs, p0, err)
+				} else {
+					m.Children = append(m.Children, value0)
+				}
+			}
+		}
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -124,8 +147,23 @@ func (m *Palette) UnmarshalJSON(data []byte) error {
 		errs = append(errs, Violation{"swatches", "required"})
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"swatches", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Swatches); err != nil {
-		errs = append(errs, Violation{"swatches", "expected array"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"swatches", "expected array"})
+		} else {
+			m.Swatches = make([]string, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "swatches", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					m.Swatches = append(m.Swatches, value0)
+				}
+			}
+		}
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}

@@ -75,6 +75,54 @@ properties:
       - { type: string, enum: [auto, manual] }
 "#;
 
+/// Plain `number` positions need a serialize-side finiteness check even when
+/// they carry no explicit numeric bound. The positions cover a property, a
+/// nested array, an unconstrained union branch, and a typed-map member array.
+const FINITE_NUMBER_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [scalar, nested, metric, values]
+properties:
+  scalar: { type: number }
+  nested:
+    type: array
+    items:
+      type: array
+      items: { type: number }
+  metric:
+    oneOf:
+      - { type: number }
+      - { type: string }
+  values: { $ref: "#/$defs/Values" }
+$defs:
+  Values:
+    type: object
+    additionalProperties:
+      type: array
+      items: { type: number }
+"##;
+
+/// Support-file detection must walk collection and typed-map member schemas;
+/// neither feature appears on a direct property here.
+const NESTED_RUNTIME_SUPPORT_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  dates:
+    type: array
+    items:
+      type: array
+      items: { type: string, format: date }
+  timestamps:
+    type: array
+    items: { type: string, format: date-time }
+  blobs: { $ref: "#/$defs/Blobs" }
+$defs:
+  Blobs:
+    type: object
+    additionalProperties:
+      type: string
+      contentEncoding: base64
+"##;
+
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -313,6 +361,92 @@ fn java_json_validates_non_object_union_branch_constraints() {
         )
     );
     assert!(declaring.contains("Value.validate(value.value, \"value\", violations);"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn java_json_rejects_non_finite_numbers_in_every_serialize_position() {
+    let temp_dir = unique_output_path("java-json-finite-numbers");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("finite.yaml");
+    fs::write(&input_path, FINITE_NUMBER_SCHEMA).unwrap();
+    let output_path = temp_dir.join("finite");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("finite".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let root = &rendered[&PathBuf::from("Finite.java")];
+    for expected in [
+        "if (!Double.isFinite(value.scalar)) {",
+        "new Violation(\"scalar\", \"must be a finite number, got \" + value.scalar)",
+        "for (int finiteIndex0 = 0; finiteIndex0 < value.nested.size(); finiteIndex0++) {",
+        "for (int finiteIndex1 = 0; finiteIndex1 < finiteValue0.size(); finiteIndex1++) {",
+        "new Violation(\"nested\" + \"[\" + finiteIndex0 + \"]\" + \"[\" + finiteIndex1 + \"]\", \"must be a finite number, got \" + finiteValue1)",
+        "if (!Double.isFinite(value)) {",
+        "Metric.validate(value.metric, \"metric\", violations);",
+    ] {
+        assert!(root.contains(expected), "{expected}\n{root}");
+    }
+
+    let map = &rendered[&PathBuf::from("Values.java")];
+    for expected in [
+        "for (Map.Entry<String, List<Double>> entry : value.additionalProperties.entrySet()) {",
+        "for (int finiteIndex0 = 0; finiteIndex0 < entry.getValue().size(); finiteIndex0++) {",
+        "new Violation(entry.getKey() + \"[\" + finiteIndex0 + \"]\", \"must be a finite number, got \" + finiteValue0)",
+    ] {
+        assert!(map.contains(expected), "{expected}\n{map}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn java_json_emits_runtime_support_for_nested_materialized_values() {
+    let temp_dir = unique_output_path("java-json-nested-runtime-support");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("nested.yaml");
+    fs::write(&input_path, NESTED_RUNTIME_SUPPORT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("nested");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("nested".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    assert!(rendered.contains_key(&PathBuf::from("TemporalSupport.java")));
+    assert!(rendered.contains_key(&PathBuf::from("Base64Support.java")));
+    let temporal = &rendered[&PathBuf::from("TemporalSupport.java")];
+    assert!(temporal.contains("if (year < 1) {"), "{temporal}");
+    let root = &rendered[&PathBuf::from("Nested.java")];
+    for expected in [
+        "for (int calendarIndex0 = 0; calendarIndex0 < value.dates.size(); calendarIndex0++) {",
+        "for (int calendarIndex1 = 0; calendarIndex1 < calendarValue0.size(); calendarIndex1++) {",
+        "if (calendarValue1.getYear() < 1) {",
+        "new Violation(\"dates\" + \"[\" + calendarIndex0 + \"]\" + \"[\" + calendarIndex1 + \"]\", \"must be a valid date, got \" + calendarValue1 + \": year must be >= 0001\")",
+        "if (calendarValue0.getYear() < 1) {",
+        "new Violation(\"timestamps\" + \"[\" + calendarIndex0 + \"]\", \"must be a valid date-time, got \" + calendarValue0 + \": year must be >= 0001\")",
+    ] {
+        assert!(root.contains(expected), "{expected}\n{root}");
+    }
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

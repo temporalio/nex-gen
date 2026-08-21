@@ -23,7 +23,11 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 export function collect(violations: Violation[], path: string, error: unknown): void {
   if (error instanceof ValidationError) {
     for (const inner of error.violations) {
-      const nested = inner.path ? `${path}.${inner.path}` : path;
+      const nested = !inner.path
+        ? path
+        : inner.path.startsWith("[")
+          ? `${path}${inner.path}`
+          : `${path}.${inner.path}`;
       violations.push({ path: nested, reason: inner.reason });
     }
   } else {

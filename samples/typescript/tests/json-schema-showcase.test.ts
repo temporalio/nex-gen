@@ -1164,4 +1164,79 @@ describe("json-schema showcase generated definitions", () => {
       }),
     ).toThrow(/tiny/);
   });
+
+  test("recursively converts collections and rejects non-finite numbers", () => {
+    const value = expectRoundTrip(
+      "showcase-recursive-collections.json",
+      showcaseTransferTypeConverter,
+    );
+    expect(value.numberGrid).toEqual([[1, 2.5], [3]]);
+    expect(value.addresses?.[0]?.street).toBe("1 Main St");
+    expect(value.addressBook?.additionalProperties.home?.street).toBe("2 Side St");
+    expect(value.dates).toEqual(["0001-01-01", "2024-02-29"]);
+    expect(value.blobs?.[0]).toEqual(new Uint8Array([104, 105]));
+    expect(value.blobIndex?.additionalProperties.hi).toEqual(
+      new Uint8Array([104, 105]),
+    );
+
+    const base = {
+      kind: "showcase",
+      revision: 1,
+      enabled: true,
+      status: "active",
+      tier: 1,
+      scale: 1.5,
+      name: "w",
+      count: 1,
+      active: true,
+      category: "tools",
+    } as const;
+    expect(() =>
+      showcaseTransferTypeConverter.fromTransferType({
+        ...base,
+        slots: ["x"],
+        links: ["not a uri"],
+      }),
+    ).toThrow(/slots\[0\][\s\S]*links\[0\]/);
+
+    for (const [replacement, path] of [
+      [{ score: Number.NaN }, "score"],
+      [{ metricOrLabel: Number.POSITIVE_INFINITY }, "metricOrLabel"],
+      [{ measurements: [Number.NEGATIVE_INFINITY] }, "measurements[0]"],
+      [{ numberGrid: [[1, Number.NaN]] }, "numberGrid[0][1]"],
+      [
+        { metrics: { additionalProperties: { cpu: Number.POSITIVE_INFINITY } } },
+        "metrics.cpu",
+      ],
+    ] as const) {
+      expect(() =>
+        showcaseTransferTypeConverter.toTransferType({
+          ...value,
+          ...replacement,
+        } as Showcase),
+      ).toThrow(new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*finite`));
+    }
+
+    // The array branch of a union uses the ordinary model mapper: the
+    // in-memory catch-all bag is flattened back into wire members.
+    const address = addressTransferTypeConverter.fromTransferType({
+      street: "3 Branch Ave",
+      city: "Capital City",
+      district: 7,
+    });
+    const serialized = showcaseTransferTypeConverter.toTransferType({
+      ...value,
+      addressListOrLabel: [address],
+    }) as Record<string, unknown>;
+    expect(serialized.addressListOrLabel).toEqual([
+      { street: "3 Branch Ave", city: "Capital City", district: 7 },
+    ]);
+
+    expect(() =>
+      showcaseTransferTypeConverter.toTransferType({
+        ...value,
+        addressListOrLabel: [address, null],
+      } as Showcase),
+    ).toThrow(/addressListOrLabel\[1\]/);
+  });
 });

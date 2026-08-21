@@ -2,6 +2,7 @@ package tests
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	showcase "samples/go/showcase"
@@ -951,13 +952,10 @@ func TestJSONSchemaShowcaseInlineShapes(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "location.city")
 
-	// An element's own model validates too. Go decodes the array as a whole, so
-	// the failure is reported at the array rather than at `rows[1].cell` — the
-	// element type is materialized either way, and elementwise dispatch for a
-	// model element is tracked with the item-constraint work.
+	// An element's own model validates too, at its fully indexed member path.
 	err = dc.FromPayload(jsonPayload([]byte(base+`,"rows":[{"cell":"ok"},{}]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "rows")
+	require.Contains(t, err.Error(), "rows[1].cell")
 
 	// A typed map's member constraints are enforced, keyed by the member.
 	err = dc.FromPayload(jsonPayload([]byte(base+`,"quotas":{"cpu":7}}`)), &out)
@@ -992,4 +990,73 @@ func TestJSONSchemaShowcaseInlineShapes(t *testing.T) {
 	_, err = dc.ToPayload(invalid)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "primary")
+}
+
+// TestJSONSchemaShowcaseRecursiveCollections exercises the same recursive
+// element/member adapters for constrained scalars, models, dates, bytes, and
+// numbers, including indexed/keyed serialize-side finiteness failures.
+func TestJSONSchemaShowcaseRecursiveCollections(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+	value := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-recursive-collections.json")
+
+	require.Equal(t, [][]float64{{1, 2.5}, {3}}, value.NumberGrid)
+	require.Equal(t, "1 Main St", value.Addresses[0].Street)
+	require.Equal(t, "2 Side St", value.AddressBook.AdditionalProperties["home"].Street)
+	require.Equal(t, 1, value.Dates[0].Year())
+	require.Equal(t, 1, value.DateIndex.AdditionalProperties["first"].Year())
+	require.Equal(t, []byte("hi"), value.Blobs[0])
+	require.Equal(t, []byte("hi"), value.BlobIndex.AdditionalProperties["hi"])
+	require.Equal(t, 1.5, value.Metrics.AdditionalProperties["cpu"])
+	require.Equal(t, showcase.ShowcaseMetricOrLabelNumber(2.5), value.MetricOrLabel)
+
+	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
+	var out showcase.Showcase
+	err := dc.FromPayload(jsonPayload([]byte(base+`,"slots":["x"],"links":["not a uri"]}`)), &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "slots[0]")
+	require.Contains(t, err.Error(), "links[0]")
+
+	for literal, want := range map[string]int64{
+		"1": 1, "1.0": 1, "1e2": 100, "1.5e1": 15,
+	} {
+		err = dc.FromPayload(jsonPayload([]byte(base+`,"count":`+literal+`}`)), &out)
+		require.NoError(t, err, literal)
+		require.Equal(t, want, out.Count, literal)
+	}
+	for _, literal := range []string{"1.5", "9007199254740992"} {
+		err = dc.FromPayload(jsonPayload([]byte(base+`,"count":`+literal+`}`)), &out)
+		require.Error(t, err, literal)
+		require.Contains(t, err.Error(), "count", literal)
+	}
+
+	nonFinite := math.Inf(1)
+	cases := []struct {
+		name string
+		path string
+		edit func(*showcase.Showcase)
+	}{
+		{"property", "score", func(v *showcase.Showcase) { v.Score = &nonFinite }},
+		{"union branch", "metricOrLabel", func(v *showcase.Showcase) {
+			v.MetricOrLabel = showcase.ShowcaseMetricOrLabelNumber(nonFinite)
+		}},
+		{"array branch element", "measurements[0]", func(v *showcase.Showcase) {
+			v.Measurements = showcase.ShowcaseMeasurementsArray{nonFinite}
+		}},
+		{"nested element", "numberGrid[0][1]", func(v *showcase.Showcase) {
+			v.NumberGrid = [][]float64{{1, nonFinite}}
+		}},
+		{"map member", "metrics.cpu", func(v *showcase.Showcase) {
+			v.Metrics = &showcase.Metrics{AdditionalProperties: map[string]float64{"cpu": nonFinite}}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			invalid := value
+			tc.edit(&invalid)
+			_, err := dc.ToPayload(invalid)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.path)
+			require.Contains(t, err.Error(), "finite number")
+		})
+	}
 }

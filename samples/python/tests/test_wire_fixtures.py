@@ -82,6 +82,7 @@ WIRE_FIXTURES: dict[tuple[str, str], type[typing.Any]] = {
     ("showcase", "showcase-note-text.json"): showcase.Showcase,
     ("showcase", "showcase-nulls.json"): showcase.Showcase,
     ("showcase", "showcase-patterns.json"): showcase.Showcase,
+    ("showcase", "showcase-recursive-collections.json"): showcase.Showcase,
     ("showcase", "showcase-shape-circle.json"): showcase.Showcase,
     ("showcase", "showcase-shape-or-name-square.json"): showcase.Showcase,
     ("showcase", "showcase-shape-or-name-string.json"): showcase.Showcase,

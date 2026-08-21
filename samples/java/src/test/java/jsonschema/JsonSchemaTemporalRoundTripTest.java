@@ -112,6 +112,15 @@ final class JsonSchemaTemporalRoundTripTest {
                 "{\"createdAt\":\"2021-06-15T12:30:45Z\",\"birthday\":\"2021-02-29\",\"alarm\":\"09:00:00\",\"timeout\":\"PT0S\"}"));
         assertThrows(Exception.class, () -> decodeBody(
                 "{\"createdAt\":\"2021-06-15T12:30:45\",\"birthday\":\"2000-01-01\",\"alarm\":\"09:00:00\",\"timeout\":\"PT0S\"}"));
+        assertThrows(Exception.class, () -> decodeBody(
+                "{\"createdAt\":\"0000-01-01T00:00:00Z\",\"birthday\":\"2000-01-01\",\"alarm\":\"09:00:00\",\"timeout\":\"PT0S\"}"));
+        assertThrows(Exception.class, () -> decodeBody(
+                "{\"createdAt\":\"2021-06-15T12:30:45Z\",\"birthday\":\"0000-01-01\",\"alarm\":\"09:00:00\",\"timeout\":\"PT0S\"}"));
+
+        Temporal firstYear = decodeBody(
+                "{\"createdAt\":\"0001-01-01T00:00:00Z\",\"birthday\":\"0001-01-01\",\"alarm\":\"00:00:00\",\"timeout\":\"PT0S\"}");
+        assertEquals(1, firstYear.getCreatedAt().getYear());
+        assertEquals(1, firstYear.getBirthday().getYear());
     }
 
     private static Temporal decodeBody(String json) {

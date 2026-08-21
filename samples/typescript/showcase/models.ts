@@ -52,10 +52,24 @@ export interface Address {
 }
 
 /**
+ * A typed map of referenced Address models.
+ */
+export interface AddressBook {
+  additionalProperties: Record<string, Address>;
+}
+
+/**
  * A string map with member-count and key-shape constraints: 1 to 3 entries, each key at most 8 code points (minProperties/maxProperties/propertyNames on a map-shaped object).
  */
 export interface Attributes {
   additionalProperties: Record<string, string>;
+}
+
+/**
+ * A typed map of materialized base64 byte strings.
+ */
+export interface BlobIndex {
+  additionalProperties: Record<string, Uint8Array>;
 }
 
 /**
@@ -87,6 +101,13 @@ export interface ContactTs {
 }
 
 /**
+ * A typed map of materialized calendar dates.
+ */
+export interface DateIndex {
+  additionalProperties: Record<string, string>;
+}
+
+/**
  * A free-form object (`additionalProperties: true` with no declared properties): every member is carried verbatim, bounded to at most 4 members. Members keep their wire form, so large integers survive a round-trip untruncated.
  */
 export interface Extras {
@@ -107,6 +128,13 @@ export interface LinkNote {
   readonly kind: "link";
   href: string;
   additionalProperties: Record<string, unknown>;
+}
+
+/**
+ * A typed map of finite numbers.
+ */
+export interface Metrics {
+  additionalProperties: Record<string, number>;
 }
 
 /**
@@ -269,6 +297,10 @@ export interface Showcase {
    */
   ratio?: number;
   /**
+   * Optional unbounded finite number.
+   */
+  score?: number;
+  /**
    * Optional integer that must be a multiple of 3.
    */
   step?: number;
@@ -317,13 +349,45 @@ export interface Showcase {
    */
   segments?: ShowcaseSegmentsItem[];
   /**
-   * A list of **nullable elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list stays a list.
+   * A list of **nullable, constrained scalar elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while each present string retains its own minimum length and the list stays a list.
    */
   slots?: (string | null)[];
   /**
    * A nested array: `items` at depth two. Each level decodes elementwise, so a bad element is reported at its own two-dimensional index (`grid[1][0]`).
    */
   grid?: number[][];
+  /**
+   * A nested array of numbers used to prove recursive finite-number validation and two-dimensional indexed aggregation.
+   */
+  numberGrid?: number[][];
+  /**
+   * A list of scalar URI values; every element keeps its format assertion.
+   */
+  links?: string[];
+  /**
+   * A list of referenced models, converted and validated elementwise.
+   */
+  addresses?: Address[];
+  addressBook?: AddressBook;
+  /**
+   * Materialized calendar dates in an array.
+   */
+  dates?: string[];
+  dateIndex?: DateIndex;
+  /**
+   * Materialized base64 byte strings in an array.
+   */
+  blobs?: Uint8Array[];
+  blobIndex?: BlobIndex;
+  metrics?: Metrics;
+  /**
+   * A finite number branch or a non-empty string branch.
+   */
+  metricOrLabel?: number | string;
+  /**
+   * A union whose array branch contains referenced models, proving that branch conversion uses the ordinary recursive array mapper.
+   */
+  addressListOrLabel?: Address[] | string;
   location?: ShowcaseLocation;
   /**
    * A nullable inline object. The nullability wrapper emits no type of its own, so the object inside it takes the property's name — `ShowcaseAudit`, the same name it would take written plainly: adding or removing nullability never renames the type.
@@ -454,6 +518,7 @@ export interface WidgetBase {
 }
 
 function serializeShowcaseDetail(value: ShowcaseDetailObject | string): unknown {
+  const violations: __nexgenDefinitions.Violation[] = [];
   if (__nexgenDefinitions.isPlainObject(value)) {
     return showcaseDetailObjectTransferTypeConverter.toTransferType(
       value as unknown as ShowcaseDetailObject,
@@ -468,6 +533,7 @@ function serializeShowcaseDetail(value: ShowcaseDetailObject | string): unknown 
 }
 
 function serializeShowcaseShapeOrName(value: Circle | Square | string): unknown {
+  const violations: __nexgenDefinitions.Violation[] = [];
   if ((value as unknown as Record<string, unknown>)["kind"] === "circle") {
     return circleTransferTypeConverter.toTransferType(value as Circle);
   }
@@ -479,6 +545,32 @@ function serializeShowcaseShapeOrName(value: Circle | Square | string): unknown 
   }
   throw new __nexgenDefinitions.ValidationError([
     { path: "", reason: "expected one of: Circle, Square, string" },
+  ]);
+}
+
+function serializeShowcaseAddressListOrLabel(value: Address[] | string): unknown {
+  const violations: __nexgenDefinitions.Violation[] = [];
+  if (Array.isArray(value)) {
+    const out = (value as Address[]).map((element, index) =>
+      (() => {
+        try {
+          return addressTransferTypeConverter.toTransferType(element);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, `[${index}]`, error);
+          return undefined;
+        }
+      })(),
+    );
+    if (violations.length) {
+      throw new __nexgenDefinitions.ValidationError(violations);
+    }
+    return out;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  throw new __nexgenDefinitions.ValidationError([
+    { path: "", reason: "expected one of: Address[], string" },
   ]);
 }
 
@@ -558,6 +650,55 @@ export const addressTransferTypeConverter =
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
+      }
+      return out;
+    }
+  })();
+
+export const addressBookTransferTypeConverter =
+  new (class implements TransferTypeConverter<AddressBook> {
+    public fromTransferType(raw: unknown): AddressBook {
+      const violations: __nexgenDefinitions.Violation[] = [];
+      if (!__nexgenDefinitions.isPlainObject(raw)) {
+        throw new __nexgenDefinitions.ValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+
+      const keys = Object.keys(raw);
+      const additionalProperties: Record<string, Address> = {};
+      for (const key of keys) {
+        let entry: Address | undefined = undefined;
+        try {
+          entry = addressTransferTypeConverter.fromTransferType(raw[key]);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, key, error);
+        }
+        if (entry !== undefined) {
+          additionalProperties[key] = entry;
+        }
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
+      }
+      return { additionalProperties };
+    }
+
+    public toTransferType(value: AddressBook): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
+      const out: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        out[key] = (() => {
+          try {
+            return addressTransferTypeConverter.toTransferType(entry);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, key, error);
+            return undefined;
+          }
+        })();
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
       }
       return out;
     }
@@ -646,6 +787,47 @@ export const attributesTransferTypeConverter =
     }
   })();
 
+export const blobIndexTransferTypeConverter =
+  new (class implements TransferTypeConverter<BlobIndex> {
+    public fromTransferType(raw: unknown): BlobIndex {
+      const violations: __nexgenDefinitions.Violation[] = [];
+      if (!__nexgenDefinitions.isPlainObject(raw)) {
+        throw new __nexgenDefinitions.ValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+
+      const keys = Object.keys(raw);
+      const additionalProperties: Record<string, Uint8Array> = {};
+      for (const key of keys) {
+        let entry: Uint8Array | undefined = undefined;
+        if (typeof raw[key] !== "string") {
+          violations.push({ path: key, reason: "expected string" });
+        } else {
+          const parsed = __nexgenDefinitions.base64ToBytes(raw[key], key, violations);
+          if (parsed !== undefined) {
+            entry = parsed;
+          }
+        }
+        if (entry !== undefined) {
+          additionalProperties[key] = entry;
+        }
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
+      }
+      return { additionalProperties };
+    }
+
+    public toTransferType(value: BlobIndex): unknown {
+      const out: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        out[key] = __nexgenDefinitions.bytesToBase64(entry);
+      }
+      return out;
+    }
+  })();
+
 export const choicesTransferTypeConverter =
   new (class implements TransferTypeConverter<Choices> {
     public fromTransferType(raw: unknown): Choices {
@@ -676,9 +858,20 @@ export const choicesTransferTypeConverter =
     }
 
     public toTransferType(value: Choices): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
-        out[key] = choicesValueTransferTypeConverter.toTransferType(entry);
+        out[key] = (() => {
+          try {
+            return choicesValueTransferTypeConverter.toTransferType(entry);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, key, error);
+            return undefined;
+          }
+        })();
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
       }
       return out;
     }
@@ -721,6 +914,7 @@ export const choicesValueTransferTypeConverter =
     }
 
     public toTransferType(value: ChoicesValue): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       if ((value as unknown as Record<string, unknown>)["kind"] === "circle") {
         return circleTransferTypeConverter.toTransferType(value as Circle);
       }
@@ -766,6 +960,12 @@ export const circleTransferTypeConverter =
           violations.push({ path: "radius", reason: "expected number" });
         } else {
           radius = raw.radius;
+          if (!Number.isFinite(raw.radius)) {
+            violations.push({
+              path: "radius",
+              reason: `must be a finite number, got ${raw.radius}`,
+            });
+          }
         }
       }
 
@@ -790,6 +990,12 @@ export const circleTransferTypeConverter =
         violations.push({ path: "kind", reason: `must equal "circle"` });
       }
       out.kind = value.kind;
+      if (!Number.isFinite(value.radius)) {
+        violations.push({
+          path: "radius",
+          reason: `must be a finite number, got ${value.radius}`,
+        });
+      }
       out.radius = value.radius;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
@@ -928,6 +1134,56 @@ export const contactTsTransferTypeConverter =
             reason: `property "shippingZip" is required when "shippingStreet" is present`,
           });
         }
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
+      }
+      return out;
+    }
+  })();
+
+export const dateIndexTransferTypeConverter =
+  new (class implements TransferTypeConverter<DateIndex> {
+    public fromTransferType(raw: unknown): DateIndex {
+      const violations: __nexgenDefinitions.Violation[] = [];
+      if (!__nexgenDefinitions.isPlainObject(raw)) {
+        throw new __nexgenDefinitions.ValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+
+      const keys = Object.keys(raw);
+      const additionalProperties: Record<string, string> = {};
+      for (const key of keys) {
+        let entry: string | undefined = undefined;
+        if (typeof raw[key] !== "string") {
+          violations.push({ path: key, reason: "expected string" });
+        } else {
+          const parsed = __nexgenDefinitions.parseTemporalDate(
+            raw[key],
+            key,
+            violations,
+          );
+          if (parsed !== undefined) {
+            entry = parsed;
+          }
+        }
+        if (entry !== undefined) {
+          additionalProperties[key] = entry;
+        }
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
+      }
+      return { additionalProperties };
+    }
+
+    public toTransferType(value: DateIndex): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
+      const out: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        __nexgenDefinitions.validateTemporalDate(entry, key, violations);
+        out[key] = entry;
       }
       if (violations.length) {
         throw new __nexgenDefinitions.ValidationError(violations);
@@ -1118,6 +1374,60 @@ export const linkNoteTransferTypeConverter =
     }
   })();
 
+export const metricsTransferTypeConverter =
+  new (class implements TransferTypeConverter<Metrics> {
+    public fromTransferType(raw: unknown): Metrics {
+      const violations: __nexgenDefinitions.Violation[] = [];
+      if (!__nexgenDefinitions.isPlainObject(raw)) {
+        throw new __nexgenDefinitions.ValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+
+      const keys = Object.keys(raw);
+      const additionalProperties: Record<string, number> = {};
+      for (const key of keys) {
+        let entry: number | undefined = undefined;
+        if (typeof raw[key] !== "number") {
+          violations.push({ path: key, reason: "expected number" });
+        } else {
+          entry = raw[key];
+          if (!Number.isFinite(raw[key])) {
+            violations.push({
+              path: key,
+              reason: `must be a finite number, got ${raw[key]}`,
+            });
+          }
+        }
+        if (entry !== undefined) {
+          additionalProperties[key] = entry;
+        }
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
+      }
+      return { additionalProperties };
+    }
+
+    public toTransferType(value: Metrics): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
+      const out: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        if (!Number.isFinite(entry)) {
+          violations.push({
+            path: key,
+            reason: `must be a finite number, got ${entry}`,
+          });
+        }
+        out[key] = entry;
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
+      }
+      return out;
+    }
+  })();
+
 export const nicknamesTransferTypeConverter =
   new (class implements TransferTypeConverter<Nicknames> {
     public fromTransferType(raw: unknown): Nicknames {
@@ -1215,6 +1525,7 @@ export const noteTransferTypeConverter =
     }
 
     public toTransferType(value: Note): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       if ((value as unknown as Record<string, unknown>)["kind"] === "text") {
         return textNoteTransferTypeConverter.toTransferType(value as TextNote);
       }
@@ -1393,6 +1704,7 @@ export const shapeTransferTypeConverter =
     }
 
     public toTransferType(value: Shape): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       if ((value as unknown as Record<string, unknown>)["kind"] === "circle") {
         return circleTransferTypeConverter.toTransferType(value as Circle);
       }
@@ -1885,16 +2197,40 @@ export const showcaseTransferTypeConverter =
           violations.push({ path: "ratio", reason: "expected number" });
         } else {
           ratio = raw.ratio;
-          if (raw.ratio < 5) {
+          if (!Number.isFinite(raw.ratio)) {
             violations.push({
               path: "ratio",
-              reason: `must be >= 5, got ${raw.ratio}`,
+              reason: `must be a finite number, got ${raw.ratio}`,
             });
+          } else {
+            if (raw.ratio < 5) {
+              violations.push({
+                path: "ratio",
+                reason: `must be >= 5, got ${raw.ratio}`,
+              });
+            }
+            if (raw.ratio % 5 !== 0) {
+              violations.push({
+                path: "ratio",
+                reason: `must be a multiple of 5, got ${raw.ratio}`,
+              });
+            }
           }
-          if (raw.ratio % 5 !== 0) {
+        }
+      }
+
+      let score: number | undefined = undefined as unknown as number | undefined;
+      if (raw.score === null) {
+        violations.push({ path: "score", reason: "explicit null not allowed" });
+      } else if (raw.score !== undefined) {
+        if (typeof raw.score !== "number") {
+          violations.push({ path: "score", reason: "expected number" });
+        } else {
+          score = raw.score;
+          if (!Number.isFinite(raw.score)) {
             violations.push({
-              path: "ratio",
-              reason: `must be a multiple of 5, got ${raw.ratio}`,
+              path: "score",
+              reason: `must be a finite number, got ${raw.score}`,
             });
           }
         }
@@ -2189,25 +2525,53 @@ export const showcaseTransferTypeConverter =
         violations.push({ path: "measurements", reason: "explicit null not allowed" });
       } else if (raw.measurements !== undefined) {
         if (Array.isArray(raw.measurements)) {
-          measurements = raw.measurements as number[];
-          if ((measurements as number[]).length < 1) {
-            violations.push({
-              path: "measurements",
-              reason: `must have at least 1 items, got ${(measurements as number[]).length}`,
-            });
-          }
-          {
-            const seen = new Map<unknown, number>();
-            (measurements as number[]).forEach((element, index) => {
-              if (seen.has(element)) {
+          let measurementsArrayBranch: number[] = undefined as unknown as number[];
+          if (!Array.isArray(raw.measurements)) {
+            violations.push({ path: "measurements", reason: "expected array" });
+          } else {
+            measurementsArrayBranch = [];
+            raw.measurements.forEach((element: unknown, index: number) => {
+              let item: number = undefined as unknown as number;
+              if (typeof element !== "number") {
                 violations.push({
-                  path: "measurements",
-                  reason: `duplicate items: element at index ${index} equals index ${seen.get(element)}`,
+                  path: `measurements[${index}]`,
+                  reason: "expected number",
                 });
               } else {
-                seen.set(element, index);
+                item = element;
+                if (!Number.isFinite(element)) {
+                  violations.push({
+                    path: `measurements[${index}]`,
+                    reason: `must be a finite number, got ${element}`,
+                  });
+                }
+              }
+              if (item !== undefined) {
+                measurementsArrayBranch!.push(item);
               }
             });
+            if (measurementsArrayBranch!.length < 1) {
+              violations.push({
+                path: "measurements",
+                reason: `must have at least 1 items, got ${measurementsArrayBranch!.length}`,
+              });
+            }
+            {
+              const seen = new Map<unknown, number>();
+              measurementsArrayBranch!.forEach((element, index) => {
+                if (seen.has(element)) {
+                  violations.push({
+                    path: "measurements",
+                    reason: `duplicate items: element at index ${index} equals index ${seen.get(element)}`,
+                  });
+                } else {
+                  seen.set(element, index);
+                }
+              });
+            }
+          }
+          if (measurementsArrayBranch !== undefined) {
+            measurements = measurementsArrayBranch;
           }
         } else if (typeof raw.measurements === "string") {
           measurements = raw.measurements as string;
@@ -2292,6 +2656,12 @@ export const showcaseTransferTypeConverter =
                 violations.push({ path: `slots[${index}]`, reason: "expected string" });
               } else {
                 item = element;
+                if ([...element].length < 2) {
+                  violations.push({
+                    path: `slots[${index}]`,
+                    reason: `must have length >= 2, got ${[...element].length}`,
+                  });
+                }
               }
             }
             if (item !== undefined) {
@@ -2319,7 +2689,7 @@ export const showcaseTransferTypeConverter =
                 let item1: number = undefined as unknown as number;
                 if (typeof element1 !== "number" || !Number.isSafeInteger(element1)) {
                   violations.push({
-                    path: `${`grid[${index}]`}[${index1}]`,
+                    path: `grid[${index}][${index1}]`,
                     reason: "expected integer",
                   });
                 } else {
@@ -2333,6 +2703,306 @@ export const showcaseTransferTypeConverter =
             if (item !== undefined) {
               grid!.push(item);
             }
+          });
+        }
+      }
+
+      let numberGrid: number[][] | undefined = undefined as unknown as
+        | number[][]
+        | undefined;
+      if (raw.numberGrid === null) {
+        violations.push({ path: "numberGrid", reason: "explicit null not allowed" });
+      } else if (raw.numberGrid !== undefined) {
+        if (!Array.isArray(raw.numberGrid)) {
+          violations.push({ path: "numberGrid", reason: "expected array" });
+        } else {
+          numberGrid = [];
+          raw.numberGrid.forEach((element: unknown, index: number) => {
+            let item: number[] = undefined as unknown as number[];
+            if (!Array.isArray(element)) {
+              violations.push({
+                path: `numberGrid[${index}]`,
+                reason: "expected array",
+              });
+            } else {
+              item = [];
+              element.forEach((element1: unknown, index1: number) => {
+                let item1: number = undefined as unknown as number;
+                if (typeof element1 !== "number") {
+                  violations.push({
+                    path: `numberGrid[${index}][${index1}]`,
+                    reason: "expected number",
+                  });
+                } else {
+                  item1 = element1;
+                  if (!Number.isFinite(element1)) {
+                    violations.push({
+                      path: `numberGrid[${index}][${index1}]`,
+                      reason: `must be a finite number, got ${element1}`,
+                    });
+                  }
+                }
+                if (item1 !== undefined) {
+                  item!.push(item1);
+                }
+              });
+            }
+            if (item !== undefined) {
+              numberGrid!.push(item);
+            }
+          });
+        }
+      }
+
+      let links: string[] | undefined = undefined as unknown as string[] | undefined;
+      if (raw.links === null) {
+        violations.push({ path: "links", reason: "explicit null not allowed" });
+      } else if (raw.links !== undefined) {
+        if (!Array.isArray(raw.links)) {
+          violations.push({ path: "links", reason: "expected array" });
+        } else {
+          links = [];
+          raw.links.forEach((element: unknown, index: number) => {
+            let item: string = undefined as unknown as string;
+            if (typeof element !== "string") {
+              violations.push({ path: `links[${index}]`, reason: "expected string" });
+            } else {
+              item = element;
+              if (!PATTERN_2F0C822905CC055D.test(element)) {
+                violations.push({
+                  path: `links[${index}]`,
+                  reason: `must be a valid uri, got ${JSON.stringify(element)}`,
+                });
+              }
+            }
+            if (item !== undefined) {
+              links!.push(item);
+            }
+          });
+        }
+      }
+
+      let addresses: Address[] | undefined = undefined as unknown as
+        | Address[]
+        | undefined;
+      if (raw.addresses === null) {
+        violations.push({ path: "addresses", reason: "explicit null not allowed" });
+      } else if (raw.addresses !== undefined) {
+        if (!Array.isArray(raw.addresses)) {
+          violations.push({ path: "addresses", reason: "expected array" });
+        } else {
+          addresses = [];
+          raw.addresses.forEach((element: unknown, index: number) => {
+            let item: Address = undefined as unknown as Address;
+            try {
+              item = addressTransferTypeConverter.fromTransferType(element);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, `addresses[${index}]`, error);
+            }
+            if (item !== undefined) {
+              addresses!.push(item);
+            }
+          });
+        }
+      }
+
+      let addressBook: AddressBook | undefined = undefined as unknown as
+        | AddressBook
+        | undefined;
+      if (raw.addressBook === null) {
+        violations.push({ path: "addressBook", reason: "explicit null not allowed" });
+      } else if (raw.addressBook !== undefined) {
+        try {
+          addressBook = addressBookTransferTypeConverter.fromTransferType(
+            raw.addressBook,
+          );
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "addressBook", error);
+        }
+      }
+
+      let dates: string[] | undefined = undefined as unknown as string[] | undefined;
+      if (raw.dates === null) {
+        violations.push({ path: "dates", reason: "explicit null not allowed" });
+      } else if (raw.dates !== undefined) {
+        if (!Array.isArray(raw.dates)) {
+          violations.push({ path: "dates", reason: "expected array" });
+        } else {
+          dates = [];
+          raw.dates.forEach((element: unknown, index: number) => {
+            let item: string = undefined as unknown as string;
+            if (typeof element !== "string") {
+              violations.push({ path: `dates[${index}]`, reason: "expected string" });
+            } else {
+              const parsed = __nexgenDefinitions.parseTemporalDate(
+                element,
+                `dates[${index}]`,
+                violations,
+              );
+              if (parsed !== undefined) {
+                item = parsed;
+              }
+            }
+            if (item !== undefined) {
+              dates!.push(item);
+            }
+          });
+        }
+      }
+
+      let dateIndex: DateIndex | undefined = undefined as unknown as
+        | DateIndex
+        | undefined;
+      if (raw.dateIndex === null) {
+        violations.push({ path: "dateIndex", reason: "explicit null not allowed" });
+      } else if (raw.dateIndex !== undefined) {
+        try {
+          dateIndex = dateIndexTransferTypeConverter.fromTransferType(raw.dateIndex);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "dateIndex", error);
+        }
+      }
+
+      let blobs: Uint8Array[] | undefined = undefined as unknown as
+        | Uint8Array[]
+        | undefined;
+      if (raw.blobs === null) {
+        violations.push({ path: "blobs", reason: "explicit null not allowed" });
+      } else if (raw.blobs !== undefined) {
+        if (!Array.isArray(raw.blobs)) {
+          violations.push({ path: "blobs", reason: "expected array" });
+        } else {
+          blobs = [];
+          raw.blobs.forEach((element: unknown, index: number) => {
+            let item: Uint8Array = undefined as unknown as Uint8Array;
+            if (typeof element !== "string") {
+              violations.push({ path: `blobs[${index}]`, reason: "expected string" });
+            } else {
+              const parsed = __nexgenDefinitions.base64ToBytes(
+                element,
+                `blobs[${index}]`,
+                violations,
+              );
+              if (parsed !== undefined) {
+                item = parsed;
+              }
+            }
+            if (item !== undefined) {
+              blobs!.push(item);
+            }
+          });
+        }
+      }
+
+      let blobIndex: BlobIndex | undefined = undefined as unknown as
+        | BlobIndex
+        | undefined;
+      if (raw.blobIndex === null) {
+        violations.push({ path: "blobIndex", reason: "explicit null not allowed" });
+      } else if (raw.blobIndex !== undefined) {
+        try {
+          blobIndex = blobIndexTransferTypeConverter.fromTransferType(raw.blobIndex);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "blobIndex", error);
+        }
+      }
+
+      let metrics: Metrics | undefined = undefined as unknown as Metrics | undefined;
+      if (raw.metrics === null) {
+        violations.push({ path: "metrics", reason: "explicit null not allowed" });
+      } else if (raw.metrics !== undefined) {
+        try {
+          metrics = metricsTransferTypeConverter.fromTransferType(raw.metrics);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "metrics", error);
+        }
+      }
+
+      let metricOrLabel: number | string | undefined = undefined as unknown as
+        | number
+        | string
+        | undefined;
+      if (raw.metricOrLabel === null) {
+        violations.push({ path: "metricOrLabel", reason: "explicit null not allowed" });
+      } else if (raw.metricOrLabel !== undefined) {
+        if (typeof raw.metricOrLabel === "number") {
+          metricOrLabel = raw.metricOrLabel as number;
+          if (!Number.isFinite(metricOrLabel as number)) {
+            violations.push({
+              path: "metricOrLabel",
+              reason: `must be a finite number, got ${metricOrLabel as number}`,
+            });
+          }
+        } else if (typeof raw.metricOrLabel === "string") {
+          metricOrLabel = raw.metricOrLabel as string;
+          if ([...(metricOrLabel as string)].length < 1) {
+            violations.push({
+              path: "metricOrLabel",
+              reason: `must have length >= 1, got ${[...(metricOrLabel as string)].length}`,
+            });
+          }
+        } else {
+          violations.push({
+            path: "metricOrLabel",
+            reason: "expected one of: number, string",
+          });
+        }
+      }
+
+      let addressListOrLabel: Address[] | string | undefined = undefined as unknown as
+        | Address[]
+        | string
+        | undefined;
+      if (raw.addressListOrLabel === null) {
+        violations.push({
+          path: "addressListOrLabel",
+          reason: "explicit null not allowed",
+        });
+      } else if (raw.addressListOrLabel !== undefined) {
+        if (Array.isArray(raw.addressListOrLabel)) {
+          let addressListOrLabelArrayBranch: Address[] =
+            undefined as unknown as Address[];
+          if (!Array.isArray(raw.addressListOrLabel)) {
+            violations.push({ path: "addressListOrLabel", reason: "expected array" });
+          } else {
+            addressListOrLabelArrayBranch = [];
+            raw.addressListOrLabel.forEach((element: unknown, index: number) => {
+              let item: Address = undefined as unknown as Address;
+              try {
+                item = addressTransferTypeConverter.fromTransferType(element);
+              } catch (error) {
+                __nexgenDefinitions.collect(
+                  violations,
+                  `addressListOrLabel[${index}]`,
+                  error,
+                );
+              }
+              if (item !== undefined) {
+                addressListOrLabelArrayBranch!.push(item);
+              }
+            });
+            if (addressListOrLabelArrayBranch!.length < 1) {
+              violations.push({
+                path: "addressListOrLabel",
+                reason: `must have at least 1 items, got ${addressListOrLabelArrayBranch!.length}`,
+              });
+            }
+          }
+          if (addressListOrLabelArrayBranch !== undefined) {
+            addressListOrLabel = addressListOrLabelArrayBranch;
+          }
+        } else if (typeof raw.addressListOrLabel === "string") {
+          addressListOrLabel = raw.addressListOrLabel as string;
+          if ([...(addressListOrLabel as string)].length < 1) {
+            violations.push({
+              path: "addressListOrLabel",
+              reason: `must have length >= 1, got ${[...(addressListOrLabel as string)].length}`,
+            });
+          }
+        } else {
+          violations.push({
+            path: "addressListOrLabel",
+            reason: "expected one of: Address[], string",
           });
         }
       }
@@ -2590,6 +3260,7 @@ export const showcaseTransferTypeConverter =
           key !== "priority" &&
           key !== "level" &&
           key !== "ratio" &&
+          key !== "score" &&
           key !== "step" &&
           key !== "tags" &&
           key !== "aliases" &&
@@ -2604,6 +3275,17 @@ export const showcaseTransferTypeConverter =
           key !== "segments" &&
           key !== "slots" &&
           key !== "grid" &&
+          key !== "numberGrid" &&
+          key !== "links" &&
+          key !== "addresses" &&
+          key !== "addressBook" &&
+          key !== "dates" &&
+          key !== "dateIndex" &&
+          key !== "blobs" &&
+          key !== "blobIndex" &&
+          key !== "metrics" &&
+          key !== "metricOrLabel" &&
+          key !== "addressListOrLabel" &&
           key !== "location" &&
           key !== "audit" &&
           key !== "rows" &&
@@ -2701,6 +3383,9 @@ export const showcaseTransferTypeConverter =
       if (ratio !== undefined) {
         out.ratio = ratio;
       }
+      if (score !== undefined) {
+        out.score = score;
+      }
       if (step !== undefined) {
         out.step = step;
       }
@@ -2742,6 +3427,39 @@ export const showcaseTransferTypeConverter =
       }
       if (grid !== undefined) {
         out.grid = grid;
+      }
+      if (numberGrid !== undefined) {
+        out.numberGrid = numberGrid;
+      }
+      if (links !== undefined) {
+        out.links = links;
+      }
+      if (addresses !== undefined) {
+        out.addresses = addresses;
+      }
+      if (addressBook !== undefined) {
+        out.addressBook = addressBook;
+      }
+      if (dates !== undefined) {
+        out.dates = dates;
+      }
+      if (dateIndex !== undefined) {
+        out.dateIndex = dateIndex;
+      }
+      if (blobs !== undefined) {
+        out.blobs = blobs;
+      }
+      if (blobIndex !== undefined) {
+        out.blobIndex = blobIndex;
+      }
+      if (metrics !== undefined) {
+        out.metrics = metrics;
+      }
+      if (metricOrLabel !== undefined) {
+        out.metricOrLabel = metricOrLabel;
+      }
+      if (addressListOrLabel !== undefined) {
+        out.addressListOrLabel = addressListOrLabel;
       }
       if (location !== undefined) {
         out.location = location;
@@ -2992,19 +3710,35 @@ export const showcaseTransferTypeConverter =
         out.level = value.level;
       }
       if (value.ratio !== undefined) {
-        if (value.ratio < 5) {
+        if (!Number.isFinite(value.ratio)) {
           violations.push({
             path: "ratio",
-            reason: `must be >= 5, got ${value.ratio}`,
+            reason: `must be a finite number, got ${value.ratio}`,
           });
-        }
-        if (value.ratio % 5 !== 0) {
-          violations.push({
-            path: "ratio",
-            reason: `must be a multiple of 5, got ${value.ratio}`,
-          });
+        } else {
+          if (value.ratio < 5) {
+            violations.push({
+              path: "ratio",
+              reason: `must be >= 5, got ${value.ratio}`,
+            });
+          }
+          if (value.ratio % 5 !== 0) {
+            violations.push({
+              path: "ratio",
+              reason: `must be a multiple of 5, got ${value.ratio}`,
+            });
+          }
         }
         out.ratio = value.ratio;
+      }
+      if (value.score !== undefined) {
+        if (!Number.isFinite(value.score)) {
+          violations.push({
+            path: "score",
+            reason: `must be a finite number, got ${value.score}`,
+          });
+        }
+        out.score = value.score;
       }
       if (value.step !== undefined) {
         if (value.step % 3 !== 0) {
@@ -3114,7 +3848,14 @@ export const showcaseTransferTypeConverter =
         out.payload = value.payload;
       }
       if (value.detail !== undefined) {
-        out.detail = serializeShowcaseDetail(value.detail);
+        out.detail = (() => {
+          try {
+            return serializeShowcaseDetail(value.detail);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "detail", error);
+            return undefined;
+          }
+        })();
       }
       if (value.shapeOrName !== undefined) {
         if (typeof value.shapeOrName === "string") {
@@ -3125,7 +3866,14 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.shapeOrName = serializeShowcaseShapeOrName(value.shapeOrName);
+        out.shapeOrName = (() => {
+          try {
+            return serializeShowcaseShapeOrName(value.shapeOrName);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "shapeOrName", error);
+            return undefined;
+          }
+        })();
       }
       if (value.measurements !== undefined) {
         if (Array.isArray(value.measurements)) {
@@ -3148,6 +3896,14 @@ export const showcaseTransferTypeConverter =
               }
             });
           }
+          (value.measurements as number[]).forEach((element, index) => {
+            if (!Number.isFinite(element)) {
+              violations.push({
+                path: `measurements[${index}]`,
+                reason: `must be a finite number, got ${element}`,
+              });
+            }
+          });
         }
         if (typeof value.measurements === "string") {
           if (!PATTERN_C182F89FDB221836.test(value.measurements as string)) {
@@ -3160,82 +3916,360 @@ export const showcaseTransferTypeConverter =
         out.measurements = value.measurements;
       }
       if (value.shapes !== undefined) {
-        out.shapes = value.shapes.map((element) =>
-          shapeTransferTypeConverter.toTransferType(element),
+        value.shapes.forEach((element, index) => {});
+        out.shapes = value.shapes.map((element, index) =>
+          (() => {
+            try {
+              return shapeTransferTypeConverter.toTransferType(element);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, `shapes[${index}]`, error);
+              return undefined;
+            }
+          })(),
         );
       }
       if (value.segments !== undefined) {
-        out.segments = value.segments.map((element) =>
-          showcaseSegmentsItemTransferTypeConverter.toTransferType(element),
+        value.segments.forEach((element, index) => {});
+        out.segments = value.segments.map((element, index) =>
+          (() => {
+            try {
+              return showcaseSegmentsItemTransferTypeConverter.toTransferType(element);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, `segments[${index}]`, error);
+              return undefined;
+            }
+          })(),
         );
       }
       if (value.slots !== undefined) {
+        value.slots.forEach((element, index) => {
+          if (element !== null) {
+            if ([...element].length < 2) {
+              violations.push({
+                path: `slots[${index}]`,
+                reason: `must have length >= 2, got ${[...element].length}`,
+              });
+            }
+          }
+        });
         out.slots = value.slots;
       }
       if (value.grid !== undefined) {
         out.grid = value.grid;
       }
-      if (value.location !== undefined) {
-        out.location = showcaseLocationTransferTypeConverter.toTransferType(
-          value.location,
+      if (value.numberGrid !== undefined) {
+        value.numberGrid.forEach((element, index) => {
+          element.forEach((element1, index1) => {
+            if (!Number.isFinite(element1)) {
+              violations.push({
+                path: `numberGrid[${index}][${index1}]`,
+                reason: `must be a finite number, got ${element1}`,
+              });
+            }
+          });
+        });
+        out.numberGrid = value.numberGrid;
+      }
+      if (value.links !== undefined) {
+        value.links.forEach((element, index) => {
+          if (!PATTERN_2F0C822905CC055D.test(element)) {
+            violations.push({
+              path: `links[${index}]`,
+              reason: `must be a valid uri, got ${JSON.stringify(element)}`,
+            });
+          }
+        });
+        out.links = value.links;
+      }
+      if (value.addresses !== undefined) {
+        value.addresses.forEach((element, index) => {});
+        out.addresses = value.addresses.map((element, index) =>
+          (() => {
+            try {
+              return addressTransferTypeConverter.toTransferType(element);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, `addresses[${index}]`, error);
+              return undefined;
+            }
+          })(),
         );
+      }
+      if (value.addressBook !== undefined) {
+        out.addressBook = (() => {
+          try {
+            return addressBookTransferTypeConverter.toTransferType(value.addressBook);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "addressBook", error);
+            return undefined;
+          }
+        })();
+      }
+      if (value.dates !== undefined) {
+        value.dates.forEach((element, index) => {
+          __nexgenDefinitions.validateTemporalDate(
+            element,
+            `dates[${index}]`,
+            violations,
+          );
+        });
+        out.dates = value.dates;
+      }
+      if (value.dateIndex !== undefined) {
+        out.dateIndex = (() => {
+          try {
+            return dateIndexTransferTypeConverter.toTransferType(value.dateIndex);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "dateIndex", error);
+            return undefined;
+          }
+        })();
+      }
+      if (value.blobs !== undefined) {
+        out.blobs = value.blobs.map((element, index) =>
+          __nexgenDefinitions.bytesToBase64(element),
+        );
+      }
+      if (value.blobIndex !== undefined) {
+        out.blobIndex = (() => {
+          try {
+            return blobIndexTransferTypeConverter.toTransferType(value.blobIndex);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "blobIndex", error);
+            return undefined;
+          }
+        })();
+      }
+      if (value.metrics !== undefined) {
+        out.metrics = (() => {
+          try {
+            return metricsTransferTypeConverter.toTransferType(value.metrics);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "metrics", error);
+            return undefined;
+          }
+        })();
+      }
+      if (value.metricOrLabel !== undefined) {
+        if (typeof value.metricOrLabel === "number") {
+          if (!Number.isFinite(value.metricOrLabel as number)) {
+            violations.push({
+              path: "metricOrLabel",
+              reason: `must be a finite number, got ${value.metricOrLabel as number}`,
+            });
+          }
+        }
+        if (typeof value.metricOrLabel === "string") {
+          if ([...(value.metricOrLabel as string)].length < 1) {
+            violations.push({
+              path: "metricOrLabel",
+              reason: `must have length >= 1, got ${[...(value.metricOrLabel as string)].length}`,
+            });
+          }
+        }
+        out.metricOrLabel = value.metricOrLabel;
+      }
+      if (value.addressListOrLabel !== undefined) {
+        if (Array.isArray(value.addressListOrLabel)) {
+          if ((value.addressListOrLabel as Address[]).length < 1) {
+            violations.push({
+              path: "addressListOrLabel",
+              reason: `must have at least 1 items, got ${(value.addressListOrLabel as Address[]).length}`,
+            });
+          }
+          (value.addressListOrLabel as Address[]).forEach((element, index) => {});
+        }
+        if (typeof value.addressListOrLabel === "string") {
+          if ([...(value.addressListOrLabel as string)].length < 1) {
+            violations.push({
+              path: "addressListOrLabel",
+              reason: `must have length >= 1, got ${[...(value.addressListOrLabel as string)].length}`,
+            });
+          }
+        }
+        out.addressListOrLabel = (() => {
+          try {
+            return serializeShowcaseAddressListOrLabel(value.addressListOrLabel);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "addressListOrLabel", error);
+            return undefined;
+          }
+        })();
+      }
+      if (value.location !== undefined) {
+        out.location = (() => {
+          try {
+            return showcaseLocationTransferTypeConverter.toTransferType(value.location);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "location", error);
+            return undefined;
+          }
+        })();
       }
       if (value.audit !== undefined) {
         out.audit =
           value.audit === null
             ? null
-            : showcaseAuditTransferTypeConverter.toTransferType(value.audit);
+            : (() => {
+                try {
+                  return showcaseAuditTransferTypeConverter.toTransferType(value.audit);
+                } catch (error) {
+                  __nexgenDefinitions.collect(violations, "audit", error);
+                  return undefined;
+                }
+              })();
       }
       if (value.rows !== undefined) {
-        out.rows = value.rows.map((element) =>
-          showcaseRowsItemTransferTypeConverter.toTransferType(element),
+        value.rows.forEach((element, index) => {});
+        out.rows = value.rows.map((element, index) =>
+          (() => {
+            try {
+              return showcaseRowsItemTransferTypeConverter.toTransferType(element);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, `rows[${index}]`, error);
+              return undefined;
+            }
+          })(),
         );
       }
       if (value.ledgerTs !== undefined) {
-        out.ledger = showcaseLedgerTransferTypeConverter.toTransferType(value.ledgerTs);
+        out.ledger = (() => {
+          try {
+            return showcaseLedgerTransferTypeConverter.toTransferType(value.ledgerTs);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "ledger", error);
+            return undefined;
+          }
+        })();
       }
       if (value.metadata !== undefined) {
-        out.metadata = showcaseMetadataTransferTypeConverter.toTransferType(
-          value.metadata,
-        );
+        out.metadata = (() => {
+          try {
+            return showcaseMetadataTransferTypeConverter.toTransferType(value.metadata);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "metadata", error);
+            return undefined;
+          }
+        })();
       }
       if (value.quotas !== undefined) {
-        out.quotas = quotasTransferTypeConverter.toTransferType(value.quotas);
+        out.quotas = (() => {
+          try {
+            return quotasTransferTypeConverter.toTransferType(value.quotas);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "quotas", error);
+            return undefined;
+          }
+        })();
       }
       if (value.tokens !== undefined) {
-        out.tokens = tokensTransferTypeConverter.toTransferType(value.tokens);
+        out.tokens = (() => {
+          try {
+            return tokensTransferTypeConverter.toTransferType(value.tokens);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "tokens", error);
+            return undefined;
+          }
+        })();
       }
       if (value.nicknames !== undefined) {
-        out.nicknames = nicknamesTransferTypeConverter.toTransferType(value.nicknames);
+        out.nicknames = (() => {
+          try {
+            return nicknamesTransferTypeConverter.toTransferType(value.nicknames);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "nicknames", error);
+            return undefined;
+          }
+        })();
       }
       if (value.choices !== undefined) {
-        out.choices = choicesTransferTypeConverter.toTransferType(value.choices);
+        out.choices = (() => {
+          try {
+            return choicesTransferTypeConverter.toTransferType(value.choices);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "choices", error);
+            return undefined;
+          }
+        })();
       }
       if (value.extras !== undefined) {
-        out.extras = extrasTransferTypeConverter.toTransferType(value.extras);
+        out.extras = (() => {
+          try {
+            return extrasTransferTypeConverter.toTransferType(value.extras);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "extras", error);
+            return undefined;
+          }
+        })();
       }
       if (value.shape !== undefined) {
-        out.shape = shapeTransferTypeConverter.toTransferType(value.shape);
+        out.shape = (() => {
+          try {
+            return shapeTransferTypeConverter.toTransferType(value.shape);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "shape", error);
+            return undefined;
+          }
+        })();
       }
       if (value.note !== undefined) {
-        out.note = noteTransferTypeConverter.toTransferType(value.note);
+        out.note = (() => {
+          try {
+            return noteTransferTypeConverter.toTransferType(value.note);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "note", error);
+            return undefined;
+          }
+        })();
       }
       if (value.address !== undefined) {
-        out.address = addressTransferTypeConverter.toTransferType(value.address);
+        out.address = (() => {
+          try {
+            return addressTransferTypeConverter.toTransferType(value.address);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "address", error);
+            return undefined;
+          }
+        })();
       }
       if (value.labels !== undefined) {
-        out.labels = labelsTransferTypeConverter.toTransferType(value.labels);
+        out.labels = (() => {
+          try {
+            return labelsTransferTypeConverter.toTransferType(value.labels);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "labels", error);
+            return undefined;
+          }
+        })();
       }
       if (value.settings !== undefined) {
-        out.settings = settingsTransferTypeConverter.toTransferType(value.settings);
+        out.settings = (() => {
+          try {
+            return settingsTransferTypeConverter.toTransferType(value.settings);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "settings", error);
+            return undefined;
+          }
+        })();
       }
       if (value.attributes !== undefined) {
-        out.attributes = attributesTransferTypeConverter.toTransferType(
-          value.attributes,
-        );
+        out.attributes = (() => {
+          try {
+            return attributesTransferTypeConverter.toTransferType(value.attributes);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "attributes", error);
+            return undefined;
+          }
+        })();
       }
       if (value.contact !== undefined) {
-        out.contact = contactTsTransferTypeConverter.toTransferType(value.contact);
+        out.contact = (() => {
+          try {
+            return contactTsTransferTypeConverter.toTransferType(value.contact);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "contact", error);
+            return undefined;
+          }
+        })();
       }
       if (violations.length) {
         throw new __nexgenDefinitions.ValidationError(violations);
@@ -3417,9 +4451,20 @@ export const showcaseLedgerTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseLedger): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
-        out[key] = showcaseLedgerValueTransferTypeConverter.toTransferType(entry);
+        out[key] = (() => {
+          try {
+            return showcaseLedgerValueTransferTypeConverter.toTransferType(entry);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, key, error);
+            return undefined;
+          }
+        })();
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
       }
       return out;
     }
@@ -3558,7 +4603,14 @@ export const showcaseLocationTransferTypeConverter =
       }
       out.city = value.city;
       if (value.geo !== undefined) {
-        out.geo = showcaseLocationGeoTransferTypeConverter.toTransferType(value.geo);
+        out.geo = (() => {
+          try {
+            return showcaseLocationGeoTransferTypeConverter.toTransferType(value.geo);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "geo", error);
+            return undefined;
+          }
+        })();
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
@@ -3590,6 +4642,12 @@ export const showcaseLocationGeoTransferTypeConverter =
           violations.push({ path: "lat", reason: "expected number" });
         } else {
           lat = raw.lat;
+          if (!Number.isFinite(raw.lat)) {
+            violations.push({
+              path: "lat",
+              reason: `must be a finite number, got ${raw.lat}`,
+            });
+          }
         }
       }
 
@@ -3601,6 +4659,12 @@ export const showcaseLocationGeoTransferTypeConverter =
           violations.push({ path: "lon", reason: "expected number" });
         } else {
           lon = raw.lon;
+          if (!Number.isFinite(raw.lon)) {
+            violations.push({
+              path: "lon",
+              reason: `must be a finite number, got ${raw.lon}`,
+            });
+          }
         }
       }
 
@@ -3625,15 +4689,31 @@ export const showcaseLocationGeoTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseLocationGeo): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       if (value.lat !== undefined) {
+        if (!Number.isFinite(value.lat)) {
+          violations.push({
+            path: "lat",
+            reason: `must be a finite number, got ${value.lat}`,
+          });
+        }
         out.lat = value.lat;
       }
       if (value.lon !== undefined) {
+        if (!Number.isFinite(value.lon)) {
+          violations.push({
+            path: "lon",
+            reason: `must be a finite number, got ${value.lon}`,
+          });
+        }
         out.lon = value.lon;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
       }
       return out;
     }
@@ -3880,6 +4960,12 @@ export const squareTransferTypeConverter =
           violations.push({ path: "side", reason: "expected number" });
         } else {
           side = raw.side;
+          if (!Number.isFinite(raw.side)) {
+            violations.push({
+              path: "side",
+              reason: `must be a finite number, got ${raw.side}`,
+            });
+          }
         }
       }
 
@@ -3904,6 +4990,12 @@ export const squareTransferTypeConverter =
         violations.push({ path: "kind", reason: `must equal "square"` });
       }
       out.kind = value.kind;
+      if (!Number.isFinite(value.side)) {
+        violations.push({
+          path: "side",
+          reason: `must be a finite number, got ${value.side}`,
+        });
+      }
       out.side = value.side;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;

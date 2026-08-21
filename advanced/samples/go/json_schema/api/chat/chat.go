@@ -336,8 +336,23 @@ func (m *Room) UnmarshalJSON(data []byte) error {
 	if raw := get("members"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"members", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Members); err != nil {
-		errs = append(errs, Violation{"members", "expected array"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"members", "expected array"})
+		} else {
+			m.Members = make([]string, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "members", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					m.Members = append(m.Members, value0)
+				}
+			}
+		}
 	}
 	if raw := get("labels"); raw == nil {
 	} else if isNull(*raw) {

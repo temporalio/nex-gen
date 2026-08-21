@@ -23,11 +23,248 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 export function collect(violations: Violation[], path: string, error: unknown): void {
   if (error instanceof ValidationError) {
     for (const inner of error.violations) {
-      const nested = inner.path ? `${path}.${inner.path}` : path;
+      const nested = !inner.path
+        ? path
+        : inner.path.startsWith("[")
+          ? `${path}${inner.path}`
+          : `${path}.${inner.path}`;
       violations.push({ path: nested, reason: inner.reason });
     }
   } else {
     violations.push({ path, reason: String(error) });
+  }
+}
+
+const TEMPORAL_DATE_TIME_RE =
+  /^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$/u;
+const TEMPORAL_DATE_RE = /^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/u;
+const TEMPORAL_TIME_RE =
+  /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?$/u;
+const TEMPORAL_DURATION_RE =
+  /^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)$/u;
+const TEMPORAL_DATE_TIME_CAP =
+  /^(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/u;
+const TEMPORAL_TIME_CAP = /^(\d{2}:\d{2}:\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?$/u;
+
+function daysInTemporalMonth(year: number, month: number): number {
+  switch (month) {
+    case 1:
+    case 3:
+    case 5:
+    case 7:
+    case 8:
+    case 10:
+    case 12:
+      return 31;
+    case 4:
+    case 6:
+    case 9:
+    case 11:
+      return 30;
+    case 2:
+      return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28;
+    default:
+      return 0;
+  }
+}
+
+function validTemporalCalendar(value: string): boolean {
+  if (value.length < 10) {
+    return false;
+  }
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  if (year < 1) {
+    return false;
+  }
+  const max = daysInTemporalMonth(year, month);
+  return max > 0 && day >= 1 && day <= max;
+}
+
+function trimTemporalFraction(fraction: string | undefined): string {
+  if (!fraction) {
+    return "";
+  }
+  const trimmed = fraction.replace(/0+$/u, "");
+  return trimmed === "." ? "" : trimmed;
+}
+
+function normalizeTemporalOffset(offset: string): string {
+  if (offset.toUpperCase() === "Z" || offset === "+00:00" || offset === "-00:00") {
+    return "Z";
+  }
+  return offset;
+}
+
+function canonicalizeTemporalDateTime(value: string): string {
+  const m = TEMPORAL_DATE_TIME_CAP.exec(value)!;
+  return `${m[1]}T${m[2]}${trimTemporalFraction(m[3])}${normalizeTemporalOffset(m[4])}`;
+}
+
+function canonicalizeTemporalTime(value: string): string {
+  const m = TEMPORAL_TIME_CAP.exec(value)!;
+  return `${m[1]}${trimTemporalFraction(m[2])}${m[3] ? normalizeTemporalOffset(m[3]) : ""}`;
+}
+
+function temporalDurationSeconds(value: string): number | undefined {
+  let total = 0;
+  let digits = "";
+  for (const ch of value.slice(2)) {
+    if (ch >= "0" && ch <= "9") {
+      digits += ch;
+      continue;
+    }
+    const unit = ch === "H" ? 3600 : ch === "M" ? 60 : 1;
+    total += Number(digits) * unit;
+    digits = "";
+    if (total > 9223372036) {
+      return undefined;
+    }
+  }
+  return total;
+}
+
+function formatTemporalDuration(total: number): string {
+  if (total === 0) {
+    return "PT0S";
+  }
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  let out = "PT";
+  if (hours) {
+    out += `${hours}H`;
+  }
+  if (minutes) {
+    out += `${minutes}M`;
+  }
+  if (seconds) {
+    out += `${seconds}S`;
+  }
+  return out;
+}
+
+export function parseTemporalDateTime(
+  value: string,
+  path: string,
+  violations: Violation[],
+): string | undefined {
+  if (!TEMPORAL_DATE_TIME_RE.test(value) || !validTemporalCalendar(value)) {
+    violations.push({
+      path,
+      reason: `must be a valid date-time, got ${JSON.stringify(value)}`,
+    });
+    return undefined;
+  }
+  return canonicalizeTemporalDateTime(value);
+}
+
+export function parseTemporalDate(
+  value: string,
+  path: string,
+  violations: Violation[],
+): string | undefined {
+  if (!TEMPORAL_DATE_RE.test(value) || !validTemporalCalendar(value)) {
+    violations.push({
+      path,
+      reason: `must be a valid date, got ${JSON.stringify(value)}`,
+    });
+    return undefined;
+  }
+  return value;
+}
+
+export function parseTemporalTime(
+  value: string,
+  path: string,
+  violations: Violation[],
+): string | undefined {
+  if (!TEMPORAL_TIME_RE.test(value)) {
+    violations.push({
+      path,
+      reason: `must be a valid time, got ${JSON.stringify(value)}`,
+    });
+    return undefined;
+  }
+  return canonicalizeTemporalTime(value);
+}
+
+export function parseTemporalDuration(
+  value: string,
+  path: string,
+  violations: Violation[],
+): string | undefined {
+  if (!TEMPORAL_DURATION_RE.test(value)) {
+    violations.push({
+      path,
+      reason: `must be a valid duration, got ${JSON.stringify(value)}`,
+    });
+    return undefined;
+  }
+  const seconds = temporalDurationSeconds(value);
+  if (seconds === undefined) {
+    violations.push({
+      path,
+      reason: `must be a valid duration, got ${JSON.stringify(value)}`,
+    });
+    return undefined;
+  }
+  return formatTemporalDuration(seconds);
+}
+
+export function validateTemporalDateTime(
+  value: string,
+  path: string,
+  violations: Violation[],
+): void {
+  const wire = value;
+  if (!TEMPORAL_DATE_TIME_RE.test(wire) || !validTemporalCalendar(wire)) {
+    violations.push({
+      path,
+      reason: `must be a valid date-time, got ${JSON.stringify(wire)}`,
+    });
+  }
+}
+
+export function validateTemporalDate(
+  value: string,
+  path: string,
+  violations: Violation[],
+): void {
+  const wire = value;
+  if (!TEMPORAL_DATE_RE.test(wire) || !validTemporalCalendar(wire)) {
+    violations.push({
+      path,
+      reason: `must be a valid date, got ${JSON.stringify(wire)}`,
+    });
+  }
+}
+
+export function validateTemporalTime(
+  value: string,
+  path: string,
+  violations: Violation[],
+): void {
+  if (!TEMPORAL_TIME_RE.test(value)) {
+    violations.push({
+      path,
+      reason: `must be a valid time, got ${JSON.stringify(value)}`,
+    });
+  }
+}
+
+export function validateTemporalDuration(
+  value: string,
+  path: string,
+  violations: Violation[],
+): void {
+  const wire = value;
+  if (!TEMPORAL_DURATION_RE.test(wire) || temporalDurationSeconds(wire) === undefined) {
+    violations.push({
+      path,
+      reason: `must be a valid duration, got ${JSON.stringify(wire)}`,
+    });
   }
 }
 

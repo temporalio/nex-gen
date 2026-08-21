@@ -13,6 +13,7 @@ from showcase import (
     Extras,
     Labels,
     LinkNote,
+    Metrics,
     Settings,
     Showcase,
     ShowcaseDetailObject,
@@ -1004,6 +1005,43 @@ def test_inline_object_shapes_roundtrip_and_reject() -> None:
     assert parse_violations({**BASE, "metadata": {"a": 1, "b": 2, "c": 3, "d": 4}}) == [
         ("metadata", "must have at most 3 properties, got 4")
     ]
+
+
+def test_recursive_collections_and_non_finite_positions() -> None:
+    value = expect_showcase("showcase-recursive-collections.json")
+    assert value.number_grid == [[1, 2.5], [3]]
+    assert value.addresses is not None
+    assert value.addresses[0].street == "1 Main St"
+    assert value.address_book is not None
+    assert value.address_book.additional_properties["home"].street == "2 Side St"
+    assert value.dates is not None
+    assert value.dates[0].year == 1
+    assert value.date_index is not None
+    assert value.date_index.additional_properties["first"].year == 1
+    assert value.blobs == [b"hi", b">>>"]
+    assert value.blob_index is not None
+    assert value.blob_index.additional_properties["hi"] == b"hi"
+
+    violations = parse_violations({**BASE, "slots": ["x"], "links": ["not a uri"]})
+    assert [path for path, _ in violations] == ["slots[0]", "links[0]"]
+
+    replacements = [
+        ({"score": float("nan")}, "score"),
+        ({"metric_or_label": float("inf")}, "metricOrLabel"),
+        ({"measurements": [float("-inf")]}, "measurements[0]"),
+        ({"number_grid": [[1, float("nan")]]}, "numberGrid[0][1]"),
+        (
+            {"metrics": Metrics(additional_properties={"cpu": float("inf")})},
+            "metrics.cpu",
+        ),
+    ]
+    for replacement, path in replacements:
+        invalid = dataclasses.replace(value, **replacement)
+        with pytest.raises(ValidationError) as excinfo:
+            _ = converter_for(Showcase).to_transfer_type(invalid)
+        pairs = violation_pairs(excinfo.value)
+        assert pairs[0][0] == path
+        assert "finite number" in pairs[0][1]
 
 
 def test_serialize_rejects_invalid_in_memory_values() -> None:

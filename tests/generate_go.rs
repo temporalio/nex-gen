@@ -80,6 +80,35 @@ $defs:
         - { type: integer }
 "##;
 
+const RECURSIVE_POSITION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [count, matrix, dates, blobs, children]
+properties:
+  count: { type: integer }
+  score: { type: number }
+  matrix:
+    type: array
+    items:
+      type: array
+      items: { type: number }
+  dates:
+    type: array
+    items: { type: string, format: date }
+  blobs: { $ref: "#/$defs/BlobMap" }
+  children:
+    type: array
+    items: { $ref: "#/$defs/Child" }
+$defs:
+  BlobMap:
+    type: object
+    additionalProperties: { type: string, contentEncoding: base64 }
+  Child:
+    type: object
+    required: [value]
+    properties:
+      value: { type: number }
+"##;
+
 fn generate_to_string_with_inputs(
     language: nexgen::language::Language,
     input_paths: &[PathBuf],
@@ -1744,17 +1773,193 @@ fn go_json_decodes_element_position_unions() {
     assert!(rendered.contains("Segments []BagSegmentsItem `json:\"segments,omitempty\"`"));
     // Elements decode one at a time, with the index in the violation path.
     assert!(rendered.contains("p0 := fmt.Sprintf(\"%s[%d]\", \"segments\", i0)"));
-    assert!(rendered.contains("if v, ok := unmarshalBagSegmentsItem(e0, p0, &errs); ok {"));
+    assert!(rendered.contains("if value0, ok := unmarshalBagSegmentsItem(e0, p0, &errs); ok {"));
     // A named union in element position takes the same path.
     assert!(rendered.contains("Choices []Choice `json:\"choices,omitempty\"`"));
-    assert!(rendered.contains("if v, ok := unmarshalChoice(e0, p0, &errs); ok {"));
+    assert!(rendered.contains("if value0, ok := unmarshalChoice(e0, p0, &errs); ok {"));
     // Serialize re-runs each element's own branch constraints (P12).
-    assert!(rendered.contains("mergeNested(&errs, p0, v0.Validate())"));
+    assert!(rendered.contains("if isNilValue(v0) {"));
+    assert!(rendered.contains("errs = append(errs, Violation{p0, \"explicit null not allowed\"})"));
     // A map member routes through the dispatcher under its key.
     assert!(rendered.contains("AdditionalProperties map[string]EntriesValue"));
     assert!(rendered.contains("if value, ok := unmarshalEntriesValue(v, k, &errs); ok {"));
     // Element nullability stays the element's own concern.
     assert!(rendered.contains("Slots []*string `json:\"slots,omitempty\"`"));
+
+    fs::write(
+        output_path.join("bag_test.go"),
+        r#"package bag
+
+import (
+	"encoding/json"
+	"errors"
+	"testing"
+)
+
+func TestNilUnionPositionsReturnValidationErrors(t *testing.T) {
+	var segment *BagSegmentsItemString
+	var entry *EntriesValueString
+	value := Bag{
+		Segments: []BagSegmentsItem{segment},
+		Entries: &Entries{AdditionalProperties: map[string]EntriesValue{"bad": entry}},
+	}
+	_, err := json.Marshal(value)
+	var validation *ValidationError
+	if !errors.As(err, &validation) {
+		t.Fatalf("expected ValidationError, got %v", err)
+	}
+	got := map[string]bool{}
+	for _, violation := range validation.Violations {
+		got[violation.Path] = true
+	}
+	for _, path := range []string{"segments[0]", "entries.bad"} {
+		if !got[path] {
+			t.Errorf("missing violation path %q in %#v", path, validation.Violations)
+		}
+	}
+}
+"#,
+    )
+    .unwrap();
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let test_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(test_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn go_json_recursively_converts_and_validates_element_positions() {
+    let temp_dir = unique_output_path("go-json-recursive-positions");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("recursive.yaml");
+    fs::write(&input_path, RECURSIVE_POSITION_SCHEMA).unwrap();
+    let output_path = temp_dir.join("recursive");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = fs::read_to_string(output_path.join("recursive.go")).unwrap();
+    let definitions = fs::read_to_string(output_path.join("definitions.go")).unwrap();
+    assert!(definitions.contains("digits += strings.Repeat(\"0\", int(scale))"));
+    assert!(definitions.contains("math.IsNaN(f) || math.IsInf(f, 0)"));
+    assert!(definitions.contains("if strings.HasPrefix(v.Path, \"[\")"));
+    assert!(definitions.contains("if len(*errs) > 0"));
+    assert!(rendered.contains("p1 := fmt.Sprintf(\"%s[%d]\", p0, i1)"));
+    assert!(rendered.contains("parseNumberField(&e1, p1, true, false, &errs)"));
+    assert!(rendered.contains("parseDate(p0, s0, &errs)"));
+    assert!(rendered.contains("decodeBase64(k, s, blobMapValueContentEncoding, &errs)"));
+    assert!(rendered.contains("mergeNested(&errs, p0, v0.Validate())"));
+
+    fs::write(
+        output_path.join("recursive_test.go"),
+        r#"package recursive
+
+import (
+	"encoding/json"
+	"errors"
+	"math"
+	"testing"
+	"time"
+)
+
+func paths(err error) map[string]bool {
+	var validation *ValidationError
+	if !errors.As(err, &validation) {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, violation := range validation.Violations {
+		out[violation.Path] = true
+	}
+	return out
+}
+
+func TestRecursivePositions(t *testing.T) {
+	for _, literal := range []string{"1", "1.0", "1e2", "1.5e1", "-1.5e1", "100e-2", "0e999999999999999999999", "9007199254740991", "-9007199254740991"} {
+		var value Recursive
+		payload := []byte(`{"count":` + literal + `,"matrix":[],"dates":[],"blobs":{},"children":[]}`)
+		if err := json.Unmarshal(payload, &value); err != nil {
+			t.Fatalf("integer spelling %s rejected: %v", literal, err)
+		}
+	}
+	for _, literal := range []string{"1.5", "1e-999999999999999999999", "1e999999999999999999999", "9007199254740990.5", "9007199254740990.6", "9007199254740991.1", "9007199254740992", "-9007199254740992"} {
+		var value Recursive
+		payload := []byte(`{"count":` + literal + `,"matrix":[],"dates":[],"blobs":{},"children":[]}`)
+		if err := json.Unmarshal(payload, &value); err == nil {
+			t.Fatalf("invalid integer spelling %s accepted", literal)
+		}
+	}
+
+	score := math.Inf(1)
+	value := Recursive{
+		Count: 1,
+		Score: &score,
+		Matrix: [][]float64{{math.Inf(-1)}},
+		Dates: []time.Time{time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC)},
+		Blobs: BlobMap{AdditionalProperties: map[string][]byte{"data": {1, 2}}},
+		Children: []Child{{Value: math.NaN()}},
+	}
+	_, err := json.Marshal(value)
+	var validation *ValidationError
+	if !errors.As(err, &validation) {
+		t.Fatalf("expected ValidationError, got %v", err)
+	}
+	if len(validation.Violations) != 4 {
+		t.Fatalf("expected exactly four validation violations, got %#v", validation.Violations)
+	}
+	got := paths(err)
+	for _, path := range []string{"score", "matrix[0][0]", "dates[0]", "children[0].value"} {
+		if !got[path] {
+			t.Errorf("missing violation path %q in %#v", path, got)
+		}
+	}
+
+	value.Score = nil
+	value.Matrix = [][]float64{{1}}
+	value.Dates = []time.Time{time.Date(1, 1, 2, 0, 0, 0, 0, time.UTC)}
+	value.Children = []Child{{Value: 2}}
+	wire, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(wire) != `{"blobs":{"data":"AQI="},"children":[{"value":2}],"count":1,"dates":["0001-01-02"],"matrix":[[1]]}` {
+		t.Fatalf("unexpected wire: %s", wire)
+	}
+}
+"#,
+    )
+    .unwrap();
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let test_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(test_status.success());
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

@@ -170,8 +170,10 @@ these because we own the check:
   parse (Go / Python / Ruby native parsers reject lowercase; safe because the
   grammar has no other letters).
 - **Calendar validity** (`date`, and the date half of `date-time`) enforces
-  month `01–12`, day within the month's length, and the Gregorian leap-year
-  rule.
+  year `0001–9999`, month `01–12`, day within the month's length, and the
+  Gregorian leap-year rule. Year `0000` is rejected uniformly: Python's native
+  temporal types cannot represent it, so accepting it elsewhere would violate
+  P1.
 - **Leap second** — see the narrowing above: **rejected** on materialized
   nodes, **accepted** on string-opt-out nodes.
 
@@ -368,7 +370,7 @@ materialized, `:60`-rejecting grammar):
 
 | Format | Pinned pattern (materialized node) |
 |---|---|
-| `date` | `^[0-9]{4}-(0[1-9]\|1[0-2])-(0[1-9]\|[12][0-9]\|3[01])$` + calendar predicate |
+| `date` | `^[0-9]{4}-(0[1-9]\|1[0-2])-(0[1-9]\|[12][0-9]\|3[01])$` + calendar predicate (year `0001–9999`) |
 | `time` | `^([01][0-9]\|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?(Z\|[+-]([01][0-9]\|2[0-3]):[0-5][0-9])?$` (offset optional; no `\|60`) |
 | `date-time` | full-date `T` full-time, **offset required**, no `\|60` + calendar + range |
 | `duration` | `^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?\|[0-9]+M(?:[0-9]+S)?\|[0-9]+S)$` (time-only) |
@@ -405,13 +407,15 @@ compiled constant; the load gate proves it compiles, so the emitted
   decoded string, so an in-memory value set to a non-UUID (etc.) fails
   serialize with the same aggregated primitive — real teeth in the
   statically-typed targets. The check is direction-agnostic.
-- **Materialized temporals:** the model field is a **native type that cannot
-  hold an invalid value** (a `time.Time` is always a valid instant; a
-  `time.Duration` always a valid duration), so the type system replaces the
-  serialize-side *format* validator — there is no invalid *format* state to
-  catch. Serialize is therefore a pure **re-serialization** (typed → wire,
-  offset & precision preserved to the type's resolution), the one place
-  `format` has genuine encode-adapter logic. A co-occurring [[minLength]] /
+- **Materialized temporals:** the model field is a native type, so most wire
+  grammar checks no longer apply. The serializer still enforces the shared
+  calendar floor for `date` / `date-time`, because Go, Java, and Temporal can
+  construct a native year-zero value while Python cannot; year `< 1` is an
+  aggregated violation before formatting. Other native values are valid by
+  construction (`time.Duration` always represents a supported time-only
+  duration, for example). Serialize then **re-serializes** typed → wire with
+  offset and precision preserved to the type's resolution. A co-occurring
+  [[minLength]] /
   [[maxLength]] / [[pattern]] is **not** subsumed by the type, though — the
   re-serialized wire string can still be too long or off-pattern — so that
   predicate re-runs over it **before emit** (**P12**). The only parse-side guard
@@ -427,6 +431,7 @@ compiled constant; the load gate proves it compiles, so the emitted
 |---|---|
 | `uuid` / `ipv4` / `ipv6` | `{type:"string", format:"uuid"}` |
 | `date-time` / `date` / `time` | `{type:"string", format:"date-time"}` (materialized) |
+| First calendar year | `0001-01-01`, `0001-01-01T00:00:00Z` |
 | `duration` (time-only) | `{type:"string", format:"duration"}` → accepts `PT1H30M`, `PT0S` |
 | `hostname` / `email` | `{type:"string", format:"hostname"}` |
 | `uri` / `uri-reference` | `{type:"string", format:"uri"}` |
@@ -444,6 +449,7 @@ compiled constant; the load gate proves it compiles, so the emitted
 | Deferred standard format | `{…, format:"idn-email"}`, `{…, format:"iri"}`, `{…, format:"uri-template"}`, `{…, format:"regex"}` |
 | Materialized narrowing: leap second | materialized `{…, format:"date-time"}` with `const:"2021-12-31T23:59:60Z"` |
 | Materialized narrowing: calendar duration | materialized `{…, format:"duration"}` with `const:"P1Y"` / `"P4W"` / `"P1D"` |
+| Calendar year zero | materialized `{…, format:"date"}` with `const:"0000-01-01"` (same for `date-time`) |
 | Literal fails its format | `{…, format:"uuid", const:"not-a-uuid"}`, `{…, default:"nope"}` |
 
 ### Runtime fixtures (validator + round-trip)

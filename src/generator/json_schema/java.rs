@@ -264,6 +264,117 @@ fn render_java_numeric_checks(
     }
 }
 
+/// True when an in-memory value contains a JSON Schema `number` position whose
+/// Java `double` can carry NaN or infinity. References validate in their own
+/// generated serializer; union branches validate through their dispatcher.
+fn java_type_needs_finite_check(ty: &JavaType) -> bool {
+    match ty {
+        JavaType::Double => true,
+        JavaType::List(element) => java_type_needs_finite_check(element),
+        _ => false,
+    }
+}
+
+/// True when an in-memory materialized date/date-time can carry Gregorian year
+/// zero even though the shared wire contract starts at year 0001.
+fn java_type_needs_calendar_year_check(ty: &JavaType) -> bool {
+    match ty {
+        JavaType::Temporal(
+            crate::json_schema::format::TemporalKind::Date
+            | crate::json_schema::format::TemporalKind::DateTime,
+        ) => true,
+        JavaType::List(element) => java_type_needs_calendar_year_check(element),
+        _ => false,
+    }
+}
+
+/// Emits the serialize-side finiteness predicate for every `number` reachable
+/// through `ty`. Arrays recurse elementwise and extend the violation path at
+/// each level, so nested failures surface as `field[1][2]`.
+fn render_java_finite_checks(
+    output: &mut String,
+    ty: &JavaType,
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+    depth: usize,
+) {
+    match ty {
+        JavaType::Double => {
+            output.push_str(&format!(
+                "{indent}if (!Double.isFinite({value_expr})) {{\n{indent}    violations.add(new Violation({path_expr}, \"must be a finite number, got \" + {value_expr}));\n{indent}}}\n"
+            ));
+        }
+        JavaType::List(element) if java_type_needs_finite_check(element) => {
+            let index = format!("finiteIndex{depth}");
+            let value = format!("finiteValue{depth}");
+            let element_path = format!("{path_expr} + \"[\" + {index} + \"]\"");
+            output.push_str(&format!(
+                "{indent}for (int {index} = 0; {index} < {value_expr}.size(); {index}++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    {} {value} = {value_expr}.get({index});\n",
+                element.boxed_name()
+            ));
+            output.push_str(&format!("{indent}    if ({value} != null) {{\n"));
+            render_java_finite_checks(
+                output,
+                element,
+                &value,
+                &element_path,
+                &format!("{indent}        "),
+                depth + 1,
+            );
+            output.push_str(&format!("{indent}    }}\n{indent}}}\n"));
+        }
+        _ => {}
+    }
+}
+
+/// Emits the serialize-side year floor for materialized native dates and
+/// date-times, recursively extending array paths just like number validation.
+fn render_java_calendar_year_checks(
+    output: &mut String,
+    ty: &JavaType,
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+    depth: usize,
+) {
+    match ty {
+        JavaType::Temporal(kind @ crate::json_schema::format::TemporalKind::Date)
+        | JavaType::Temporal(kind @ crate::json_schema::format::TemporalKind::DateTime) => {
+            output.push_str(&format!(
+                "{indent}if ({value_expr}.getYear() < 1) {{\n{indent}    violations.add(new Violation({path_expr}, \"must be a valid {}, got \" + {value_expr} + \": year must be >= 0001\"));\n{indent}}}\n",
+                kind.name()
+            ));
+        }
+        JavaType::List(element) if java_type_needs_calendar_year_check(element) => {
+            let index = format!("calendarIndex{depth}");
+            let value = format!("calendarValue{depth}");
+            let element_path = format!("{path_expr} + \"[\" + {index} + \"]\"");
+            output.push_str(&format!(
+                "{indent}for (int {index} = 0; {index} < {value_expr}.size(); {index}++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    {} {value} = {value_expr}.get({index});\n",
+                element.boxed_name()
+            ));
+            output.push_str(&format!("{indent}    if ({value} != null) {{\n"));
+            render_java_calendar_year_checks(
+                output,
+                element,
+                &value,
+                &element_path,
+                &format!("{indent}        "),
+                depth + 1,
+            );
+            output.push_str(&format!("{indent}    }}\n{indent}}}\n"));
+        }
+        _ => {}
+    }
+}
+
 /// Emits the string-length predicates (`minLength`/`maxLength`) over
 /// `value_expr` (a validated `String` in scope) into the collecting
 /// deserializer, appending `Violation`s. Length is the Unicode code-point count
@@ -2524,6 +2635,12 @@ fn field_has_serialize_check(field: &FieldPlan) -> bool {
     {
         return true;
     }
+    if java_type_needs_finite_check(&field.ty) {
+        return true;
+    }
+    if java_type_needs_calendar_year_check(&field.ty) {
+        return true;
+    }
     match &field.ty {
         JavaType::String => !field.string_length.is_empty(),
         JavaType::Long | JavaType::Double => !field.numeric.is_empty(),
@@ -2554,6 +2671,8 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
     let inner = format!("{indent}    ");
     let mut body = String::new();
     {
+        render_java_finite_checks(&mut body, &field.ty, &accessor, &json, &inner, 0);
+        render_java_calendar_year_checks(&mut body, &field.ty, &accessor, &json, &inner, 0);
         match &field.ty {
             JavaType::String if !field.string_length.is_empty() => render_java_string_checks(
                 &mut body,
@@ -3601,6 +3720,8 @@ fn render_java_member_checks(
     ty: &JavaType,
     indent: &str,
 ) {
+    render_java_finite_checks(output, ty, value_expr, key_expr, indent, 0);
+    render_java_calendar_year_checks(output, ty, value_expr, key_expr, indent, 0);
     if let Some(values) = closed_member_values(member) {
         let condition = values
             .iter()
@@ -4395,31 +4516,67 @@ pub(in crate::generator) fn render_spec_numbers_file(package: &str) -> String {
     output
 }
 
-/// True when any property of the model materializes a temporal `format`.
+/// Recursively walks schema-bearing positions that can materialize a target
+/// type. Planned `$defs` are models of their own and are covered by the caller's
+/// all-model scan; this handles properties, arrays, nullable/sum branches, and
+/// typed-map members within each planned model.
+fn schema_uses_feature(schema: &Schema, direct: fn(&Schema) -> bool) -> bool {
+    if direct(schema) {
+        return true;
+    }
+    if schema.properties.as_ref().is_some_and(|properties| {
+        properties
+            .values()
+            .any(|value| schema_uses_feature(value, direct))
+    }) {
+        return true;
+    }
+    if schema
+        .items
+        .as_deref()
+        .is_some_and(|items| schema_uses_feature(items, direct))
+        || schema.one_of.as_ref().is_some_and(|branches| {
+            branches
+                .iter()
+                .any(|branch| schema_uses_feature(branch, direct))
+        })
+        || schema
+            .contains
+            .as_deref()
+            .is_some_and(|contains| schema_uses_feature(contains, direct))
+        || schema
+            .property_names
+            .as_deref()
+            .is_some_and(|names| schema_uses_feature(names, direct))
+    {
+        return true;
+    }
+    let Some(Value::Object(member)) = &schema.additional_properties else {
+        return false;
+    };
+    serde_json::from_value::<Schema>(Value::Object(member.clone()))
+        .is_ok_and(|member| schema_uses_feature(&member, direct))
+}
+
+/// True when any reachable position of the model materializes a temporal
+/// `format`.
 pub(in crate::generator) fn model_uses_temporal(model: &PlannedJsonType) -> bool {
     let Ok(schema) = decode_schema(model) else {
         return false;
     };
-    schema.properties.as_ref().is_some_and(|properties| {
-        properties.values().any(|property| {
-            temporal_kind_direct(property).is_some()
-                || nullable_non_null_schema(property)
-                    .is_some_and(|inner| temporal_kind_direct(inner).is_some())
-        })
+    schema_uses_feature(&schema, |candidate| {
+        temporal_kind_direct(candidate).is_some()
     })
 }
 
-/// True when any property of the model materializes a `contentEncoding`.
+/// True when any reachable position of the model materializes a
+/// `contentEncoding`.
 pub(in crate::generator) fn model_uses_content_encoding(model: &PlannedJsonType) -> bool {
     let Ok(schema) = decode_schema(model) else {
         return false;
     };
-    schema.properties.as_ref().is_some_and(|properties| {
-        properties.values().any(|property| {
-            content_encoding_direct(property).is_some()
-                || nullable_non_null_schema(property)
-                    .is_some_and(|inner| content_encoding_direct(inner).is_some())
-        })
+    schema_uses_feature(&schema, |candidate| {
+        content_encoding_direct(candidate).is_some()
     })
 }
 
@@ -4559,6 +4716,9 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
             int year = Integer.parseInt(value.substring(0, 4));
             int month = Integer.parseInt(value.substring(5, 7));
             int day = Integer.parseInt(value.substring(8, 10));
+            if (year < 1) {
+                return false;
+            }
             int max = daysInMonth(year, month);
             return max > 0 && day >= 1 && day <= max;
         } catch (NumberFormatException e) {

@@ -3,6 +3,7 @@ package kb
 
 import (
 	"encoding/json"
+	"fmt"
 )
 
 // Page A page. One half of the Page <-> Block cross-file cycle. Because the cycle spans two input files, Page and Block hoist together into Python's _recursive.py; the non-cyclic PageMeta helper stays in this module.
@@ -22,6 +23,10 @@ type Page struct {
 func (m Page) Validate() error {
 	var errs []Violation
 	mergeNested(&errs, "meta", m.Meta.Validate())
+	for i0, v0 := range m.Blocks {
+		p0 := fmt.Sprintf("%s[%d]", "blocks", i0)
+		mergeNested(&errs, p0, v0.Validate())
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -66,8 +71,26 @@ func (m *Page) UnmarshalJSON(data []byte) error {
 	if raw := get("blocks"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"blocks", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Blocks); err != nil {
-		errs = append(errs, Violation{"blocks", "expected array"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"blocks", "expected array"})
+		} else {
+			m.Blocks = make([]Block, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "blocks", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				var value0 Block
+				if err := json.Unmarshal(e0, &value0); err != nil {
+					mergeNested(&errs, p0, err)
+				} else {
+					m.Blocks = append(m.Blocks, value0)
+				}
+			}
+		}
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}

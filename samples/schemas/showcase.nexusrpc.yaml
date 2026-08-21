@@ -245,6 +245,9 @@ $defs:
         type: number
         minimum: 5
         multipleOf: 5
+      score:
+        description: Optional unbounded finite number.
+        type: number
       step:
         description: Optional integer that must be a multiple of 3.
         type: integer
@@ -367,14 +370,15 @@ $defs:
             - { type: integer, minimum: 0 }
       slots:
         description: >-
-          A list of **nullable elements** — the two-branch nullability `oneOf`
-          rather than a sum type, so nothing is named: the elements themselves
-          become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`,
-          `List<@Nullable String>`) while the list stays a list.
+          A list of **nullable, constrained scalar elements** — the two-branch
+          nullability `oneOf` rather than a sum type, so nothing is named: the
+          elements themselves become nullable (`[]*string`, `(string | null)[]`,
+          `list[str | None]`, `List<@Nullable String>`) while each present string
+          retains its own minimum length and the list stays a list.
         type: array
         items:
           oneOf:
-            - { type: string }
+            - { type: string, minLength: 2 }
             - { type: "null" }
       grid:
         description: >-
@@ -385,6 +389,52 @@ $defs:
         items:
           type: array
           items: { type: integer }
+      numberGrid:
+        description: >-
+          A nested array of numbers used to prove recursive finite-number
+          validation and two-dimensional indexed aggregation.
+        type: array
+        items:
+          type: array
+          items: { type: number }
+      links:
+        description: A list of scalar URI values; every element keeps its format assertion.
+        type: array
+        items: { type: string, format: uri }
+      addresses:
+        description: A list of referenced models, converted and validated elementwise.
+        type: array
+        items: { $ref: "#/$defs/Address" }
+      addressBook:
+        $ref: "#/$defs/AddressBook"
+      dates:
+        description: Materialized calendar dates in an array.
+        type: array
+        items: { type: string, format: date }
+      dateIndex:
+        $ref: "#/$defs/DateIndex"
+      blobs:
+        description: Materialized base64 byte strings in an array.
+        type: array
+        items: { type: string, contentEncoding: base64 }
+      blobIndex:
+        $ref: "#/$defs/BlobIndex"
+      metrics:
+        $ref: "#/$defs/Metrics"
+      metricOrLabel:
+        description: A finite number branch or a non-empty string branch.
+        oneOf:
+          - { type: number }
+          - { type: string, minLength: 1 }
+      addressListOrLabel:
+        description: >-
+          A union whose array branch contains referenced models, proving that
+          branch conversion uses the ordinary recursive array mapper.
+        oneOf:
+          - type: array
+            minItems: 1
+            items: { $ref: "#/$defs/Address" }
+          - { type: string, minLength: 1 }
       location:
         description: >-
           An object written **inline** on the property rather than in `$defs`. It
@@ -538,6 +588,22 @@ $defs:
       city: { type: string }
       zip: { type: integer }
     required: [street]
+  AddressBook:
+    description: A typed map of referenced Address models.
+    type: object
+    additionalProperties: { $ref: "#/$defs/Address" }
+  DateIndex:
+    description: A typed map of materialized calendar dates.
+    type: object
+    additionalProperties: { type: string, format: date }
+  BlobIndex:
+    description: A typed map of materialized base64 byte strings.
+    type: object
+    additionalProperties: { type: string, contentEncoding: base64 }
+  Metrics:
+    description: A typed map of finite numbers.
+    type: object
+    additionalProperties: { type: number }
   Labels:
     description: Arbitrary string key/value labels (typed map).
     type: object

@@ -1006,9 +1006,9 @@ def _valid_temporal_calendar(value: str) -> bool:
         year, month, day = int(value[0:4]), int(value[5:7]), int(value[8:10])
     except ValueError:
         return False
-    # `datetime.MINYEAR` is 1, so year 0000 -- which the wire grammar admits and
-    # the other three targets materialize -- has no Python value at all. It is
-    # rejected rather than shifted into range, and `_temporal_reason` says so.
+    # `datetime.MINYEAR` is 1, which is also the shared cross-language floor.
+    # Year 0000 is rejected rather than shifted into range, and
+    # `_temporal_reason` says so.
     if year < datetime.MINYEAR:
         return False
     maximum = _days_in_month(year, month)
@@ -1018,9 +1018,8 @@ def _valid_temporal_calendar(value: str) -> bool:
 def _temporal_reason(name: str, value: str) -> str:
     """The reason a rejected temporal string is reported under.
 
-    Year 0000 earns its own clause: it is a valid wire value the other targets
-    accept, so a caller needs to read Python's floor rather than conclude the
-    timestamp was malformed.
+    Year 0000 earns its own clause so the caller sees the shared calendar floor
+    rather than only a generic malformed-timestamp reason.
     """
 
     if value[0:4] == "0000":
@@ -1874,6 +1873,10 @@ fn py_field_needs_serialize_check(schema: &Schema) -> bool {
                 || schema.max_items.is_some()
                 || schema.unique_items == Some(true)
                 || schema.contains.is_some()
+                || schema
+                    .items
+                    .as_deref()
+                    .is_some_and(py_field_needs_serialize_check)
         }
         _ => false,
     }
@@ -1974,7 +1977,52 @@ fn render_py_field_checks(
         Some("number") | Some("integer") => {
             render_py_numeric_checks(output, value_expr, path_expr, schema, indent)
         }
-        Some("array") => render_py_array_checks(output, value_expr, path_expr, schema, indent)?,
+        Some("array") => {
+            render_py_array_checks(output, value_expr, path_expr, schema, indent)?;
+            if let Some(items) = schema.items.as_deref()
+                && py_field_needs_serialize_check(items)
+            {
+                // Validate every materialized element before the enclosing value
+                // is emitted. The depth-derived names stay distinct for nested
+                // arrays, so an inner loop cannot overwrite the outer index used
+                // to build paths such as `numberGrid[0][1]`.
+                let depth = indent.len();
+                let index = format!("item_index_{depth}");
+                let element = format!("item_element_{depth}");
+                let loop_indent = format!("{indent}    ");
+                let item_path = py_indexed_path(path_expr, &index);
+                let nullable = allows_null(items);
+                let check_indent = if nullable {
+                    format!("{loop_indent}    ")
+                } else {
+                    loop_indent.clone()
+                };
+                let mut checks = String::new();
+                render_py_field_checks(
+                    &mut checks,
+                    items,
+                    models,
+                    &element,
+                    &item_path,
+                    &check_indent,
+                )?;
+                // Some materialized schemas (for example `date`) report that
+                // they need serialize validation but their native helper proves
+                // sufficient and emits no inline predicate. Do not leave an
+                // empty loop behind in that case.
+                if !checks.is_empty() {
+                    output.push_str(indent);
+                    output.push_str(&format!(
+                        "for {index}, {element} in enumerate({value_expr}):\n"
+                    ));
+                    if nullable {
+                        output.push_str(&loop_indent);
+                        output.push_str(&format!("if {element} is not None:\n"));
+                    }
+                    output.push_str(&checks);
+                }
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -2030,7 +2078,10 @@ fn py_literal_text(expr: &str) -> Option<String> {
 fn py_indexed_path(path_expr: &str, index_var: &str) -> String {
     match py_literal_text(path_expr) {
         Some(text) => format!("f'{}[{{{index_var}}}]'", py_fstring_text(&text)),
-        None => format!("f'{{{path_expr}}}[{{{index_var}}}]'"),
+        // Concatenate a new suffix instead of interpolating the already-dynamic
+        // expression. This remains valid on Python 3.10 even when `path_expr`
+        // is itself an f-string from an outer array level.
+        None => format!("{path_expr} + f'[{{{index_var}}}]'"),
     }
 }
 

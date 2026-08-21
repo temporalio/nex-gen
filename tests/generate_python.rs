@@ -1296,6 +1296,15 @@ fn python_json_validates_non_object_union_branch_constraints() {
     );
     assert!(rendered.contains("if _PATTERN_F242E3A159C2422C.search(value) is None:"));
     assert!(rendered.contains("_check_unique_items("));
+    // The array branch's element schema is part of the serialize contract too:
+    // its unconstrained `number` still contributes the uniform finiteness guard
+    // at the indexed path.
+    assert!(
+        rendered.contains("for item_index_8, item_element_8 in enumerate(value.list_or_name):")
+    );
+    assert!(rendered.contains(
+        "Violation(path=f'listOrName[{item_index_8}]', reason=f\"must be a finite number, got {item_element_8}\")"
+    ));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

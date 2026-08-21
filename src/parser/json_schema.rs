@@ -7145,6 +7145,21 @@ properties:
     }
 
     #[test]
+    fn materialized_temporal_literals_start_at_year_one() {
+        numeric_accept("type: string\nformat: date\nconst: \"0001-01-01\"");
+        numeric_accept("type: string\nformat: date-time\ndefault: \"0001-01-01T00:00:00Z\"");
+
+        for literal in [
+            "type: string\nformat: date\nconst: \"0000-01-01\"",
+            "type: string\nformat: date-time\ndefault: \"0000-01-01T00:00:00Z\"",
+            "type: string\nformat: date\nenum: [\"0000-01-01\"]",
+        ] {
+            let error = numeric_reject(literal);
+            assert!(error.contains("is not a valid date"), "{error}");
+        }
+    }
+
+    #[test]
     fn rejects_materialized_leap_second_literal() {
         // Materialized narrowing: `:60` cannot be held by a native type.
         let error =

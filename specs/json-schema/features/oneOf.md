@@ -267,6 +267,12 @@ allocate a sealed interface. Each element/member is routed through the
 union's own dispatcher, and its index or key is threaded into the violation
 path (`shapes[1]`, `choices.primary`) per **P11**.
 
+The reverse nesting is recursive too: when an **array is itself a union
+branch**, the selected branch uses the ordinary [[items]] parser and mapper in
+both directions. It does not pass the array through verbatim. Element models,
+temporals, and binary values therefore materialize normally, every element's
+constraints run, and failures aggregate at indexed paths under the union.
+
 ### Deferred (reject with a "not yet supported" diagnostic)
 
 - **The OpenAPI `discriminator: {propertyName, mapping}` object** — the

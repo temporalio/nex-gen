@@ -42,6 +42,9 @@ public final class TemporalSupport {
             int year = Integer.parseInt(value.substring(0, 4));
             int month = Integer.parseInt(value.substring(5, 7));
             int day = Integer.parseInt(value.substring(8, 10));
+            if (year < 1) {
+                return false;
+            }
             int max = daysInMonth(year, month);
             return max > 0 && day >= 1 && day <= max;
         } catch (NumberFormatException e) {

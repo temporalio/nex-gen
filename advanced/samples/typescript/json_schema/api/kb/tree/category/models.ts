@@ -106,13 +106,25 @@ export const categoryTransferTypeConverter =
     }
 
     public toTransferType(value: Category): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       out.id = value.id;
       out.name = value.name;
       if (value.children !== undefined) {
-        out.children = value.children.map((element) =>
-          categoryTransferTypeConverter.toTransferType(element),
+        value.children.forEach((element, index) => {});
+        out.children = value.children.map((element, index) =>
+          (() => {
+            try {
+              return categoryTransferTypeConverter.toTransferType(element);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, `children[${index}]`, error);
+              return undefined;
+            }
+          })(),
         );
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
       }
       return out;
     }

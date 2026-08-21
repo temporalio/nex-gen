@@ -43,6 +43,9 @@ func validTemporalCalendar(s string) bool {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return false
 	}
+	if year < 1 {
+		return false
+	}
 	max := daysInTemporalMonth(year, month)
 	return max > 0 && day >= 1 && day <= max
 }
@@ -226,6 +229,32 @@ type Temporal struct {
 // listing any violations.
 func (m Temporal) Validate() error {
 	var errs []Violation
+	if m.CreatedAt.Year() < 1 {
+		errs = append(errs, Violation{"createdAt", "year must be >= 1"})
+	}
+	if m.Birthday.Year() < 1 {
+		errs = append(errs, Violation{"birthday", "year must be >= 1"})
+	}
+	if m.UpdatedAt != nil {
+		if (*m.UpdatedAt).Year() < 1 {
+			errs = append(errs, Violation{"updatedAt", "year must be >= 1"})
+		}
+	}
+	if m.ExpiresOn != nil {
+		if (*m.ExpiresOn).Year() < 1 {
+			errs = append(errs, Violation{"expiresOn", "year must be >= 1"})
+		}
+	}
+	if m.DeletedAt != nil {
+		if (*m.DeletedAt).Year() < 1 {
+			errs = append(errs, Violation{"deletedAt", "year must be >= 1"})
+		}
+	}
+	if m.ArchivedOn != nil {
+		if (*m.ArchivedOn).Year() < 1 {
+			errs = append(errs, Violation{"archivedOn", "year must be >= 1"})
+		}
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}

@@ -368,6 +368,7 @@ export const roomTransferTypeConverter =
     }
 
     public toTransferType(value: Room): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       out.roomId = value.roomId;
       out.displayName = value.displayName;
@@ -376,10 +377,20 @@ export const roomTransferTypeConverter =
         out.members = value.members;
       }
       if (value.labels !== undefined) {
-        out.labels = labelsTransferTypeConverter.toTransferType(value.labels);
+        out.labels = (() => {
+          try {
+            return labelsTransferTypeConverter.toTransferType(value.labels);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "labels", error);
+            return undefined;
+          }
+        })();
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
       }
       return out;
     }
@@ -431,9 +442,20 @@ export const sendMessageInputTransferTypeConverter =
     }
 
     public toTransferType(value: SendMessageInput): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       out.roomId = value.roomId;
-      out.message = messageTransferTypeConverter.toTransferType(value.message);
+      out.message = (() => {
+        try {
+          return messageTransferTypeConverter.toTransferType(value.message);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "message", error);
+          return undefined;
+        }
+      })();
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
+      }
       return out;
     }
   })();

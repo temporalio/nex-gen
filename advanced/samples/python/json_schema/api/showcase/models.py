@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import typing
 import typing_extensions
+import datetime
 import math
 import re
 import temporalio.converter
@@ -17,8 +18,10 @@ from ._definitions import (
     _collect,
     _format_base64,
     _format_base64url,
+    _format_date,
     _parse_base64,
     _parse_base64url,
+    _parse_date,
     _parse_spec_integer,
     _quote,
     _transfer_type_convertible,
@@ -185,6 +188,54 @@ class Address:
     )
 
 
+class _AddressBookTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["AddressBook", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["AddressBook"]
+    ) -> "AddressBook":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+        additional_properties: dict[str, Address] = {}
+        for key in raw:
+            member: Address = typing.cast("typing.Any", None)
+            member_raw = raw[key]
+            try:
+                member = _AddressTransferTypeConverter().from_transfer_type(
+                    member_raw, Address
+                )
+            except ValidationError as error:
+                _collect(violations, key, error)
+            additional_properties[key] = member
+        if violations:
+            raise ValidationError(violations)
+        return AddressBook(additional_properties=additional_properties)
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "AddressBook") -> typing.Any:
+        violations: list[Violation] = []
+        out: dict[str, typing.Any] = {}
+        for key, entry in value.additional_properties.items():
+            try:
+                out[key] = _AddressTransferTypeConverter().to_transfer_type(entry)
+            except ValidationError as error:
+                _collect(violations, key, error)
+        if violations:
+            raise ValidationError(violations)
+        return out
+
+
+@_transfer_type_convertible(_AddressBookTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class AddressBook:
+    """A typed map of referenced Address models."""
+
+    additional_properties: dict[str, Address] = dataclasses.field(default_factory=dict)
+
+
 class _AttributesTransferTypeConverter(
     temporalio.converter.TransferTypeConverter["Attributes", typing.Any]
 ):
@@ -269,6 +320,48 @@ class Attributes:
     """
 
     additional_properties: dict[str, str] = dataclasses.field(default_factory=dict)
+
+
+class _BlobIndexTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["BlobIndex", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["BlobIndex"]
+    ) -> "BlobIndex":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+        additional_properties: dict[str, bytes] = {}
+        for key in raw:
+            member: bytes = typing.cast("typing.Any", None)
+            member_raw = raw[key]
+            if not isinstance(member_raw, str):
+                violations.append(Violation(path=key, reason="expected string"))
+            else:
+                member_parsed = _parse_base64(member_raw, key, violations)
+                if member_parsed is not None:
+                    member = member_parsed
+            additional_properties[key] = member
+        if violations:
+            raise ValidationError(violations)
+        return BlobIndex(additional_properties=additional_properties)
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "BlobIndex") -> typing.Any:
+        out: dict[str, typing.Any] = {}
+        for key, entry in value.additional_properties.items():
+            out[key] = _format_base64(entry)
+        return out
+
+
+@_transfer_type_convertible(_BlobIndexTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class BlobIndex:
+    """A typed map of materialized base64 byte strings."""
+
+    additional_properties: dict[str, bytes] = dataclasses.field(default_factory=dict)
 
 
 class _ChoicesTransferTypeConverter(
@@ -567,6 +660,53 @@ class ContactPy:
     )
 
 
+class _DateIndexTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["DateIndex", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["DateIndex"]
+    ) -> "DateIndex":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+        additional_properties: dict[str, datetime.date] = {}
+        for key in raw:
+            member: datetime.date = typing.cast("typing.Any", None)
+            member_raw = raw[key]
+            if not isinstance(member_raw, str):
+                violations.append(Violation(path=key, reason="expected string"))
+            else:
+                member_parsed = _parse_date(member_raw, key, violations)
+                if member_parsed is not None:
+                    member = member_parsed
+            additional_properties[key] = member
+        if violations:
+            raise ValidationError(violations)
+        return DateIndex(additional_properties=additional_properties)
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "DateIndex") -> typing.Any:
+        violations: list[Violation] = []
+        out: dict[str, typing.Any] = {}
+        for key, entry in value.additional_properties.items():
+            out[key] = _format_date(entry)
+        if violations:
+            raise ValidationError(violations)
+        return out
+
+
+@_transfer_type_convertible(_DateIndexTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class DateIndex:
+    """A typed map of materialized calendar dates."""
+
+    additional_properties: dict[str, datetime.date] = dataclasses.field(
+        default_factory=dict
+    )
+
+
 class _ExtrasTransferTypeConverter(
     temporalio.converter.TransferTypeConverter["Extras", typing.Any]
 ):
@@ -762,6 +902,65 @@ class LinkNote:
     additional_properties: dict[str, typing.Any] = dataclasses.field(
         default_factory=dict
     )
+
+
+class _MetricsTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["Metrics", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["Metrics"]
+    ) -> "Metrics":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise ValidationError([Violation(path="", reason="expected object")])
+        raw = typing.cast("dict[str, typing.Any]", value)
+        additional_properties: dict[str, float] = {}
+        for key in raw:
+            member: float = typing.cast("typing.Any", None)
+            member_raw = raw[key]
+            if not (
+                not isinstance(member_raw, bool)
+                and isinstance(member_raw, (int, float))
+            ):
+                violations.append(Violation(path=key, reason="expected number"))
+            else:
+                member = member_raw
+                if not (
+                    -1.7976931348623157e308 <= member_raw <= 1.7976931348623157e308
+                ):
+                    violations.append(
+                        Violation(
+                            path=key,
+                            reason=f"must be a finite number, got {member_raw}",
+                        )
+                    )
+            additional_properties[key] = member
+        if violations:
+            raise ValidationError(violations)
+        return Metrics(additional_properties=additional_properties)
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "Metrics") -> typing.Any:
+        violations: list[Violation] = []
+        out: dict[str, typing.Any] = {}
+        for key, entry in value.additional_properties.items():
+            if not (-1.7976931348623157e308 <= entry <= 1.7976931348623157e308):
+                violations.append(
+                    Violation(path=key, reason=f"must be a finite number, got {entry}")
+                )
+            out[key] = entry
+        if violations:
+            raise ValidationError(violations)
+        return out
+
+
+@_transfer_type_convertible(_MetricsTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class Metrics:
+    """A typed map of finite numbers."""
+
+    additional_properties: dict[str, float] = dataclasses.field(default_factory=dict)
 
 
 class _NicknamesTransferTypeConverter(
@@ -1557,6 +1756,33 @@ class _ShowcaseTransferTypeConverter(
                                 )
                             )
 
+        score_value: float | None = None
+        if "score" in raw:
+            score_value_raw = raw["score"]
+            if score_value_raw is None:
+                violations.append(
+                    Violation(path="score", reason="explicit null not allowed")
+                )
+            else:
+                if not (
+                    not isinstance(score_value_raw, bool)
+                    and isinstance(score_value_raw, (int, float))
+                ):
+                    violations.append(Violation(path="score", reason="expected number"))
+                else:
+                    score_value = score_value_raw
+                    if not (
+                        -1.7976931348623157e308
+                        <= score_value_raw
+                        <= 1.7976931348623157e308
+                    ):
+                        violations.append(
+                            Violation(
+                                path="score",
+                                reason=f"must be a finite number, got {score_value_raw}",
+                            )
+                        )
+
         step_value: int | None = None
         if "step" in raw:
             step_value_raw = raw["step"]
@@ -1860,6 +2086,13 @@ class _ShowcaseTransferTypeConverter(
                                 )
                             else:
                                 slots_value_item = slots_value_element
+                                if len(slots_value_element) < 2:
+                                    violations.append(
+                                        Violation(
+                                            path=slots_value_item_path,
+                                            reason=f"must have length >= 2, got {len(slots_value_element)}",
+                                        )
+                                    )
                         slots_value_list.append(slots_value_item)
                     slots_value = slots_value_list
 
@@ -1895,7 +2128,7 @@ class _ShowcaseTransferTypeConverter(
                                 typing.cast("list[typing.Any]", grid_value_element)
                             ):
                                 grid_value_item_item_path = (
-                                    f"{grid_value_item_path}[{grid_value_item_index}]"
+                                    grid_value_item_path + f"[{grid_value_item_index}]"
                                 )
                                 grid_value_item_item: int = typing.cast(
                                     "typing.Any", None
@@ -1911,6 +2144,325 @@ class _ShowcaseTransferTypeConverter(
                             grid_value_item = grid_value_item_list
                         grid_value_list.append(grid_value_item)
                     grid_value = grid_value_list
+
+        number_grid_value: list[list[float]] | None = None
+        if "numberGrid" in raw:
+            number_grid_value_raw = raw["numberGrid"]
+            if number_grid_value_raw is None:
+                violations.append(
+                    Violation(path="numberGrid", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(number_grid_value_raw, list):
+                    violations.append(
+                        Violation(path="numberGrid", reason="expected array")
+                    )
+                else:
+                    number_grid_value_list: list[list[float]] = []
+                    for number_grid_value_index, number_grid_value_element in enumerate(
+                        typing.cast("list[typing.Any]", number_grid_value_raw)
+                    ):
+                        number_grid_value_item_path = (
+                            f"numberGrid[{number_grid_value_index}]"
+                        )
+                        number_grid_value_item: list[float] = typing.cast(
+                            "typing.Any", None
+                        )
+                        if not isinstance(number_grid_value_element, list):
+                            violations.append(
+                                Violation(
+                                    path=number_grid_value_item_path,
+                                    reason="expected array",
+                                )
+                            )
+                        else:
+                            number_grid_value_item_list: list[float] = []
+                            for (
+                                number_grid_value_item_index,
+                                number_grid_value_item_element,
+                            ) in enumerate(
+                                typing.cast(
+                                    "list[typing.Any]", number_grid_value_element
+                                )
+                            ):
+                                number_grid_value_item_item_path = (
+                                    number_grid_value_item_path
+                                    + f"[{number_grid_value_item_index}]"
+                                )
+                                number_grid_value_item_item: float = typing.cast(
+                                    "typing.Any", None
+                                )
+                                if not (
+                                    not isinstance(number_grid_value_item_element, bool)
+                                    and isinstance(
+                                        number_grid_value_item_element, (int, float)
+                                    )
+                                ):
+                                    violations.append(
+                                        Violation(
+                                            path=number_grid_value_item_item_path,
+                                            reason="expected number",
+                                        )
+                                    )
+                                else:
+                                    number_grid_value_item_item = (
+                                        number_grid_value_item_element
+                                    )
+                                    if not (
+                                        -1.7976931348623157e308
+                                        <= number_grid_value_item_element
+                                        <= 1.7976931348623157e308
+                                    ):
+                                        violations.append(
+                                            Violation(
+                                                path=number_grid_value_item_item_path,
+                                                reason=f"must be a finite number, got {number_grid_value_item_element}",
+                                            )
+                                        )
+                                number_grid_value_item_list.append(
+                                    number_grid_value_item_item
+                                )
+                            number_grid_value_item = number_grid_value_item_list
+                        number_grid_value_list.append(number_grid_value_item)
+                    number_grid_value = number_grid_value_list
+
+        links_value: list[str] | None = None
+        if "links" in raw:
+            links_value_raw = raw["links"]
+            if links_value_raw is None:
+                violations.append(
+                    Violation(path="links", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(links_value_raw, list):
+                    violations.append(Violation(path="links", reason="expected array"))
+                else:
+                    links_value_list: list[str] = []
+                    for links_value_index, links_value_element in enumerate(
+                        typing.cast("list[typing.Any]", links_value_raw)
+                    ):
+                        links_value_item_path = f"links[{links_value_index}]"
+                        links_value_item: str = typing.cast("typing.Any", None)
+                        if not isinstance(links_value_element, str):
+                            violations.append(
+                                Violation(
+                                    path=links_value_item_path, reason="expected string"
+                                )
+                            )
+                        else:
+                            links_value_item = links_value_element
+                            if (
+                                _PATTERN_BECE32B4DA20247D.search(links_value_element)
+                                is None
+                            ):
+                                violations.append(
+                                    Violation(
+                                        path=links_value_item_path,
+                                        reason=f"must be a valid uri, got {_quote(links_value_element)}",
+                                    )
+                                )
+                        links_value_list.append(links_value_item)
+                    links_value = links_value_list
+
+        addresses_value: list[Address] | None = None
+        if "addresses" in raw:
+            addresses_value_raw = raw["addresses"]
+            if addresses_value_raw is None:
+                violations.append(
+                    Violation(path="addresses", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(addresses_value_raw, list):
+                    violations.append(
+                        Violation(path="addresses", reason="expected array")
+                    )
+                else:
+                    addresses_value_list: list[Address] = []
+                    for addresses_value_index, addresses_value_element in enumerate(
+                        typing.cast("list[typing.Any]", addresses_value_raw)
+                    ):
+                        addresses_value_item_path = (
+                            f"addresses[{addresses_value_index}]"
+                        )
+                        addresses_value_item: Address = typing.cast("typing.Any", None)
+                        try:
+                            addresses_value_item = (
+                                _AddressTransferTypeConverter().from_transfer_type(
+                                    addresses_value_element, Address
+                                )
+                            )
+                        except ValidationError as error:
+                            _collect(violations, addresses_value_item_path, error)
+                        addresses_value_list.append(addresses_value_item)
+                    addresses_value = addresses_value_list
+
+        address_book_value: AddressBook | None = None
+        if "addressBook" in raw:
+            address_book_value_raw = raw["addressBook"]
+            if address_book_value_raw is None:
+                violations.append(
+                    Violation(path="addressBook", reason="explicit null not allowed")
+                )
+            else:
+                try:
+                    address_book_value = (
+                        _AddressBookTransferTypeConverter().from_transfer_type(
+                            address_book_value_raw, AddressBook
+                        )
+                    )
+                except ValidationError as error:
+                    _collect(violations, "addressBook", error)
+
+        dates_value: list[datetime.date] | None = None
+        if "dates" in raw:
+            dates_value_raw = raw["dates"]
+            if dates_value_raw is None:
+                violations.append(
+                    Violation(path="dates", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(dates_value_raw, list):
+                    violations.append(Violation(path="dates", reason="expected array"))
+                else:
+                    dates_value_list: list[datetime.date] = []
+                    for dates_value_index, dates_value_element in enumerate(
+                        typing.cast("list[typing.Any]", dates_value_raw)
+                    ):
+                        dates_value_item_path = f"dates[{dates_value_index}]"
+                        dates_value_item: datetime.date = typing.cast(
+                            "typing.Any", None
+                        )
+                        if not isinstance(dates_value_element, str):
+                            violations.append(
+                                Violation(
+                                    path=dates_value_item_path, reason="expected string"
+                                )
+                            )
+                        else:
+                            dates_value_item_parsed = _parse_date(
+                                dates_value_element, dates_value_item_path, violations
+                            )
+                            if dates_value_item_parsed is not None:
+                                dates_value_item = dates_value_item_parsed
+                        dates_value_list.append(dates_value_item)
+                    dates_value = dates_value_list
+
+        date_index_value: DateIndex | None = None
+        if "dateIndex" in raw:
+            date_index_value_raw = raw["dateIndex"]
+            if date_index_value_raw is None:
+                violations.append(
+                    Violation(path="dateIndex", reason="explicit null not allowed")
+                )
+            else:
+                try:
+                    date_index_value = (
+                        _DateIndexTransferTypeConverter().from_transfer_type(
+                            date_index_value_raw, DateIndex
+                        )
+                    )
+                except ValidationError as error:
+                    _collect(violations, "dateIndex", error)
+
+        blobs_value: list[bytes] | None = None
+        if "blobs" in raw:
+            blobs_value_raw = raw["blobs"]
+            if blobs_value_raw is None:
+                violations.append(
+                    Violation(path="blobs", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(blobs_value_raw, list):
+                    violations.append(Violation(path="blobs", reason="expected array"))
+                else:
+                    blobs_value_list: list[bytes] = []
+                    for blobs_value_index, blobs_value_element in enumerate(
+                        typing.cast("list[typing.Any]", blobs_value_raw)
+                    ):
+                        blobs_value_item_path = f"blobs[{blobs_value_index}]"
+                        blobs_value_item: bytes = typing.cast("typing.Any", None)
+                        if not isinstance(blobs_value_element, str):
+                            violations.append(
+                                Violation(
+                                    path=blobs_value_item_path, reason="expected string"
+                                )
+                            )
+                        else:
+                            blobs_value_item_parsed = _parse_base64(
+                                blobs_value_element, blobs_value_item_path, violations
+                            )
+                            if blobs_value_item_parsed is not None:
+                                blobs_value_item = blobs_value_item_parsed
+                        blobs_value_list.append(blobs_value_item)
+                    blobs_value = blobs_value_list
+
+        blob_index_value: BlobIndex | None = None
+        if "blobIndex" in raw:
+            blob_index_value_raw = raw["blobIndex"]
+            if blob_index_value_raw is None:
+                violations.append(
+                    Violation(path="blobIndex", reason="explicit null not allowed")
+                )
+            else:
+                try:
+                    blob_index_value = (
+                        _BlobIndexTransferTypeConverter().from_transfer_type(
+                            blob_index_value_raw, BlobIndex
+                        )
+                    )
+                except ValidationError as error:
+                    _collect(violations, "blobIndex", error)
+
+        metrics_value: Metrics | None = None
+        if "metrics" in raw:
+            metrics_value_raw = raw["metrics"]
+            if metrics_value_raw is None:
+                violations.append(
+                    Violation(path="metrics", reason="explicit null not allowed")
+                )
+            else:
+                try:
+                    metrics_value = _MetricsTransferTypeConverter().from_transfer_type(
+                        metrics_value_raw, Metrics
+                    )
+                except ValidationError as error:
+                    _collect(violations, "metrics", error)
+
+        metric_or_label_value: float | str | None = None
+        if "metricOrLabel" in raw:
+            metric_or_label_value_raw = raw["metricOrLabel"]
+            if metric_or_label_value_raw is None:
+                violations.append(
+                    Violation(path="metricOrLabel", reason="explicit null not allowed")
+                )
+            else:
+                metric_or_label_value_parsed = (
+                    _showcase_metric_or_label_from_transfer_type(
+                        metric_or_label_value_raw, "metricOrLabel", violations
+                    )
+                )
+                if metric_or_label_value_parsed is not None:
+                    metric_or_label_value = metric_or_label_value_parsed
+
+        address_list_or_label_value: list[Address] | str | None = None
+        if "addressListOrLabel" in raw:
+            address_list_or_label_value_raw = raw["addressListOrLabel"]
+            if address_list_or_label_value_raw is None:
+                violations.append(
+                    Violation(
+                        path="addressListOrLabel", reason="explicit null not allowed"
+                    )
+                )
+            else:
+                address_list_or_label_value_parsed = (
+                    _showcase_address_list_or_label_from_transfer_type(
+                        address_list_or_label_value_raw,
+                        "addressListOrLabel",
+                        violations,
+                    )
+                )
+                if address_list_or_label_value_parsed is not None:
+                    address_list_or_label_value = address_list_or_label_value_parsed
 
         location_value: ShowcaseLocation | None = None
         if "location" in raw:
@@ -2224,6 +2776,7 @@ class _ShowcaseTransferTypeConverter(
                 and key != "priority"
                 and key != "level"
                 and key != "ratio"
+                and key != "score"
                 and key != "step"
                 and key != "tags"
                 and key != "aliases"
@@ -2238,6 +2791,17 @@ class _ShowcaseTransferTypeConverter(
                 and key != "segments"
                 and key != "slots"
                 and key != "grid"
+                and key != "numberGrid"
+                and key != "links"
+                and key != "addresses"
+                and key != "addressBook"
+                and key != "dates"
+                and key != "dateIndex"
+                and key != "blobs"
+                and key != "blobIndex"
+                and key != "metrics"
+                and key != "metricOrLabel"
+                and key != "addressListOrLabel"
                 and key != "location"
                 and key != "audit"
                 and key != "rows"
@@ -2290,6 +2854,7 @@ class _ShowcaseTransferTypeConverter(
             priority=priority_value,
             level=level_value,
             ratio=ratio_value,
+            score=score_value,
             step=step_value,
             tags=tags_value,
             aliases=aliases_value,
@@ -2304,6 +2869,17 @@ class _ShowcaseTransferTypeConverter(
             segments=segments_value,
             slots=slots_value,
             grid=grid_value,
+            number_grid=number_grid_value,
+            links=links_value,
+            addresses=addresses_value,
+            address_book=address_book_value,
+            dates=dates_value,
+            date_index=date_index_value,
+            blobs=blobs_value,
+            blob_index=blob_index_value,
+            metrics=metrics_value,
+            metric_or_label=metric_or_label_value,
+            address_list_or_label=address_list_or_label_value,
             location=location_value,
             audit=audit_value,
             rows=rows_value,
@@ -2529,6 +3105,15 @@ class _ShowcaseTransferTypeConverter(
                         )
                     )
             out["ratio"] = value.ratio
+        if value.score is not None:
+            if not (-1.7976931348623157e308 <= value.score <= 1.7976931348623157e308):
+                violations.append(
+                    Violation(
+                        path="score",
+                        reason=f"must be a finite number, got {value.score}",
+                    )
+                )
+            out["score"] = value.score
         if value.step is not None:
             if value.step % 3 != 0:
                 violations.append(
@@ -2649,6 +3234,18 @@ class _ShowcaseTransferTypeConverter(
                         )
                     )
                 _check_unique_items(value.measurements, "measurements", violations)
+                for item_index_8, item_element_8 in enumerate(value.measurements):
+                    if not (
+                        -1.7976931348623157e308
+                        <= item_element_8
+                        <= 1.7976931348623157e308
+                    ):
+                        violations.append(
+                            Violation(
+                                path=f"measurements[{item_index_8}]",
+                                reason=f"must be a finite number, got {item_element_8}",
+                            )
+                        )
             if isinstance(value.measurements, str):
                 if _PATTERN_F242E3A159C2422C.search(value.measurements) is None:
                     violations.append(
@@ -2685,9 +3282,153 @@ class _ShowcaseTransferTypeConverter(
                     _collect(violations, f"segments[{segments_index}]", error)
             out["segments"] = segments_out
         if value.slots is not None:
+            for item_index_4, item_element_4 in enumerate(value.slots):
+                if item_element_4 is not None:
+                    if len(item_element_4) < 2:
+                        violations.append(
+                            Violation(
+                                path=f"slots[{item_index_4}]",
+                                reason=f"must have length >= 2, got {len(item_element_4)}",
+                            )
+                        )
             out["slots"] = value.slots
         if value.grid is not None:
             out["grid"] = value.grid
+        if value.number_grid is not None:
+            for item_index_4, item_element_4 in enumerate(value.number_grid):
+                for item_index_8, item_element_8 in enumerate(item_element_4):
+                    if not (
+                        -1.7976931348623157e308
+                        <= item_element_8
+                        <= 1.7976931348623157e308
+                    ):
+                        violations.append(
+                            Violation(
+                                path=f"numberGrid[{item_index_4}]"
+                                + f"[{item_index_8}]",
+                                reason=f"must be a finite number, got {item_element_8}",
+                            )
+                        )
+            out["numberGrid"] = value.number_grid
+        if value.links is not None:
+            for item_index_4, item_element_4 in enumerate(value.links):
+                if _PATTERN_BECE32B4DA20247D.search(item_element_4) is None:
+                    violations.append(
+                        Violation(
+                            path=f"links[{item_index_4}]",
+                            reason=f"must be a valid uri, got {_quote(item_element_4)}",
+                        )
+                    )
+            out["links"] = value.links
+        if value.addresses is not None:
+            addresses_out: list[typing.Any] = []
+            for addresses_index, addresses_element in enumerate(value.addresses):
+                try:
+                    addresses_out.append(
+                        _AddressTransferTypeConverter().to_transfer_type(
+                            addresses_element
+                        )
+                    )
+                except ValidationError as error:
+                    _collect(violations, f"addresses[{addresses_index}]", error)
+            out["addresses"] = addresses_out
+        if value.address_book is not None:
+            try:
+                out["addressBook"] = (
+                    _AddressBookTransferTypeConverter().to_transfer_type(
+                        value.address_book
+                    )
+                )
+            except ValidationError as error:
+                _collect(violations, "addressBook", error)
+        if value.dates is not None:
+            out["dates"] = [_format_date(element) for element in value.dates]
+        if value.date_index is not None:
+            try:
+                out["dateIndex"] = _DateIndexTransferTypeConverter().to_transfer_type(
+                    value.date_index
+                )
+            except ValidationError as error:
+                _collect(violations, "dateIndex", error)
+        if value.blobs is not None:
+            out["blobs"] = [_format_base64(element) for element in value.blobs]
+        if value.blob_index is not None:
+            try:
+                out["blobIndex"] = _BlobIndexTransferTypeConverter().to_transfer_type(
+                    value.blob_index
+                )
+            except ValidationError as error:
+                _collect(violations, "blobIndex", error)
+        if value.metrics is not None:
+            try:
+                out["metrics"] = _MetricsTransferTypeConverter().to_transfer_type(
+                    value.metrics
+                )
+            except ValidationError as error:
+                _collect(violations, "metrics", error)
+        if value.metric_or_label is not None:
+            if not isinstance(value.metric_or_label, bool) and isinstance(
+                value.metric_or_label, (int, float)
+            ):
+                if not (
+                    -1.7976931348623157e308
+                    <= value.metric_or_label
+                    <= 1.7976931348623157e308
+                ):
+                    violations.append(
+                        Violation(
+                            path="metricOrLabel",
+                            reason=f"must be a finite number, got {value.metric_or_label}",
+                        )
+                    )
+            if isinstance(value.metric_or_label, str):
+                if len(value.metric_or_label) < 1:
+                    violations.append(
+                        Violation(
+                            path="metricOrLabel",
+                            reason=f"must have length >= 1, got {len(value.metric_or_label)}",
+                        )
+                    )
+            candidate = typing.cast("object", value.metric_or_label)
+            if not (
+                (
+                    not isinstance(candidate, bool)
+                    and isinstance(candidate, (int, float))
+                )
+                or isinstance(candidate, str)
+            ):
+                violations.append(
+                    Violation(
+                        path="metricOrLabel", reason="expected one of: number, string"
+                    )
+                )
+            out["metricOrLabel"] = value.metric_or_label
+        if value.address_list_or_label is not None:
+            if isinstance(value.address_list_or_label, list):
+                if len(value.address_list_or_label) < 1:
+                    violations.append(
+                        Violation(
+                            path="addressListOrLabel",
+                            reason=f"must have at least 1 items, got {len(value.address_list_or_label)}",
+                        )
+                    )
+            if isinstance(value.address_list_or_label, str):
+                if len(value.address_list_or_label) < 1:
+                    violations.append(
+                        Violation(
+                            path="addressListOrLabel",
+                            reason=f"must have length >= 1, got {len(value.address_list_or_label)}",
+                        )
+                    )
+            candidate = typing.cast("object", value.address_list_or_label)
+            if not (isinstance(candidate, list) or isinstance(candidate, str)):
+                violations.append(
+                    Violation(
+                        path="addressListOrLabel",
+                        reason="expected one of: list[Address], string",
+                    )
+                )
+            out["addressListOrLabel"] = value.address_list_or_label
         if value.location is not None:
             try:
                 out["location"] = (
@@ -2973,6 +3714,9 @@ class Showcase:
     ratio: float | None = None
     """Optional number that must be a non-negative multiple of 5."""
 
+    score: float | None = None
+    """Optional unbounded finite number."""
+
     step: int | None = None
     """Optional integer that must be a multiple of 3."""
 
@@ -3053,15 +3797,49 @@ class Showcase:
     """
 
     slots: list[str | None] | None = None
-    """A list of **nullable elements** — the two-branch nullability `oneOf` rather than a
-    sum type, so nothing is named: the elements themselves become nullable (`[]*string`,
-    `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list
+    """A list of **nullable, constrained scalar elements** — the two-branch nullability
+    `oneOf` rather than a sum type, so nothing is named: the elements themselves become
+    nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable
+    String>`) while each present string retains its own minimum length and the list
     stays a list.
     """
 
     grid: list[list[int]] | None = None
     """A nested array: `items` at depth two. Each level decodes elementwise, so a bad
     element is reported at its own two-dimensional index (`grid[1][0]`).
+    """
+
+    number_grid: list[list[float]] | None = None
+    """A nested array of numbers used to prove recursive finite-number validation and
+    two-dimensional indexed aggregation.
+    """
+
+    links: list[str] | None = None
+    """A list of scalar URI values; every element keeps its format assertion."""
+
+    addresses: list[Address] | None = None
+    """A list of referenced models, converted and validated elementwise."""
+
+    address_book: AddressBook | None = None
+
+    dates: list[datetime.date] | None = None
+    """Materialized calendar dates in an array."""
+
+    date_index: DateIndex | None = None
+
+    blobs: list[bytes] | None = None
+    """Materialized base64 byte strings in an array."""
+
+    blob_index: BlobIndex | None = None
+
+    metrics: Metrics | None = None
+
+    metric_or_label: float | str | None = None
+    """A finite number branch or a non-empty string branch."""
+
+    address_list_or_label: list[Address] | str | None = None
+    """A union whose array branch contains referenced models, proving that branch
+    conversion uses the ordinary recursive array mapper.
     """
 
     location: ShowcaseLocation | None = None
@@ -3142,6 +3920,7 @@ class Showcase:
         priority: int | None = None,
         level: int | None = None,
         ratio: float | None = None,
+        score: float | None = None,
         step: int | None = None,
         tags: list[str] | None = None,
         aliases: list[str] | None = None,
@@ -3156,6 +3935,17 @@ class Showcase:
         segments: list[ShowcaseSegmentsItem] | None = None,
         slots: list[str | None] | None = None,
         grid: list[list[int]] | None = None,
+        number_grid: list[list[float]] | None = None,
+        links: list[str] | None = None,
+        addresses: list[Address] | None = None,
+        address_book: AddressBook | None = None,
+        dates: list[datetime.date] | None = None,
+        date_index: DateIndex | None = None,
+        blobs: list[bytes] | None = None,
+        blob_index: BlobIndex | None = None,
+        metrics: Metrics | None = None,
+        metric_or_label: float | str | None = None,
+        address_list_or_label: list[Address] | str | None = None,
         location: ShowcaseLocation | None = None,
         audit: ShowcaseAudit | None = None,
         rows: list[ShowcaseRowsItem] | None = None,
@@ -3207,6 +3997,7 @@ class Showcase:
         self.priority = priority
         self.level = level
         self.ratio = ratio
+        self.score = score
         self.step = step
         self.tags = tags
         self.aliases = aliases
@@ -3221,6 +4012,17 @@ class Showcase:
         self.segments = segments
         self.slots = slots
         self.grid = grid
+        self.number_grid = number_grid
+        self.links = links
+        self.addresses = addresses
+        self.address_book = address_book
+        self.dates = dates
+        self.date_index = date_index
+        self.blobs = blobs
+        self.blob_index = blob_index
+        self.metrics = metrics
+        self.metric_or_label = metric_or_label
+        self.address_list_or_label = address_list_or_label
         self.location = location
         self.audit = audit
         self.rows = rows
@@ -4773,7 +5575,7 @@ def _showcase_measurements_from_transfer_type(
         for items_index, items_element in enumerate(
             typing.cast("list[typing.Any]", value)
         ):
-            items_item_path = f"{path}[{items_index}]"
+            items_item_path = path + f"[{items_index}]"
             items_item: float = typing.cast("typing.Any", None)
             if not (
                 not isinstance(items_element, bool)
@@ -4814,6 +5616,62 @@ def _showcase_measurements_from_transfer_type(
         return value
     violations.append(
         Violation(path=path, reason="expected one of: list[float], string")
+    )
+    return None
+
+
+def _showcase_metric_or_label_from_transfer_type(
+    value: typing.Any, path: str, violations: list[Violation]
+) -> float | str | None:
+    if not isinstance(value, bool) and isinstance(value, (int, float)):
+        if not (-1.7976931348623157e308 <= value <= 1.7976931348623157e308):
+            violations.append(
+                Violation(path=path, reason=f"must be a finite number, got {value}")
+            )
+        return value
+    if isinstance(value, str):
+        if len(value) < 1:
+            violations.append(
+                Violation(path=path, reason=f"must have length >= 1, got {len(value)}")
+            )
+        return value
+    violations.append(Violation(path=path, reason="expected one of: number, string"))
+    return None
+
+
+def _showcase_address_list_or_label_from_transfer_type(
+    value: typing.Any, path: str, violations: list[Violation]
+) -> list[Address] | str | None:
+    if isinstance(value, list):
+        items_list: list[Address] = []
+        for items_index, items_element in enumerate(
+            typing.cast("list[typing.Any]", value)
+        ):
+            items_item_path = path + f"[{items_index}]"
+            items_item: Address = typing.cast("typing.Any", None)
+            try:
+                items_item = _AddressTransferTypeConverter().from_transfer_type(
+                    items_element, Address
+                )
+            except ValidationError as error:
+                _collect(violations, items_item_path, error)
+            items_list.append(items_item)
+        if len(items_list) < 1:
+            violations.append(
+                Violation(
+                    path=path,
+                    reason=f"must have at least 1 items, got {len(items_list)}",
+                )
+            )
+        return items_list
+    if isinstance(value, str):
+        if len(value) < 1:
+            violations.append(
+                Violation(path=path, reason=f"must have length >= 1, got {len(value)}")
+            )
+        return value
+    violations.append(
+        Violation(path=path, reason="expected one of: list[Address], string")
     )
     return None
 

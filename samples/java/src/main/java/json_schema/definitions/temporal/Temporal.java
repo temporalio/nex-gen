@@ -166,6 +166,40 @@ public final class Temporal {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Temporal> {
         @Override
         public void serialize(Temporal value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
+            if (value.createdAt != null) {
+                if (value.createdAt.getYear() < 1) {
+                    violations.add(new Violation("createdAt", "must be a valid date-time, got " + value.createdAt + ": year must be >= 0001"));
+                }
+            }
+            if (value.birthday != null) {
+                if (value.birthday.getYear() < 1) {
+                    violations.add(new Violation("birthday", "must be a valid date, got " + value.birthday + ": year must be >= 0001"));
+                }
+            }
+            if (value.updatedAt != null) {
+                if (value.updatedAt.getYear() < 1) {
+                    violations.add(new Violation("updatedAt", "must be a valid date-time, got " + value.updatedAt + ": year must be >= 0001"));
+                }
+            }
+            if (value.expiresOn != null) {
+                if (value.expiresOn.getYear() < 1) {
+                    violations.add(new Violation("expiresOn", "must be a valid date, got " + value.expiresOn + ": year must be >= 0001"));
+                }
+            }
+            if (value.deletedAt != null) {
+                if (value.deletedAt.getYear() < 1) {
+                    violations.add(new Violation("deletedAt", "must be a valid date-time, got " + value.deletedAt + ": year must be >= 0001"));
+                }
+            }
+            if (value.archivedOn != null) {
+                if (value.archivedOn.getYear() < 1) {
+                    violations.add(new Violation("archivedOn", "must be a valid date, got " + value.archivedOn + ": year must be >= 0001"));
+                }
+            }
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
             gen.writeStartObject();
             if (value.createdAt != null) {
                 gen.writeStringField("createdAt", TemporalSupport.formatDateTime(value.createdAt));

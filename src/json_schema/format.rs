@@ -150,6 +150,12 @@ fn valid_calendar_prefix(value: &str) -> bool {
     ) else {
         return false;
     };
+    // Year zero cannot be represented by every target's materialized native
+    // date type (notably Python's datetime), so the shared wire contract starts
+    // at Gregorian year 0001.
+    if year < 1 {
+        return false;
+    }
     match days_in_month(year, month) {
         Some(max) => (1..=max).contains(&day),
         None => false,
@@ -536,6 +542,20 @@ mod tests {
         assert!(!is_valid_materialized(
             TemporalKind::Duration,
             "PT999999999999H"
+        ));
+    }
+
+    #[test]
+    fn materialized_calendar_starts_at_year_one() {
+        assert!(is_valid_materialized(TemporalKind::Date, "0001-01-01"));
+        assert!(!is_valid_materialized(TemporalKind::Date, "0000-01-01"));
+        assert!(is_valid_materialized(
+            TemporalKind::DateTime,
+            "0001-01-01T00:00:00Z"
+        ));
+        assert!(!is_valid_materialized(
+            TemporalKind::DateTime,
+            "0000-01-01T00:00:00Z"
         ));
     }
 

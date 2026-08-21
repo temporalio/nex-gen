@@ -220,9 +220,9 @@ def _valid_temporal_calendar(value: str) -> bool:
         year, month, day = int(value[0:4]), int(value[5:7]), int(value[8:10])
     except ValueError:
         return False
-    # `datetime.MINYEAR` is 1, so year 0000 -- which the wire grammar admits and
-    # the other three targets materialize -- has no Python value at all. It is
-    # rejected rather than shifted into range, and `_temporal_reason` says so.
+    # `datetime.MINYEAR` is 1, which is also the shared cross-language floor.
+    # Year 0000 is rejected rather than shifted into range, and
+    # `_temporal_reason` says so.
     if year < datetime.MINYEAR:
         return False
     maximum = _days_in_month(year, month)
@@ -232,9 +232,8 @@ def _valid_temporal_calendar(value: str) -> bool:
 def _temporal_reason(name: str, value: str) -> str:
     """The reason a rejected temporal string is reported under.
 
-    Year 0000 earns its own clause: it is a valid wire value the other targets
-    accept, so a caller needs to read Python's floor rather than conclude the
-    timestamp was malformed.
+    Year 0000 earns its own clause so the caller sees the shared calendar floor
+    rather than only a generic malformed-timestamp reason.
     """
 
     if value[0:4] == "0000":

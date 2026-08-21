@@ -126,6 +126,15 @@ public final class Circle implements ChoicesValue, Shape, Showcase.ShapeOrName {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Circle> {
         @Override
         public void serialize(Circle value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
+            {
+                if (!Double.isFinite(value.radius)) {
+                    violations.add(new Violation("radius", "must be a finite number, got " + value.radius));
+                }
+            }
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
             gen.writeStartObject();
             if (value.kind != null) {
                 gen.writeStringField("kind", value.kind.getValue());

@@ -171,14 +171,10 @@ def test_temporal_materialized_narrowing_rejects(
 
 
 def test_year_zero_is_a_violation_rather_than_a_value_error() -> None:
-    """`datetime.MINYEAR` is 1, so year 0000 — which the wire grammar admits and
-    Go/TypeScript/Java all materialize — has no Python representation at all.
+    """`datetime.MINYEAR` is 1, now the shared cross-language calendar floor.
 
-    The pinned regex accepts it, so the value reached `fromisoformat` and escaped as
-    a bare `ValueError` instead of the aggregated `ValidationError` (P11). It is now
-    rejected, and the reason names the limit rather than implying the timestamp was
-    malformed: this is a genuine per-language accept-set divergence a caller has to
-    be able to read.
+    Year 0000 is rejected as an aggregated `ValidationError` (P11), and the reason
+    names the limit rather than escaping as a native `ValueError`.
     """
     limit = f"year 0000 is not representable (datetime.MINYEAR is {datetime.MINYEAR})"
     assert parse_violations(createdAt="0000-01-01T00:00:00Z") == [

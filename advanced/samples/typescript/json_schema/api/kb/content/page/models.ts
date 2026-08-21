@@ -119,14 +119,33 @@ export const pageTransferTypeConverter =
     }
 
     public toTransferType(value: Page): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       out.pageId = value.pageId;
       out.title = value.title;
-      out.meta = pageMetaTransferTypeConverter.toTransferType(value.meta);
+      out.meta = (() => {
+        try {
+          return pageMetaTransferTypeConverter.toTransferType(value.meta);
+        } catch (error) {
+          __nexgenDefinitions.collect(violations, "meta", error);
+          return undefined;
+        }
+      })();
       if (value.blocks !== undefined) {
-        out.blocks = value.blocks.map((element) =>
-          blockTransferTypeConverter.toTransferType(element),
+        value.blocks.forEach((element, index) => {});
+        out.blocks = value.blocks.map((element, index) =>
+          (() => {
+            try {
+              return blockTransferTypeConverter.toTransferType(element);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, `blocks[${index}]`, error);
+              return undefined;
+            }
+          })(),
         );
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
       }
       return out;
     }

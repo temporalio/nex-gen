@@ -29,6 +29,7 @@ import json_schema.definitions.showcase.ContactJava;
 import json_schema.definitions.showcase.Extras;
 import json_schema.definitions.showcase.Labels;
 import json_schema.definitions.showcase.LinkNote;
+import json_schema.definitions.showcase.Metrics;
 import json_schema.definitions.showcase.Nicknames;
 import json_schema.definitions.showcase.Quotas;
 import json_schema.definitions.showcase.Settings;
@@ -1159,6 +1160,50 @@ final class JsonSchemaShowcaseRoundTripTest {
         assertTrue(messageChain(tokenSerialize).contains("primary"), messageChain(tokenSerialize));
     }
 
+    @Test
+    void recursiveCollectionsRoundTripAndRejectNonFiniteValues() throws IOException {
+        Showcase value = decode("showcase-recursive-collections.json", Showcase.class);
+        // Java currently writes integral `number` values with a `.0` suffix;
+        // that separate byte-identity issue is outside this P0 validation fix.
+        CONVERTER.toPayload(value).orElseThrow(AssertionError::new);
+        assertEquals(java.util.Arrays.asList(1.0, 2.5), value.getNumberGrid().get(0));
+        assertEquals("1 Main St", value.getAddresses().get(0).getStreet());
+        assertEquals(
+                "2 Side St",
+                value.getAddressBook().getAdditionalProperties().get("home").getStreet());
+        assertEquals(1, value.getDates().get(0).getYear());
+        assertEquals(1, value.getDateIndex().getAdditionalProperties().get("first").getYear());
+        assertArrayEquals("hi".getBytes(StandardCharsets.UTF_8), value.getBlobs().get(0));
+        assertArrayEquals(
+                "hi".getBytes(StandardCharsets.UTF_8),
+                value.getBlobIndex().getAdditionalProperties().get("hi"));
+
+        Map<String, Double> nonFiniteMap = new java.util.LinkedHashMap<>();
+        nonFiniteMap.put("cpu", Double.POSITIVE_INFINITY);
+        Object[][] cases = new Object[][] {
+            {"score", showcaseWith(null, null, null, null, null, null,
+                    Double.NaN, null, null, null, null)},
+            {"measurements[0]", showcaseWith(null, null, null, null, null, null,
+                    null, new Showcase.MeasurementsArray(java.util.Arrays.asList(Double.NEGATIVE_INFINITY)),
+                    null, null, null)},
+            {"numberGrid[0][1]", showcaseWith(null, null, null, null, null, null,
+                    null, null, java.util.Arrays.asList(java.util.Arrays.asList(1.0, Double.NaN)),
+                    null, null)},
+            {"cpu", showcaseWith(null, null, null, null, null, null,
+                    null, null, null, new Metrics(nonFiniteMap), null)},
+            {"metricOrLabel", showcaseWith(null, null, null, null, null, null,
+                    null, null, null, null,
+                    new Showcase.MetricOrLabelNumber(Double.POSITIVE_INFINITY))},
+        };
+        for (Object[] testCase : cases) {
+            RuntimeException error = assertThrows(
+                    RuntimeException.class,
+                    () -> CONVERTER.toPayload((Showcase) testCase[1]));
+            assertTrue(messageChain(error).contains((String) testCase[0]), messageChain(error));
+            assertTrue(messageChain(error).contains("finite number"), messageChain(error));
+        }
+    }
+
     /**
      * Builds a Showcase with all required members valid, varying only the members
      * under serialize-side test; every other optional member is left unset.
@@ -1183,6 +1228,23 @@ final class JsonSchemaShowcaseRoundTripTest {
             Long priority,
             java.util.List<String> aliases,
             Showcase.IdOrName idOrName) {
+        return showcaseWith(
+                code, sku, requestId, priority, aliases, idOrName,
+                null, null, null, null, null);
+    }
+
+    private static Showcase showcaseWith(
+            String code,
+            String sku,
+            String requestId,
+            Long priority,
+            java.util.List<String> aliases,
+            Showcase.IdOrName idOrName,
+            Double score,
+            Showcase.Measurements measurements,
+            java.util.List<java.util.List<Double>> numberGrid,
+            Metrics metrics,
+            Showcase.MetricOrLabel metricOrLabel) {
         // Closed value-set members can only hold a known value-class constant —
         // a wrong value cannot be constructed (private constructor), so these
         // fields are always the valid constants here.
@@ -1192,10 +1254,11 @@ final class JsonSchemaShowcaseRoundTripTest {
                 "w", 1L, true,
                 null, code, sku, null, requestId, null, null, null, null,
                 null, null, null, null, null, null, null, null, "tools",
-                priority, null, null, null, null, aliases, null, idOrName, null,
-                null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null);
+                priority, null, null, score, null, null, aliases, null, idOrName,
+                null, null, null, null, measurements, null, null, null, null,
+                numberGrid, null, null, null, null, null, null, null, metrics,
+                metricOrLabel, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     /**

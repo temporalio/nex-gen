@@ -118,6 +118,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema converters now apply scalar, reference, union, nested-array,
+  temporal, and content-encoding handling recursively inside array elements and
+  typed-map members. Go reports indexed/keyed violations instead of collapsing
+  them to the collection, TypeScript no longer passes a `oneOf` array branch
+  through verbatim, and required temporal/base64 runtime support is discovered
+  at every nesting depth.
+- JSON Schema `number` values now reject `NaN` and positive/negative infinity
+  with aggregated, fully pathed validation errors before serialization in every
+  target. Go also accepts every valid integer-valued JSON number spelling
+  (`1`, `1.0`, `1e2`, `1.5e1`) while continuing to reject fractional and
+  over-cap values.
+- JSON Schema temporal dates and date-times now use `0001` as their shared
+  minimum year. Year `0000` is rejected by schema-literal validation and by the
+  generated Go, TypeScript, Python, and Java runtime predicates.
 - JSON Schema: Cross-input emission and naming now follow each target's actual
   scope and `x-<lang>-name` overrides. Foreign types are imported rather than
   duplicated, empty TypeScript model modules are omitted, member-derived names

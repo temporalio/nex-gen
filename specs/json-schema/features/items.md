@@ -159,6 +159,11 @@ binding) comes from [[type]]'s `"array"` row.
   array decodes one loop per level, each level's loop variables carrying
   their depth so an inner element never shadows the level above it, and each
   level appending its own index to the path (`matrix[1][2]`).
+- **Materializing elements use their ordinary adapters.** A temporal
+  [[format]] or [[contentEncoding]] in `items` is parsed and serialized through
+  the same generator-owned adapter as a declared property, at every nesting
+  depth. Required runtime support is discovered recursively from the element
+  schema, rather than only from top-level properties.
 - **Empty array.** The element loop is vacuous; an empty `[]` passes the
   `items` check (array-length floors, when supported, live in their own
   specs — see Interactions).
@@ -172,6 +177,11 @@ same predicate the deserializer used) **before emitting a byte**, failing
 with the same aggregated primitive (**P11**), and re-emits elements in
 order (arrays are ordered — unlike object members, element order is part
 of the value and is preserved).
+
+This includes arrays that are branches of a [[oneOf]]: branch selection does
+not bypass the ordinary recursive array parser/mapper, so constraints,
+materialization, nested models, and indexed aggregation remain identical to a
+declared array property.
 
 - **Go nil-slice hazard.** A `nil` `[]T` marshals to JSON `null` under
   `encoding/json`, not `[]`. For a **required, non-nullable** array that

@@ -23,7 +23,11 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 export function collect(violations: Violation[], path: string, error: unknown): void {
   if (error instanceof ValidationError) {
     for (const inner of error.violations) {
-      const nested = inner.path ? `${path}.${inner.path}` : path;
+      const nested = !inner.path
+        ? path
+        : inner.path.startsWith("[")
+          ? `${path}${inner.path}`
+          : `${path}.${inner.path}`;
       violations.push({ path: nested, reason: inner.reason });
     }
   } else {
@@ -71,6 +75,9 @@ function validTemporalCalendar(value: string): boolean {
   const year = Number(value.slice(0, 4));
   const month = Number(value.slice(5, 7));
   const day = Number(value.slice(8, 10));
+  if (year < 1) {
+    return false;
+  }
   const max = daysInTemporalMonth(year, month);
   return max > 0 && day >= 1 && day <= max;
 }
@@ -204,4 +211,59 @@ export function parseTemporalDuration(
     return undefined;
   }
   return formatTemporalDuration(seconds);
+}
+
+export function validateTemporalDateTime(
+  value: string,
+  path: string,
+  violations: Violation[],
+): void {
+  const wire = value;
+  if (!TEMPORAL_DATE_TIME_RE.test(wire) || !validTemporalCalendar(wire)) {
+    violations.push({
+      path,
+      reason: `must be a valid date-time, got ${JSON.stringify(wire)}`,
+    });
+  }
+}
+
+export function validateTemporalDate(
+  value: string,
+  path: string,
+  violations: Violation[],
+): void {
+  const wire = value;
+  if (!TEMPORAL_DATE_RE.test(wire) || !validTemporalCalendar(wire)) {
+    violations.push({
+      path,
+      reason: `must be a valid date, got ${JSON.stringify(wire)}`,
+    });
+  }
+}
+
+export function validateTemporalTime(
+  value: string,
+  path: string,
+  violations: Violation[],
+): void {
+  if (!TEMPORAL_TIME_RE.test(value)) {
+    violations.push({
+      path,
+      reason: `must be a valid time, got ${JSON.stringify(value)}`,
+    });
+  }
+}
+
+export function validateTemporalDuration(
+  value: string,
+  path: string,
+  violations: Violation[],
+): void {
+  const wire = value;
+  if (!TEMPORAL_DURATION_RE.test(wire) || temporalDurationSeconds(wire) === undefined) {
+    violations.push({
+      path,
+      reason: `must be a valid duration, got ${JSON.stringify(wire)}`,
+    });
+  }
 }

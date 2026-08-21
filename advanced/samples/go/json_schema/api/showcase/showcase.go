@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strconv"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
@@ -253,6 +256,97 @@ func unmarshalShape(raw json.RawMessage, path string, errs *[]Violation) (Shape,
 	return nil, false
 }
 
+// ShowcaseAddressListOrLabel is one of: []Address, string.
+type ShowcaseAddressListOrLabel interface {
+	isShowcaseAddressListOrLabel()
+	Validate() error
+}
+
+// ShowcaseAddressListOrLabelArray wraps a []Address value admissible in the ShowcaseAddressListOrLabel union.
+type ShowcaseAddressListOrLabelArray []Address
+
+func (ShowcaseAddressListOrLabelArray) isShowcaseAddressListOrLabel() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseAddressListOrLabelArray) Validate() error {
+	var errs []Violation
+	if n := len([]Address(v)); n < 1 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have at least 1 items, got %d", n)})
+	}
+	for i0, v0 := range []Address(v) {
+		p0 := fmt.Sprintf("%s[%d]", "", i0)
+		mergeNested(&errs, p0, v0.Validate())
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// ShowcaseAddressListOrLabelString wraps a string value admissible in the ShowcaseAddressListOrLabel union.
+type ShowcaseAddressListOrLabelString string
+
+func (ShowcaseAddressListOrLabelString) isShowcaseAddressListOrLabel() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseAddressListOrLabelString) Validate() error {
+	var errs []Violation
+	if n := utf8.RuneCountInString(string(v)); n < 1 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+func unmarshalShowcaseAddressListOrLabel(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseAddressListOrLabel, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		*errs = append(*errs, Violation{path, "expected one of: []Address, string"})
+		return nil, false
+	}
+	switch trimmed[0] {
+	case '[':
+		var arr []Address
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(trimmed, &elems0); err != nil {
+			*errs = append(*errs, Violation{path, "expected array"})
+		} else {
+			arr = make([]Address, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", path, i0)
+				if isNull(e0) {
+					*errs = append(*errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				var value0 Address
+				if err := json.Unmarshal(e0, &value0); err != nil {
+					mergeNested(errs, p0, err)
+				} else {
+					arr = append(arr, value0)
+				}
+			}
+		}
+		v := ShowcaseAddressListOrLabelArray(arr)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			*errs = append(*errs, Violation{path, "expected string"})
+			return nil, false
+		}
+		v := ShowcaseAddressListOrLabelString(s)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	}
+	*errs = append(*errs, Violation{path, "expected one of: []Address, string"})
+	return nil, false
+}
+
 // ShowcaseDetail is one of: ShowcaseDetailObject, string.
 type ShowcaseDetail interface {
 	isShowcaseDetail()
@@ -411,6 +505,12 @@ func (v ShowcaseMeasurementsArray) Validate() error {
 			}
 		}
 	}
+	for i0, v0 := range []float64(v) {
+		p0 := fmt.Sprintf("%s[%d]", "", i0)
+		if math.IsNaN(v0) || math.IsInf(v0, 0) {
+			errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", v0)})
+		}
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -446,9 +546,21 @@ func unmarshalShowcaseMeasurements(raw json.RawMessage, path string, errs *[]Vio
 	switch trimmed[0] {
 	case '[':
 		var arr []float64
-		if err := json.Unmarshal(trimmed, &arr); err != nil {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(trimmed, &elems0); err != nil {
 			*errs = append(*errs, Violation{path, "expected array"})
-			return nil, false
+		} else {
+			arr = make([]float64, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", path, i0)
+				if isNull(e0) {
+					*errs = append(*errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseNumberField(&e0, p0, true, false, errs); ok {
+					arr = append(arr, value0)
+				}
+			}
 		}
 		v := ShowcaseMeasurementsArray(arr)
 		mergeNested(errs, path, v.Validate())
@@ -464,6 +576,85 @@ func unmarshalShowcaseMeasurements(raw json.RawMessage, path string, errs *[]Vio
 		return v, true
 	}
 	*errs = append(*errs, Violation{path, "expected one of: []float64, string"})
+	return nil, false
+}
+
+// ShowcaseMetricOrLabel is one of: number, string.
+type ShowcaseMetricOrLabel interface {
+	isShowcaseMetricOrLabel()
+	Validate() error
+}
+
+// ShowcaseMetricOrLabelNumber wraps a float64 value admissible in the ShowcaseMetricOrLabel union.
+type ShowcaseMetricOrLabelNumber float64
+
+func (ShowcaseMetricOrLabelNumber) isShowcaseMetricOrLabel() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseMetricOrLabelNumber) Validate() error {
+	var errs []Violation
+	if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+		errs = append(errs, Violation{"", fmt.Sprintf("must be a finite number, got %v", float64(v))})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// ShowcaseMetricOrLabelString wraps a string value admissible in the ShowcaseMetricOrLabel union.
+type ShowcaseMetricOrLabelString string
+
+func (ShowcaseMetricOrLabelString) isShowcaseMetricOrLabel() {}
+
+// Validate checks v against every constraint and returns a *ValidationError
+// listing any violations.
+func (v ShowcaseMetricOrLabelString) Validate() error {
+	var errs []Violation
+	if n := utf8.RuneCountInString(string(v)); n < 1 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+func unmarshalShowcaseMetricOrLabel(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseMetricOrLabel, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		*errs = append(*errs, Violation{path, "expected one of: number, string"})
+		return nil, false
+	}
+	switch trimmed[0] {
+	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		dec := json.NewDecoder(bytes.NewReader(trimmed))
+		dec.UseNumber()
+		var n json.Number
+		if err := dec.Decode(&n); err != nil {
+			*errs = append(*errs, Violation{path, "expected number"})
+			return nil, false
+		}
+		fv, err := n.Float64()
+		if err != nil || math.IsNaN(fv) || math.IsInf(fv, 0) {
+			*errs = append(*errs, Violation{path, "expected finite number"})
+			return nil, false
+		}
+		v := ShowcaseMetricOrLabelNumber(fv)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			*errs = append(*errs, Violation{path, "expected string"})
+			return nil, false
+		}
+		v := ShowcaseMetricOrLabelString(s)
+		mergeNested(errs, path, v.Validate())
+		return v, true
+	}
+	*errs = append(*errs, Violation{path, "expected one of: number, string"})
 	return nil, false
 }
 
@@ -801,6 +992,196 @@ func unmarshalShowcaseShapeOrName(raw json.RawMessage, path string, errs *[]Viol
 	return nil, false
 }
 
+var jsonTemporalDateTimeRE = regexp.MustCompile(`^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$`)
+var jsonTemporalDateRE = regexp.MustCompile(`^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$`)
+var jsonTemporalTimeRE = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?$`)
+var jsonTemporalDurationRE = regexp.MustCompile(`^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)$`)
+
+// daysInTemporalMonth returns the Gregorian day count of a 1-based month.
+func daysInTemporalMonth(year, month int) int {
+	switch month {
+	case 1, 3, 5, 7, 8, 10, 12:
+		return 31
+	case 4, 6, 9, 11:
+		return 30
+	case 2:
+		if (year%4 == 0 && year%100 != 0) || year%400 == 0 {
+			return 29
+		}
+		return 28
+	}
+	return 0
+}
+
+// validTemporalCalendar checks day-in-month over a YYYY-MM-DD prefix; the regex
+// has already fixed the digit shape and the month/day ranges.
+func validTemporalCalendar(s string) bool {
+	if len(s) < 10 {
+		return false
+	}
+	year, err1 := strconv.Atoi(s[0:4])
+	month, err2 := strconv.Atoi(s[5:7])
+	day, err3 := strconv.Atoi(s[8:10])
+	if err1 != nil || err2 != nil || err3 != nil {
+		return false
+	}
+	if year < 1 {
+		return false
+	}
+	max := daysInTemporalMonth(year, month)
+	return max > 0 && day >= 1 && day <= max
+}
+
+func temporalFracNanos(nanos int) string {
+	if nanos == 0 {
+		return ""
+	}
+	return "." + strings.TrimRight(fmt.Sprintf("%09d", nanos), "0")
+}
+
+func temporalOffset(secs int) string {
+	if secs == 0 {
+		return "Z"
+	}
+	sign := "+"
+	if secs < 0 {
+		sign = "-"
+		secs = -secs
+	}
+	return fmt.Sprintf("%s%02d:%02d", sign, secs/3600, (secs%3600)/60)
+}
+
+// parseDateTime validates the wire string (narrowed regex + calendar) then parses
+// it into a time.Time, uppercasing the case-insensitive T/Z first (Go's parser
+// rejects lowercase). Offset and nanoseconds are preserved; no truncation.
+func parseDateTime(path, s string, errs *[]Violation) (time.Time, bool) {
+	if !jsonTemporalDateTimeRE.MatchString(s) || !validTemporalCalendar(s) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid date-time, got %q", s)})
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, strings.ToUpper(s))
+	if err != nil {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid date-time, got %q", s)})
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// formatDateTime re-serializes via time.RFC3339Nano, which matches the
+// generator-owned form exactly (offset preserved, Z for zero offset, trailing
+// fractional zeros trimmed).
+func formatDateTime(t time.Time) string {
+	return t.Format(time.RFC3339Nano)
+}
+
+func parseDate(path, s string, errs *[]Violation) (time.Time, bool) {
+	if !jsonTemporalDateRE.MatchString(s) || !validTemporalCalendar(s) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid date, got %q", s)})
+		return time.Time{}, false
+	}
+	t, _ := time.Parse("2006-01-02", s)
+	return t, true
+}
+
+func formatDate(t time.Time) string {
+	return t.Format("2006-01-02")
+}
+
+// Go has no time-of-day type; time.Time carries a phantom date. An offset-less
+// value is stored with a sentinel year so the serializer can distinguish it from
+// an explicit Z/offset (whose offset parse yields year 0).
+const temporalNoOffsetYear = 1
+
+func parseTime(path, s string, errs *[]Violation) (time.Time, bool) {
+	if !jsonTemporalTimeRE.MatchString(s) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid time, got %q", s)})
+		return time.Time{}, false
+	}
+	w := strings.ToUpper(s)
+	if t, err := time.Parse("15:04:05.999999999Z07:00", w); err == nil {
+		return t, true
+	}
+	t, err := time.Parse("15:04:05.999999999", w)
+	if err != nil {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid time, got %q", s)})
+		return time.Time{}, false
+	}
+	return time.Date(temporalNoOffsetYear, 1, 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC), true
+}
+
+func formatTime(t time.Time) string {
+	s := fmt.Sprintf("%02d:%02d:%02d%s", t.Hour(), t.Minute(), t.Second(), temporalFracNanos(t.Nanosecond()))
+	if t.Year() != temporalNoOffsetYear {
+		_, off := t.Zone()
+		s += temporalOffset(off)
+	}
+	return s
+}
+
+// parseDuration validates the time-only wire string then sums it into a
+// time.Duration, rejecting an overflow of the int64-nanosecond capacity.
+func parseDuration(path, s string, errs *[]Violation) (time.Duration, bool) {
+	fail := func() (time.Duration, bool) {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid duration, got %q", s)})
+		return 0, false
+	}
+	if !jsonTemporalDurationRE.MatchString(s) {
+		return fail()
+	}
+	const maxSeconds = int64(9223372036854775807) / 1000000000
+	var totalSeconds int64
+	num := ""
+	for _, ch := range s[2:] {
+		if ch >= '0' && ch <= '9' {
+			num += string(ch)
+			continue
+		}
+		mag, err := strconv.ParseInt(num, 10, 64)
+		if err != nil {
+			return fail()
+		}
+		num = ""
+		var unit int64
+		switch ch {
+		case 'H':
+			unit = 3600
+		case 'M':
+			unit = 60
+		case 'S':
+			unit = 1
+		}
+		prod := mag * unit
+		if unit != 0 && prod/unit != mag {
+			return fail()
+		}
+		totalSeconds += prod
+		if totalSeconds < 0 || totalSeconds > maxSeconds {
+			return fail()
+		}
+	}
+	return time.Duration(totalSeconds) * time.Second, true
+}
+
+// formatDuration canonicalizes to time-only PT…H…M…S (PT0S for zero); a
+// non-canonical input collapses (PT90M → PT1H30M).
+func formatDuration(d time.Duration) string {
+	total := int64(d / time.Second)
+	if total == 0 {
+		return "PT0S"
+	}
+	out := "PT"
+	if h := total / 3600; h != 0 {
+		out += fmt.Sprintf("%dH", h)
+	}
+	if m := (total % 3600) / 60; m != 0 {
+		out += fmt.Sprintf("%dM", m)
+	}
+	if sec := total % 60; sec != 0 {
+		out += fmt.Sprintf("%dS", sec)
+	}
+	return out
+}
+
 // decodeBase64 validates the wire string against the pinned canonical base64
 // regex, then decodes it via the standard (padded) alphabet into bytes.
 func decodeBase64(path, s string, re *regexp.Regexp, errs *[]Violation) ([]byte, bool) {
@@ -926,6 +1307,65 @@ func (m Address) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// AddressBook A typed map of referenced Address models.
+type AddressBook struct {
+	// AdditionalProperties holds every member of this map-shaped object.
+	AdditionalProperties map[string]Address
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m AddressBook) Validate() error {
+	var errs []Violation
+	for k, v := range m.AdditionalProperties {
+		mergeNested(&errs, k, v.Validate())
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *AddressBook) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var errs []Violation
+	m.AdditionalProperties = make(map[string]Address, len(raw))
+	for k, v := range raw {
+		if isNull(v) {
+			errs = append(errs, Violation{k, "explicit null not allowed"})
+			continue
+		}
+		var value Address
+		if err := json.Unmarshal(v, &value); err != nil {
+			mergeNested(&errs, k, err)
+			continue
+		}
+		m.AdditionalProperties[k] = value
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m AddressBook) MarshalJSON() ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]Address, len(m.AdditionalProperties))
+	for k, v := range m.AdditionalProperties {
+		out[k] = v
+	}
+	return json.Marshal(out)
+}
+
 // Attributes A string map with member-count and key-shape constraints: 1 to 3 entries, each key at most 8 code points (minProperties/maxProperties/propertyNames on a map-shaped object).
 type Attributes struct {
 	// AdditionalProperties holds every member of this map-shaped object.
@@ -997,6 +1437,63 @@ func (m Attributes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+var blobIndexValueContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
+
+// BlobIndex A typed map of materialized base64 byte strings.
+type BlobIndex struct {
+	// AdditionalProperties holds every member of this map-shaped object.
+	AdditionalProperties map[string][]byte
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m BlobIndex) Validate() error {
+	var errs []Violation
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *BlobIndex) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var errs []Violation
+	m.AdditionalProperties = make(map[string][]byte, len(raw))
+	for k, v := range raw {
+		if isNull(v) {
+			errs = append(errs, Violation{k, "explicit null not allowed"})
+			continue
+		}
+		if s, ok := parseStringField(&v, k, true, false, &errs); ok {
+			if value, ok := decodeBase64(k, s, blobIndexValueContentEncoding, &errs); ok {
+				m.AdditionalProperties[k] = value
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m BlobIndex) MarshalJSON() ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]any, len(m.AdditionalProperties))
+	for k, v := range m.AdditionalProperties {
+		out[k] = encodeBase64(v)
+	}
+	return json.Marshal(out)
+}
+
 // Choices A map whose *member* type is a union written inline in `additionalProperties`. Like an element union it has no name of its own, so it is named after its position — `ChoicesValue` — and moved into `$defs`; each member then decodes through that union's selector, with the member key carrying into the violation path.
 type Choices struct {
 	// AdditionalProperties holds every member of this map-shaped object.
@@ -1008,7 +1505,11 @@ type Choices struct {
 func (m Choices) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
-		mergeNested(&errs, k, v.Validate())
+		if isNilValue(v) {
+			errs = append(errs, Violation{k, "explicit null not allowed"})
+		} else {
+			mergeNested(&errs, k, v.Validate())
+		}
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -1069,6 +1570,9 @@ func (m Circle) Validate() error {
 	var errs []Violation
 	if m.Kind != CircleKindCircle {
 		errs = append(errs, Violation{"kind", "must equal \"circle\""})
+	}
+	if math.IsNaN(m.Radius) || math.IsInf(m.Radius, 0) {
+		errs = append(errs, Violation{"radius", fmt.Sprintf("must be a finite number, got %v", m.Radius)})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -1235,6 +1739,66 @@ func (m ContactGo) MarshalJSON() ([]byte, error) {
 	}
 	if len(errs) > 0 {
 		return nil, &ValidationError{Violations: errs}
+	}
+	return json.Marshal(out)
+}
+
+// DateIndex A typed map of materialized calendar dates.
+type DateIndex struct {
+	// AdditionalProperties holds every member of this map-shaped object.
+	AdditionalProperties map[string]time.Time
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m DateIndex) Validate() error {
+	var errs []Violation
+	for k, v := range m.AdditionalProperties {
+		if v.Year() < 1 {
+			errs = append(errs, Violation{k, "year must be >= 1"})
+		}
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *DateIndex) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var errs []Violation
+	m.AdditionalProperties = make(map[string]time.Time, len(raw))
+	for k, v := range raw {
+		if isNull(v) {
+			errs = append(errs, Violation{k, "explicit null not allowed"})
+			continue
+		}
+		if s, ok := parseStringField(&v, k, true, false, &errs); ok {
+			if value, ok := parseDate(k, s, &errs); ok {
+				m.AdditionalProperties[k] = value
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m DateIndex) MarshalJSON() ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]any, len(m.AdditionalProperties))
+	for k, v := range m.AdditionalProperties {
+		out[k] = formatDate(v)
 	}
 	return json.Marshal(out)
 }
@@ -1429,6 +1993,63 @@ func (m LinkNote) MarshalJSON() ([]byte, error) {
 	marshalField(out, "href", m.Href, &errs)
 	if len(errs) > 0 {
 		return nil, &ValidationError{Violations: errs}
+	}
+	return json.Marshal(out)
+}
+
+// Metrics A typed map of finite numbers.
+type Metrics struct {
+	// AdditionalProperties holds every member of this map-shaped object.
+	AdditionalProperties map[string]float64
+}
+
+// Validate checks m against every constraint and returns a *ValidationError
+// listing any violations.
+func (m Metrics) Validate() error {
+	var errs []Violation
+	for k, v := range m.AdditionalProperties {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			errs = append(errs, Violation{k, fmt.Sprintf("must be a finite number, got %v", v)})
+		}
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// *ValidationError listing any violations.
+func (m *Metrics) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var errs []Violation
+	m.AdditionalProperties = make(map[string]float64, len(raw))
+	for k, v := range raw {
+		if value, ok := parseNumberField(&v, k, true, false, &errs); ok {
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				errs = append(errs, Violation{k, fmt.Sprintf("must be a finite number, got %v", value)})
+			}
+			m.AdditionalProperties[k] = value
+		}
+	}
+	if len(errs) > 0 {
+		return &ValidationError{Violations: errs}
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// *ValidationError if validation fails.
+func (m Metrics) MarshalJSON() ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]float64, len(m.AdditionalProperties))
+	for k, v := range m.AdditionalProperties {
+		out[k] = v
 	}
 	return json.Marshal(out)
 }
@@ -1651,6 +2272,8 @@ var showcaseHomepageFormat = regexp.MustCompile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?:
 var showcaseGatewayFormat = regexp.MustCompile("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$")
 var showcaseBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
 var showcaseUrlBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$")
+var showcaseLinksItemFormat = regexp.MustCompile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)$")
+var showcaseBlobsItemContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
 
 // Showcase
 // Root object exercising the supported JSON-Schema feature subset: required and optional fields of every scalar type, optional+nullable and required+nullable members, arrays, a nested object via $ref, a typed-map, a closed object, an open (catch-all) object, a string const, a scalar default, and member docs.
@@ -1721,6 +2344,8 @@ type Showcase struct {
 	Level *int64 `json:"level,omitempty"`
 	// Ratio Optional number that must be a non-negative multiple of 5.
 	Ratio *float64 `json:"ratio,omitempty"`
+	// Score Optional unbounded finite number.
+	Score *float64 `json:"score,omitempty"`
 	// Step Optional integer that must be a multiple of 3.
 	Step *int64 `json:"step,omitempty"`
 	// Tags Ordered list of free-form tags; 1 to 5 entries.
@@ -1745,10 +2370,32 @@ type Showcase struct {
 	Shapes []Shape `json:"shapes,omitempty"`
 	// Segments A list whose element union is written **inline**. An element has no name of its own, so the union is named after its position — `ShowcaseSegmentsItem` — moved into `$defs`, and the element becomes a `$ref` at it; from there it is an ordinary named union in every language.
 	Segments []ShowcaseSegmentsItem `json:"segments,omitempty"`
-	// Slots A list of **nullable elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while the list stays a list.
+	// Slots A list of **nullable, constrained scalar elements** — the two-branch nullability `oneOf` rather than a sum type, so nothing is named: the elements themselves become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`, `List<@Nullable String>`) while each present string retains its own minimum length and the list stays a list.
 	Slots []*string `json:"slots,omitempty"`
 	// Grid A nested array: `items` at depth two. Each level decodes elementwise, so a bad element is reported at its own two-dimensional index (`grid[1][0]`).
 	Grid [][]int64 `json:"grid,omitempty"`
+	// NumberGrid A nested array of numbers used to prove recursive finite-number validation and two-dimensional indexed aggregation.
+	NumberGrid [][]float64 `json:"numberGrid,omitempty"`
+	// Links A list of scalar URI values; every element keeps its format assertion.
+	Links []string `json:"links,omitempty"`
+	// Addresses A list of referenced models, converted and validated elementwise.
+	Addresses []Address `json:"addresses,omitempty"`
+	// AddressBook corresponds to the "addressBook" JSON property.
+	AddressBook *AddressBook `json:"addressBook,omitempty"`
+	// Dates Materialized calendar dates in an array.
+	Dates []time.Time `json:"dates,omitempty"`
+	// DateIndex corresponds to the "dateIndex" JSON property.
+	DateIndex *DateIndex `json:"dateIndex,omitempty"`
+	// Blobs Materialized base64 byte strings in an array.
+	Blobs [][]byte `json:"blobs,omitempty"`
+	// BlobIndex corresponds to the "blobIndex" JSON property.
+	BlobIndex *BlobIndex `json:"blobIndex,omitempty"`
+	// Metrics corresponds to the "metrics" JSON property.
+	Metrics *Metrics `json:"metrics,omitempty"`
+	// MetricOrLabel A finite number branch or a non-empty string branch.
+	MetricOrLabel ShowcaseMetricOrLabel `json:"metricOrLabel,omitempty"`
+	// AddressListOrLabel A union whose array branch contains referenced models, proving that branch conversion uses the ordinary recursive array mapper.
+	AddressListOrLabel ShowcaseAddressListOrLabel `json:"addressListOrLabel,omitempty"`
 	// Location corresponds to the "location" JSON property.
 	Location *ShowcaseLocation `json:"location,omitempty"`
 	// Audit A nullable inline object. The nullability wrapper emits no type of its own, so the object inside it takes the property's name — `ShowcaseAudit`, the same name it would take written plainly: adding or removing nullability never renames the type.
@@ -1837,6 +2484,9 @@ func (m Showcase) Validate() error {
 	default:
 		errs = append(errs, Violation{"scale", fmt.Sprintf("must be one of [1.5,2.5], got %v", m.Scale)})
 	}
+	if math.IsNaN(float64(m.Scale)) || math.IsInf(float64(m.Scale), 0) {
+		errs = append(errs, Violation{"scale", fmt.Sprintf("must be a finite number, got %v", float64(m.Scale))})
+	}
 	if n := utf8.RuneCountInString(m.Name); n < 1 {
 		errs = append(errs, Violation{"name", fmt.Sprintf("must have length >= 1, got %d", n)})
 	}
@@ -1917,11 +2567,21 @@ func (m Showcase) Validate() error {
 		}
 	}
 	if m.Ratio != nil {
+		if math.IsNaN(*m.Ratio) || math.IsInf(*m.Ratio, 0) {
+			errs = append(errs, Violation{"ratio", fmt.Sprintf("must be a finite number, got %v", *m.Ratio)})
+		}
+	}
+	if m.Ratio != nil {
 		if *m.Ratio < 5 {
 			errs = append(errs, Violation{"ratio", fmt.Sprintf("must be >= 5, got %v", *m.Ratio)})
 		}
 		if math.Mod(*m.Ratio, 5) != 0 {
 			errs = append(errs, Violation{"ratio", fmt.Sprintf("must be a multiple of 5, got %v", *m.Ratio)})
+		}
+	}
+	if m.Score != nil {
+		if math.IsNaN(*m.Score) || math.IsInf(*m.Score, 0) {
+			errs = append(errs, Violation{"score", fmt.Sprintf("must be a finite number, got %v", *m.Score)})
 		}
 	}
 	if m.Step != nil && (*m.Step < -integerCap || *m.Step > integerCap) {
@@ -1988,18 +2648,95 @@ func (m Showcase) Validate() error {
 	}
 	for i0, v0 := range m.Shapes {
 		p0 := fmt.Sprintf("%s[%d]", "shapes", i0)
-		if v0 != nil {
+		if isNilValue(v0) {
+			errs = append(errs, Violation{p0, "explicit null not allowed"})
+		} else {
 			mergeNested(&errs, p0, v0.Validate())
 		}
 	}
 	for i0, v0 := range m.Segments {
 		p0 := fmt.Sprintf("%s[%d]", "segments", i0)
-		if v0 != nil {
+		if isNilValue(v0) {
+			errs = append(errs, Violation{p0, "explicit null not allowed"})
+		} else {
 			mergeNested(&errs, p0, v0.Validate())
 		}
 	}
+	for i0, v0 := range m.Slots {
+		p0 := fmt.Sprintf("%s[%d]", "slots", i0)
+		if v0 == nil {
+			continue
+		}
+		if n := utf8.RuneCountInString((*v0)); n < 2 {
+			errs = append(errs, Violation{p0, fmt.Sprintf("must have length >= 2, got %d", n)})
+		}
+	}
+	for i0, v0 := range m.Grid {
+		p0 := fmt.Sprintf("%s[%d]", "grid", i0)
+		if v0 == nil {
+			errs = append(errs, Violation{p0, "explicit null not allowed"})
+		} else {
+			for i1, v1 := range v0 {
+				p1 := fmt.Sprintf("%s[%d]", p0, i1)
+				if v1 < -integerCap || v1 > integerCap {
+					errs = append(errs, Violation{p1, "exceeds ±(2^53-1) integer cap"})
+				}
+			}
+		}
+	}
+	for i0, v0 := range m.NumberGrid {
+		p0 := fmt.Sprintf("%s[%d]", "numberGrid", i0)
+		if v0 == nil {
+			errs = append(errs, Violation{p0, "explicit null not allowed"})
+		} else {
+			for i1, v1 := range v0 {
+				p1 := fmt.Sprintf("%s[%d]", p0, i1)
+				if math.IsNaN(v1) || math.IsInf(v1, 0) {
+					errs = append(errs, Violation{p1, fmt.Sprintf("must be a finite number, got %v", v1)})
+				}
+			}
+		}
+	}
+	for i0, v0 := range m.Links {
+		p0 := fmt.Sprintf("%s[%d]", "links", i0)
+		if !showcaseLinksItemFormat.MatchString(v0) {
+			errs = append(errs, Violation{p0, fmt.Sprintf("must be a valid uri, got %q", v0)})
+		}
+	}
+	for i0, v0 := range m.Addresses {
+		p0 := fmt.Sprintf("%s[%d]", "addresses", i0)
+		mergeNested(&errs, p0, v0.Validate())
+	}
+	if m.AddressBook != nil {
+		mergeNested(&errs, "addressBook", m.AddressBook.Validate())
+	}
+	for i0, v0 := range m.Dates {
+		p0 := fmt.Sprintf("%s[%d]", "dates", i0)
+		if v0.Year() < 1 {
+			errs = append(errs, Violation{p0, "year must be >= 1"})
+		}
+	}
+	if m.DateIndex != nil {
+		mergeNested(&errs, "dateIndex", m.DateIndex.Validate())
+	}
+	if m.BlobIndex != nil {
+		mergeNested(&errs, "blobIndex", m.BlobIndex.Validate())
+	}
+	if m.Metrics != nil {
+		mergeNested(&errs, "metrics", m.Metrics.Validate())
+	}
+	if m.MetricOrLabel != nil {
+		mergeNested(&errs, "metricOrLabel", m.MetricOrLabel.Validate())
+	}
+	if m.AddressListOrLabel != nil {
+		mergeNested(&errs, "addressListOrLabel", m.AddressListOrLabel.Validate())
+	}
 	if m.Location != nil {
 		mergeNested(&errs, "location", m.Location.Validate())
+	}
+	for i0, v0 := range m.Rows {
+		p0 := fmt.Sprintf("%s[%d]", "rows", i0)
+		mergeNested(&errs, p0, v0.Validate())
 	}
 	if m.LedgerGo != nil {
 		mergeNested(&errs, "ledger", m.LedgerGo.Validate())
@@ -2059,7 +2796,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	for k := range all {
 		switch k {
-		case "kind", "revision", "enabled", "status", "tier", "scale", "name", "count", "active", "nickname", "code", "sku", "phrase", "requestId", "contactEmail", "host", "homepage", "gateway", "blob", "urlBlob", "retries", "verbose", "greeting", "debug", "legacyId", "middleName", "category", "priority", "level", "ratio", "step", "tags", "aliases", "roles", "idOrName", "mode", "payload", "detail", "shapeOrName", "measurements", "shapes", "segments", "slots", "grid", "location", "audit", "rows", "ledger", "metadata", "quotas", "tokens", "nicknames", "choices", "extras", "shape", "note", "address", "labels", "settings", "attributes", "contact":
+		case "kind", "revision", "enabled", "status", "tier", "scale", "name", "count", "active", "nickname", "code", "sku", "phrase", "requestId", "contactEmail", "host", "homepage", "gateway", "blob", "urlBlob", "retries", "verbose", "greeting", "debug", "legacyId", "middleName", "category", "priority", "level", "ratio", "score", "step", "tags", "aliases", "roles", "idOrName", "mode", "payload", "detail", "shapeOrName", "measurements", "shapes", "segments", "slots", "grid", "numberGrid", "links", "addresses", "addressBook", "dates", "dateIndex", "blobs", "blobIndex", "metrics", "metricOrLabel", "addressListOrLabel", "location", "audit", "rows", "ledger", "metadata", "quotas", "tokens", "nicknames", "choices", "extras", "shape", "note", "address", "labels", "settings", "attributes", "contact":
 		default:
 			errs = append(errs, Violation{k, "unknown field"})
 		}
@@ -2249,6 +2986,9 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 		}
 		m.Ratio = &v
 	}
+	if v, ok := parseNumberField(get("score"), "score", false, false, &errs); ok {
+		m.Score = &v
+	}
 	if v, ok := parseIntegerField(get("step"), "step", false, false, &errs); ok {
 		if v%3 != 0 {
 			errs = append(errs, Violation{"step", fmt.Sprintf("must be a multiple of 3, got %v", v)})
@@ -2258,9 +2998,23 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	if raw := get("tags"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"tags", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Tags); err != nil {
-		errs = append(errs, Violation{"tags", "expected array"})
 	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"tags", "expected array"})
+		} else {
+			m.Tags = make([]string, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "tags", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					m.Tags = append(m.Tags, value0)
+				}
+			}
+		}
 		if n := len(m.Tags); n < 1 {
 			errs = append(errs, Violation{"tags", fmt.Sprintf("must have at least 1 items, got %d", n)})
 		}
@@ -2271,9 +3025,23 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	if raw := get("aliases"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"aliases", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Aliases); err != nil {
-		errs = append(errs, Violation{"aliases", "expected array"})
 	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"aliases", "expected array"})
+		} else {
+			m.Aliases = make([]string, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "aliases", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					m.Aliases = append(m.Aliases, value0)
+				}
+			}
+		}
 		{
 			seen := make(map[string]int, len(m.Aliases))
 			for i, e := range m.Aliases {
@@ -2288,9 +3056,23 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	if raw := get("roles"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"roles", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Roles); err != nil {
-		errs = append(errs, Violation{"roles", "expected array"})
 	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"roles", "expected array"})
+		} else {
+			m.Roles = make([]string, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "roles", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					m.Roles = append(m.Roles, value0)
+				}
+			}
+		}
 		{
 			matchCount := 0
 			for _, e := range m.Roles {
@@ -2353,8 +3135,12 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 			m.Shapes = make([]Shape, 0, len(elems0))
 			for i0, e0 := range elems0 {
 				p0 := fmt.Sprintf("%s[%d]", "shapes", i0)
-				if v, ok := unmarshalShape(e0, p0, &errs); ok {
-					m.Shapes = append(m.Shapes, v)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := unmarshalShape(e0, p0, &errs); ok {
+					m.Shapes = append(m.Shapes, value0)
 				}
 			}
 		}
@@ -2370,8 +3156,12 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 			m.Segments = make([]ShowcaseSegmentsItem, 0, len(elems0))
 			for i0, e0 := range elems0 {
 				p0 := fmt.Sprintf("%s[%d]", "segments", i0)
-				if v, ok := unmarshalShowcaseSegmentsItem(e0, p0, &errs); ok {
-					m.Segments = append(m.Segments, v)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := unmarshalShowcaseSegmentsItem(e0, p0, &errs); ok {
+					m.Segments = append(m.Segments, value0)
 				}
 			}
 		}
@@ -2379,14 +3169,251 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	if raw := get("slots"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"slots", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Slots); err != nil {
-		errs = append(errs, Violation{"slots", "expected array"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"slots", "expected array"})
+		} else {
+			m.Slots = make([]*string, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "slots", i0)
+				if isNull(e0) {
+					m.Slots = append(m.Slots, nil)
+					continue
+				}
+				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					if n := utf8.RuneCountInString(value0); n < 2 {
+						errs = append(errs, Violation{p0, fmt.Sprintf("must have length >= 2, got %d", n)})
+					}
+					m.Slots = append(m.Slots, &value0)
+				}
+			}
+		}
 	}
 	if raw := get("grid"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"grid", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Grid); err != nil {
-		errs = append(errs, Violation{"grid", "expected array"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"grid", "expected array"})
+		} else {
+			m.Grid = make([][]int64, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "grid", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				var value0 []int64
+				var elems1 []json.RawMessage
+				if err := json.Unmarshal(e0, &elems1); err != nil {
+					errs = append(errs, Violation{p0, "expected array"})
+				} else {
+					value0 = make([]int64, 0, len(elems1))
+					for i1, e1 := range elems1 {
+						p1 := fmt.Sprintf("%s[%d]", p0, i1)
+						if isNull(e1) {
+							errs = append(errs, Violation{p1, "explicit null not allowed"})
+							continue
+						}
+						if value1, ok := parseIntegerField(&e1, p1, true, false, &errs); ok {
+							value0 = append(value0, value1)
+						}
+					}
+				}
+				m.Grid = append(m.Grid, value0)
+			}
+		}
+	}
+	if raw := get("numberGrid"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"numberGrid", "explicit null not allowed"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"numberGrid", "expected array"})
+		} else {
+			m.NumberGrid = make([][]float64, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "numberGrid", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				var value0 []float64
+				var elems1 []json.RawMessage
+				if err := json.Unmarshal(e0, &elems1); err != nil {
+					errs = append(errs, Violation{p0, "expected array"})
+				} else {
+					value0 = make([]float64, 0, len(elems1))
+					for i1, e1 := range elems1 {
+						p1 := fmt.Sprintf("%s[%d]", p0, i1)
+						if isNull(e1) {
+							errs = append(errs, Violation{p1, "explicit null not allowed"})
+							continue
+						}
+						if value1, ok := parseNumberField(&e1, p1, true, false, &errs); ok {
+							if math.IsNaN(value1) || math.IsInf(value1, 0) {
+								errs = append(errs, Violation{p1, fmt.Sprintf("must be a finite number, got %v", value1)})
+							}
+							value0 = append(value0, value1)
+						}
+					}
+				}
+				m.NumberGrid = append(m.NumberGrid, value0)
+			}
+		}
+	}
+	if raw := get("links"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"links", "explicit null not allowed"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"links", "expected array"})
+		} else {
+			m.Links = make([]string, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "links", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					if !showcaseLinksItemFormat.MatchString(value0) {
+						errs = append(errs, Violation{p0, fmt.Sprintf("must be a valid uri, got %q", value0)})
+					}
+					m.Links = append(m.Links, value0)
+				}
+			}
+		}
+	}
+	if raw := get("addresses"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"addresses", "explicit null not allowed"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"addresses", "expected array"})
+		} else {
+			m.Addresses = make([]Address, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "addresses", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				var value0 Address
+				if err := json.Unmarshal(e0, &value0); err != nil {
+					mergeNested(&errs, p0, err)
+				} else {
+					m.Addresses = append(m.Addresses, value0)
+				}
+			}
+		}
+	}
+	if raw := get("addressBook"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"addressBook", "explicit null not allowed"})
+	} else {
+		var tmp AddressBook
+		if err := json.Unmarshal(*raw, &tmp); err != nil {
+			mergeNested(&errs, "addressBook", err)
+		} else {
+			m.AddressBook = &tmp
+		}
+	}
+	if raw := get("dates"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"dates", "explicit null not allowed"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"dates", "expected array"})
+		} else {
+			m.Dates = make([]time.Time, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "dates", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if s0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					if value0, ok := parseDate(p0, s0, &errs); ok {
+						m.Dates = append(m.Dates, value0)
+					}
+				}
+			}
+		}
+	}
+	if raw := get("dateIndex"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"dateIndex", "explicit null not allowed"})
+	} else {
+		var tmp DateIndex
+		if err := json.Unmarshal(*raw, &tmp); err != nil {
+			mergeNested(&errs, "dateIndex", err)
+		} else {
+			m.DateIndex = &tmp
+		}
+	}
+	if raw := get("blobs"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"blobs", "explicit null not allowed"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"blobs", "expected array"})
+		} else {
+			m.Blobs = make([][]byte, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "blobs", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if s0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					if value0, ok := decodeBase64(p0, s0, showcaseBlobsItemContentEncoding, &errs); ok {
+						m.Blobs = append(m.Blobs, value0)
+					}
+				}
+			}
+		}
+	}
+	if raw := get("blobIndex"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"blobIndex", "explicit null not allowed"})
+	} else {
+		var tmp BlobIndex
+		if err := json.Unmarshal(*raw, &tmp); err != nil {
+			mergeNested(&errs, "blobIndex", err)
+		} else {
+			m.BlobIndex = &tmp
+		}
+	}
+	if raw := get("metrics"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"metrics", "explicit null not allowed"})
+	} else {
+		var tmp Metrics
+		if err := json.Unmarshal(*raw, &tmp); err != nil {
+			mergeNested(&errs, "metrics", err)
+		} else {
+			m.Metrics = &tmp
+		}
+	}
+	if raw := get("metricOrLabel"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"metricOrLabel", "explicit null not allowed"})
+	} else if v, ok := unmarshalShowcaseMetricOrLabel(*raw, "metricOrLabel", &errs); ok {
+		m.MetricOrLabel = v
+	}
+	if raw := get("addressListOrLabel"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"addressListOrLabel", "explicit null not allowed"})
+	} else if v, ok := unmarshalShowcaseAddressListOrLabel(*raw, "addressListOrLabel", &errs); ok {
+		m.AddressListOrLabel = v
 	}
 	if raw := get("location"); raw == nil {
 	} else if isNull(*raw) {
@@ -2412,8 +3439,26 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	if raw := get("rows"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"rows", "explicit null not allowed"})
-	} else if err := json.Unmarshal(*raw, &m.Rows); err != nil {
-		errs = append(errs, Violation{"rows", "expected array"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"rows", "expected array"})
+		} else {
+			m.Rows = make([]ShowcaseRowsItem, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "rows", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				var value0 ShowcaseRowsItem
+				if err := json.Unmarshal(e0, &value0); err != nil {
+					mergeNested(&errs, p0, err)
+				} else {
+					m.Rows = append(m.Rows, value0)
+				}
+			}
+		}
 	}
 	if raw := get("ledger"); raw == nil {
 	} else if isNull(*raw) {
@@ -2645,6 +3690,9 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	if m.Ratio != nil {
 		marshalField(out, "ratio", *m.Ratio, &errs)
 	}
+	if m.Score != nil {
+		marshalField(out, "score", *m.Score, &errs)
+	}
 	if m.Step != nil {
 		marshalField(out, "step", *m.Step, &errs)
 	}
@@ -2686,6 +3734,47 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	}
 	if m.Grid != nil {
 		marshalField(out, "grid", m.Grid, &errs)
+	}
+	if m.NumberGrid != nil {
+		marshalField(out, "numberGrid", m.NumberGrid, &errs)
+	}
+	if m.Links != nil {
+		marshalField(out, "links", m.Links, &errs)
+	}
+	if m.Addresses != nil {
+		marshalField(out, "addresses", m.Addresses, &errs)
+	}
+	if m.AddressBook != nil {
+		marshalField(out, "addressBook", *m.AddressBook, &errs)
+	}
+	if m.Dates != nil {
+		wireDates0 := make([]any, 0, len(m.Dates))
+		for _, itemDates0 := range m.Dates {
+			wireDates0 = append(wireDates0, formatDate(itemDates0))
+		}
+		marshalField(out, "dates", wireDates0, &errs)
+	}
+	if m.DateIndex != nil {
+		marshalField(out, "dateIndex", *m.DateIndex, &errs)
+	}
+	if m.Blobs != nil {
+		wireBlobs0 := make([]any, 0, len(m.Blobs))
+		for _, itemBlobs0 := range m.Blobs {
+			wireBlobs0 = append(wireBlobs0, encodeBase64(itemBlobs0))
+		}
+		marshalField(out, "blobs", wireBlobs0, &errs)
+	}
+	if m.BlobIndex != nil {
+		marshalField(out, "blobIndex", *m.BlobIndex, &errs)
+	}
+	if m.Metrics != nil {
+		marshalField(out, "metrics", *m.Metrics, &errs)
+	}
+	if m.MetricOrLabel != nil {
+		marshalField(out, "metricOrLabel", m.MetricOrLabel, &errs)
+	}
+	if m.AddressListOrLabel != nil {
+		marshalField(out, "addressListOrLabel", m.AddressListOrLabel, &errs)
 	}
 	if m.Location != nil {
 		marshalField(out, "location", *m.Location, &errs)
@@ -3135,6 +4224,16 @@ type ShowcaseLocationGeo struct {
 // listing any violations.
 func (m ShowcaseLocationGeo) Validate() error {
 	var errs []Violation
+	if m.Lat != nil {
+		if math.IsNaN(*m.Lat) || math.IsInf(*m.Lat, 0) {
+			errs = append(errs, Violation{"lat", fmt.Sprintf("must be a finite number, got %v", *m.Lat)})
+		}
+	}
+	if m.Lon != nil {
+		if math.IsNaN(*m.Lon) || math.IsInf(*m.Lon, 0) {
+			errs = append(errs, Violation{"lon", fmt.Sprintf("must be a finite number, got %v", *m.Lon)})
+		}
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -3398,6 +4497,9 @@ func (m Square) Validate() error {
 	var errs []Violation
 	if m.Kind != SquareKindSquare {
 		errs = append(errs, Violation{"kind", "must equal \"square\""})
+	}
+	if math.IsNaN(m.Side) || math.IsInf(m.Side, 0) {
+		errs = append(errs, Violation{"side", fmt.Sprintf("must be a finite number, got %v", m.Side)})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}

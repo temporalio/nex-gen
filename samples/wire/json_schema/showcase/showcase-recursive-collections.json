@@ -1,0 +1,28 @@
+{
+  "kind": "showcase",
+  "revision": 1,
+  "enabled": true,
+  "status": "active",
+  "tier": 1,
+  "scale": 1.5,
+  "name": "recursive collections",
+  "count": 1,
+  "active": true,
+  "category": "tests",
+  "score": 2.5,
+  "slots": ["ok", null, "yes"],
+  "numberGrid": [[1, 2.5], [3]],
+  "links": ["https://example.test/a", "urn:example:item"],
+  "addresses": [
+    {"street": "1 Main St", "city": "Springfield"}
+  ],
+  "addressBook": {
+    "home": {"street": "2 Side St", "city": "Shelbyville"}
+  },
+  "dates": ["0001-01-01", "2024-02-29"],
+  "dateIndex": {"first": "0001-01-01", "leap": "2024-02-29"},
+  "blobs": ["aGk=", "Pj4+"],
+  "blobIndex": {"hi": "aGk=", "arrows": "Pj4+"},
+  "metrics": {"cpu": 1.5, "memory": 2},
+  "metricOrLabel": 2.5
+}

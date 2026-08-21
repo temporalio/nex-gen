@@ -306,26 +306,72 @@ export const temporalTransferTypeConverter =
     public toTransferType(value: Temporal): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
+      __nexgenDefinitions.validateTemporalDateTime(
+        value.createdAt,
+        "createdAt",
+        violations,
+      );
       out.createdAt = value.createdAt;
+      __nexgenDefinitions.validateTemporalDate(value.birthday, "birthday", violations);
       out.birthday = value.birthday;
+      __nexgenDefinitions.validateTemporalTime(value.alarm, "alarm", violations);
       out.alarm = value.alarm;
+      __nexgenDefinitions.validateTemporalDuration(
+        value.timeout,
+        "timeout",
+        violations,
+      );
       out.timeout = value.timeout;
       if (value.updatedAt !== undefined) {
+        __nexgenDefinitions.validateTemporalDateTime(
+          value.updatedAt,
+          "updatedAt",
+          violations,
+        );
         out.updatedAt = value.updatedAt;
       }
       if (value.expiresOn !== undefined) {
+        __nexgenDefinitions.validateTemporalDate(
+          value.expiresOn,
+          "expiresOn",
+          violations,
+        );
         out.expiresOn = value.expiresOn;
       }
       if (value.reminder !== undefined) {
+        __nexgenDefinitions.validateTemporalTime(
+          value.reminder,
+          "reminder",
+          violations,
+        );
         out.reminder = value.reminder;
       }
       if (value.retryDelay !== undefined) {
+        __nexgenDefinitions.validateTemporalDuration(
+          value.retryDelay,
+          "retryDelay",
+          violations,
+        );
         out.retryDelay = value.retryDelay;
       }
       if (value.deletedAt !== undefined) {
+        if (value.deletedAt !== null) {
+          __nexgenDefinitions.validateTemporalDateTime(
+            value.deletedAt,
+            "deletedAt",
+            violations,
+          );
+        }
         out.deletedAt = value.deletedAt === null ? null : value.deletedAt;
       }
       if (value.archivedOn !== undefined) {
+        if (value.archivedOn !== null) {
+          __nexgenDefinitions.validateTemporalDate(
+            value.archivedOn,
+            "archivedOn",
+            violations,
+          );
+        }
         out.archivedOn = value.archivedOn === null ? null : value.archivedOn;
       }
       if (violations.length) {
