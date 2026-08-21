@@ -2821,7 +2821,7 @@ pub(in crate::generator) struct RenderedModelFragments {
     pub(in crate::generator) post_model_statements: String,
     pub(in crate::generator) module_imports: BTreeSet<String>,
     pub(in crate::generator) relative_imports: BTreeMap<String, BTreeSet<String>>,
-    /// Backend-owned public names imported only by the generated package tree's root barrel.
+    /// Backend-owned public names imported only by the generated package tree's root module.
     pub(in crate::generator) root_package_imports: RootPackageImports,
     pub(in crate::generator) exported_names: BTreeSet<String>,
     pub(in crate::generator) allows_private_wire_access: bool,
