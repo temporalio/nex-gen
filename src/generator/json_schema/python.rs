@@ -23,6 +23,8 @@ use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
+const JSON_PUBLIC_RUNTIME_NAMES: &[&str] = &["ValidationError", "Violation"];
+
 #[derive(Debug, Clone, Deserialize, Default)]
 struct Schema {
     #[serde(rename = "$ref")]
@@ -289,7 +291,20 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
     fn render_models(&self) -> Result<RenderedModelFragments> {
         set_ref_names(&self.ref_names);
         let json_models = self.json_models.iter().collect::<Vec<_>>();
-        render_external_models(json_models.as_slice(), &self.runtime_import_module)
+        let mut fragments =
+            render_external_models(json_models.as_slice(), &self.runtime_import_module)?;
+        if !self.json_models.is_empty() || !self.hoisted_json_models.is_empty() {
+            // Validation failures are part of the JSON backend's public runtime surface.
+            // Keep the request even when every local model was moved to `_recursive`.
+            fragments.root_package_imports.insert(
+                "._definitions".to_string(),
+                JSON_PUBLIC_RUNTIME_NAMES
+                    .iter()
+                    .map(|name| (*name).to_string())
+                    .collect(),
+            );
+        }
+        Ok(fragments)
     }
 
     fn render_support_files(&self) -> Result<BTreeMap<PathBuf, String>> {
@@ -715,6 +730,7 @@ pub(in crate::generator) fn render_external_models(
         post_model_statements: String::new(),
         module_imports,
         relative_imports,
+        root_package_imports: BTreeMap::new(),
         exported_names: json_models
             .iter()
             .map(|model| model.model_name.clone())
