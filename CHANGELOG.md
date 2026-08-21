@@ -54,29 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — the one sibling keyword treated this way, because it asserts nothing about the
   value, and the only way to rename a member whose type is a `$ref` (a member
   named `class` was otherwise unfixable in Python and Java).
-- TypeScript: A model's companion converter is now an exported
-  `TransferTypeConverter` **instance** instead of a class. `class <Type>Mapper`
-  with `fromIntermediate`/`toIntermediate` becomes
-  `export const <type>TransferTypeConverter = new class implements
-  TransferTypeConverter<Type> { … }()` with `fromTransferType`/`toTransferType`,
-  implementing the contract from
-  [nexus-rpc/sdk-typescript#40](https://github.com/nexus-rpc/sdk-typescript/pull/40).
-  Call sites drop the construction: `new UserMapper().fromIntermediate(raw)`
-  becomes `userTransferTypeConverter.fromTransferType(raw)`. The converter
-  identifier is the model's resolved type name lower-camel-cased, so an
-  `x-ts-name` override moves it. `models.ts` now carries a type-only
-  `import type { TransferTypeConverter } from "nexus-rpc"`. Because the
-  identifier is derived by lower-camel-casing, it takes part in the load-time
-  identifier-collision check: two models in one module whose converter names
-  coincide (for example `HTTPError` and `HttpError`) are now rejected with a
-  fix-it, as is a service whose `x-ts-name` lands on a converter name.
-- TypeScript: Generated operations now carry operation type info. Each
-  non-void side of `nexus.operation` emits
-  `inputType`/`outputType` = `{ transferTypeConverter: … }` naming the I/O
-  model's converter, so a protocol integration can apply the conversion without
-  the caller wiring it by hand; a void side carries neither field. Applies to
-  JSON-Schema input only — WIT-input operations are unchanged. Requires a
-  `nexus-rpc` release that includes the type-info API.
+- TypeScript: JSON models now export companion `TransferTypeConverter`
+  instances with `fromTransferType`/`toTransferType`, replacing the previous
+  mapper classes and intermediate-value terminology.
+- TypeScript: JSON Schema operations now attach their model converters as
+  `inputType`/`outputType` metadata. WIT-generated operations are unchanged.
 - Generating into an existing `--output` directory no longer deletes it first.
   The directory is written into instead, so pre-existing files and
   subdirectories are preserved; generated files are still overwritten in place.
@@ -126,95 +108,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- JSON Schema: A module re-emitted the types it only `$ref`d from **another input
-  file**, instead of importing them, whenever that module declared no types of its
-  own — a service file whose every operation type is a `$ref` elsewhere. Every
-  target emitted a second copy of each referenced type: `Page redeclared in this
-  block` in Go's flat package, a duplicate `Page.java` that failed the build with a
-  generated-file conflict, a TypeScript module that both imported and redeclared
-  the name (`TS2440`), and in Python a barrel importing two copies and silently
-  binding one (P7). The cause was reachability pruning inferring "this front end
-  does not scope declarations by module" from a module owning nothing, which is
-  indistinguishable from "this module declares nothing" while the flag is a
-  `bool`; declarations now record *foreign* distinctly from *unscoped*. A module
-  that declares nothing now emits no models file, and its TypeScript barrel stops
-  re-exporting `./models` — re-exporting a file with no exports is itself an error
-  (`TS2306`). The checked-in samples were unaffected, because every sample service
-  module happens to declare at least one inline operation type.
-- JSON Schema: The P15 collision pass used the wrong scope in two ways, so
-  **multi-input** runs accepted schemas that generate uncompilable code. Services
-  were only entered into the namespace of the root module, which in multi-input
-  mode is no module at all — a service clashing with a model in its own file
-  rejected when that file was the sole input and was silently accepted when it sat
-  in a directory. And every target was scoped per module, but **Go flattens every
-  module into one package**: two input files each declaring a `Page` emitted the
-  type twice into one package (`Page redeclared in this block`) with no
-  diagnostic. Services now enter the namespace of their declaring module, and Go's
-  scope is the whole input closure; its diagnostic names the module each
-  declaration came from (`a/page#Page` and `b/page#Page`), which it could not do
-  while two same-named models in different modules produced identical origin text
-  and were mistaken for one declaration seen twice.
-- JSON Schema: TypeScript and Python had the same cross-module defect as Go, by a
-  different route: both emit a **root barrel** that lifts every module's top-level
-  names into one namespace — `index.ts` re-exporting each module with `export *`,
-  `__init__.py` re-exporting them by name — so two input files each declaring a
-  `Page` collide there. TypeScript emitted a barrel the compiler rejects (`TS2308`,
-  and the model's `pageTransferTypeConverter` collided alongside the interface),
-  while **Python emitted silently wrong code**: `from .a import Page` followed by
-  `from .b import Page` binds the second and drops the first off the package
-  surface, so `from pkg import Page` quietly resolved to the wrong model (P7). Both
-  now reject at load with the same module-qualified diagnostic Go gives, resolvable
-  with `x-ts-name` / `x-py-name`. Java and .NET are genuinely unaffected: each
-  module lands in its own sub-package/namespace and neither emits an aggregating
-  barrel, so two `Page` classes stay distinct — verified against both generators
-  rather than assumed.
-- JSON Schema: A TypeScript service identifier was derived as a *type* name in the
-  collision pass while the generator emits a lower-camel `const`, so the pass
-  rejected a service and a model of the same name — `chatService` and
-  `ChatService` are distinct TypeScript identifiers and generate cleanly — and
-  missed the clash TypeScript really has, a service whose lower-camel form lands
-  on a model's `<model>TransferTypeConverter`. The identifier is now derived the
-  way it is emitted. Only the collision pass is affected; no emitted name changes.
-- JSON Schema: An `x-<lang>-name` override on a property did not move two of the
-  identifiers **synthesized from that property**, so a collision on either was
-  rejected with a fix-it the author could not act on. The TypeScript
-  `DEFAULT_<FIELD>` constant and the Go closed-value type `<Type><Field>` (with
-  its value constants) were derived from the JSON key rather than the emitted
-  member identifier: two default-bearing members that recase alike
-  (`retryCount` + `retry_count`) collided on `DEFAULT_RETRY_COUNT`, and the
-  printed `disambiguate with an x-ts-name override` moved the *members* apart
-  while leaving both constants on the colliding name — with no remaining escape
-  short of renaming the JSON property, i.e. changing the wire contract. The Go
-  closed-value type had the same misfire against a declared type name, and
-  disagreed with Java, whose nested value class already followed the override.
-  Both are now named off the emitted member identifier, so the documented escape
-  hatch resolves the clash and Go and Java agree on the synthesized type's name.
-  The governing rule — **a name synthesized from a member moves with that
-  member; a name synthesized from a position stays with the position** — is now
-  stated in PRINCIPLES §15; an inline object hoisted to `<Model><Property>` is
-  position-derived and is still renamed by authoring it in `$defs` instead.
-  Emitted output is unchanged for any schema that does not put a name override
-  on a `default`- or `const`-bearing property.
-- JSON Schema: A file's **root type and a same-file `$defs` entry of the same
-  name** silently collapsed into one type. `thing.yaml` declaring a root object
-  plus `$defs.Thing` — `Thing` being the name the root derives from the file name
-  — emitted a single `Thing` carrying the *root's* shape in all four languages,
-  with the `$defs` entry's members gone and every reference to it retargeted at
-  the root: Go emitted `Nested *Thing`, TypeScript `nested?: Thing`, Python
-  `nested: Thing | None`, Java `@Nullable Thing nested`, all pointing at a
-  self-reference the schema never declared. The coincidence is now a load-time
-  rejection for every target, naming the identifier and both origins (the root
-  schema's file-name derivation and the `$defs` entry) with the two renames that
-  resolve it — the `$defs` key, or the file the root name derives from. A name
-  **synthesized** for an inline shape that lands on the root type's name is
-  rejected the same way, reported at the position the shape was written in
-  (`$defs.User.properties.profile`). This is a new rejection: a schema that hit
-  the collapse used to generate and now fails to load. An `x-<lang>-name`
-  override does not resolve it — the override moves one target's emitted
-  identifier, while the derived name is the model's identity. Any other route to
-  one identity is rejected too, rather than dropping a shape: two files whose
-  root types derive the same name in a module-less in-process load, for
-  instance.
+- JSON Schema: Modules that own no types now import foreign `$ref` targets
+  without re-emitting duplicate declarations.
+- JSON Schema: Identifier collisions now use each target's actual emitted
+  namespace, including Go's flat package and the TypeScript/Python root barrels.
+  TypeScript service constants are checked under their emitted lower-camel names.
+- JSON Schema: Member-derived synthesized names now follow `x-<lang>-name`
+  overrides, including TypeScript default constants and Go closed-value types.
+- JSON Schema: A root model can no longer silently collapse with a same-named
+  `$defs` or synthesized model; the loader reports the conflicting origins.
 - JSON Schema: A **non-object `oneOf` branch's own constraints** were dropped in
   three of four languages: only Go carried them, in the synthesized
   `<Union><Kind>` variant's `Validate`. TypeScript cast the narrowed value
@@ -310,13 +212,8 @@ array"` at runtime, though `items.md` accepts them. Both now decode elementwise,
   a time.") added that package to the import block, and an unused import is a Go
   compile error. Package use is now read off the emitted code, not the doc
   comments.
-- JSON Schema: An `x-<lang>-name` override on a model was ignored by every
-  *other* input file that referenced it, in all four languages. The consuming
-  module emitted the pre-override identifier — a dangling operation generic,
-  model import, and (in TypeScript) converter import; a dangling field type for a
-  cross-file `$ref` property; and, in Go's flat package, a reference to a type
-  name that is never declared. Emitted identifiers are now resolved once over the
-  whole input closure, so a cross-file reference names the overridden type.
+- JSON Schema: Cross-file `$ref` and operation references now honor the target
+  model's `x-<lang>-name` override.
 - JSON Schema: A `oneOf` with an inline object branch generated uncompilable Go
   (a marker method on an undeclared `<Union>Object` type) and uncompilable
   TypeScript (a converter named after the anonymous `Record<string, unknown>`

@@ -415,28 +415,31 @@ where
     }
 }
 
-/// How a declaration relates to the module of the spec that carries it.
+/// Which module, if any, is responsible for emitting a declaration.
 ///
-/// The distinction that matters is between a front end that assigns modules at
-/// all and one that does not: a spec whose declarations are all [`Unscoped`]
-/// emits everything it can reach, while a spec that participates in module
-/// scoping emits only what it [`Owned`]s. Collapsing these two into "has no
-/// module exports" would make a module that declares nothing — a JSON service
-/// file whose every operation type is `$ref`d from elsewhere — look like a front
-/// end that does not scope, and re-emit every referenced type into it.
+/// Reachability needs all three states. WIT produces one unscoped spec, so that
+/// spec emits every reachable declaration. JSON Schema produces one spec per
+/// input file: a declaration is either owned by that file and emitted there, or
+/// foreign and imported from the file that owns it. In particular, a JSON
+/// service file may own no types at all while still referencing foreign types;
+/// treating that case as unscoped would emit duplicate declarations in the
+/// service module.
 ///
 /// [`Unscoped`]: ModuleExport::Unscoped
 /// [`Owned`]: ModuleExport::Owned
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum ModuleExport {
-    /// The front end does not scope declarations by module (WIT), so the one
-    /// module emits every declaration it references.
+    /// No input module owns the declaration, so the containing spec must emit
+    /// it when reachable. This preserves front ends such as WIT that build one
+    /// spec without assigning declarations to source modules.
     #[default]
     Unscoped,
-    /// This module declares the type, and is the module that emits it.
+    /// The containing spec's input module declares the type, so it both seeds
+    /// reachability and is the one module allowed to emit the declaration.
     Owned,
-    /// Another module declares the type; this spec only references it, and must
-    /// import rather than re-emit it.
+    /// Another input module owns the declaration. Keeping the declaration here
+    /// lets planning follow references to it, while this distinct state keeps a
+    /// module that owns no types from looking unscoped and re-emitting it.
     Foreign,
 }
 
