@@ -920,6 +920,7 @@ def test_union_array_branch_types_every_element() -> None:
     # keeping an unbounded `int` here, so an element past 2 ** 53 round-tripped
     # to a different number than everywhere else.
     values = parse({**BASE, "measurements": [1.5, 2, 3.75]})
+    assert values.measurements is not None
     assert values.measurements == [1.5, 2, 3.75]
     assert all(isinstance(m, float) for m in values.measurements)
     assert encode_bytes(values) == canonical_json_bytes(
