@@ -527,6 +527,69 @@ $defs:
         $ref: "#/$defs/Attributes"
       contact:
         $ref: "#/$defs/Contact"
+      nullableCount:
+        description: >-
+          Optional and nullable **integer**, with bounds on the non-null branch.
+          The nullability wrapper carries no `type` of its own, so an emitter that
+          reads the wrapper rather than the branch loses both the element type and
+          every constraint on it. Go emits `*int64`, TS `number | null`, Python
+          `int | None`, Java `@Nullable Long`, and `1 <= v <= 10` is enforced in
+          all four, in both directions.
+        oneOf:
+          - { type: integer, minimum: 1, maximum: 10 }
+          - { type: "null" }
+      nullableRatio:
+        description: Optional and nullable number with a divisor on the non-null branch.
+        oneOf:
+          - { type: number, multipleOf: 2 }
+          - { type: "null" }
+      nullableFlag:
+        description: Optional and nullable boolean.
+        oneOf:
+          - { type: boolean }
+          - { type: "null" }
+      nullableTags:
+        description: >-
+          Optional and nullable **array**, with element and count constraints on
+          the non-null branch. Optional + nullable, so the Go field stays `[]string`
+          and a wire `null` decodes to a nil slice.
+        oneOf:
+          - { type: array, items: { type: string }, minItems: 1, uniqueItems: true }
+          - { type: "null" }
+      nullableMode:
+        description: >-
+          Optional and nullable **closed value set** — the closed type survives the
+          nullability wrapper, so an unknown string is a Violation rather than an
+          accepted value.
+        oneOf:
+          - { type: string, enum: [auto, manual] }
+          - { type: "null" }
+      integralMeasurements:
+        description: >-
+          An integer `contains` matcher over number elements: the matcher's own
+          predicate decides a match, and the +/-(2^53-1) integer cap applies to it
+          in every language.
+        type: array
+        items: { type: number }
+        contains: { type: integer }
+      byFive:
+        description: >-
+          A number-field divisor. Divisibility is IEEE `fmod` over the stored
+          binary64 value, not exact decimal arithmetic, so all four agree at
+          magnitudes where the shortest decimal spelling and the stored double
+          diverge.
+        type: number
+        multipleOf: 5
+      wildcard:
+        description: >-
+          A pattern containing a bare dot, normalized to an explicit negated class
+          so the four regex engines agree on line terminators (`\r`, U+0085,
+          U+2028, U+2029), which their native `.` does not.
+        type: string
+        pattern: "a.b"
+      quoted:
+        description: 'Ends with a quote "'
+        type: string
     required: [kind, revision, enabled, status, tier, scale, name, count, active, category]
   Circle:
     description: A circle branch of the Shape and shapeOrName tagged unions.

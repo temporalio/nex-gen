@@ -145,7 +145,7 @@ public final class ContactJava {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<ContactJava> {
         @Override
         public ContactJava deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

@@ -1,23 +1,112 @@
 # JSON Schema conformance manifest
 
-`json-schema.json` is the language-neutral index for cross-language runtime
-conformance cases. It records what loads, accepted wire values, parse and
-serialize failures, their expected violation paths, and the narrow set of
-presence/nullability collapses permitted by the JSON Schema specification.
+`json-schema.json` is the language-neutral statement of P1: *a value one target
+accepts round-trips through any other unchanged.* It is **executed**, not just
+described — `tests/json_schema_conformance_manifest.rs` generates every case
+into Go, Java, Python and TypeScript, pushes every declared wire value through
+the generated code of all four, and requires the verdicts to agree with the
+manifest and with each other.
 
-Each case has a stable `id` and declares exactly one consumer in Go,
-TypeScript, Python, and Java. A consumer declaration names a repository-relative
-test source and a test-name anchor in that source. The Rust coverage test rejects
-missing targets, stale source paths or anchors, missing fixtures, malformed raw
-JSON, duplicate identifiers and paths, and undeclared manifest fields.
+## Layout
 
-Accepted values use either `fixture` for a repository fixture or `wire_json` for
-an inline JSON value. Parse failures use `wire_json`; serialize failures use a
-language-neutral `native_value` description because non-finite and otherwise
-invalid native values are not always representable as JSON. Failure entries
-compare paths only; exception wording remains target-idiomatic.
+    json-schema.json   the manifest
+    schemas/           schemas written for conformance, one model per file
+    runners/           the four generic runners the Rust driver drives
 
-For a load-time rejection, set `expected_load.result` to `rejected` and include
-the targeted `diagnostic`. Accepted cases must include at least one accepted wire
-value. Every manifest case must retain all fields, using empty arrays when a case
-does not exercise that dimension.
+The generator derives the root model's name from the schema **file stem**, so
+`schemas/numeric-bounds.yaml` produces `NumericBounds` in every target. Keep
+conformance schemas to lowerCamel ASCII property names: the runners' native
+mutation paths map a JSON property to a member by convention, and that
+convention is only total for those names.
+
+## A case
+
+| field | meaning |
+|---|---|
+| `id` | stable, lowercase kebab-case |
+| `intent` | what the case pins, in prose |
+| `schema` | repository-relative schema path |
+| `model` | the generated model every wire value is driven through |
+| `expected_load` | `accepted`, or `rejected` with the `diagnostic` substring |
+| `accepted_wire_values` | `fixture` or `wire_json`, plus an optional `expected_wire` when the input is deliberately non-canonical |
+| `parse_failures` | `wire_json` + the `expected_paths` every target must report |
+| `serialize_failures` | `from_wire`/`from_fixture` + native `mutations` + `expected_paths` |
+| `permitted_presence_nullability_collapse` | the **closed** list of members allowed to change presence on the way out |
+| `expected_divergence` | the findings a case still reproduces (see below) |
+| `consumers` | optional; a hand-written per-language test that also covers the case |
+
+Failures compare **paths**, never reason text: P11 leaves the wording
+target-idiomatic. A **load** verdict may legitimately differ per target — P15
+scopes identifier validity to the emitted language, so a member named `validate`
+is rejected for Go and accepted for the other three
+(`features/properties.md:132-144`). What may never differ is the accepted and
+rejected **wire** value set. `tests/json_schema_probe_matrix.rs` declares the
+former with a `ScopedLoad` row rather than treating it as a finding. Round-trip comparison is member-by-member — presence (absent /
+explicit null / present) is exact, and numbers compare by mathematical value with
+`-0` kept distinct from `0`.
+
+### Serialize failures
+
+A serialize-side rejection needs a native value the parser would never produce,
+so a case declares one by parsing `from_wire` and then mutating the model. The
+mutation vocabulary is deliberately tiny and implemented identically by all four
+runners:
+
+    {"path": "count",         "set_integer": "9007199254740992"}
+    {"path": "ratio",         "set_number": "inf" | "-inf" | "nan" | "1e308"}
+    {"path": "name",          "set_string": "..."}
+    {"path": "maybe",         "set_null": true}
+    {"path": "numbers",       "duplicate_element": 0}
+
+A path is `a.b[0][1]`: dot-separated members, each optionally indexed.
+
+### `permitted_presence_nullability_collapse` is closed
+
+Any member **not** listed must round-trip with its presence intact in every
+target. Any member that *is* listed must actually collapse, in every target it
+names — a stale entry fails the driver just as loudly as a missing one, because
+a stale entry would hide the day a target stopped collapsing.
+
+### `expected_divergence`
+
+A case that a target still gets wrong carries:
+
+```json
+"expected_divergence": {
+  "findings": ["13#2"],
+  "status": "open",
+  "note": "why, in one sentence",
+  "matches": ["java rejected at"]
+}
+```
+
+`status` is `open` (a defect someone owns) or `structural` (a permanent
+limitation of the target — nobody should go looking for a fix). Both keep their
+`matches` live; the difference is only how the driver reports them, so a
+`structural` entry never becomes a stale to-do and still fails if the target
+starts agreeing.
+
+`matches` classifies which driver findings are *this* known divergence. Every
+observed finding must match one, and every entry must match at least one
+finding. So a pinned case cannot quietly absorb a new bug, and the marker cannot
+outlive the fix: the driver fails when the case starts passing.
+
+Use a `new:<slug>` finding id for a divergence this driver measured first.
+
+## Runners
+
+`runners/` holds one generic runner per target. They are copied into a scratch
+workspace by `tests/toolchain/mod.rs`; nothing is generated into the committed
+samples, which are golden snapshots.
+
+| runner | how it reaches the model |
+|---|---|
+| `runner.go` | a generated `registry.go` maps a case to a `reflect.Type` (Go cannot look a type up by name), then reflection |
+| `Runner.java` | `Class.forName` + Jackson, configured like Temporal's default converter |
+| `runner.py` | `importlib` + the registered `TransferTypeConverter` |
+| `runner.test.ts` | a generated `registry.ts` of lazy `import()`s, run under vitest (whose transform resolves the generator's extension-less imports) |
+
+`smoke.py` and `smoke.test.ts` are the import-only variants used by
+`tests/json_schema_probe_matrix.rs`.
+
+Adding a case needs no runner change. Adding a *mutation kind* needs all four.

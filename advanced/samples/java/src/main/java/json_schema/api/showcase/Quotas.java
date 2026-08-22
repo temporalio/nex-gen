@@ -64,6 +64,9 @@ public final class Quotas {
         public void serialize(Quotas value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
             for (Map.Entry<String, Long> entry : value.additionalProperties.entrySet()) {
+                if (entry.getValue() < -SpecNumbers.INTEGER_CAP || entry.getValue() > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation(entry.getKey(), "exceeds \u00b1(2^53-1) integer cap"));
+                }
                 if (entry.getValue() < 0L) {
                     violations.add(new Violation(entry.getKey(), "must be >= 0, got " + entry.getValue()));
                 }
@@ -88,7 +91,7 @@ public final class Quotas {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Quotas> {
         @Override
         public Quotas deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));
@@ -105,6 +108,9 @@ public final class Quotas {
                 }
                 Long parsed = SpecNumbers.specLong(element, key, violations);
                 if (parsed != null) {
+                    if (parsed < -SpecNumbers.INTEGER_CAP || parsed > SpecNumbers.INTEGER_CAP) {
+                        violations.add(new Violation(key, "exceeds \u00b1(2^53-1) integer cap"));
+                    }
                     if (parsed < 0L) {
                         violations.add(new Violation(key, "must be >= 0, got " + parsed));
                     }

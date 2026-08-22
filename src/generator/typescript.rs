@@ -1892,12 +1892,46 @@ pub(crate) fn generate(
     mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
 ) -> Result<GeneratedFiles> {
+    // A `$ref` resolves against the whole input closure ([[ref]]
+    // §"Type-name derivation"). Only this entry point sees every leaf, so the
+    // tree-wide model registry the JSON backend consults for a cross-module
+    // `oneOf` branch is populated here, before any leaf renders.
+    typescript_json::set_tree_json_models(collect_tree_json_models(&tree.root));
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
             generate_leaf(&leaf.spec, &support_fragments, mode, ts_date_time_types)
         }
         ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode, ts_date_time_types),
+    }
+}
+
+/// Every JSON model declared anywhere in the spec tree, keyed by `full_name`.
+fn collect_tree_json_models(
+    node: &ApiSpecNode<PlannedFamily>,
+) -> BTreeMap<String, crate::planning::PlannedJsonType> {
+    let mut models = BTreeMap::new();
+    collect_tree_json_models_into(node, &mut models);
+    models
+}
+
+fn collect_tree_json_models_into(
+    node: &ApiSpecNode<PlannedFamily>,
+    models: &mut BTreeMap<String, crate::planning::PlannedJsonType>,
+) {
+    match node {
+        ApiSpecNode::Leaf(leaf) => {
+            for (_, binding) in leaf.spec.external_types() {
+                if let ExternalTypeSpec::Json(json_type) = &binding.external_type {
+                    models.insert(json_type.full_name.clone(), json_type.clone());
+                }
+            }
+        }
+        ApiSpecNode::Branch(branch) => {
+            for child in branch.children.values() {
+                collect_tree_json_models_into(child, models);
+            }
+        }
     }
 }
 

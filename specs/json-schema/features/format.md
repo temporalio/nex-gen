@@ -75,10 +75,13 @@ generator-owned check. Everything outside the subset — including the
 spec-default annotation-only fallthrough — is **rejected at load**
 (deferred, *not* a categorical **P6** exclusion).
 
-The opt-in is made **explicit**: the `*.nexusrpc.yaml` IDE-support schema
-declares the `format-assertion` vocabulary in its `$vocabulary` (mapped to
-`true`), so tooling reads that these formats are *validated*, not merely
-annotated — the assertion behavior is self-documenting rather than implicit.
+The opt-in is meant to be made **explicit**: the `*.nexusrpc.yaml` IDE-support
+schema is to declare the `format-assertion` vocabulary in its `$vocabulary`
+(mapped to `true`), so tooling reads that these formats are *validated*, not
+merely annotated — the assertion behavior self-documenting rather than
+implicit. **Status: unimplemented** — no such IDE-support schema artifact is
+published. Assertion semantics are enforced by the generated code regardless;
+what is missing is the machine-readable declaration of it.
 
 **Asserted (v1)** — grouped by the shape of the owned check:
 
@@ -331,6 +334,16 @@ trailing fractional zeros), the sub-microsecond digits Python would otherwise
 drop, and the pre-narrowing grammar (`:60`, calendar durations). The opt-out is
 per-node (and available as a generator-wide mode).
 
+> **Status: unimplemented.** There is no opt-out keyword, no generator-wide
+> mode, and no derived accessor; every temporal node materializes. Every
+> statement about opt-out nodes in this spec (the wider grammars above, the
+> string-shaped validator row, the accepted-matrix row) describes the intended
+> design, not current behavior. This is load-bearing beyond `format`:
+> **P1's bounded exception (b) is conditioned on the loss being recoverable
+> through a per-field `string` opt-out**, so until this ships, Python's
+> sub-microsecond truncation and the legacy TS `date` fold have no recovery
+> path.
+
 **Doc comment.** The materialized field's doc comment names the format and its
 round-trip behavior (`// format: date-time — offset & precision preserved;
 round-trip may lose precision beyond this type's resolution`) so any loss is
@@ -408,12 +421,40 @@ compiled constant; the load gate proves it compiles, so the emitted
   serialize with the same aggregated primitive — real teeth in the
   statically-typed targets. The check is direction-agnostic.
 - **Materialized temporals:** the model field is a native type, so most wire
-  grammar checks no longer apply. The serializer still enforces the shared
-  calendar floor for `date` / `date-time`, because Go, Java, and Temporal can
-  construct a native year-zero value while Python cannot; year `< 1` is an
-  aggregated violation before formatting. Other native values are valid by
-  construction (`time.Duration` always represents a supported time-only
-  duration, for example). Serialize then **re-serializes** typed → wire with
+  grammar checks no longer apply — but **no native temporal type is a subset
+  of the wire grammar**, so the serializer owes one explicit check per way a
+  constructible in-memory value cannot be spelled. Each failure is an
+  aggregated `Violation` pushed **before** formatting; emitting a string the
+  generated parser would itself reject is a P1 break, not a nicety:
+  - **Calendar floor** (`date` / `date-time`): Go, Java and Temporal can
+    construct a native year-zero value while Python cannot — year `< 1` is a
+    violation.
+  - **Calendar ceiling** (`date` / `date-time`): the wire form carries a
+    four-digit year, so year `> 9999` is a violation.
+  - **Offset granularity** (`date-time` / `time`): RFC 3339 spells an offset
+    in whole minutes, while Go's `time.FixedZone("", 30)` and Java's
+    `ZoneOffset.ofTotalSeconds(30)` carry seconds — a sub-minute offset is a
+    violation, not something to round or drop.
+  - **Duration sign** (`duration`): the pinned grammar has no sign, but
+    `time.Duration`, `java.time.Duration`, `timedelta` and
+    `Temporal.Duration` are all signed. A negative duration is a violation —
+    `-90 * time.Minute` must not emit `"PT-1H-30M"`.
+  - **Duration resolution** (`duration`): the grammar's seconds component is
+    integral, while the native types are nanosecond- or
+    microsecond-resolution. A duration carrying a fraction of a second
+    (`500 * time.Millisecond`) is a violation, never a silent fold to
+    `"PT0S"`.
+  - **Duration units** (`duration`): the grammar is time-only, so a native
+    value carrying calendar components (`Temporal.Duration` with `years` /
+    `months` / `weeks`) is a violation.
+
+  Where a target holds a temporal as a `string` rather than a native type
+  (the TS `--date-time-types=string` default, and any format a target has no
+  type for), the stored string is not authoritative by construction either:
+  re-run the pinned predicate over it before emit, exactly as for the
+  string-shaped formats above.
+
+  Serialize then **re-serializes** typed → wire with
   offset and precision preserved to the type's resolution. A co-occurring
   [[minLength]] /
   [[maxLength]] / [[pattern]] is **not** subsumed by the type, though — the
@@ -437,7 +478,7 @@ compiled constant; the load gate proves it compiles, so the emitted
 | `uri` / `uri-reference` | `{type:"string", format:"uri"}` |
 | Combined with `pattern` | `{type:"string", format:"uuid", pattern:"^0"}` (value must satisfy both) |
 | On a nullable string | `{oneOf:[{type:"string", format:"uuid"},{type:"null"}]}` |
-| String opt-out keeps the wider grammar | opt-out `date-time` accepts `…T23:59:60Z`; opt-out `duration` accepts `P1Y` |
+| String opt-out keeps the wider grammar (**unimplemented**) | opt-out `date-time` accepts `…T23:59:60Z`; opt-out `duration` accepts `P1Y` |
 
 ### Rejected at load time (negative)
 
@@ -454,15 +495,22 @@ compiled constant; the load gate proves it compiles, so the emitted
 
 ### Runtime fixtures (validator + round-trip)
 
-Per-format accept/reject is exercised by the conformance corpora
-(`json-schema/corpora/format_conformance/` 124,
-`json-schema/corpora/format_email/` 56, `json-schema/corpora/format_hostname/`
-41, duration 68, `json-schema/corpora/format_uri/` 72); the materialization
-round-trips by the `json-schema/corpora/format_materialize_clock/` and
-materialize-duration corpora (the clock corpus proves the current
-offset-preserving, no-truncation behavior — 0 mismatches across Go / Java /
-Python / TS `string` / TS `temporal`, with Python sub-µs truncation, the legacy
-TS `date` UTC fold, and the `:60` skip landing exactly as tabulated).
+Per-format accept/reject is exercised by the conformance corpora that exist
+today: `json-schema/corpora/format_conformance/` (124 pairs, covering `date`,
+`time`, `date-time`, `ipv4`, `ipv6`, `uuid`), `json-schema/corpora/format_email/`
+(56), `json-schema/corpora/format_hostname/` (41) and
+`json-schema/corpora/format_uri/` (72, driven as `uri`). The materialization
+round-trips are tabulated by `json-schema/corpora/format_materialize_clock/`
+(`date-time` / `date` / `time` sections), which records the expected
+offset-preserving, no-truncation behavior per target — including Python's
+sub-µs truncation, the legacy TS `date` UTC fold, and the `:60` skip.
+
+**Planned, not yet present:** a `duration` corpus (accept/reject plus
+canonicalization pairs) and a `uri-reference` corpus; and a per-language runner
+that drives each corpus through generated code. The corpora are currently data
+consumed by the Rust unit tests only, so a corpus row is a specification of the
+expected result, not evidence that four languages were measured against it.
+
 Representative cases:
 
 - **String formats** — `uuid` canonical OK, wrong length/non-hex → fail;

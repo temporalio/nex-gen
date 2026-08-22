@@ -209,9 +209,39 @@ reuses the same `*json.RawMessage` shadow machinery the custom
 `UnmarshalJSON` already uses for declared fields — `any` would introduce
 a second, lossy representation. The only cost is that a value must be
 `Unmarshal`'d before use, which is acceptable for a preserve-and-pass-
-through role. (TS `unknown` / Python `Any` / Java `Object` don't share
-the `float64` hazard: their parsers keep an exact numeric/JSON-node
-representation, so no equivalent workaround is needed.)
+through role.
+
+Python `Any` and Java `Object` don't share the `float64` hazard: the
+`json` module decodes an integer literal to an arbitrary-precision `int`,
+and Jackson hands the untyped member a `JsonNode` holding the exact
+token, so both re-emit `9007199254740993` unchanged and neither needs an
+equivalent workaround.
+
+### TypeScript untyped extras: a bounded exception to P13.2
+
+TS `unknown` **does** share the hazard, and — unlike Go — cannot be
+worked around. **PRINCIPLES TypeScript §4** places the byte boundary
+*outside* the converter: the Temporal converter owns
+`JSON.parse`/`JSON.stringify` and hands `fromTransferType` an
+already-parsed value. By the time any generated code runs,
+`9007199254740993` is already the `number` `9007199254740992` — there is
+no surviving representation to preserve and no interception point. The
+only fixes would be for the converter to own the parse step (a
+`JSON.parse` reviver, or parsing from the raw text itself), which moves
+the boundary §4 defines and breaks the composable transfer-value
+contract that lets a parent's `toTransferType` embed its children's
+results.
+
+So **P13.2's "preserved verbatim" holds for TypeScript with one stated
+exception**: an undeclared numeric value outside IEEE-754 double range
+round-trips to the nearest double. Object keys, key order, strings,
+booleans, `null`, nested structure and every number representable as a
+double are preserved. An author whose payload carries integers past
+2^53 must not rely on the catch-all to ferry them; note that *declaring*
+the field does not rescue the value either — the cross-language integer
+cap is `±(2^53−1)` and a literal past it is a validation reject, not a
+silent round ([[type]]). Carrying such a value across a TypeScript
+target requires modeling it as a `string`.
 
 ## Validator mapping
 

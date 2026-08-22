@@ -115,6 +115,9 @@ public final class Showcase {
         }
 
         void validate(String path, List<Violation> violations) {
+            if (value < -SpecNumbers.INTEGER_CAP || value > SpecNumbers.INTEGER_CAP) {
+                violations.add(new Violation(path, "exceeds \u00b1(2^53-1) integer cap"));
+            }
             if (value < 1L) {
                 violations.add(new Violation(path, "must be >= 1, got " + value));
             }
@@ -225,6 +228,9 @@ public final class Showcase {
         }
 
         void validate(String path, List<Violation> violations) {
+            if (value < -SpecNumbers.INTEGER_CAP || value > SpecNumbers.INTEGER_CAP) {
+                violations.add(new Violation(path, "exceeds \u00b1(2^53-1) integer cap"));
+            }
             if (value < 0L) {
                 violations.add(new Violation(path, "must be >= 0, got " + value));
             }
@@ -400,39 +406,38 @@ public final class Showcase {
         static @Nullable ShapeOrName fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
             if (node.isObject()) {
                 JsonNode disc = node.get("kind");
-                if (disc == null || !disc.isTextual()) {
+                if (disc == null || disc.isNull() || !disc.isValueNode()) {
                     violations.add(new Violation(path, "discriminator \"kind\" is required"));
                     return null;
                 }
-                switch (disc.textValue()) {
-                    case "circle":
-                        try {
-                            return context.readTreeAsValue(node, Circle.class);
-                        } catch (ValidationException nested) {
-                            for (Violation violation : nested.getViolations()) {
-                                violations.add(violation.withPathPrefix(path));
-                            }
-                            return null;
-                        } catch (IOException nested) {
-                            violations.add(new Violation(path, nested.getMessage()));
-                            return null;
+                if (disc.isTextual() && "circle".equals(disc.textValue())) {
+                    try {
+                        return context.readTreeAsValue(node, Circle.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix(path));
                         }
-                    case "square":
-                        try {
-                            return context.readTreeAsValue(node, Square.class);
-                        } catch (ValidationException nested) {
-                            for (Violation violation : nested.getViolations()) {
-                                violations.add(violation.withPathPrefix(path));
-                            }
-                            return null;
-                        } catch (IOException nested) {
-                            violations.add(new Violation(path, nested.getMessage()));
-                            return null;
-                        }
-                    default:
-                        violations.add(new Violation(path, "unknown discriminator kind " + disc.textValue() + ": expected one of [circle, square]"));
                         return null;
+                    } catch (IOException nested) {
+                        violations.add(new Violation(path, nested.getMessage()));
+                        return null;
+                    }
                 }
+                if (disc.isTextual() && "square".equals(disc.textValue())) {
+                    try {
+                        return context.readTreeAsValue(node, Square.class);
+                    } catch (ValidationException nested) {
+                        for (Violation violation : nested.getViolations()) {
+                            violations.add(violation.withPathPrefix(path));
+                        }
+                        return null;
+                    } catch (IOException nested) {
+                        violations.add(new Violation(path, nested.getMessage()));
+                        return null;
+                    }
+                }
+                violations.add(new Violation(path, "unknown discriminator kind " + disc.asText() + ": expected one of [circle, square]"));
+                return null;
             }
             if (node.isTextual()) {
                 ShapeOrNameString wrapped = new ShapeOrNameString(node.textValue());
@@ -561,9 +566,9 @@ public final class Showcase {
             if (value.size() < 1) {
                 violations.add(new Violation(path, "must have at least 1 items, got " + value.size()));
             }
-            java.util.Map<Double, Integer> seen = new java.util.HashMap<>();
+            java.util.Map<Object, Integer> seen = new java.util.HashMap<>();
             for (int index = 0; index < value.size(); index++) {
-                Double element = value.get(index);
+                Object element = SpecNumbers.numberKey(value.get(index));
                 Integer priorIndex = seen.get(element);
                 if (priorIndex != null) {
                     violations.add(new Violation(path, "duplicate items: element at index " + index + " equals index " + priorIndex));
@@ -1166,6 +1171,58 @@ public final class Showcase {
         }
     }
 
+    public static final class NullableMode {
+        public static final NullableMode NULLABLE_MODE_AUTO = new NullableMode("auto");
+        public static final NullableMode NULLABLE_MODE_MANUAL = new NullableMode("manual");
+
+        private final String value;
+
+        private NullableMode(String value) {
+            this.value = value;
+        }
+
+        @JsonCreator
+        public static @Nullable NullableMode fromString(String value) {
+            if (value == null) {
+                return null;
+            }
+            if ("auto".equals(value)) {
+                return NULLABLE_MODE_AUTO;
+            }
+            if ("manual".equals(value)) {
+                return NULLABLE_MODE_MANUAL;
+            }
+            throw new IllegalArgumentException("must be one of [\"auto\", \"manual\"], got \"" + value + "\"");
+        }
+
+        @JsonValue
+        public String getValue() {
+            return value;
+        }
+
+        @Override
+        public boolean equals(@Nullable Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof NullableMode)) {
+                return false;
+            }
+            NullableMode that = (NullableMode) other;
+            return Objects.equals(this.value, that.value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return "NullableMode[" + value + "]";
+        }
+    }
+
     private static final java.util.regex.Pattern SKU_PATTERN = java.util.regex.Pattern.compile("^[A-Z]{2,4}\\z");
     private static final java.util.regex.Pattern PHRASE_PATTERN = java.util.regex.Pattern.compile("^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+\\z");
     private static final java.util.regex.Pattern REQUEST_ID_FORMAT = java.util.regex.Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\z");
@@ -1173,310 +1230,66 @@ public final class Showcase {
     private static final java.util.regex.Pattern HOST_FORMAT = java.util.regex.Pattern.compile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\z");
     private static final java.util.regex.Pattern HOMEPAGE_FORMAT = java.util.regex.Pattern.compile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)\\z");
     private static final java.util.regex.Pattern GATEWAY_FORMAT = java.util.regex.Pattern.compile("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\z");
+    private static final java.util.regex.Pattern WILDCARD_PATTERN = java.util.regex.Pattern.compile("a[^\\n]b");
 
-    /**
-     * Discriminator; always "showcase".
-     */
     private final Kind kind;
-    /**
-     * Integer const; always 1. Also exercises the single-`const` value override:
-     * `x-go-const-name`/`x-java-const-name` rename the emitted constant to the derived
-     * name plus a per-language suffix (Go `RevisionGo`, Java `REVISION_JAVA`) while the
-     * wire value stays `1`. TS/Python are inert here (no const override keyword — the
-     * value is emitted as a plain literal type).
-     */
     private final Revision revision;
-    /**
-     * Boolean const; always true.
-     */
     private final Enabled enabled;
-    /**
-     * Closed string value set. Also exercises the enum value-constant override:
-     * `x-go-enum-names`/`x-java-enum-names` rename the `active` value's emitted
-     * constant to the value name plus a per-language suffix (Go `ActiveGo`, Java
-     * `ACTIVE_JAVA`) while the wire value stays `active`. TS/Python are inert here (no
-     * enum override keyword).
-     */
     private final Status status;
-    /**
-     * Closed integer value set.
-     */
     private final Tier tier;
-    /**
-     * Closed number value set (exercises the Python float exception: emitted as plain
-     * float, validated by membership).
-     */
     private final Scale scale;
-    /**
-     * Display name
-     *
-     * Required human-readable name, 1 to 64 code points.
-     */
     private final String name;
-    /**
-     * Required integer scalar.
-     */
     private final long count;
-    /**
-     * Required boolean scalar.
-     */
     private final boolean active;
-    /**
-     * Optional short name, at most 12 code points.
-     */
     private final @Nullable String nickname;
-    /**
-     * Optional code, 2 to 5 code points. Counted in Unicode code points, so a
-     * multi-byte value (e.g. "a😀b", 3 code points / 6 UTF-8 bytes) is valid.
-     */
     private final @Nullable String code;
-    /**
-     * Optional product code: 2 to 4 uppercase ASCII letters, anchored (`^[A-Z]{2,4}$`).
-     * Exercises the RE2-safe `pattern` gate.
-     */
     private final @Nullable String sku;
-    /**
-     * Optional two-word phrase separated by whitespace (`^\S+\s\S+$`). Exercises the
-     * loader's `\s`/`\S` → ASCII-class normalization and the per-target `$` end-anchor
-     * rewrite (Python `\Z` / Java `\z`), so a Unicode space (NBSP) and a trailing
-     * newline are rejected consistently across all four languages.
-     */
     private final @Nullable String phrase;
-    /**
-     * Optional request identifier; asserted RFC 4122 UUID via `format: uuid`. Stays
-     * `string`-typed (format assertion, no materialization); the pinned regex is
-     * validated identically across all four languages.
-     */
     private final @Nullable String requestId;
-    /**
-     * Optional contact address; asserted ASCII dot-atom `format: email` (single `@`,
-     * &gt;=2-label domain, total length &lt;= 254, guard-before-regex).
-     */
     private final @Nullable String contactEmail;
-    /**
-     * Optional host name; asserted RFC 1123 `format: hostname` (LDH labels, total
-     * length &lt;= 253).
-     */
     private final @Nullable String host;
-    /**
-     * Optional homepage; asserted RFC 3986 `format: uri` (scheme required, ASCII only;
-     * an IP-literal host is validated by the spliced ipv6 grammar).
-     */
     private final @Nullable String homepage;
-    /**
-     * Optional gateway address; asserted dotted-quad IPv4 via format ipv4.
-     */
     private final @Nullable String gateway;
-    /**
-     * Optional binary payload carried as a `contentEncoding: base64` string,
-     * materialized to native bytes (Go []byte, TS Uint8Array, Python bytes, Java
-     * byte[]). The wire is canonical padded standard base64; a malformed value is
-     * rejected by the pinned regex before decode.
-     */
     private final byte @Nullable [] blob;
-    /**
-     * Optional binary payload carried as a `contentEncoding: base64url` string
-     * (URL-safe alphabet, unpadded, RFC 4648 §5), materialized to the same native bytes
-     * type. The same bytes encode to a different wire than base64 ("Pj4+" vs "Pj4-").
-     */
     private final byte @Nullable [] urlBlob;
-    /**
-     * Retry budget
-     *
-     * Optional integer with a schema default.
-     */
     private final @Nullable Long retries;
     private final @Nullable Boolean verbose;
-    /**
-     * Greeting
-     *
-     * Optional string with a schema default, surfaced on read.
-     */
     private final @Nullable String greeting;
-    /**
-     * Debug flag
-     *
-     * Optional boolean with a schema default.
-     */
     private final @Nullable Boolean debug;
-    /**
-     * Deprecated legacy identifier; prefer `requestId`. Exercises the native
-     * deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python
-     * PEP 702 @deprecated). Also exercises the property-level `x-&lt;lang&gt;-name`
-     * override (the Stage 4 escape hatch): the emitted member identifier is renamed to
-     * the derived name plus a per-language suffix (Go `LegacyIdGo`, TS `legacyIdTs`,
-     * Python `legacy_id_py`, Java `legacyIdJava`) while the wire name stays `legacyId`
-     * (json tag / alias / @JsonProperty).
-     */
     private final @Nullable String legacyIdJava;
-    /**
-     * Optional and nullable; may be absent or explicitly null.
-     */
     private final @Nullable String middleName;
-    /**
-     * Required but nullable; may be explicitly cleared to null.
-     */
     private final @Nullable String category;
-    /**
-     * Optional integer bounded to the inclusive range [1, 10].
-     */
     private final @Nullable Long priority;
-    /**
-     * Optional integer that must be strictly greater than 0.
-     */
     private final @Nullable Long level;
-    /**
-     * Optional number that must be a non-negative multiple of 5.
-     */
     private final @Nullable Double ratio;
-    /**
-     * Optional unbounded finite number.
-     */
     private final @Nullable Double score;
-    /**
-     * Optional integer that must be a multiple of 3.
-     */
     private final @Nullable Long step;
-    /**
-     * Ordered list of free-form tags; 1 to 5 entries.
-     */
     private final @Nullable List<String> tags;
-    /**
-     * Alternate names; each must be distinct.
-     */
     private final @Nullable List<String> aliases;
-    /**
-     * Access roles; must contain between one and two "admin" entries.
-     */
     private final @Nullable List<String> roles;
-    /**
-     * Disjoint-kind union (oneOf sum type): the wire value is either a string of at
-     * least 3 code points or an integer of at least 1, selected by its JSON token. Not
-     * a member of a discriminated union — the token itself is the selector. Each branch
-     * also carries its **own constraints**: once the token selects a branch, the value
-     * is held to everything that branch declares, in both directions, with the union's
-     * path on the violation.
-     */
     private final @Nullable IdOrName idOrName;
-    /**
-     * A union whose string branch is a **closed value set**: either one of two named
-     * modes or an unbounded non-negative integer. The branch narrows to its own
-     * admissible values (a Go/Java membership check, a TypeScript literal union, a
-     * Python `Literal`), so an unknown string is a Violation while any non-negative
-     * integer is accepted.
-     */
     private final @Nullable Mode mode;
-    /**
-     * Mixed-kind union whose object branch is an inline free-form object: the wire
-     * value is either an arbitrary object (members carried verbatim) or a string,
-     * selected by its JSON token. The free-form object is the one object branch that
-     * needs no type name — TypeScript and Python carry it structurally, Go and Java
-     * wrap it as `&lt;Union&gt;Object`.
-     */
     private final @Nullable Payload payload;
-    /**
-     * Mixed-kind union whose object branch is an inline *structured* object, written
-     * directly on the property rather than in `$defs`. It is the only object branch of
-     * this union, so it derives its name from the union it belongs to —
-     * `ShowcaseDetailObject` — and is emitted as an ordinary model: its members keep
-     * their own constraints and it stays open to unknown ones.
-     */
     private final @Nullable Detail detail;
-    /**
-     * Tagged object union mixed with a scalar kind: the two selector layers compose —
-     * the JSON token picks object-vs-string, and, for an object, the shared required
-     * `kind` const picks Circle-vs-Square. Written inline on the property, so the union
-     * itself is named after its position (`ShowcaseShapeOrName` / nested
-     * `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape`
-     * — a branch type may belong to more than one union (Go gains a second marker
-     * method, Java a second implemented interface). The scalar branch carries a length
-     * bound of its own; the object branches validate through their own models.
-     */
     private final @Nullable ShapeOrName shapeOrName;
-    /**
-     * Mixed-kind union with an array branch: the wire value is either a non-empty list
-     * of distinct numbers or a lowercase preset name, selected by its JSON token. An
-     * array branch has no definition to take a name from, so Go and Java emit it as the
-     * synthesized `&lt;Union&gt;Array` variant (a defined type / a `@JsonValue`
-     * wrapper) while TypeScript and Python carry it structurally as `number[]` /
-     * `list[float]`. Both branches carry their own constraints — the array's
-     * `minItems`/`uniqueItems` and the string's `pattern` — so the array-vs-string
-     * choice is validated as well as selected.
-     */
     private final @Nullable Measurements measurements;
-    /**
-     * A list whose element type is a named union: every element is routed to exactly
-     * one branch by the union's own selector, and its index carries into the violation
-     * path (`shapes[1]`). Go and Java cannot decode a sealed interface as a whole, so
-     * the element decodes through the union's dispatcher one at a time.
-     */
     private final @Nullable List<Shape> shapes;
-    /**
-     * A list whose element union is written **inline**. An element has no name of its
-     * own, so the union is named after its position — `ShowcaseSegmentsItem` — moved
-     * into `$defs`, and the element becomes a `$ref` at it; from there it is an
-     * ordinary named union in every language.
-     */
     private final @Nullable List<ShowcaseSegmentsItem> segments;
-    /**
-     * A list of **nullable, constrained scalar elements** — the two-branch nullability
-     * `oneOf` rather than a sum type, so nothing is named: the elements themselves
-     * become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`,
-     * `List&lt;@Nullable String&gt;`) while each present string retains its own minimum
-     * length and the list stays a list.
-     */
     private final @Nullable List<@Nullable String> slots;
-    /**
-     * A nested array: `items` at depth two. Each level decodes elementwise, so a bad
-     * element is reported at its own two-dimensional index (`grid[1][0]`).
-     */
     private final @Nullable List<List<Long>> grid;
-    /**
-     * A nested array of numbers used to prove recursive finite-number validation and
-     * two-dimensional indexed aggregation.
-     */
     private final @Nullable List<List<Double>> numberGrid;
-    /**
-     * A list of scalar URI values; every element keeps its format assertion.
-     */
     private final @Nullable List<String> links;
-    /**
-     * A list of referenced models, converted and validated elementwise.
-     */
     private final @Nullable List<Address> addresses;
     private final @Nullable AddressBook addressBook;
-    /**
-     * Materialized calendar dates in an array.
-     */
     private final @Nullable List<LocalDate> dates;
     private final @Nullable DateIndex dateIndex;
-    /**
-     * Materialized base64 byte strings in an array.
-     */
     private final @Nullable List<byte[]> blobs;
     private final @Nullable BlobIndex blobIndex;
     private final @Nullable Metrics metrics;
-    /**
-     * A finite number branch or a non-empty string branch.
-     */
     private final @Nullable MetricOrLabel metricOrLabel;
-    /**
-     * A union whose array branch contains referenced models, proving that branch
-     * conversion uses the ordinary recursive array mapper.
-     */
     private final @Nullable AddressListOrLabel addressListOrLabel;
     private final @Nullable ShowcaseLocation location;
-    /**
-     * A nullable inline object. The nullability wrapper emits no type of its own, so
-     * the object inside it takes the property's name — `ShowcaseAudit`, the same name
-     * it would take written plainly: adding or removing nullability never renames the
-     * type.
-     */
     private final @Nullable ShowcaseAudit audit;
-    /**
-     * A list whose element is an inline object, named after its position
-     * (`ShowcaseRowsItem`) exactly as an inline element *union* is.
-     */
     private final @Nullable List<ShowcaseRowsItem> rows;
     private final @Nullable ShowcaseLedger ledgerJava;
     private final @Nullable ShowcaseMetadata metadata;
@@ -1492,8 +1305,17 @@ public final class Showcase {
     private final @Nullable Settings settings;
     private final @Nullable Attributes attributes;
     private final @Nullable ContactJava contact;
+    private final @Nullable Long nullableCount;
+    private final @Nullable Double nullableRatio;
+    private final @Nullable Boolean nullableFlag;
+    private final @Nullable List<String> nullableTags;
+    private final @Nullable NullableMode nullableMode;
+    private final @Nullable List<Double> integralMeasurements;
+    private final @Nullable Double byFive;
+    private final @Nullable String wildcard;
+    private final @Nullable String quoted;
 
-    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Double score, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Mode mode, @Nullable Payload payload, @Nullable Detail detail, @Nullable ShapeOrName shapeOrName, @Nullable Measurements measurements, @Nullable List<Shape> shapes, @Nullable List<ShowcaseSegmentsItem> segments, @Nullable List<@Nullable String> slots, @Nullable List<List<Long>> grid, @Nullable List<List<Double>> numberGrid, @Nullable List<String> links, @Nullable List<Address> addresses, @Nullable AddressBook addressBook, @Nullable List<LocalDate> dates, @Nullable DateIndex dateIndex, @Nullable List<byte[]> blobs, @Nullable BlobIndex blobIndex, @Nullable Metrics metrics, @Nullable MetricOrLabel metricOrLabel, @Nullable AddressListOrLabel addressListOrLabel, @Nullable ShowcaseLocation location, @Nullable ShowcaseAudit audit, @Nullable List<ShowcaseRowsItem> rows, @Nullable ShowcaseLedger ledgerJava, @Nullable ShowcaseMetadata metadata, @Nullable Quotas quotas, @Nullable Tokens tokens, @Nullable Nicknames nicknames, @Nullable Choices choices, @Nullable Extras extras, @Nullable Shape shape, @Nullable Note note, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact) {
+    public Showcase(Kind kind, Revision revision, Enabled enabled, Status status, Tier tier, Scale scale, String name, long count, boolean active, @Nullable String nickname, @Nullable String code, @Nullable String sku, @Nullable String phrase, @Nullable String requestId, @Nullable String contactEmail, @Nullable String host, @Nullable String homepage, @Nullable String gateway, byte @Nullable [] blob, byte @Nullable [] urlBlob, @Nullable Long retries, @Nullable Boolean verbose, @Nullable String greeting, @Nullable Boolean debug, @Nullable String legacyIdJava, @Nullable String middleName, @Nullable String category, @Nullable Long priority, @Nullable Long level, @Nullable Double ratio, @Nullable Double score, @Nullable Long step, @Nullable List<String> tags, @Nullable List<String> aliases, @Nullable List<String> roles, @Nullable IdOrName idOrName, @Nullable Mode mode, @Nullable Payload payload, @Nullable Detail detail, @Nullable ShapeOrName shapeOrName, @Nullable Measurements measurements, @Nullable List<Shape> shapes, @Nullable List<ShowcaseSegmentsItem> segments, @Nullable List<@Nullable String> slots, @Nullable List<List<Long>> grid, @Nullable List<List<Double>> numberGrid, @Nullable List<String> links, @Nullable List<Address> addresses, @Nullable AddressBook addressBook, @Nullable List<LocalDate> dates, @Nullable DateIndex dateIndex, @Nullable List<byte[]> blobs, @Nullable BlobIndex blobIndex, @Nullable Metrics metrics, @Nullable MetricOrLabel metricOrLabel, @Nullable AddressListOrLabel addressListOrLabel, @Nullable ShowcaseLocation location, @Nullable ShowcaseAudit audit, @Nullable List<ShowcaseRowsItem> rows, @Nullable ShowcaseLedger ledgerJava, @Nullable ShowcaseMetadata metadata, @Nullable Quotas quotas, @Nullable Tokens tokens, @Nullable Nicknames nicknames, @Nullable Choices choices, @Nullable Extras extras, @Nullable Shape shape, @Nullable Note note, @Nullable Address address, @Nullable Labels labels, @Nullable Settings settings, @Nullable Attributes attributes, @Nullable ContactJava contact, @Nullable Long nullableCount, @Nullable Double nullableRatio, @Nullable Boolean nullableFlag, @Nullable List<String> nullableTags, @Nullable NullableMode nullableMode, @Nullable List<Double> integralMeasurements, @Nullable Double byFive, @Nullable String wildcard, @Nullable String quoted) {
         this.kind = kind;
         this.revision = revision;
         this.enabled = enabled;
@@ -1567,88 +1389,188 @@ public final class Showcase {
         this.settings = settings;
         this.attributes = attributes;
         this.contact = contact;
+        this.nullableCount = nullableCount;
+        this.nullableRatio = nullableRatio;
+        this.nullableFlag = nullableFlag;
+        this.nullableTags = nullableTags;
+        this.nullableMode = nullableMode;
+        this.integralMeasurements = integralMeasurements;
+        this.byFive = byFive;
+        this.wildcard = wildcard;
+        this.quoted = quoted;
     }
 
+    /**
+     * Discriminator; always "showcase".
+     */
     public Kind getKind() {
         return kind;
     }
 
+    /**
+     * Integer const; always 1. Also exercises the single-`const` value override:
+     * `x-go-const-name`/`x-java-const-name` rename the emitted constant to the derived
+     * name plus a per-language suffix (Go `RevisionGo`, Java `REVISION_JAVA`) while the
+     * wire value stays `1`. TS/Python are inert here (no const override keyword — the
+     * value is emitted as a plain literal type).
+     */
     public Revision getRevision() {
         return revision;
     }
 
+    /**
+     * Boolean const; always true.
+     */
     public Enabled getEnabled() {
         return enabled;
     }
 
+    /**
+     * Closed string value set. Also exercises the enum value-constant override:
+     * `x-go-enum-names`/`x-java-enum-names` rename the `active` value's emitted
+     * constant to the value name plus a per-language suffix (Go `ActiveGo`, Java
+     * `ACTIVE_JAVA`) while the wire value stays `active`. TS/Python are inert here (no
+     * enum override keyword).
+     */
     public Status getStatus() {
         return status;
     }
 
+    /**
+     * Closed integer value set.
+     */
     public Tier getTier() {
         return tier;
     }
 
+    /**
+     * Closed number value set (exercises the Python float exception: emitted as plain
+     * float, validated by membership).
+     */
     public Scale getScale() {
         return scale;
     }
 
+    /**
+     * Display name
+     *
+     * Required human-readable name, 1 to 64 code points.
+     */
     public String getName() {
         return name;
     }
 
+    /**
+     * Required integer scalar.
+     */
     public long getCount() {
         return count;
     }
 
+    /**
+     * Required boolean scalar.
+     */
     public boolean getActive() {
         return active;
     }
 
+    /**
+     * Optional short name, at most 12 code points.
+     */
     public @Nullable String getNickname() {
         return nickname;
     }
 
+    /**
+     * Optional code, 2 to 5 code points. Counted in Unicode code points, so a
+     * multi-byte value (e.g. "a😀b", 3 code points / 6 UTF-8 bytes) is valid.
+     */
     public @Nullable String getCode() {
         return code;
     }
 
+    /**
+     * Optional product code: 2 to 4 uppercase ASCII letters, anchored (`^[A-Z]{2,4}$`).
+     * Exercises the RE2-safe `pattern` gate.
+     */
     public @Nullable String getSku() {
         return sku;
     }
 
+    /**
+     * Optional two-word phrase separated by whitespace (`^\S+\s\S+$`). Exercises the
+     * loader's `\s`/`\S` → ASCII-class normalization and the per-target `$` end-anchor
+     * rewrite (Python `\Z` / Java `\z`), so a Unicode space (NBSP) and a trailing
+     * newline are rejected consistently across all four languages.
+     */
     public @Nullable String getPhrase() {
         return phrase;
     }
 
+    /**
+     * Optional request identifier; asserted RFC 4122 UUID via `format: uuid`. Stays
+     * `string`-typed (format assertion, no materialization); the pinned regex is
+     * validated identically across all four languages.
+     */
     public @Nullable String getRequestId() {
         return requestId;
     }
 
+    /**
+     * Optional contact address; asserted ASCII dot-atom `format: email` (single `@`,
+     * &gt;=2-label domain, total length &lt;= 254, guard-before-regex).
+     */
     public @Nullable String getContactEmail() {
         return contactEmail;
     }
 
+    /**
+     * Optional host name; asserted RFC 1123 `format: hostname` (LDH labels, total
+     * length &lt;= 253).
+     */
     public @Nullable String getHost() {
         return host;
     }
 
+    /**
+     * Optional homepage; asserted RFC 3986 `format: uri` (scheme required, ASCII only;
+     * an IP-literal host is validated by the spliced ipv6 grammar).
+     */
     public @Nullable String getHomepage() {
         return homepage;
     }
 
+    /**
+     * Optional gateway address; asserted dotted-quad IPv4 via format ipv4.
+     */
     public @Nullable String getGateway() {
         return gateway;
     }
 
+    /**
+     * Optional binary payload carried as a `contentEncoding: base64` string,
+     * materialized to native bytes (Go []byte, TS Uint8Array, Python bytes, Java
+     * byte[]). The wire is canonical padded standard base64; a malformed value is
+     * rejected by the pinned regex before decode.
+     */
     public byte @Nullable [] getBlob() {
         return blob;
     }
 
+    /**
+     * Optional binary payload carried as a `contentEncoding: base64url` string
+     * (URL-safe alphabet, unpadded, RFC 4648 §5), materialized to the same native bytes
+     * type. The same bytes encode to a different wire than base64 ("Pj4+" vs "Pj4-").
+     */
     public byte @Nullable [] getUrlBlob() {
         return urlBlob;
     }
 
+    /**
+     * Retry budget
+     *
+     * Optional integer with a schema default.
+     */
     public @Nullable Long getRetries() {
         return retries;
     }
@@ -1661,6 +1583,11 @@ public final class Showcase {
         return verbose;
     }
 
+    /**
+     * Greeting
+     *
+     * Optional string with a schema default, surfaced on read.
+     */
     public @Nullable String getGreeting() {
         return greeting;
     }
@@ -1669,6 +1596,11 @@ public final class Showcase {
         return greeting != null ? greeting : "hello";
     }
 
+    /**
+     * Debug flag
+     *
+     * Optional boolean with a schema default.
+     */
     public @Nullable Boolean getDebug() {
         return debug;
     }
@@ -1678,6 +1610,14 @@ public final class Showcase {
     }
 
     /**
+     * Deprecated legacy identifier; prefer `requestId`. Exercises the native
+     * deprecation marker (Go // Deprecated:, TS @deprecated, Java @Deprecated, Python
+     * PEP 702 @deprecated). Also exercises the property-level `x-&lt;lang&gt;-name`
+     * override (the Stage 4 escape hatch): the emitted member identifier is renamed to
+     * the derived name plus a per-language suffix (Go `LegacyIdGo`, TS `legacyIdTs`,
+     * Python `legacy_id_py`, Java `legacyIdJava`) while the wire name stays `legacyId`
+     * (json tag / alias / @JsonProperty).
+     *
      * @deprecated This field is deprecated.
      */
     @Deprecated
@@ -1685,94 +1625,206 @@ public final class Showcase {
         return legacyIdJava;
     }
 
+    /**
+     * Optional and nullable; may be absent or explicitly null.
+     */
     public @Nullable String getMiddleName() {
         return middleName;
     }
 
+    /**
+     * Required but nullable; may be explicitly cleared to null.
+     */
     public @Nullable String getCategory() {
         return category;
     }
 
+    /**
+     * Optional integer bounded to the inclusive range [1, 10].
+     */
     public @Nullable Long getPriority() {
         return priority;
     }
 
+    /**
+     * Optional integer that must be strictly greater than 0.
+     */
     public @Nullable Long getLevel() {
         return level;
     }
 
+    /**
+     * Optional number that must be a non-negative multiple of 5.
+     */
     public @Nullable Double getRatio() {
         return ratio;
     }
 
+    /**
+     * Optional unbounded finite number.
+     */
     public @Nullable Double getScore() {
         return score;
     }
 
+    /**
+     * Optional integer that must be a multiple of 3.
+     */
     public @Nullable Long getStep() {
         return step;
     }
 
+    /**
+     * Ordered list of free-form tags; 1 to 5 entries.
+     */
     public @Nullable List<String> getTags() {
         return tags;
     }
 
+    /**
+     * Alternate names; each must be distinct.
+     */
     public @Nullable List<String> getAliases() {
         return aliases;
     }
 
+    /**
+     * Access roles; must contain between one and two "admin" entries.
+     */
     public @Nullable List<String> getRoles() {
         return roles;
     }
 
+    /**
+     * Disjoint-kind union (oneOf sum type): the wire value is either a string of at
+     * least 3 code points or an integer of at least 1, selected by its JSON token. Not
+     * a member of a discriminated union — the token itself is the selector. Each branch
+     * also carries its **own constraints**: once the token selects a branch, the value
+     * is held to everything that branch declares, in both directions, with the union's
+     * path on the violation.
+     */
     public @Nullable IdOrName getIdOrName() {
         return idOrName;
     }
 
+    /**
+     * A union whose string branch is a **closed value set**: either one of two named
+     * modes or an unbounded non-negative integer. The branch narrows to its own
+     * admissible values (a Go/Java membership check, a TypeScript literal union, a
+     * Python `Literal`), so an unknown string is a Violation while any non-negative
+     * integer is accepted.
+     */
     public @Nullable Mode getMode() {
         return mode;
     }
 
+    /**
+     * Mixed-kind union whose object branch is an inline free-form object: the wire
+     * value is either an arbitrary object (members carried verbatim) or a string,
+     * selected by its JSON token. The free-form object is the one object branch that
+     * needs no type name — TypeScript and Python carry it structurally, Go and Java
+     * wrap it as `&lt;Union&gt;Object`.
+     */
     public @Nullable Payload getPayload() {
         return payload;
     }
 
+    /**
+     * Mixed-kind union whose object branch is an inline *structured* object, written
+     * directly on the property rather than in `$defs`. It is the only object branch of
+     * this union, so it derives its name from the union it belongs to —
+     * `ShowcaseDetailObject` — and is emitted as an ordinary model: its members keep
+     * their own constraints and it stays open to unknown ones.
+     */
     public @Nullable Detail getDetail() {
         return detail;
     }
 
+    /**
+     * Tagged object union mixed with a scalar kind: the two selector layers compose —
+     * the JSON token picks object-vs-string, and, for an object, the shared required
+     * `kind` const picks Circle-vs-Square. Written inline on the property, so the union
+     * itself is named after its position (`ShowcaseShapeOrName` / nested
+     * `Showcase.ShapeOrName`), and it reuses the `Circle`/`Square` branches of `shape`
+     * — a branch type may belong to more than one union (Go gains a second marker
+     * method, Java a second implemented interface). The scalar branch carries a length
+     * bound of its own; the object branches validate through their own models.
+     */
     public @Nullable ShapeOrName getShapeOrName() {
         return shapeOrName;
     }
 
+    /**
+     * Mixed-kind union with an array branch: the wire value is either a non-empty list
+     * of distinct numbers or a lowercase preset name, selected by its JSON token. An
+     * array branch has no definition to take a name from, so Go and Java emit it as the
+     * synthesized `&lt;Union&gt;Array` variant (a defined type / a `@JsonValue`
+     * wrapper) while TypeScript and Python carry it structurally as `number[]` /
+     * `list[float]`. Both branches carry their own constraints — the array's
+     * `minItems`/`uniqueItems` and the string's `pattern` — so the array-vs-string
+     * choice is validated as well as selected.
+     */
     public @Nullable Measurements getMeasurements() {
         return measurements;
     }
 
+    /**
+     * A list whose element type is a named union: every element is routed to exactly
+     * one branch by the union's own selector, and its index carries into the violation
+     * path (`shapes[1]`). Go and Java cannot decode a sealed interface as a whole, so
+     * the element decodes through the union's dispatcher one at a time.
+     */
     public @Nullable List<Shape> getShapes() {
         return shapes;
     }
 
+    /**
+     * A list whose element union is written **inline**. An element has no name of its
+     * own, so the union is named after its position — `ShowcaseSegmentsItem` — moved
+     * into `$defs`, and the element becomes a `$ref` at it; from there it is an
+     * ordinary named union in every language.
+     */
     public @Nullable List<ShowcaseSegmentsItem> getSegments() {
         return segments;
     }
 
+    /**
+     * A list of **nullable, constrained scalar elements** — the two-branch nullability
+     * `oneOf` rather than a sum type, so nothing is named: the elements themselves
+     * become nullable (`[]*string`, `(string | null)[]`, `list[str | None]`,
+     * `List&lt;@Nullable String&gt;`) while each present string retains its own minimum
+     * length and the list stays a list.
+     */
     public @Nullable List<@Nullable String> getSlots() {
         return slots;
     }
 
+    /**
+     * A nested array: `items` at depth two. Each level decodes elementwise, so a bad
+     * element is reported at its own two-dimensional index (`grid[1][0]`).
+     */
     public @Nullable List<List<Long>> getGrid() {
         return grid;
     }
 
+    /**
+     * A nested array of numbers used to prove recursive finite-number validation and
+     * two-dimensional indexed aggregation.
+     */
     public @Nullable List<List<Double>> getNumberGrid() {
         return numberGrid;
     }
 
+    /**
+     * A list of scalar URI values; every element keeps its format assertion.
+     */
     public @Nullable List<String> getLinks() {
         return links;
     }
 
+    /**
+     * A list of referenced models, converted and validated elementwise.
+     */
     public @Nullable List<Address> getAddresses() {
         return addresses;
     }
@@ -1781,6 +1833,9 @@ public final class Showcase {
         return addressBook;
     }
 
+    /**
+     * Materialized calendar dates in an array.
+     */
     public @Nullable List<LocalDate> getDates() {
         return dates;
     }
@@ -1789,6 +1844,9 @@ public final class Showcase {
         return dateIndex;
     }
 
+    /**
+     * Materialized base64 byte strings in an array.
+     */
     public @Nullable List<byte[]> getBlobs() {
         return blobs;
     }
@@ -1801,10 +1859,17 @@ public final class Showcase {
         return metrics;
     }
 
+    /**
+     * A finite number branch or a non-empty string branch.
+     */
     public @Nullable MetricOrLabel getMetricOrLabel() {
         return metricOrLabel;
     }
 
+    /**
+     * A union whose array branch contains referenced models, proving that branch
+     * conversion uses the ordinary recursive array mapper.
+     */
     public @Nullable AddressListOrLabel getAddressListOrLabel() {
         return addressListOrLabel;
     }
@@ -1813,10 +1878,20 @@ public final class Showcase {
         return location;
     }
 
+    /**
+     * A nullable inline object. The nullability wrapper emits no type of its own, so
+     * the object inside it takes the property's name — `ShowcaseAudit`, the same name
+     * it would take written plainly: adding or removing nullability never renames the
+     * type.
+     */
     public @Nullable ShowcaseAudit getAudit() {
         return audit;
     }
 
+    /**
+     * A list whose element is an inline object, named after its position
+     * (`ShowcaseRowsItem`) exactly as an inline element *union* is.
+     */
     public @Nullable List<ShowcaseRowsItem> getRows() {
         return rows;
     }
@@ -1877,6 +1952,83 @@ public final class Showcase {
         return contact;
     }
 
+    /**
+     * Optional and nullable **integer**, with bounds on the non-null branch. The
+     * nullability wrapper carries no `type` of its own, so an emitter that reads the
+     * wrapper rather than the branch loses both the element type and every constraint
+     * on it. Go emits `*int64`, TS `number | null`, Python `int | None`, Java
+     * `@Nullable Long`, and `1 &lt;= v &lt;= 10` is enforced in all four, in both
+     * directions.
+     */
+    public @Nullable Long getNullableCount() {
+        return nullableCount;
+    }
+
+    /**
+     * Optional and nullable number with a divisor on the non-null branch.
+     */
+    public @Nullable Double getNullableRatio() {
+        return nullableRatio;
+    }
+
+    /**
+     * Optional and nullable boolean.
+     */
+    public @Nullable Boolean getNullableFlag() {
+        return nullableFlag;
+    }
+
+    /**
+     * Optional and nullable **array**, with element and count constraints on the
+     * non-null branch. Optional + nullable, so the Go field stays `[]string` and a wire
+     * `null` decodes to a nil slice.
+     */
+    public @Nullable List<String> getNullableTags() {
+        return nullableTags;
+    }
+
+    /**
+     * Optional and nullable **closed value set** — the closed type survives the
+     * nullability wrapper, so an unknown string is a Violation rather than an accepted
+     * value.
+     */
+    public @Nullable NullableMode getNullableMode() {
+        return nullableMode;
+    }
+
+    /**
+     * An integer `contains` matcher over number elements: the matcher's own predicate
+     * decides a match, and the +/-(2^53-1) integer cap applies to it in every language.
+     */
+    public @Nullable List<Double> getIntegralMeasurements() {
+        return integralMeasurements;
+    }
+
+    /**
+     * A number-field divisor. Divisibility is IEEE `fmod` over the stored binary64
+     * value, not exact decimal arithmetic, so all four agree at magnitudes where the
+     * shortest decimal spelling and the stored double diverge.
+     */
+    public @Nullable Double getByFive() {
+        return byFive;
+    }
+
+    /**
+     * A pattern containing a bare dot, normalized to an explicit negated class so the
+     * four regex engines agree on line terminators (`\r`, U+0085, U+2028, U+2029),
+     * which their native `.` does not.
+     */
+    public @Nullable String getWildcard() {
+        return wildcard;
+    }
+
+    /**
+     * Ends with a quote "
+     */
+    public @Nullable String getQuoted() {
+        return quoted;
+    }
+
     @Override
     public boolean equals(@Nullable Object other) {
         if (this == other) {
@@ -1904,8 +2056,8 @@ public final class Showcase {
             && Objects.equals(this.host, that.host)
             && Objects.equals(this.homepage, that.homepage)
             && Objects.equals(this.gateway, that.gateway)
-            && Objects.equals(this.blob, that.blob)
-            && Objects.equals(this.urlBlob, that.urlBlob)
+            && java.util.Arrays.equals(this.blob, that.blob)
+            && java.util.Arrays.equals(this.urlBlob, that.urlBlob)
             && Objects.equals(this.retries, that.retries)
             && Objects.equals(this.verbose, that.verbose)
             && Objects.equals(this.greeting, that.greeting)
@@ -1937,7 +2089,7 @@ public final class Showcase {
             && Objects.equals(this.addressBook, that.addressBook)
             && Objects.equals(this.dates, that.dates)
             && Objects.equals(this.dateIndex, that.dateIndex)
-            && Objects.equals(this.blobs, that.blobs)
+            && Base64Support.listEquals(this.blobs, that.blobs)
             && Objects.equals(this.blobIndex, that.blobIndex)
             && Objects.equals(this.metrics, that.metrics)
             && Objects.equals(this.metricOrLabel, that.metricOrLabel)
@@ -1958,12 +2110,21 @@ public final class Showcase {
             && Objects.equals(this.labels, that.labels)
             && Objects.equals(this.settings, that.settings)
             && Objects.equals(this.attributes, that.attributes)
-            && Objects.equals(this.contact, that.contact);
+            && Objects.equals(this.contact, that.contact)
+            && Objects.equals(this.nullableCount, that.nullableCount)
+            && Objects.equals(this.nullableRatio, that.nullableRatio)
+            && Objects.equals(this.nullableFlag, that.nullableFlag)
+            && Objects.equals(this.nullableTags, that.nullableTags)
+            && Objects.equals(this.nullableMode, that.nullableMode)
+            && Objects.equals(this.integralMeasurements, that.integralMeasurements)
+            && Objects.equals(this.byFive, that.byFive)
+            && Objects.equals(this.wildcard, that.wildcard)
+            && Objects.equals(this.quoted, that.quoted);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, score, step, tags, aliases, roles, idOrName, mode, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, numberGrid, links, addresses, addressBook, dates, dateIndex, blobs, blobIndex, metrics, metricOrLabel, addressListOrLabel, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
+        return Objects.hash(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, java.util.Arrays.hashCode(blob), java.util.Arrays.hashCode(urlBlob), retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, score, step, tags, aliases, roles, idOrName, mode, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, numberGrid, links, addresses, addressBook, dates, dateIndex, Base64Support.listHashCode(blobs), blobIndex, metrics, metricOrLabel, addressListOrLabel, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact, nullableCount, nullableRatio, nullableFlag, nullableTags, nullableMode, integralMeasurements, byFive, wildcard, quoted);
     }
 
     @Override
@@ -1987,8 +2148,8 @@ public final class Showcase {
             + ", host=" + host
             + ", homepage=" + homepage
             + ", gateway=" + gateway
-            + ", blob=" + blob
-            + ", urlBlob=" + urlBlob
+            + ", blob=" + java.util.Arrays.toString(blob)
+            + ", urlBlob=" + java.util.Arrays.toString(urlBlob)
             + ", retries=" + retries
             + ", verbose=" + verbose
             + ", greeting=" + greeting
@@ -2020,7 +2181,7 @@ public final class Showcase {
             + ", addressBook=" + addressBook
             + ", dates=" + dates
             + ", dateIndex=" + dateIndex
-            + ", blobs=" + blobs
+            + ", blobs=" + Base64Support.listToString(blobs)
             + ", blobIndex=" + blobIndex
             + ", metrics=" + metrics
             + ", metricOrLabel=" + metricOrLabel
@@ -2042,6 +2203,15 @@ public final class Showcase {
             + ", settings=" + settings
             + ", attributes=" + attributes
             + ", contact=" + contact
+            + ", nullableCount=" + nullableCount
+            + ", nullableRatio=" + nullableRatio
+            + ", nullableFlag=" + nullableFlag
+            + ", nullableTags=" + nullableTags
+            + ", nullableMode=" + nullableMode
+            + ", integralMeasurements=" + integralMeasurements
+            + ", byFive=" + byFive
+            + ", wildcard=" + wildcard
+            + ", quoted=" + quoted
             + "}";
     }
 
@@ -2056,6 +2226,11 @@ public final class Showcase {
                 }
                 if (length > 64) {
                     violations.add(new Violation("name", "must have length <= 64, got " + length));
+                }
+            }
+            {
+                if (value.count < -SpecNumbers.INTEGER_CAP || value.count > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("count", "exceeds \u00b1(2^53-1) integer cap"));
                 }
             }
             if (value.nickname != null) {
@@ -2108,7 +2283,15 @@ public final class Showcase {
                     violations.add(new Violation("gateway", "must be a valid ipv4, got " + value.gateway));
                 }
             }
+            if (value.retries != null) {
+                if (value.retries < -SpecNumbers.INTEGER_CAP || value.retries > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("retries", "exceeds \u00b1(2^53-1) integer cap"));
+                }
+            }
             if (value.priority != null) {
+                if (value.priority < -SpecNumbers.INTEGER_CAP || value.priority > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("priority", "exceeds \u00b1(2^53-1) integer cap"));
+                }
                 if (value.priority < 1L) {
                     violations.add(new Violation("priority", "must be >= 1, got " + value.priority));
                 }
@@ -2117,6 +2300,9 @@ public final class Showcase {
                 }
             }
             if (value.level != null) {
+                if (value.level < -SpecNumbers.INTEGER_CAP || value.level > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("level", "exceeds \u00b1(2^53-1) integer cap"));
+                }
                 if (value.level <= 0L) {
                     violations.add(new Violation("level", "must be > 0, got " + value.level));
                 }
@@ -2138,6 +2324,9 @@ public final class Showcase {
                 }
             }
             if (value.step != null) {
+                if (value.step < -SpecNumbers.INTEGER_CAP || value.step > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("step", "exceeds \u00b1(2^53-1) integer cap"));
+                }
                 if (value.step % 3L != 0) {
                     violations.add(new Violation("step", "must be a multiple of 3, got " + value.step));
                 }
@@ -2151,9 +2340,9 @@ public final class Showcase {
                 }
             }
             if (value.aliases != null) {
-                java.util.Map<String, Integer> seen = new java.util.HashMap<>();
+                java.util.Map<Object, Integer> seen = new java.util.HashMap<>();
                 for (int index = 0; index < value.aliases.size(); index++) {
-                    String element = value.aliases.get(index);
+                    Object element = value.aliases.get(index);
                     Integer priorIndex = seen.get(element);
                     if (priorIndex != null) {
                         violations.add(new Violation("aliases", "duplicate items: element at index " + index + " equals index " + priorIndex));
@@ -2193,6 +2382,32 @@ public final class Showcase {
                     ShowcaseSegmentsItem.validate(value.segments.get(index), "segments" + "[" + index + "]", violations);
                 }
             }
+            if (value.slots != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.slots.size(); validationIndex0++) {
+                    String validationValue0 = value.slots.get(validationIndex0);
+                    if (validationValue0 != null) {
+                        int nestedLength = validationValue0.codePointCount(0, validationValue0.length());
+                        if (nestedLength < 2) {
+                            violations.add(new Violation("slots" + "[" + validationIndex0 + "]", "must have length >= 2, got " + nestedLength));
+                        }
+                    }
+                }
+            }
+            if (value.grid != null) {
+                for (int integerCapIndex0 = 0; integerCapIndex0 < value.grid.size(); integerCapIndex0++) {
+                    List<Long> integerCapValue0 = value.grid.get(integerCapIndex0);
+                    if (integerCapValue0 != null) {
+                        for (int integerCapIndex1 = 0; integerCapIndex1 < integerCapValue0.size(); integerCapIndex1++) {
+                            Long integerCapValue1 = integerCapValue0.get(integerCapIndex1);
+                            if (integerCapValue1 != null) {
+                                if (integerCapValue1 < -SpecNumbers.INTEGER_CAP || integerCapValue1 > SpecNumbers.INTEGER_CAP) {
+                                    violations.add(new Violation("grid" + "[" + integerCapIndex0 + "]" + "[" + integerCapIndex1 + "]", "exceeds \u00b1(2^53-1) integer cap"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (value.numberGrid != null) {
                 for (int finiteIndex0 = 0; finiteIndex0 < value.numberGrid.size(); finiteIndex0++) {
                     List<Double> finiteValue0 = value.numberGrid.get(finiteIndex0);
@@ -2219,12 +2434,10 @@ public final class Showcase {
                 }
             }
             if (value.dates != null) {
-                for (int calendarIndex0 = 0; calendarIndex0 < value.dates.size(); calendarIndex0++) {
-                    LocalDate calendarValue0 = value.dates.get(calendarIndex0);
-                    if (calendarValue0 != null) {
-                        if (calendarValue0.getYear() < 1) {
-                            violations.add(new Violation("dates" + "[" + calendarIndex0 + "]", "must be a valid date, got " + calendarValue0 + ": year must be >= 0001"));
-                        }
+                for (int temporalIndex0 = 0; temporalIndex0 < value.dates.size(); temporalIndex0++) {
+                    LocalDate temporalValue0 = value.dates.get(temporalIndex0);
+                    if (temporalValue0 != null) {
+                        TemporalSupport.checkDate(temporalValue0, "dates" + "[" + temporalIndex0 + "]", violations);
                     }
                 }
             }
@@ -2234,8 +2447,71 @@ public final class Showcase {
             if (value.addressListOrLabel != null) {
                 AddressListOrLabel.validate(value.addressListOrLabel, "addressListOrLabel", violations);
             }
-            if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
+            if (value.nullableCount != null) {
+                if (value.nullableCount < -SpecNumbers.INTEGER_CAP || value.nullableCount > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("nullableCount", "exceeds \u00b1(2^53-1) integer cap"));
+                }
+                if (value.nullableCount < 1L) {
+                    violations.add(new Violation("nullableCount", "must be >= 1, got " + value.nullableCount));
+                }
+                if (value.nullableCount > 10L) {
+                    violations.add(new Violation("nullableCount", "must be <= 10, got " + value.nullableCount));
+                }
+            }
+            if (value.nullableRatio != null) {
+                if (!Double.isFinite(value.nullableRatio)) {
+                    violations.add(new Violation("nullableRatio", "must be a finite number, got " + value.nullableRatio));
+                }
+                if (value.nullableRatio % 2.0 != 0) {
+                    violations.add(new Violation("nullableRatio", "must be a multiple of 2, got " + value.nullableRatio));
+                }
+            }
+            if (value.nullableTags != null) {
+                if (value.nullableTags.size() < 1) {
+                    violations.add(new Violation("nullableTags", "must have at least 1 items, got " + value.nullableTags.size()));
+                }
+                java.util.Map<Object, Integer> seen = new java.util.HashMap<>();
+                for (int index = 0; index < value.nullableTags.size(); index++) {
+                    Object element = value.nullableTags.get(index);
+                    Integer priorIndex = seen.get(element);
+                    if (priorIndex != null) {
+                        violations.add(new Violation("nullableTags", "duplicate items: element at index " + index + " equals index " + priorIndex));
+                    } else {
+                        seen.put(element, index);
+                    }
+                }
+            }
+            if (value.integralMeasurements != null) {
+                for (int finiteIndex0 = 0; finiteIndex0 < value.integralMeasurements.size(); finiteIndex0++) {
+                    Double finiteValue0 = value.integralMeasurements.get(finiteIndex0);
+                    if (finiteValue0 != null) {
+                        if (!Double.isFinite(finiteValue0)) {
+                            violations.add(new Violation("integralMeasurements" + "[" + finiteIndex0 + "]", "must be a finite number, got " + finiteValue0));
+                        }
+                    }
+                }
+                int matchCount = 0;
+                for (Double element : value.integralMeasurements) {
+                    if (Double.isFinite(element) && element == Math.rint(element) && element >= -(double) SpecNumbers.INTEGER_CAP && element <= (double) SpecNumbers.INTEGER_CAP && (true)) {
+                        matchCount++;
+                    }
+                }
+                if (matchCount < 1) {
+                    violations.add(new Violation("integralMeasurements", "no element matches the required schema"));
+                }
+            }
+            if (value.byFive != null) {
+                if (!Double.isFinite(value.byFive)) {
+                    violations.add(new Violation("byFive", "must be a finite number, got " + value.byFive));
+                }
+                if (value.byFive % 5.0 != 0) {
+                    violations.add(new Violation("byFive", "must be a multiple of 5, got " + value.byFive));
+                }
+            }
+            if (value.wildcard != null) {
+                if (!WILDCARD_PATTERN.matcher(value.wildcard).find()) {
+                    violations.add(new Violation("wildcard", "must match pattern " + "a[^\\n]b" + ", got " + value.wildcard));
+                }
             }
             gen.writeStartObject();
             if (value.kind != null) {
@@ -2348,35 +2624,109 @@ public final class Showcase {
             }
             if (value.idOrName != null) {
                 gen.writeFieldName("idOrName");
-                serializers.defaultSerializeValue(value.idOrName, gen);
+                try {
+                    serializers.defaultSerializeValue(value.idOrName, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("idOrName"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.mode != null) {
                 gen.writeFieldName("mode");
-                serializers.defaultSerializeValue(value.mode, gen);
+                try {
+                    serializers.defaultSerializeValue(value.mode, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("mode"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.payload != null) {
                 gen.writeFieldName("payload");
-                serializers.defaultSerializeValue(value.payload, gen);
+                try {
+                    serializers.defaultSerializeValue(value.payload, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("payload"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.detail != null) {
                 gen.writeFieldName("detail");
-                serializers.defaultSerializeValue(value.detail, gen);
+                try {
+                    serializers.defaultSerializeValue(value.detail, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("detail"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.shapeOrName != null) {
                 gen.writeFieldName("shapeOrName");
-                serializers.defaultSerializeValue(value.shapeOrName, gen);
+                try {
+                    serializers.defaultSerializeValue(value.shapeOrName, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("shapeOrName"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.measurements != null) {
                 gen.writeFieldName("measurements");
-                serializers.defaultSerializeValue(value.measurements, gen);
+                try {
+                    serializers.defaultSerializeValue(value.measurements, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("measurements"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.shapes != null) {
                 gen.writeFieldName("shapes");
-                serializers.defaultSerializeValue(value.shapes, gen);
+                gen.writeStartArray();
+                for (int nestedIndex0 = 0; nestedIndex0 < value.shapes.size(); nestedIndex0++) {
+                    Shape nestedElement0 = value.shapes.get(nestedIndex0);
+                    if (nestedElement0 == null) {
+                        gen.writeNull();
+                    } else {
+                        try {
+                            serializers.defaultSerializeValue(nestedElement0, gen);
+                        } catch (ValidationException nested1) {
+                            for (Violation nestedViolation1 : nested1.getViolations()) {
+                                violations.add(nestedViolation1.withPathPrefix("shapes" + "[" + nestedIndex0 + "]"));
+                            }
+                            throw new ValidationException(violations);
+                        }
+                    }
+                }
+                gen.writeEndArray();
             }
             if (value.segments != null) {
                 gen.writeFieldName("segments");
-                serializers.defaultSerializeValue(value.segments, gen);
+                gen.writeStartArray();
+                for (int nestedIndex0 = 0; nestedIndex0 < value.segments.size(); nestedIndex0++) {
+                    ShowcaseSegmentsItem nestedElement0 = value.segments.get(nestedIndex0);
+                    if (nestedElement0 == null) {
+                        gen.writeNull();
+                    } else {
+                        try {
+                            serializers.defaultSerializeValue(nestedElement0, gen);
+                        } catch (ValidationException nested1) {
+                            for (Violation nestedViolation1 : nested1.getViolations()) {
+                                violations.add(nestedViolation1.withPathPrefix("segments" + "[" + nestedIndex0 + "]"));
+                            }
+                            throw new ValidationException(violations);
+                        }
+                    }
+                }
+                gen.writeEndArray();
             }
             if (value.slots != null) {
                 gen.writeFieldName("slots");
@@ -2396,116 +2746,352 @@ public final class Showcase {
             }
             if (value.addresses != null) {
                 gen.writeFieldName("addresses");
-                serializers.defaultSerializeValue(value.addresses, gen);
+                gen.writeStartArray();
+                for (int nestedIndex0 = 0; nestedIndex0 < value.addresses.size(); nestedIndex0++) {
+                    Address nestedElement0 = value.addresses.get(nestedIndex0);
+                    if (nestedElement0 == null) {
+                        gen.writeNull();
+                    } else {
+                        try {
+                            serializers.defaultSerializeValue(nestedElement0, gen);
+                        } catch (ValidationException nested1) {
+                            for (Violation nestedViolation1 : nested1.getViolations()) {
+                                violations.add(nestedViolation1.withPathPrefix("addresses" + "[" + nestedIndex0 + "]"));
+                            }
+                            throw new ValidationException(violations);
+                        }
+                    }
+                }
+                gen.writeEndArray();
             }
             if (value.addressBook != null) {
                 gen.writeFieldName("addressBook");
-                serializers.defaultSerializeValue(value.addressBook, gen);
+                try {
+                    serializers.defaultSerializeValue(value.addressBook, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("addressBook"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.dates != null) {
                 gen.writeFieldName("dates");
-                serializers.defaultSerializeValue(value.dates, gen);
+                gen.writeStartArray();
+                for (int wireIndex0 = 0; wireIndex0 < value.dates.size(); wireIndex0++) {
+                    @Nullable LocalDate wireElement0 = value.dates.get(wireIndex0);
+                    if (wireElement0 == null) {
+                        gen.writeNull();
+                    } else {
+                        gen.writeString(TemporalSupport.formatDate(wireElement0));
+                    }
+                }
+                gen.writeEndArray();
             }
             if (value.dateIndex != null) {
                 gen.writeFieldName("dateIndex");
-                serializers.defaultSerializeValue(value.dateIndex, gen);
+                try {
+                    serializers.defaultSerializeValue(value.dateIndex, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("dateIndex"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.blobs != null) {
                 gen.writeFieldName("blobs");
-                serializers.defaultSerializeValue(value.blobs, gen);
+                gen.writeStartArray();
+                for (int wireIndex0 = 0; wireIndex0 < value.blobs.size(); wireIndex0++) {
+                    byte @Nullable [] wireElement0 = value.blobs.get(wireIndex0);
+                    if (wireElement0 == null) {
+                        gen.writeNull();
+                    } else {
+                        gen.writeString(Base64Support.formatBase64(wireElement0));
+                    }
+                }
+                gen.writeEndArray();
             }
             if (value.blobIndex != null) {
                 gen.writeFieldName("blobIndex");
-                serializers.defaultSerializeValue(value.blobIndex, gen);
+                try {
+                    serializers.defaultSerializeValue(value.blobIndex, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("blobIndex"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.metrics != null) {
                 gen.writeFieldName("metrics");
-                serializers.defaultSerializeValue(value.metrics, gen);
+                try {
+                    serializers.defaultSerializeValue(value.metrics, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("metrics"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.metricOrLabel != null) {
                 gen.writeFieldName("metricOrLabel");
-                serializers.defaultSerializeValue(value.metricOrLabel, gen);
+                try {
+                    serializers.defaultSerializeValue(value.metricOrLabel, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("metricOrLabel"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.addressListOrLabel != null) {
                 gen.writeFieldName("addressListOrLabel");
-                serializers.defaultSerializeValue(value.addressListOrLabel, gen);
+                try {
+                    serializers.defaultSerializeValue(value.addressListOrLabel, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("addressListOrLabel"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.location != null) {
                 gen.writeFieldName("location");
-                serializers.defaultSerializeValue(value.location, gen);
+                try {
+                    serializers.defaultSerializeValue(value.location, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("location"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.audit != null) {
                 gen.writeFieldName("audit");
-                serializers.defaultSerializeValue(value.audit, gen);
+                try {
+                    serializers.defaultSerializeValue(value.audit, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("audit"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.rows != null) {
                 gen.writeFieldName("rows");
-                serializers.defaultSerializeValue(value.rows, gen);
+                gen.writeStartArray();
+                for (int nestedIndex0 = 0; nestedIndex0 < value.rows.size(); nestedIndex0++) {
+                    ShowcaseRowsItem nestedElement0 = value.rows.get(nestedIndex0);
+                    if (nestedElement0 == null) {
+                        gen.writeNull();
+                    } else {
+                        try {
+                            serializers.defaultSerializeValue(nestedElement0, gen);
+                        } catch (ValidationException nested1) {
+                            for (Violation nestedViolation1 : nested1.getViolations()) {
+                                violations.add(nestedViolation1.withPathPrefix("rows" + "[" + nestedIndex0 + "]"));
+                            }
+                            throw new ValidationException(violations);
+                        }
+                    }
+                }
+                gen.writeEndArray();
             }
             if (value.ledgerJava != null) {
                 gen.writeFieldName("ledger");
-                serializers.defaultSerializeValue(value.ledgerJava, gen);
+                try {
+                    serializers.defaultSerializeValue(value.ledgerJava, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("ledger"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.metadata != null) {
                 gen.writeFieldName("metadata");
-                serializers.defaultSerializeValue(value.metadata, gen);
+                try {
+                    serializers.defaultSerializeValue(value.metadata, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("metadata"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.quotas != null) {
                 gen.writeFieldName("quotas");
-                serializers.defaultSerializeValue(value.quotas, gen);
+                try {
+                    serializers.defaultSerializeValue(value.quotas, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("quotas"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.tokens != null) {
                 gen.writeFieldName("tokens");
-                serializers.defaultSerializeValue(value.tokens, gen);
+                try {
+                    serializers.defaultSerializeValue(value.tokens, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("tokens"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.nicknames != null) {
                 gen.writeFieldName("nicknames");
-                serializers.defaultSerializeValue(value.nicknames, gen);
+                try {
+                    serializers.defaultSerializeValue(value.nicknames, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("nicknames"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.choices != null) {
                 gen.writeFieldName("choices");
-                serializers.defaultSerializeValue(value.choices, gen);
+                try {
+                    serializers.defaultSerializeValue(value.choices, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("choices"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.extras != null) {
                 gen.writeFieldName("extras");
-                serializers.defaultSerializeValue(value.extras, gen);
+                try {
+                    serializers.defaultSerializeValue(value.extras, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("extras"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.shape != null) {
                 gen.writeFieldName("shape");
-                serializers.defaultSerializeValue(value.shape, gen);
+                try {
+                    serializers.defaultSerializeValue(value.shape, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("shape"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.note != null) {
                 gen.writeFieldName("note");
-                serializers.defaultSerializeValue(value.note, gen);
+                try {
+                    serializers.defaultSerializeValue(value.note, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("note"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.address != null) {
                 gen.writeFieldName("address");
-                serializers.defaultSerializeValue(value.address, gen);
+                try {
+                    serializers.defaultSerializeValue(value.address, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("address"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.labels != null) {
                 gen.writeFieldName("labels");
-                serializers.defaultSerializeValue(value.labels, gen);
+                try {
+                    serializers.defaultSerializeValue(value.labels, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("labels"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.settings != null) {
                 gen.writeFieldName("settings");
-                serializers.defaultSerializeValue(value.settings, gen);
+                try {
+                    serializers.defaultSerializeValue(value.settings, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("settings"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.attributes != null) {
                 gen.writeFieldName("attributes");
-                serializers.defaultSerializeValue(value.attributes, gen);
+                try {
+                    serializers.defaultSerializeValue(value.attributes, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("attributes"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.contact != null) {
                 gen.writeFieldName("contact");
-                serializers.defaultSerializeValue(value.contact, gen);
+                try {
+                    serializers.defaultSerializeValue(value.contact, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("contact"));
+                    }
+                    throw new ValidationException(violations);
+                }
+            }
+            if (value.nullableCount != null) {
+                gen.writeNumberField("nullableCount", value.nullableCount);
+            }
+            if (value.nullableRatio != null) {
+                gen.writeNumberField("nullableRatio", value.nullableRatio);
+            }
+            if (value.nullableFlag != null) {
+                gen.writeBooleanField("nullableFlag", value.nullableFlag);
+            }
+            if (value.nullableTags != null) {
+                gen.writeFieldName("nullableTags");
+                serializers.defaultSerializeValue(value.nullableTags, gen);
+            }
+            if (value.nullableMode != null) {
+                gen.writeStringField("nullableMode", value.nullableMode.getValue());
+            }
+            if (value.integralMeasurements != null) {
+                gen.writeFieldName("integralMeasurements");
+                serializers.defaultSerializeValue(value.integralMeasurements, gen);
+            }
+            if (value.byFive != null) {
+                gen.writeNumberField("byFive", value.byFive);
+            }
+            if (value.wildcard != null) {
+                gen.writeStringField("wildcard", value.wildcard);
+            }
+            if (value.quoted != null) {
+                gen.writeStringField("quoted", value.quoted);
             }
             gen.writeEndObject();
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
         }
     }
 
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Showcase> {
         @Override
         public Showcase deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));
@@ -2526,6 +3112,7 @@ public final class Showcase {
                     case "blob":
                     case "blobIndex":
                     case "blobs":
+                    case "byFive":
                     case "category":
                     case "choices":
                     case "code":
@@ -2544,6 +3131,7 @@ public final class Showcase {
                     case "homepage":
                     case "host":
                     case "idOrName":
+                    case "integralMeasurements":
                     case "kind":
                     case "labels":
                     case "ledger":
@@ -2561,11 +3149,17 @@ public final class Showcase {
                     case "nickname":
                     case "nicknames":
                     case "note":
+                    case "nullableCount":
+                    case "nullableFlag":
+                    case "nullableMode":
+                    case "nullableRatio":
+                    case "nullableTags":
                     case "numberGrid":
                     case "payload":
                     case "phrase":
                     case "priority":
                     case "quotas":
+                    case "quoted":
                     case "ratio":
                     case "requestId":
                     case "retries":
@@ -2588,6 +3182,7 @@ public final class Showcase {
                     case "tokens":
                     case "urlBlob":
                     case "verbose":
+                    case "wildcard":
                         break;
                     default:
                         violations.add(new Violation(key, "unknown field"));
@@ -3364,6 +3959,10 @@ public final class Showcase {
                                 violations.add(new Violation(elementPath, "expected string"));
                             } else {
                                 String parsed = element.textValue();
+                                int nestedLength = parsed.codePointCount(0, parsed.length());
+                                if (nestedLength < 2) {
+                                    violations.add(new Violation(elementPath, "must have length >= 2, got " + nestedLength));
+                                }
                                 items.add(parsed);
                             }
                         }
@@ -3938,10 +4537,192 @@ public final class Showcase {
                     }
                 }
             }
+            Long nullableCount = null;
+            {
+                JsonNode field = node.get("nullableCount");
+                if (field == null) {
+                } else if (field.isNull()) {
+                } else {
+                    Long numberValue = SpecNumbers.specLong(field, "nullableCount", violations);
+                    if (numberValue != null) {
+                        nullableCount = numberValue;
+                        if (numberValue < 1L) {
+                            violations.add(new Violation("nullableCount", "must be >= 1, got " + numberValue));
+                        }
+                        if (numberValue > 10L) {
+                            violations.add(new Violation("nullableCount", "must be <= 10, got " + numberValue));
+                        }
+                    }
+                }
+            }
+            Double nullableRatio = null;
+            {
+                JsonNode field = node.get("nullableRatio");
+                if (field == null) {
+                } else if (field.isNull()) {
+                } else {
+                    Double numberValue = SpecNumbers.specDouble(field, "nullableRatio", violations);
+                    if (numberValue != null) {
+                        nullableRatio = numberValue;
+                        if (numberValue % 2.0 != 0) {
+                            violations.add(new Violation("nullableRatio", "must be a multiple of 2, got " + numberValue));
+                        }
+                    }
+                }
+            }
+            Boolean nullableFlag = null;
+            {
+                JsonNode field = node.get("nullableFlag");
+                if (field == null) {
+                } else if (field.isNull()) {
+                } else {
+                    if (!field.isBoolean()) {
+                        violations.add(new Violation("nullableFlag", "expected boolean"));
+                    } else {
+                        nullableFlag = field.booleanValue();
+                    }
+                }
+            }
+            List<String> nullableTags = null;
+            {
+                JsonNode field = node.get("nullableTags");
+                if (field == null) {
+                } else if (field.isNull()) {
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("nullableTags", "expected array"));
+                    } else {
+                        List<String> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "nullableTags" + "[" + index + "]";
+                            if (!element.isTextual()) {
+                                violations.add(new Violation(elementPath, "expected string"));
+                            } else {
+                                String parsed = element.textValue();
+                                items.add(parsed);
+                            }
+                        }
+                        nullableTags = items;
+                        if (field.size() < 1) {
+                            violations.add(new Violation("nullableTags", "must have at least 1 items, got " + field.size()));
+                        }
+                        java.util.Map<Object, Integer> rawSeen = new java.util.HashMap<>();
+                        for (int rawIndex = 0; rawIndex < field.size(); rawIndex++) {
+                            Object rawKey = SpecNumbers.valueKey(field.get(rawIndex));
+                            Integer priorIndex = rawSeen.get(rawKey);
+                            if (priorIndex != null) {
+                                violations.add(new Violation("nullableTags", "duplicate items: element at index " + rawIndex + " equals index " + priorIndex));
+                            } else {
+                                rawSeen.put(rawKey, rawIndex);
+                            }
+                        }
+                    }
+                }
+            }
+            NullableMode nullableMode = null;
+            {
+                JsonNode field = node.get("nullableMode");
+                if (field == null) {
+                } else if (field.isNull()) {
+                } else {
+                    if (!field.isTextual()) {
+                        violations.add(new Violation("nullableMode", "expected string"));
+                    } else {
+                        String nullableModeValue = field.textValue();
+                        if ("auto".equals(nullableModeValue)) {
+                            nullableMode = NullableMode.NULLABLE_MODE_AUTO;
+                        } else if ("manual".equals(nullableModeValue)) {
+                            nullableMode = NullableMode.NULLABLE_MODE_MANUAL;
+                        } else {
+                            violations.add(new Violation("nullableMode", "must be one of [\"auto\", \"manual\"], got " + nullableModeValue));
+                        }
+                    }
+                }
+            }
+            List<Double> integralMeasurements = null;
+            {
+                JsonNode field = node.get("integralMeasurements");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("integralMeasurements", "explicit null not allowed"));
+                } else {
+                    if (!field.isArray()) {
+                        violations.add(new Violation("integralMeasurements", "expected array"));
+                    } else {
+                        List<Double> items = new ArrayList<>();
+                        for (int index = 0; index < field.size(); index++) {
+                            JsonNode element = field.get(index);
+                            String elementPath = "integralMeasurements" + "[" + index + "]";
+                            Double parsed = SpecNumbers.specDouble(element, elementPath, violations);
+                            if (parsed != null) {
+                                items.add(parsed);
+                            }
+                        }
+                        integralMeasurements = items;
+                        int rawMatchCount = 0;
+                        for (JsonNode rawElement : field) {
+                            if (SpecNumbers.isSpecLong(rawElement) && (true)) {
+                                rawMatchCount++;
+                            }
+                        }
+                        if (rawMatchCount < 1) {
+                            violations.add(new Violation("integralMeasurements", "no element matches the required schema"));
+                        }
+                    }
+                }
+            }
+            Double byFive = null;
+            {
+                JsonNode field = node.get("byFive");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("byFive", "explicit null not allowed"));
+                } else {
+                    Double numberValue = SpecNumbers.specDouble(field, "byFive", violations);
+                    if (numberValue != null) {
+                        byFive = numberValue;
+                        if (numberValue % 5.0 != 0) {
+                            violations.add(new Violation("byFive", "must be a multiple of 5, got " + numberValue));
+                        }
+                    }
+                }
+            }
+            String wildcard = null;
+            {
+                JsonNode field = node.get("wildcard");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("wildcard", "explicit null not allowed"));
+                } else {
+                    if (!field.isTextual()) {
+                        violations.add(new Violation("wildcard", "expected string"));
+                    } else {
+                        wildcard = field.textValue();
+                        if (!WILDCARD_PATTERN.matcher(wildcard).find()) {
+                            violations.add(new Violation("wildcard", "must match pattern " + "a[^\\n]b" + ", got " + wildcard));
+                        }
+                    }
+                }
+            }
+            String quoted = null;
+            {
+                JsonNode field = node.get("quoted");
+                if (field == null) {
+                } else if (field.isNull()) {
+                    violations.add(new Violation("quoted", "explicit null not allowed"));
+                } else {
+                    if (!field.isTextual()) {
+                        violations.add(new Violation("quoted", "expected string"));
+                    } else {
+                        quoted = field.textValue();
+                    }
+                }
+            }
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
             }
-            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, score, step, tags, aliases, roles, idOrName, mode, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, numberGrid, links, addresses, addressBook, dates, dateIndex, blobs, blobIndex, metrics, metricOrLabel, addressListOrLabel, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact);
+            return new Showcase(kind, revision, enabled, status, tier, scale, name, count, active, nickname, code, sku, phrase, requestId, contactEmail, host, homepage, gateway, blob, urlBlob, retries, verbose, greeting, debug, legacyIdJava, middleName, category, priority, level, ratio, score, step, tags, aliases, roles, idOrName, mode, payload, detail, shapeOrName, measurements, shapes, segments, slots, grid, numberGrid, links, addresses, addressBook, dates, dateIndex, blobs, blobIndex, metrics, metricOrLabel, addressListOrLabel, location, audit, rows, ledgerJava, metadata, quotas, tokens, nicknames, choices, extras, shape, note, address, labels, settings, attributes, contact, nullableCount, nullableRatio, nullableFlag, nullableTags, nullableMode, integralMeasurements, byFive, wildcard, quoted);
         }
     }
 }

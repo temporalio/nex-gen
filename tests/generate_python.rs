@@ -327,7 +327,7 @@ assert reported == [
 ], reported
 assert violations(lambda: converter(EnumNames).to_transfer_type(
     EnumNames(additional_properties={"gamma": "x"})
-)) == [("gamma", 'invalid property name "gamma": must equal an allowed value')]
+)) == [("gamma", 'invalid property name "gamma": must be one of ["alpha", "beta"], got "gamma"')]
 assert violations(lambda: converter(FormatNames).from_transfer_type(
     {"bad": "x"}, FormatNames
 )) == [("bad", 'invalid property name "bad": must be a valid email')]
@@ -874,6 +874,10 @@ fn generate_formatted_json_python_output(
     assert!(format_status.success());
 }
 
+/// Parses every module at `feature_version=(3, 10)` on the *host* interpreter.
+/// This is weaker than it looks: the flag does not reject a PEP 701 nested
+/// same-quote f-string, which a real interpreter below 3.12 refuses outright.
+/// Use [`assert_python_floor_compiles`] where the floor is the thing under test.
 fn assert_python_310_syntax_compatible(package_dir: &Path) {
     let checker = r#"
 import ast
@@ -899,6 +903,45 @@ for path in sorted(root.rglob("*.py")):
     .status()
     .unwrap();
     assert!(status.success());
+}
+
+/// Byte-compiles every module under `package_dir` with a **real** 3.10
+/// interpreter. `ast.parse(..., feature_version=(3, 10))` is not sufficient: it
+/// accepts a PEP 701 nested same-quote f-string, which is a `SyntaxError` on
+/// every interpreter below 3.12. The generator's own bytes are compiled — never
+/// `ruff`-formatted output, which rewrites the inner quotes and hides the break.
+fn assert_python_floor_compiles(package_dir: &Path) {
+    let checker = r#"
+import pathlib
+import py_compile
+import sys
+import tempfile
+
+root = pathlib.Path(sys.argv[1])
+with tempfile.TemporaryDirectory() as out:
+    for index, path in enumerate(sorted(root.rglob("*.py"))):
+        py_compile.compile(
+            str(path), cfile=str(pathlib.Path(out) / f"{index}.pyc"), doraise=True
+        )
+"#;
+    let status = Command::new("uv")
+        .current_dir(project_root())
+        .args([
+            "run",
+            "--python",
+            "3.10",
+            "--no-project",
+            "python",
+            "-c",
+            checker,
+            package_dir.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "the generated package does not compile on Python 3.10, the declared floor"
+    );
 }
 
 /// The interpreter the generated packages are exercised with. The advanced
@@ -1992,6 +2035,12 @@ services:
     // The root barrel binds each name exactly once.
     let barrel = fs::read_to_string(output_path.join("__init__.py")).unwrap();
     assert_eq!(barrel.matches("import Page").count(), 1, "{barrel}");
+    // A module that declares nothing of its own emits no models file at all —
+    // see `specs/json-schema/features/generated-file-layout.md`.
+    assert!(
+        !output_path.join("svc/models.py").exists(),
+        "a service-only module must not emit an empty `models.py`"
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
@@ -2132,6 +2181,440 @@ fn python_json_model_properties_use_union_none_and_defaults_preserve_presence() 
     assert_python_script_succeeds(
         PYTHON_DATACLASS_DEFAULT_RUNTIME_CHECK,
         &[temp_dir.to_str().unwrap(), "default_package"],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Generates a Python package from `schema_source` into a fresh directory under
+/// `temp_dir`, without running `ruff`. Formatting is what has historically hidden
+/// syntax that the declared floor rejects, so every probe below reads the
+/// generator's own bytes.
+fn generate_unformatted_python_package(
+    temp_dir: &Path,
+    schema_source: &str,
+    generate_native_api: bool,
+) -> PathBuf {
+    fs::create_dir_all(temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.nexusrpc.yaml");
+    fs::write(&input_path, schema_source).unwrap();
+    let output_path = temp_dir.join("probe_package");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    output_path
+}
+
+/// A docstring body that *ends* in a double quote runs straight into the closing
+/// `"""` delimiter. Escaping only the three-quote sequence leaves four consecutive
+/// quotes and the module does not parse at all, so this is asserted by importing
+/// the package and reading the docstrings back — the rendered text alone cannot
+/// distinguish "escaped" from "escaped and now says something else".
+/// See `specs/json-schema/features/description.md`.
+#[test]
+fn python_docstrings_ending_in_a_quote_parse_and_keep_their_text() {
+    let temp_dir = unique_output_path("py-docstring-trailing-quote");
+    let output_path = generate_unformatted_python_package(
+        &temp_dir,
+        r##"nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+services:
+  QuoteService:
+    fqn: example.quote.v1.QuoteService
+    description: Service ends with a quote "
+    operations:
+      doIt:
+        description: Operation ends with a quote "
+        input: { $ref: "#/$defs/R" }
+        output: { $ref: "#/$defs/R" }
+$defs:
+  R:
+    description: Type ends with a quote "
+    type: object
+    additionalProperties: false
+    properties:
+      a:
+        description: 'Trailing quote "'
+        type: string
+"##,
+        false,
+    );
+
+    let models = fs::read_to_string(output_path.join("models.py")).unwrap();
+    assert!(
+        models.contains("\"\"\"Type ends with a quote \\\"\"\"\""),
+        "{models}"
+    );
+    assert!(!models.contains("quote \"\"\"\""), "{models}");
+
+    assert_python_floor_compiles(&output_path);
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+models = importlib.import_module(sys.argv[2] + ".models")
+services = importlib.import_module(sys.argv[2] + ".services")
+assert models.R.__doc__ == 'Type ends with a quote "', models.R.__doc__
+assert services.QuoteService.__doc__ == 'Service ends with a quote "', (
+    services.QuoteService.__doc__
+)
+"#,
+        &[temp_dir.to_str().unwrap(), "probe_package"],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A deprecated operation is declared as `typing.Annotated[Operation[...], ...]`,
+/// and `nexusrpc`'s `@service` resolves that annotation with `eval_str=True`, so
+/// `typing` has to be bound at runtime. The native-API client body imports it
+/// incidentally; a definitions-only package does not, which is why this probe
+/// runs with `generate_native_api: false` and *imports* the result.
+/// See `specs/json-schema/features/deprecated.md`.
+#[test]
+fn python_json_definitions_only_deprecated_operation_imports_typing() {
+    let temp_dir = unique_output_path("py-json-deprecated-op-import");
+    let output_path = generate_unformatted_python_package(
+        &temp_dir,
+        r##"nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+services:
+  DepService:
+    fqn: example.dep.v1.DepService
+    operations:
+      doIt:
+        deprecated: true
+        input: { $ref: "#/$defs/R" }
+        output: { $ref: "#/$defs/R" }
+$defs:
+  R:
+    type: object
+    additionalProperties: false
+    properties:
+      a: { type: string }
+"##,
+        false,
+    );
+
+    let services = fs::read_to_string(output_path.join("services.py")).unwrap();
+    assert!(
+        services.contains("typing.Annotated[Operation["),
+        "{services}"
+    );
+    assert!(services.contains("\nimport typing\n"), "{services}");
+
+    assert_python_script_succeeds(
+        "import importlib, sys; sys.path.insert(0, sys.argv[1]); importlib.import_module(sys.argv[2] + '.services')",
+        &[temp_dir.to_str().unwrap(), "probe_package"],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Array count bounds interpolate the raw-array expression into an f-string reason.
+/// Reusing the outer quote inside a replacement field is PEP 701 (Python 3.12+),
+/// so the cast target has to be spelled with the other quote or the generator's own
+/// output is a `SyntaxError` on the declared 3.10 floor.
+/// See `specs/json-schema/features/items.md`.
+#[test]
+fn python_json_array_bound_reasons_parse_on_the_declared_floor() {
+    let temp_dir = unique_output_path("py-json-array-fstring-floor");
+    let output_path = generate_unformatted_python_package(
+        &temp_dir,
+        r##"nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  R:
+    type: object
+    additionalProperties: false
+    properties:
+      tags:
+        type: array
+        minItems: 1
+        maxItems: 3
+        uniqueItems: true
+        items: { type: string }
+"##,
+        false,
+    );
+
+    let models = fs::read_to_string(output_path.join("models.py")).unwrap();
+    assert!(
+        models.contains("typing.cast('list[typing.Any]', tags_value_raw)"),
+        "{models}"
+    );
+    assert_python_floor_compiles(&output_path);
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Python's `$` also matches immediately before a trailing newline, so the pinned
+/// temporal patterns have to carry the same `\Z` rewrite every other emitted
+/// pattern does. Without it `"PT1H\n"` reaches the native parse and escapes as a
+/// raw `ValueError`/`KeyError` instead of an aggregated `ValidationError` (P11).
+/// See `specs/json-schema/features/format.md`.
+#[test]
+fn python_json_temporal_patterns_reject_a_trailing_newline() {
+    let temp_dir = unique_output_path("py-json-temporal-anchor");
+    let output_path = generate_unformatted_python_package(
+        &temp_dir,
+        r##"nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  R:
+    type: object
+    additionalProperties: false
+    properties:
+      d: { type: string, format: duration }
+      dt: { type: string, format: date-time }
+      dd: { type: string, format: date }
+      tt: { type: string, format: time }
+"##,
+        false,
+    );
+
+    let definitions = fs::read_to_string(output_path.join("_definitions.py")).unwrap();
+    for name in [
+        "_TEMPORAL_DATE_TIME_RE",
+        "_TEMPORAL_DATE_RE",
+        "_TEMPORAL_TIME_RE",
+        "_TEMPORAL_DURATION_RE",
+    ] {
+        let line = definitions
+            .lines()
+            .find(|line| line.starts_with(&format!("{name} = ")))
+            .unwrap_or_else(|| panic!("{name} not emitted\n{definitions}"));
+        assert!(line.ends_with("\\Z\")"), "{line}");
+    }
+
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+definitions = importlib.import_module(sys.argv[2] + "._definitions")
+cases = [
+    (definitions._parse_duration, "PT1H\n"),
+    (definitions._parse_date_time, "2021-06-15T12:30:45Z\n"),
+    (definitions._parse_date, "2021-06-15\n"),
+    (definitions._parse_time, "12:30:45Z\n"),
+]
+for parse, value in cases:
+    violations = []
+    assert parse(value, "p", violations) is None, (parse, value)
+    assert len(violations) == 1, (parse, value, violations)
+"#,
+        &[temp_dir.to_str().unwrap(), "probe_package"],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// `type: number` is the binary64 domain in every target, so a bound is compared
+/// against the authored decimal *rounded to a double* and the subject is narrowed
+/// to a `float` first — Python is the only target that would otherwise compare two
+/// exact integers. `type: integer` stays exact, and gains the serialize-side
+/// ±(2^53−1) cap Go already asserts (a Python `int` is unbounded, so an in-memory
+/// value can exceed what any parser — including this module's own — will read).
+/// See `specs/json-schema/features/type.md` and `.../maximum.md`.
+#[test]
+fn python_json_number_bounds_compare_in_binary64_and_integers_are_capped() {
+    let temp_dir = unique_output_path("py-json-binary64-bounds");
+    let output_path = generate_unformatted_python_package(
+        &temp_dir,
+        r##"nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  R:
+    type: object
+    additionalProperties: false
+    properties:
+      n:
+        type: number
+        maximum: 9007199254740992
+      i: { type: integer }
+"##,
+        false,
+    );
+
+    let models = fs::read_to_string(output_path.join("models.py")).unwrap();
+    assert!(
+        models.contains("if float(n_value_raw) > 9007199254740992.0:"),
+        "{models}"
+    );
+    // The reason keeps the authored spelling so the text is identical in all four.
+    assert!(
+        models.contains("must be <= 9007199254740992, got {n_value_raw}"),
+        "{models}"
+    );
+    assert!(
+        models.contains("reason=\"exceeds ±(2^53-1) integer cap\""),
+        "{models}"
+    );
+
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+models = importlib.import_module(sys.argv[2] + ".models")
+definitions = importlib.import_module(sys.argv[2] + "._definitions")
+converter = models._RTransferTypeConverter()
+# Rounds to the bound under binary64, exactly as Go/TypeScript/Java read it.
+assert converter.from_transfer_type({"n": 9007199254740993}, models.R).n is not None
+try:
+    converter.from_transfer_type({"n": 9007199254740995}, models.R)
+    raise AssertionError("expected the over-bound value to be rejected")
+except definitions.ValidationError:
+    pass
+try:
+    converter.to_transfer_type(models.R(i=9007199254740993))
+    raise AssertionError("expected the over-cap integer to be rejected")
+except definitions.ValidationError as error:
+    assert [v.reason for v in error.violations] == [
+        "exceeds \u00b1(2^53-1) integer cap"
+    ], error.violations
+"#,
+        &[temp_dir.to_str().unwrap(), "probe_package"],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A `contains` matcher's effective kind is its declared `type`, and otherwise the
+/// element type — never the kind of the first `const`/`enum` literal, which made a
+/// mixed-kind set exclude its own members and made the verdict depend on the order
+/// the set was authored in. See `specs/json-schema/features/contains.md`.
+#[test]
+fn python_json_contains_matcher_kind_ignores_the_literal_set() {
+    let temp_dir = unique_output_path("py-json-contains-kind");
+    let output_path = generate_unformatted_python_package(
+        &temp_dir,
+        r##"nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  R:
+    type: object
+    additionalProperties: false
+    properties:
+      e:
+        type: array
+        items: { type: number }
+        contains: { enum: [2, 1.5] }
+      r:
+        type: array
+        items: { type: number }
+        contains: { enum: [1.5, 2] }
+"##,
+        false,
+    );
+
+    let models = fs::read_to_string(output_path.join("models.py")).unwrap();
+    assert!(
+        !models.contains("float(element).is_integer()"),
+        "the element guard must come from the element type, not the first literal\n{models}"
+    );
+
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+models = importlib.import_module(sys.argv[2] + ".models")
+converter = models._RTransferTypeConverter()
+# Both orderings accept the same value: the set is not what types the matcher.
+converter.from_transfer_type({"e": [1.5], "r": [1.5]}, models.R)
+"#,
+        &[temp_dir.to_str().unwrap(), "probe_package"],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// The Python key loop is opened only when the `propertyNames` subschema actually
+/// contributes a key predicate — an empty `for` body is an `IndentationError` at
+/// import. The two shapes that would produce one are refused at load: a subschema
+/// that asserts nothing, and a materializing temporal `format`, which cannot
+/// assert a key at all. Asserted here because the emitter's guard is the second
+/// line of defence and is otherwise unreachable.
+/// See `specs/json-schema/features/propertyNames.md`.
+#[test]
+fn python_json_property_names_without_a_key_predicate_are_refused() {
+    for (label, subschema) in [
+        ("vacuous", "{ type: string }"),
+        ("temporal", "{ type: string, format: date-time }"),
+    ] {
+        let temp_dir = unique_output_path(&format!("py-json-property-names-{label}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let input_path = temp_dir.join("probe.nexusrpc.yaml");
+        fs::write(
+            &input_path,
+            format!(
+                r##"nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Keys:
+    type: object
+    propertyNames: {subschema}
+    additionalProperties: {{ type: string }}
+"##
+            ),
+        )
+        .unwrap();
+        let error = generate_to_file(&GenerateRequest {
+            language: nexgen::language::Language::Python,
+            input_paths: vec![input_path],
+            support_paths: Vec::new(),
+            descriptor_paths: Vec::new(),
+            output_path: temp_dir.join("out"),
+            format: false,
+            generate_native_api: false,
+            java_package_name: None,
+            ts_date_time_types: Default::default(),
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("propertyNames"), "{label}: {error}");
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+}
+
+/// A named `oneOf` union is a `TypeAlias`, which cannot carry a decorator — but it
+/// can carry the marker inside `typing.Annotated`, and its `title` is prose with no
+/// such excuse. Go, TypeScript and Java emit both.
+/// See `specs/json-schema/features/deprecated.md` and `.../title.md`.
+#[test]
+fn python_json_union_alias_keeps_its_title_and_deprecation() {
+    let temp_dir = unique_output_path("py-json-union-alias-annotations");
+    let output_path = generate_unformatted_python_package(
+        &temp_dir,
+        r##"nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  U:
+    title: UNION TITLE
+    description: UNION BODY
+    deprecated: true
+    oneOf:
+      - { type: string }
+      - { type: integer }
+"##,
+        false,
+    );
+
+    let models = fs::read_to_string(output_path.join("models.py")).unwrap();
+    assert!(
+        models.contains(
+            "U: typing.TypeAlias = typing.Annotated[str | int, typing_extensions.deprecated(\"This type is deprecated.\", category=None)]"
+        ),
+        "{models}"
+    );
+    assert!(
+        models.contains("\"\"\"UNION TITLE\n\nUNION BODY\n\"\"\""),
+        "{models}"
+    );
+    assert_python_script_succeeds(
+        "import importlib, sys; sys.path.insert(0, sys.argv[1]); importlib.import_module(sys.argv[2] + '.models')",
+        &[temp_dir.to_str().unwrap(), "probe_package"],
     );
     fs::remove_dir_all(temp_dir).unwrap();
 }

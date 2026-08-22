@@ -170,7 +170,7 @@ public final class TextNote implements Note {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<TextNote> {
         @Override
         public TextNote deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

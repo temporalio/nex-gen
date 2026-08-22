@@ -29,10 +29,6 @@ import org.jspecify.annotations.Nullable;
 public final class Category {
     private final String id;
     private final String name;
-    /**
-     * Sub-categories. A within-file self-cycle via `$ref: '#'`; the possibly-empty
-     * array is the terminating edge, so it stays in this module.
-     */
     private final @Nullable List<Category> children;
 
     public Category(String id, String name, @Nullable List<Category> children) {
@@ -49,6 +45,10 @@ public final class Category {
         return name;
     }
 
+    /**
+     * Sub-categories. A within-file self-cycle via `$ref: '#'`; the possibly-empty
+     * array is the terminating edge, so it stays in this module.
+     */
     public @Nullable List<Category> getChildren() {
         return children;
     }
@@ -84,6 +84,7 @@ public final class Category {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Category> {
         @Override
         public void serialize(Category value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
             gen.writeStartObject();
             if (value.id != null) {
                 gen.writeStringField("id", value.id);
@@ -93,16 +94,35 @@ public final class Category {
             }
             if (value.children != null) {
                 gen.writeFieldName("children");
-                serializers.defaultSerializeValue(value.children, gen);
+                gen.writeStartArray();
+                for (int nestedIndex0 = 0; nestedIndex0 < value.children.size(); nestedIndex0++) {
+                    Category nestedElement0 = value.children.get(nestedIndex0);
+                    if (nestedElement0 == null) {
+                        gen.writeNull();
+                    } else {
+                        try {
+                            serializers.defaultSerializeValue(nestedElement0, gen);
+                        } catch (ValidationException nested1) {
+                            for (Violation nestedViolation1 : nested1.getViolations()) {
+                                violations.add(nestedViolation1.withPathPrefix("children" + "[" + nestedIndex0 + "]"));
+                            }
+                            throw new ValidationException(violations);
+                        }
+                    }
+                }
+                gen.writeEndArray();
             }
             gen.writeEndObject();
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
         }
     }
 
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Category> {
         @Override
         public Category deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

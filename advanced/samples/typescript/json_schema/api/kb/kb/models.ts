@@ -155,9 +155,16 @@ export const putBlockOutputTransferTypeConverter =
     }
 
     public toTransferType(value: PutBlockOutput): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       out.blockId = value.blockId;
+      if (!Number.isSafeInteger(value.revision)) {
+        violations.push({ path: "revision", reason: "exceeds ±(2^53-1) integer cap" });
+      }
       out.revision = value.revision;
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
+      }
       return out;
     }
   })();

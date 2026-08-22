@@ -1,0 +1,34 @@
+# The three object shapes, and how each answers an unexpected key.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ObjectModeling
+description: Closed, open and typed-map objects side by side.
+type: object
+additionalProperties: false
+required: [closed, open, typed]
+properties:
+  closed:
+    description: A closed model — an undeclared key is a violation.
+    type: object
+    additionalProperties: false
+    required: [alpha]
+    properties:
+      alpha:
+        type: string
+      beta:
+        type: integer
+  open:
+    description: >-
+      An open model — an undeclared key is carried through untouched, so it must
+      survive a round trip with its own type and spelling.
+    type: object
+    additionalProperties: true
+    required: [alpha]
+    properties:
+      alpha:
+        type: string
+  typed:
+    description: A typed map — every member is validated against one schema.
+    type: object
+    additionalProperties:
+      type: integer
+      minimum: 1

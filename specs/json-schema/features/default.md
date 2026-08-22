@@ -220,7 +220,7 @@ Three consequences that the count specs already encode:
 | Optional integer default | `{type:"integer", default:0}` |
 | Optional boolean default | `{type:"boolean", default:false}` |
 | Optional + nullable with scalar default | `{oneOf:[{type:"string"},{type:"null"}], default:"x"}` |
-| Differing merged defaults (last-wins) | `allOf:[{default:"a"},{default:"b"}]` → `"b"`; `{$ref:"#/$defs/X", default:"local"}` overrides X's default (see [[allOf]]/[[ref]]) |
+| Differing merged defaults (last-wins) | `allOf:[{default:"a"},{default:"b"}]` → `"b"` (see [[allOf]]). The `$ref`-sibling half — `{$ref:"#/$defs/X", default:"local"}` overriding X's own `default` — is **unreachable today**: a `default` belongs to a scalar, a scalar `$defs` entry is a load reject ([[const]] *Naming and collisions*), and an object/array `default` is rejected on its own. |
 
 ### Rejected at load time (negative)
 

@@ -109,6 +109,16 @@ const (
 	ShowcaseScale2_5 ShowcaseScale = 2.5
 )
 
+// ShowcaseNullableMode is the closed value set for Showcase.nullableMode.
+type ShowcaseNullableMode string
+
+const (
+	// ShowcaseNullableModeAuto is the ShowcaseNullableMode value "auto".
+	ShowcaseNullableModeAuto ShowcaseNullableMode = "auto"
+	// ShowcaseNullableModeManual is the ShowcaseNullableMode value "manual".
+	ShowcaseNullableModeManual ShowcaseNullableMode = "manual"
+)
+
 // SquareKind is the closed value set for Square.kind.
 type SquareKind string
 
@@ -149,12 +159,12 @@ func unmarshalChoicesValue(raw json.RawMessage, path string, errs *[]Violation) 
 			*errs = append(*errs, Violation{path, "discriminator \"kind\" is required"})
 			return nil, false
 		}
-		switch string(bytes.TrimSpace(discRaw)) {
-		case "\"circle\"":
+		switch {
+		case jsonScalarEquals(discRaw, "\"circle\""):
 			var v Circle
 			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
 			return v, true
-		case "\"square\"":
+		case jsonScalarEquals(discRaw, "\"square\""):
 			var v Square
 			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
 			return v, true
@@ -200,12 +210,12 @@ func unmarshalNote(raw json.RawMessage, path string, errs *[]Violation) (Note, b
 			*errs = append(*errs, Violation{path, "discriminator \"kind\" is required"})
 			return nil, false
 		}
-		switch string(bytes.TrimSpace(discRaw)) {
-		case "\"text\"":
+		switch {
+		case jsonScalarEquals(discRaw, "\"text\""):
 			var v TextNote
 			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
 			return v, true
-		case "\"link\"":
+		case jsonScalarEquals(discRaw, "\"link\""):
 			var v LinkNote
 			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
 			return v, true
@@ -248,12 +258,12 @@ func unmarshalShape(raw json.RawMessage, path string, errs *[]Violation) (Shape,
 			*errs = append(*errs, Violation{path, "discriminator \"kind\" is required"})
 			return nil, false
 		}
-		switch string(bytes.TrimSpace(discRaw)) {
-		case "\"circle\"":
+		switch {
+		case jsonScalarEquals(discRaw, "\"circle\""):
 			var v Circle
 			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
 			return v, true
-		case "\"square\"":
+		case jsonScalarEquals(discRaw, "\"square\""):
 			var v Square
 			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
 			return v, true
@@ -1027,12 +1037,12 @@ func unmarshalShowcaseShapeOrName(raw json.RawMessage, path string, errs *[]Viol
 			*errs = append(*errs, Violation{path, "discriminator \"kind\" is required"})
 			return nil, false
 		}
-		switch string(bytes.TrimSpace(discRaw)) {
-		case "\"circle\"":
+		switch {
+		case jsonScalarEquals(discRaw, "\"circle\""):
 			var v Circle
 			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
 			return v, true
-		case "\"square\"":
+		case jsonScalarEquals(discRaw, "\"square\""):
 			var v Square
 			mergeNested(errs, path, json.Unmarshal(trimmed, &v))
 			return v, true
@@ -1280,6 +1290,65 @@ func mustParseDuration(s string) time.Duration {
 	return v
 }
 
+// checkTemporalYear asserts a year is one the four-digit wire grammar spells.
+func checkTemporalYear(name string, v time.Time, path string, errs *[]Violation) bool {
+	switch y := v.Year(); {
+	case y < 1:
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: year must be >= 0001", name, v)})
+	case y > 9999:
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: year must be <= 9999", name, v)})
+	default:
+		return true
+	}
+	return false
+}
+
+// checkTemporalOffset asserts a UTC offset is a whole number of minutes, the
+// finest the wire form spells (a Go Location carries seconds, which the wire
+// form would silently lose).
+func checkTemporalOffset(name string, v time.Time, path string, errs *[]Violation) {
+	if _, offset := v.Zone(); offset%60 != 0 {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: the UTC offset %d seconds is not a whole number of minutes", name, v, offset)})
+	}
+}
+
+// checkDateTime asserts a time.Time is writable as a wire date-time (P12): a
+// value is constructed unchecked, so anything the grammar cannot spell has to
+// be caught before a byte is emitted.
+func checkDateTime(v time.Time, path string, errs *[]Violation) {
+	if checkTemporalYear("date-time", v, path, errs) {
+		checkTemporalOffset("date-time", v, path, errs)
+	}
+}
+
+// checkDate asserts a time.Time is writable as a wire date (P12).
+func checkDate(v time.Time, path string, errs *[]Violation) {
+	checkTemporalYear("date", v, path, errs)
+}
+
+// checkTime asserts a time.Time is writable as a wire time (P12). The offset is
+// optional in the grammar, so only its precision is held to anything.
+func checkTime(v time.Time, path string, errs *[]Violation) {
+	if v.Year() != temporalNoOffsetYear {
+		checkTemporalOffset("time", v, path, errs)
+	}
+}
+
+// checkDuration asserts a time.Duration is writable as a wire duration (P12):
+// the grammar is unsigned and whole-second, and a time.Duration is neither.
+func checkDuration(v time.Duration, path string, errs *[]Violation) {
+	var reason string
+	switch {
+	case v < 0:
+		reason = "a duration cannot be negative"
+	case v%time.Second != 0:
+		reason = "a duration cannot carry a fraction of a second"
+	default:
+		return
+	}
+	*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid duration, got %v: %s", v, reason)})
+}
+
 // decodeBase64 validates the wire string against the pinned canonical base64
 // regex, then decodes it via the standard (padded) alphabet into bytes.
 func decodeBase64(path, s string, re *regexp.Regexp, errs *[]Violation) ([]byte, bool) {
@@ -1354,6 +1423,15 @@ func (m Address) Validate() error {
 	var errs []Violation
 	if m.Zip != nil && (*m.Zip < -integerCap || *m.Zip > integerCap) {
 		errs = append(errs, Violation{"zip", "exceeds ±(2^53-1) integer cap"})
+	}
+	if _, ok := m.AdditionalProperties["street"]; ok {
+		errs = append(errs, Violation{"street", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["city"]; ok {
+		errs = append(errs, Violation{"city", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["zip"]; ok {
+		errs = append(errs, Violation{"zip", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -1553,7 +1631,7 @@ func (m Attributes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-var blobIndexValueContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
+var blobIndexValueContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$")
 
 // BlobIndex A typed map of materialized base64 byte strings.
 type BlobIndex struct {
@@ -1694,6 +1772,12 @@ func (m Circle) Validate() error {
 	if math.IsNaN(m.Radius) || math.IsInf(m.Radius, 0) {
 		errs = append(errs, Violation{"radius", fmt.Sprintf("must be a finite number, got %v", m.Radius)})
 	}
+	if _, ok := m.AdditionalProperties["kind"]; ok {
+		errs = append(errs, Violation{"kind", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["radius"]; ok {
+		errs = append(errs, Violation{"radius", "catch-all key collides with declared property"})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -1779,6 +1863,39 @@ type ContactGo struct {
 // listing any violations.
 func (m ContactGo) Validate() error {
 	var errs []Violation
+	if _, ok := m.AdditionalProperties["email"]; ok {
+		errs = append(errs, Violation{"email", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["shippingStreet"]; ok {
+		errs = append(errs, Violation{"shippingStreet", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["shippingZip"]; ok {
+		errs = append(errs, Violation{"shippingZip", "catch-all key collides with declared property"})
+	}
+	present := map[string]struct{}{}
+	if m.Email != nil {
+		present["email"] = struct{}{}
+	}
+	if m.ShippingStreet != nil {
+		present["shippingStreet"] = struct{}{}
+	}
+	if m.ShippingZip != nil {
+		present["shippingZip"] = struct{}{}
+	}
+	for k := range m.AdditionalProperties {
+		present[k] = struct{}{}
+	}
+	if n := len(present); n < 1 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have at least 1 properties, got %d", n)})
+	}
+	if n := len(present); n > 3 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 3 properties, got %d", n)})
+	}
+	if _, ok := present["shippingStreet"]; ok {
+		if _, ok := present["shippingZip"]; !ok {
+			errs = append(errs, Violation{"shippingZip", "property \"shippingZip\" is required when \"shippingStreet\" is present"})
+		}
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -1852,17 +1969,6 @@ func (m ContactGo) MarshalJSON() ([]byte, error) {
 	if m.ShippingZip != nil {
 		marshalField(out, "shippingZip", *m.ShippingZip, &errs)
 	}
-	if n := len(out); n < 1 {
-		errs = append(errs, Violation{"", fmt.Sprintf("must have at least 1 properties, got %d", n)})
-	}
-	if n := len(out); n > 3 {
-		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 3 properties, got %d", n)})
-	}
-	if _, ok := out["shippingStreet"]; ok {
-		if _, ok := out["shippingZip"]; !ok {
-			errs = append(errs, Violation{"shippingZip", "property \"shippingZip\" is required when \"shippingStreet\" is present"})
-		}
-	}
 	if len(errs) > 0 {
 		return nil, &ValidationError{Violations: errs}
 	}
@@ -1880,9 +1986,7 @@ type DateIndex struct {
 func (m DateIndex) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
-		if v.Year() < 1 {
-			errs = append(errs, Violation{k, "year must be >= 1"})
-		}
+		checkDate(v, k, &errs)
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -2058,6 +2162,12 @@ func (m LinkNote) Validate() error {
 	}
 	if n := utf8.RuneCountInString(m.Href); n < 1 {
 		errs = append(errs, Violation{"href", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if _, ok := m.AdditionalProperties["kind"]; ok {
+		errs = append(errs, Violation{"kind", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["href"]; ok {
+		errs = append(errs, Violation{"href", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -2403,10 +2513,11 @@ var showcaseContactEmailFormat = regexp.MustCompile("^[a-zA-Z0-9!#$%&'*+/=?^_`{|
 var showcaseHostFormat = regexp.MustCompile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
 var showcaseHomepageFormat = regexp.MustCompile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)$")
 var showcaseGatewayFormat = regexp.MustCompile("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$")
-var showcaseBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
-var showcaseUrlBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$")
+var showcaseBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$")
+var showcaseUrlBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$")
 var showcaseLinksItemFormat = regexp.MustCompile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)$")
-var showcaseBlobsItemContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
+var showcaseBlobsItemContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$")
+var showcaseWildcardPattern = regexp.MustCompile("a[^\\n]b")
 
 // Showcase
 //
@@ -2647,6 +2758,38 @@ type Showcase struct {
 	Attributes *Attributes `json:"attributes,omitempty"`
 	// Contact corresponds to the "contact" JSON property.
 	Contact *ContactGo `json:"contact,omitempty"`
+	// NullableCount Optional and nullable **integer**, with bounds on the non-null branch.
+	// The nullability wrapper carries no `type` of its own, so an emitter that reads the
+	// wrapper rather than the branch loses both the element type and every constraint on
+	// it. Go emits `*int64`, TS `number | null`, Python `int | None`, Java `@Nullable
+	// Long`, and `1 <= v <= 10` is enforced in all four, in both directions.
+	NullableCount *int64 `json:"nullableCount,omitempty"`
+	// NullableRatio Optional and nullable number with a divisor on the non-null branch.
+	NullableRatio *float64 `json:"nullableRatio,omitempty"`
+	// NullableFlag Optional and nullable boolean.
+	NullableFlag *bool `json:"nullableFlag,omitempty"`
+	// NullableTags Optional and nullable **array**, with element and count constraints on
+	// the non-null branch. Optional + nullable, so the Go field stays `[]string` and a
+	// wire `null` decodes to a nil slice.
+	NullableTags []string `json:"nullableTags,omitempty"`
+	// NullableMode Optional and nullable **closed value set** — the closed type survives
+	// the nullability wrapper, so an unknown string is a Violation rather than an accepted
+	// value.
+	NullableMode *ShowcaseNullableMode `json:"nullableMode,omitempty"`
+	// IntegralMeasurements An integer `contains` matcher over number elements: the
+	// matcher's own predicate decides a match, and the +/-(2^53-1) integer cap applies to
+	// it in every language.
+	IntegralMeasurements []float64 `json:"integralMeasurements,omitempty"`
+	// ByFive A number-field divisor. Divisibility is IEEE `fmod` over the stored binary64
+	// value, not exact decimal arithmetic, so all four agree at magnitudes where the
+	// shortest decimal spelling and the stored double diverge.
+	ByFive *float64 `json:"byFive,omitempty"`
+	// Wildcard A pattern containing a bare dot, normalized to an explicit negated class so
+	// the four regex engines agree on line terminators (`\r`, U+0085, U+2028, U+2029),
+	// which their native `.` does not.
+	Wildcard *string `json:"wildcard,omitempty"`
+	// Quoted Ends with a quote "
+	Quoted *string `json:"quoted,omitempty"`
 }
 
 // RetriesOrDefault returns Retries when set, else the schema default.
@@ -2792,7 +2935,7 @@ func (m Showcase) Validate() error {
 		if *m.Ratio < 5 {
 			errs = append(errs, Violation{"ratio", fmt.Sprintf("must be >= 5, got %v", *m.Ratio)})
 		}
-		if !isJSONMultiple(float64(*m.Ratio), "5") {
+		if math.Mod(float64(*m.Ratio), 5) != 0 {
 			errs = append(errs, Violation{"ratio", fmt.Sprintf("must be a multiple of 5, got %v", *m.Ratio)})
 		}
 	}
@@ -2929,9 +3072,7 @@ func (m Showcase) Validate() error {
 	}
 	for i0, v0 := range m.Dates {
 		p0 := fmt.Sprintf("%s[%d]", "dates", i0)
-		if v0.Year() < 1 {
-			errs = append(errs, Violation{p0, "year must be >= 1"})
-		}
+		checkDate(v0, p0, &errs)
 	}
 	if m.DateIndex != nil {
 		mergeNested(&errs, "dateIndex", m.DateIndex.Validate())
@@ -2950,6 +3091,9 @@ func (m Showcase) Validate() error {
 	}
 	if m.Location != nil {
 		mergeNested(&errs, "location", m.Location.Validate())
+	}
+	if m.Audit != nil {
+		mergeNested(&errs, "audit", m.Audit.Validate())
 	}
 	for i0, v0 := range m.Rows {
 		p0 := fmt.Sprintf("%s[%d]", "rows", i0)
@@ -2997,6 +3141,83 @@ func (m Showcase) Validate() error {
 	if m.Contact != nil {
 		mergeNested(&errs, "contact", m.Contact.Validate())
 	}
+	if m.NullableCount != nil && (*m.NullableCount < -integerCap || *m.NullableCount > integerCap) {
+		errs = append(errs, Violation{"nullableCount", "exceeds ±(2^53-1) integer cap"})
+	}
+	if m.NullableCount != nil {
+		if *m.NullableCount < 1 {
+			errs = append(errs, Violation{"nullableCount", fmt.Sprintf("must be >= 1, got %v", *m.NullableCount)})
+		}
+		if *m.NullableCount > 10 {
+			errs = append(errs, Violation{"nullableCount", fmt.Sprintf("must be <= 10, got %v", *m.NullableCount)})
+		}
+	}
+	if m.NullableRatio != nil {
+		if math.IsNaN(*m.NullableRatio) || math.IsInf(*m.NullableRatio, 0) {
+			errs = append(errs, Violation{"nullableRatio", fmt.Sprintf("must be a finite number, got %v", *m.NullableRatio)})
+		}
+	}
+	if m.NullableRatio != nil {
+		if math.Mod(float64(*m.NullableRatio), 2) != 0 {
+			errs = append(errs, Violation{"nullableRatio", fmt.Sprintf("must be a multiple of 2, got %v", *m.NullableRatio)})
+		}
+	}
+	if m.NullableTags != nil {
+		if n := len(m.NullableTags); n < 1 {
+			errs = append(errs, Violation{"nullableTags", fmt.Sprintf("must have at least 1 items, got %d", n)})
+		}
+		{
+			seen := make(map[string]int, len(m.NullableTags))
+			for i, e := range m.NullableTags {
+				if j, ok := seen[e]; ok {
+					errs = append(errs, Violation{"nullableTags", fmt.Sprintf("duplicate items: element at index %d equals index %d", i, j)})
+				} else {
+					seen[e] = i
+				}
+			}
+		}
+	}
+	if m.NullableMode != nil {
+		switch *m.NullableMode {
+		case ShowcaseNullableModeAuto, ShowcaseNullableModeManual:
+		default:
+			errs = append(errs, Violation{"nullableMode", fmt.Sprintf("must be one of [\"auto\",\"manual\"], got %q", (*m.NullableMode))})
+		}
+	}
+	if m.IntegralMeasurements != nil {
+		{
+			matchCount := 0
+			for _, e := range m.IntegralMeasurements {
+				if math.Trunc(e) == e && e >= -integerCap && e <= integerCap {
+					matchCount++
+				}
+			}
+			if matchCount < 1 {
+				errs = append(errs, Violation{"integralMeasurements", "no element matches the required schema"})
+			}
+		}
+	}
+	for i0, v0 := range m.IntegralMeasurements {
+		p0 := fmt.Sprintf("%s[%d]", "integralMeasurements", i0)
+		if math.IsNaN(v0) || math.IsInf(v0, 0) {
+			errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", v0)})
+		}
+	}
+	if m.ByFive != nil {
+		if math.IsNaN(*m.ByFive) || math.IsInf(*m.ByFive, 0) {
+			errs = append(errs, Violation{"byFive", fmt.Sprintf("must be a finite number, got %v", *m.ByFive)})
+		}
+	}
+	if m.ByFive != nil {
+		if math.Mod(float64(*m.ByFive), 5) != 0 {
+			errs = append(errs, Violation{"byFive", fmt.Sprintf("must be a multiple of 5, got %v", *m.ByFive)})
+		}
+	}
+	if m.Wildcard != nil {
+		if !showcaseWildcardPattern.MatchString(*m.Wildcard) {
+			errs = append(errs, Violation{"wildcard", fmt.Sprintf("must match pattern %q, got %q", "a[^\\n]b", *m.Wildcard)})
+		}
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -3013,7 +3234,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	for k := range all {
 		switch k {
-		case "kind", "revision", "enabled", "status", "tier", "scale", "name", "count", "active", "nickname", "code", "sku", "phrase", "requestId", "contactEmail", "host", "homepage", "gateway", "blob", "urlBlob", "retries", "verbose", "greeting", "debug", "legacyId", "middleName", "category", "priority", "level", "ratio", "score", "step", "tags", "aliases", "roles", "idOrName", "mode", "payload", "detail", "shapeOrName", "measurements", "shapes", "segments", "slots", "grid", "numberGrid", "links", "addresses", "addressBook", "dates", "dateIndex", "blobs", "blobIndex", "metrics", "metricOrLabel", "addressListOrLabel", "location", "audit", "rows", "ledger", "metadata", "quotas", "tokens", "nicknames", "choices", "extras", "shape", "note", "address", "labels", "settings", "attributes", "contact":
+		case "kind", "revision", "enabled", "status", "tier", "scale", "name", "count", "active", "nickname", "code", "sku", "phrase", "requestId", "contactEmail", "host", "homepage", "gateway", "blob", "urlBlob", "retries", "verbose", "greeting", "debug", "legacyId", "middleName", "category", "priority", "level", "ratio", "score", "step", "tags", "aliases", "roles", "idOrName", "mode", "payload", "detail", "shapeOrName", "measurements", "shapes", "segments", "slots", "grid", "numberGrid", "links", "addresses", "addressBook", "dates", "dateIndex", "blobs", "blobIndex", "metrics", "metricOrLabel", "addressListOrLabel", "location", "audit", "rows", "ledger", "metadata", "quotas", "tokens", "nicknames", "choices", "extras", "shape", "note", "address", "labels", "settings", "attributes", "contact", "nullableCount", "nullableRatio", "nullableFlag", "nullableTags", "nullableMode", "integralMeasurements", "byFive", "wildcard", "quoted":
 		default:
 			errs = append(errs, Violation{k, "unknown field"})
 		}
@@ -3198,7 +3419,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 		if v < 5 {
 			errs = append(errs, Violation{"ratio", fmt.Sprintf("must be >= 5, got %v", v)})
 		}
-		if !isJSONMultiple(float64(v), "5") {
+		if math.Mod(float64(v), 5) != 0 {
 			errs = append(errs, Violation{"ratio", fmt.Sprintf("must be a multiple of 5, got %v", v)})
 		}
 		m.Ratio = &v
@@ -3829,6 +4050,124 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 			m.Contact = &tmp
 		}
 	}
+	if v, ok := parseIntegerField(get("nullableCount"), "nullableCount", false, true, &errs); ok {
+		if v < 1 {
+			errs = append(errs, Violation{"nullableCount", fmt.Sprintf("must be >= 1, got %v", v)})
+		}
+		if v > 10 {
+			errs = append(errs, Violation{"nullableCount", fmt.Sprintf("must be <= 10, got %v", v)})
+		}
+		m.NullableCount = &v
+	}
+	if v, ok := parseNumberField(get("nullableRatio"), "nullableRatio", false, true, &errs); ok {
+		if math.Mod(float64(v), 2) != 0 {
+			errs = append(errs, Violation{"nullableRatio", fmt.Sprintf("must be a multiple of 2, got %v", v)})
+		}
+		m.NullableRatio = &v
+	}
+	if v, ok := parseBoolField(get("nullableFlag"), "nullableFlag", false, true, &errs); ok {
+		m.NullableFlag = &v
+	}
+	if raw := get("nullableTags"); raw == nil {
+	} else if isNull(*raw) {
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"nullableTags", "expected array"})
+		} else {
+			m.NullableTags = make([]string, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "nullableTags", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					m.NullableTags = append(m.NullableTags, value0)
+				}
+			}
+			if n := len(elems0); n < 1 {
+				errs = append(errs, Violation{"nullableTags", fmt.Sprintf("must have at least 1 items, got %d", n)})
+			}
+			{
+				rawSeen0 := make(map[string]int, len(elems0))
+				for rawIndex0, rawElement0 := range elems0 {
+					var rawValue0 any
+					if err := json.Unmarshal(rawElement0, &rawValue0); err != nil {
+						continue
+					}
+					if rawNumber0, ok := rawValue0.(float64); ok && rawNumber0 == 0 {
+						rawValue0 = float64(0)
+					}
+					rawKeyBytes0, _ := json.Marshal(rawValue0)
+					rawKey0 := string(rawKeyBytes0)
+					if priorIndex0, ok := rawSeen0[rawKey0]; ok {
+						errs = append(errs, Violation{"nullableTags", fmt.Sprintf("duplicate items: element at index %d equals index %d", rawIndex0, priorIndex0)})
+					} else {
+						rawSeen0[rawKey0] = rawIndex0
+					}
+				}
+			}
+		}
+	}
+	if v, ok := parseStringField(get("nullableMode"), "nullableMode", false, true, &errs); ok {
+		typed := ShowcaseNullableMode(v)
+		switch typed {
+		case ShowcaseNullableModeAuto, ShowcaseNullableModeManual:
+			m.NullableMode = &typed
+		default:
+			errs = append(errs, Violation{"nullableMode", fmt.Sprintf("must be one of [\"auto\",\"manual\"], got %q", typed)})
+		}
+	}
+	if raw := get("integralMeasurements"); raw == nil {
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"integralMeasurements", "explicit null not allowed"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"integralMeasurements", "expected array"})
+		} else {
+			m.IntegralMeasurements = make([]float64, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "integralMeasurements", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseNumberField(&e0, p0, true, false, &errs); ok {
+					if math.IsNaN(value0) || math.IsInf(value0, 0) {
+						errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", value0)})
+					}
+					m.IntegralMeasurements = append(m.IntegralMeasurements, value0)
+				}
+			}
+			rawMatchCount0 := 0
+			for _, rawElement0 := range elems0 {
+				var rawCandidate0 float64
+				if err := json.Unmarshal(rawElement0, &rawCandidate0); err == nil && math.IsInf(rawCandidate0, 0) == false && (math.Trunc(rawCandidate0) == rawCandidate0 && rawCandidate0 >= -integerCap && rawCandidate0 <= integerCap) {
+					rawMatchCount0++
+				}
+			}
+			if rawMatchCount0 < 1 {
+				errs = append(errs, Violation{"integralMeasurements", "no element matches the required schema"})
+			}
+		}
+	}
+	if v, ok := parseNumberField(get("byFive"), "byFive", false, false, &errs); ok {
+		if math.Mod(float64(v), 5) != 0 {
+			errs = append(errs, Violation{"byFive", fmt.Sprintf("must be a multiple of 5, got %v", v)})
+		}
+		m.ByFive = &v
+	}
+	if v, ok := parseStringField(get("wildcard"), "wildcard", false, false, &errs); ok {
+		m.Wildcard = &v
+		if !showcaseWildcardPattern.MatchString(v) {
+			errs = append(errs, Violation{"wildcard", fmt.Sprintf("must match pattern %q, got %q", "a[^\\n]b", v)})
+		}
+	}
+	if v, ok := parseStringField(get("quoted"), "quoted", false, false, &errs); ok {
+		m.Quoted = &v
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -4052,6 +4391,33 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	if m.Contact != nil {
 		marshalField(out, "contact", *m.Contact, &errs)
 	}
+	if m.NullableCount != nil {
+		marshalField(out, "nullableCount", *m.NullableCount, &errs)
+	}
+	if m.NullableRatio != nil {
+		marshalField(out, "nullableRatio", *m.NullableRatio, &errs)
+	}
+	if m.NullableFlag != nil {
+		marshalField(out, "nullableFlag", *m.NullableFlag, &errs)
+	}
+	if m.NullableTags != nil {
+		marshalField(out, "nullableTags", m.NullableTags, &errs)
+	}
+	if m.NullableMode != nil {
+		marshalField(out, "nullableMode", *m.NullableMode, &errs)
+	}
+	if m.IntegralMeasurements != nil {
+		marshalField(out, "integralMeasurements", m.IntegralMeasurements, &errs)
+	}
+	if m.ByFive != nil {
+		marshalField(out, "byFive", *m.ByFive, &errs)
+	}
+	if m.Wildcard != nil {
+		marshalField(out, "wildcard", *m.Wildcard, &errs)
+	}
+	if m.Quoted != nil {
+		marshalField(out, "quoted", *m.Quoted, &errs)
+	}
 	if len(errs) > 0 {
 		return nil, &ValidationError{Violations: errs}
 	}
@@ -4072,6 +4438,9 @@ func (m ShowcaseAudit) Validate() error {
 	var errs []Violation
 	if n := utf8.RuneCountInString(m.By); n < 1 {
 		errs = append(errs, Violation{"by", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if _, ok := m.AdditionalProperties["by"]; ok {
+		errs = append(errs, Violation{"by", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -4146,6 +4515,12 @@ func (m ShowcaseDetailObject) Validate() error {
 	var errs []Violation
 	if n := utf8.RuneCountInString(m.Code); n < 1 {
 		errs = append(errs, Violation{"code", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if _, ok := m.AdditionalProperties["code"]; ok {
+		errs = append(errs, Violation{"code", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["hint"]; ok {
+		errs = append(errs, Violation{"hint", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -4292,6 +4667,9 @@ func (m ShowcaseLedgerValue) Validate() error {
 	if m.Amount < 0 {
 		errs = append(errs, Violation{"amount", fmt.Sprintf("must be >= 0, got %v", m.Amount)})
 	}
+	if _, ok := m.AdditionalProperties["amount"]; ok {
+		errs = append(errs, Violation{"amount", "catch-all key collides with declared property"})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -4373,6 +4751,12 @@ func (m ShowcaseLocation) Validate() error {
 	}
 	if m.Geo != nil {
 		mergeNested(&errs, "geo", m.Geo.Validate())
+	}
+	if _, ok := m.AdditionalProperties["city"]; ok {
+		errs = append(errs, Violation{"city", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["geo"]; ok {
+		errs = append(errs, Violation{"geo", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -4468,6 +4852,12 @@ func (m ShowcaseLocationGeo) Validate() error {
 		if math.IsNaN(*m.Lon) || math.IsInf(*m.Lon, 0) {
 			errs = append(errs, Violation{"lon", fmt.Sprintf("must be a finite number, got %v", *m.Lon)})
 		}
+	}
+	if _, ok := m.AdditionalProperties["lat"]; ok {
+		errs = append(errs, Violation{"lat", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["lon"]; ok {
+		errs = append(errs, Violation{"lon", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -4601,6 +4991,9 @@ func (m ShowcaseRowsItem) Validate() error {
 	var errs []Violation
 	if n := utf8.RuneCountInString(m.Cell); n < 1 {
 		errs = append(errs, Violation{"cell", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if _, ok := m.AdditionalProperties["cell"]; ok {
+		errs = append(errs, Violation{"cell", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -4739,6 +5132,12 @@ func (m Square) Validate() error {
 	if math.IsNaN(m.Side) || math.IsInf(m.Side, 0) {
 		errs = append(errs, Violation{"side", fmt.Sprintf("must be a finite number, got %v", m.Side)})
 	}
+	if _, ok := m.AdditionalProperties["kind"]; ok {
+		errs = append(errs, Violation{"kind", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["side"]; ok {
+		errs = append(errs, Violation{"side", "catch-all key collides with declared property"})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -4821,6 +5220,12 @@ func (m TextNote) Validate() error {
 	}
 	if n := utf8.RuneCountInString(m.Body); n < 1 {
 		errs = append(errs, Violation{"body", fmt.Sprintf("must have length >= 1, got %d", n)})
+	}
+	if _, ok := m.AdditionalProperties["kind"]; ok {
+		errs = append(errs, Violation{"kind", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["body"]; ok {
+		errs = append(errs, Violation{"body", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
@@ -4995,6 +5400,18 @@ func (m Widget) Validate() error {
 			errs = append(errs, Violation{"size", fmt.Sprintf("must be <= 20, got %v", *m.Size)})
 		}
 	}
+	if _, ok := m.AdditionalProperties["id"]; ok {
+		errs = append(errs, Violation{"id", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["kind"]; ok {
+		errs = append(errs, Violation{"kind", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["name"]; ok {
+		errs = append(errs, Violation{"name", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["size"]; ok {
+		errs = append(errs, Violation{"size", "catch-all key collides with declared property"})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}
@@ -5086,6 +5503,12 @@ type WidgetBase struct {
 // listing any violations.
 func (m WidgetBase) Validate() error {
 	var errs []Violation
+	if _, ok := m.AdditionalProperties["id"]; ok {
+		errs = append(errs, Violation{"id", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["kind"]; ok {
+		errs = append(errs, Violation{"kind", "catch-all key collides with declared property"})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}

@@ -180,7 +180,11 @@ func (m Palette) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
 	out := map[string]json.RawMessage{}
-	marshalField(out, "swatches", m.Swatches, &errs)
+	if m.Swatches == nil {
+		out["swatches"] = json.RawMessage("[]")
+	} else {
+		marshalField(out, "swatches", m.Swatches, &errs)
+	}
 	if len(errs) > 0 {
 		return nil, &ValidationError{Violations: errs}
 	}

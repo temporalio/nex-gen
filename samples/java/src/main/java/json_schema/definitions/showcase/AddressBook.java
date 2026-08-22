@@ -59,19 +59,30 @@ public final class AddressBook {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<AddressBook> {
         @Override
         public void serialize(AddressBook value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
             gen.writeStartObject();
             for (Map.Entry<String, Address> entry : value.additionalProperties.entrySet()) {
                 gen.writeFieldName(entry.getKey());
-                serializers.defaultSerializeValue(entry.getValue(), gen);
+                try {
+                    serializers.defaultSerializeValue(entry.getValue(), gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix(entry.getKey()));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             gen.writeEndObject();
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
         }
     }
 
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<AddressBook> {
         @Override
         public AddressBook deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

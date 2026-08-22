@@ -31,48 +31,15 @@ import org.jspecify.annotations.Nullable;
 @JsonSerialize(using = Temporal.Serializer.class)
 @JsonDeserialize(using = Temporal.Deserializer.class)
 public final class Temporal {
-    /**
-     * Required event timestamp; materialized date-time (offset required, sub-second
-     * precision &amp; offset preserved on round-trip).
-     */
     private final OffsetDateTime createdAt;
-    /**
-     * Required calendar date; materialized date (YYYY-MM-DD, lossless).
-     */
     private final LocalDate birthday;
-    /**
-     * Required wall-clock time; materialized time (offset preserved when present,
-     * otherwise offset-less).
-     */
     private final String alarm;
-    /**
-     * Required time-only duration; materialized duration, canonicalized to PT…H…M…S
-     * (e.g. PT90M → PT1H30M).
-     */
     private final Duration timeout;
-    /**
-     * Optional date-time.
-     */
     private final @Nullable OffsetDateTime updatedAt;
-    /**
-     * Optional date.
-     */
     private final @Nullable LocalDate expiresOn;
-    /**
-     * Optional time.
-     */
     private final @Nullable String reminder;
-    /**
-     * Optional duration.
-     */
     private final @Nullable Duration retryDelay;
-    /**
-     * Optional and nullable date-time (may be absent or explicitly null).
-     */
     private final @Nullable OffsetDateTime deletedAt;
-    /**
-     * Optional and nullable date.
-     */
     private final @Nullable LocalDate archivedOn;
 
     public Temporal(OffsetDateTime createdAt, LocalDate birthday, String alarm, Duration timeout, @Nullable OffsetDateTime updatedAt, @Nullable LocalDate expiresOn, @Nullable String reminder, @Nullable Duration retryDelay, @Nullable OffsetDateTime deletedAt, @Nullable LocalDate archivedOn) {
@@ -88,42 +55,75 @@ public final class Temporal {
         this.archivedOn = archivedOn;
     }
 
+    /**
+     * Required event timestamp; materialized date-time (offset required, sub-second
+     * precision &amp; offset preserved on round-trip).
+     */
     public OffsetDateTime getCreatedAt() {
         return createdAt;
     }
 
+    /**
+     * Required calendar date; materialized date (YYYY-MM-DD, lossless).
+     */
     public LocalDate getBirthday() {
         return birthday;
     }
 
+    /**
+     * Required wall-clock time; materialized time (offset preserved when present,
+     * otherwise offset-less).
+     */
     public String getAlarm() {
         return alarm;
     }
 
+    /**
+     * Required time-only duration; materialized duration, canonicalized to PT…H…M…S
+     * (e.g. PT90M → PT1H30M).
+     */
     public Duration getTimeout() {
         return timeout;
     }
 
+    /**
+     * Optional date-time.
+     */
     public @Nullable OffsetDateTime getUpdatedAt() {
         return updatedAt;
     }
 
+    /**
+     * Optional date.
+     */
     public @Nullable LocalDate getExpiresOn() {
         return expiresOn;
     }
 
+    /**
+     * Optional time.
+     */
     public @Nullable String getReminder() {
         return reminder;
     }
 
+    /**
+     * Optional duration.
+     */
     public @Nullable Duration getRetryDelay() {
         return retryDelay;
     }
 
+    /**
+     * Optional and nullable date-time (may be absent or explicitly null).
+     */
     public @Nullable OffsetDateTime getDeletedAt() {
         return deletedAt;
     }
 
+    /**
+     * Optional and nullable date.
+     */
     public @Nullable LocalDate getArchivedOn() {
         return archivedOn;
     }
@@ -175,34 +175,34 @@ public final class Temporal {
         public void serialize(Temporal value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
             if (value.createdAt != null) {
-                if (value.createdAt.getYear() < 1) {
-                    violations.add(new Violation("createdAt", "must be a valid date-time, got " + value.createdAt + ": year must be >= 0001"));
-                }
+                TemporalSupport.checkDateTime(value.createdAt, "createdAt", violations);
             }
             if (value.birthday != null) {
-                if (value.birthday.getYear() < 1) {
-                    violations.add(new Violation("birthday", "must be a valid date, got " + value.birthday + ": year must be >= 0001"));
-                }
+                TemporalSupport.checkDate(value.birthday, "birthday", violations);
+            }
+            if (value.alarm != null) {
+                TemporalSupport.checkTime(value.alarm, "alarm", violations);
+            }
+            if (value.timeout != null) {
+                TemporalSupport.checkDuration(value.timeout, "timeout", violations);
             }
             if (value.updatedAt != null) {
-                if (value.updatedAt.getYear() < 1) {
-                    violations.add(new Violation("updatedAt", "must be a valid date-time, got " + value.updatedAt + ": year must be >= 0001"));
-                }
+                TemporalSupport.checkDateTime(value.updatedAt, "updatedAt", violations);
             }
             if (value.expiresOn != null) {
-                if (value.expiresOn.getYear() < 1) {
-                    violations.add(new Violation("expiresOn", "must be a valid date, got " + value.expiresOn + ": year must be >= 0001"));
-                }
+                TemporalSupport.checkDate(value.expiresOn, "expiresOn", violations);
+            }
+            if (value.reminder != null) {
+                TemporalSupport.checkTime(value.reminder, "reminder", violations);
+            }
+            if (value.retryDelay != null) {
+                TemporalSupport.checkDuration(value.retryDelay, "retryDelay", violations);
             }
             if (value.deletedAt != null) {
-                if (value.deletedAt.getYear() < 1) {
-                    violations.add(new Violation("deletedAt", "must be a valid date-time, got " + value.deletedAt + ": year must be >= 0001"));
-                }
+                TemporalSupport.checkDateTime(value.deletedAt, "deletedAt", violations);
             }
             if (value.archivedOn != null) {
-                if (value.archivedOn.getYear() < 1) {
-                    violations.add(new Violation("archivedOn", "must be a valid date, got " + value.archivedOn + ": year must be >= 0001"));
-                }
+                TemporalSupport.checkDate(value.archivedOn, "archivedOn", violations);
             }
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
@@ -245,7 +245,7 @@ public final class Temporal {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Temporal> {
         @Override
         public Temporal deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

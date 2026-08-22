@@ -9,9 +9,9 @@ cross-language hazard: the four targets ship **different regex engines**
 whose dialect, anchoring, and character-class semantics diverge, so the
 supported form is narrowed to the **portable (RE2-safe) subset** matched
 with **unanchored search** and **ASCII** class semantics. That
-configuration was validated against an **83-pair conformance corpus** run
-through all four runtime engines plus the Rust gate
-(`json-schema/corpora/pattern_conformance/`), which proved the compile
+configuration was validated against the **conformance corpus** of
+`(pattern, instance)` pairs run through all four runtime engines plus the
+Rust gate (`json-schema/corpora/pattern_conformance/`), which proved the compile
 gate + pinned flags alone is *not* enough — three further constructs
 (inline flags, `\s`/`\S`, and the `$` anchor) compile everywhere yet match
 differently. Each gets an explicit rule: inline flags are **rejected**, and
@@ -101,7 +101,7 @@ Rationale (citing [[PRINCIPLES.md]]):
   silently-inconsistent output the mission forbids. Reject the non-portable form at load with a clear
   diagnostic naming the offending construct.
 
-**Conformance-verified gate rules (beyond no-backtracking).** An 83-pair
+**Conformance-verified gate rules (beyond no-backtracking).** The
 `(pattern, instance)` corpus run through all four runtime engines + the
 Rust gate (`json-schema/corpora/pattern_conformance/`) showed the compile gate +
 pinned flags is **not** sufficient — three constructs compile in *every*
@@ -124,8 +124,8 @@ engine yet match differently, so each gets an explicit rule:
    written `\x0B`, not `\v`, to avoid shorthand ambiguity — because
    ECMA-262 / Python / Java / JS all include it and only Go/RE2 omits it, so
    spelling it explicitly makes Go agree and honors author intent.
-   Placement rules (all verified — 13 original divergences → 0 after
-   rewrite): standalone `\s`/`\S`; `\s` inside a class
+   The rewrite is defined for every placement, and the corpus pins each
+   one: standalone `\s`/`\S`; `\s` inside a class
    (`[\s.]`→`[\t\n\x0B\f\r .]`, `[^\s]`→`[^\t\n\x0B\f\r ]`); sole-member
    `[\S]`→`[^…]` and the double-negation `[^\S]`→`[…]`. **`\d`/`\w` are
    untouched** (identical ASCII across all four already). *One narrow
@@ -294,10 +294,18 @@ is projected from the native value on the encode side.
 
 The per-`(pattern, instance)` match behavior — unanchored search, ASCII
 class semantics, code-point `.`, and the `\s`/`\S` and `$` normalizations —
-is exercised by the **83-pair conformance corpus**
-(`json-schema/corpora/pattern_conformance/corpus.json`), run through all
-four runtime engines plus the Rust gate. That corpus is this keyword's
-regression suite — new edge cases are added there, not enumerated here.
+is specified by the **conformance corpus**
+(`json-schema/corpora/pattern_conformance/corpus.json`). Each row states the
+pattern, the instance, and the expected disposition, including which patterns
+the gate must reject; a row's expectation is data, never a special case
+carried in a test's source. That corpus is this keyword's regression suite —
+new edge cases are added there, not enumerated here.
+
+Today the only consumer is the Rust gate, which checks the reject/normalize
+decisions. **Planned:** a per-language corpus runner (Go / TypeScript /
+Python / Java) that applies each target's emit transform and asserts the
+match result, which is what would turn "the four runtimes agree" from a
+design claim into a measured one.
 
 Fixtures outside the corpus (validator integration, not pure matching):
 - Combined with a failing [[minLength]]/[[maxLength]] or sibling field →
@@ -342,9 +350,10 @@ The known cross-engine divergences are now all handled — the compile gate
 + `regex-syntax` AST checks **reject** the non-portable constructs
 (lookaround/backref, inline flags, and the narrow `\S`-in-multi-member-class
 case) and **normalize** `\s`/`\S` (→ explicit ASCII class) and `$` (→ per-
-target end-anchor); the 83-pair corpus confirms the four runtimes then agree
-value-for-value. The **residual risk** is only an edge the corpus hasn't yet
-exercised (e.g. some `\b` word-boundary or `.`-newline corner); the corpus
+target end-anchor), which is what makes the four runtimes agree
+value-for-value. The **residual risk** is an edge the corpus does not yet
+cover (e.g. some `\b` word-boundary or `.`-newline corner), plus the rows it
+does cover that no per-language runner executes yet; the corpus
 (`json-schema/corpora/pattern_conformance/`) is the regression guard and grows into the
 [[type]] cross-language conformance-suite item. Since the gate is the Rust
 `regex` crate rather than the four runtime engines themselves, any

@@ -53,8 +53,8 @@ Loader behavior:
   [[allOf]] / [[ref]] carries no top-level `type` and is **accepted** — the
   type comes from the branches / merged result / referenced target.
 - Unknown type name (`"int"`, `"date"`, etc.) → reject.
-- `type: "object"` with no `properties`, `patternProperties`, or
-  `additionalProperties` → reject (P7.1). Per spec this is "any object",
+- `type: "object"` with no `properties` and no `additionalProperties` →
+  reject (P7.1). Per spec this is "any object",
   but the typed-codegen contract requires explicit intent. Diagnostic
   names the three resolutions: add `properties: {...}` (typed struct),
   add `additionalProperties: true` (open opaque map), or add
@@ -146,14 +146,21 @@ Strategy per language:
   10 type-classification fixtures. Push `Violation { path, reason }`
   into a list, throw one `ValidationError` (a class extending `Error`,
   holding the `Violation[]`) at the end.
-  `JSON.parse` silently rounds integers past 2^53 to the nearest
-  double, but with the cap at `Number.MAX_SAFE_INTEGER` (`2^53−1`),
-  a plain post-parse `Number.isSafeInteger(v)` is a complete and sound
-  check — no text pre-scan, no `lossless-json`, no P4 tension. Every
-  integer literal past the cap rounds to a double that fails
-  `Number.isSafeInteger` (e.g. `9007199254740993` → `9007199254740992`,
-  which is `> MAX_SAFE_INTEGER` → rejected). Integer fields therefore
-  emit `typeof v === 'number' && Number.isSafeInteger(v)`.
+  Integer fields emit `typeof v === 'number' && Number.isSafeInteger(v)`.
+  `JSON.parse` silently rounds integers past 2^53 to the nearest double,
+  and with the cap at `Number.MAX_SAFE_INTEGER` (`2^53−1`) that post-parse
+  check is sound **for magnitude**: every integer literal past the cap
+  rounds to a double that fails `Number.isSafeInteger` (e.g.
+  `9007199254740993` → `9007199254740992`, which is `> MAX_SAFE_INTEGER`
+  → rejected), so no text pre-scan and no `lossless-json` (P4) is needed
+  to enforce the cap.
+  It is **not** a complete fractional-part check. A post-parse predicate
+  cannot see a fractional digit that the parse already dropped: for a
+  literal in `[2^52, 2^53)` the double spacing is `1`, so
+  `JSON.parse("9007199254740991.1") === 9007199254740991` and
+  `Number.isSafeInteger` reports `true`. See the fractional-band note
+  under the large-integer fixtures below for which targets share this
+  limitation.
 - **Python**: models are inert dataclasses (**PRINCIPLES Python §1**), so
   every type-classification check is a hand-emitted `isinstance` call in the
   model's `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**), each
@@ -206,7 +213,11 @@ Strategy per language:
   *silently truncate* `1.5`→`1` for `Long` fields — a P7 violation
   blocking shipping with defaults. `ACCEPT_FLOAT_AS_INT=false` fixes
   truncation but rejects spec-valid `1.0`/`1e2` and still coerces `"1"`.
-  The custom helper is the only path that matches the spec.
+  The custom helper is the only path that matches the spec. The body
+  printed above is **normative**, including its use of
+  `n.decimalValue()`: a `BigDecimal` built from the token is exact, so
+  `4503599627370496.5` rejects, whereas the `n.doubleValue()` shortcut
+  would round it to an integer first and accept it.
   The `±(2^53−1)` cap is enforced
   explicitly above; `>2^63` would also trip Jackson's own range check,
   but our cap is tighter so ours fires first. **Reading from a `JsonNode`
@@ -263,7 +274,7 @@ Loader must produce a clear, located diagnostic for each.
 |---|---|
 | Array form (P6/P7) | `["string","null"]`, `["integer","number"]`, full 7-element union, `[]`, `["string"]` |
 | Absent `type` on a **leaf** schema (P7) | `{}`, `{"description":"…"}` (no `oneOf`/`allOf`/`$ref` to supply the shape) |
-| Object without shape (P7.1) | `{"type":"object"}` with no `properties`, `patternProperties`, or `additionalProperties` (spec says "any object"; we require explicit intent) |
+| Object without shape (P7.1) | `{"type":"object"}` with no `properties` and no `additionalProperties` (spec says "any object"; we require explicit intent). [[patternProperties]] does not supply a shape — it is rejected unconditionally. |
 | `"null"` standalone | `{"type":"null"}` anywhere except as a branch of the [[nullability]] `oneOf` pattern |
 | Unknown type name | `"int"`, `"float"`, `"date"`, `"any"`, `"bigint"`, `"String"`, `"INTEGER"` |
 | Wrong outer type | `5`, `null`, `true`, `{"type":"string"}` |
@@ -291,6 +302,24 @@ For each accepted `type`, fuzz over:
   `9007199254740993` (`2^53+1`, which TS silently rounds to `2^53` —
   must still reject), and `18014398509481985` (`2^54+1`). Same
   accept/reject set in all four languages.
+- **Fractional literals in the `[2^52, 2^53)` band.** The normative rule
+  is the one stated at the top of this spec: `integer` matches a JSON
+  number whose **written** fractional part is zero, so
+  `4503599627370496.5` and `9007199254740991.1` reject. Enforcing it
+  requires reading the literal's decimal text, which only two targets
+  can: Go's helper takes a `json.Number` (the verbatim token) and Java's
+  takes a `JsonNode` it converts with `decimalValue()`. TypeScript and
+  Python are handed a value the platform parser already produced — the
+  double nearest the literal — and in this band that double *is* an
+  integer, so `Number.isSafeInteger` / `float.is_integer()` report a
+  whole number and the field is accepted. This is a **documented,
+  bounded limitation of the two parse-boundary targets**, not a licence
+  to loosen Go and Java: the band is `[2^52, 2^53)` (double spacing ≥ 1
+  with the cap still admitting the value), and no smaller magnitude is
+  affected because the fractional digit survives the parse there. It has
+  the same root cause as the untyped-extras precision note in
+  [[additionalProperties]] — the byte boundary sits outside the
+  converter (PRINCIPLES TypeScript §4, Python §3).
 
 ## Interactions
 

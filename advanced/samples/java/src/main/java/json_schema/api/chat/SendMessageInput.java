@@ -68,22 +68,33 @@ public final class SendMessageInput {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<SendMessageInput> {
         @Override
         public void serialize(SendMessageInput value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
             gen.writeStartObject();
             if (value.roomId != null) {
                 gen.writeStringField("roomId", value.roomId);
             }
             if (value.message != null) {
                 gen.writeFieldName("message");
-                serializers.defaultSerializeValue(value.message, gen);
+                try {
+                    serializers.defaultSerializeValue(value.message, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("message"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             gen.writeEndObject();
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
         }
     }
 
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<SendMessageInput> {
         @Override
         public SendMessageInput deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

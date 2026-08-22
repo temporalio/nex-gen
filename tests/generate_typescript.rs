@@ -1216,7 +1216,12 @@ fn typescript_json_validates_non_object_union_branch_constraints() {
     // A closed value set narrows the branch type itself.
     assert!(rendered.contains("listOrName?: number[] | \"auto\" | \"manual\";"));
     // Parse: each branch's own predicates run under the union's path.
-    assert!(rendered.contains("if ([...(value as string)].length < 3) {"));
+    assert!(
+        rendered.contains(
+            "const codePoints = __nexgenDefinitions.codePointLength((value as string), 3);"
+        )
+    );
+    assert!(rendered.contains("if (codePoints < 3) {"));
     assert!(rendered.contains("if (!PATTERN_C182F89FDB221836.test((value as string))) {"));
     assert!(rendered.contains("if ((value as number) < 1) {"));
     assert!(rendered.contains("if (raw.listOrName.length < 1) {"));
@@ -1226,7 +1231,9 @@ fn typescript_json_validates_non_object_union_branch_constraints() {
     ));
     // Serialize: the same predicates over the in-memory member, aggregated into
     // the model's own violations before the wire object is built.
-    assert!(rendered.contains("if ([...(value.value as string)].length < 3) {"));
+    assert!(rendered.contains(
+        "const codePoints = __nexgenDefinitions.codePointLength((value.value as string), 3);"
+    ));
     assert!(rendered.contains("if ((value.value as number) < 1) {"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
@@ -1447,9 +1454,10 @@ fn typescript_json_guards_nullable_array_elements_during_serialize_validation() 
         "{rendered}"
     );
     assert!(
-        rendered.contains("if ([...element].length < 2) {"),
+        rendered.contains("const codePoints = __nexgenDefinitions.codePointLength(element, 2);"),
         "{rendered}"
     );
+    assert!(rendered.contains("if (codePoints < 2) {"), "{rendered}");
     assert!(rendered.contains("path: `slots[${index}]`"), "{rendered}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
@@ -2254,4 +2262,659 @@ test("contains, propertyNames, arrays, and typed-extra counts aggregate both way
         .unwrap();
     assert!(runtime_status.success(), "wave 3 runtime matrix failed");
     fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Runs the real compiler over generated output. `npm run typecheck` is scoped
+/// by the sample `tsconfig.json`'s `include` list, which no temporary output
+/// directory is in — so a generated module that does not even parse can slip
+/// through a text-assertion suite. This invokes `tsc` on the emitted files
+/// directly, from the sample root so `nexus-rpc`/`@types/node` resolve.
+fn typecheck_generated_typescript(output_path: &Path, label: &str) {
+    fn collect(dir: &Path, files: &mut Vec<PathBuf>) {
+        let mut entries = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                collect(&path, files);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("ts") {
+                files.push(path);
+            }
+        }
+    }
+
+    let sample_root = samples_typescript_root(&project_root());
+    ensure_typescript_dependencies(&sample_root);
+    let mut files = vec![sample_root.join("shims/nexus-rpc-type-info.d.ts")];
+    collect(output_path, &mut files);
+    let mut command = Command::new("npm");
+    command.current_dir(&sample_root).args([
+        "exec",
+        "--",
+        "tsc",
+        "--ignoreConfig",
+        "--noEmit",
+        "--target",
+        "ES2022",
+        "--lib",
+        "ES2022,esnext.temporal",
+        "--module",
+        "ES2022",
+        "--moduleResolution",
+        "bundler",
+        "--strict",
+        "--skipLibCheck",
+        "--allowImportingTsExtensions",
+        "--types",
+        "node",
+    ]);
+    command.args(files.iter().map(|path| path.to_str().unwrap()));
+    let status = command.status().unwrap();
+    assert!(status.success(), "{label} did not typecheck");
+}
+
+/// Runs one generated-output vitest module from the sample root.
+fn run_generated_typescript_test(temp_dir: &Path, runtime_test: &Path, label: &str) {
+    let sample_root = samples_typescript_root(&project_root());
+    let runtime_relative = runtime_test.strip_prefix(&sample_root).unwrap();
+    let runtime_config = temp_dir.join("vitest.config.ts");
+    fs::write(
+        &runtime_config,
+        format!(
+            "export default {{ test: {{ include: [{}] }} }};\n",
+            serde_json::to_string(runtime_relative.to_str().unwrap()).unwrap()
+        ),
+    )
+    .unwrap();
+    let status = Command::new("npm")
+        .current_dir(&sample_root)
+        .args([
+            "exec",
+            "--",
+            "vitest",
+            "run",
+            "--config",
+            runtime_config.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success(), "{label} runtime test failed");
+}
+
+/// Every shape whose generated TypeScript was previously unparseable, mis-pathed
+/// or reference-compared: a closed **empty** object
+/// ([[additionalProperties]] "Closed empty object"), a nested `uniqueItems`
+/// level ([[items]] §"Nested arrays" — the inner loop must not shadow the
+/// enclosing index), `uniqueItems` over a materialized element (compared by
+/// canonical wire string, not by object identity), a typeless `contains`
+/// matcher (which needs the element type's guard so a mistyped element
+/// aggregates instead of throwing), the serialize-side integer cap
+/// ([[type]] §Serialize-side), and the code-point length scan.
+const TYPESCRIPT_WAVE7_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [matrix, blobs, names, nums, count, label]
+properties:
+  empty: { $ref: "#/$defs/Empty" }
+  matrix:
+    type: array
+    items:
+      type: array
+      items: { type: integer }
+      uniqueItems: true
+  blobs:
+    type: array
+    items: { type: string, contentEncoding: base64 }
+    uniqueItems: true
+  names:
+    type: array
+    items: { type: string }
+    contains: { minLength: 2 }
+  nums:
+    type: array
+    items: { type: integer }
+    contains: { minimum: 5 }
+  count: { type: integer }
+  label: { type: string, minLength: 0, maxLength: 4, pattern: "^a/b" }
+$defs:
+  Empty:
+    type: object
+    additionalProperties: false
+"##;
+
+#[test]
+fn typescript_json_wave7_discrete_defects_typecheck_and_run() {
+    let temp_dir = unique_typescript_runtime_path("ts-json-wave7");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.yaml");
+    fs::write(&input_path, TYPESCRIPT_WAVE7_SCHEMA).unwrap();
+    let output_path = temp_dir.join("probe");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+    let runtime = fs::read_to_string(output_path.join("definitions.ts")).unwrap();
+
+    // A closed object with no declared properties rejects every key, and the
+    // zero-term join must not degenerate to `if () {`.
+    assert!(!rendered.contains("if () {"), "{rendered}");
+    // The inner `uniqueItems` loop carries its depth so the enclosing `index`
+    // (which `path` interpolates) stays visible.
+    assert!(
+        rendered.contains("forEach((element1, index1) => {"),
+        "{rendered}"
+    );
+    // Materialized elements compare by their canonical wire string.
+    assert!(
+        rendered.contains("const wireItems = value.blobs.map((element) =>"),
+        "{rendered}"
+    );
+    // A typeless matcher falls back to the element type's runtime guard.
+    assert!(
+        rendered.contains("(element) => typeof element === 'string' &&"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("(element) => typeof element === 'number' && Number.isSafeInteger(element) && element >= 5"),
+        "{rendered}"
+    );
+    // The serialize-side integer cap.
+    assert!(
+        rendered.contains("if (!Number.isSafeInteger(value.count)) {"),
+        "{rendered}"
+    );
+    // The shared early-exit code-point scan replaces every `[...v].length`.
+    assert!(!rendered.contains("[..."), "{rendered}");
+    assert!(
+        runtime.contains("export function codePointLength(value: string, limit = Number.POSITIVE_INFINITY): number {"),
+        "{runtime}"
+    );
+    // `minLength: 0` constrains nothing, so no comparison is emitted for it.
+    assert!(!rendered.contains("codePoints < 0"), "{rendered}");
+    // The default `pattern` form is a module-level literal.
+    assert!(rendered.contains("= /^a\\/b/u;"), "{rendered}");
+
+    typecheck_generated_typescript(&output_path, "wave 7 output");
+
+    let runtime_test = output_path.join("wave7-discrete.ts");
+    fs::write(
+        &runtime_test,
+        r#"import { expect, test } from "vitest";
+import { probeTransferTypeConverter, emptyTransferTypeConverter } from "./models.ts";
+import { ValidationError } from "./definitions.ts";
+
+const base = {
+  matrix: [[1, 2]],
+  blobs: ["AQI="],
+  names: ["ab"],
+  nums: [9],
+  count: 1,
+  label: "a/b",
+};
+
+function violations(fn: () => unknown) {
+  try {
+    fn();
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return error.violations;
+    }
+    throw error;
+  }
+  return [];
+}
+
+test("a closed empty object rejects every member", () => {
+  expect(emptyTransferTypeConverter.fromTransferType({})).toEqual({});
+  expect(violations(() => emptyTransferTypeConverter.fromTransferType({ a: 1 }))).toEqual([
+    { path: "a", reason: "unknown field" },
+  ]);
+});
+
+test("a nested uniqueItems violation is pathed at the outer index", () => {
+  expect(violations(() => probeTransferTypeConverter.fromTransferType({ ...base, matrix: [[7, 7], [1, 2]] })))
+    .toEqual([{ path: "matrix[0]", reason: "duplicate items: element at index 1 equals index 0" }]);
+  const model = probeTransferTypeConverter.fromTransferType(base);
+  expect(violations(() => probeTransferTypeConverter.toTransferType({ ...model, matrix: [[7, 7], [1, 2]] })))
+    .toEqual([{ path: "matrix[0]", reason: "duplicate items: element at index 1 equals index 0" }]);
+});
+
+test("materialized elements compare by wire string in both directions", () => {
+  expect(violations(() => probeTransferTypeConverter.fromTransferType({ ...base, blobs: ["AQI=", "AQI="] })))
+    .toEqual([{ path: "blobs", reason: "duplicate items: element at index 1 equals index 0" }]);
+  const model = probeTransferTypeConverter.fromTransferType(base);
+  expect(
+    violations(() =>
+      probeTransferTypeConverter.toTransferType({
+        ...model,
+        blobs: [new Uint8Array([1, 2]), new Uint8Array([1, 2])],
+      }),
+    ),
+  ).toEqual([{ path: "blobs", reason: "duplicate items: element at index 1 equals index 0" }]);
+});
+
+test("a mistyped element aggregates instead of throwing out of the matcher", () => {
+  expect(violations(() => probeTransferTypeConverter.fromTransferType({ ...base, names: [5] })))
+    .toEqual([
+      { path: "names[0]", reason: "expected string" },
+      { path: "names", reason: "no element matches the required schema" },
+    ]);
+  // `"9" >= 5` is `true` in JS; the element guard keeps the match count honest.
+  expect(violations(() => probeTransferTypeConverter.fromTransferType({ ...base, nums: ["9"] })))
+    .toEqual([
+      { path: "nums[0]", reason: "expected integer" },
+      { path: "nums", reason: "no element matches the required schema" },
+    ]);
+});
+
+test("the integer cap is re-checked before emit", () => {
+  const model = probeTransferTypeConverter.fromTransferType(base);
+  expect(violations(() => probeTransferTypeConverter.toTransferType({ ...model, count: 2 ** 60 })))
+    .toEqual([{ path: "count", reason: "exceeds ±(2^53-1) integer cap" }]);
+  expect(probeTransferTypeConverter.toTransferType(model)).toEqual(base);
+});
+
+test("length is the code-point count, early-exited against the bound", () => {
+  const model = probeTransferTypeConverter.fromTransferType({ ...base, label: "a/b\u{1F600}" });
+  expect(model.label).toBe("a/b\u{1F600}");
+  expect(violations(() => probeTransferTypeConverter.fromTransferType({ ...base, label: "a/bxx" })))
+    .toEqual([{ path: "label", reason: "must have length <= 4, got 5" }]);
+});
+"#,
+    )
+    .unwrap();
+    run_generated_typescript_test(&temp_dir, &runtime_test, "wave 7");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+const TYPESCRIPT_CROSS_MODULE_SHAPES: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Circle:
+    type: object
+    required: [kind]
+    properties:
+      kind: { type: string, const: circle }
+      r: { type: number }
+  Square:
+    type: object
+    required: [kind]
+    properties:
+      kind: { type: string, const: square }
+      s: { type: number }
+"##;
+
+const TYPESCRIPT_CROSS_MODULE_MAIN: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  shape:
+    oneOf:
+      - { $ref: "shapes.yaml#/$defs/Circle" }
+      - { $ref: "shapes.yaml#/$defs/Square" }
+      - { type: string }
+"##;
+
+/// A sum-type `oneOf` branch that `$ref`s another input file. A `$ref` resolves
+/// against the whole input closure ([[ref]] §"Type-name derivation"), so the
+/// dispatcher must see the sibling module's shape — resolving only against the
+/// current module silently collapses the union to its first local branch.
+#[test]
+fn typescript_json_dispatches_cross_module_ref_union_branches() {
+    let temp_dir = unique_typescript_runtime_path("ts-json-cross-module-union");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let shapes_path = temp_dir.join("shapes.yaml");
+    fs::write(&shapes_path, TYPESCRIPT_CROSS_MODULE_SHAPES).unwrap();
+    let main_path = temp_dir.join("main.yaml");
+    fs::write(&main_path, TYPESCRIPT_CROSS_MODULE_MAIN).unwrap();
+    let output_path = temp_dir.join("closure");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![main_path, shapes_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("main/models.ts")).unwrap();
+    assert!(
+        rendered.contains("shape?: Circle | Square | string;"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("import { circleTransferTypeConverter, squareTransferTypeConverter } from '../shapes/models';"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("case \"circle\":") && rendered.contains("case \"square\":"),
+        "{rendered}"
+    );
+    typecheck_generated_typescript(&output_path, "cross-module union output");
+
+    let runtime_test = output_path.join("cross-module-union.ts");
+    fs::write(
+        &runtime_test,
+        r#"import { expect, test } from "vitest";
+import { mainTransferTypeConverter } from "./main/models.ts";
+import { ValidationError } from "./definitions.ts";
+
+test("every cross-file branch round-trips", () => {
+  for (const wire of [{ shape: { kind: "square", s: 2 } }, { shape: { kind: "circle", r: 1 } }, { shape: "x" }]) {
+    const model = mainTransferTypeConverter.fromTransferType(wire);
+    expect(mainTransferTypeConverter.toTransferType(model)).toEqual(wire);
+  }
+  expect(() => mainTransferTypeConverter.fromTransferType({ shape: { kind: "tri" } })).toThrow(
+    ValidationError,
+  );
+});
+"#,
+    )
+    .unwrap();
+    run_generated_typescript_test(&temp_dir, &runtime_test, "cross-module union");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Decision **D2**: a nullable *scalar* element (`items: {oneOf: [T, null]}`) is
+/// accepted for `uniqueItems` and `contains`. The wrapper carries no `type`, so
+/// reading it leaves the matcher unguarded — and `null <= 5` is `true` in JS, so
+/// an unguarded numeric matcher would count `null` as a match. Semantics per
+/// `uniqueItems.md:189-191` (two `null`s are a duplicate) and `contains.md`
+/// Interactions → [[nullability]] (a `null` element never satisfies a scalar
+/// matcher).
+const TYPESCRIPT_NULLABLE_ELEMENT_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [tags, nums, blobs]
+properties:
+  tags:
+    type: array
+    items:
+      oneOf: [{ type: string }, { type: "null" }]
+    uniqueItems: true
+    contains: { minLength: 2 }
+  nums:
+    type: array
+    items:
+      oneOf: [{ type: number }, { type: "null" }]
+    contains: { maximum: 5 }
+  blobs:
+    type: array
+    items:
+      oneOf: [{ type: string, contentEncoding: base64 }, { type: "null" }]
+    uniqueItems: true
+"##;
+
+#[test]
+fn typescript_json_guards_nullable_elements_in_array_keywords() {
+    let temp_dir = unique_typescript_runtime_path("ts-json-nullable-elements");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bag.yaml");
+    fs::write(&input_path, TYPESCRIPT_NULLABLE_ELEMENT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("bag");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    // The element kind comes from the wrapper's non-null branch, so the matcher
+    // is guarded and `null` can never reach the bare comparison.
+    assert!(
+        rendered.contains("(element) => typeof element === 'string' &&"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains(
+            "(element) => typeof element === 'number' && Number.isFinite(element) && element <= 5"
+        ),
+        "{rendered}"
+    );
+    // A nullable materialized element still compares by its canonical wire form.
+    assert!(
+        rendered.contains(
+            "const wireItems = value.blobs.map((element) => element === null ? null : __nexgenDefinitions.bytesToBase64(element));"
+        ),
+        "{rendered}"
+    );
+
+    typecheck_generated_typescript(&output_path, "nullable-element output");
+
+    let runtime_test = output_path.join("nullable-elements.ts");
+    fs::write(
+        &runtime_test,
+        r#"import { expect, test } from "vitest";
+import { bagTransferTypeConverter } from "./models.ts";
+import { ValidationError } from "./definitions.ts";
+
+const base = { tags: ["ab"], nums: [1], blobs: ["AQI="] };
+
+function violations(fn: () => unknown) {
+  try {
+    fn();
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return error.violations;
+    }
+    throw error;
+  }
+  return [];
+}
+
+test("two nulls are one duplicate value", () => {
+  expect(violations(() => bagTransferTypeConverter.fromTransferType({ ...base, tags: [null, null] })))
+    .toContainEqual({ path: "tags", reason: "duplicate items: element at index 1 equals index 0" });
+  const model = bagTransferTypeConverter.fromTransferType(base);
+  expect(violations(() => bagTransferTypeConverter.toTransferType({ ...model, blobs: [null, null] })))
+    .toEqual([{ path: "blobs", reason: "duplicate items: element at index 1 equals index 0" }]);
+});
+
+test("a null element never satisfies a scalar matcher", () => {
+  // `null <= 5` is `true` in JS; the element guard keeps `null` out of the count.
+  expect(violations(() => bagTransferTypeConverter.fromTransferType({ ...base, nums: [null] })))
+    .toEqual([{ path: "nums", reason: "no element matches the required schema" }]);
+  const model = bagTransferTypeConverter.fromTransferType(base);
+  expect(violations(() => bagTransferTypeConverter.toTransferType({ ...model, nums: [null] })))
+    .toEqual([{ path: "nums", reason: "no element matches the required schema" }]);
+});
+
+test("a nullable element round-trips alongside a matching one", () => {
+  const wire = { tags: ["ab", null], nums: [1, null], blobs: [null, "AQI="] };
+  const model = bagTransferTypeConverter.fromTransferType(wire);
+  expect(bagTransferTypeConverter.toTransferType(model)).toEqual(wire);
+});
+"#,
+    )
+    .unwrap();
+    run_generated_typescript_test(&temp_dir, &runtime_test, "nullable elements");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A `const` member is emitted `readonly`, but an **optional** member is assigned
+/// after the result literal is built — which `readonly` forbids (TS2540), so the
+/// generated module did not compile for any optional `const`, materialized or not.
+#[test]
+fn typescript_json_optional_const_members_typecheck() {
+    let temp_dir = unique_typescript_runtime_path("ts-json-optional-const");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("pin.yaml");
+    fs::write(
+        &input_path,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  plain: { type: string, const: "x" }
+  num: { type: integer, const: 3 }
+  tag: { type: string, contentEncoding: base64, const: "aGk=" }
+  span: { type: string, format: duration, const: "PT1H30M" }
+"##,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("pin");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+    // The member stays immutable to consumers; only the staging binding is mutable.
+    assert!(rendered.contains("  readonly plain?: \"x\";"), "{rendered}");
+    assert!(
+        rendered.contains("const out: { -readonly [K in keyof Pin]: Pin[K] } = {"),
+        "{rendered}"
+    );
+    typecheck_generated_typescript(&output_path, "optional-const output");
+
+    let runtime_test = output_path.join("optional-const.ts");
+    fs::write(
+        &runtime_test,
+        r#"import { expect, test } from "vitest";
+import { pinTransferTypeConverter } from "./models.ts";
+
+test("an optional const member round-trips and stays absent when omitted", () => {
+  expect(pinTransferTypeConverter.toTransferType(pinTransferTypeConverter.fromTransferType({}))).toEqual({});
+  const wire = { plain: "x", num: 3, tag: "aGk=", span: "PT1H30M" };
+  expect(pinTransferTypeConverter.toTransferType(pinTransferTypeConverter.fromTransferType(wire))).toEqual(wire);
+  expect(() => pinTransferTypeConverter.fromTransferType({ plain: "y" })).toThrow(/must equal/);
+});
+"#,
+    )
+    .unwrap();
+    run_generated_typescript_test(&temp_dir, &runtime_test, "optional const");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+const TYPESCRIPT_FRACTIONAL_SECOND_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [createdAt]
+properties:
+  createdAt: { type: string, format: date-time }
+"##;
+
+/// A fractional second wider than the target's capacity is **accepted and
+/// truncated**, never rejected: Go and Java truncate at nine digits, Python at
+/// six, and the `string` repr keeps the wire verbatim because it has no capacity
+/// to lose. `Temporal.ZonedDateTime` caps at nanoseconds exactly like
+/// `java.time`, and its ISO parser *throws* past nine digits — so the `temporal`
+/// repr must truncate before constructing, or it both splits the accept set and
+/// escapes as a bare `RangeError` instead of an aggregated `ValidationError`
+/// (P11). The truncated forms below are byte-identical to the ones the generated
+/// Go emits for the same inputs (measured).
+#[test]
+fn typescript_json_truncates_over_capacity_fractional_seconds() {
+    let expectations: &[(nexgen::generator::TsDateTimeTypes, &str)] = &[
+        // repr, the re-emitted `createdAt` for `…45.123456789012Z`
+        (
+            nexgen::generator::TsDateTimeTypes::Temporal,
+            "2021-01-15T12:30:45.123456789Z",
+        ),
+        (
+            nexgen::generator::TsDateTimeTypes::Date,
+            "2021-01-15T12:30:45.123Z",
+        ),
+        (
+            nexgen::generator::TsDateTimeTypes::String,
+            "2021-01-15T12:30:45.123456789012Z",
+        ),
+    ];
+    for (repr, expected) in expectations {
+        let label = format!("{repr:?}").to_lowercase();
+        let temp_dir = unique_typescript_runtime_path(&format!("ts-json-fraction-{label}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let input_path = temp_dir.join("clock.yaml");
+        fs::write(&input_path, TYPESCRIPT_FRACTIONAL_SECOND_SCHEMA).unwrap();
+        let output_path = temp_dir.join("clock");
+        generate_to_file(&GenerateRequest {
+            language: nexgen::language::Language::TypeScript,
+            input_paths: vec![input_path],
+            support_paths: Vec::new(),
+            descriptor_paths: Vec::new(),
+            output_path: output_path.clone(),
+            format: false,
+            generate_native_api: false,
+            java_package_name: None,
+            ts_date_time_types: *repr,
+        })
+        .unwrap();
+        let runtime = fs::read_to_string(output_path.join("definitions.ts")).unwrap();
+        // Only the nanosecond-capacity repr needs the scan; emitting it elsewhere
+        // would be dead code.
+        assert_eq!(
+            runtime.contains("function truncateTemporalFraction("),
+            *repr == nexgen::generator::TsDateTimeTypes::Temporal,
+            "{runtime}"
+        );
+        if *repr == nexgen::generator::TsDateTimeTypes::Temporal {
+            assert!(
+                runtime.contains(
+                    "const canon = truncateTemporalFraction(canonicalizeTemporalDateTime(value));"
+                ),
+                "{runtime}"
+            );
+            // A throwing constructor must surface as a Violation, never a bare
+            // RangeError out of the converter (P11).
+            assert!(
+                runtime.contains(
+                    "    return Temporal.ZonedDateTime.from(`${canon}[${zone}]`);\n  } catch {\n"
+                ),
+                "{runtime}"
+            );
+        }
+        typecheck_generated_typescript(&output_path, &format!("{label} fractional output"));
+
+        let runtime_test = output_path.join("fractional-second.ts");
+        fs::write(
+            &runtime_test,
+            format!(
+                r#"import {{ expect, test }} from "vitest";
+import {{ clockTransferTypeConverter }} from "./models.ts";
+
+function roundTrip(wire: string): unknown {{
+  const model = clockTransferTypeConverter.fromTransferType({{ createdAt: wire }});
+  return (clockTransferTypeConverter.toTransferType(model) as Record<string, unknown>).createdAt;
+}}
+
+test("an over-capacity fraction truncates instead of throwing", () => {{
+  expect(roundTrip("2021-01-15T12:30:45.123456789012Z")).toBe({expected});
+  // Widths within capacity, and an all-zero fraction, are unaffected.
+  expect(roundTrip("2021-01-15T12:30:45Z")).toBe("2021-01-15T12:30:45{zero_suffix}Z");
+}});
+"#,
+                expected = serde_json::to_string(expected).unwrap(),
+                zero_suffix = if *repr == nexgen::generator::TsDateTimeTypes::Date {
+                    ".000"
+                } else {
+                    ""
+                },
+            ),
+        )
+        .unwrap();
+        run_generated_typescript_test(&temp_dir, &runtime_test, &format!("{label} fraction"));
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 }

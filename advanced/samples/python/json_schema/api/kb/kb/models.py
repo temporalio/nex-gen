@@ -148,9 +148,16 @@ class _PutBlockOutputTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "PutBlockOutput") -> typing.Any:
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         out["blockId"] = value.block_id
+        if abs(value.revision) > 9007199254740991:
+            violations.append(
+                Violation(path="revision", reason="exceeds ±(2^53-1) integer cap")
+            )
         out["revision"] = value.revision
+        if violations:
+            raise ValidationError(violations)
         return out
 
 

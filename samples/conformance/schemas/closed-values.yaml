@@ -1,0 +1,36 @@
+# Closed value sets, including behind the nullability wrapper.
+#
+# An `enum`/`const` under `oneOf: [T, null]` is the shape a target loses when it
+# reads the wrapper: the member keeps its type and silently accepts any value of
+# it.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ClosedValues
+description: enum and const acceptance, plain and nullable.
+type: object
+additionalProperties: false
+required: [status, tier, fixed]
+properties:
+  status:
+    description: A string enum.
+    type: string
+    enum: [active, inactive]
+  tier:
+    description: An integer enum.
+    type: integer
+    enum: [1, 2, 3]
+  fixed:
+    description: An integer const.
+    type: integer
+    const: 1
+  nullableStatus:
+    description: The same closed set, one nullability wrapper deep.
+    oneOf:
+      - type: string
+        enum: [active, inactive]
+      - type: "null"
+  nullableTier:
+    description: A nullable integer enum — non-string members behind the wrapper.
+    oneOf:
+      - type: integer
+        enum: [1, 2, 3]
+      - type: "null"

@@ -256,6 +256,12 @@ export const messageTransferTypeConverter =
         out.replyToId = value.replyToId;
       }
       if (value.priority !== undefined) {
+        if (!Number.isSafeInteger(value.priority)) {
+          violations.push({
+            path: "priority",
+            reason: "exceeds ±(2^53-1) integer cap",
+          });
+        }
         out.priority = value.priority;
       }
       if (violations.length) {

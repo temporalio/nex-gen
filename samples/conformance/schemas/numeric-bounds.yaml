@@ -1,0 +1,38 @@
+# Numeric range and divisibility, at and around the boundary.
+#
+# The inclusive boundary value itself is the row nothing in the repository
+# asserted: every existing bound test feeds a value *outside* the range. The
+# `multipleOf` members carry values large enough that "exact rational arithmetic
+# over the shortest decimal spelling" and IEEE `fmod` disagree.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: NumericBounds
+description: Inclusive/exclusive bounds and multipleOf across the double range.
+type: object
+additionalProperties: false
+required: [boundedInt, boundedNumber, gridFive, gridThree, exclusive]
+properties:
+  boundedInt:
+    description: Inclusive integer range; 5 and 10 are IN.
+    type: integer
+    minimum: 5
+    maximum: 10
+  boundedNumber:
+    description: >-
+      A `number` bound at exactly 2^53. An integral wire token one above it is
+      out of range mathematically, whichever way a target stores the bound.
+    type: number
+    minimum: -1.5
+    maximum: 9007199254740992
+  gridFive:
+    description: multipleOf 5 over a `number`, exercised at 1e23.
+    type: number
+    multipleOf: 5
+  gridThree:
+    description: multipleOf 3 over a `number`, exercised at 1e300.
+    type: number
+    multipleOf: 3
+  exclusive:
+    description: Exclusive bounds; 0 and 1 are OUT, the values between are IN.
+    type: number
+    exclusiveMinimum: 0
+    exclusiveMaximum: 1

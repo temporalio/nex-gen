@@ -85,6 +85,11 @@ public final class Address {
         @Override
         public void serialize(Address value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
+            if (value.zip != null) {
+                if (value.zip < -SpecNumbers.INTEGER_CAP || value.zip > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("zip", "exceeds \u00b1(2^53-1) integer cap"));
+                }
+            }
             java.util.Set<String> wireKeys = new java.util.LinkedHashSet<>();
             if (value.street != null) {
                 wireKeys.add("street");
@@ -128,7 +133,7 @@ public final class Address {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Address> {
         @Override
         public Address deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

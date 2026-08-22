@@ -1320,7 +1320,10 @@ final class JsonSchemaShowcaseRoundTripTest {
                 null, null, null, null, measurements, null, null, null, null,
                 numberGrid, null, null, null, null, null, null, null, metrics,
                 metricOrLabel, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null,
+                // nullableCount, nullableRatio, nullableFlag, nullableTags, nullableMode,
+                // integralMeasurements, byFive, wildcard, quoted
+                null, null, null, null, null, null, null, null, null);
     }
 
     /**

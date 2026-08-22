@@ -623,8 +623,8 @@ the [[const]] literal, and drives selection.
 
 ```yaml
 $defs:
-  Cat: { type: object, required: [kind], properties: { kind: {const: cat}, meow: {type: string} } }
-  Dog: { type: object, required: [kind], properties: { kind: {const: dog}, bark: {type: string} } }
+  Cat: { type: object, required: [kind], properties: { kind: {type: string, const: cat}, meow: {type: string} } }
+  Dog: { type: object, required: [kind], properties: { kind: {type: string, const: dog}, bark: {type: string} } }
   Animal: { oneOf: [ {$ref: '#/$defs/Cat'}, {$ref: '#/$defs/Dog'} ] }
 ```
 
@@ -772,7 +772,7 @@ of the declared union type, tests every branch and raises
 | A closed value set on a branch | `{oneOf:[{type:string,enum:[auto,manual]},{type:integer,minimum:0}]}` |
 | An asserted (non-materializing) `format` on a branch | `{oneOf:[{type:string,format:uuid},{type:integer}]}` |
 | Named `$defs` union reused by `$ref` | `{$defs:{Foo:{oneOf:[…]}}, properties:{f:{$ref:"#/$defs/Foo"}}}` |
-| Object tagged union (`const`-tag) | `{oneOf:[{$ref:"#/$defs/Cat"},{$ref:"#/$defs/Dog"}]}` with `kind:{const:…}` required in each |
+| Object tagged union (`const`-tag) | `{oneOf:[{$ref:"#/$defs/Cat"},{$ref:"#/$defs/Dog"}]}` with `kind:{type:string, const:…}` required in each |
 | Tagged union mixed with a scalar kind | `{oneOf:[{$ref:"#/$defs/Cat"},{$ref:"#/$defs/Dog"},{type:string}]}` (token picks object-vs-string; `const` picks Cat-vs-Dog) |
 | Two-branch `[T,null]` | owned by [[nullability]] — the degenerate type-token case |
 | Nullable union — `null` among 3+ disjoint kinds | `{oneOf:[{$ref:"#/$defs/Widget"},{type:array,items:{type:number}},{type:"null"}]}` |
@@ -791,11 +791,11 @@ of the declared union type, tests every branch and raises
 | Empty array (invalid schema) | `{oneOf:[]}` |
 | Branch with no classifiable kind | `{oneOf:[{type:string},{minLength:3}]}`, `…{oneOf:[{type:string},true]}`, `…[{type:string},{}]` |
 | Object branches with no shared required-`const` (no discriminator) | `{oneOf:[{$ref:"#/$defs/A"},{$ref:"#/$defs/B"}]}`, neither carrying a `const` tag |
-| Two or more inline object branches missing a per-branch `x-<lang>-name` | `{oneOf:[{type:object,required:[kind],properties:{kind:{const:cat}…}},{…kind:{const:dog}…}]}` — both derive `<Union>Object` |
+| Two or more inline object branches missing a per-branch `x-<lang>-name` | `{oneOf:[{type:object,required:[kind],properties:{kind:{type:string,const:cat}…}},{…kind:{type:string,const:dog}…}]}` — both derive `<Union>Object` |
 | Synthesized `<Union>Object` collides with another emitted type (P15) | a `$defs.FooObject` alongside an inline object branch of the `Foo` union |
 | Inline structured object branch with no derivable name | a branch inside a *nested inline object's* property, whose enclosing shape is itself not materialized |
 | Discriminator `const` not `required` in a branch | `{oneOf:[{Cat with kind required},{Dog with kind optional}]}` |
-| Non-distinct discriminator values | `{oneOf:[{kind:{const:"x"}…},{kind:{const:"x"}…}]}` |
+| Non-distinct discriminator values | `{oneOf:[{kind:{type:string,const:"x"}…},{kind:{type:string,const:"x"}…}]}` |
 | Ambiguous discriminator (2+ qualifying properties) | two object branches sharing both `kind` and `variant` as required-`const` |
 | A materialized temporal `format` on a sum-type branch (deferred) | `{oneOf:[{type:string,format:"date-time"},{type:integer}]}` |
 | A materialized `contentEncoding` on a sum-type branch (deferred) | `{oneOf:[{type:string,contentEncoding:base64},{type:integer}]}` |

@@ -1,0 +1,19 @@
+# `contentEncoding` materializes the member as bytes, so the wire form has to be
+# canonical in both directions: decode -> encode must be the identity, which
+# means non-canonical trailing bits, whitespace and missing padding are all
+# rejections rather than values that come back spelled differently.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ContentEncoding
+description: base64 and base64url acceptance at the canonical-form boundary.
+type: object
+additionalProperties: false
+required: [payload]
+properties:
+  payload:
+    description: Standard base64 with padding.
+    type: string
+    contentEncoding: base64
+  urlPayload:
+    description: URL-safe base64.
+    type: string
+    contentEncoding: base64url

@@ -54,6 +54,7 @@ _PATTERN_4A45C0D214B9083D = re.compile(
     re.ASCII,
 )
 _PATTERN_F242E3A159C2422C = re.compile("^[a-z]+\\Z", re.ASCII)
+_PATTERN_F7DE686CF7F23810 = re.compile("a[^\\n]b", re.ASCII)
 
 
 _ADDRESS_DECLARED: frozenset[str] = frozenset({"street", "city", "zip"})
@@ -168,6 +169,10 @@ class _AddressTransferTypeConverter(
         if value.city is not None:
             out["city"] = value.city
         if value.zip is not None:
+            if abs(value.zip) > 9007199254740991:
+                violations.append(
+                    Violation(path="zip", reason="exceeds ±(2^53-1) integer cap")
+                )
             out["zip"] = value.zip
         for key, entry in value.additional_properties.items():
             if key in _ADDRESS_DECLARED:
@@ -1106,6 +1111,10 @@ class _QuotasTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            if abs(entry) > 9007199254740991:
+                violations.append(
+                    Violation(path=key, reason="exceeds ±(2^53-1) integer cap")
+                )
             if entry < 0:
                 violations.append(
                     Violation(path=key, reason=f"must be >= 0, got {entry}")
@@ -1187,11 +1196,18 @@ class _SettingsTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Settings") -> typing.Any:
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         if value.theme is not None:
             out["theme"] = value.theme
         if value.font_size is not None:
+            if abs(value.font_size) > 9007199254740991:
+                violations.append(
+                    Violation(path="fontSize", reason="exceeds ±(2^53-1) integer cap")
+                )
             out["fontSize"] = value.font_size
+        if violations:
+            raise ValidationError(violations)
         return out
 
 
@@ -1777,14 +1793,14 @@ class _ShowcaseTransferTypeConverter(
                             )
                         )
                     else:
-                        if ratio_value_raw < 5:
+                        if float(ratio_value_raw) < 5.0:
                             violations.append(
                                 Violation(
                                     path="ratio",
                                     reason=f"must be >= 5, got {ratio_value_raw}",
                                 )
                             )
-                        if math.fmod(ratio_value_raw, 5) != 0:
+                        if math.fmod(float(ratio_value_raw), 5.0) != 0:
                             violations.append(
                                 Violation(
                                     path="ratio",
@@ -2825,6 +2841,308 @@ class _ShowcaseTransferTypeConverter(
                 except ValidationError as error:
                     _collect(violations, "contact", error)
 
+        nullable_count_value: int | None = None
+        if "nullableCount" in raw:
+            nullable_count_value_raw = raw["nullableCount"]
+            if nullable_count_value_raw is None:
+                nullable_count_value = None
+            else:
+                nullable_count_value_parsed = _parse_spec_integer(
+                    nullable_count_value_raw, "nullableCount", violations
+                )
+                if nullable_count_value_parsed is not None:
+                    nullable_count_value = nullable_count_value_parsed
+                    if nullable_count_value < 1:
+                        violations.append(
+                            Violation(
+                                path="nullableCount",
+                                reason=f"must be >= 1, got {nullable_count_value}",
+                            )
+                        )
+                    if nullable_count_value > 10:
+                        violations.append(
+                            Violation(
+                                path="nullableCount",
+                                reason=f"must be <= 10, got {nullable_count_value}",
+                            )
+                        )
+
+        nullable_ratio_value: float | None = None
+        if "nullableRatio" in raw:
+            nullable_ratio_value_raw = raw["nullableRatio"]
+            if nullable_ratio_value_raw is None:
+                nullable_ratio_value = None
+            else:
+                if not (
+                    not isinstance(nullable_ratio_value_raw, bool)
+                    and isinstance(nullable_ratio_value_raw, (int, float))
+                ):
+                    violations.append(
+                        Violation(path="nullableRatio", reason="expected number")
+                    )
+                else:
+                    nullable_ratio_value = nullable_ratio_value_raw
+                    if not (
+                        -1.7976931348623157e308
+                        <= nullable_ratio_value_raw
+                        <= 1.7976931348623157e308
+                    ):
+                        violations.append(
+                            Violation(
+                                path="nullableRatio",
+                                reason=f"must be a finite number, got {nullable_ratio_value_raw}",
+                            )
+                        )
+                    else:
+                        if math.fmod(float(nullable_ratio_value_raw), 2.0) != 0:
+                            violations.append(
+                                Violation(
+                                    path="nullableRatio",
+                                    reason=f"must be a multiple of 2, got {nullable_ratio_value_raw}",
+                                )
+                            )
+
+        nullable_flag_value: bool | None = None
+        if "nullableFlag" in raw:
+            nullable_flag_value_raw = raw["nullableFlag"]
+            if nullable_flag_value_raw is None:
+                nullable_flag_value = None
+            else:
+                if not isinstance(nullable_flag_value_raw, bool):
+                    violations.append(
+                        Violation(path="nullableFlag", reason="expected boolean")
+                    )
+                else:
+                    nullable_flag_value = nullable_flag_value_raw
+
+        nullable_tags_value: list[str] | None = None
+        if "nullableTags" in raw:
+            nullable_tags_value_raw = raw["nullableTags"]
+            if nullable_tags_value_raw is None:
+                nullable_tags_value = None
+            else:
+                if not isinstance(nullable_tags_value_raw, list):
+                    violations.append(
+                        Violation(path="nullableTags", reason="expected array")
+                    )
+                else:
+                    nullable_tags_value_list: list[str] = []
+                    for (
+                        nullable_tags_value_index,
+                        nullable_tags_value_element,
+                    ) in enumerate(
+                        typing.cast("list[typing.Any]", nullable_tags_value_raw)
+                    ):
+                        nullable_tags_value_item_path = (
+                            f"nullableTags[{nullable_tags_value_index}]"
+                        )
+                        nullable_tags_value_item_violation_count = len(violations)
+                        nullable_tags_value_item: str = typing.cast("typing.Any", None)
+                        if not isinstance(nullable_tags_value_element, str):
+                            violations.append(
+                                Violation(
+                                    path=nullable_tags_value_item_path,
+                                    reason="expected string",
+                                )
+                            )
+                        else:
+                            nullable_tags_value_item = nullable_tags_value_element
+                        if len(violations) == nullable_tags_value_item_violation_count:
+                            nullable_tags_value_list.append(nullable_tags_value_item)
+                    if (
+                        len(typing.cast("list[typing.Any]", nullable_tags_value_raw))
+                        < 1
+                    ):
+                        violations.append(
+                            Violation(
+                                path="nullableTags",
+                                reason=f"must have at least 1 items, got {len(typing.cast('list[typing.Any]', nullable_tags_value_raw))}",
+                            )
+                        )
+                    _check_unique_items(
+                        typing.cast("list[typing.Any]", nullable_tags_value_raw),
+                        "nullableTags",
+                        violations,
+                    )
+                    nullable_tags_value = nullable_tags_value_list
+
+        nullable_mode_value: typing.Literal["auto", "manual"] | None = None
+        if "nullableMode" in raw:
+            nullable_mode_value_raw = raw["nullableMode"]
+            if nullable_mode_value_raw is None:
+                nullable_mode_value = None
+            else:
+                if not isinstance(nullable_mode_value_raw, str):
+                    violations.append(
+                        Violation(path="nullableMode", reason="expected string")
+                    )
+                elif nullable_mode_value_raw not in ("auto", "manual"):
+                    violations.append(
+                        Violation(
+                            path="nullableMode",
+                            reason=f'must be one of ["auto", "manual"], got {_quote(nullable_mode_value_raw)}',
+                        )
+                    )
+                else:
+                    nullable_mode_value = nullable_mode_value_raw
+
+        integral_measurements_value: list[float] | None = None
+        if "integralMeasurements" in raw:
+            integral_measurements_value_raw = raw["integralMeasurements"]
+            if integral_measurements_value_raw is None:
+                violations.append(
+                    Violation(
+                        path="integralMeasurements", reason="explicit null not allowed"
+                    )
+                )
+            else:
+                if not isinstance(integral_measurements_value_raw, list):
+                    violations.append(
+                        Violation(path="integralMeasurements", reason="expected array")
+                    )
+                else:
+                    integral_measurements_value_list: list[float] = []
+                    for (
+                        integral_measurements_value_index,
+                        integral_measurements_value_element,
+                    ) in enumerate(
+                        typing.cast("list[typing.Any]", integral_measurements_value_raw)
+                    ):
+                        integral_measurements_value_item_path = (
+                            f"integralMeasurements[{integral_measurements_value_index}]"
+                        )
+                        integral_measurements_value_item_violation_count = len(
+                            violations
+                        )
+                        integral_measurements_value_item: float = typing.cast(
+                            "typing.Any", None
+                        )
+                        if not (
+                            not isinstance(integral_measurements_value_element, bool)
+                            and isinstance(
+                                integral_measurements_value_element, (int, float)
+                            )
+                        ):
+                            violations.append(
+                                Violation(
+                                    path=integral_measurements_value_item_path,
+                                    reason="expected number",
+                                )
+                            )
+                        else:
+                            integral_measurements_value_item = (
+                                integral_measurements_value_element
+                            )
+                            if not (
+                                -1.7976931348623157e308
+                                <= integral_measurements_value_element
+                                <= 1.7976931348623157e308
+                            ):
+                                violations.append(
+                                    Violation(
+                                        path=integral_measurements_value_item_path,
+                                        reason=f"must be a finite number, got {integral_measurements_value_element}",
+                                    )
+                                )
+                        if (
+                            len(violations)
+                            == integral_measurements_value_item_violation_count
+                        ):
+                            integral_measurements_value_list.append(
+                                integral_measurements_value_item
+                            )
+                    _check_contains(
+                        typing.cast(
+                            "list[typing.Any]", integral_measurements_value_raw
+                        ),
+                        lambda element: (
+                            not isinstance(element, bool)
+                            and isinstance(element, (int, float))
+                            and abs(element) <= 9007199254740991
+                            and float(element).is_integer()
+                        ),
+                        1,
+                        None,
+                        False,
+                        "integralMeasurements",
+                        violations,
+                    )
+                    integral_measurements_value = integral_measurements_value_list
+
+        by_five_value: float | None = None
+        if "byFive" in raw:
+            by_five_value_raw = raw["byFive"]
+            if by_five_value_raw is None:
+                violations.append(
+                    Violation(path="byFive", reason="explicit null not allowed")
+                )
+            else:
+                if not (
+                    not isinstance(by_five_value_raw, bool)
+                    and isinstance(by_five_value_raw, (int, float))
+                ):
+                    violations.append(
+                        Violation(path="byFive", reason="expected number")
+                    )
+                else:
+                    by_five_value = by_five_value_raw
+                    if not (
+                        -1.7976931348623157e308
+                        <= by_five_value_raw
+                        <= 1.7976931348623157e308
+                    ):
+                        violations.append(
+                            Violation(
+                                path="byFive",
+                                reason=f"must be a finite number, got {by_five_value_raw}",
+                            )
+                        )
+                    else:
+                        if math.fmod(float(by_five_value_raw), 5.0) != 0:
+                            violations.append(
+                                Violation(
+                                    path="byFive",
+                                    reason=f"must be a multiple of 5, got {by_five_value_raw}",
+                                )
+                            )
+
+        wildcard_value: str | None = None
+        if "wildcard" in raw:
+            wildcard_value_raw = raw["wildcard"]
+            if wildcard_value_raw is None:
+                violations.append(
+                    Violation(path="wildcard", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(wildcard_value_raw, str):
+                    violations.append(
+                        Violation(path="wildcard", reason="expected string")
+                    )
+                else:
+                    wildcard_value = wildcard_value_raw
+                    if _PATTERN_F7DE686CF7F23810.search(wildcard_value_raw) is None:
+                        violations.append(
+                            Violation(
+                                path="wildcard",
+                                reason=f"must match pattern {_PATTERN_F7DE686CF7F23810.pattern}, got {_quote(wildcard_value_raw)}",
+                            )
+                        )
+
+        quoted_value: str | None = None
+        if "quoted" in raw:
+            quoted_value_raw = raw["quoted"]
+            if quoted_value_raw is None:
+                violations.append(
+                    Violation(path="quoted", reason="explicit null not allowed")
+                )
+            else:
+                if not isinstance(quoted_value_raw, str):
+                    violations.append(
+                        Violation(path="quoted", reason="expected string")
+                    )
+                else:
+                    quoted_value = quoted_value_raw
+
         for key in raw:
             if (
                 key != "kind"
@@ -2900,6 +3218,15 @@ class _ShowcaseTransferTypeConverter(
                 and key != "settings"
                 and key != "attributes"
                 and key != "contact"
+                and key != "nullableCount"
+                and key != "nullableRatio"
+                and key != "nullableFlag"
+                and key != "nullableTags"
+                and key != "nullableMode"
+                and key != "integralMeasurements"
+                and key != "byFive"
+                and key != "wildcard"
+                and key != "quoted"
             ):
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
@@ -2978,6 +3305,15 @@ class _ShowcaseTransferTypeConverter(
             settings=settings_value,
             attributes=attributes_value,
             contact=contact_value,
+            nullable_count=nullable_count_value,
+            nullable_ratio=nullable_ratio_value,
+            nullable_flag=nullable_flag_value,
+            nullable_tags=nullable_tags_value,
+            nullable_mode=nullable_mode_value,
+            integral_measurements=integral_measurements_value,
+            by_five=by_five_value,
+            wildcard=wildcard_value,
+            quoted=quoted_value,
         )
 
     @typing_extensions.override
@@ -3030,6 +3366,10 @@ class _ShowcaseTransferTypeConverter(
                 )
             )
         out["name"] = value.name
+        if abs(value.count) > 9007199254740991:
+            violations.append(
+                Violation(path="count", reason="exceeds ±(2^53-1) integer cap")
+            )
         out["count"] = value.count
         out["active"] = value.active
         if value.nickname is not None:
@@ -3131,6 +3471,10 @@ class _ShowcaseTransferTypeConverter(
         if value.url_blob is not None:
             out["urlBlob"] = _format_base64url(value.url_blob)
         if value._retries is not None:
+            if abs(value.retries) > 9007199254740991:
+                violations.append(
+                    Violation(path="retries", reason="exceeds ±(2^53-1) integer cap")
+                )
             out["retries"] = value._retries
         if value.verbose is not None:
             out["verbose"] = value.verbose
@@ -3144,6 +3488,10 @@ class _ShowcaseTransferTypeConverter(
             out["middleName"] = value.middle_name
         out["category"] = value.category
         if value.priority is not None:
+            if abs(value.priority) > 9007199254740991:
+                violations.append(
+                    Violation(path="priority", reason="exceeds ±(2^53-1) integer cap")
+                )
             if value.priority < 1:
                 violations.append(
                     Violation(
@@ -3158,6 +3506,10 @@ class _ShowcaseTransferTypeConverter(
                 )
             out["priority"] = value.priority
         if value.level is not None:
+            if abs(value.level) > 9007199254740991:
+                violations.append(
+                    Violation(path="level", reason="exceeds ±(2^53-1) integer cap")
+                )
             if value.level <= 0:
                 violations.append(
                     Violation(path="level", reason=f"must be > 0, got {value.level}")
@@ -3172,13 +3524,13 @@ class _ShowcaseTransferTypeConverter(
                     )
                 )
             else:
-                if value.ratio < 5:
+                if float(value.ratio) < 5.0:
                     violations.append(
                         Violation(
                             path="ratio", reason=f"must be >= 5, got {value.ratio}"
                         )
                     )
-                if math.fmod(value.ratio, 5) != 0:
+                if math.fmod(float(value.ratio), 5.0) != 0:
                     violations.append(
                         Violation(
                             path="ratio",
@@ -3196,6 +3548,10 @@ class _ShowcaseTransferTypeConverter(
                 )
             out["score"] = value.score
         if value.step is not None:
+            if abs(value.step) > 9007199254740991:
+                violations.append(
+                    Violation(path="step", reason="exceeds ±(2^53-1) integer cap")
+                )
             if value.step % 3 != 0:
                 violations.append(
                     Violation(
@@ -3247,6 +3603,12 @@ class _ShowcaseTransferTypeConverter(
             if not isinstance(value.id_or_name, bool) and isinstance(
                 value.id_or_name, int
             ):
+                if abs(value.id_or_name) > 9007199254740991:
+                    violations.append(
+                        Violation(
+                            path="idOrName", reason="exceeds ±(2^53-1) integer cap"
+                        )
+                    )
                 if value.id_or_name < 1:
                     violations.append(
                         Violation(
@@ -3275,6 +3637,10 @@ class _ShowcaseTransferTypeConverter(
                         )
                     )
             if not isinstance(value.mode, bool) and isinstance(value.mode, int):
+                if abs(value.mode) > 9007199254740991:
+                    violations.append(
+                        Violation(path="mode", reason="exceeds ±(2^53-1) integer cap")
+                    )
                 if value.mode < 0:
                     violations.append(
                         Violation(path="mode", reason=f"must be >= 0, got {value.mode}")
@@ -3376,6 +3742,15 @@ class _ShowcaseTransferTypeConverter(
                         )
             out["slots"] = value.slots
         if value.grid is not None:
+            for item_index_4, item_element_4 in enumerate(value.grid):
+                for item_index_8, item_element_8 in enumerate(item_element_4):
+                    if abs(item_element_8) > 9007199254740991:
+                        violations.append(
+                            Violation(
+                                path=f"grid[{item_index_4}]" + f"[{item_index_8}]",
+                                reason="exceeds ±(2^53-1) integer cap",
+                            )
+                        )
             out["grid"] = value.grid
         if value.number_grid is not None:
             for item_index_4, item_element_4 in enumerate(value.number_grid):
@@ -3636,6 +4011,124 @@ class _ShowcaseTransferTypeConverter(
                 )
             except ValidationError as error:
                 _collect(violations, "contact", error)
+        if value.nullable_count is not None:
+            if abs(value.nullable_count) > 9007199254740991:
+                violations.append(
+                    Violation(
+                        path="nullableCount", reason="exceeds ±(2^53-1) integer cap"
+                    )
+                )
+            if value.nullable_count < 1:
+                violations.append(
+                    Violation(
+                        path="nullableCount",
+                        reason=f"must be >= 1, got {value.nullable_count}",
+                    )
+                )
+            if value.nullable_count > 10:
+                violations.append(
+                    Violation(
+                        path="nullableCount",
+                        reason=f"must be <= 10, got {value.nullable_count}",
+                    )
+                )
+            out["nullableCount"] = value.nullable_count
+        if value.nullable_ratio is not None:
+            if not (
+                -1.7976931348623157e308
+                <= value.nullable_ratio
+                <= 1.7976931348623157e308
+            ):
+                violations.append(
+                    Violation(
+                        path="nullableRatio",
+                        reason=f"must be a finite number, got {value.nullable_ratio}",
+                    )
+                )
+            else:
+                if math.fmod(float(value.nullable_ratio), 2.0) != 0:
+                    violations.append(
+                        Violation(
+                            path="nullableRatio",
+                            reason=f"must be a multiple of 2, got {value.nullable_ratio}",
+                        )
+                    )
+            out["nullableRatio"] = value.nullable_ratio
+        if value.nullable_flag is not None:
+            out["nullableFlag"] = value.nullable_flag
+        if value.nullable_tags is not None:
+            if len(value.nullable_tags) < 1:
+                violations.append(
+                    Violation(
+                        path="nullableTags",
+                        reason=f"must have at least 1 items, got {len(value.nullable_tags)}",
+                    )
+                )
+            _check_unique_items(value.nullable_tags, "nullableTags", violations)
+            out["nullableTags"] = value.nullable_tags
+        if value.nullable_mode is not None:
+            if typing.cast("object", value.nullable_mode) not in ("auto", "manual"):
+                violations.append(
+                    Violation(
+                        path="nullableMode",
+                        reason=f'must be one of ["auto", "manual"], got {_quote(value.nullable_mode)}',
+                    )
+                )
+            out["nullableMode"] = value.nullable_mode
+        if value.integral_measurements is not None:
+            _check_contains(
+                value.integral_measurements,
+                lambda element: (
+                    not isinstance(element, bool)
+                    and isinstance(element, (int, float))
+                    and abs(element) <= 9007199254740991
+                    and float(element).is_integer()
+                ),
+                1,
+                None,
+                False,
+                "integralMeasurements",
+                violations,
+            )
+            for item_index_4, item_element_4 in enumerate(value.integral_measurements):
+                if not (
+                    -1.7976931348623157e308 <= item_element_4 <= 1.7976931348623157e308
+                ):
+                    violations.append(
+                        Violation(
+                            path=f"integralMeasurements[{item_index_4}]",
+                            reason=f"must be a finite number, got {item_element_4}",
+                        )
+                    )
+            out["integralMeasurements"] = value.integral_measurements
+        if value.by_five is not None:
+            if not (-1.7976931348623157e308 <= value.by_five <= 1.7976931348623157e308):
+                violations.append(
+                    Violation(
+                        path="byFive",
+                        reason=f"must be a finite number, got {value.by_five}",
+                    )
+                )
+            else:
+                if math.fmod(float(value.by_five), 5.0) != 0:
+                    violations.append(
+                        Violation(
+                            path="byFive",
+                            reason=f"must be a multiple of 5, got {value.by_five}",
+                        )
+                    )
+            out["byFive"] = value.by_five
+        if value.wildcard is not None:
+            if _PATTERN_F7DE686CF7F23810.search(value.wildcard) is None:
+                violations.append(
+                    Violation(
+                        path="wildcard",
+                        reason=f"must match pattern {_PATTERN_F7DE686CF7F23810.pattern}, got {_quote(value.wildcard)}",
+                    )
+                )
+            out["wildcard"] = value.wildcard
+        if value.quoted is not None:
+            out["quoted"] = value.quoted
         if violations:
             raise ValidationError(violations)
         return out
@@ -3971,6 +4464,52 @@ class Showcase:
 
     contact: ContactPy | None = None
 
+    nullable_count: int | None = None
+    """Optional and nullable **integer**, with bounds on the non-null branch. The
+    nullability wrapper carries no `type` of its own, so an emitter that reads the
+    wrapper rather than the branch loses both the element type and every constraint on
+    it. Go emits `*int64`, TS `number | null`, Python `int | None`, Java `@Nullable
+    Long`, and `1 <= v <= 10` is enforced in all four, in both directions.
+    """
+
+    nullable_ratio: float | None = None
+    """Optional and nullable number with a divisor on the non-null branch."""
+
+    nullable_flag: bool | None = None
+    """Optional and nullable boolean."""
+
+    nullable_tags: list[str] | None = None
+    """Optional and nullable **array**, with element and count constraints on the non-null
+    branch. Optional + nullable, so the Go field stays `[]string` and a wire `null`
+    decodes to a nil slice.
+    """
+
+    nullable_mode: typing.Literal["auto", "manual"] | None = None
+    """Optional and nullable **closed value set** — the closed type survives the
+    nullability wrapper, so an unknown string is a Violation rather than an accepted
+    value.
+    """
+
+    integral_measurements: list[float] | None = None
+    """An integer `contains` matcher over number elements: the matcher's own predicate
+    decides a match, and the +/-(2^53-1) integer cap applies to it in every language.
+    """
+
+    by_five: float | None = None
+    """A number-field divisor. Divisibility is IEEE `fmod` over the stored binary64 value,
+    not exact decimal arithmetic, so all four agree at magnitudes where the shortest
+    decimal spelling and the stored double diverge.
+    """
+
+    wildcard: str | None = None
+    """A pattern containing a bare dot, normalized to an explicit negated class so the four
+    regex engines agree on line terminators (`\\r`, U+0085, U+2028, U+2029), which their
+    native `.` does not.
+    """
+
+    quoted: str | None = None
+    """Ends with a quote \""""
+
     def __init__(
         self,
         *,
@@ -4051,6 +4590,15 @@ class Showcase:
         settings: Settings | None = None,
         attributes: Attributes | None = None,
         contact: ContactPy | None = None,
+        nullable_count: int | None = None,
+        nullable_ratio: float | None = None,
+        nullable_flag: bool | None = None,
+        nullable_tags: list[str] | None = None,
+        nullable_mode: typing.Literal["auto", "manual"] | None = None,
+        integral_measurements: list[float] | None = None,
+        by_five: float | None = None,
+        wildcard: str | None = None,
+        quoted: str | None = None,
         _retries: int | None = None,
         _greeting: str | None = None,
         _debug: bool | None = None,
@@ -4128,6 +4676,15 @@ class Showcase:
         self.settings = settings
         self.attributes = attributes
         self.contact = contact
+        self.nullable_count = nullable_count
+        self.nullable_ratio = nullable_ratio
+        self.nullable_flag = nullable_flag
+        self.nullable_tags = nullable_tags
+        self.nullable_mode = nullable_mode
+        self.integral_measurements = integral_measurements
+        self.by_five = by_five
+        self.wildcard = wildcard
+        self.quoted = quoted
 
     @property
     def retries(self) -> int:
@@ -4450,6 +5007,10 @@ class _ShowcaseLedgerValueTransferTypeConverter(
     def to_transfer_type(self, value: "ShowcaseLedgerValue") -> typing.Any:
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if abs(value.amount) > 9007199254740991:
+            violations.append(
+                Violation(path="amount", reason="exceeds ±(2^53-1) integer cap")
+            )
         if value.amount < 0:
             violations.append(
                 Violation(path="amount", reason=f"must be >= 0, got {value.amount}")
@@ -5269,6 +5830,10 @@ class _WidgetTransferTypeConverter(
             out["kind"] = value.kind
         out["name"] = value.name
         if value.size is not None:
+            if abs(value.size) > 9007199254740991:
+                violations.append(
+                    Violation(path="size", reason="exceeds ±(2^53-1) integer cap")
+                )
             if value.size < 10:
                 violations.append(
                     Violation(path="size", reason=f"must be >= 10, got {value.size}")
@@ -5566,6 +6131,10 @@ def _showcase_segments_item_to_transfer_type(value: ShowcaseSegmentsItem) -> typ
                 Violation(path="", reason=f"must have length >= 2, got {len(value)}")
             )
     if not isinstance(value, bool) and isinstance(value, int):
+        if abs(value) > 9007199254740991:
+            violations.append(
+                Violation(path="", reason="exceeds ±(2^53-1) integer cap")
+            )
         if value < 0:
             violations.append(Violation(path="", reason=f"must be >= 0, got {value}"))
     candidate = typing.cast("object", value)

@@ -1,15 +1,49 @@
 //! The RE2-safe portable subset for the JSON-Schema `pattern` keyword: a
-//! load-time compile gate + `\s`/`\S` normalization (target-agnostic) plus the
-//! per-target `$` end-anchor rewrite applied by the Python/Java backends. See
-//! `specs/json-schema/features/pattern.md` for the authoritative rules and
+//! load-time compile gate + a `regex-syntax` AST conformance pass (portability
+//! rejects plus the `\s`/`\S` and `.` normalizations, all target-agnostic) plus
+//! the per-target `$` end-anchor rewrite applied by the Python/Java backends.
+//! See `specs/json-schema/features/pattern.md` for the authoritative rules and
 //! `specs/json-schema/corpora/pattern_conformance/corpus.json` for the corpus
 //! that pinned every rule below.
 //!
 //! The gate is pure Rust — it compiles the pattern with the `regex` crate (the
-//! same no-backtracking family as Go's RE2, so a pattern it accepts is
-//! compilable by the permissive JS/Python/Java engines) and walks the
-//! `regex-syntax` AST for the three conformance rules the compile gate alone
-//! does not cover. No Go (or other) toolchain is involved.
+//! same no-backtracking family as Go's RE2) and then walks the `regex-syntax`
+//! AST. **Compiling under Rust is necessary but not sufficient:** Rust's
+//! accepted language is a *superset* of ECMA-262-with-`u`, Python `re`, and
+//! `java.util.regex` in several directions, so the AST pass carries an explicit
+//! rule for every construct where a Rust-compilable pattern would either fail to
+//! compile in a target or match differently there. Every rule below was measured
+//! against Go 1.26 / Node (`u` flag) / CPython `re.ASCII` / OpenJDK 21, not
+//! reasoned about. No Go (or other) toolchain is involved at load time.
+//!
+//! Rejects (each verified to break or diverge in at least one target):
+//! - backtracking constructs the `regex` crate cannot compile (lookaround,
+//!   backreferences, …) — the compile gate;
+//! - inline flag groups (`(?i)` / `(?flags:…)`) — JS cannot compile them;
+//! - `\S` inside a multi-member character class — no portable positive form;
+//! - **non-portable escapes**: `\-`, `\_`, `\"`, `\ `, `\#`, `\&`, `\~`, … (JS
+//!   `u` mode restricts `IdentityEscape` to the syntax characters and `/`),
+//!   `\a` (JS), `\v` (Java reads it as a *vertical whitespace class*, not
+//!   U+000B), `\0`/octal (Java), `\uFFFF` (Go), `\x{…}` (JS + Python),
+//!   `\p{…}`/`\pL` (Python; `\pL` also JS);
+//! - **lone `{`, `}`, `]`** outside a class — JS `u` (and Java, for `{`) treat
+//!   them as malformed quantifier/class brackets;
+//! - `\A` / `\z` / `\b{start}` … — JS (and Python, for `\z`) cannot compile them;
+//! - **named capture groups** — `(?P<n>…)` breaks Java, `(?<n>…)` breaks Python;
+//! - **POSIX classes** (`[[:alpha:]]`), **nested classes** (`[a[\s]]`) and
+//!   **class set operations** (`[a&&b]`, `[a--b]`, `[a~~b]`) — JS cannot compile
+//!   them and Go/Python/Java each read them differently;
+//! - **nested / ambiguous quantifiers** (`(a+)+`, `(a?)*`, `(a|a)*`) — "regular"
+//!   is a property of the *language*, not the *engine*: these are linear in
+//!   Go/RE2 and exponential in the three backtracking targets (decision D7).
+//!
+//! Normalizations (rewritten in the emitted pattern rather than rejected):
+//! - `\s`/`\S` → the explicit ASCII whitespace class, in every placement
+//!   including inside a class;
+//! - `.` → `[^\n]` — the four engines' "any character except a line terminator"
+//!   sets differ (Go/Python exclude only `\n`; JS also `\r`, U+2028, U+2029;
+//!   Java also `\r`, U+0085, U+2028, U+2029);
+//! - `$` → `\Z` (Python) / `\z` (Java) at emit time, via [`rewrite_end_anchor`].
 
 use regex_syntax::ast::{self, Ast};
 
@@ -20,6 +54,33 @@ use regex_syntax::ast::{self, Ast};
 /// agree. Deliberately ASCII (ECMA-262's Unicode spaces dropped), consistent
 /// with the ASCII `\d`/`\w` pinning.
 const WS: &str = r"\t\n\x0B\f\r ";
+
+/// The portable spelling of `.`. Go/RE2 and Python `re` exclude only `\n` from
+/// `.`; JS additionally excludes `\r`, U+2028 and U+2029; Java additionally
+/// excludes `\r`, U+0085, U+2028 and U+2029. Splicing the explicit negated class
+/// pins every engine to the RE2/Python reading (measured: all four agree on
+/// `\r`, U+0085, U+2028, U+2029, `\n` and an astral code point after the
+/// rewrite).
+const DOT_CLASS: &str = r"[^\n]";
+
+/// Punctuation whose *escaped* form every target accepts **outside** a character
+/// class. ECMA-262 `u` mode is the binding constraint: `IdentityEscape` is
+/// restricted to `SyntaxCharacter` (`^ $ \ . * + ? ( ) [ ] { } |`) plus `/`, so
+/// Rust-legal escapes such as `\-`, `\_`, `\"`, `\ `, `\#`, `\&` and `\~` are
+/// `SyntaxError`s in JavaScript.
+const PORTABLE_ESCAPES: &[char] = &[
+    '^', '$', '\\', '.', '*', '+', '?', '(', ')', '[', ']', '{', '}', '|', '/',
+];
+
+/// Additional escapes legal **inside** a character class: ECMA-262 `u` mode's
+/// `ClassEscape` admits `-` on top of the list above.
+const PORTABLE_CLASS_ESCAPES: &[char] = &['-'];
+
+/// Characters that must not appear **verbatim** outside a character class: JS
+/// `u` mode reads a lone `}` or `]` as a stray quantifier/class bracket, and a
+/// lone `{` as an incomplete quantifier (Java rejects `{` too). Rust and Python
+/// treat all three as literals.
+const LONE_BRACKETS: &[char] = &['{', '}', ']'];
 
 #[derive(Debug, Clone)]
 struct Edit {
@@ -32,16 +93,16 @@ struct Edit {
 #[derive(Debug)]
 pub struct PatternError(pub String);
 
-/// The load-time compile gate + `\s`/`\S` normalization. Returns the normalized
-/// pattern (Perl whitespace classes expanded to the explicit ASCII class; the
-/// `$` end-anchor kept canonical for the per-target backend rewrite). Rejects:
-/// backtracking constructs the `regex` crate cannot compile (lookaround,
-/// backreferences, …), inline flag groups (`(?i)` / `(?flags:…)`), and `\S`
-/// inside a multi-member character class.
+/// The load-time compile gate + portability pass + normalization. Returns the
+/// normalized pattern (Perl whitespace classes expanded to the explicit ASCII
+/// class, `.` expanded to `[^\n]`, the `$` end-anchor kept canonical for the
+/// per-target backend rewrite), or a `PatternError` naming the non-portable
+/// construct and the portable spelling to use instead. See the module docs for
+/// the full rule list.
 pub fn gate_and_normalize(pattern: &str) -> Result<String, PatternError> {
-    // 1. Compile gate. Success ⟹ the regular (no-backtracking) subset, which
-    //    every target runtime engine accepts. Failure names the offending
-    //    construct via the `regex` diagnostic.
+    // 1. Compile gate. Success ⟹ the regular (no-backtracking) subset. This is
+    //    necessary but *not* sufficient — step 2 carries the rules for every
+    //    construct Rust accepts that a target engine does not.
     if let Err(error) = regex::Regex::new(pattern) {
         let detail = error
             .to_string()
@@ -58,7 +119,7 @@ pub fn gate_and_normalize(pattern: &str) -> Result<String, PatternError> {
     }
 
     // 2. Walk the AST (guaranteed to parse, since it just compiled) for the
-    //    three conformance rules the compile gate alone does not cover.
+    //    portability rejects and the `\s`/`\S` and `.` normalizations.
     let ast = ast::parse::Parser::new()
         .parse(pattern)
         .map_err(|error| PatternError(format!("pattern {pattern:?} failed to parse: {error}")))?;
@@ -113,12 +174,31 @@ fn collect_end_anchors(ast: &Ast, edits: &mut Vec<Edit>, replacement: &str) {
     }
 }
 
-/// Walk the AST collecting `\s`/`\S` rewrite edits, rejecting inline-flag groups
-/// and the open-complement `\S`-in-multi-member-class case.
+/// Walk the AST rejecting every non-portable construct and collecting the
+/// `\s`/`\S` and `.` rewrite edits.
 fn walk_normalize(ast: &Ast, pattern: &str, edits: &mut Vec<Edit>) -> Result<(), PatternError> {
     match ast {
+        Ast::Empty(_) => Ok(()),
         // Bare inline flag directive `(?i)` / `(?m)` … — JS cannot compile it.
         Ast::Flags(_) => Err(inline_flag_error(pattern)),
+        Ast::Literal(literal) => check_literal(literal, pattern, false),
+        // `.` means a different set in each engine — splice the explicit class.
+        Ast::Dot(span) => {
+            edits.push(Edit {
+                start: span.start.offset,
+                end: span.end.offset,
+                replacement: DOT_CLASS.to_string(),
+            });
+            Ok(())
+        }
+        Ast::Assertion(assertion) => check_assertion(assertion, pattern),
+        // `\p{…}` / `\pL`: Python `re` has no Unicode-property escape at all and
+        // `\pL` is also a JS `SyntaxError` (JS requires the braced form).
+        Ast::ClassUnicode(_) => Err(PatternError(format!(
+            "pattern {pattern:?} uses a Unicode property escape (`\\p{{…}}` / `\\pL`), \
+             which Python's `re` cannot compile (and the one-letter form is a JavaScript \
+             SyntaxError); spell the intended set as an explicit character class"
+        ))),
         Ast::ClassPerl(perl) if matches!(perl.kind, ast::ClassPerlKind::Space) => {
             let replacement = if perl.negated {
                 format!("[^{WS}]") // \S -> [^WS]
@@ -132,6 +212,8 @@ fn walk_normalize(ast: &Ast, pattern: &str, edits: &mut Vec<Edit>) -> Result<(),
             });
             Ok(())
         }
+        // `\d` / `\D` / `\w` / `\W` are already identical ASCII in all four.
+        Ast::ClassPerl(_) => Ok(()),
         Ast::ClassBracketed(class) => handle_class(class, pattern, edits),
         Ast::Concat(concat) => {
             for child in &concat.asts {
@@ -145,18 +227,137 @@ fn walk_normalize(ast: &Ast, pattern: &str, edits: &mut Vec<Edit>) -> Result<(),
             }
             Ok(())
         }
-        Ast::Repetition(repetition) => walk_normalize(&repetition.ast, pattern, edits),
+        Ast::Repetition(repetition) => {
+            check_repetition(repetition, pattern)?;
+            walk_normalize(&repetition.ast, pattern, edits)
+        }
         Ast::Group(group) => {
-            // `(?flags:…)` sets flags on a group — reject (JS cannot compile it).
-            // `(?:…)` is a bare non-capturing group (empty flag list) — fine.
-            if let ast::GroupKind::NonCapturing(flags) = &group.kind
-                && !flags.items.is_empty()
-            {
-                return Err(inline_flag_error(pattern));
+            match &group.kind {
+                // `(?flags:…)` sets flags on a group — reject (JS cannot
+                // compile it). `(?:…)` is a bare non-capturing group (empty flag
+                // list) — fine.
+                ast::GroupKind::NonCapturing(flags) if !flags.items.is_empty() => {
+                    return Err(inline_flag_error(pattern));
+                }
+                // `(?P<n>…)` is a `PatternSyntaxException` in Java; `(?<n>…)` is
+                // a `PatternError` in Python. Neither spelling is portable.
+                ast::GroupKind::CaptureName { name, .. } => {
+                    let name = &name.name;
+                    return Err(PatternError(format!(
+                        "pattern {pattern:?} uses a named capture group `{name}`, which has no \
+                         portable spelling (`(?P<{name}>…)` fails to compile in Java, \
+                         `(?<{name}>…)` fails in Python); use a non-capturing group `(?:…)` \
+                         — `pattern` only ever asks whether the regex matches, so captures \
+                         are never read"
+                    )));
+                }
+                _ => {}
             }
             walk_normalize(&group.ast, pattern, edits)
         }
-        _ => Ok(()),
+    }
+}
+
+/// Zero-width assertions: `^`, `$`, `\b` and `\B` are portable (and `$` is
+/// normalized per target at emit time). `\A`, `\z` and the `\b{…}` family are
+/// Rust/Go spellings with no ECMA-262 equivalent.
+fn check_assertion(assertion: &ast::Assertion, pattern: &str) -> Result<(), PatternError> {
+    use ast::AssertionKind::*;
+    match assertion.kind {
+        StartLine | EndLine | WordBoundary | NotWordBoundary => Ok(()),
+        StartText => Err(PatternError(format!(
+            "pattern {pattern:?} uses the `\\A` start-of-text anchor, which is a JavaScript \
+             SyntaxError; use `^` (the generator never enables multiline mode, so `^` already \
+             means start-of-input in every target)"
+        ))),
+        EndText => Err(PatternError(format!(
+            "pattern {pattern:?} uses the `\\z` end-of-text anchor, which is a JavaScript \
+             SyntaxError and a Python `re` error; use `$` (the generator rewrites it to \
+             `\\Z`/`\\z` per target so it always means end-of-input)"
+        ))),
+        WordBoundaryStart
+        | WordBoundaryEnd
+        | WordBoundaryStartAngle
+        | WordBoundaryEndAngle
+        | WordBoundaryStartHalf
+        | WordBoundaryEndHalf => Err(PatternError(format!(
+            "pattern {pattern:?} uses a Rust/Go-only word-boundary assertion \
+             (`\\b{{start}}` / `\\b{{end}}` / `\\<` / `\\>`), which no other target engine \
+             can compile; use the plain `\\b` / `\\B` boundaries"
+        ))),
+    }
+}
+
+/// Validate one literal's *spelling*. The character it denotes is irrelevant —
+/// what differs across engines is which escape forms parse.
+fn check_literal(
+    literal: &ast::Literal,
+    pattern: &str,
+    in_class: bool,
+) -> Result<(), PatternError> {
+    use ast::{HexLiteralKind, LiteralKind, SpecialLiteralKind};
+    match &literal.kind {
+        LiteralKind::Verbatim => {
+            if !in_class && LONE_BRACKETS.contains(&literal.c) {
+                let c = literal.c;
+                return Err(PatternError(format!(
+                    "pattern {pattern:?} contains a lone `{c}` outside a character class, which \
+                     JavaScript's `u` mode rejects as a stray quantifier/class bracket \
+                     (Java rejects a lone `{{` too); escape it as `\\{c}`"
+                )));
+            }
+            Ok(())
+        }
+        // An escaped punctuation character (`\*`, `\-`, `\_`, …).
+        LiteralKind::Meta | LiteralKind::Superfluous => {
+            let c = literal.c;
+            if PORTABLE_ESCAPES.contains(&c) || (in_class && PORTABLE_CLASS_ESCAPES.contains(&c)) {
+                return Ok(());
+            }
+            Err(PatternError(format!(
+                "pattern {pattern:?} escapes `{c}` as `\\{c}`, which is a JavaScript SyntaxError \
+                 (ECMA-262 `u` mode only allows escaping `^ $ \\ . * + ? ( ) [ ] {{ }} | /`, \
+                 plus `-` inside a character class); write `{c}` unescaped"
+            )))
+        }
+        LiteralKind::Octal => Err(PatternError(format!(
+            "pattern {pattern:?} uses an octal escape, which Java rejects \
+             (`Illegal octal escape sequence`); use the two-digit hex form `\\xHH`"
+        ))),
+        LiteralKind::HexFixed(HexLiteralKind::X) => Ok(()),
+        LiteralKind::HexFixed(HexLiteralKind::UnicodeShort) => Err(PatternError(format!(
+            "pattern {pattern:?} uses a `\\uFFFF` escape, which Go's `regexp` cannot compile; \
+             use the two-digit hex form `\\xHH` for ASCII or write the character literally"
+        ))),
+        LiteralKind::HexFixed(HexLiteralKind::UnicodeLong) => Err(PatternError(format!(
+            "pattern {pattern:?} uses a `\\UFFFFFFFF` escape, which only Rust and Go accept; \
+             write the character literally"
+        ))),
+        LiteralKind::HexBrace(_) => Err(PatternError(format!(
+            "pattern {pattern:?} uses a braced hex escape (`\\x{{…}}`), which is a JavaScript \
+             SyntaxError and a Python `re` error; write the character literally \
+             (the emitted JavaScript regex carries the `u` flag, so an astral character \
+             is one code point)"
+        ))),
+        LiteralKind::Special(SpecialLiteralKind::Bell) => Err(PatternError(format!(
+            "pattern {pattern:?} uses the `\\a` bell escape, which is a JavaScript SyntaxError; \
+             use `\\x07`"
+        ))),
+        LiteralKind::Special(SpecialLiteralKind::VerticalTab) => Err(PatternError(format!(
+            "pattern {pattern:?} uses the `\\v` escape, which Java reads as a *vertical \
+             whitespace class* (it matches `\\n`, `\\r`, U+0085, U+2028, U+2029 as well) while \
+             every other target reads it as U+000B; use `\\x0B`"
+        ))),
+        LiteralKind::Special(SpecialLiteralKind::Space) => Err(PatternError(format!(
+            "pattern {pattern:?} uses the verbose-mode `\\ ` escape, which only Rust accepts; \
+             write a plain space"
+        ))),
+        LiteralKind::Special(
+            SpecialLiteralKind::FormFeed
+            | SpecialLiteralKind::Tab
+            | SpecialLiteralKind::LineFeed
+            | SpecialLiteralKind::CarriageReturn,
+        ) => Ok(()),
     }
 }
 
@@ -165,7 +366,8 @@ fn handle_class(
     pattern: &str,
     edits: &mut Vec<Edit>,
 ) -> Result<(), PatternError> {
-    let items = flatten(&class.kind);
+    let mut items = Vec::new();
+    collect_class_set(&class.kind, pattern, &mut items)?;
 
     // Sole-member reductions: `[\s]`→`[WS]`, `[^\s]`→`[^WS]`, `[\S]`→`[^WS]`,
     // `[^\S]`→`[WS]` (the class reduces to a standalone `\s`/`\S`).
@@ -210,33 +412,217 @@ fn handle_class(
     Ok(())
 }
 
+/// Flatten a `ClassSet` into its leaf items, rejecting every non-portable class
+/// construct on the way down. Unlike a plain flatten this *cannot* silently drop
+/// a subtree: a nested class, a POSIX class, a Unicode property or a set binary
+/// operation is an error, not an opaque leaf — which is what previously let a
+/// `\s`/`\S` inside `[a[\s]]`, `[[\S]]` or `[\w&&\s]` escape normalization
+/// entirely.
+fn collect_class_set<'a>(
+    set: &'a ast::ClassSet,
+    pattern: &str,
+    out: &mut Vec<&'a ast::ClassSetItem>,
+) -> Result<(), PatternError> {
+    match set {
+        ast::ClassSet::Item(item) => collect_class_item(item, pattern, out),
+        // `&&` / `--` / `~~`: a JavaScript SyntaxError, a literal member list in
+        // Python, an intersection in Java (`&&` only) and in Go/Rust — measured
+        // to produce three different answers for `[\w&&\s]` and `[a-z&&[^aeiou]]`.
+        ast::ClassSet::BinaryOp(op) => {
+            let spelling = match op.kind {
+                ast::ClassSetBinaryOpKind::Intersection => "&&",
+                ast::ClassSetBinaryOpKind::Difference => "--",
+                ast::ClassSetBinaryOpKind::SymmetricDifference => "~~",
+            };
+            Err(PatternError(format!(
+                "pattern {pattern:?} uses the character-class set operator `{spelling}`, which \
+                 JavaScript cannot compile and which Go, Python and Java each read differently \
+                 (Python treats it as ordinary members); spell the resulting set explicitly"
+            )))
+        }
+    }
+}
+
+fn collect_class_item<'a>(
+    item: &'a ast::ClassSetItem,
+    pattern: &str,
+    out: &mut Vec<&'a ast::ClassSetItem>,
+) -> Result<(), PatternError> {
+    match item {
+        ast::ClassSetItem::Union(union) => {
+            for child in &union.items {
+                collect_class_item(child, pattern, out)?;
+            }
+            Ok(())
+        }
+        ast::ClassSetItem::Bracketed(_) => Err(PatternError(format!(
+            "pattern {pattern:?} nests a character class inside another (`[a[…]]`), which is a \
+             JavaScript SyntaxError and which Go, Python and Java each read differently; \
+             merge the members into a single class"
+        ))),
+        ast::ClassSetItem::Ascii(_) => Err(PatternError(format!(
+            "pattern {pattern:?} uses a POSIX character class (`[:alpha:]`), which is a \
+             JavaScript SyntaxError and which Python and Java read as a plain member list; \
+             spell the range explicitly (e.g. `[A-Za-z]`)"
+        ))),
+        ast::ClassSetItem::Unicode(_) => Err(PatternError(format!(
+            "pattern {pattern:?} uses a Unicode property escape (`\\p{{…}}`) inside a character \
+             class, which Python's `re` cannot compile; spell the intended set explicitly"
+        ))),
+        ast::ClassSetItem::Literal(literal) => {
+            check_literal(literal, pattern, true)?;
+            out.push(item);
+            Ok(())
+        }
+        ast::ClassSetItem::Range(range) => {
+            check_literal(&range.start, pattern, true)?;
+            check_literal(&range.end, pattern, true)?;
+            out.push(item);
+            Ok(())
+        }
+        ast::ClassSetItem::Perl(_) | ast::ClassSetItem::Empty(_) => {
+            out.push(item);
+            Ok(())
+        }
+    }
+}
+
+/// Decision **D7**: gate-reject the nested / ambiguous quantifier shapes.
+/// "Regular" is a property of the *language*, not the *engine* — Go/RE2 and Rust
+/// run `^(a+)+$` in linear time, while the three backtracking targets do not
+/// (measured: 39 s for a 31-character input in CPython). A gate-accepted schema
+/// must not be a remote DoS in three of four targets, so an **unbounded** loop
+/// (`*`, `+`, `{n,}`) is rejected when its body is ambiguous:
+///
+/// - the body can match the empty string (`(a?)+`, `(a*)*`), or
+/// - the body reduces to another *inexact* repetition (`(a+)+`, `(a{1,2})+`,
+///   `(a+|b)*`) — "reduces to" meaning after stripping groups, and for a
+///   concatenation, when every other element is nullable (`(a+b*)+`), or
+/// - the body is an alternation with two textually identical branches
+///   (`(a|a)*`).
+///
+/// An **exact-count** inner repetition is unambiguous and stays accepted, which
+/// is what keeps the generator's own pinned `format` / `contentEncoding` regexes
+/// (`(?:[A-Za-z0-9+/]{4})*`, the `hostname` / `email` / `uri` bodies, the `ipv6`
+/// grammar) inside the gate.
+fn check_repetition(repetition: &ast::Repetition, pattern: &str) -> Result<(), PatternError> {
+    if !is_unbounded(&repetition.op.kind) {
+        return Ok(());
+    }
+    let body = strip_groups(&repetition.ast);
+    let reason = if is_nullable(body) {
+        "its body can match the empty string"
+    } else if reduces_to_inexact_repetition(body) {
+        "it applies a quantifier to another open-ended quantifier"
+    } else if has_duplicate_alternation_branch(body, pattern) {
+        "its body is an alternation with two identical branches"
+    } else {
+        return Ok(());
+    };
+    Err(PatternError(format!(
+        "pattern {pattern:?} contains an ambiguous unbounded quantifier ({reason}), which runs \
+         in linear time under Go's RE2 but backtracks exponentially in JavaScript, Python and \
+         Java — a schema that is safe in one target and a denial-of-service in the other three; \
+         rewrite the repetition so each iteration consumes an unambiguous, non-empty chunk \
+         (e.g. `^a+$` for `^(a+)+$`), or bound the inner quantifier to an exact count"
+    )))
+}
+
+fn is_unbounded(kind: &ast::RepetitionKind) -> bool {
+    match kind {
+        ast::RepetitionKind::ZeroOrOne => false,
+        ast::RepetitionKind::ZeroOrMore | ast::RepetitionKind::OneOrMore => true,
+        ast::RepetitionKind::Range(range) => {
+            matches!(range, ast::RepetitionRange::AtLeast(_))
+        }
+    }
+}
+
+/// True for a repetition whose iteration count is not fixed — the shape that
+/// makes a nested loop ambiguous. `{n}` is exact and therefore safe.
+fn is_inexact(kind: &ast::RepetitionKind) -> bool {
+    !matches!(
+        kind,
+        ast::RepetitionKind::Range(ast::RepetitionRange::Exactly(_))
+    )
+}
+
+fn strip_groups(ast: &Ast) -> &Ast {
+    match ast {
+        Ast::Group(group) => strip_groups(&group.ast),
+        other => other,
+    }
+}
+
+fn is_nullable(ast: &Ast) -> bool {
+    match ast {
+        Ast::Empty(_) | Ast::Flags(_) | Ast::Assertion(_) => true,
+        Ast::Literal(_)
+        | Ast::Dot(_)
+        | Ast::ClassUnicode(_)
+        | Ast::ClassPerl(_)
+        | Ast::ClassBracketed(_) => false,
+        Ast::Repetition(repetition) => {
+            min_repetitions(&repetition.op.kind) == 0 || is_nullable(&repetition.ast)
+        }
+        Ast::Group(group) => is_nullable(&group.ast),
+        Ast::Concat(concat) => concat.asts.iter().all(is_nullable),
+        Ast::Alternation(alternation) => alternation.asts.iter().any(is_nullable),
+    }
+}
+
+fn min_repetitions(kind: &ast::RepetitionKind) -> u32 {
+    match kind {
+        ast::RepetitionKind::ZeroOrOne | ast::RepetitionKind::ZeroOrMore => 0,
+        ast::RepetitionKind::OneOrMore => 1,
+        ast::RepetitionKind::Range(range) => match range {
+            ast::RepetitionRange::Exactly(n)
+            | ast::RepetitionRange::AtLeast(n)
+            | ast::RepetitionRange::Bounded(n, _) => *n,
+        },
+    }
+}
+
+/// Whether `ast` behaves as a bare inexact repetition for the purposes of the
+/// nested-quantifier rule: itself one, an alternation with such a branch, or a
+/// concatenation in which one element is one and every other element is nullable
+/// (so the concatenation can degenerate to it).
+fn reduces_to_inexact_repetition(ast: &Ast) -> bool {
+    match strip_groups(ast) {
+        Ast::Repetition(repetition) => is_inexact(&repetition.op.kind),
+        Ast::Alternation(alternation) => alternation.asts.iter().any(reduces_to_inexact_repetition),
+        Ast::Concat(concat) => concat.asts.iter().enumerate().any(|(index, child)| {
+            reduces_to_inexact_repetition(child)
+                && concat
+                    .asts
+                    .iter()
+                    .enumerate()
+                    .all(|(other, sibling)| other == index || is_nullable(sibling))
+        }),
+        _ => false,
+    }
+}
+
+/// `(a|a)*` and friends: two branches that accept the same input give a
+/// backtracking engine 2^n paths through the loop. Compared on the source text,
+/// which is exact and never over-rejects.
+fn has_duplicate_alternation_branch(ast: &Ast, pattern: &str) -> bool {
+    let Ast::Alternation(alternation) = strip_groups(ast) else {
+        return false;
+    };
+    let mut seen = std::collections::HashSet::new();
+    alternation
+        .asts
+        .iter()
+        .any(|branch| !seen.insert(&pattern[branch.span().start.offset..branch.span().end.offset]))
+}
+
 fn inline_flag_error(pattern: &str) -> PatternError {
     PatternError(format!(
         "pattern {pattern:?} uses an inline flag group (e.g. `(?i)` / `(?flags:…)`) \
          which is not ECMA-262 syntax and cannot compile in JavaScript; remove it \
          (per-pattern case-insensitivity and friends are not portable)"
     ))
-}
-
-/// Flatten a `ClassSet` into its leaf items (handles `Union` nesting produced by
-/// a plain `[…]`). `BinaryOp` (`&&`, `--`) is not valid in the accepted subset
-/// and yields no items.
-fn flatten(set: &ast::ClassSet) -> Vec<&ast::ClassSetItem> {
-    fn item<'a>(it: &'a ast::ClassSetItem, out: &mut Vec<&'a ast::ClassSetItem>) {
-        match it {
-            ast::ClassSetItem::Union(union) => {
-                for child in &union.items {
-                    item(child, out);
-                }
-            }
-            other => out.push(other),
-        }
-    }
-    let mut out = Vec::new();
-    if let ast::ClassSet::Item(it) = set {
-        item(it, &mut out);
-    }
-    out
 }
 
 /// Apply non-overlapping `edits` to `src` (left to right by start offset).
@@ -282,6 +668,17 @@ mod tests {
         assert_eq!(norm(r"[^\S]"), r"[\t\n\x0B\f\r ]");
     }
 
+    /// `08#2`: `.` is a different set in each engine — it is spliced out.
+    #[test]
+    fn normalizes_dot_to_an_explicit_class() {
+        assert_eq!(norm("a.b"), r"a[^\n]b");
+        assert_eq!(norm("^a.$"), r"^a[^\n]$");
+        assert_eq!(norm("a.*b"), r"a[^\n]*b");
+        // An escaped dot and a dot inside a class are literals — untouched.
+        assert_eq!(norm(r"a\.b"), r"a\.b");
+        assert_eq!(norm("[.]"), "[.]");
+    }
+
     #[test]
     fn rewrites_end_anchor_per_target() {
         assert_eq!(rewrite_end_anchor("^[a-z]+$", r"\Z"), r"^[a-z]+\Z");
@@ -311,10 +708,143 @@ mod tests {
         assert!(gate_and_normalize(r"[\S\d]").is_err());
     }
 
-    /// Regression: drive the shared 83-pair conformance corpus through the gate.
-    /// Every `expect_gate_reject` pair (backtracking constructs) must reject; the
-    /// lone inline-flag pair rejects too (the gate is stricter than the corpus's
-    /// original flag, per the spec's inline-flag rule); every other pair accepts.
+    /// `08#1`: escapes Rust accepts that at least one target engine does not.
+    #[test]
+    fn rejects_non_portable_escapes() {
+        // The flagship case: an ordinary phone pattern whose `\-` is a JS
+        // `SyntaxError` under the mandatory `u` flag.
+        assert!(gate_and_normalize(r"^\d{3}\-\d{4}$").is_err());
+        assert!(gate_and_normalize(r"\_").is_err());
+        assert!(gate_and_normalize("a\\\"b").is_err());
+        assert!(gate_and_normalize(r"a\ b").is_err());
+        assert!(gate_and_normalize(r"a\ab").is_err()); // \a — JS
+        assert!(gate_and_normalize(r"a\vb").is_err()); // \v — Java class
+        assert!(gate_and_normalize(r"\0").is_err()); // octal — Java
+        assert!(gate_and_normalize("a\\u0041b").is_err()); // \uFFFF — Go
+        assert!(gate_and_normalize(r"\x{1F600}").is_err()); // \x{…} — JS, Python
+        assert!(gate_and_normalize(r"\p{L}+").is_err()); // \p{…} — Python
+        assert!(gate_and_normalize(r"\pL").is_err()); // \pL — JS, Python
+        // The portable escapes stay accepted, including `\-` *inside* a class.
+        for portable in [
+            r"a\.b", r"a\*b", r"a\+b", r"a\?b", r"a\(b", r"a\)b", r"a\[b", r"a\]b", r"a\{b",
+            r"a\}b", r"a\|b", r"a\^b", r"a\$b", r"a\\b", r"a\/b", r"a\tb", r"a\nb", r"a\rb",
+            r"a\fb", r"a\x41b", r"[a\-z]", r"[\^a]", r"[\]]",
+        ] {
+            assert!(
+                gate_and_normalize(portable).is_ok(),
+                "{portable} should stay accepted"
+            );
+        }
+    }
+
+    /// `08#1`: a lone `{`, `}` or `]` is a JS (and, for `{`, Java) syntax error.
+    #[test]
+    fn rejects_lone_brackets() {
+        assert!(gate_and_normalize("a}b").is_err());
+        assert!(gate_and_normalize("a]b").is_err());
+        assert!(gate_and_normalize("a{b").is_err());
+        // Inside a class they are ordinary members in every engine.
+        assert!(gate_and_normalize("[{}]").is_ok());
+        // A real quantifier is not a lone bracket.
+        assert!(gate_and_normalize("^a{2,4}$").is_ok());
+    }
+
+    /// `08#1`: named groups have no spelling that Python and Java both accept.
+    #[test]
+    fn rejects_named_capture_groups() {
+        assert!(gate_and_normalize("(?P<n>a)b").is_err());
+        assert!(gate_and_normalize("(?<name>a)b").is_err());
+        // Plain and non-capturing groups are fine.
+        assert!(gate_and_normalize("(a)b").is_ok());
+        assert!(gate_and_normalize("(?:a)b").is_ok());
+    }
+
+    /// `08#1`: `\A` / `\z` are JS syntax errors (`\z` is a Python error too).
+    #[test]
+    fn rejects_non_portable_anchors() {
+        assert!(gate_and_normalize(r"\Aabc").is_err());
+        assert!(gate_and_normalize(r"abc\z").is_err());
+        assert!(gate_and_normalize(r"\bfoo\b").is_ok());
+        assert!(gate_and_normalize(r"foo\B").is_ok());
+    }
+
+    /// `08#1` / `08#3`: POSIX classes, nested classes and class set operations
+    /// compile in two or more targets and match *differently* there.
+    #[test]
+    fn rejects_non_portable_class_constructs() {
+        assert!(gate_and_normalize("[[:alpha:]]+").is_err());
+        assert!(gate_and_normalize("[a-z&&[^aeiou]]").is_err());
+        assert!(gate_and_normalize(r"[\w&&\s]").is_err());
+        assert!(gate_and_normalize("[a-z--[aeiou]]").is_err());
+        assert!(gate_and_normalize(r"[a[\s]]").is_err());
+        // `[[\S]]` used to slip past the `\S`-in-class reject via the nested
+        // class; it is now rejected as a nested class.
+        assert!(gate_and_normalize(r"[[\S]]").is_err());
+    }
+
+    /// `08#9` / decision D7: nested and ambiguous unbounded quantifiers.
+    #[test]
+    fn rejects_ambiguous_unbounded_quantifiers() {
+        for hostile in [
+            "^(a+)+$",
+            "^(a*)*$",
+            "^(a?)+$",
+            "^([a-z]+)+$",
+            "^(a{1,2})+$",
+            "^(a+b*)+$",
+            "^(a+|b)*$",
+            "^(a|a)*$",
+            r"^(\w+\s*)+$",
+        ] {
+            assert!(
+                gate_and_normalize(hostile).is_err(),
+                "{hostile} should gate-reject (ReDoS)"
+            );
+        }
+        // Unambiguous loops stay accepted.
+        for safe in [
+            "^a+$",
+            "^.*$",
+            "^(ab)+$",
+            "^(a{2})+$",
+            r"^(\d{3}-)+$",
+            "^(a+b)+$",
+            r"^(\.a+)+$",
+            "^(?:[A-Za-z0-9+/]{4})*$",
+        ] {
+            assert!(
+                gate_and_normalize(safe).is_ok(),
+                "{safe} should stay accepted: {:?}",
+                gate_and_normalize(safe).err()
+            );
+        }
+    }
+
+    /// The normalized form must itself be inside the accepted subset — the
+    /// spliced `[\t\n\x0B\f\r ]` and `[^\n]` classes are re-parsed by
+    /// [`rewrite_end_anchor`] at emit time and by the loader's literal check.
+    #[test]
+    fn normalization_is_idempotent() {
+        for pattern in [
+            r"^\s+$",
+            r"[\s.]",
+            r"[\S]",
+            "a.b",
+            r"^\d{3}-\w{4}$",
+            r"^[a-z]+$",
+            "",
+        ] {
+            let once = norm(pattern);
+            let twice = gate_and_normalize(&once)
+                .unwrap_or_else(|error| panic!("re-gating {once:?} failed: {error:?}"));
+            assert_eq!(once, twice, "normalizing {pattern:?} is not idempotent");
+        }
+    }
+
+    /// Regression: drive the shared conformance corpus through the gate. Every
+    /// `expect_gate_reject` pair must reject; every other pair must accept.
+    /// The corpus (not a hard-coded id in this test) is the single source of
+    /// truth for which pairs reject.
     #[test]
     fn conformance_corpus_gate_agrees() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
@@ -324,8 +854,7 @@ mod tests {
         for pair in corpus["pairs"].as_array().expect("pairs array") {
             let id = pair["id"].as_str().unwrap_or("<no id>");
             let pattern = pair["pattern"].as_str().expect("pattern string");
-            let expect_reject =
-                pair["expect_gate_reject"].as_bool().unwrap_or(false) || id == "case-inline-flag";
+            let expect_reject = pair["expect_gate_reject"].as_bool().unwrap_or(false);
             let result = gate_and_normalize(pattern);
             if expect_reject {
                 assert!(
@@ -337,6 +866,32 @@ mod tests {
                     result.is_ok(),
                     "pair `{id}` ({pattern:?}) should gate-accept: {:?}",
                     result.err()
+                );
+            }
+        }
+    }
+
+    /// Every gate-accepted corpus pair carries the expected match verdict that
+    /// the per-language corpus runners assert against, and every gate-rejected
+    /// pair carries none (there is nothing to match).
+    #[test]
+    fn conformance_corpus_declares_expected_matches() {
+        let corpus: serde_json::Value = serde_json::from_str(include_str!(
+            "../../specs/json-schema/corpora/pattern_conformance/corpus.json"
+        ))
+        .expect("corpus parses");
+        for pair in corpus["pairs"].as_array().expect("pairs array") {
+            let id = pair["id"].as_str().unwrap_or("<no id>");
+            let expect_reject = pair["expect_gate_reject"].as_bool().unwrap_or(false);
+            if expect_reject {
+                assert!(
+                    pair.get("expect_match").is_none(),
+                    "gate-rejected pair `{id}` must not declare `expect_match`"
+                );
+            } else {
+                assert!(
+                    pair["expect_match"].is_boolean(),
+                    "pair `{id}` must declare a boolean `expect_match`"
                 );
             }
         }

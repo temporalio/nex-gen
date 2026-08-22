@@ -209,6 +209,14 @@ the enum is a **named** definition; when it is **anonymous** (inline on a
 property), nest the synthesized type inside its enclosing model where the
 language allows it, so it leaves the package/module namespace.
 
+> **`$defs`-named scalar closed values are unimplemented.** A `$defs` entry
+> must currently be `type: object`, a `oneOf` union, or a bare `$ref`, so
+> `$defs: {Color: {type: string, enum: [red, green, blue]}}` is a load
+> reject in all four languages. Every "named definition" branch below —
+> the `$defs`-name reuse, the P15 row for a `$defs`-named type, and
+> `x-<lang>-const-name` on a `$defs` node — describes the intended design
+> and is unreachable until scalar `$defs` entries are admitted.
+
 | Target | Synthesized identifier(s) | Placement / scope |
 |---|---|---|
 | Go | defined type `Color` **+** one const per value (`ColorRed`, …) | **flat package** (Go has no nested types); P15 backstop |
@@ -410,7 +418,8 @@ deserialize-direction guard there.
 - **[[ref]]**: a `$defs`-named enum's synthesized type (Go defined type /
   Java value class) reuses the `$defs` name and enters the same
   per-package namespace (P15); recursion/anonymity follow the shared
-  [[properties]] nesting rule.
+  [[properties]] nesting rule. **Unimplemented** — a scalar `$defs` entry
+  is a load reject today (see *Naming and collisions*).
 
 ## Ecosystem variance
 

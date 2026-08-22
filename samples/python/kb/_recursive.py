@@ -124,6 +124,10 @@ class _BlockTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         out["blockId"] = value.block_id
+        if abs(value.order) > 9007199254740991:
+            violations.append(
+                Violation(path="order", reason="exceeds ±(2^53-1) integer cap")
+            )
         if value.order < 0:
             violations.append(
                 Violation(path="order", reason=f"must be >= 0, got {value.order}")

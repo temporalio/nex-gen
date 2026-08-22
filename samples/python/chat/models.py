@@ -209,6 +209,10 @@ class _MessageTransferTypeConverter(
         if value.reply_to_id is not None:
             out["replyToId"] = value.reply_to_id
         if value._priority is not None:
+            if abs(value.priority) > 9007199254740991:
+                violations.append(
+                    Violation(path="priority", reason="exceeds ±(2^53-1) integer cap")
+                )
             out["priority"] = value._priority
         if violations:
             raise ValidationError(violations)

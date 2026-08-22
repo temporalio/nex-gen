@@ -1,0 +1,30 @@
+# One `contains` matcher schema, run through all four predicates.
+#
+# Each backend derives the matcher's effective type from a different source, so
+# until a single schema reaches all four no wire value was ever judged by more
+# than one of them.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ContainsMatcher
+description: contains over number and integer element types.
+type: object
+additionalProperties: false
+required: [numbers]
+properties:
+  numbers:
+    description: A fractional lower bound over `number` elements.
+    type: array
+    items:
+      type: number
+    contains:
+      type: number
+      minimum: 1.5
+  wideNumbers:
+    description: >-
+      An `integer` matcher over `number` elements: the matcher's own integral
+      predicate has to hold, cap included, before the bound is even consulted.
+    type: array
+    items:
+      type: number
+    contains:
+      type: integer
+      minimum: 1

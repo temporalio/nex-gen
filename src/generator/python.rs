@@ -735,21 +735,23 @@ impl<'a> ApiPlanner<'a> {
             &empty_root_package_imports
         };
         insert_generated_file(&mut files, "__init__.py", render_init(root_package_imports))?;
-        insert_generated_file(
-            &mut files,
-            "models.py",
-            render_models_module(
-                self.enums.values().collect::<Vec<_>>().as_slice(),
-                self.flags.values().collect::<Vec<_>>().as_slice(),
-                self.variants.values().collect::<Vec<_>>().as_slice(),
-                model_fragments,
-                &support_names,
-                &self.language_imports,
-                self.api_plan,
-                self.inline_model_rebuilds,
-                self.model_hoists,
-            ),
-        )?;
+        // A module whose every operation type is `$ref`d from another file
+        // declares nothing of its own and emits no models file at all — see
+        // specs/json-schema/features/generated-file-layout.md. Emitting the file
+        // anyway leaves a header and an unused `import typing` behind.
+        if let Some(models_source) = render_models_module(
+            self.enums.values().collect::<Vec<_>>().as_slice(),
+            self.flags.values().collect::<Vec<_>>().as_slice(),
+            self.variants.values().collect::<Vec<_>>().as_slice(),
+            model_fragments,
+            &support_names,
+            &self.language_imports,
+            self.api_plan,
+            self.inline_model_rebuilds,
+            self.model_hoists,
+        ) {
+            insert_generated_file(&mut files, "models.py", models_source)?;
+        }
         if !resource_names.is_empty() {
             insert_generated_file(
                 &mut files,
@@ -3848,7 +3850,7 @@ fn render_models_module(
     api_plan: &PlannedSpec,
     inline_model_rebuilds: bool,
     model_hoists: Option<&PythonModelHoists>,
-) -> String {
+) -> Option<String> {
     let mut module_imports = BTreeSet::new();
     module_imports.extend(model_fragments.module_imports.iter().cloned());
     let mut body = String::new();
@@ -3922,6 +3924,11 @@ fn render_models_module(
         body.push_str(&model_fragments.post_model_statements);
     }
 
+    // Nothing was declared, so there is no models module to emit.
+    if body.is_empty() {
+        return None;
+    }
+
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
@@ -3973,13 +3980,11 @@ fn render_models_module(
         }
         render_named_python_import(&mut output, "._support", &used_support_names);
     }
-    if !body.is_empty() {
-        output.push('\n');
-        output.push('\n');
-        output.push_str(&body);
-    }
+    output.push('\n');
+    output.push('\n');
+    output.push_str(&body);
 
-    output
+    Some(output)
 }
 
 fn render_resources_package_init(services: &[RenderedService<'_>]) -> String {
@@ -4177,6 +4182,12 @@ fn render_service_module(
                 .as_ref()
                 .is_some_and(|input| input.descriptor_type_ref.contains("typing."))
                 || operation.descriptor_output_ref.contains("typing.")
+                // A deprecated operation is declared as
+                // `typing.Annotated[Operation[...], ...]`, and `nexusrpc`'s
+                // `@service` resolves the annotation with `eval_str=True`, so
+                // the name has to be bound at runtime, not just under
+                // `TYPE_CHECKING`.
+                || operation.deprecated
         });
     if uses_typing || endpoint_client_body.contains("typing.") || needs_type_checking_imports {
         output.push_str("import typing\n");
@@ -7011,9 +7022,25 @@ fn push_wrapped_python_docstring_line(
 }
 
 fn python_docstring_literal_text(value: &str) -> String {
-    value
+    let mut escaped = value
         .replace('\\', "\\\\")
-        .replace("\"\"\"", "\\\"\\\"\\\"")
+        .replace("\"\"\"", "\\\"\\\"\\\"");
+    // A body that ends in an unescaped `"` would run into the closing `"""`
+    // delimiter and produce four consecutive quotes, which does not parse.
+    // Escaping the final quote keeps the rendered text identical while making
+    // the delimiter unambiguous. A quote that the passes above already escaped
+    // is preceded by an odd number of backslashes and must be left alone.
+    if escaped.ends_with('"') {
+        let preceding_backslashes = escaped[..escaped.len() - 1]
+            .chars()
+            .rev()
+            .take_while(|character| *character == '\\')
+            .count();
+        if preceding_backslashes % 2 == 0 {
+            escaped.insert(escaped.len() - 1, '\\');
+        }
+    }
+    escaped
 }
 
 fn render_unpacked_operation_function(

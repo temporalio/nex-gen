@@ -89,6 +89,13 @@ Loader behavior:
   (contradictory: managed-by-authority *and* never-returned — the value
   could never legitimately appear in either direction). See [[writeOnly]].
 
+These are four different author mistakes with four different remedies, so
+one shared message is not sufficient. The **no-op** case in particular must
+not be told to split the type into request/response shapes — the fix for
+`readOnly: false` is to *delete* it, because it already means nothing. The
+non-boolean case names the offending value (per the `reason` convention),
+and the contradictory pair names the contradiction and both keywords.
+
 ## Type mapping
 
 None — rejected before any type is emitted.

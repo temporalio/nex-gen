@@ -144,8 +144,15 @@ export const blockTransferTypeConverter =
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       out.blockId = value.blockId;
-      if (value.order < 0) {
-        violations.push({ path: "order", reason: `must be >= 0, got ${value.order}` });
+      if (!Number.isSafeInteger(value.order)) {
+        violations.push({ path: "order", reason: "exceeds ±(2^53-1) integer cap" });
+      } else {
+        if (value.order < 0) {
+          violations.push({
+            path: "order",
+            reason: `must be >= 0, got ${value.order}`,
+          });
+        }
       }
       out.order = value.order;
       if (value.text !== undefined) {
@@ -245,11 +252,15 @@ export const blockStyleTransferTypeConverter =
         out.bold = value.bold;
       }
       if (value.indent !== undefined) {
-        if (value.indent < 0) {
-          violations.push({
-            path: "indent",
-            reason: `must be >= 0, got ${value.indent}`,
-          });
+        if (!Number.isSafeInteger(value.indent)) {
+          violations.push({ path: "indent", reason: "exceeds ±(2^53-1) integer cap" });
+        } else {
+          if (value.indent < 0) {
+            violations.push({
+              path: "indent",
+              reason: `must be >= 0, got ${value.indent}`,
+            });
+          }
         }
         out.indent = value.indent;
       }

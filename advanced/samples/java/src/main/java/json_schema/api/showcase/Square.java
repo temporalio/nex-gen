@@ -166,7 +166,7 @@ public final class Square implements ChoicesValue, Shape, Showcase.ShapeOrName {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Square> {
         @Override
         public Square deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

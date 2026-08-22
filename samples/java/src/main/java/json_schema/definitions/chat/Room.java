@@ -25,9 +25,6 @@ import org.jspecify.annotations.Nullable;
 public final class Room {
     private final String roomId;
     private final String displayName;
-    /**
-     * Room topic; may be explicitly cleared to null.
-     */
     private final @Nullable String topic;
     private final @Nullable List<String> members;
     private final @Nullable Labels labels;
@@ -50,6 +47,9 @@ public final class Room {
         return displayName;
     }
 
+    /**
+     * Room topic; may be explicitly cleared to null.
+     */
     public @Nullable String getTopic() {
         return topic;
     }
@@ -125,9 +125,6 @@ public final class Room {
                     }
                 }
             }
-            if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
-            }
             gen.writeStartObject();
             if (value.roomId != null) {
                 gen.writeStringField("roomId", value.roomId);
@@ -146,7 +143,14 @@ public final class Room {
             }
             if (value.labels != null) {
                 gen.writeFieldName("labels");
-                serializers.defaultSerializeValue(value.labels, gen);
+                try {
+                    serializers.defaultSerializeValue(value.labels, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("labels"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.additionalProperties != null) {
                 for (Map.Entry<String, JsonNode> entry : value.additionalProperties.entrySet()) {
@@ -155,13 +159,16 @@ public final class Room {
                 }
             }
             gen.writeEndObject();
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
         }
     }
 
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Room> {
         @Override
         public Room deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

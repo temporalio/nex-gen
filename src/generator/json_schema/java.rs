@@ -201,11 +201,21 @@ impl NumericConstraints {
     }
 }
 
+/// Renders a numeric literal for an `integer` (`long`) or `number` (`double`)
+/// position.
+///
+/// A **fractional** bound over an integer position keeps its `double` spelling —
+/// `>= 1.5` rejects `1` and accepts `2`, which is what the bound means, where
+/// the truncated `>= 1L` would accept `1`. Java widens the `long` operand for
+/// the comparison, so the emitted predicate stays a single expression. An
+/// integral spelling of an integer literal (`1.0` for `const: 1.0`) still
+/// renders as `1L`, never `0L`.
 fn java_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
-    if is_integer {
-        if let Some(value) = number.as_f64() {
-            return format!("{}L", value.trunc() as i64);
-        }
+    if is_integer
+        && let Some(value) = number.as_f64()
+        && value.fract() == 0.0
+    {
+        return format!("{}L", value as i64);
     }
     // Number-field bounds render as a `double` literal.
     let text = number.to_string();
@@ -280,16 +290,85 @@ fn java_type_needs_finite_check(ty: &JavaType) -> bool {
     }
 }
 
-/// True when an in-memory materialized date/date-time can carry Gregorian year
-/// zero even though the shared wire contract starts at year 0001.
-fn java_type_needs_calendar_year_check(ty: &JavaType) -> bool {
+/// True when an in-memory `integer` position is reachable through `ty`. A Java
+/// `long` spans ±(2^63−1) while the shared wire contract caps integers at
+/// ±(2^53−1), so serialize has to hold the value to the same cap the parser
+/// (`SpecNumbers.specLong`) enforces — otherwise the emitter writes a number its
+/// own reader rejects.
+fn java_type_needs_integer_cap_check(ty: &JavaType) -> bool {
     match ty {
-        JavaType::Temporal(
-            crate::json_schema::format::TemporalKind::Date
-            | crate::json_schema::format::TemporalKind::DateTime,
-        ) => true,
-        JavaType::List(element) => java_type_needs_calendar_year_check(element),
+        JavaType::Long => true,
+        JavaType::List(element) => java_type_needs_integer_cap_check(element),
         _ => false,
+    }
+}
+
+/// Emits the serialize-side ±(2^53−1) integer cap for every `integer` reachable
+/// through `ty`, recursively extending array paths like number validation.
+fn render_java_integer_cap_checks(
+    output: &mut String,
+    ty: &JavaType,
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+    depth: usize,
+) {
+    match ty {
+        JavaType::Long => {
+            output.push_str(&format!(
+                "{indent}if ({value_expr} < -SpecNumbers.INTEGER_CAP || {value_expr} > SpecNumbers.INTEGER_CAP) {{\n{indent}    violations.add(new Violation({path_expr}, \"exceeds \\u00b1(2^53-1) integer cap\"));\n{indent}}}\n"
+            ));
+        }
+        JavaType::List(element) if java_type_needs_integer_cap_check(element) => {
+            let index = format!("integerCapIndex{depth}");
+            let value = format!("integerCapValue{depth}");
+            let element_path = format!("{path_expr} + \"[\" + {index} + \"]\"");
+            output.push_str(&format!(
+                "{indent}for (int {index} = 0; {index} < {value_expr}.size(); {index}++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    {} {value} = {value_expr}.get({index});\n",
+                element.boxed_name()
+            ));
+            output.push_str(&format!("{indent}    if ({value} != null) {{\n"));
+            render_java_integer_cap_checks(
+                output,
+                element,
+                &value,
+                &element_path,
+                &format!("{indent}        "),
+                depth + 1,
+            );
+            output.push_str(&format!("{indent}    }}\n{indent}}}\n"));
+        }
+        _ => {}
+    }
+}
+
+/// True when an in-memory materialized temporal can hold a value the wire
+/// grammar cannot spell. **Every** kind can: a `LocalDate`/`OffsetDateTime`
+/// carries Gregorian year zero and five-digit years, an `OffsetDateTime`/
+/// `OffsetTime` carries a sub-minute UTC offset the wire form truncates, and a
+/// `Duration` is signed, nanosecond-resolution and unbounded while the pinned
+/// `PTnHnMnS` grammar is none of those. See
+/// `specs/json-schema/features/format.md` and Python's `_check_date_time` /
+/// `_check_time` / `_check_duration`.
+fn java_type_needs_temporal_check(ty: &JavaType) -> bool {
+    match ty {
+        JavaType::Temporal(_) => true,
+        JavaType::List(element) => java_type_needs_temporal_check(element),
+        _ => false,
+    }
+}
+
+/// The `TemporalSupport` static method asserting a value is writable as this
+/// kind's wire form (the serialize-side counterpart of `parse*`).
+fn java_temporal_check_fn(kind: crate::json_schema::format::TemporalKind) -> &'static str {
+    match kind {
+        crate::json_schema::format::TemporalKind::DateTime => "checkDateTime",
+        crate::json_schema::format::TemporalKind::Date => "checkDate",
+        crate::json_schema::format::TemporalKind::Time => "checkTime",
+        crate::json_schema::format::TemporalKind::Duration => "checkDuration",
     }
 }
 
@@ -299,10 +378,7 @@ fn schema_has_recursive_value_checks(schema: &Schema) -> bool {
         || !NumericConstraints::from_schema(schema).is_empty()
         || !StringLengthConstraints::from_schema(schema).is_empty()
         || !ArrayConstraints::from_schema(schema).is_empty()
-        || schema
-            .items
-            .as_deref()
-            .is_some_and(schema_has_recursive_value_checks)
+        || element_shape(schema).is_some_and(schema_has_recursive_value_checks)
 }
 
 fn render_java_recursive_value_checks(
@@ -357,10 +433,11 @@ fn render_java_recursive_value_checks(
                     path_expr,
                     element_ty,
                     &constraints,
+                    None,
                     indent,
                 );
             }
-            if let Some(item_schema) = schema.items.as_deref()
+            if let Some(item_schema) = element_shape(schema)
                 && schema_has_recursive_value_checks(item_schema)
             {
                 let index = format!("validationIndex{depth}");
@@ -429,9 +506,11 @@ fn render_java_finite_checks(
     }
 }
 
-/// Emits the serialize-side year floor for materialized native dates and
-/// date-times, recursively extending array paths just like number validation.
-fn render_java_calendar_year_checks(
+/// Emits the serialize-side representability predicate for every materialized
+/// temporal reachable through `ty` (P12), recursively extending array paths just
+/// like number validation. The predicate itself lives in `TemporalSupport` so it
+/// is written once per kind rather than inlined per field.
+fn render_java_temporal_checks(
     output: &mut String,
     ty: &JavaType,
     value_expr: &str,
@@ -440,16 +519,15 @@ fn render_java_calendar_year_checks(
     depth: usize,
 ) {
     match ty {
-        JavaType::Temporal(kind @ crate::json_schema::format::TemporalKind::Date)
-        | JavaType::Temporal(kind @ crate::json_schema::format::TemporalKind::DateTime) => {
+        JavaType::Temporal(kind) => {
             output.push_str(&format!(
-                "{indent}if ({value_expr}.getYear() < 1) {{\n{indent}    violations.add(new Violation({path_expr}, \"must be a valid {}, got \" + {value_expr} + \": year must be >= 0001\"));\n{indent}}}\n",
-                kind.name()
+                "{indent}TemporalSupport.{}({value_expr}, {path_expr}, violations);\n",
+                java_temporal_check_fn(*kind)
             ));
         }
-        JavaType::List(element) if java_type_needs_calendar_year_check(element) => {
-            let index = format!("calendarIndex{depth}");
-            let value = format!("calendarValue{depth}");
+        JavaType::List(element) if java_type_needs_temporal_check(element) => {
+            let index = format!("temporalIndex{depth}");
+            let value = format!("temporalValue{depth}");
             let element_path = format!("{path_expr} + \"[\" + {index} + \"]\"");
             output.push_str(&format!(
                 "{indent}for (int {index} = 0; {index} < {value_expr}.size(); {index}++) {{\n"
@@ -459,7 +537,7 @@ fn render_java_calendar_year_checks(
                 element.boxed_name()
             ));
             output.push_str(&format!("{indent}    if ({value} != null) {{\n"));
-            render_java_calendar_year_checks(
+            render_java_temporal_checks(
                 output,
                 element,
                 &value,
@@ -594,6 +672,67 @@ fn java_pattern_field_name(java_name: &str) -> String {
 fn java_format_field_name(java_name: &str) -> String {
     use heck::ToShoutySnakeCase;
     format!("{}_FORMAT", java_name.to_shouty_snake_case())
+}
+
+/// A pinned generator-owned regex (a `format` / `contentEncoding` oracle baked
+/// into a runtime support class) with Java's strict end-of-input anchor applied.
+///
+/// `java.util.regex`'s `$` matches before a final line terminator, so a raw `$`
+/// would let `"aGk=\n"` / `"2021-06-15T12:30:45Z\n"` through any `find()`-style
+/// use. Every other Java regex the generator emits already routes through
+/// `rewrite_end_anchor`; the support classes must not be the exception.
+fn java_pinned_pattern(pattern: &str) -> String {
+    crate::json_schema::pattern::rewrite_end_anchor(pattern, r"\z")
+}
+
+/// The static `Pattern` field name for a `contains` matcher's `pattern` at the
+/// scope `java_name` (a field, a map member, or a union wrapper).
+fn java_contains_pattern_field_name(java_name: &str) -> String {
+    use heck::ToShoutySnakeCase;
+    format!("{}_CONTAINS_PATTERN", java_name.to_shouty_snake_case())
+}
+
+/// The static `Pattern` field name for a `contains` matcher's `format`.
+fn java_contains_format_field_name(java_name: &str) -> String {
+    use heck::ToShoutySnakeCase;
+    format!("{}_CONTAINS_FORMAT", java_name.to_shouty_snake_case())
+}
+
+/// Emits the compiled-once statics a `contains` matcher needs at `scope`.
+/// Returns true when anything was written.
+fn render_contains_pattern_statics(
+    output: &mut String,
+    constraints: &ArrayConstraints,
+    scope: &str,
+    indent: &str,
+) -> bool {
+    let Some(matcher) = constraints.contains.as_deref() else {
+        return false;
+    };
+    let mut wrote = false;
+    if let Some(pattern) = &matcher.pattern {
+        let pattern = crate::json_schema::pattern::rewrite_end_anchor(pattern, r"\z");
+        output.push_str(&format!(
+            "{indent}private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n",
+            java_contains_pattern_field_name(scope),
+            java_string_literal(&pattern),
+        ));
+        wrote = true;
+    }
+    if let Some(check) = matcher
+        .format
+        .as_deref()
+        .and_then(crate::json_schema::format::check_for)
+    {
+        let pattern = crate::json_schema::pattern::rewrite_end_anchor(&check.pattern, r"\z");
+        output.push_str(&format!(
+            "{indent}private static final java.util.regex.Pattern {} = java.util.regex.Pattern.compile({});\n",
+            java_contains_format_field_name(scope),
+            java_string_literal(&pattern),
+        ));
+        wrote = true;
+    }
+    wrote
 }
 
 /// Emits the object member-count predicates (`minProperties`/`maxProperties`)
@@ -734,7 +873,12 @@ fn java_equals_term(value: &Value, elem: &str, element_ty: &JavaType) -> String 
 /// Builds the boolean Java match expression for a scalar `contains` matcher over
 /// `elem` (a boxed element). A type-only matcher matches every element, so an
 /// empty condition set renders as the literal `true`.
-fn java_matcher_condition(matcher: &Schema, elem: &str, element_ty: &JavaType) -> String {
+fn java_matcher_condition(
+    matcher: &Schema,
+    elem: &str,
+    element_ty: &JavaType,
+    scope: Option<&str>,
+) -> String {
     let is_integer = matches!(element_ty, JavaType::Long);
     let mut parts: Vec<String> = Vec::new();
     if let Some(value) = &matcher.const_value {
@@ -780,10 +924,20 @@ fn java_matcher_condition(matcher: &Schema, elem: &str, element_ty: &JavaType) -
     }
     if let Some(pattern) = &matcher.pattern {
         let pattern = crate::json_schema::pattern::rewrite_end_anchor(pattern, r"\z");
-        parts.push(format!(
-            "java.util.regex.Pattern.compile({}).matcher({elem}).find()",
-            java_string_literal(&pattern)
-        ));
+        // Compile-once: the matcher runs inside a per-element loop, so an
+        // inline `Pattern.compile` would recompile per element on every
+        // (de)serialize ([[pattern]] §"Why compile-once"). A scoped position
+        // hangs the compiled pattern on a static class member instead.
+        parts.push(match scope {
+            Some(scope) => format!(
+                "{}.matcher({elem}).find()",
+                java_contains_pattern_field_name(scope)
+            ),
+            None => format!(
+                "java.util.regex.Pattern.compile({}).matcher({elem}).find()",
+                java_string_literal(&pattern)
+            ),
+        });
     }
     if let Some(format) = matcher
         .format
@@ -796,10 +950,16 @@ fn java_matcher_condition(matcher: &Schema, elem: &str, element_ty: &JavaType) -
                 "{elem}.codePointCount(0, {elem}.length()) <= {max}"
             ));
         }
-        parts.push(format!(
-            "java.util.regex.Pattern.compile({}).matcher({elem}).find()",
-            java_string_literal(&pattern)
-        ));
+        parts.push(match scope {
+            Some(scope) => format!(
+                "{}.matcher({elem}).find()",
+                java_contains_format_field_name(scope)
+            ),
+            None => format!(
+                "java.util.regex.Pattern.compile({}).matcher({elem}).find()",
+                java_string_literal(&pattern)
+            ),
+        });
     }
     if parts.is_empty() {
         "true".to_string()
@@ -834,6 +994,51 @@ fn java_typed_matcher_guard(matcher: &Schema, elem: &str, element_ty: &JavaType)
     }
 }
 
+/// True when an in-memory element needs a derived `uniqueItems` equality key:
+/// a materialized value (temporal / `contentEncoding`) whose Java type compares
+/// by reference or by an offset-sensitive natural equality, or a `number` whose
+/// `-0.0` must fold onto `0.0`.
+fn java_needs_unique_key_mapping(ty: &JavaType) -> bool {
+    match ty {
+        JavaType::Double | JavaType::Temporal(_) | JavaType::Bytes(_) => true,
+        JavaType::List(inner) => java_needs_unique_key_mapping(inner),
+        _ => false,
+    }
+}
+
+/// The serialize-side `uniqueItems` equality key for one in-memory element.
+///
+/// Per decision D10 a materialized value compares on its **canonical wire
+/// string** — the same side the deserialize path compares (`SpecNumbers.valueKey`
+/// over the wire node) — never on the native value and never by reference.
+/// `byte[]` has no value equality at all, and `OffsetDateTime` compares
+/// offset-sensitively while the wire string is what the contract is written
+/// over. A `number` folds `-0.0` onto `0.0` so serialize agrees with
+/// deserialize (P1). Everything else already has value equality.
+fn java_unique_key_expr(ty: &JavaType, elem: &str, depth: usize) -> String {
+    match ty {
+        JavaType::Double => format!("SpecNumbers.numberKey({elem})"),
+        JavaType::Temporal(kind) => match java_temporal_format_fn(*kind) {
+            Some(format_fn) => {
+                format!("({elem} == null ? null : TemporalSupport.{format_fn}({elem}))")
+            }
+            None => elem.to_string(),
+        },
+        JavaType::Bytes(encoding) => format!(
+            "({elem} == null ? null : Base64Support.{}({elem}))",
+            java_content_encoding_format_fn(*encoding)
+        ),
+        JavaType::List(inner) if java_needs_unique_key_mapping(inner) => {
+            let param = format!("uniqueKeyElement{depth}");
+            format!(
+                "({elem} == null ? null : {elem}.stream().map({param} -> ({})).collect(java.util.stream.Collectors.toList()))",
+                java_unique_key_expr(inner, &param, depth + 1)
+            )
+        }
+        _ => elem.to_string(),
+    }
+}
+
 /// Emits the array-constraint predicates over `items` (a built `List<T>` in
 /// scope) into the collecting deserializer, appending `Violation`s.
 fn render_java_array_checks(
@@ -842,6 +1047,7 @@ fn render_java_array_checks(
     json: &str,
     element_ty: &JavaType,
     constraints: &ArrayConstraints,
+    scope: Option<&str>,
     indent: &str,
 ) {
     if let Some(min) = constraints.min_items {
@@ -855,15 +1061,15 @@ fn render_java_array_checks(
         ));
     }
     if constraints.unique_items {
-        let boxed = element_ty.boxed_name();
         output.push_str(&format!(
-            "{indent}java.util.Map<{boxed}, Integer> seen = new java.util.HashMap<>();\n"
+            "{indent}java.util.Map<Object, Integer> seen = new java.util.HashMap<>();\n"
         ));
         output.push_str(&format!(
             "{indent}for (int index = 0; index < {list}.size(); index++) {{\n"
         ));
         output.push_str(&format!(
-            "{indent}    {boxed} element = {list}.get(index);\n"
+            "{indent}    Object element = {};\n",
+            java_unique_key_expr(element_ty, &format!("{list}.get(index)"), 0)
         ));
         output.push_str(&format!(
             "{indent}    Integer priorIndex = seen.get(element);\n"
@@ -879,7 +1085,7 @@ fn render_java_array_checks(
     }
     if let Some(matcher) = &constraints.contains {
         let boxed = element_ty.boxed_name();
-        let condition = java_matcher_condition(matcher, "element", element_ty);
+        let condition = java_matcher_condition(matcher, "element", element_ty, scope);
         let guard = java_typed_matcher_guard(matcher, "element", element_ty);
         let effective_min = constraints.min_contains.unwrap_or(1);
         output.push_str(&format!("{indent}int matchCount = 0;\n"));
@@ -921,6 +1127,7 @@ fn render_java_raw_array_checks(
     json: &str,
     element_ty: &JavaType,
     constraints: &ArrayConstraints,
+    scope: Option<&str>,
     indent: &str,
 ) {
     if let Some(min) = constraints.min_items {
@@ -963,7 +1170,7 @@ fn render_java_raw_array_checks(
             ),
             _ => ("false".to_string(), "rawElement", element_ty.clone()),
         };
-        let condition = java_matcher_condition(matcher, value, &evaluation_ty);
+        let condition = java_matcher_condition(matcher, value, &evaluation_ty, scope);
         let effective_min = constraints.min_contains.unwrap_or(1);
         output.push_str(&format!(
             "{indent}int rawMatchCount = 0;\n{indent}for (JsonNode rawElement : {node}) {{\n{indent}    if ({guard} && ({condition})) {{\n{indent}        rawMatchCount++;\n{indent}    }}\n{indent}}}\n"
@@ -1611,14 +1818,37 @@ impl ClosedNameOverrides {
         }
     }
 
+    /// The verbatim constant identifier this member declares, if any.
+    ///
+    /// `x-java-enum-names` is keyed by the member's canonical **wire spelling**
+    /// (`"active"`, `"1"`, `"1.5"`, `"true"`). Matching only `Value::String`
+    /// meant a numeric or boolean member could never be renamed, so P15's one
+    /// escape hatch for a value-constant collision did not exist for exactly the
+    /// values most likely to collide — `enum: [1, 1.0]` folds both onto the same
+    /// token and nothing could separate them (`11#11`).
     fn get(&self, value: &Value) -> Option<&str> {
         if self.is_const {
-            self.const_name.as_deref()
-        } else if let (Some(map), Value::String(key)) = (&self.enum_names, value) {
-            map.get(key).map(String::as_str)
-        } else {
-            None
+            return self.const_name.as_deref();
         }
+        let map = self.enum_names.as_ref()?;
+        map.get(&enum_names_lookup_key(value)?).map(String::as_str)
+    }
+}
+
+/// The `x-java-enum-names` map key for one closed value: its JSON wire spelling.
+///
+/// Mirrors the loader's `enum_names_lookup_key` (`src/parser/json_schema.rs`),
+/// which validates the same map, and `enum_names_lookup_key` in
+/// `src/generator/json_schema/go.rs`. The loader's copy is `pub(crate)` inside a
+/// private module, so sharing it would widen `src/parser/mod.rs`; the three must
+/// derive the identical key either way, or the P15 collision pass and emission
+/// disagree about which member a rename applies to.
+fn enum_names_lookup_key(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
     }
 }
 
@@ -1794,6 +2024,21 @@ fn nullable_non_null_schema(schema: &Schema) -> Option<&Schema> {
     })
 }
 
+/// The schema describing an array's **element shape**, with the nullability
+/// `oneOf` wrapper stripped.
+///
+/// `items: {oneOf: [T, null]}` is the element-level spelling of a nullable
+/// member: the wrapper carries no `type` and no keywords, so reading
+/// `schema.items` directly drops everything the non-null branch declares — the
+/// same defect the field planner had at the property level ([[nullability]],
+/// finding `13#2`). Every site that reads an element's constraints goes through
+/// this; the element's *nullability* is read from the wrapper separately
+/// (`allows_null`), which is why the two cannot be collapsed.
+fn element_shape(schema: &Schema) -> Option<&Schema> {
+    let items = schema.items.as_deref()?;
+    Some(nullable_non_null_schema(items).unwrap_or(items))
+}
+
 /// The `full_name` of every model that is a named `oneOf` union definition.
 fn union_def_names(all_models: &BTreeMap<String, PlannedJsonType>) -> BTreeSet<String> {
     all_models
@@ -1898,9 +2143,18 @@ fn resolve_model_kind(
     let required: BTreeSet<String> = schema.required.iter().flatten().cloned().collect();
     if let Some(properties) = &schema.properties {
         for (json_name, property) in properties {
-            let closed_values = if let Some(value) = &property.const_value {
+            // A nullable property is authored as `oneOf: [T, null]`. The
+            // wrapper carries no `type` and no keywords, so every read of the
+            // member's *shape* (its closed value set, its constraints, its
+            // `items`) must go through the non-null branch — otherwise the
+            // whole constraint set is silently dropped and Java accepts wire
+            // values the other targets reject (P1). Presence/annotation
+            // keywords (`default`, `title`, `description`, `deprecated`,
+            // `x-java-name`) stay on the authored property node.
+            let shape = nullable_non_null_schema(property).unwrap_or(property);
+            let closed_values = if let Some(value) = &shape.const_value {
                 vec![value.clone()]
-            } else if let Some(values) = &property.enum_values {
+            } else if let Some(values) = &shape.enum_values {
                 values.clone()
             } else {
                 Vec::new()
@@ -1920,7 +2174,7 @@ fn resolve_model_kind(
                     },
                     union,
                 )
-            } else if let Some(union) = ref_union(property, all_models, context) {
+            } else if let Some(union) = ref_union(shape, all_models, context) {
                 (java_type_for(property, context)?, Some(union))
             } else if !closed_values.is_empty() {
                 // A `const`/`enum` member is a nested value class over its
@@ -1944,7 +2198,7 @@ fn resolve_model_kind(
             // A collection whose *element* is a union def: the field carries the
             // element's union so the serialize side can route each element through
             // its dispatcher ([[oneOf]] §"Unions in element positions").
-            let element_union = match &property.items {
+            let element_union = match &shape.items {
                 Some(element) => ref_union(element, all_models, context),
                 None => None,
             };
@@ -1955,15 +2209,15 @@ fn resolve_model_kind(
                 required: required.contains(json_name),
                 nullable: allows_null(property),
                 closed_values,
-                closed_overrides: ClosedNameOverrides::from_property(property),
+                closed_overrides: ClosedNameOverrides::from_property(shape),
                 default: property.default.clone(),
                 doc: compose_doc(property.title.as_deref(), property.description.as_deref()),
                 deprecated: property.deprecated == Some(true),
-                numeric: NumericConstraints::from_schema(property),
-                string_length: StringLengthConstraints::from_schema(property),
-                array: ArrayConstraints::from_schema(property),
-                schema: property.clone(),
-                nullable_items: property.items.as_deref().is_some_and(allows_null),
+                numeric: NumericConstraints::from_schema(shape),
+                string_length: StringLengthConstraints::from_schema(shape),
+                array: ArrayConstraints::from_schema(shape),
+                schema: shape.clone(),
+                nullable_items: shape.items.as_deref().is_some_and(allows_null),
                 union,
                 element_union,
             });
@@ -2115,6 +2369,7 @@ pub(in crate::generator) fn render_model_file(
                 value,
                 *max_properties,
                 map_member_union(&schema, all_models, &context).as_ref(),
+                &implements,
                 &mut refs,
             );
         }
@@ -2161,6 +2416,27 @@ fn render_union_interface(
     output.push_str("}\n");
 }
 
+/// The Java predicate testing a `JsonNode` for JSON-value equality with a
+/// scalar literal. Numbers compare **mathematically** (so `1`, `1.0` and `1e0`
+/// are one value), strings by content, booleans by identity.
+fn java_node_equals_literal(node_expr: &str, value: &Value) -> String {
+    match value {
+        Value::String(text) => format!(
+            "{node_expr}.isTextual() && {}.equals({node_expr}.textValue())",
+            java_string_literal(text)
+        ),
+        Value::Bool(flag) => {
+            format!("{node_expr}.isBoolean() && {node_expr}.booleanValue() == {flag}")
+        }
+        Value::Number(number) => format!(
+            "{node_expr}.isNumber() && {node_expr}.doubleValue() == {}",
+            java_bound_literal(number, false)
+        ),
+        Value::Null => format!("{node_expr}.isNull()"),
+        _ => "false".to_string(),
+    }
+}
+
 /// Emits the token/discriminant dispatch that reads a `JsonNode` into a union
 /// value (returning it) or records a `Violation` and returns `null`.
 fn render_union_dispatch_body(
@@ -2183,11 +2459,15 @@ fn render_union_dispatch_body(
             output.push_str(&format!(
                 "{indent}    JsonNode disc = {node}.get({disc_lit});\n"
             ));
+            // The discriminant is any scalar the loader admits (`const: 1`,
+            // `const: true`, …), not only a string — so the branch is selected
+            // by **JSON value equality** against each member's `const`, never
+            // by the tag's text. A number tag matches whatever spelling arrives
+            // (`1`, `1.0`, `1e0`), which is what the other targets do.
             output.push_str(&format!(
-                "{indent}    if (disc == null || !disc.isTextual()) {{\n{indent}        violations.add(new Violation({path}, {}));\n{indent}        return null;\n{indent}    }}\n",
+                "{indent}    if (disc == null || disc.isNull() || !disc.isValueNode()) {{\n{indent}        violations.add(new Violation({path}, {}));\n{indent}        return null;\n{indent}    }}\n",
                 java_string_literal(&format!("discriminator {discriminant:?} is required"))
             ));
-            output.push_str(&format!("{indent}    switch (disc.textValue()) {{\n"));
             let mut values_display = Vec::new();
             for variant in &object_variants {
                 let Some(value) = &variant.discriminant_value else {
@@ -2199,25 +2479,21 @@ fn render_union_dispatch_body(
                     .unwrap_or_else(|| value.to_string());
                 values_display.push(text.clone());
                 output.push_str(&format!(
-                    "{indent}        case {}:\n",
-                    java_string_literal(&text)
+                    "{indent}    if ({}) {{\n",
+                    java_node_equals_literal("disc", value)
                 ));
-                render_union_read_object(
-                    output,
-                    variant,
-                    node,
-                    path,
-                    &format!("{indent}            "),
-                );
+                render_union_read_object(output, variant, node, path, &format!("{indent}        "));
+                output.push_str(&format!("{indent}    }}\n"));
             }
-            output.push_str(&format!("{indent}        default:\n"));
             output.push_str(&format!(
-                "{indent}            violations.add(new Violation({path}, {} + disc.textValue() + {}));\n",
+                "{indent}    violations.add(new Violation({path}, {} + disc.asText() + {}));\n",
                 java_string_literal(&format!("unknown discriminator {discriminant} ")),
-                java_string_literal(&format!(": expected one of [{}]", values_display.join(", ")))
+                java_string_literal(&format!(
+                    ": expected one of [{}]",
+                    values_display.join(", ")
+                ))
             ));
-            output.push_str(&format!("{indent}            return null;\n"));
-            output.push_str(&format!("{indent}    }}\n"));
+            output.push_str(&format!("{indent}    return null;\n"));
         } else {
             let variant = object_variants[0];
             render_union_read_object(output, variant, node, path, &format!("{indent}    "));
@@ -2357,7 +2633,7 @@ fn render_union_read_scalar(
             render_parse_element(
                 output,
                 item,
-                variant.schema.items.as_deref(),
+                element_shape(&variant.schema),
                 "items",
                 "element",
                 "elementPath",
@@ -2368,7 +2644,15 @@ fn render_union_read_scalar(
             output.push_str(&format!("{indent}}}\n"));
             let constraints = ArrayConstraints::from_schema(&variant.schema);
             if !constraints.is_empty() {
-                render_java_raw_array_checks(output, node, path, item, &constraints, indent);
+                render_java_raw_array_checks(
+                    output,
+                    node,
+                    path,
+                    item,
+                    &constraints,
+                    Some(MAP_MEMBER_POSITION),
+                    indent,
+                );
             }
             // Array-level branch constraints have just run over the original
             // node. Re-validating the shortened typed list here would both
@@ -2548,6 +2832,14 @@ fn render_union_wrapper_classes(output: &mut String, union: &JavaUnion, indent: 
                 java_string_literal(&format.pattern),
             ));
         }
+        if render_contains_pattern_statics(
+            output,
+            &ArrayConstraints::from_schema(&variant.schema),
+            MAP_MEMBER_POSITION,
+            &inner,
+        ) {
+            output.push('\n');
+        }
         output.push_str(&format!("{inner}private final {field_type} value;\n\n"));
         output.push_str(&format!(
             "{inner}public {}({field_type} value) {{\n{inner}    this.value = value;\n{inner}}}\n\n",
@@ -2724,10 +3016,6 @@ fn render_java_schema_doc(
     }
 }
 
-fn render_javadoc(output: &mut String, indent: &str, doc: Option<&str>) {
-    render_java_doc_comment(output, indent, doc, &[]);
-}
-
 fn java_string_literal(value: &str) -> String {
     let mut output = String::with_capacity(value.len() + 2);
     output.push('"');
@@ -2828,6 +3116,12 @@ fn render_object_class(
             ));
             wrote_pattern = true;
         }
+        wrote_pattern |= render_contains_pattern_statics(
+            output,
+            &ArrayConstraints::from_schema(candidate),
+            position,
+            "    ",
+        );
     }
 
     // Compiled `pattern` regexes (compiled once at class init; the load-time
@@ -2849,14 +3143,20 @@ fn render_object_class(
             ));
             wrote_pattern = true;
         }
+        // A `contains` matcher's `pattern`/`format` is compiled once here too —
+        // it runs inside a per-element loop in both directions.
+        wrote_pattern |=
+            render_contains_pattern_statics(output, &field.array, &field.java_name, "    ");
     }
     if wrote_pattern {
         output.push('\n');
     }
 
-    // Fields.
+    // Fields. The authored prose rides on the **getter** (below), not here:
+    // `javadoc` skips private members at its default visibility, so a comment on
+    // the field would never reach published docs (`description.md`: "Javadoc
+    // above the class/getter/method").
     for field in fields {
-        render_javadoc(output, "    ", field.doc.as_deref());
         output.push_str("    private final ");
         output.push_str(&field.declared_type());
         output.push(' ');
@@ -2879,18 +3179,19 @@ fn render_object_class(
     // Getters.
     for field in fields {
         let return_type = field.declared_type();
+        // One Javadoc block on the public getter: the authored summary/body,
+        // then the generated `@deprecated` tag — the tag is a trailer of the
+        // same block, never an orphan comment above a doc-less member.
+        let tags: Vec<(String, String)> = if field.deprecated {
+            vec![(
+                "@deprecated".to_string(),
+                "This field is deprecated.".to_string(),
+            )]
+        } else {
+            Vec::new()
+        };
+        render_java_doc_comment(output, "    ", field.doc.as_deref(), &tags);
         if field.deprecated {
-            // Native marker on the public getter: `@Deprecated` annotation plus a
-            // Javadoc `@deprecated` tag (the rationale lives on the field above).
-            render_java_doc_comment(
-                output,
-                "    ",
-                None,
-                &[(
-                    "@deprecated".to_string(),
-                    "This field is deprecated.".to_string(),
-                )],
-            );
             output.push_str("    @Deprecated\n");
         }
         output.push_str(&format!(
@@ -2974,12 +3275,64 @@ fn render_constructor(
     output.push_str("    }\n\n");
 }
 
+/// The `equals` comparison, `hashCode` argument and `toString` expression for
+/// one member.
+///
+/// A materialized `contentEncoding` member is a `byte[]`, which in Java has
+/// **no** value semantics: `Objects.equals` compares references (so two models
+/// parsed from the same payload are unequal), `Objects.hash` hashes the
+/// identity, and `toString` prints `[B@1b6d…`. Those members route through
+/// `java.util.Arrays` — and a `List<byte[]>`, whose `List.equals` would compare
+/// its elements by reference, through the generated `Base64Support` list
+/// helpers. See `specs/json-schema/features/contentEncoding.md`.
+fn java_member_equality(ty: &JavaType, is_primitive: bool, name: &str) -> (String, String, String) {
+    match ty {
+        JavaType::Bytes(_) => (
+            format!("java.util.Arrays.equals(this.{name}, that.{name})"),
+            format!("java.util.Arrays.hashCode({name})"),
+            format!("java.util.Arrays.toString({name})"),
+        ),
+        JavaType::List(inner) if matches!(**inner, JavaType::Bytes(_)) => (
+            format!("Base64Support.listEquals(this.{name}, that.{name})"),
+            format!("Base64Support.listHashCode({name})"),
+            format!("Base64Support.listToString({name})"),
+        ),
+        _ if is_primitive => (
+            format!("this.{name} == that.{name}"),
+            name.to_string(),
+            name.to_string(),
+        ),
+        _ => (
+            format!("Objects.equals(this.{name}, that.{name})"),
+            name.to_string(),
+            name.to_string(),
+        ),
+    }
+}
+
 fn render_equals_hashcode_tostring(
     output: &mut String,
     class: &str,
     fields: &[FieldPlan],
     open: bool,
 ) {
+    let mut members: Vec<(String, String, String, String)> = fields
+        .iter()
+        .map(|field| {
+            let (equals, hash, display) =
+                java_member_equality(&field.ty, field.is_primitive(), &field.java_name);
+            (field.java_name.clone(), equals, hash, display)
+        })
+        .collect();
+    if open {
+        members.push((
+            "additionalProperties".to_string(),
+            "Objects.equals(this.additionalProperties, that.additionalProperties)".to_string(),
+            "additionalProperties".to_string(),
+            "additionalProperties".to_string(),
+        ));
+    }
+
     // equals
     output.push_str("    @Override\n    public boolean equals(@Nullable Object other) {\n");
     output.push_str("        if (this == other) {\n            return true;\n        }\n");
@@ -2987,53 +3340,45 @@ fn render_equals_hashcode_tostring(
         "        if (!(other instanceof {class})) {{\n            return false;\n        }}\n"
     ));
     output.push_str(&format!("        {class} that = ({class}) other;\n"));
-    let mut comparisons = Vec::new();
-    for field in fields {
-        if field.is_primitive() {
-            comparisons.push(format!("this.{0} == that.{0}", field.java_name));
-        } else {
-            comparisons.push(format!(
-                "Objects.equals(this.{0}, that.{0})",
-                field.java_name
-            ));
-        }
-    }
-    if open {
-        comparisons.push(
-            "Objects.equals(this.additionalProperties, that.additionalProperties)".to_string(),
-        );
-    }
-    if comparisons.is_empty() {
+    if members.is_empty() {
         output.push_str("        return true;\n");
     } else {
         output.push_str("        return ");
-        output.push_str(&comparisons.join("\n            && "));
+        output.push_str(
+            &members
+                .iter()
+                .map(|(_, equals, _, _)| equals.clone())
+                .collect::<Vec<_>>()
+                .join("\n            && "),
+        );
         output.push_str(";\n");
     }
     output.push_str("    }\n\n");
 
     // hashCode
     output.push_str("    @Override\n    public int hashCode() {\n        return Objects.hash(");
-    let mut names: Vec<String> = fields.iter().map(|field| field.java_name.clone()).collect();
-    if open {
-        names.push("additionalProperties".to_string());
-    }
-    output.push_str(&names.join(", "));
+    output.push_str(
+        &members
+            .iter()
+            .map(|(_, _, hash, _)| hash.clone())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
     output.push_str(");\n    }\n\n");
 
     // toString
     output.push_str("    @Override\n    public String toString() {\n");
     output.push_str(&format!("        return \"{class}{{\"\n"));
-    if names.is_empty() {
+    if members.is_empty() {
         output.push_str("            + \"}\";\n");
     } else {
-        for (index, name) in names.iter().enumerate() {
+        for (index, (name, _, _, display)) in members.iter().enumerate() {
             let prefix = if index == 0 {
                 format!("{name}=")
             } else {
                 format!(", {name}=")
             };
-            output.push_str(&format!("            + \"{prefix}\" + {name}\n"));
+            output.push_str(&format!("            + \"{prefix}\" + {display}\n"));
         }
         output.push_str("            + \"}\";\n");
     }
@@ -3056,7 +3401,10 @@ fn field_has_serialize_check(field: &FieldPlan) -> bool {
     if java_type_needs_finite_check(&field.ty) {
         return true;
     }
-    if java_type_needs_calendar_year_check(&field.ty) {
+    if java_type_needs_temporal_check(&field.ty) {
+        return true;
+    }
+    if java_type_needs_integer_cap_check(&field.ty) {
         return true;
     }
     if !field.closed_values.is_empty()
@@ -3065,11 +3413,7 @@ fn field_has_serialize_check(field: &FieldPlan) -> bool {
         return true;
     }
     if matches!(field.ty, JavaType::List(_))
-        && field
-            .schema
-            .items
-            .as_deref()
-            .is_some_and(schema_has_recursive_value_checks)
+        && element_shape(&field.schema).is_some_and(schema_has_recursive_value_checks)
     {
         return true;
     }
@@ -3107,7 +3451,8 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
     let mut body = String::new();
     {
         render_java_finite_checks(&mut body, &field.ty, &accessor, &json, &inner, 0);
-        render_java_calendar_year_checks(&mut body, &field.ty, &accessor, &json, &inner, 0);
+        render_java_integer_cap_checks(&mut body, &field.ty, &accessor, &json, &inner, 0);
+        render_java_temporal_checks(&mut body, &field.ty, &accessor, &json, &inner, 0);
         match &field.ty {
             JavaType::String if !field.string_length.is_empty() => render_java_string_checks(
                 &mut body,
@@ -3141,10 +3486,11 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
                         &json,
                         element_ty,
                         &field.array,
+                        Some(&field.java_name),
                         &inner,
                     );
                 }
-                if let Some(item_schema) = field.schema.items.as_deref()
+                if let Some(item_schema) = element_shape(&field.schema)
                     && schema_has_recursive_value_checks(item_schema)
                 {
                     let index = "validationIndex0";
@@ -3444,11 +3790,23 @@ fn render_object_serializer(
         "        @Override\n        public void serialize({class} value, JsonGenerator gen, SerializerProvider serializers) throws IOException {{\n"
     ));
 
+    // A member whose value is itself a validating model reports its failures
+    // through its own `ValidationException`; those have to be re-pathed under
+    // this member and merged into *this* object's list, so the throw moves to
+    // after the write (P11: one aggregated failure per payload).
+    let captures_nested = fields
+        .iter()
+        .any(|field| field_serialize_may_nest(&field.ty))
+        || typed_additional.is_some_and(|additional| field_serialize_may_nest(&additional.ty));
+
     // Serialize-side (P12): re-run the shared field validation over the
     // in-memory model and throw the aggregated `ValidationException` before
     // emitting any wire member — matching the deserializer (both directions over
     // one set of check emitters).
     let needs_validation = object_needs_serialize_validation(schema, fields, open);
+    if !needs_validation && captures_nested {
+        output.push_str("            List<Violation> violations = new ArrayList<>();\n");
+    }
     if needs_validation {
         output.push_str("            List<Violation> violations = new ArrayList<>();\n");
         for field in fields {
@@ -3525,12 +3883,14 @@ fn render_object_serializer(
             render_java_serialize_property_count(output, schema, fields, open, "            ");
         }
         render_java_serialize_dependent_required(output, schema, fields, open, "            ");
-        output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+        if !captures_nested {
+            output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+        }
     }
 
     output.push_str("            gen.writeStartObject();\n");
     for field in fields {
-        render_field_serialize(output, field);
+        render_field_serialize(output, field, captures_nested);
     }
     if open {
         output.push_str("            if (value.additionalProperties != null) {\n");
@@ -3544,7 +3904,7 @@ fn render_object_serializer(
             if additional.nullable {
                 output.push_str("                    if (entry.getValue() == null) {\n                        gen.writeNullField(entry.getKey());\n                        continue;\n                    }\n");
             }
-            output.push_str(&write_map_value(&additional.ty));
+            output.push_str(&write_map_value(&additional.ty, captures_nested));
         } else {
             output.push_str("                    gen.writeFieldName(entry.getKey());\n");
             output.push_str("                    gen.writeTree(entry.getValue());\n");
@@ -3553,12 +3913,102 @@ fn render_object_serializer(
         output.push_str("            }\n");
     }
     output.push_str("            gen.writeEndObject();\n");
+    if captures_nested {
+        output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+    }
     output.push_str("        }\n    }\n\n");
 }
 
-fn render_field_serialize(output: &mut String, field: &FieldPlan) {
+/// True when writing a value of this type runs another model's `Serializer`,
+/// which may throw its own `ValidationException` with paths rooted at *its*
+/// members (`zip`, not `address.zip`).
+fn field_serialize_may_nest(ty: &JavaType) -> bool {
+    match ty {
+        JavaType::Ref { .. } | JavaType::Union { .. } => true,
+        JavaType::List(inner) => field_serialize_may_nest(inner),
+        _ => false,
+    }
+}
+
+/// Writes a value that may itself be a validating model, capturing its
+/// `ValidationException` and re-pathing every violation under the parent's
+/// member path — `address.zip`, `addresses[1].zip` — into the parent's own
+/// list, so one payload still produces one aggregated failure (P11). The
+/// deserialize side does the same at `readTreeAsValue`.
+fn render_capturing_value_write(
+    output: &mut String,
+    ty: &JavaType,
+    path_expr: &str,
+    accessor: &str,
+    indent: &str,
+    depth: usize,
+) {
+    match ty {
+        JavaType::List(inner) if field_serialize_may_nest(inner) => {
+            let index = format!("nestedIndex{depth}");
+            let element = format!("nestedElement{depth}");
+            output.push_str(&format!("{indent}gen.writeStartArray();\n"));
+            output.push_str(&format!(
+                "{indent}for (int {index} = 0; {index} < {accessor}.size(); {index}++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    {} {element} = {accessor}.get({index});\n",
+                inner.boxed_name()
+            ));
+            output.push_str(&format!(
+                "{indent}    if ({element} == null) {{\n{indent}        gen.writeNull();\n{indent}    }} else {{\n"
+            ));
+            render_capturing_value_write(
+                output,
+                inner,
+                &format!("{path_expr} + \"[\" + {index} + \"]\""),
+                &element,
+                &format!("{indent}        "),
+                depth + 1,
+            );
+            output.push_str(&format!("{indent}    }}\n{indent}}}\n"));
+            output.push_str(&format!("{indent}gen.writeEndArray();\n"));
+        }
+        _ => {
+            output.push_str(&format!("{indent}try {{\n"));
+            output.push_str(&format!(
+                "{indent}    serializers.defaultSerializeValue({accessor}, gen);\n"
+            ));
+            output.push_str(&format!(
+                "{indent}}} catch (ValidationException nested{depth}) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    for (Violation nestedViolation{depth} : nested{depth}.getViolations()) {{\n{indent}        violations.add(nestedViolation{depth}.withPathPrefix({path_expr}));\n{indent}    }}\n"
+            ));
+            // The nested serializer aborted mid-value, so the generator is
+            // expecting one; nothing more can be written. Throw here with the
+            // parent's own violations already merged in (P11).
+            output.push_str(&format!(
+                "{indent}    throw new ValidationException(violations);\n"
+            ));
+            output.push_str(&format!("{indent}}}\n"));
+        }
+    }
+}
+
+fn render_field_serialize(output: &mut String, field: &FieldPlan, capture_nested: bool) {
     let json = java_string_literal(&field.json_name);
     let accessor = format!("value.{}", field.java_name);
+
+    if capture_nested && field_serialize_may_nest(&field.ty) {
+        // A nesting member is never a stored primitive.
+        output.push_str(&format!("            if ({accessor} != null) {{\n"));
+        output.push_str(&format!("                gen.writeFieldName({json});\n"));
+        render_capturing_value_write(output, &field.ty, &json, &accessor, "                ", 0);
+        if field.required && field.nullable {
+            output.push_str(&format!(
+                "            }} else {{\n                gen.writeNullField({json});\n            }}\n"
+            ));
+        } else {
+            output.push_str("            }\n");
+        }
+        return;
+    }
 
     let write = write_value_statement(&field.ty, &json, &accessor, "                ");
 
@@ -3603,6 +4053,13 @@ fn write_value_statement(ty: &JavaType, json: &str, accessor: &str, indent: &str
             "{indent}gen.writeStringField({json}, Base64Support.{}({accessor}));\n",
             java_content_encoding_format_fn(*encoding)
         ),
+        // A collection of materialized values is written by the generator, not
+        // by Jackson: see `java_list_needs_owned_write`.
+        JavaType::List(_) if java_list_needs_owned_write(ty) => {
+            let mut output = format!("{indent}gen.writeFieldName({json});\n");
+            render_owned_value_write(&mut output, ty, accessor, indent, 0);
+            output
+        }
         JavaType::Ref { .. } | JavaType::List(_) | JavaType::Union { .. } => {
             format!(
                 "{indent}gen.writeFieldName({json});\n{indent}serializers.defaultSerializeValue({accessor}, gen);\n"
@@ -3613,6 +4070,86 @@ fn write_value_statement(ty: &JavaType, json: &str, accessor: &str, indent: &str
         JavaType::ClosedValue { wire, .. } => {
             write_value_statement(wire, json, &format!("{accessor}.getValue()"), indent)
         }
+    }
+}
+
+/// True when a collection holds materialized values that **Jackson cannot write
+/// correctly on its own**, so the generator has to write the array elementwise.
+///
+/// A scalar `format`/`contentEncoding` member is written through
+/// `TemporalSupport.format*` / `Base64Support.format*`, but the same value
+/// inside a `List` used to reach `serializers.defaultSerializeValue`, i.e.
+/// Jackson's defaults. A stock `ObjectMapper` then **throws**
+/// `InvalidDefinitionException: Java 8 date/time type ... not supported by
+/// default: add Module "jackson-datatype-jsr310"` — the generated code is not
+/// self-sufficient, which P3/P4 forbid (a stock converter, no user wiring).
+/// `byte[]` is worse than a throw: Jackson silently writes its own base64
+/// variant, which is not the canonical `base64url` form the parser accepts.
+fn java_list_needs_owned_write(ty: &JavaType) -> bool {
+    match ty {
+        JavaType::Temporal(_) | JavaType::Bytes(_) => true,
+        JavaType::List(inner) => java_list_needs_owned_write(inner),
+        JavaType::ClosedValue { wire, .. } => java_list_needs_owned_write(wire),
+        _ => false,
+    }
+}
+
+/// Writes one value (no field name) with the generator-owned encoder, recursing
+/// through collections. Only reached for the types
+/// `java_list_needs_owned_write` selects.
+fn render_owned_value_write(
+    output: &mut String,
+    ty: &JavaType,
+    accessor: &str,
+    indent: &str,
+    depth: usize,
+) {
+    match ty {
+        JavaType::List(inner) => {
+            let index = format!("wireIndex{depth}");
+            let element = format!("wireElement{depth}");
+            output.push_str(&format!("{indent}gen.writeStartArray();\n"));
+            output.push_str(&format!(
+                "{indent}for (int {index} = 0; {index} < {accessor}.size(); {index}++) {{\n"
+            ));
+            output.push_str(&format!(
+                "{indent}    {} {element} = {accessor}.get({index});\n",
+                element_declaration(inner, true)
+            ));
+            output.push_str(&format!(
+                "{indent}    if ({element} == null) {{\n{indent}        gen.writeNull();\n{indent}    }} else {{\n"
+            ));
+            render_owned_value_write(
+                output,
+                inner,
+                &element,
+                &format!("{indent}        "),
+                depth + 1,
+            );
+            output.push_str(&format!("{indent}    }}\n{indent}}}\n"));
+            output.push_str(&format!("{indent}gen.writeEndArray();\n"));
+        }
+        JavaType::Temporal(kind) => match java_temporal_format_fn(*kind) {
+            // `time` is already a canonical String.
+            None => output.push_str(&format!("{indent}gen.writeString({accessor});\n")),
+            Some(format_fn) => output.push_str(&format!(
+                "{indent}gen.writeString(TemporalSupport.{format_fn}({accessor}));\n"
+            )),
+        },
+        JavaType::Bytes(encoding) => output.push_str(&format!(
+            "{indent}gen.writeString(Base64Support.{}({accessor}));\n",
+            java_content_encoding_format_fn(*encoding)
+        )),
+        JavaType::ClosedValue { wire, .. } => render_owned_value_write(
+            output,
+            wire,
+            &format!("{accessor}.getValue()"),
+            indent,
+            depth,
+        ),
+        _ => output.push_str(&format!(
+            "{indent}serializers.defaultSerializeValue({accessor}, gen);\n"
+        )),
     }
 }
 
@@ -3630,7 +4167,7 @@ fn render_object_deserializer(
     output.push_str(&format!(
         "        @Override\n        public {class} deserialize(JsonParser parser, DeserializationContext context) throws IOException {{\n"
     ));
-    output.push_str("            JsonNode node = parser.readValueAsTree();\n");
+    output.push_str("            JsonNode node = SpecNumbers.readExactTree(parser);\n");
     output.push_str("            List<Violation> violations = new ArrayList<>();\n");
     output.push_str("            if (node == null || !node.isObject()) {\n");
     output.push_str(
@@ -4004,7 +4541,7 @@ fn render_parse_value(
             render_parse_element(
                 output,
                 inner,
-                schema.items.as_deref(),
+                element_shape(schema),
                 "items",
                 "element",
                 "elementPath",
@@ -4021,6 +4558,7 @@ fn render_parse_value(
                     json,
                     inner,
                     array,
+                    Some(field_java_name),
                     &format!("{indent}    "),
                 );
             }
@@ -4242,7 +4780,7 @@ fn render_parse_element(
             render_parse_element(
                 output,
                 inner,
-                schema.and_then(|schema| schema.items.as_deref()),
+                schema.and_then(element_shape),
                 &nested,
                 &format!("element{level}"),
                 &format!("path{level}"),
@@ -4260,6 +4798,7 @@ fn render_parse_element(
                         path_var,
                         inner,
                         &constraints,
+                        None,
                         &format!("{indent}    "),
                     );
                 }
@@ -4448,7 +4987,7 @@ fn render_parse_map_value(
             render_parse_element(
                 output,
                 inner,
-                member.and_then(|schema| schema.items.as_deref()),
+                member.and_then(element_shape),
                 "items",
                 "item",
                 "itemPath",
@@ -4466,6 +5005,7 @@ fn render_parse_map_value(
                         key_var,
                         inner,
                         &constraints,
+                        Some(position),
                         &format!("{indent}    "),
                     );
                 }
@@ -4562,7 +5102,8 @@ fn render_java_member_checks(
     indent: &str,
 ) {
     render_java_finite_checks(output, ty, value_expr, key_expr, indent, 0);
-    render_java_calendar_year_checks(output, ty, value_expr, key_expr, indent, 0);
+    render_java_integer_cap_checks(output, ty, value_expr, key_expr, indent, 0);
+    render_java_temporal_checks(output, ty, value_expr, key_expr, indent, 0);
     render_java_closed_scalar_checks(output, value_expr, key_expr, member, ty, indent);
     match member.ty.as_ref().and_then(Value::as_str) {
         Some("string") if matches!(ty, JavaType::String) => {
@@ -4601,10 +5142,11 @@ fn render_java_member_checks(
                         key_expr,
                         element,
                         &constraints,
+                        Some(position),
                         indent,
                     );
                 }
-                if let Some(item_schema) = member.items.as_deref()
+                if let Some(item_schema) = element_shape(member)
                     && schema_has_recursive_value_checks(item_schema)
                 {
                     let index = "validationIndex0";
@@ -4707,6 +5249,7 @@ fn render_typed_map_class(
     value: &JavaType,
     max_properties: Option<usize>,
     member_union: Option<&JavaUnion>,
+    implements: &[String],
     refs: &mut BTreeSet<(String, String)>,
 ) {
     value.collect_refs(refs);
@@ -4718,8 +5261,19 @@ fn render_typed_map_class(
         schema.deprecated == Some(true),
         "type",
     );
+    // A typed map can be a `oneOf` member like any other object model, and then
+    // it has to carry the interface: the union's dispatcher reads the branch with
+    // `readTreeAsValue(node, <Branch>.class)`, whose `T` is pinned to the branch
+    // by the class literal and bounded above by the interface — without the
+    // clause that is an unsatisfiable inference constraint, not a cast error, so
+    // the package does not compile.
+    let implements_clause = if implements.is_empty() {
+        String::new()
+    } else {
+        format!(" implements {}", implements.join(", "))
+    };
     output.push_str(&format!(
-        "@JsonSerialize(using = {class}.Serializer.class)\n@JsonDeserialize(using = {class}.Deserializer.class)\npublic final class {class} {{\n"
+        "@JsonSerialize(using = {class}.Serializer.class)\n@JsonDeserialize(using = {class}.Deserializer.class)\npublic final class {class}{implements_clause} {{\n"
     ));
     // A nullable member takes the TYPE_USE annotation, so the map stays non-null
     // while its members may be null — the rule [[items]] applies to an element.
@@ -4743,6 +5297,14 @@ fn render_typed_map_class(
                 java_format_field_name(MAP_MEMBER_POSITION),
                 java_string_literal(&format.pattern),
             ));
+        }
+        if render_contains_pattern_statics(
+            output,
+            &ArrayConstraints::from_schema(member),
+            MAP_MEMBER_POSITION,
+            "    ",
+        ) {
+            output.push('\n');
         }
     }
     if let Some(property_names) = &schema.property_names {
@@ -4838,6 +5400,12 @@ fn render_typed_map_class(
         || schema.max_properties.is_some()
         || schema.property_names.is_some()
         || !member_checks.is_empty();
+    // A model-valued member reports through its own `ValidationException`;
+    // re-path and merge it here rather than letting it escape unrooted (P11).
+    let captures_nested = field_serialize_may_nest(value);
+    if !map_needs_validation && captures_nested {
+        output.push_str("            List<Violation> violations = new ArrayList<>();\n");
+    }
     if map_needs_validation {
         output.push_str("            List<Violation> violations = new ArrayList<>();\n");
         render_java_property_count_checks(
@@ -4865,7 +5433,9 @@ fn render_typed_map_class(
             output.push_str(&member_checks);
             output.push_str("            }\n");
         }
-        output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+        if !captures_nested {
+            output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+        }
     }
 
     output.push_str("            gen.writeStartObject();\n");
@@ -4877,9 +5447,12 @@ fn render_typed_map_class(
         output.push_str("                    gen.writeNullField(entry.getKey());\n");
         output.push_str("                    continue;\n                }\n");
     }
-    output.push_str(&write_map_value(value));
+    output.push_str(&write_map_value(value, captures_nested));
     output.push_str("            }\n");
     output.push_str("            gen.writeEndObject();\n");
+    if captures_nested {
+        output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+    }
     output.push_str("        }\n    }\n\n");
 
     // Deserializer
@@ -4889,7 +5462,7 @@ fn render_typed_map_class(
     output.push_str(&format!(
         "        @Override\n        public {class} deserialize(JsonParser parser, DeserializationContext context) throws IOException {{\n"
     ));
-    output.push_str("            JsonNode node = parser.readValueAsTree();\n");
+    output.push_str("            JsonNode node = SpecNumbers.readExactTree(parser);\n");
     output.push_str("            List<Violation> violations = new ArrayList<>();\n");
     output.push_str("            if (node == null || !node.isObject()) {\n");
     output.push_str(
@@ -4939,7 +5512,19 @@ fn render_typed_map_class(
     output.push_str("        }\n    }\n}\n");
 }
 
-fn write_map_value(value: &JavaType) -> String {
+fn write_map_value(value: &JavaType, capture_nested: bool) -> String {
+    if capture_nested && field_serialize_may_nest(value) {
+        let mut output = String::from("                gen.writeFieldName(entry.getKey());\n");
+        render_capturing_value_write(
+            &mut output,
+            value,
+            "entry.getKey()",
+            "entry.getValue()",
+            "                ",
+            0,
+        );
+        return output;
+    }
     match value {
         JavaType::String => {
             "                gen.writeStringField(entry.getKey(), entry.getValue());\n".to_string()
@@ -4949,6 +5534,12 @@ fn write_map_value(value: &JavaType) -> String {
         }
         JavaType::Boolean => {
             "                gen.writeBooleanField(entry.getKey(), entry.getValue());\n".to_string()
+        }
+        JavaType::List(_) if java_list_needs_owned_write(value) => {
+            let mut output =
+                "                gen.writeFieldName(entry.getKey());\n".to_string();
+            render_owned_value_write(&mut output, value, "entry.getValue()", "                ", 0);
+            output
         }
         JavaType::Ref { .. } | JavaType::List(_) | JavaType::Union { .. } => {
             "                gen.writeFieldName(entry.getKey());\n                serializers.defaultSerializeValue(entry.getValue(), gen);\n".to_string()
@@ -5122,10 +5713,10 @@ fn default_expr(field: &FieldPlan, value: &Value) -> Option<String> {
     let ty = &field.ty;
     match (ty, value) {
         (_, Value::Null) if field.nullable => Some("null".to_string()),
-        (JavaType::Long, Value::Number(number)) => number.as_i64().map(|value| format!("{value}L")),
-        (JavaType::Double, Value::Number(number)) => {
-            number.as_f64().map(|value| format!("{value}"))
-        }
+        // `1.0` is a legal spelling of an `integer` default; `as_i64()` returns
+        // `None` for it, so the shared literal renderer decides the spelling.
+        (JavaType::Long, Value::Number(number)) => Some(java_bound_literal(number, true)),
+        (JavaType::Double, Value::Number(number)) => Some(java_bound_literal(number, false)),
         (JavaType::Boolean, Value::Bool(value)) => Some(value.to_string()),
         (JavaType::String, Value::String(text)) => Some(java_string_literal(text)),
         (JavaType::ClosedValue { class, .. }, _) => Some(format!(
@@ -5138,7 +5729,12 @@ fn default_expr(field: &FieldPlan, value: &Value) -> Option<String> {
             )
         )),
         (JavaType::Temporal(kind), Value::String(text)) => {
-            let literal = java_string_literal(text);
+            // `java.time`'s `parse` is case-sensitive on the `T`/`Z`/`PT`
+            // designators while the pinned wire grammar accepts either case
+            // (`format.md`), so `OffsetDateTime.parse("2021-06-15t12:30:45z")`
+            // would throw `DateTimeParseException` the first time the default is
+            // read. Uppercase the literal, as Go's `mustParseDateTime` does.
+            let literal = java_string_literal(&text.to_ascii_uppercase());
             Some(match kind {
                 crate::json_schema::format::TemporalKind::DateTime => {
                     format!("OffsetDateTime.parse({literal})")
@@ -5180,12 +5776,17 @@ fn java_closed_const_type(ty: &JavaType) -> &'static str {
     }
 }
 
-/// The Java literal for a scalar closed value in its constant's type.
+/// The Java literal for a scalar closed value in its constant's type. An
+/// integer written with an integral fraction (`const: 1.0`, which JSON Schema
+/// admits for `type: integer`) renders as `1L` — `as_i64()` alone returns
+/// `None` for it and would silently emit `0L`.
 fn java_closed_literal(ty: &JavaType, value: &Value) -> String {
-    match ty {
-        JavaType::Long => format!("{}L", value.as_i64().unwrap_or_default()),
-        JavaType::Double => value.to_string(),
-        JavaType::Boolean => value.as_bool().unwrap_or_default().to_string(),
+    match (ty, value) {
+        (JavaType::Long, Value::Number(number)) => java_bound_literal(number, true),
+        (JavaType::Long, _) => "0L".to_string(),
+        (JavaType::Double, Value::Number(number)) => java_bound_literal(number, false),
+        (JavaType::Double, _) => "0.0".to_string(),
+        (JavaType::Boolean, _) => value.as_bool().unwrap_or_default().to_string(),
         _ => java_string_literal(value.as_str().unwrap_or_default()),
     }
 }
@@ -5427,7 +6028,15 @@ pub(in crate::generator) fn render_spec_numbers_file(package: &str) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
     output.push_str(&format!("package {package};\n\n"));
+    output.push_str("import com.fasterxml.jackson.core.JsonParser;\n");
+    output.push_str("import com.fasterxml.jackson.core.JsonToken;\n");
     output.push_str("import com.fasterxml.jackson.databind.JsonNode;\n");
+    output.push_str("import com.fasterxml.jackson.databind.node.ArrayNode;\n");
+    output.push_str("import com.fasterxml.jackson.databind.node.DecimalNode;\n");
+    output.push_str("import com.fasterxml.jackson.databind.node.JsonNodeFactory;\n");
+    output.push_str("import com.fasterxml.jackson.databind.node.ObjectNode;\n");
+    output.push_str("import java.io.IOException;\n");
+    output.push_str("import java.math.BigDecimal;\n");
     output.push_str("import java.util.List;\n");
     output.push_str("import org.jspecify.annotations.Nullable;\n\n");
     output.push_str(
@@ -5435,28 +6044,46 @@ pub(in crate::generator) fn render_spec_numbers_file(package: &str) -> String {
     );
     output.push_str("public final class SpecNumbers {\n");
     output.push_str("    public static final long INTEGER_CAP = (1L << 53) - 1;\n\n");
+    output.push_str(
+        "    private static final BigDecimal INTEGER_CAP_DECIMAL = BigDecimal.valueOf(INTEGER_CAP);\n\n",
+    );
     output.push_str("    private SpecNumbers() {}\n\n");
-    output.push_str("    /**\n     * Parses a JSON number as a spec integer: rejects non-numbers, fractional\n     * values, and magnitudes beyond the +/-(2^53-1) cap. Adds a {@link Violation}\n     * and returns {@code null} on failure.\n     */\n");
+    // Integral classification runs on the token's **exact** decimal value
+    // (`JsonNode.decimalValue()`), never on `doubleValue()`: above 2^52 a
+    // fractional literal such as `4503599627370496.5` has already rounded to an
+    // integral `double`, so `value == Math.floor(value)` would accept it where
+    // the shared contract rejects. See `specs/json-schema/features/type.md`.
+    output.push_str("    /**\n     * Parses a JSON number as a spec integer: rejects non-numbers, fractional\n     * values, and magnitudes beyond the +/-(2^53-1) cap. Classification is exact\n     * (the token's {@code BigDecimal}), never the rounded {@code double}. Adds a\n     * {@link Violation} and returns {@code null} on failure.\n     */\n");
     output.push_str("    public static @Nullable Long specLong(JsonNode node, String path, List<Violation> violations) {\n");
     output.push_str("        if (!node.isNumber()) {\n            violations.add(new Violation(path, \"expected integer\"));\n            return null;\n        }\n");
-    output.push_str("        double value = node.doubleValue();\n");
-    output.push_str("        if (Double.isNaN(value) || Double.isInfinite(value) || value != Math.floor(value)) {\n");
+    output.push_str("        if (!isFiniteNode(node)) {\n            violations.add(new Violation(path, \"not an integer\"));\n            return null;\n        }\n");
+    output.push_str("        BigDecimal decimal = node.decimalValue();\n");
+    output.push_str("        if (decimal.stripTrailingZeros().scale() > 0) {\n");
     output.push_str("            violations.add(new Violation(path, \"not an integer\"));\n            return null;\n        }\n");
-    output
-        .push_str("        if (value < -(double) INTEGER_CAP || value > (double) INTEGER_CAP) {\n");
+    output.push_str("        if (decimal.abs().compareTo(INTEGER_CAP_DECIMAL) > 0) {\n");
     output.push_str("            violations.add(new Violation(path, \"exceeds \\u00b1(2^53-1) integer cap\"));\n            return null;\n        }\n");
-    output.push_str("        return node.longValue();\n    }\n");
+    output.push_str("        return decimal.longValueExact();\n    }\n");
     output.push_str("\n    /** Returns whether a node is an accepted spec integer without recording a violation. */\n");
     output.push_str("    public static boolean isSpecLong(JsonNode node) {\n");
-    output.push_str("        if (!node.isNumber()) {\n            return false;\n        }\n");
-    output.push_str("        double value = node.doubleValue();\n");
-    output.push_str("        return Double.isFinite(value) && value == Math.floor(value)\n                && value >= -(double) INTEGER_CAP && value <= (double) INTEGER_CAP;\n    }\n");
+    output.push_str("        if (!node.isNumber() || !isFiniteNode(node)) {\n            return false;\n        }\n");
+    output.push_str("        BigDecimal decimal = node.decimalValue();\n");
+    output.push_str("        return decimal.stripTrailingZeros().scale() <= 0\n                && decimal.abs().compareTo(INTEGER_CAP_DECIMAL) <= 0;\n    }\n");
+    output.push_str("\n    /** True when a numeric node has an exact decimal value ({@code decimalValue()} throws on NaN/Infinity). */\n");
+    output.push_str("    private static boolean isFiniteNode(JsonNode node) {\n");
+    output.push_str("        return !(node.isDouble() || node.isFloat()) || Double.isFinite(node.doubleValue());\n    }\n");
     output.push_str("\n    /**\n     * Parses a JSON number as a finite binary64 value. Adds a\n     * {@link Violation} and returns {@code null} on failure.\n     */\n");
     output.push_str("    public static @Nullable Double specDouble(JsonNode node, String path, List<Violation> violations) {\n");
     output.push_str("        if (!node.isNumber()) {\n            violations.add(new Violation(path, \"expected number\"));\n            return null;\n        }\n");
     output.push_str("        double value = node.doubleValue();\n");
     output.push_str("        if (!Double.isFinite(value)) {\n            violations.add(new Violation(path, \"must be a finite number, got \" + value));\n            return null;\n        }\n");
     output.push_str("        return value;\n    }\n");
+    output.push_str(SPEC_NUMBERS_EXACT_TREE_BODY);
+    output.push_str("\n    /** Returns an in-memory {@code number} equality key, folding {@code -0.0} onto {@code 0.0}. */\n");
+    output.push_str("    public static @Nullable Double numberKey(@Nullable Double value) {\n");
+    output.push_str("        if (value == null) {\n            return null;\n        }\n");
+    output.push_str(
+        "        return value.doubleValue() == 0.0d ? Double.valueOf(0.0d) : value;\n    }\n",
+    );
     output.push_str("\n    /** Returns a JSON-value equality key, normalizing numeric spellings and signed zero. */\n");
     output.push_str("    public static Object valueKey(JsonNode node) {\n");
     output.push_str("        if (!node.isNumber()) {\n            return node;\n        }\n");
@@ -5467,6 +6094,80 @@ pub(in crate::generator) fn render_spec_numbers_file(package: &str) -> String {
     output.push_str("}\n");
     output
 }
+
+/// The `SpecNumbers.readExactTree` token walk. Jackson's default tree builder
+/// folds **every** floating token into a `double`, so a fractional literal at or
+/// above 2^52 (`4503599627370496.5`) has already rounded to an integral value
+/// before any check can see it — and an `integer` field would accept it. This
+/// walk keeps the token's exact decimal **only when the `double` is lossy**;
+/// otherwise it produces the very node Jackson would have, so signed zero, the
+/// re-emitted lexeme of a pass-through extra, and every other observable stay
+/// exactly as before. See `specs/json-schema/features/type.md`.
+const SPEC_NUMBERS_EXACT_TREE_BODY: &str = r####"
+    /**
+     * Reads the whole value under {@code parser} as a tree whose numbers keep
+     * their exact decimal value when {@code double} cannot hold it. Used in
+     * place of {@code parser.readValueAsTree()} by every generated
+     * deserializer.
+     */
+    public static @Nullable JsonNode readExactTree(JsonParser parser) throws IOException {
+        JsonToken token = parser.currentToken();
+        if (token == null) {
+            token = parser.nextToken();
+        }
+        if (token == null) {
+            return null;
+        }
+        JsonNodeFactory factory = JsonNodeFactory.instance;
+        switch (token) {
+            case START_OBJECT: {
+                ObjectNode object = factory.objectNode();
+                while (parser.nextToken() != JsonToken.END_OBJECT) {
+                    String name = parser.currentName();
+                    parser.nextToken();
+                    object.set(name, readExactTree(parser));
+                }
+                return object;
+            }
+            case START_ARRAY: {
+                ArrayNode array = factory.arrayNode();
+                while (parser.nextToken() != JsonToken.END_ARRAY) {
+                    array.add(readExactTree(parser));
+                }
+                return array;
+            }
+            case VALUE_STRING:
+                return factory.textNode(parser.getText());
+            case VALUE_NUMBER_INT:
+                switch (parser.getNumberType()) {
+                    case INT:
+                        return factory.numberNode(parser.getIntValue());
+                    case LONG:
+                        return factory.numberNode(parser.getLongValue());
+                    default:
+                        return factory.numberNode(parser.getBigIntegerValue());
+                }
+            case VALUE_NUMBER_FLOAT: {
+                double approximate = parser.getDoubleValue();
+                if (!Double.isFinite(approximate)) {
+                    return factory.numberNode(approximate);
+                }
+                BigDecimal exact = parser.getDecimalValue();
+                return BigDecimal.valueOf(approximate).compareTo(exact) == 0
+                        ? factory.numberNode(approximate)
+                        : DecimalNode.valueOf(exact);
+            }
+            case VALUE_TRUE:
+                return factory.booleanNode(true);
+            case VALUE_FALSE:
+                return factory.booleanNode(false);
+            case VALUE_NULL:
+                return factory.nullNode();
+            default:
+                return factory.pojoNode(parser.getEmbeddedObject());
+        }
+    }
+"####;
 
 /// Recursively walks schema-bearing positions that can materialize a target
 /// type. Planned `$defs` are models of their own and are covered by the caller's
@@ -5550,13 +6251,18 @@ pub(in crate::generator) fn render_base64_support_file(package: &str) -> String 
     );
     output.push_str("public final class Base64Support {\n");
     output.push_str("    private Base64Support() {}\n\n");
+    // The pinned regex carries the per-target end anchor, exactly as the
+    // value-level `pattern`/`format` path does: `java.util.regex`'s `$` matches
+    // *before* a final line terminator, so a trailing `\n` must be excluded by
+    // `\z` rather than by the anchoring mode of whichever matcher call happens
+    // to be at the use site. See `specs/json-schema/features/pattern.md`.
     output.push_str(&format!(
         "    private static final Pattern BASE64 = Pattern.compile({});\n",
-        java_string_literal(Encoding::Base64.pattern())
+        java_string_literal(&java_pinned_pattern(Encoding::Base64.pattern()))
     ));
     output.push_str(&format!(
         "    private static final Pattern BASE64URL = Pattern.compile({});\n\n",
-        java_string_literal(Encoding::Base64Url.pattern())
+        java_string_literal(&java_pinned_pattern(Encoding::Base64Url.pattern()))
     ));
     output.push_str(BASE64_SUPPORT_BODY);
     output.push_str("}\n");
@@ -5596,6 +6302,51 @@ const BASE64_SUPPORT_BODY: &str = r####"    public static byte @Nullable [] pars
     public static String formatBase64Url(byte[] value) {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
     }
+
+    // A `byte[]` has no value equality in Java, so a `List<byte[]>` member
+    // cannot use `List.equals` / `List.hashCode` / `List.toString` (they compare
+    // and print element identities). These three give it the value semantics the
+    // rest of the model has.
+
+    public static boolean listEquals(@Nullable List<byte[]> left, @Nullable List<byte[]> right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null || left.size() != right.size()) {
+            return false;
+        }
+        for (int index = 0; index < left.size(); index++) {
+            if (!java.util.Arrays.equals(left.get(index), right.get(index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static int listHashCode(@Nullable List<byte[]> values) {
+        if (values == null) {
+            return 0;
+        }
+        int result = 1;
+        for (byte[] value : values) {
+            result = 31 * result + java.util.Arrays.hashCode(value);
+        }
+        return result;
+    }
+
+    public static String listToString(@Nullable List<byte[]> values) {
+        if (values == null) {
+            return "null";
+        }
+        StringBuilder out = new StringBuilder("[");
+        for (int index = 0; index < values.size(); index++) {
+            if (index > 0) {
+                out.append(", ");
+            }
+            out.append(java.util.Arrays.toString(values.get(index)));
+        }
+        return out.append("]").toString();
+    }
 "####;
 
 /// Runtime `TemporalSupport.java`: the pinned narrowed regexes, the Gregorian
@@ -5614,6 +6365,7 @@ pub(in crate::generator) fn render_temporal_support_file(package: &str) -> Strin
     output.push_str("import java.time.LocalTime;\n");
     output.push_str("import java.time.OffsetDateTime;\n");
     output.push_str("import java.time.OffsetTime;\n");
+    output.push_str("import java.time.ZoneOffset;\n");
     output.push_str("import java.time.format.DateTimeParseException;\n");
     output.push_str("import java.util.List;\n");
     output.push_str("import java.util.regex.Pattern;\n");
@@ -5623,21 +6375,24 @@ pub(in crate::generator) fn render_temporal_support_file(package: &str) -> Strin
     );
     output.push_str("public final class TemporalSupport {\n");
     output.push_str("    private TemporalSupport() {}\n\n");
+    // As `Base64Support`: the pinned regex carries the `\z` end anchor so a
+    // trailing line terminator can never slip past, whatever matcher call the
+    // use site makes.
     output.push_str(&format!(
         "    private static final Pattern DATE_TIME = Pattern.compile({});\n",
-        java_string_literal(TemporalKind::DateTime.pattern())
+        java_string_literal(&java_pinned_pattern(TemporalKind::DateTime.pattern()))
     ));
     output.push_str(&format!(
         "    private static final Pattern DATE = Pattern.compile({});\n",
-        java_string_literal(TemporalKind::Date.pattern())
+        java_string_literal(&java_pinned_pattern(TemporalKind::Date.pattern()))
     ));
     output.push_str(&format!(
         "    private static final Pattern TIME = Pattern.compile({});\n",
-        java_string_literal(TemporalKind::Time.pattern())
+        java_string_literal(&java_pinned_pattern(TemporalKind::Time.pattern()))
     ));
     output.push_str(&format!(
         "    private static final Pattern DURATION = Pattern.compile({});\n",
-        java_string_literal(TemporalKind::Duration.pattern())
+        java_string_literal(&java_pinned_pattern(TemporalKind::Duration.pattern()))
     ));
     output.push_str(
         "    private static final long MAX_DURATION_SECONDS = Long.MAX_VALUE / 1_000_000_000L;\n\n",
@@ -5699,13 +6454,40 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
         return String.format("%s%02d:%02d", sign, abs / 3600, (abs % 3600) / 60);
     }
 
+    /**
+     * Truncates a fractional-seconds run to nanosecond resolution.
+     *
+     * The pinned grammar admits a fraction of any width and every target keeps
+     * what its own type can hold, dropping the rest: Go, TypeScript and Java at
+     * nanoseconds, Python at microseconds. That is P1's exception (b) — loss
+     * only at the target type's genuine capacity limit — and it is what
+     * `samples/python/tests/test_temporal.py` already pins. `java.time` stops at
+     * nanoseconds and its ISO parser *throws* past nine digits, so the extra
+     * digits are dropped here; rejecting instead would split the accept set,
+     * which exception (b) does not cover.
+     */
+    private static String truncateFraction(String value) {
+        int dot = value.indexOf('.');
+        if (dot < 0) {
+            return value;
+        }
+        int end = dot + 1;
+        while (end < value.length() && value.charAt(end) >= '0' && value.charAt(end) <= '9') {
+            end++;
+        }
+        if (end - dot - 1 <= 9) {
+            return value;
+        }
+        return value.substring(0, dot + 10) + value.substring(end);
+    }
+
     public static @Nullable OffsetDateTime parseDateTime(String value, String path, List<Violation> violations) {
         if (!DATE_TIME.matcher(value).matches() || !validCalendar(value)) {
             violations.add(new Violation(path, "must be a valid date-time, got \"" + value + "\""));
             return null;
         }
         try {
-            return OffsetDateTime.parse(value.toUpperCase());
+            return OffsetDateTime.parse(truncateFraction(value).toUpperCase());
         } catch (DateTimeParseException e) {
             violations.add(new Violation(path, "must be a valid date-time, got \"" + value + "\""));
             return null;
@@ -5742,7 +6524,7 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
             violations.add(new Violation(path, "must be a valid time, got \"" + value + "\""));
             return null;
         }
-        String upper = value.toUpperCase();
+        String upper = truncateFraction(value).toUpperCase();
         try {
             OffsetTime t = OffsetTime.parse(upper);
             return String.format("%02d:%02d:%02d", t.getHour(), t.getMinute(), t.getSecond())
@@ -5781,6 +6563,64 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
             return null;
         }
         return Duration.ofSeconds(total);
+    }
+
+    // ---- Serialize-side representability (P12) -------------------------
+    // A POJO is constructed unchecked, so a value the pinned wire grammar
+    // cannot spell reaches the Serializer. Each check below is the exact
+    // counterpart of the matching `parse*` above: without it the emitted wire
+    // is a string this module's own parser rejects.
+
+    private static void checkOffset(String name, Object value, ZoneOffset offset, String path, List<Violation> violations) {
+        if (offset.getTotalSeconds() % 60 != 0) {
+            violations.add(new Violation(path, "must be a valid " + name + ", got " + value
+                    + ": the UTC offset " + offset + " is not a whole number of minutes"));
+        }
+    }
+
+    private static void checkYear(String name, Object value, int year, String path, List<Violation> violations) {
+        if (year < 1) {
+            violations.add(new Violation(path, "must be a valid " + name + ", got " + value + ": year must be >= 0001"));
+        } else if (year > 9999) {
+            violations.add(new Violation(path, "must be a valid " + name + ", got " + value + ": year must be <= 9999"));
+        }
+    }
+
+    public static void checkDateTime(OffsetDateTime value, String path, List<Violation> violations) {
+        checkYear("date-time", value, value.getYear(), path, violations);
+        checkOffset("date-time", value, value.getOffset(), path, violations);
+    }
+
+    public static void checkDate(LocalDate value, String path, List<Violation> violations) {
+        checkYear("date", value, value.getYear(), path, violations);
+    }
+
+    // `time` materializes as the canonical wire string; a hand-constructed POJO
+    // can still hold anything, so the pinned grammar is re-asserted.
+    public static void checkTime(String value, String path, List<Violation> violations) {
+        if (!TIME.matcher(value).matches()) {
+            violations.add(new Violation(path, "must be a valid time, got \"" + value + "\""));
+            return;
+        }
+        try {
+            checkOffset("time", value, OffsetTime.parse(value.toUpperCase()).getOffset(), path, violations);
+        } catch (DateTimeParseException e) {
+            // Offset-less; the grammar allows it and there is no offset to hold.
+        }
+    }
+
+    public static void checkDuration(Duration value, String path, List<Violation> violations) {
+        String reason;
+        if (value.isNegative()) {
+            reason = "a duration cannot be negative";
+        } else if (value.getNano() != 0) {
+            reason = "a duration cannot carry a fraction of a second";
+        } else if (value.getSeconds() > MAX_DURATION_SECONDS) {
+            reason = "a duration cannot exceed " + MAX_DURATION_SECONDS + " seconds";
+        } else {
+            return;
+        }
+        violations.add(new Violation(path, "must be a valid duration, got " + value + ": " + reason));
     }
 
     public static String formatDuration(Duration value) {

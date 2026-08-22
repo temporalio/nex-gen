@@ -1,0 +1,24 @@
+# `uniqueItems` is a value-equality question, asked in both directions.
+#
+# `1` and `1.0` are the same number; `5` and `5e0` are the same number; `-0.0`
+# and `0.0` are NOT (P1 keeps the sign, and so must every target's key); `true`
+# and `1` are different values in different types.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: UniqueItems
+description: Duplicate detection by mathematical value, parsing and serializing.
+type: object
+additionalProperties: false
+required: [numbers]
+properties:
+  numbers:
+    description: Numeric elements — the axis where spelling and sign diverge.
+    type: array
+    uniqueItems: true
+    items:
+      type: number
+  words:
+    description: String elements, the trivially-agreed baseline.
+    type: array
+    uniqueItems: true
+    items:
+      type: string

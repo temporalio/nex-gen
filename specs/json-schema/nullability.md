@@ -354,10 +354,14 @@ Per-language mechanism (all are *encode-adapter* concerns; the shared
   JSON `null`); required-non-nullable, `const` and defaulted fields are
   always written. Optional+nullable takes the conservative omit — a
   `None` attribute cannot say whether the wire carried `null`.
-- **Java** — `@JsonInclude(NON_NULL)` on optional fields;
-  `@JsonInclude(ALWAYS)` forces the required+nullable `null`;
-  optional+nullable collapses to the conservative omit (PRINCIPLES
-  Java §6).
+- **Java** — the per-POJO nested `Serializer` (PRINCIPLES Java §6) writes
+  the object field by field, honoring `@JsonInclude` semantics **in code**
+  rather than by annotation: an optional field is written only when
+  non-`null` (`NON_NULL` behavior), a required+nullable field is always
+  written and emits `writeNullField` when `null` (`ALWAYS` behavior), and
+  optional+nullable collapses to the conservative omit. The POJO itself
+  carries no `@JsonInclude` — the mirror of the collecting deserializer,
+  keeping both directions in one hand-emitted place.
 
 ## Strict enforcement of optional-non-nullable
 

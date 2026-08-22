@@ -2185,7 +2185,16 @@ properties:
     let rendered = fs::read_to_string(output_path.join("output.go")).unwrap();
 
     assert!(rendered.contains("utf8.RuneCountInString(e) >= 5"));
-    assert!(rendered.contains("regexp.MustCompile(\"^api\\\\.\").MatchString(e)"));
+    // The matcher's regexes compile once at package init, never per element
+    // inside the scan loop (`pattern.md`'s compile-once rule).
+    assert!(
+        rendered.contains("var matchersHostsContainsPattern = regexp.MustCompile(\"^api\\\\.\")")
+    );
+    assert!(rendered.contains("matchersHostsContainsPattern.MatchString(e)"));
+    assert!(
+        !rendered.contains("regexp.MustCompile(\"^api\\\\.\").MatchString("),
+        "the matcher pattern must not be recompiled per element\n{rendered}"
+    );
 
     let format_status = Command::new("gofmt")
         .args(["-w", output_path.to_str().unwrap()])
@@ -2366,6 +2375,18 @@ func TestScalarMatchers(t *testing.T) {
     }
     if err := decode(t, `{"integers":[2],"decimals":[0.3,2],"names":{"Api":"x"}}`); err == nil || !strings.Contains(err.Error(), "Api") {
         t.Fatalf("property name matcher was not applied: %v", err)
+    }
+    // An `integer` matcher over `number` elements admits [[type]]'s integer
+    // domain, cap included -- the same set Number.isSafeInteger / SpecNumbers
+    // admit in the other three targets.
+    if err := decode(t, `{"integers":[1e300],"decimals":[0.3,2],"names":{"api":"x"}}`); err == nil || !strings.Contains(err.Error(), "integers") {
+        t.Fatalf("an over-cap integral double matched the integer matcher: %v", err)
+    }
+    if err := decode(t, `{"integers":[9007199254740993],"decimals":[0.3,2],"names":{"api":"x"}}`); err == nil || !strings.Contains(err.Error(), "integers") {
+        t.Fatalf("a past-2^53 double matched the integer matcher: %v", err)
+    }
+    if err := decode(t, `{"integers":[9007199254740991],"decimals":[0.3,2],"names":{"api":"x"}}`); err != nil {
+        t.Fatalf("the cap boundary did not match the integer matcher: %v", err)
     }
 }
 "#,
@@ -3164,5 +3185,1038 @@ services:
         1,
         "`Page` must be declared once in the flat package\n{rendered}"
     );
+    // Owning no models of its own must not turn the module's service into the
+    // WIT operation-function surface: a JSON service is a `var <Service>` of
+    // `nexus.OperationReference`s and never depends on the Temporal SDK.
+    assert!(rendered.contains("var Svc = struct {"), "{rendered}");
+    assert!(
+        rendered.contains("nexus.NewOperationReference[Page, nexus.NoValue](\"One\")"),
+        "{rendered}"
+    );
+    assert!(
+        !rendered.contains("go.temporal.io/sdk/workflow"),
+        "definitions-only output must not depend on the Temporal SDK\n{rendered}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A `number` field's `multipleOf` is IEEE `fmod` — the same primitive
+/// TypeScript's `%`, Python's `math.fmod` and Java's `%` run — so the accepted
+/// set is bit-identical across the four (`multipleOf.md:97`). Exact decimal
+/// arithmetic over the shortest round-tripping spelling is a *different*
+/// predicate: it accepts `1e23 % 5` (which the other three reject) and rejects
+/// `1e300 % 3` (which they accept).
+#[test]
+fn go_json_number_multiple_of_is_ieee_fmod() {
+    let temp_dir = unique_output_path("go-json-fmod");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("fmod.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  byFive: { type: number, multipleOf: 5 }
+  byThree: { type: number, multipleOf: 3 }
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("fmod");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("fmod.go")).unwrap();
+    assert!(
+        rendered.contains("math.Mod(float64(v), 5) != 0"),
+        "{rendered}"
+    );
+    fs::write(
+        output_path.join("fmod_test.go"),
+        r#"package fmod
+
+import (
+    "encoding/json"
+    "testing"
+)
+
+func TestNumberMultipleOfIsFmod(t *testing.T) {
+    for _, tc := range []struct {
+        wire   string
+        accept bool
+    }{
+        // fmod(1e23, 5) == 2 -- the shortest decimal spelling "1e23" is an exact
+        // multiple of 5, the stored double is not.
+        {`{"byFive":1e23}`, false},
+        // fmod(1e300, 3) == 0 -- the stored double is an exact multiple, the
+        // decimal 1e300 is not.
+        {`{"byThree":1e300}`, true},
+        {`{"byThree":1e22}`, false},
+        {`{"byFive":10}`, true},
+        {`{"byFive":-0}`, true},
+        {`{"byFive":7}`, false},
+    } {
+        var value Fmod
+        err := json.Unmarshal([]byte(tc.wire), &value)
+        if (err == nil) != tc.accept {
+            t.Errorf("%s: accept=%v, err=%v", tc.wire, tc.accept, err)
+        }
+    }
+}
+"#,
+    )
+    .unwrap();
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let test_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(test_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// The `oneOf:[T, null]` nullability wrapper carries no `type` and no keywords,
+/// so every shape decision and every constraint has to be read off the non-null
+/// branch (`nullability.md:177-187`). Before this was fixed a nullable
+/// `integer`/`number`/`boolean`/`array` property parsed through
+/// `parseStringField` — the package did not compile — and the shared `Validate`
+/// dropped every co-occurring constraint.
+#[test]
+fn go_json_nullable_non_string_properties_keep_their_shape_and_constraints() {
+    let temp_dir = unique_output_path("go-json-nullable-shapes");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("nullable.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [count, tags]
+properties:
+  count:
+    oneOf:
+      - { type: integer, minimum: 1, maximum: 10 }
+      - { type: "null" }
+  ratio:
+    oneOf:
+      - { type: number, multipleOf: 2 }
+      - { type: "null" }
+  flag:
+    oneOf:
+      - { type: boolean }
+      - { type: "null" }
+  tags:
+    oneOf:
+      - { type: array, items: { type: string }, minItems: 1 }
+      - { type: "null" }
+  name:
+    oneOf:
+      - { type: string, minLength: 2, maxLength: 5, pattern: "^[a-z]+$" }
+      - { type: "null" }
+  kind:
+    oneOf:
+      - { type: string, enum: [a, b] }
+      - { type: "null" }
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("nullable");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("nullable.go")).unwrap();
+    assert!(
+        rendered.contains("Count *int64 `json:\"count\"`"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("Ratio *float64"), "{rendered}");
+    assert!(rendered.contains("Flag *bool"), "{rendered}");
+    // required + nullable array is `[]T`, not `*[]T` (nullability.md:252).
+    assert!(
+        rendered.contains("Tags []string `json:\"tags\"`"),
+        "{rendered}"
+    );
+    // A nullable `enum` still gets the closed defined type (P13.1).
+    assert!(rendered.contains("Kind *NullableKind"), "{rendered}");
+    assert!(
+        !rendered.contains("parseStringField(get(\"count\")"),
+        "{rendered}"
+    );
+
+    fs::write(
+        output_path.join("nullable_test.go"),
+        r#"package nullable
+
+import (
+    "encoding/json"
+    "testing"
+)
+
+func TestNullableShapes(t *testing.T) {
+    // Every nullable member accepts an explicit null.
+    var allNull Nullable
+    if err := json.Unmarshal([]byte(`{"count":null,"tags":null,"ratio":null,"flag":null,"name":null,"kind":null}`), &allNull); err != nil {
+        t.Fatalf("explicit nulls rejected: %v", err)
+    }
+    encoded, err := json.Marshal(allNull)
+    if err != nil {
+        t.Fatalf("re-encode failed: %v", err)
+    }
+    if string(encoded) != `{"count":null,"tags":null}` {
+        t.Errorf("required+nullable members must emit null, optional ones omit: %s", encoded)
+    }
+
+    var full Nullable
+    if err := json.Unmarshal([]byte(`{"count":5,"tags":["x"],"ratio":4,"flag":true,"name":"abc","kind":"a"}`), &full); err != nil {
+        t.Fatalf("valid payload rejected: %v", err)
+    }
+
+    // Every constraint on the non-null branch still applies.
+    for _, wire := range []string{
+        `{"count":0,"tags":["x"]}`,
+        `{"count":11,"tags":["x"]}`,
+        `{"count":5,"tags":[]}`,
+        `{"count":5,"tags":["x"],"ratio":3}`,
+        `{"count":5,"tags":["x"],"name":"A"}`,
+        `{"count":5,"tags":["x"],"name":"toolong"}`,
+        `{"count":5,"tags":["x"],"kind":"zzz"}`,
+    } {
+        var value Nullable
+        if err := json.Unmarshal([]byte(wire), &value); err == nil {
+            t.Errorf("%s: expected a violation", wire)
+        }
+    }
+}
+"#,
+    )
+    .unwrap();
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let test_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(test_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A cross-file `$ref` union branch must resolve to its target's schema. Go
+/// flattens the generate closure into one package, but reachability pruning
+/// removes another file's declarations from this module's plan, so the branch
+/// used to classify as nothing at all and the union collapsed to
+/// `type Shape struct{}`. A cross-module `$ref` *to* a named union must resolve
+/// to the sealed interface, not to `*Shape`.
+#[test]
+fn go_json_cross_file_union_branches_resolve() {
+    let temp_dir = unique_output_path("go-json-cross-file-union");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(&input_dir).unwrap();
+    fs::write(
+        input_dir.join("shapes.nexusrpc.yaml"),
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+$defs:
+  Circle:
+    type: object
+    required: [kind]
+    properties:
+      kind: { type: string, const: circle }
+      r: { type: number }
+  Square:
+    type: object
+    required: [kind]
+    properties:
+      kind: { type: string, const: square }
+      side: { type: number }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("holder.nexusrpc.yaml"),
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+$defs:
+  Shape:
+    oneOf:
+      - { $ref: "shapes.nexusrpc.yaml#/$defs/Circle" }
+      - { $ref: "shapes.nexusrpc.yaml#/$defs/Square" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        input_dir.join("drawing.nexusrpc.yaml"),
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+$defs:
+  Drawing:
+    type: object
+    properties:
+      main: { $ref: "holder.nexusrpc.yaml#/$defs/Shape" }
+"#,
+    )
+    .unwrap();
+
+    let output_path = temp_dir.join("out");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = read_go_output_files(&output_path)
+        .into_values()
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("// Shape is one of: Circle, Square."),
+        "{rendered}"
+    );
+    assert!(
+        !rendered.contains("type Shape struct {"),
+        "a named cross-file union must not collapse to an empty struct\n{rendered}"
+    );
+    assert_eq!(
+        rendered.matches("type Shape interface {").count(),
+        1,
+        "the union interface is declared once, by the file that owns it\n{rendered}"
+    );
+    // The referencing module gets the interface, not a pointer to it.
+    assert!(
+        rendered.contains("Main Shape `json:\"main,omitempty\"`"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("*Shape"), "{rendered}");
+    // The discriminator is matched on the JSON value, not on the wire lexeme.
+    assert!(
+        rendered.contains("case jsonScalarEquals(discRaw, \"\\\"circle\\\"\"):"),
+        "{rendered}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Everything a materialized value has to survive on the way out (P12): the
+/// wire grammar's calendar and offset limits, the unsigned whole-second
+/// duration, and `uniqueItems`/`const` compared on the canonical **wire
+/// string** in both directions (decision D10) rather than on the native
+/// `time.Time`/`time.Duration`/`[]byte`.
+#[test]
+fn go_json_materialized_values_are_checked_and_compared_on_the_wire() {
+    let temp_dir = unique_output_path("go-json-materialized-serialize");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("mat.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [blob]
+properties:
+  blob: { type: string, contentEncoding: base64, minLength: 4, maxLength: 8 }
+  blobConst: { type: string, contentEncoding: base64, const: "aGk=" }
+  when: { type: string, format: date-time }
+  dur: { type: string, format: duration }
+  times:
+    type: array
+    items: { type: string, format: date-time }
+    uniqueItems: true
+  blobs:
+    type: array
+    items: { type: string, contentEncoding: base64 }
+    uniqueItems: true
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("mat");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("mat.go")).unwrap();
+    // The wire-string length bounds run over the encoded string, never over the
+    // decoded `[]byte` (`utf8.RuneCountInString` does not take one).
+    assert!(
+        rendered.contains("wireBlob := encodeBase64(m.Blob)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("utf8.RuneCountInString(wireBlob)"),
+        "{rendered}"
+    );
+    // `const` compares the canonical wire string, not the decoded bytes.
+    assert!(
+        rendered.contains("wireBlobConst := encodeBase64(m.BlobConst)"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("bytes.Equal(("), "{rendered}");
+    // `uniqueItems` keys on the canonical wire string ([]byte is not even a
+    // legal Go map key).
+    assert!(rendered.contains("key := formatDateTime(e)"), "{rendered}");
+    assert!(rendered.contains("key := encodeBase64(e)"), "{rendered}");
+
+    fs::write(
+        output_path.join("mat_test.go"),
+        r#"package mat
+
+import (
+    "encoding/json"
+    "testing"
+    "time"
+)
+
+func TestMaterializedSerializeChecks(t *testing.T) {
+    base := Mat{Blob: []byte("hi!!")}
+
+    negative := -90 * time.Minute
+    fractional := 500 * time.Millisecond
+    for name, value := range map[string]time.Duration{"negative": negative, "sub-second": fractional} {
+        model := base
+        model.Dur = &value
+        if _, err := json.Marshal(model); err == nil {
+            t.Errorf("%s duration serialized", name)
+        }
+    }
+
+    subMinuteOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", 30))
+    overflowYear := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+    for name, value := range map[string]time.Time{"sub-minute offset": subMinuteOffset, "year 10000": overflowYear} {
+        model := base
+        model.When = &value
+        if _, err := json.Marshal(model); err == nil {
+            t.Errorf("%s date-time serialized", name)
+        }
+    }
+
+    duplicate := time.Date(2021, 6, 15, 12, 30, 45, 0, time.UTC)
+    model := base
+    model.Times = []time.Time{duplicate, duplicate}
+    if _, err := json.Marshal(model); err == nil {
+        t.Errorf("duplicate date-times serialized")
+    }
+    model = base
+    model.Blobs = [][]byte{[]byte("ab"), []byte("ab")}
+    if _, err := json.Marshal(model); err == nil {
+        t.Errorf("duplicate byte strings serialized")
+    }
+
+    model = base
+    model.BlobConst = []byte("hi")
+    if _, err := json.Marshal(model); err != nil {
+        t.Errorf("the const value was rejected: %v", err)
+    }
+    model.BlobConst = []byte("no")
+    if _, err := json.Marshal(model); err == nil {
+        t.Errorf("a non-const value serialized")
+    }
+
+    ok := base
+    canonical := time.Date(2021, 6, 15, 12, 30, 45, 0, time.UTC)
+    ninety := 90 * time.Minute
+    ok.When = &canonical
+    ok.Dur = &ninety
+    encoded, err := json.Marshal(ok)
+    if err != nil {
+        t.Fatalf("valid model rejected: %v", err)
+    }
+    if string(encoded) != `{"blob":"aGkhIQ==","dur":"PT1H30M","when":"2021-06-15T12:30:45Z"}` {
+        t.Errorf("unexpected wire: %s", encoded)
+    }
+}
+"#,
+    )
+    .unwrap();
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let test_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(test_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A `nil` `[]T` marshals to `null` under `encoding/json`, which is the wrong
+/// wire form for a required non-nullable array — and a payload this package's
+/// own decoder rejects. `MarshalJSON` emits `[]` (items.md:193-202).
+#[test]
+fn go_json_required_array_emits_empty_array_for_a_nil_slice() {
+    let temp_dir = unique_output_path("go-json-nil-slice");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("bag.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [tags]
+properties:
+  tags: { type: array, items: { type: string } }
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("bag");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    fs::write(
+        output_path.join("bag_test.go"),
+        r#"package bag
+
+import (
+    "encoding/json"
+    "testing"
+)
+
+func TestNilSliceEmitsEmptyArray(t *testing.T) {
+    encoded, err := json.Marshal(Bag{})
+    if err != nil {
+        t.Fatalf("nil slice rejected: %v", err)
+    }
+    if string(encoded) != `{"tags":[]}` {
+        t.Fatalf("got %s", encoded)
+    }
+    var back Bag
+    if err := json.Unmarshal(encoded, &back); err != nil {
+        t.Fatalf("own output rejected: %v", err)
+    }
+}
+"#,
+    )
+    .unwrap();
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let test_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(test_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Object-shape leftovers that each produced Go that did not compile, or a
+/// `Validate()` that lied: a closed-value member with a `default` (the accessor
+/// has to return the closed defined type), an untyped catch-all colliding with a
+/// declared member, the object-level constraints missing from the shared
+/// `Validate`.
+#[test]
+fn go_json_object_shapes_compile_and_validate_completely() {
+    let temp_dir = unique_output_path("go-json-object-shapes");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("shapes.nexusrpc.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+$defs:
+  Defaulted:
+    type: object
+    properties:
+      status: { type: string, enum: [active, inactive], default: active }
+  Contact:
+    type: object
+    additionalProperties: false
+    minProperties: 1
+    maxProperties: 3
+    dependentRequired:
+      email: [name]
+    properties:
+      name: { type: string }
+      email: { type: string }
+      phone: { type: string }
+  Open:
+    type: object
+    properties:
+      a: { type: string }
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("shapes");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("shapes.go")).unwrap();
+    assert!(
+        rendered.contains("func (m Defaulted) StatusOrDefault() DefaultedStatus {"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("return DefaultedStatusActive"),
+        "{rendered}"
+    );
+
+    fs::write(
+        output_path.join("shapes_test.go"),
+        r#"package shapes
+
+import (
+    "encoding/json"
+    "strings"
+    "testing"
+)
+
+func TestObjectShapes(t *testing.T) {
+    if got := (Defaulted{}).StatusOrDefault(); got != DefaultedStatusActive {
+        t.Errorf("default accessor returned %v", got)
+    }
+
+    // The catch-all can only hold members the declared set does not name --
+    // an untyped catch-all is no different from a typed one.
+    a := "x"
+    collision := Open{A: &a, AdditionalProperties: map[string]json.RawMessage{"a": json.RawMessage(`"y"`)}}
+    if _, err := json.Marshal(collision); err == nil || !strings.Contains(err.Error(), "collides") {
+        t.Errorf("catch-all collision was not reported: %v", err)
+    }
+
+    // The object-level constraints live in the shared Validate, and are
+    // reported exactly once through MarshalJSON.
+    if err := (Contact{}).Validate(); err == nil || !strings.Contains(err.Error(), "at least 1 properties") {
+        t.Errorf("minProperties missing from Validate: %v", err)
+    }
+    email := "a@b.c"
+    if err := (Contact{Email: &email}).Validate(); err == nil || !strings.Contains(err.Error(), "is required when") {
+        t.Errorf("dependentRequired missing from Validate: %v", err)
+    }
+    if _, err := json.Marshal(Contact{Email: &email}); err == nil || strings.Count(err.Error(), "is required when") != 1 {
+        t.Errorf("dependentRequired was not reported exactly once: %v", err)
+    }
+    name := "n"
+    if err := (Contact{Name: &name, Email: &email}).Validate(); err != nil {
+        t.Errorf("a satisfying Contact was rejected: %v", err)
+    }
+}
+"#,
+    )
+    .unwrap();
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let test_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(test_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A `$ref` to a named union resolves through the name manifest, so an
+/// `x-go-name` on the union still binds the sealed interface. Recasing the
+/// reference text missed the override and fell through to `*<Union>` — a
+/// pointer to an interface, which does not compile.
+#[test]
+fn go_json_renamed_union_reference_binds_the_interface() {
+    let temp_dir = unique_output_path("go-json-renamed-union");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("shapes.nexusrpc.yaml");
+    fs::write(
+        &input_path,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+$defs:
+  Shape:
+    x-go-name: ShapeGo
+    oneOf:
+      - { $ref: "#/$defs/Circle" }
+      - { $ref: "#/$defs/Square" }
+  Circle:
+    type: object
+    required: [kind]
+    properties:
+      kind: { type: string, const: circle }
+  Square:
+    type: object
+    required: [kind]
+    properties:
+      kind: { type: string, const: square }
+  Holder:
+    type: object
+    properties:
+      shape: { $ref: "#/$defs/Shape" }
+"##,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("shapes");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("shapes.go")).unwrap();
+    assert!(
+        rendered.contains("Shape ShapeGo `json:\"shape,omitempty\"`"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("*ShapeGo"), "{rendered}");
+
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let build_status = Command::new("go")
+        .args(["build", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(build_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// `json.Number` is a string type, so `encoding/json` decodes the quoted token
+/// `"7"` into it without complaint and the spec-number path never learns the
+/// wire token was a string. TypeScript, Python and Java all reject it, so this
+/// was an accept-set divergence on every numeric member in the repo.
+#[test]
+fn go_json_numeric_members_reject_a_quoted_token() {
+    let temp_dir = unique_output_path("go-json-quoted-number");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("nums.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [count, ratio]
+properties:
+  count: { type: integer }
+  ratio: { type: number }
+  counts:
+    type: array
+    items: { type: number }
+    contains: { type: integer }
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("nums");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    fs::write(
+        output_path.join("nums_test.go"),
+        r#"package nums
+
+import (
+    "encoding/json"
+    "testing"
+)
+
+func TestQuotedNumericTokenRejected(t *testing.T) {
+    for _, tc := range []struct {
+        wire   string
+        accept bool
+    }{
+        {`{"count":7,"ratio":1.5}`, true},
+        {`{"count":"7","ratio":1.5}`, false},
+        {`{"count":7,"ratio":"1.5"}`, false},
+        {`{"count":7,"ratio":1.5,"counts":[1]}`, true},
+        // A quoted element must not satisfy an `integer` contains matcher either.
+        {`{"count":7,"ratio":1.5,"counts":["1"]}`, false},
+    } {
+        var value Nums
+        err := json.Unmarshal([]byte(tc.wire), &value)
+        if (err == nil) != tc.accept {
+            t.Errorf("%s: accept=%v, err=%v", tc.wire, tc.accept, err)
+        }
+    }
+}
+"#,
+    )
+    .unwrap();
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let test_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(test_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A nullable scalar element (decision D2). The Go element is a `*T`, so both
+/// array-keyword loops have to look through the pointer — and `null` carries
+/// its own semantics: two `null` elements are a duplicate
+/// (`uniqueItems.md:188-190`) while a `null` element never matches a scalar
+/// `contains` matcher (`contains.md`, Interactions → nullability).
+#[test]
+fn go_json_nullable_elements_are_unique_and_never_match_a_matcher() {
+    let temp_dir = unique_output_path("go-json-nullable-elements");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("elements.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [words, counts]
+properties:
+  words:
+    type: array
+    uniqueItems: true
+    items:
+      oneOf:
+        - { type: string }
+        - { type: "null" }
+  counts:
+    type: array
+    contains: { type: integer, minimum: 2 }
+    items:
+      oneOf:
+        - { type: integer }
+        - { type: "null" }
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("elements");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    fs::write(
+        output_path.join("elements_test.go"),
+        r#"package elements
+
+import (
+    "encoding/json"
+    "strings"
+    "testing"
+)
+
+func TestNullableElements(t *testing.T) {
+    for _, tc := range []struct {
+        wire   string
+        accept bool
+    }{
+        {`{"words":["a",null,"b"],"counts":[2]}`, true},
+        {`{"words":[null,null],"counts":[2]}`, false},
+        {`{"words":["a","a"],"counts":[2]}`, false},
+        {`{"words":[],"counts":[null,3]}`, true},
+        {`{"words":[],"counts":[null,1]}`, false},
+        {`{"words":[],"counts":[null]}`, false},
+    } {
+        var value Elements
+        err := json.Unmarshal([]byte(tc.wire), &value)
+        if (err == nil) != tc.accept {
+            t.Errorf("%s: accept=%v, err=%v", tc.wire, tc.accept, err)
+        }
+    }
+
+    // Serialize reaches the same verdicts over natively built values.
+    word := "a"
+    two := int64(2)
+    if _, err := json.Marshal(Elements{Words: []*string{nil, nil}, Counts: []*int64{&two}}); err == nil ||
+        !strings.Contains(err.Error(), "duplicate") {
+        t.Errorf("two nil elements are a duplicate: %v", err)
+    }
+    if _, err := json.Marshal(Elements{Words: []*string{nil, &word}, Counts: []*int64{&two}}); err != nil {
+        t.Errorf("one nil element is not a duplicate: %v", err)
+    }
+    if _, err := json.Marshal(Elements{Words: []*string{}, Counts: []*int64{nil}}); err == nil ||
+        !strings.Contains(err.Error(), "no element matches") {
+        t.Errorf("a nil element must not match the matcher: %v", err)
+    }
+}
+"#,
+    )
+    .unwrap();
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let test_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(test_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Two synthesized names that must follow the **emitted member identifier**, not
+/// the JSON name: `x-go-enum-names` is keyed by a member's wire spelling (so a
+/// numeric or boolean member can be renamed at all — P15's only escape hatch for
+/// a value-constant collision), and an inline union's sealed interface is
+/// `<Model><Member>`, the same rule the closed-value defined type already
+/// follows.
+#[test]
+fn go_json_synthesized_names_follow_the_emitted_member() {
+    let temp_dir = unique_output_path("go-json-synthesized-names");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("names.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  tier:
+    type: integer
+    enum: [1, 2]
+    x-go-enum-names:
+      "1": TierBronzeGo
+      "2": TierSilverGo
+  flag:
+    type: boolean
+    enum: [true, false]
+    x-go-enum-names:
+      "true": FlagOnGo
+      "false": FlagOffGo
+  idOrName:
+    x-go-name: Chosen
+    oneOf:
+      - { type: string }
+      - { type: integer }
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("names");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("names.go")).unwrap();
+    // Numeric and boolean members are renameable.
+    assert!(
+        rendered.contains("TierBronzeGo NamesTier = 1"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("FlagOnGo NamesFlag = true"), "{rendered}");
+    // The union moves with `x-go-name`, wrappers and dispatcher included.
+    assert!(
+        rendered.contains("type NamesChosen interface {"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("type NamesChosenString string"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("func unmarshalNamesChosen("),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("NamesIdOrName"), "{rendered}");
+    // The wire name is untouched by every one of them.
+    assert!(
+        rendered.contains("`json:\"idOrName,omitempty\"`"),
+        "{rendered}"
+    );
+
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let build_status = Command::new("go")
+        .args(["build", "./..."])
+        .env("GO111MODULE", "off")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(build_status.success());
     fs::remove_dir_all(temp_dir).unwrap();
 }

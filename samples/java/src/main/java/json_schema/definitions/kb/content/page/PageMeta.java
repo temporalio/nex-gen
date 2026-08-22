@@ -72,6 +72,15 @@ public final class PageMeta {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<PageMeta> {
         @Override
         public void serialize(PageMeta value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
+            if (value.wordCount != null) {
+                if (value.wordCount < -SpecNumbers.INTEGER_CAP || value.wordCount > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("wordCount", "exceeds \u00b1(2^53-1) integer cap"));
+                }
+            }
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
             gen.writeStartObject();
             if (value.author != null) {
                 gen.writeStringField("author", value.author);
@@ -86,7 +95,7 @@ public final class PageMeta {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<PageMeta> {
         @Override
         public PageMeta deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

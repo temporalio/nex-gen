@@ -30,9 +30,6 @@ public final class Widget {
     private final String id;
     private final @Nullable String kind;
     private final String name;
-    /**
-     * Optional integer with two allOf branches tightened to [10, 20].
-     */
     private final @Nullable Long size;
     private final Map<String, JsonNode> additionalProperties;
 
@@ -56,6 +53,9 @@ public final class Widget {
         return name;
     }
 
+    /**
+     * Optional integer with two allOf branches tightened to [10, 20].
+     */
     public @Nullable Long getSize() {
         return size;
     }
@@ -101,6 +101,9 @@ public final class Widget {
         public void serialize(Widget value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
             if (value.size != null) {
+                if (value.size < -SpecNumbers.INTEGER_CAP || value.size > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("size", "exceeds \u00b1(2^53-1) integer cap"));
+                }
                 if (value.size < 10L) {
                     violations.add(new Violation("size", "must be >= 10, got " + value.size));
                 }
@@ -157,7 +160,7 @@ public final class Widget {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Widget> {
         @Override
         public Widget deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

@@ -69,12 +69,12 @@ is the decoded collection's native length. Same per-language strategy as
 | Language | Strategy |
 |---|---|
 | Go | `UnmarshalJSON` checks `len(rawArray) < min` after collecting indexed item violations; serialize checks the typed slice in shared `Validate`. Both collect into one `ValidationError`. |
-| TypeScript | After the `Array.isArray` guard ([[items]]), deserialize checks `raw.length < min` after parsing the elements; serialize checks the typed array. A failure pushes ``Violation{path, reason: `too few items: at least ${min}, got ${raw.length}`}``. |
+| TypeScript | After the `Array.isArray` guard ([[items]]), deserialize checks `raw.length < min` after parsing the elements; serialize checks the typed array. A failure pushes ``Violation{path, reason: `must have at least ${min} items, got ${raw.length}`}``. |
 | Python | After the `isinstance(raw, list)` guard ([[items]]), the transfer converter checks `len(raw) < min` after parsing the elements; serialize checks the typed list. Both aggregate into the generated `ValidationError`. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) checks `node.size() < min` after parsing the elements; serialize checks the typed `List<T>`. Both push a structured violation into the single `ValidationException`. Not bean-validation `@Size`. |
 
 Reason strings name the concrete bound and offending count
-(`too few items: at least 2, got 1`), per the [[maxProperties]]
+(`must have at least 2 items, got 1`), per the [[maxProperties]]
 count-family convention.
 
 ### Serialize-side (P12)
@@ -111,7 +111,7 @@ encoder decision itself is owned by [[nullability]], see [[items]]).
 
 - Element count `== min` → OK (`≥` is inclusive).
 - Element count `min-1` → one `ValidationError` naming the bound and
-  count (`too few items: at least 2, got 1`).
+  count (`must have at least 2 items, got 1`).
 - Empty array `[]` against `minItems:1` → rejected; against `minItems:0`
   → OK.
 - Combined with other failing assertions → all reported in one shot

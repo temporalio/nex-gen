@@ -204,10 +204,20 @@ export const pageMetaTransferTypeConverter =
     }
 
     public toTransferType(value: PageMeta): unknown {
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = {};
       out.author = value.author;
       if (value.wordCount !== undefined) {
+        if (!Number.isSafeInteger(value.wordCount)) {
+          violations.push({
+            path: "wordCount",
+            reason: "exceeds ±(2^53-1) integer cap",
+          });
+        }
         out.wordCount = value.wordCount;
+      }
+      if (violations.length) {
+        throw new __nexgenDefinitions.ValidationError(violations);
       }
       return out;
     }

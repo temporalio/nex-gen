@@ -8,13 +8,17 @@
 //! the `specs/json-schema/corpora/format_{conformance,email,hostname,uri}/`
 //! corpora that pinned every pattern and length below.
 //!
-//! Only the string-shaped subset is asserted here: `uuid`, `ipv4`, `ipv6`,
-//! `hostname`, `email`, `uri`, `uri-reference`. The temporal formats
-//! (`date-time`, `date`, `time`, `duration`) are recognized but **rejected at
-//! load** as "not yet supported (temporal, pending)" — materialization is a
-//! separate follow-up task, and nothing must silently no-op (P10). Every other
-//! standard format is **deferred** (rejected "not yet supported"); anything else
-//! is an **unknown** format (rejected with a fix-it listing the supported names).
+//! Two families are asserted here. The **string-shaped** formats — `uuid`,
+//! `ipv4`, `ipv6`, `hostname`, `email`, `uri`, `uri-reference` — keep a
+//! `string` field and get the pinned regex (+ length guard). The **temporal**
+//! formats — `date-time`, `date`, `time`, `duration` — are *materialized* into
+//! a language-native typed field (Go `time.Time`, Java `OffsetDateTime`, Python
+//! `datetime`, …) and asserted with a **narrowed** grammar (leap second `:60`
+//! rejected; `duration` time-only; calendar year floor 0001); their wire form is
+//! produced by a generator-owned serializer, so a literal is canonicalized
+//! through [`canonicalize`] rather than echoed verbatim. Every other standard
+//! format is **deferred** (rejected "not yet supported"); anything else is an
+//! **unknown** format (rejected with a fix-it listing the supported names).
 
 /// The RFC 3986 dotted-quad octet (`0-255`, no leading zeros), shared by `ipv4`
 /// and the IPv4-tail of `ipv6`. Pinned verbatim from
@@ -24,8 +28,12 @@ const OCTET: &str = "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])";
 /// An RFC 4291 IPv6 16-bit group (1-4 hex digits).
 const H16: &str = "[0-9a-fA-F]{1,4}";
 
-/// The names asserted here, in canonical order, for the unknown-format fix-it.
-pub const SUPPORTED_FORMATS: [&str; 7] = [
+/// The **string-shaped** formats, in canonical order: each lowers to a pinned
+/// regex (plus an optional length guard) over a field that stays a `string`.
+/// This is the set [`check_for`] answers for — it is *not* the fix-it list,
+/// which must also name the materialized temporal formats
+/// ([`SUPPORTED_FORMATS`]).
+pub const STRING_FORMATS: [&str; 7] = [
     "uuid",
     "ipv4",
     "ipv6",
@@ -33,6 +41,24 @@ pub const SUPPORTED_FORMATS: [&str; 7] = [
     "email",
     "uri",
     "uri-reference",
+];
+
+/// Every format the generator asserts, in canonical order — the string-shaped
+/// set followed by the materialized temporal set. This is the list the
+/// unknown-format fix-it prints, so it must stay complete: quoting only
+/// [`STRING_FORMATS`] hid `date-time` from the user who typed `datetime`.
+pub const SUPPORTED_FORMATS: [&str; 11] = [
+    "uuid",
+    "ipv4",
+    "ipv6",
+    "hostname",
+    "email",
+    "uri",
+    "uri-reference",
+    "date-time",
+    "date",
+    "time",
+    "duration",
 ];
 
 /// The RFC-3339 temporal formats. These are **materialized** as idiomatic
@@ -92,6 +118,23 @@ impl TemporalKind {
 }
 
 /// The pinned materialized regex for a temporal kind. See `TemporalKind::pattern`.
+///
+/// **Fractional seconds are deliberately unbounded** (`(\.[0-9]+)?`). RFC 3339
+/// places no limit on the number of digits, and the contract is *accept every
+/// width and truncate to each target's genuine capacity* — Python `datetime` to
+/// microseconds, Go / Java / TS `Temporal` to nanoseconds — which is exactly the
+/// bounded loss P1 exception (b) permits, since each target truncates at **its
+/// own** capacity limit. `samples/python/tests/test_temporal.py:201-227`
+/// (`test_sub_second_precision_is_accepted_at_every_width`) pins this with an
+/// explicit ten-digit case and spells the reasoning out.
+///
+/// Do **not** narrow this to `{1,9}` to make a target that rejects long
+/// fractions agree: a uniform nine-digit cap satisfies exception (b) for *no*
+/// target at ten or more digits (nine is not Python's limit, and the others can
+/// simply truncate), and it silently turns an accepted value into a load
+/// rejection. When a target diverges here, the target is what to fix — see
+/// `new:java-rejects-12-digit-fraction`, closed by teaching Java to truncate
+/// like the other three.
 pub fn materialized_pattern(kind: TemporalKind) -> &'static str {
     match kind {
         TemporalKind::Date => "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
@@ -195,12 +238,95 @@ pub fn duration_total_nanos(value: &str) -> Option<i128> {
     Some(total_nanos)
 }
 
+/// The **canonical wire string** for a materialized temporal value — the exact
+/// bytes the generator's own serializer produces in every target, and therefore
+/// the only form a `const`/`enum`/`default` literal may be compared against
+/// (decision **D10**: `uniqueItems` and `const`/`enum` over materialized values
+/// compare the canonical wire string, in both directions, in all four
+/// languages).
+///
+/// Returns `None` when `value` is not valid under the materialized grammar for
+/// `kind` (same verdict as [`is_valid_materialized`]), so a caller can validate
+/// and canonicalize in one step.
+///
+/// The rules, per `specs/json-schema/features/format.md` ("Serialized form"):
+/// - `date` — already canonical (the pinned regex fixes every field width).
+/// - `time` / `date-time` — the RFC 3339 §5.6 case-insensitive `t`/`z`
+///   separators are **uppercased**, the zero offsets `+00:00` / `-00:00` fold to
+///   `Z`, and fractional seconds are kept at the value's own precision with
+///   trailing zeros trimmed (no fractional part at all when it is zero).
+/// - `duration` — value-preserving non-canonical inputs are recomposed
+///   (`PT90M` → `PT1H30M`, `PT3600S` → `PT1H`).
+///
+/// Examples: `2021-06-15t12:30:45z` → `2021-06-15T12:30:45Z`,
+/// `2021-06-15T12:30:45.120+00:00` → `2021-06-15T12:30:45.12Z`,
+/// `12:30:45.000-00:00` → `12:30:45Z`.
+pub fn canonicalize(kind: TemporalKind, value: &str) -> Option<String> {
+    if !is_valid_materialized(kind, value) {
+        return None;
+    }
+    Some(match kind {
+        TemporalKind::Date => value.to_string(),
+        TemporalKind::Time | TemporalKind::DateTime => canonicalize_clock(value),
+        TemporalKind::Duration => canonicalize_duration(value)?,
+    })
+}
+
+/// [`canonicalize`] keyed by the `format` name. Returns `None` for a format that
+/// is not a materialized temporal (there is nothing to canonicalize — a
+/// string-shaped format's literal is already its own wire form) as well as for
+/// an invalid value; callers that want "the canonical wire string, or the
+/// literal unchanged" write
+/// `canonicalize_for_format(name, v).unwrap_or_else(|| v.to_string())`.
+pub fn canonicalize_for_format(format: &str, value: &str) -> Option<String> {
+    TemporalKind::from_name(format).and_then(|kind| canonicalize(kind, value))
+}
+
+/// The `time` / `date-time` half of [`canonicalize`]. The input has already
+/// matched the pinned materialized regex, so the only letters it can contain are
+/// the `t`/`T` separator and the `z`/`Z` offset, and any offset is exactly
+/// `±HH:MM`.
+fn canonicalize_clock(value: &str) -> String {
+    // 1. Split the offset off the end and fold the zero offsets to `Z`.
+    let (body, offset) =
+        if let Some(body) = value.strip_suffix('Z').or_else(|| value.strip_suffix('z')) {
+            (body, "Z")
+        } else if value.len() >= 6 && value.is_char_boundary(value.len() - 6) {
+            let tail = &value[value.len() - 6..];
+            let bytes = tail.as_bytes();
+            if (bytes[0] == b'+' || bytes[0] == b'-') && bytes[3] == b':' {
+                let folded = if &tail[1..] == "00:00" { "Z" } else { tail };
+                (&value[..value.len() - 6], folded)
+            } else {
+                (value, "")
+            }
+        } else {
+            (value, "")
+        };
+
+    // 2. Trim trailing zeros from the fractional seconds, dropping an all-zero
+    //    fraction entirely.
+    let body = match body.split_once('.') {
+        Some((whole, fraction)) => {
+            let trimmed = fraction.trim_end_matches('0');
+            if trimmed.is_empty() {
+                whole.to_string()
+            } else {
+                format!("{whole}.{trimmed}")
+            }
+        }
+        None => body.to_string(),
+    };
+
+    // 3. Uppercase the `date-time` separator (the grammar has no other letters).
+    format!("{}{offset}", body.replace('t', "T"))
+}
+
 /// The generator-owned canonical serialization of a materialized (time-only)
 /// `duration`: decompose the total seconds into `PT…H…M…S`, omitting zero
 /// components; the whole-zero duration is `PT0S`. Non-canonical inputs
 /// canonicalize (`PT90M` → `PT1H30M`, `PT3600S` → `PT1H`). Returns `None` on
-/// overflow. Used at load to echo `const`/`default`/`enum` literals in their
-/// serialized form.
+/// overflow. Prefer [`canonicalize`], which covers all four temporal kinds.
 pub fn canonicalize_duration(value: &str) -> Option<String> {
     let total_nanos = duration_total_nanos(value)?;
     let total_seconds = (total_nanos / 1_000_000_000) as i128;
@@ -408,10 +534,36 @@ mod tests {
 
     #[test]
     fn pinned_patterns_pass_the_pattern_gate() {
-        for name in SUPPORTED_FORMATS {
+        for name in STRING_FORMATS {
             let check = check_for(name).expect("supported");
             crate::json_schema::pattern::gate_and_normalize(&check.pattern).unwrap_or_else(
                 |error| panic!("{name} pinned pattern rejected by gate: {error:?}"),
+            );
+        }
+        // The materialized temporal grammars are emitted through the same gate.
+        for name in TEMPORAL_FORMATS {
+            let kind = TemporalKind::from_name(name).expect("temporal");
+            crate::json_schema::pattern::gate_and_normalize(kind.pattern()).unwrap_or_else(
+                |error| panic!("{name} pinned pattern rejected by gate: {error:?}"),
+            );
+        }
+    }
+
+    /// `09#10`: the unknown-format fix-it prints `SUPPORTED_FORMATS`, so the
+    /// constant must name every format the loader actually accepts — otherwise
+    /// `format: datetime` is rejected with a list that hides `date-time`.
+    #[test]
+    fn supported_formats_names_every_accepted_format() {
+        for name in STRING_FORMATS {
+            assert!(SUPPORTED_FORMATS.contains(&name), "{name}");
+        }
+        for name in TEMPORAL_FORMATS {
+            assert!(SUPPORTED_FORMATS.contains(&name), "{name}");
+        }
+        for name in SUPPORTED_FORMATS {
+            assert!(
+                !matches!(classify(name), FormatClass::Unknown | FormatClass::Deferred),
+                "{name} is advertised but not accepted"
             );
         }
     }
@@ -491,11 +643,14 @@ mod tests {
         assert!(matches!(classify("datetime"), FormatClass::Unknown));
     }
 
-    /// The materialized temporal grammar agrees with `format_conformance`,
-    /// **except** the two leap-second rows (`:60`), which the narrowed
-    /// materialized grammar rejects (native types cannot hold `:60`).
+    /// The materialized temporal grammar agrees with `format_conformance`
+    /// row for row. There is no exception list: the corpus previously marked the
+    /// two leap-second rows (`:60`) valid and this test force-flipped them to
+    /// `false`, hiding a data error behind a code workaround. The rows now
+    /// declare `expect_valid: false` — measured, all four runtimes reject
+    /// `23:59:60Z` — so the assertion reads the corpus verbatim.
     #[test]
-    fn materialized_temporal_conformance_with_leap_narrowing() {
+    fn materialized_temporal_matches_the_conformance_corpus() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
             "../../specs/json-schema/corpora/format_conformance/corpus.json"
         ))
@@ -506,11 +661,7 @@ mod tests {
                 continue;
             };
             let value = pair["value"].as_str().expect("value string");
-            let mut expect = pair["expect_valid"].as_bool().expect("expect_valid");
-            // Materialized narrowing: leap second `:60` is rejected.
-            if value.contains(":60") {
-                expect = false;
-            }
+            let expect = pair["expect_valid"].as_bool().expect("expect_valid");
             assert_eq!(
                 is_valid_materialized(kind, value),
                 expect,
@@ -545,6 +696,159 @@ mod tests {
         ));
     }
 
+    /// `09#2` / `09#7` / decision **D10**: one canonicalization entry point
+    /// covering all four temporal kinds, so the loader can store the literal in
+    /// its serialized form and every emitter can compare the same wire string.
+    #[test]
+    fn canonicalize_covers_every_temporal_kind() {
+        use TemporalKind::*;
+        let cases = [
+            // `date` is already canonical.
+            (Date, "2021-06-15", "2021-06-15"),
+            // Case folding (RFC 3339 §5.6 accepts lowercase `t`/`z`).
+            (DateTime, "2021-06-15t12:30:45z", "2021-06-15T12:30:45Z"),
+            (Time, "12:30:45z", "12:30:45Z"),
+            // Zero offsets fold to `Z`; a real offset is preserved.
+            (
+                DateTime,
+                "2021-06-15T12:30:45+00:00",
+                "2021-06-15T12:30:45Z",
+            ),
+            (
+                DateTime,
+                "2021-06-15T12:30:45-00:00",
+                "2021-06-15T12:30:45Z",
+            ),
+            (
+                DateTime,
+                "2021-06-15T12:30:45-05:00",
+                "2021-06-15T12:30:45-05:00",
+            ),
+            (Time, "12:30:45+00:00", "12:30:45Z"),
+            (Time, "12:30:45-00:00", "12:30:45Z"),
+            (Time, "12:30:45+02:00", "12:30:45+02:00"),
+            // Fractional seconds keep their own precision, trailing zeros
+            // trimmed; an all-zero fraction disappears.
+            (
+                DateTime,
+                "2021-06-15T12:30:45.120Z",
+                "2021-06-15T12:30:45.12Z",
+            ),
+            (DateTime, "2021-06-15T12:30:45.000Z", "2021-06-15T12:30:45Z"),
+            (
+                DateTime,
+                "2021-06-15t12:30:45.5-03:00",
+                "2021-06-15T12:30:45.5-03:00",
+            ),
+            (Time, "12:30:45.250", "12:30:45.25"),
+            (Time, "12:30:45.000-00:00", "12:30:45Z"),
+            (Time, "12:30:45", "12:30:45"),
+            // `duration` recomposes.
+            (Duration, "PT90M", "PT1H30M"),
+            (Duration, "PT3600S", "PT1H"),
+            (Duration, "PT0S", "PT0S"),
+        ];
+        for (kind, input, expected) in cases {
+            assert_eq!(
+                canonicalize(kind, input).as_deref(),
+                Some(expected),
+                "canonicalize({kind:?}, {input:?})"
+            );
+            // Canonicalization is idempotent and its output is itself valid.
+            assert!(is_valid_materialized(kind, expected), "{expected:?}");
+            assert_eq!(canonicalize(kind, expected).as_deref(), Some(expected));
+        }
+        // An invalid value canonicalizes to `None` rather than to garbage.
+        assert_eq!(canonicalize(TemporalKind::Date, "2021-02-30"), None);
+        assert_eq!(canonicalize(TemporalKind::DateTime, "2021-06-15"), None);
+        assert_eq!(canonicalize(TemporalKind::Duration, "P1D"), None);
+        // The by-name wrapper only answers for the materialized temporals.
+        assert_eq!(
+            canonicalize_for_format("date-time", "2021-06-15t12:30:45z").as_deref(),
+            Some("2021-06-15T12:30:45Z")
+        );
+        assert_eq!(canonicalize_for_format("uuid", "not-a-uuid"), None);
+    }
+
+    /// A `format_materialize_clock` row is a valid, round-trippable wire unless
+    /// it explicitly declares otherwise. Keeping the exception in the data — not
+    /// in a `wire.contains(":60")` guard here — is what lets the cross-runtime
+    /// harness and this test read one source of truth.
+    fn clock_row_is_valid(row: &serde_json::Value) -> bool {
+        row["expect_valid"].as_bool().unwrap_or(true)
+    }
+
+    /// Every wire form in the clock corpus canonicalizes to something the
+    /// materialized grammar still accepts, and canonicalization is a fixed point.
+    #[test]
+    fn canonicalize_is_idempotent_over_the_clock_corpus() {
+        let corpus: serde_json::Value = serde_json::from_str(include_str!(
+            "../../specs/json-schema/corpora/format_materialize_clock/corpus.json"
+        ))
+        .expect("corpus parses");
+        for (key, kind) in [
+            ("date-time", TemporalKind::DateTime),
+            ("date", TemporalKind::Date),
+            ("time", TemporalKind::Time),
+        ] {
+            for row in corpus[key].as_array().expect("rows") {
+                let wire = row["wire"].as_str().expect("wire");
+                let Some(canonical) = canonicalize(kind, wire) else {
+                    assert!(
+                        !clock_row_is_valid(row),
+                        "{key} {wire:?} is declared valid but does not canonicalize"
+                    );
+                    continue;
+                };
+                assert_eq!(
+                    canonicalize(kind, &canonical).as_deref(),
+                    Some(canonical.as_str()),
+                    "{key} {wire:?} is not a canonicalization fixed point"
+                );
+                assert!(!canonical.contains('t') && !canonical.contains('z'));
+                assert!(!canonical.ends_with("+00:00") && !canonical.ends_with("-00:00"));
+            }
+        }
+    }
+
+    /// The fractional-seconds contract is **accept every width**, not a cap.
+    /// RFC 3339 sets no limit and each target truncates at its own genuine
+    /// capacity (Python microseconds, Go / Java / TS nanoseconds) — the bounded
+    /// loss P1 exception (b) allows. `samples/python/tests/test_temporal.py`
+    /// (`test_sub_second_precision_is_accepted_at_every_width`) pins the runtime
+    /// half with an explicit ten-digit case; this pins the grammar half, so
+    /// narrowing the pattern to `{1,9}` to make a rejecting target agree fails
+    /// here rather than in a sample suite.
+    #[test]
+    fn materialized_fraction_is_accepted_at_every_width() {
+        for kind in [TemporalKind::DateTime, TemporalKind::Time] {
+            let render = |fraction: &str| match kind {
+                TemporalKind::DateTime => format!("2021-01-15T12:30:45{fraction}Z"),
+                _ => format!("12:30:45{fraction}Z"),
+            };
+            // No fraction at all.
+            assert!(is_valid_materialized(kind, &render("")), "{kind:?} bare");
+            // Every width, including past every target's native resolution:
+            // 7+ exceeds Python's microseconds, 10+ exceeds nanoseconds. Both
+            // are accepted and truncated per target, never rejected.
+            for digits in [1, 2, 3, 6, 7, 9, 10, 12, 20] {
+                let fraction = format!(".{}", "1".repeat(digits));
+                assert!(
+                    is_valid_materialized(kind, &render(&fraction)),
+                    "{kind:?} {digits} fractional digits must be accepted \
+                     (the contract is truncate-per-target, not reject)"
+                );
+            }
+            // A lone `.` carries no digits and is not a fraction.
+            assert!(!is_valid_materialized(kind, &render(".")));
+        }
+        // The corpus row that pins the beyond-nanosecond case.
+        assert!(is_valid_materialized(
+            TemporalKind::DateTime,
+            "2021-01-15T12:30:45.123456789012Z"
+        ));
+    }
+
     #[test]
     fn materialized_calendar_starts_at_year_one() {
         assert!(is_valid_materialized(TemporalKind::Date, "0001-01-01"));
@@ -561,8 +865,10 @@ mod tests {
 
     #[test]
     fn materialized_clock_roundtrip_values_are_valid() {
-        // Every VALID wire in the clock corpus (minus `:60`) must pass the
-        // materialized check so the parse adapter never rejects a round-trip case.
+        // Every wire in the clock corpus must pass the materialized check so the
+        // parse adapter never rejects a round-trip case — unless the row declares
+        // `expect_valid: false` (the two leap-second wires, which no target's
+        // native temporal type can hold). An absent field means valid.
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
             "../../specs/json-schema/corpora/format_materialize_clock/corpus.json"
         ))
@@ -574,7 +880,7 @@ mod tests {
         ] {
             for row in corpus[key].as_array().expect("rows") {
                 let wire = row["wire"].as_str().expect("wire");
-                let expect = !wire.contains(":60");
+                let expect = clock_row_is_valid(row);
                 assert_eq!(
                     is_valid_materialized(kind, wire),
                     expect,
@@ -595,7 +901,7 @@ mod tests {
         .expect("corpus parses");
         for pair in corpus["pairs"].as_array().expect("pairs") {
             let format = pair["format"].as_str().unwrap_or_default();
-            if !SUPPORTED_FORMATS.contains(&format) {
+            if !STRING_FORMATS.contains(&format) {
                 continue;
             }
             let value = pair["value"].as_str().expect("value string");

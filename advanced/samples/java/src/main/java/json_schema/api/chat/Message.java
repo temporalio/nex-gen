@@ -73,18 +73,9 @@ public final class Message {
         }
     }
 
-    /**
-     * Discriminator; always "text".
-     */
     private final Kind kind;
     private final String body;
-    /**
-     * Id of the message this replies to, if any.
-     */
     private final @Nullable String replyToId;
-    /**
-     * Delivery priority.
-     */
     private final @Nullable Long priority;
 
     public Message(Kind kind, String body, @Nullable String replyToId, @Nullable Long priority) {
@@ -94,6 +85,9 @@ public final class Message {
         this.priority = priority;
     }
 
+    /**
+     * Discriminator; always "text".
+     */
     public Kind getKind() {
         return kind;
     }
@@ -102,10 +96,16 @@ public final class Message {
         return body;
     }
 
+    /**
+     * Id of the message this replies to, if any.
+     */
     public @Nullable String getReplyToId() {
         return replyToId;
     }
 
+    /**
+     * Delivery priority.
+     */
     public @Nullable Long getPriority() {
         return priority;
     }
@@ -147,6 +147,15 @@ public final class Message {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Message> {
         @Override
         public void serialize(Message value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
+            if (value.priority != null) {
+                if (value.priority < -SpecNumbers.INTEGER_CAP || value.priority > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("priority", "exceeds \u00b1(2^53-1) integer cap"));
+                }
+            }
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
             gen.writeStartObject();
             if (value.kind != null) {
                 gen.writeStringField("kind", value.kind.getValue());
@@ -167,7 +176,7 @@ public final class Message {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Message> {
         @Override
         public Message deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

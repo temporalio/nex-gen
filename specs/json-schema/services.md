@@ -115,6 +115,13 @@ services:                       # map<service-name, service-def>
   [Identifiers](#identifiers--naming)). The **`fqn`** is the wire name,
   pinned verbatim on the wire and never altered (P1/P3) — exactly the
   `properties` JSON-name-pinning relationship, one level up.
+- **An empty `fqn` (`fqn: ""`) is a load reject** on a service or an
+  operation (P7.1). "Arbitrary characters" does not extend to *no*
+  characters: an empty wire name is not addressable, and it is
+  indistinguishable from the author meaning "use the default" — which is
+  spelled by omitting the key. The diagnostic names the service or
+  operation and says to remove the `fqn` to take the default, or give it a
+  non-empty value.
 - **`x-<lang>-name` (the code-identifier override).** A service or an
   operation may carry an optional per-language override — one of
   `x-go-name` / `x-ts-name` / `x-py-name` / `x-java-name` — that replaces

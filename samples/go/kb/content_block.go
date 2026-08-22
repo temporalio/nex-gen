@@ -37,6 +37,9 @@ func (m Block) Validate() error {
 	if m.Style != nil {
 		mergeNested(&errs, "style", m.Style.Validate())
 	}
+	if m.Page != nil {
+		mergeNested(&errs, "page", m.Page.Validate())
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}

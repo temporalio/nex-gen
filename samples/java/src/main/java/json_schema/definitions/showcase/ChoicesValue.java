@@ -21,39 +21,38 @@ public interface ChoicesValue {
     static @Nullable ChoicesValue fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
         if (node.isObject()) {
             JsonNode disc = node.get("kind");
-            if (disc == null || !disc.isTextual()) {
+            if (disc == null || disc.isNull() || !disc.isValueNode()) {
                 violations.add(new Violation(path, "discriminator \"kind\" is required"));
                 return null;
             }
-            switch (disc.textValue()) {
-                case "circle":
-                    try {
-                        return context.readTreeAsValue(node, Circle.class);
-                    } catch (ValidationException nested) {
-                        for (Violation violation : nested.getViolations()) {
-                            violations.add(violation.withPathPrefix(path));
-                        }
-                        return null;
-                    } catch (IOException nested) {
-                        violations.add(new Violation(path, nested.getMessage()));
-                        return null;
+            if (disc.isTextual() && "circle".equals(disc.textValue())) {
+                try {
+                    return context.readTreeAsValue(node, Circle.class);
+                } catch (ValidationException nested) {
+                    for (Violation violation : nested.getViolations()) {
+                        violations.add(violation.withPathPrefix(path));
                     }
-                case "square":
-                    try {
-                        return context.readTreeAsValue(node, Square.class);
-                    } catch (ValidationException nested) {
-                        for (Violation violation : nested.getViolations()) {
-                            violations.add(violation.withPathPrefix(path));
-                        }
-                        return null;
-                    } catch (IOException nested) {
-                        violations.add(new Violation(path, nested.getMessage()));
-                        return null;
-                    }
-                default:
-                    violations.add(new Violation(path, "unknown discriminator kind " + disc.textValue() + ": expected one of [circle, square]"));
                     return null;
+                } catch (IOException nested) {
+                    violations.add(new Violation(path, nested.getMessage()));
+                    return null;
+                }
             }
+            if (disc.isTextual() && "square".equals(disc.textValue())) {
+                try {
+                    return context.readTreeAsValue(node, Square.class);
+                } catch (ValidationException nested) {
+                    for (Violation violation : nested.getViolations()) {
+                        violations.add(violation.withPathPrefix(path));
+                    }
+                    return null;
+                } catch (IOException nested) {
+                    violations.add(new Violation(path, nested.getMessage()));
+                    return null;
+                }
+            }
+            violations.add(new Violation(path, "unknown discriminator kind " + disc.asText() + ": expected one of [circle, square]"));
+            return null;
         }
         violations.add(new Violation(path, "expected one of: Circle, Square"));
         return null;

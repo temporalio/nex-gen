@@ -30,17 +30,9 @@ import org.jspecify.annotations.Nullable;
 @JsonDeserialize(using = Block.Deserializer.class)
 public final class Block {
     private final String blockId;
-    /**
-     * Non-negative position within the page. Exercises a numeric `minimum` bound over
-     * an integer field.
-     */
     private final long order;
     private final @Nullable String text;
     private final @Nullable BlockStyle style;
-    /**
-     * Optional back-reference to the containing page - closes the Page &lt;-&gt; Block
-     * cycle. Optional + nullable, so this edge terminates.
-     */
     private final @Nullable Page page;
 
     public Block(String blockId, long order, @Nullable String text, @Nullable BlockStyle style, @Nullable Page page) {
@@ -55,6 +47,10 @@ public final class Block {
         return blockId;
     }
 
+    /**
+     * Non-negative position within the page. Exercises a numeric `minimum` bound over
+     * an integer field.
+     */
     public long getOrder() {
         return order;
     }
@@ -67,6 +63,10 @@ public final class Block {
         return style;
     }
 
+    /**
+     * Optional back-reference to the containing page - closes the Page &lt;-&gt; Block
+     * cycle. Optional + nullable, so this edge terminates.
+     */
     public @Nullable Page getPage() {
         return page;
     }
@@ -108,12 +108,12 @@ public final class Block {
         public void serialize(Block value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
             {
+                if (value.order < -SpecNumbers.INTEGER_CAP || value.order > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("order", "exceeds \u00b1(2^53-1) integer cap"));
+                }
                 if (value.order < 0L) {
                     violations.add(new Violation("order", "must be >= 0, got " + value.order));
                 }
-            }
-            if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
             }
             gen.writeStartObject();
             if (value.blockId != null) {
@@ -126,20 +126,37 @@ public final class Block {
             }
             if (value.style != null) {
                 gen.writeFieldName("style");
-                serializers.defaultSerializeValue(value.style, gen);
+                try {
+                    serializers.defaultSerializeValue(value.style, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("style"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.page != null) {
                 gen.writeFieldName("page");
-                serializers.defaultSerializeValue(value.page, gen);
+                try {
+                    serializers.defaultSerializeValue(value.page, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("page"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             gen.writeEndObject();
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
         }
     }
 
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Block> {
         @Override
         public Block deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

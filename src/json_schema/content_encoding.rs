@@ -51,10 +51,31 @@ impl Encoding {
     /// (→ zero bytes) and reject the *other* encoding's alphabet, wrong padding,
     /// embedded whitespace, and stray characters. Emitted verbatim to Go/JS and
     /// with the [[pattern]] per-target end-anchor rewrite to Python/Java.
+    ///
+    /// **Trailing bits are constrained** so the wire form is *canonical* — the
+    /// byte-identity claim the spec makes ("only the canonical form is accepted
+    /// … the wire round-trips byte-identically with no re-canonicalization
+    /// step") is load-bearing for a sibling `const`/`enum`/`pattern`/`maxLength`
+    /// on the same node, and every target's decoder happily ignores non-zero
+    /// unused bits. A final quantum written as **two** significant characters
+    /// carries one byte, so the second character's low four bits must be zero
+    /// (`[AQgw]`, alphabet indices 0/16/32/48); written as **three** characters
+    /// it carries two bytes, so the third character's low two bits must be zero
+    /// (`[AEIMQUYcgkosw048]`, the indices divisible by four). Without this,
+    /// `"aGl="`, `"AB=="`, `"//9="` and base64url `"aGl"` all match, decode
+    /// fine, and re-encode to a *different* string (`"aGk="`, `"AA=="`,
+    /// `"//8="`, `"aGk"`) — measured end-to-end in Go, where `{"req":"aGl="}`
+    /// marshals back as `{"req":"aGk="}`.
     pub fn pattern(self) -> &'static str {
         match self {
-            Self::Base64 => "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
-            Self::Base64Url => "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$",
+            Self::Base64 => concat!(
+                "^(?:[A-Za-z0-9+/]{4})*",
+                "(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$"
+            ),
+            Self::Base64Url => concat!(
+                "^(?:[A-Za-z0-9_-]{4})*",
+                "(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+            ),
         }
     }
 }
@@ -161,5 +182,75 @@ mod tests {
         // A single trailing char (invalid base64 length) is rejected.
         assert!(!is_valid(Encoding::Base64Url, "aGk=A"));
         assert!(!is_valid(Encoding::Base64Url, "a"));
+    }
+
+    /// Decision **D1** / `10#4`: the unused low bits of the last significant
+    /// character must be zero, so `decode(v)` → `encode(…)` is the identity and
+    /// the wire round-trips byte-identically with no re-canonicalization step.
+    #[test]
+    fn rejects_non_canonical_trailing_bits() {
+        // Three significant characters + `=`: the third carries only four
+        // significant bits. "aGk=" is canonical for "hi"; "aGl=" decodes to the
+        // same bytes and re-encodes as "aGk=".
+        assert!(is_valid(Encoding::Base64, "aGk="));
+        assert!(!is_valid(Encoding::Base64, "aGl="));
+        assert!(is_valid(Encoding::Base64, "//8="));
+        assert!(!is_valid(Encoding::Base64, "//9="));
+        // Two significant characters + `==`: the second carries only two
+        // significant bits.
+        assert!(is_valid(Encoding::Base64, "AA=="));
+        assert!(!is_valid(Encoding::Base64, "AB=="));
+        assert!(is_valid(Encoding::Base64, "/w=="));
+        assert!(!is_valid(Encoding::Base64, "/x=="));
+        // Same rule, unpadded, over the URL-safe alphabet.
+        assert!(is_valid(Encoding::Base64Url, "aGk"));
+        assert!(!is_valid(Encoding::Base64Url, "aGl"));
+        assert!(is_valid(Encoding::Base64Url, "AA"));
+        assert!(!is_valid(Encoding::Base64Url, "AB"));
+        // A leading full quantum does not change the rule for the final one.
+        assert!(is_valid(Encoding::Base64, "YWJjaGk="));
+        assert!(!is_valid(Encoding::Base64, "YWJjaGl="));
+        // Every canonical padded/unpadded encoding of a byte string is accepted:
+        // exhaustively over all one- and two-byte payloads.
+        for high in 0u16..=255 {
+            let one = [high as u8];
+            assert!(is_valid(Encoding::Base64, &encode(&one, true)), "{one:?}");
+            assert!(
+                is_valid(Encoding::Base64Url, &encode(&one, false)),
+                "{one:?}"
+            );
+            let two = [high as u8, (high * 7 % 256) as u8];
+            assert!(is_valid(Encoding::Base64, &encode(&two, true)), "{two:?}");
+            assert!(
+                is_valid(Encoding::Base64Url, &encode(&two, false)),
+                "{two:?}"
+            );
+        }
+    }
+
+    /// A minimal reference encoder (the generator does not depend on a base64
+    /// crate) used to prove the tightened regex accepts every canonical form.
+    fn encode(bytes: &[u8], standard: bool) -> String {
+        const STD: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const URL: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let alphabet = if standard { STD } else { URL };
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let mut buffer = [0u8; 3];
+            buffer[..chunk.len()].copy_from_slice(chunk);
+            let triple =
+                u32::from(buffer[0]) << 16 | u32::from(buffer[1]) << 8 | u32::from(buffer[2]);
+            let significant = chunk.len() + 1;
+            for index in 0..significant {
+                let shift = 18 - 6 * index;
+                out.push(alphabet[((triple >> shift) & 0x3F) as usize] as char);
+            }
+            if standard {
+                for _ in significant..4 {
+                    out.push('=');
+                }
+            }
+        }
+        out
     }
 }

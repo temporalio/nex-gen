@@ -132,16 +132,21 @@ From the canonical word list:
 
 The recased identifier is **rejected at load** if, *for a language being
 generated*, it is empty, begins with a digit, contains a character
-illegal in that language's identifier grammar, or equals a reserved word
-in that language. Rejection is **per emitted target** only — a name that
-is invalid in a language you are not generating is not a concern and
-produces no diagnostic.
+illegal in that language's identifier grammar, or is a word that language
+reserves **in the position the identifier is emitted into**. Rejection is
+**per emitted target** only — a name that is invalid in a language you are
+not generating is not a concern and produces no diagnostic.
 
-In practice the languages reject *different* names: Go's exported
-`PascalCase` never collides with Go's all-lowercase keywords, and TS
-interface members permit keywords, so **Python** (`class`, `import`,
-`lambda` → `SyntaxError`) and **Java** (`class`, `new`, `default` →
-keyword) are the targets that actually hit Stage-3 rejections.
+The position qualifier is load-bearing, because a language's keyword list
+and the set of words it refuses *as a member name* are not the same set.
+A TypeScript interface member may be named after any keyword
+(`interface X { class: string; default: number }` compiles, and so does
+`x.class`), so TS's reserved set in this position is **empty** and a
+keyword-named property is not a Stage-3 rejection there. Go's exported
+`PascalCase` likewise never collides with Go's all-lowercase keywords. So
+**Python** (`class`, `import`, `lambda` → `SyntaxError`) and **Java**
+(`class`, `new`, `default` → keyword) are the only targets that hit
+Stage-3 rejections on a keyword-named property.
 
 ### Stage 4 — Escape hatch (per-language override)
 
@@ -349,6 +354,7 @@ deserialize.
 | Name needing recasing | `{properties:{user_id:{type:string}}}` → Go `UserId`, TS `userId`, Python `user_id` |
 | Acronym folded | `{properties:{userID:{…}, httpServer:{…}}}` → Go `UserId`, `HttpServer` |
 | Per-language override admits an otherwise-rejected name | `{properties:{class:{type:string, x-py-name:"klass", x-java-name:"klazz"}}}` |
+| Keyword-named member needs no override in Go / TypeScript | `{properties:{class:{type:string}}}` generating Go + TS only → `Class` / `class:` (a TS interface member may be any keyword) |
 
 ### Rejected at load time (negative)
 

@@ -78,6 +78,10 @@ class _BlockStyleTransferTypeConverter(
         if value.bold is not None:
             out["bold"] = value.bold
         if value.indent is not None:
+            if abs(value.indent) > 9007199254740991:
+                violations.append(
+                    Violation(path="indent", reason="exceeds ±(2^53-1) integer cap")
+                )
             if value.indent < 0:
                 violations.append(
                     Violation(path="indent", reason=f"must be >= 0, got {value.indent}")

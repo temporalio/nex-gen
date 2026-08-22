@@ -1,0 +1,15 @@
+# What "an integer" is on the wire, and what a native one may be on the way out.
+#
+# JSON has one number type, so `type: integer` is a predicate over a *token*:
+# `1`, `1.0` and `1e2` are integers, `1.5` is not, and the safe-integer cap
+# bounds both directions.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: IntegerSemantics
+description: Integral-token acceptance and the +-(2^53-1) cap.
+type: object
+additionalProperties: false
+required: [value]
+properties:
+  value:
+    description: A plain integer, with no range of its own.
+    type: integer

@@ -236,6 +236,65 @@ func mustParseDuration(s string) time.Duration {
 	return v
 }
 
+// checkTemporalYear asserts a year is one the four-digit wire grammar spells.
+func checkTemporalYear(name string, v time.Time, path string, errs *[]Violation) bool {
+	switch y := v.Year(); {
+	case y < 1:
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: year must be >= 0001", name, v)})
+	case y > 9999:
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: year must be <= 9999", name, v)})
+	default:
+		return true
+	}
+	return false
+}
+
+// checkTemporalOffset asserts a UTC offset is a whole number of minutes, the
+// finest the wire form spells (a Go Location carries seconds, which the wire
+// form would silently lose).
+func checkTemporalOffset(name string, v time.Time, path string, errs *[]Violation) {
+	if _, offset := v.Zone(); offset%60 != 0 {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: the UTC offset %d seconds is not a whole number of minutes", name, v, offset)})
+	}
+}
+
+// checkDateTime asserts a time.Time is writable as a wire date-time (P12): a
+// value is constructed unchecked, so anything the grammar cannot spell has to
+// be caught before a byte is emitted.
+func checkDateTime(v time.Time, path string, errs *[]Violation) {
+	if checkTemporalYear("date-time", v, path, errs) {
+		checkTemporalOffset("date-time", v, path, errs)
+	}
+}
+
+// checkDate asserts a time.Time is writable as a wire date (P12).
+func checkDate(v time.Time, path string, errs *[]Violation) {
+	checkTemporalYear("date", v, path, errs)
+}
+
+// checkTime asserts a time.Time is writable as a wire time (P12). The offset is
+// optional in the grammar, so only its precision is held to anything.
+func checkTime(v time.Time, path string, errs *[]Violation) {
+	if v.Year() != temporalNoOffsetYear {
+		checkTemporalOffset("time", v, path, errs)
+	}
+}
+
+// checkDuration asserts a time.Duration is writable as a wire duration (P12):
+// the grammar is unsigned and whole-second, and a time.Duration is neither.
+func checkDuration(v time.Duration, path string, errs *[]Violation) {
+	var reason string
+	switch {
+	case v < 0:
+		reason = "a duration cannot be negative"
+	case v%time.Second != 0:
+		reason = "a duration cannot carry a fraction of a second"
+	default:
+		return
+	}
+	*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid duration, got %v: %s", v, reason)})
+}
+
 // Temporal
 //
 // Root object materializing the four RFC 3339 temporal formats as native typed fields:
@@ -272,35 +331,27 @@ type Temporal struct {
 // listing any violations.
 func (m Temporal) Validate() error {
 	var errs []Violation
-	if m.CreatedAt.Year() < 1 {
-		errs = append(errs, Violation{"createdAt", "year must be >= 1"})
-	}
-	if m.Birthday.Year() < 1 {
-		errs = append(errs, Violation{"birthday", "year must be >= 1"})
-	}
+	checkDateTime(m.CreatedAt, "createdAt", &errs)
+	checkDate(m.Birthday, "birthday", &errs)
+	checkTime(m.Alarm, "alarm", &errs)
+	checkDuration(m.Timeout, "timeout", &errs)
 	if m.UpdatedAt != nil {
-		if (*m.UpdatedAt).Year() < 1 {
-			errs = append(errs, Violation{"updatedAt", "year must be >= 1"})
-		}
+		checkDateTime((*m.UpdatedAt), "updatedAt", &errs)
 	}
 	if m.ExpiresOn != nil {
-		if (*m.ExpiresOn).Year() < 1 {
-			errs = append(errs, Violation{"expiresOn", "year must be >= 1"})
-		}
+		checkDate((*m.ExpiresOn), "expiresOn", &errs)
 	}
 	if m.Reminder != nil {
+		checkTime((*m.Reminder), "reminder", &errs)
 	}
 	if m.RetryDelay != nil {
+		checkDuration((*m.RetryDelay), "retryDelay", &errs)
 	}
 	if m.DeletedAt != nil {
-		if (*m.DeletedAt).Year() < 1 {
-			errs = append(errs, Violation{"deletedAt", "year must be >= 1"})
-		}
+		checkDateTime((*m.DeletedAt), "deletedAt", &errs)
 	}
 	if m.ArchivedOn != nil {
-		if (*m.ArchivedOn).Year() < 1 {
-			errs = append(errs, Violation{"archivedOn", "year must be >= 1"})
-		}
+		checkDate((*m.ArchivedOn), "archivedOn", &errs)
 	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}

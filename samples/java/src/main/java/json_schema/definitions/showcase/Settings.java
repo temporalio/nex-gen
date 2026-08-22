@@ -68,6 +68,15 @@ public final class Settings {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Settings> {
         @Override
         public void serialize(Settings value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
+            if (value.fontSize != null) {
+                if (value.fontSize < -SpecNumbers.INTEGER_CAP || value.fontSize > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("fontSize", "exceeds \u00b1(2^53-1) integer cap"));
+                }
+            }
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
             gen.writeStartObject();
             if (value.theme != null) {
                 gen.writeStringField("theme", value.theme);
@@ -82,7 +91,7 @@ public final class Settings {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Settings> {
         @Override
         public Settings deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

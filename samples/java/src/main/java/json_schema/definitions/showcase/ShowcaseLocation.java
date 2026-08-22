@@ -102,16 +102,20 @@ public final class ShowcaseLocation {
                     }
                 }
             }
-            if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
-            }
             gen.writeStartObject();
             if (value.city != null) {
                 gen.writeStringField("city", value.city);
             }
             if (value.geo != null) {
                 gen.writeFieldName("geo");
-                serializers.defaultSerializeValue(value.geo, gen);
+                try {
+                    serializers.defaultSerializeValue(value.geo, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("geo"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.additionalProperties != null) {
                 for (Map.Entry<String, JsonNode> entry : value.additionalProperties.entrySet()) {
@@ -120,13 +124,16 @@ public final class ShowcaseLocation {
                 }
             }
             gen.writeEndObject();
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
         }
     }
 
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<ShowcaseLocation> {
         @Override
         public ShowcaseLocation deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

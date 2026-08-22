@@ -1,10 +1,14 @@
 {
-  "version": 1,
+  "version": 2,
   "cases": [
     {
       "id": "recursive-collections",
+      "intent": "Nested arrays, arrays of models, typed maps and materialized element types recurse in both directions; a bad element reports its own index.",
       "schema": "samples/schemas/showcase.nexusrpc.yaml",
-      "expected_load": { "result": "accepted" },
+      "model": "Showcase",
+      "expected_load": {
+        "result": "accepted"
+      },
       "accepted_wire_values": [
         {
           "fixture": "samples/wire/json_schema/showcase/showcase-recursive-collections.json"
@@ -13,13 +17,24 @@
       "parse_failures": [
         {
           "wire_json": "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\",\"tier\":1,\"scale\":1.5,\"name\":\"w\",\"count\":1,\"active\":true,\"category\":\"tools\",\"slots\":[\"x\"],\"links\":[\"not a uri\"]}",
-          "expected_paths": ["slots[0]", "links[0]"]
+          "expected_paths": [
+            "links[0]",
+            "slots[0]"
+          ]
         }
       ],
       "serialize_failures": [
         {
-          "native_value": "replace numberGrid[0][1] with a non-finite number",
-          "expected_paths": ["numberGrid[0][1]"]
+          "from_fixture": "samples/wire/json_schema/showcase/showcase-recursive-collections.json",
+          "mutations": [
+            {
+              "path": "numberGrid[0][1]",
+              "set_number": "inf"
+            }
+          ],
+          "expected_paths": [
+            "numberGrid[0][1]"
+          ]
         }
       ],
       "permitted_presence_nullability_collapse": [],
@@ -44,8 +59,12 @@
     },
     {
       "id": "mathematical-number-equality",
+      "intent": "JSON number spelling is not identity-bearing: -0.0, 5e0, 1e3, the double extremes and a subnormal survive a round trip by mathematical value in every target.",
       "schema": "samples/schemas/showcase.nexusrpc.yaml",
-      "expected_load": { "result": "accepted" },
+      "model": "Showcase",
+      "expected_load": {
+        "result": "accepted"
+      },
       "accepted_wire_values": [
         {
           "fixture": "samples/wire/json_schema/showcase/showcase-number-values.json"
@@ -71,12 +90,26 @@
           "source": "samples/java/src/test/java/jsonschema/JsonSchemaShowcaseRoundTripTest.java",
           "anchor": "numberSpellingsRoundTripByMathematicalValue"
         }
+      },
+      "expected_divergence": {
+        "findings": [
+          "new:ts-negative-zero"
+        ],
+        "status": "structural",
+        "note": "JSON.stringify(-0) is \"0\" and the generated converter is handed an already-parsed value, so TypeScript cannot emit negative zero at all. The other three preserve it. Decision D8's class: the boundary is not the generator's to own, so this is documented rather than fixed.",
+        "matches": [
+          "typescript did not round-trip numberGrid[0][0]"
+        ]
       }
     },
     {
       "id": "year-zero-rejection",
+      "intent": "A materialized temporal format narrows the wire: year 0000 is a violation with the member's path, not a parser crash, and the supported minimum 0001-01-01 is accepted.",
       "schema": "samples/schemas/temporal.yaml",
-      "expected_load": { "result": "accepted" },
+      "model": "Temporal",
+      "expected_load": {
+        "result": "accepted"
+      },
       "accepted_wire_values": [
         {
           "wire_json": "{\"createdAt\":\"0001-01-01T00:00:00Z\",\"birthday\":\"0001-01-01\",\"alarm\":\"00:00:00\",\"timeout\":\"PT0S\"}"
@@ -85,11 +118,15 @@
       "parse_failures": [
         {
           "wire_json": "{\"createdAt\":\"0000-01-01T00:00:00Z\",\"birthday\":\"2000-01-01\",\"alarm\":\"09:00:00\",\"timeout\":\"PT0S\"}",
-          "expected_paths": ["createdAt"]
+          "expected_paths": [
+            "createdAt"
+          ]
         },
         {
           "wire_json": "{\"createdAt\":\"2021-06-15T12:30:45Z\",\"birthday\":\"0000-01-01\",\"alarm\":\"09:00:00\",\"timeout\":\"PT0S\"}",
-          "expected_paths": ["birthday"]
+          "expected_paths": [
+            "birthday"
+          ]
         }
       ],
       "serialize_failures": [],
@@ -115,8 +152,12 @@
     },
     {
       "id": "optional-null-presence-collapse",
+      "intent": "The one permitted P1 exception: an optional+nullable member's explicit wire null re-serializes as absent in the three targets with no presence channel, and only there.",
       "schema": "samples/schemas/showcase.nexusrpc.yaml",
-      "expected_load": { "result": "accepted" },
+      "model": "Showcase",
+      "expected_load": {
+        "result": "accepted"
+      },
       "accepted_wire_values": [
         {
           "fixture": "samples/wire/json_schema/showcase/showcase-nulls.json"
@@ -127,7 +168,11 @@
       "permitted_presence_nullability_collapse": [
         {
           "path": "middleName",
-          "targets": ["go", "python", "java"],
+          "targets": [
+            "go",
+            "python",
+            "java"
+          ],
           "wire_presence": "explicit_null",
           "serialized_presence": "absent"
         }
@@ -150,6 +195,629 @@
           "anchor": "showcaseFixturesRoundTrip"
         }
       }
+    },
+    {
+      "id": "nullability-matrix",
+      "intent": "Every optional x nullable combination over non-string inner types, across all three wire presences, with a constraint on each non-null branch.",
+      "schema": "samples/conformance/schemas/nullability-matrix.yaml",
+      "model": "NullabilityMatrix",
+      "expected_load": {
+        "result": "accepted"
+      },
+      "accepted_wire_values": [
+        {
+          "wire_json": "{\"requiredPlain\":1,\"optionalPlain\":2,\"requiredNullable\":3,\"optionalNullable\":4,\"nullableNumber\":10,\"nullableFlag\":true,\"nullableList\":[1,2],\"nullableChoice\":\"alpha\"}"
+        },
+        {
+          "wire_json": "{\"requiredPlain\":1,\"requiredNullable\":5}"
+        },
+        {
+          "wire_json": "{\"requiredPlain\":1,\"requiredNullable\":null,\"optionalNullable\":null,\"nullableNumber\":null,\"nullableFlag\":null,\"nullableList\":null,\"nullableChoice\":null}"
+        }
+      ],
+      "parse_failures": [
+        {
+          "wire_json": "{\"requiredNullable\":1}",
+          "expected_paths": [
+            "requiredPlain"
+          ]
+        },
+        {
+          "wire_json": "{\"requiredPlain\":1,\"requiredNullable\":1,\"optionalPlain\":null}",
+          "expected_paths": [
+            "optionalPlain"
+          ]
+        },
+        {
+          "wire_json": "{\"requiredPlain\":0,\"requiredNullable\":0}",
+          "expected_paths": [
+            "requiredNullable",
+            "requiredPlain"
+          ]
+        },
+        {
+          "wire_json": "{\"requiredPlain\":1,\"requiredNullable\":1,\"nullableNumber\":11}",
+          "expected_paths": [
+            "nullableNumber"
+          ]
+        },
+        {
+          "wire_json": "{\"requiredPlain\":1,\"requiredNullable\":1,\"nullableList\":[]}",
+          "expected_paths": [
+            "nullableList"
+          ]
+        },
+        {
+          "wire_json": "{\"requiredPlain\":1,\"requiredNullable\":1,\"nullableChoice\":\"gamma\"}",
+          "expected_paths": [
+            "nullableChoice"
+          ]
+        },
+        {
+          "wire_json": "{\"requiredPlain\":1,\"requiredNullable\":\"x\"}",
+          "expected_paths": [
+            "requiredNullable"
+          ]
+        }
+      ],
+      "serialize_failures": [],
+      "permitted_presence_nullability_collapse": [
+        {
+          "path": "optionalNullable",
+          "targets": [
+            "go",
+            "python",
+            "java"
+          ],
+          "wire_presence": "explicit_null",
+          "serialized_presence": "absent"
+        },
+        {
+          "path": "nullableNumber",
+          "targets": [
+            "go",
+            "python",
+            "java"
+          ],
+          "wire_presence": "explicit_null",
+          "serialized_presence": "absent"
+        },
+        {
+          "path": "nullableFlag",
+          "targets": [
+            "go",
+            "python",
+            "java"
+          ],
+          "wire_presence": "explicit_null",
+          "serialized_presence": "absent"
+        },
+        {
+          "path": "nullableList",
+          "targets": [
+            "go",
+            "python",
+            "java"
+          ],
+          "wire_presence": "explicit_null",
+          "serialized_presence": "absent"
+        },
+        {
+          "path": "nullableChoice",
+          "targets": [
+            "go",
+            "python",
+            "java"
+          ],
+          "wire_presence": "explicit_null",
+          "serialized_presence": "absent"
+        }
+      ]
+    },
+    {
+      "id": "union-token-selection",
+      "intent": "Discriminated dispatch on a non-string const tag, 1.0 == 1 for that tag, and branch selection across the string/integer/array/object token shapes.",
+      "schema": "samples/conformance/schemas/union-cases.yaml",
+      "model": "UnionCases",
+      "expected_load": {
+        "result": "accepted"
+      },
+      "accepted_wire_values": [
+        {
+          "wire_json": "{\"discriminated\":{\"kind\":1,\"alphaValue\":\"a\"},\"scalarUnion\":\"text\"}"
+        },
+        {
+          "wire_json": "{\"discriminated\":{\"kind\":2,\"betaValue\":7},\"scalarUnion\":42}"
+        },
+        {
+          "wire_json": "{\"discriminated\":{\"kind\":1.0,\"alphaValue\":\"a\"},\"scalarUnion\":[\"x\",\"y\"]}",
+          "expected_wire": "{\"discriminated\":{\"kind\":1,\"alphaValue\":\"a\"},\"scalarUnion\":[\"x\",\"y\"]}"
+        },
+        {
+          "wire_json": "{\"discriminated\":{\"kind\":1,\"alphaValue\":\"a\"},\"scalarUnion\":{\"k\":\"v\"}}"
+        },
+        {
+          "wire_json": "{\"discriminated\":{\"kind\":1,\"alphaValue\":\"a\"},\"scalarUnion\":\"t\",\"flagUnion\":{\"on\":true,\"since\":1}}"
+        },
+        {
+          "wire_json": "{\"discriminated\":{\"kind\":1,\"alphaValue\":\"a\"},\"scalarUnion\":\"t\",\"flagUnion\":{\"on\":false,\"reason\":\"off\"}}"
+        }
+      ],
+      "parse_failures": [
+        {
+          "wire_json": "{\"discriminated\":{\"kind\":3,\"alphaValue\":\"a\"},\"scalarUnion\":\"t\"}",
+          "expected_paths": [
+            "discriminated"
+          ]
+        },
+        {
+          "wire_json": "{\"discriminated\":{\"alphaValue\":\"a\"},\"scalarUnion\":\"t\"}",
+          "expected_paths": [
+            "discriminated"
+          ]
+        },
+        {
+          "wire_json": "{\"discriminated\":{\"kind\":1,\"alphaValue\":\"a\"},\"scalarUnion\":true}",
+          "expected_paths": [
+            "scalarUnion"
+          ]
+        }
+      ],
+      "serialize_failures": [],
+      "permitted_presence_nullability_collapse": []
+    },
+    {
+      "id": "numeric-bounds",
+      "intent": "The inclusive boundary value is accepted; multipleOf over a number holds at 1e23 and 1e300; a number bound compares mathematically against an integral token above 2^53.",
+      "schema": "samples/conformance/schemas/numeric-bounds.yaml",
+      "model": "NumericBounds",
+      "expected_load": {
+        "result": "accepted"
+      },
+      "accepted_wire_values": [
+        {
+          "wire_json": "{\"boundedInt\":5,\"boundedNumber\":-1.5,\"gridFive\":0,\"gridThree\":0,\"exclusive\":0.5}"
+        },
+        {
+          "wire_json": "{\"boundedInt\":10,\"boundedNumber\":9007199254740992,\"gridFive\":10,\"gridThree\":9,\"exclusive\":0.9999999999999999}"
+        },
+        {
+          "wire_json": "{\"boundedInt\":7,\"boundedNumber\":0,\"gridFive\":0,\"gridThree\":1e300,\"exclusive\":0.5}",
+          "expected_wire": "{\"boundedInt\":7,\"boundedNumber\":0,\"gridFive\":0,\"gridThree\":1e300,\"exclusive\":0.5}"
+        },
+        {
+          "wire_json": "{\"boundedInt\":7,\"boundedNumber\":9007199254740993,\"gridFive\":0,\"gridThree\":0,\"exclusive\":0.5}",
+          "expected_wire": "{\"boundedInt\":7,\"boundedNumber\":9007199254740992,\"gridFive\":0,\"gridThree\":0,\"exclusive\":0.5}"
+        }
+      ],
+      "parse_failures": [
+        {
+          "wire_json": "{\"boundedInt\":4,\"boundedNumber\":0,\"gridFive\":0,\"gridThree\":0,\"exclusive\":0.5}",
+          "expected_paths": [
+            "boundedInt"
+          ]
+        },
+        {
+          "wire_json": "{\"boundedInt\":11,\"boundedNumber\":0,\"gridFive\":0,\"gridThree\":0,\"exclusive\":0.5}",
+          "expected_paths": [
+            "boundedInt"
+          ]
+        },
+        {
+          "wire_json": "{\"boundedInt\":7,\"boundedNumber\":9007199254740994,\"gridFive\":0,\"gridThree\":0,\"exclusive\":0.5}",
+          "expected_paths": [
+            "boundedNumber"
+          ]
+        },
+        {
+          "wire_json": "{\"boundedInt\":7,\"boundedNumber\":0,\"gridFive\":1e23,\"gridThree\":0,\"exclusive\":0.5}",
+          "expected_paths": [
+            "gridFive"
+          ]
+        },
+        {
+          "wire_json": "{\"boundedInt\":7,\"boundedNumber\":0,\"gridFive\":0,\"gridThree\":0,\"exclusive\":0}",
+          "expected_paths": [
+            "exclusive"
+          ]
+        },
+        {
+          "wire_json": "{\"boundedInt\":7,\"boundedNumber\":0,\"gridFive\":0,\"gridThree\":0,\"exclusive\":1}",
+          "expected_paths": [
+            "exclusive"
+          ]
+        },
+        {
+          "wire_json": "{\"boundedInt\":\"7\",\"boundedNumber\":0,\"gridFive\":0,\"gridThree\":0,\"exclusive\":0.5}",
+          "expected_paths": [
+            "boundedInt"
+          ]
+        },
+        {
+          "wire_json": "{\"boundedInt\":7,\"boundedNumber\":\"0\",\"gridFive\":0,\"gridThree\":0,\"exclusive\":0.5}",
+          "expected_paths": [
+            "boundedNumber"
+          ]
+        }
+      ],
+      "serialize_failures": [],
+      "permitted_presence_nullability_collapse": []
+    },
+    {
+      "id": "integer-semantics",
+      "intent": "Which wire tokens are integers (1, 1.0, 1e2, -0, +-(2^53-1)) and which are not (1.5, true, \"1\", 2^53, 2^53+1, a fractional literal above 2^52) - plus the serialize-side cap.",
+      "schema": "samples/conformance/schemas/integer-semantics.yaml",
+      "model": "IntegerSemantics",
+      "expected_load": {
+        "result": "accepted"
+      },
+      "accepted_wire_values": [
+        {
+          "wire_json": "{\"value\":1}"
+        },
+        {
+          "wire_json": "{\"value\":1.0}",
+          "expected_wire": "{\"value\":1}"
+        },
+        {
+          "wire_json": "{\"value\":1e2}",
+          "expected_wire": "{\"value\":100}"
+        },
+        {
+          "wire_json": "{\"value\":-0}",
+          "expected_wire": "{\"value\":0}"
+        },
+        {
+          "wire_json": "{\"value\":9007199254740991}"
+        },
+        {
+          "wire_json": "{\"value\":-9007199254740991}"
+        }
+      ],
+      "parse_failures": [
+        {
+          "wire_json": "{\"value\":1.5}",
+          "expected_paths": [
+            "value"
+          ]
+        },
+        {
+          "wire_json": "{\"value\":true}",
+          "expected_paths": [
+            "value"
+          ]
+        },
+        {
+          "wire_json": "{\"value\":\"1\"}",
+          "expected_paths": [
+            "value"
+          ]
+        },
+        {
+          "wire_json": "{\"value\":9007199254740992}",
+          "expected_paths": [
+            "value"
+          ]
+        },
+        {
+          "wire_json": "{\"value\":9007199254740993}",
+          "expected_paths": [
+            "value"
+          ]
+        },
+        {
+          "wire_json": "{\"value\":4503599627370496.5}",
+          "expected_paths": [
+            "value"
+          ]
+        }
+      ],
+      "serialize_failures": [
+        {
+          "from_wire": "{\"value\":1}",
+          "mutations": [
+            {
+              "path": "value",
+              "set_integer": "9007199254740992"
+            }
+          ],
+          "expected_paths": [
+            "value"
+          ]
+        }
+      ],
+      "permitted_presence_nullability_collapse": [],
+      "expected_divergence": {
+        "findings": [
+          "13#4"
+        ],
+        "status": "structural",
+        "note": "4503599627370496.5 is rejected by Go and Java, which see the decimal text, and accepted by Python and TypeScript, which see the already-rounded double. TypeScript cannot recover the literal (D8), so the agreed accept set is bounded by it; narrowing Python alone would move the divergence rather than remove it.",
+        "matches": [
+          "parse_failures[5]"
+        ]
+      }
+    },
+    {
+      "id": "unique-items-equality",
+      "intent": "uniqueItems compares mathematical value in both directions: 1 == 1.0, 5 == 5e0 and -0.0 == 0.0 are all duplicates, and a duplicate introduced natively is rejected on serialize.",
+      "schema": "samples/conformance/schemas/unique-items.yaml",
+      "model": "UniqueItems",
+      "expected_load": {
+        "result": "accepted"
+      },
+      "accepted_wire_values": [
+        {
+          "wire_json": "{\"numbers\":[1,2,3],\"words\":[\"a\",\"b\"]}"
+        }
+      ],
+      "parse_failures": [
+        {
+          "wire_json": "{\"numbers\":[1,1.0]}",
+          "expected_paths": [
+            "numbers"
+          ]
+        },
+        {
+          "wire_json": "{\"numbers\":[5,5e0]}",
+          "expected_paths": [
+            "numbers"
+          ]
+        },
+        {
+          "wire_json": "{\"numbers\":[1],\"words\":[\"a\",\"a\"]}",
+          "expected_paths": [
+            "words"
+          ]
+        },
+        {
+          "wire_json": "{\"numbers\":[-0.0,0.0]}",
+          "expected_paths": [
+            "numbers"
+          ]
+        }
+      ],
+      "serialize_failures": [
+        {
+          "from_wire": "{\"numbers\":[1,2]}",
+          "mutations": [
+            {
+              "path": "numbers",
+              "duplicate_element": 0
+            }
+          ],
+          "expected_paths": [
+            "numbers"
+          ]
+        },
+        {
+          "from_wire": "{\"numbers\":[0.0,1]}",
+          "mutations": [
+            {
+              "path": "numbers[1]",
+              "set_number": "-0.0"
+            }
+          ],
+          "expected_paths": [
+            "numbers"
+          ]
+        }
+      ],
+      "permitted_presence_nullability_collapse": []
+    },
+    {
+      "id": "closed-values",
+      "intent": "An off-set enum or const value is rejected, including one nullability wrapper deep, where a target that reads the wrapper keeps only the inner type.",
+      "schema": "samples/conformance/schemas/closed-values.yaml",
+      "model": "ClosedValues",
+      "expected_load": {
+        "result": "accepted"
+      },
+      "accepted_wire_values": [
+        {
+          "wire_json": "{\"status\":\"active\",\"tier\":2,\"fixed\":1,\"nullableStatus\":\"inactive\",\"nullableTier\":3}"
+        },
+        {
+          "wire_json": "{\"status\":\"inactive\",\"tier\":1,\"fixed\":1,\"nullableStatus\":null,\"nullableTier\":null}"
+        }
+      ],
+      "parse_failures": [
+        {
+          "wire_json": "{\"status\":\"archived\",\"tier\":1,\"fixed\":1}",
+          "expected_paths": [
+            "status"
+          ]
+        },
+        {
+          "wire_json": "{\"status\":\"active\",\"tier\":4,\"fixed\":1}",
+          "expected_paths": [
+            "tier"
+          ]
+        },
+        {
+          "wire_json": "{\"status\":\"active\",\"tier\":1,\"fixed\":2}",
+          "expected_paths": [
+            "fixed"
+          ]
+        },
+        {
+          "wire_json": "{\"status\":\"active\",\"tier\":1,\"fixed\":1,\"nullableStatus\":\"archived\"}",
+          "expected_paths": [
+            "nullableStatus"
+          ]
+        },
+        {
+          "wire_json": "{\"status\":\"active\",\"tier\":1,\"fixed\":1,\"nullableTier\":9}",
+          "expected_paths": [
+            "nullableTier"
+          ]
+        }
+      ],
+      "serialize_failures": [],
+      "permitted_presence_nullability_collapse": [
+        {
+          "path": "nullableStatus",
+          "targets": [
+            "go",
+            "python",
+            "java"
+          ],
+          "wire_presence": "explicit_null",
+          "serialized_presence": "absent"
+        },
+        {
+          "path": "nullableTier",
+          "targets": [
+            "go",
+            "python",
+            "java"
+          ],
+          "wire_presence": "explicit_null",
+          "serialized_presence": "absent"
+        }
+      ]
+    },
+    {
+      "id": "object-modeling",
+      "intent": "A closed model rejects an undeclared key, an open model carries it through untouched, a typed map validates every member, and missing required members aggregate across siblings.",
+      "schema": "samples/conformance/schemas/object-modeling.yaml",
+      "model": "ObjectModeling",
+      "expected_load": {
+        "result": "accepted"
+      },
+      "accepted_wire_values": [
+        {
+          "wire_json": "{\"closed\":{\"alpha\":\"a\",\"beta\":1},\"open\":{\"alpha\":\"a\",\"extra\":{\"nested\":[1,\"two\",true,null]}},\"typed\":{\"x\":1,\"y\":2}}"
+        }
+      ],
+      "parse_failures": [
+        {
+          "wire_json": "{\"closed\":{\"alpha\":\"a\",\"gamma\":1},\"open\":{\"alpha\":\"a\"},\"typed\":{}}",
+          "expected_paths": [
+            "closed.gamma"
+          ]
+        },
+        {
+          "wire_json": "{\"closed\":{},\"open\":{},\"typed\":{}}",
+          "expected_paths": [
+            "closed.alpha",
+            "open.alpha"
+          ]
+        },
+        {
+          "wire_json": "{\"closed\":{\"alpha\":\"a\"},\"open\":{\"alpha\":\"a\"},\"typed\":{\"x\":0}}",
+          "expected_paths": [
+            "typed.x"
+          ]
+        }
+      ],
+      "serialize_failures": [],
+      "permitted_presence_nullability_collapse": []
+    },
+    {
+      "id": "content-encoding-canonical-form",
+      "intent": "base64/base64url decode-encode must be the identity, so non-canonical trailing bits, missing padding, embedded whitespace and the wrong alphabet are all rejections.",
+      "schema": "samples/conformance/schemas/content-encoding.yaml",
+      "model": "ContentEncoding",
+      "expected_load": {
+        "result": "accepted"
+      },
+      "accepted_wire_values": [
+        {
+          "wire_json": "{\"payload\":\"aGk=\",\"urlPayload\":\"Pj4-\"}"
+        },
+        {
+          "wire_json": "{\"payload\":\"\"}"
+        },
+        {
+          "wire_json": "{\"payload\":\"Pj4+\",\"urlPayload\":\"aGk\"}"
+        }
+      ],
+      "parse_failures": [
+        {
+          "wire_json": "{\"payload\":\"aGl=\"}",
+          "expected_paths": [
+            "payload"
+          ]
+        },
+        {
+          "wire_json": "{\"payload\":\"aGk\"}",
+          "expected_paths": [
+            "payload"
+          ]
+        },
+        {
+          "wire_json": "{\"payload\":\"aG k=\"}",
+          "expected_paths": [
+            "payload"
+          ]
+        },
+        {
+          "wire_json": "{\"payload\":\"aGk=\\n\"}",
+          "expected_paths": [
+            "payload"
+          ]
+        },
+        {
+          "wire_json": "{\"payload\":\"Pj4-\"}",
+          "expected_paths": [
+            "payload"
+          ]
+        },
+        {
+          "wire_json": "{\"payload\":\"aGk=\",\"urlPayload\":\"Pj4+\"}",
+          "expected_paths": [
+            "urlPayload"
+          ]
+        },
+        {
+          "wire_json": "{\"payload\":\"aGk=\",\"urlPayload\":\"aGl\"}",
+          "expected_paths": [
+            "urlPayload"
+          ]
+        }
+      ],
+      "serialize_failures": [],
+      "permitted_presence_nullability_collapse": []
+    },
+    {
+      "id": "contains-matcher",
+      "intent": "One contains matcher schema judged by all four predicates: a fractional bound is not truncated, and an integer matcher over number elements applies its own integral and cap predicates first.",
+      "schema": "samples/conformance/schemas/contains-matcher.yaml",
+      "model": "ContainsMatcher",
+      "expected_load": {
+        "result": "accepted"
+      },
+      "accepted_wire_values": [
+        {
+          "wire_json": "{\"numbers\":[1,2],\"wideNumbers\":[1]}"
+        },
+        {
+          "wire_json": "{\"numbers\":[1.5]}"
+        }
+      ],
+      "parse_failures": [
+        {
+          "wire_json": "{\"numbers\":[1,1.4]}",
+          "expected_paths": [
+            "numbers"
+          ]
+        },
+        {
+          "wire_json": "{\"numbers\":[2],\"wideNumbers\":[1e300]}",
+          "expected_paths": [
+            "wideNumbers"
+          ]
+        },
+        {
+          "wire_json": "{\"numbers\":[2],\"wideNumbers\":[0.5]}",
+          "expected_paths": [
+            "wideNumbers"
+          ]
+        }
+      ],
+      "serialize_failures": [],
+      "permitted_presence_nullability_collapse": []
     }
   ]
 }

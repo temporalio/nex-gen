@@ -295,6 +295,21 @@ func (m Room) Validate() error {
 	if m.Labels != nil {
 		mergeNested(&errs, "labels", m.Labels.Validate())
 	}
+	if _, ok := m.AdditionalProperties["roomId"]; ok {
+		errs = append(errs, Violation{"roomId", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["displayName"]; ok {
+		errs = append(errs, Violation{"displayName", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["topic"]; ok {
+		errs = append(errs, Violation{"topic", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["members"]; ok {
+		errs = append(errs, Violation{"members", "catch-all key collides with declared property"})
+	}
+	if _, ok := m.AdditionalProperties["labels"]; ok {
+		errs = append(errs, Violation{"labels", "catch-all key collides with declared property"})
+	}
 	if len(errs) > 0 {
 		return &ValidationError{Violations: errs}
 	}

@@ -166,6 +166,16 @@ input root = /abs/schemas   (common ancestor of all resolved inputs)
 /abs/schemas/tree/category.json    -> tree/category/ (models.py)
 ```
 
+"Minus extension" strips `.json` / `.yaml` / `.yml` **and then a trailing
+`.nexusrpc` infix**, so `chat.nexusrpc.yaml` is the module `chat`, not
+`chat.nexusrpc` — the convention marker names the file, not the generated
+package, and a `.` in a module segment would be unspellable as a Python or
+Java package name anyway. The same stripping produces the file's derived
+root type name. A consequence worth stating outright: `chat.yaml` and
+`chat.nexusrpc.yaml` in one closure map to the **same** module path and
+collide (a load reject, per *Collisions* below); a closure may name a
+module once, in one spelling.
+
 Because the directory structure is mirrored rather than collapsed, there
 is no delimiter to escape and no path-encoding scheme: literal
 underscores, nested directories, and repeated segments all survive
@@ -203,8 +213,11 @@ reject costs little.
 **Go** — one unified namespace per package holds the **reserved generated
 names** (`definitions` and `_definitions`, the union across languages) plus one
 entry per input module. Any collision
-in that namespace → **load reject** with a fix-it (`x-output-module`
-override or rename):
+in that namespace → **load reject** with a fix-it. The fix-it is **rename
+the input file or directory**; a per-input `x-output-module` override is a
+*possible* future escape hatch and is **not implemented** — nothing in the
+generator reads such a keyword today, and there is no per-module escape
+hatch at all (`x-<lang>-name` names types and members, not modules):
 
 - two inputs flattening to the same module (`full/name` vs `full_name`);
 - an input flattening onto a reserved generated name (a root-level
@@ -270,10 +283,15 @@ types:
 - **Python**: the cross-file SCC moves wholesale into `_recursive.py` at
   the package root, where it becomes a within-module cycle (topological
   order + a forward-ref back-edge in the annotation). It imports the
-  leaf, non-cyclic types it needs from the per-input modules; those
-  modules and the aggregators import the finished classes back from
-  `_recursive.py`, which imports nothing back from them — so the
-  cross-module import cycle is gone. The hoist is what makes the cycle
+  leaf, non-cyclic types it needs from the per-input modules, and
+  **nothing imports back into it from below**: the hoisted classes are
+  re-exported by the **package-root `__init__.py` only**. A per-input
+  module — or its `__init__.py` — importing them back would recreate
+  exactly the cycle the hoist exists to break (`_recursive` imports
+  `content.page.models`, whose package `__init__` would in turn import
+  `_recursive`). So a hoisted type is reached as `from kb import Page`,
+  never `from kb.content.page import Page`, and the cross-module import
+  cycle is gone. The hoist is what makes the cycle
   tractable: a per-input module names its siblings' classes in
   **module-level `import` statements**, which is a real Python import
   cycle no annotation treatment can defuse. A cycle **within** a single
@@ -313,9 +331,11 @@ including dead ones; anonymous types stay nested) plus each file's service
 bindings:
 
 - **Python** — each per-input `__init__.py` re-exports its module's public
-  types (and services) via `__all__`; each intermediate directory's
-  `__init__.py` re-exports its children; the package-root `__init__.py`
-  re-exports the whole tree, pulling hoisted types from `_recursive`. The
+  types (and services) via `__all__` — **except** types hoisted into
+  `_recursive.py`, which would reintroduce the broken cycle; each
+  intermediate directory's `__init__.py` re-exports its children; the
+  package-root `__init__.py` re-exports the whole tree, and is the **only**
+  place the hoisted types surface, pulled from `_recursive`. The
   package root also exports the shared `ValidationError` and `Violation`, so
   callers catch or inspect validation failures without importing the private
   `_definitions` module.

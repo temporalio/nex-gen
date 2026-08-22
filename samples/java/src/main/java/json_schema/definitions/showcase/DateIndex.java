@@ -62,9 +62,7 @@ public final class DateIndex {
         public void serialize(DateIndex value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
             for (Map.Entry<String, LocalDate> entry : value.additionalProperties.entrySet()) {
-                if (entry.getValue().getYear() < 1) {
-                    violations.add(new Violation(entry.getKey(), "must be a valid date, got " + entry.getValue() + ": year must be >= 0001"));
-                }
+                TemporalSupport.checkDate(entry.getValue(), entry.getKey(), violations);
             }
             if (!violations.isEmpty()) {
                 throw new ValidationException(violations);
@@ -80,7 +78,7 @@ public final class DateIndex {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<DateIndex> {
         @Override
         public DateIndex deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

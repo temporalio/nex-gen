@@ -36,10 +36,23 @@ thread_local! {
     static TS_DATE_TIME_TYPES: Cell<TsDateTimeTypes> = const { Cell::new(TsDateTimeTypes::String) };
     static USES_TEMPORAL: Cell<bool> = const { Cell::new(false) };
     static USES_CONTENT_ENCODING: Cell<bool> = const { Cell::new(false) };
+    static USES_CODE_POINT_LENGTH: Cell<bool> = const { Cell::new(false) };
+    /// Every JSON model in the input closure, keyed by `full_name`, so a `$ref`
+    /// branch that crosses a module boundary still resolves to its target's
+    /// shape. Registered once per generation from the whole spec tree; the
+    /// per-module model list alone cannot see a sibling leaf's `$defs`.
+    static TREE_JSON_MODELS: RefCell<BTreeMap<String, PlannedJsonType>> =
+        const { RefCell::new(BTreeMap::new()) };
     /// Resolved type identifiers keyed by both `full_name` and the `#/$defs/<full_name>`
     /// `$ref` form, so `reference_model_name` follows the same name manifest as the
     /// declaration (honoring `x-ts-name` overrides) instead of recasing the ref segment.
     static REF_NAMES: RefCell<BTreeMap<String, String>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+/// Registers the whole input closure's JSON models for cross-module `$ref`
+/// resolution. Called once per generation, before any leaf renders.
+pub(in crate::generator) fn set_tree_json_models(models: BTreeMap<String, PlannedJsonType>) {
+    TREE_JSON_MODELS.with(|cell| *cell.borrow_mut() = models);
 }
 
 fn set_ref_names(ref_names: &BTreeMap<String, String>) {
@@ -53,6 +66,16 @@ fn set_temporal_context(repr: TsDateTimeTypes, uses_temporal: bool) {
 
 fn set_content_encoding_context(uses_content_encoding: bool) {
     USES_CONTENT_ENCODING.with(|cell| cell.set(uses_content_encoding));
+}
+
+fn set_code_point_length_context(uses_code_point_length: bool) {
+    USES_CODE_POINT_LENGTH.with(|cell| cell.set(uses_code_point_length));
+}
+
+/// The qualified call to the shared surrogate-aware code-point scan in the
+/// generated runtime module.
+fn code_point_length_fn() -> String {
+    format!("{DEFINITIONS_NAMESPACE}.codePointLength")
 }
 
 fn active_repr() -> TsDateTimeTypes {
@@ -260,10 +283,18 @@ impl Schema {
     }
 
     fn has_string_constraints(&self) -> bool {
-        self.min_length.is_some()
+        // `minLength: 0` is the spec's explicit no-op ([[minLength]]); emitting
+        // it would spread the whole string for an unreachable comparison.
+        self.effective_min_length().is_some()
             || self.max_length.is_some()
             || self.pattern.is_some()
             || self.format.is_some()
+    }
+
+    /// The `minLength` that actually constrains anything: `0` is equivalent to
+    /// the keyword being absent.
+    fn effective_min_length(&self) -> Option<u64> {
+        self.min_length.filter(|min| *min > 0)
     }
 
     fn has_array_constraints(&self) -> bool {
@@ -282,13 +313,17 @@ fn ts_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
 }
 
 /// Emits the numeric-constraint predicates over `value_expr` (a validated
-/// `number` in scope) into the parser body, pushing Violations.
+/// `number` in scope), pushing Violations. `emit_integer_cap` adds the P12
+/// serialize-side ±(2^53−1) re-check; the parse adapter has already classified
+/// the token with `Number.isSafeInteger`, so it passes `false` rather than
+/// emitting the same comparison twice.
 fn render_ts_numeric_checks(
     output: &mut String,
     value_expr: &str,
     path_expr: &str,
     schema: &Schema,
     indent: &str,
+    emit_integer_cap: bool,
 ) {
     let is_integer = schema.ty.as_ref().and_then(Value::as_str) == Some("integer");
     let mut body = String::new();
@@ -341,8 +376,32 @@ fn render_ts_numeric_checks(
             format!("must be a multiple of {bound}, got ${{{value_expr}}}"),
         );
     }
-    if is_integer {
+    if is_integer && !emit_integer_cap {
         output.push_str(&body);
+        return;
+    }
+    if is_integer {
+        // The `integer` cap (`type.md` §Serialize-side). A JS
+        // `number` also has no integral or finite guarantee in memory, so the
+        // one `Number.isSafeInteger` guard covers the cap, the fractional part
+        // and `NaN`/`±Infinity` — all of which would otherwise emit a payload
+        // every target's parser (including this one) rejects.
+        output.push_str(indent);
+        output.push_str(&format!("if (!Number.isSafeInteger({value_expr})) {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "  violations.push({{ path: {path_expr}, reason: 'exceeds ±(2^53-1) integer cap' }});\n"
+        ));
+        output.push_str(indent);
+        output.push_str("}");
+        if body.is_empty() {
+            output.push('\n');
+        } else {
+            output.push_str(" else {\n");
+            output.push_str(&body);
+            output.push_str(indent);
+            output.push_str("}\n");
+        }
         return;
     }
 
@@ -366,8 +425,9 @@ fn render_ts_numeric_checks(
 
 /// Emits the string-length predicates (`minLength`/`maxLength`) over
 /// `value_expr` (a validated `string` in scope). Length is the Unicode
-/// code-point count via the spread iterator (`[...s].length`), which is
-/// surrogate-aware — never `s.length` (UTF-16 code units). See
+/// code-point count from the shared surrogate-aware `codePointLength` scan —
+/// never `s.length` (UTF-16 code units) and never `[...s].length` (which
+/// allocates a whole code-point array before the bound can fire). See
 /// `specs/json-schema/features/maxLength.md`.
 fn render_ts_string_checks(
     output: &mut String,
@@ -390,34 +450,46 @@ fn render_ts_string_assertions(
     indent: &str,
     include_format: bool,
 ) {
-    let mut emit = |condition: String, reason: String| {
+    if let Some(min) = schema.effective_min_length() {
+        // The scan stops the moment the count reaches `min`; if the string ended
+        // first the count in hand is already exact, so the failure path needs no
+        // second pass (`minLength.md` TS row).
         output.push_str(indent);
-        output.push_str("if (");
-        output.push_str(&condition);
-        output.push_str(") {\n");
+        output.push_str("{\n");
         output.push_str(indent);
-        output.push_str("  violations.push({ path: ");
-        output.push_str(path_expr);
-        output.push_str(", reason: `");
-        output.push_str(&reason);
-        output.push_str("` });\n");
+        output.push_str(&format!(
+            "  const codePoints = {}({value_expr}, {min});\n",
+            code_point_length_fn()
+        ));
+        output.push_str(indent);
+        output.push_str(&format!("  if (codePoints < {min}) {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "    violations.push({{ path: {path_expr}, reason: `must have length >= {min}, got ${{codePoints}}` }});\n"
+        ));
+        output.push_str(indent);
+        output.push_str("  }\n");
         output.push_str(indent);
         output.push_str("}\n");
-    };
-    let length = format!("[...{value_expr}].length");
-    if let Some(min) = schema.min_length {
-        emit(
-            format!("{length} < {min}"),
-            format!("must have length >= {min}, got ${{{length}}}"),
-        );
     }
     if let Some(max) = schema.max_length {
-        emit(
-            format!("{length} > {max}"),
-            format!("must have length <= {max}, got ${{{length}}}"),
-        );
+        // Early-exit against the bound: the scan stops at `max + 1` code points,
+        // so an adversarially long string costs O(max), not O(n). Only the
+        // (rare) failure path pays the exact recount for the message
+        // (`maxLength.md` TS row).
+        output.push_str(indent);
+        output.push_str(&format!(
+            "if ({}({value_expr}, {max}) > {max}) {{\n",
+            code_point_length_fn()
+        ));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "  violations.push({{ path: {path_expr}, reason: `must have length <= {max}, got ${{{}({value_expr})}}` }});\n",
+            code_point_length_fn()
+        ));
+        output.push_str(indent);
+        output.push_str("}\n");
     }
-    drop(emit);
     if let Some(pattern) = &schema.pattern {
         render_ts_pattern_check(output, value_expr, path_expr, pattern, indent);
     }
@@ -445,7 +517,10 @@ fn render_ts_format_check(
     output.push_str(indent);
     output.push_str("if (");
     if let Some(max) = check.max_code_points {
-        output.push_str(&format!("[...{value_expr}].length > {max} || "));
+        output.push_str(&format!(
+            "{}({value_expr}, {max}) > {max} || ",
+            code_point_length_fn()
+        ));
     }
     output.push_str(&format!("!{const_name}.test({value_expr})) {{\n"));
     output.push_str(indent);
@@ -522,12 +597,53 @@ fn render_pattern_regexes(output: &mut String, models: &[&PlannedJsonType]) -> R
             output.push('\n');
             emitted = true;
         }
-        output.push_str(&format!(
-            "const {name} = new RegExp({}, \"u\");\n",
-            typescript_string_literal(&pattern)
-        ));
+        match ts_regex_literal(&pattern) {
+            Some(literal) => output.push_str(&format!("const {name} = {literal};\n")),
+            None => output.push_str(&format!(
+                "const {name} = new RegExp({}, \"u\");\n",
+                typescript_string_literal(&pattern)
+            )),
+        }
     }
     Ok(())
+}
+
+/// Spells a `pattern` as a module-level regex literal (`/…/u`), the default form
+/// `pattern.md`'s TypeScript row prescribes. Returns `None` for the shapes a
+/// literal cannot carry — an empty body (`//` opens a comment), a line
+/// terminator, or a trailing lone backslash — so those fall back to
+/// `new RegExp(<string>, "u")`. An unescaped `/` is escaped as `\/`, which the
+/// `u` grammar admits as an identity escape.
+fn ts_regex_literal(pattern: &str) -> Option<String> {
+    if pattern.is_empty()
+        || pattern
+            .chars()
+            .any(|ch| matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
+    {
+        return None;
+    }
+    let mut literal = String::from("/");
+    let mut escaped = false;
+    for ch in pattern.chars() {
+        if escaped {
+            literal.push(ch);
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => {
+                literal.push('\\');
+                escaped = true;
+            }
+            '/' => literal.push_str("\\/"),
+            _ => literal.push(ch),
+        }
+    }
+    if escaped {
+        return None;
+    }
+    literal.push_str("/u");
+    Some(literal)
 }
 
 /// Collects every compiled-regex source a model's checks reference, in every
@@ -611,7 +727,7 @@ fn render_ts_property_name_checks(
     indent: &str,
 ) {
     let matcher = scalar_matcher(subschema);
-    if matcher.min_length.is_none()
+    if matcher.min_length.is_none_or(|min| min == 0)
         && matcher.max_length.is_none()
         && matcher.pattern.is_none()
         && matcher.format.is_none()
@@ -622,7 +738,6 @@ fn render_ts_property_name_checks(
     output.push_str(indent);
     output.push_str(&format!("for (const key of {keys_expr}) {{\n"));
     let inner = format!("{indent}  ");
-    let length = "[...key].length";
     let mut emit = |condition: String, reason: String| {
         output.push_str(&inner);
         output.push_str(&format!("if ({condition}) {{\n"));
@@ -633,16 +748,20 @@ fn render_ts_property_name_checks(
         output.push_str(&inner);
         output.push_str("}\n");
     };
-    if let Some(min) = matcher.min_length {
+    if let Some(min) = matcher.min_length.filter(|min| *min > 0) {
+        let count = format!("{}(key, {min})", code_point_length_fn());
         emit(
-            format!("{length} < {min}"),
-            format!("must have length >= {min}, got ${{{length}}}"),
+            format!("{count} < {min}"),
+            format!("must have length >= {min}, got ${{{count}}}"),
         );
     }
     if let Some(max) = matcher.max_length {
         emit(
-            format!("{length} > {max}"),
-            format!("must have length <= {max}, got ${{{length}}}"),
+            format!("{}(key, {max}) > {max}", code_point_length_fn()),
+            format!(
+                "must have length <= {max}, got ${{{}(key)}}",
+                code_point_length_fn()
+            ),
         );
     }
     if !matcher.enum_values.is_empty() {
@@ -683,7 +802,10 @@ fn render_ts_property_name_checks(
         output.push_str(&inner);
         output.push_str("if (");
         if let Some(max) = check.max_code_points {
-            output.push_str(&format!("[...key].length > {max} || "));
+            output.push_str(&format!(
+                "{}(key, {max}) > {max} || ",
+                code_point_length_fn()
+            ));
         }
         output.push_str(&format!("!{const_name}.test(key)) {{\n"));
         output.push_str(&inner);
@@ -774,8 +896,16 @@ fn ts_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) 
     let matcher = scalar_matcher(matcher);
     let is_integer = element_ty == Some("integer")
         || matcher.kind == Some(ScalarKind::Integer) && element_ty != Some("number");
+    // A matcher that declares no `type` still needs a runtime kind guard: the
+    // raw wire array can hold anything, and an unguarded string/number predicate
+    // either throws (`[...5]`) or silently coerces (`"9" >= 5`) instead of
+    // aggregating a Violation. Fall back to the element type, as Java and Python
+    // do (`contains.md` §Validator mapping, P11).
+    let kind = matcher
+        .kind
+        .or_else(|| element_ty.and_then(ScalarKind::from_name));
     let mut parts: Vec<String> = Vec::new();
-    match matcher.kind {
+    match kind {
         Some(ScalarKind::String) => parts.push(format!("typeof {elem} === 'string'")),
         Some(ScalarKind::Boolean) => parts.push(format!("typeof {elem} === 'boolean'")),
         Some(ScalarKind::Number) => parts.push(format!(
@@ -821,11 +951,17 @@ fn ts_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) 
             ts_bound_literal(divisor, is_integer)
         ));
     }
-    if let Some(min) = matcher.min_length {
-        parts.push(format!("[...{elem}].length >= {min}"));
+    if let Some(min) = matcher.min_length.filter(|min| *min > 0) {
+        parts.push(format!(
+            "{}({elem}, {min}) >= {min}",
+            code_point_length_fn()
+        ));
     }
     if let Some(max) = matcher.max_length {
-        parts.push(format!("[...{elem}].length <= {max}"));
+        parts.push(format!(
+            "{}({elem}, {max}) <= {max}",
+            code_point_length_fn()
+        ));
     }
     if let Some(pattern) = &matcher.pattern {
         parts.push(format!("{}.test({elem})", ts_pattern_const_name(pattern)));
@@ -834,7 +970,10 @@ fn ts_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) 
         && let Some(check) = crate::json_schema::format::check_for(format)
     {
         if let Some(max) = check.max_code_points {
-            parts.push(format!("[...{elem}].length <= {max}"));
+            parts.push(format!(
+                "{}({elem}, {max}) <= {max}",
+                code_point_length_fn()
+            ));
         }
         parts.push(format!(
             "{}.test({elem})",
@@ -849,19 +988,42 @@ fn ts_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) 
 }
 
 /// Emits the array-constraint predicates over `array_expr` (a built array in
-/// scope) into the parser body, pushing Violations.
+/// scope) into the parser or serializer body, pushing Violations.
+///
+/// `depth` is the array's own nesting level; every loop variable this emits
+/// carries that depth, so an inner level never shadows the enclosing level's
+/// `index` — which the surrounding `path_expr` interpolates
+/// (`items.md` §"Nested arrays").
+///
+/// `serialize` selects the in-memory side. Element equality and the `contains`
+/// matcher are always evaluated over the **wire** value in both directions (D10),
+/// so a materialized element (`Uint8Array`, `Temporal.*`, `Date`) is compared by
+/// its canonical wire string rather than by reference.
 fn render_ts_array_checks(
     output: &mut String,
     array_expr: &str,
     path_expr: &str,
     schema: &Schema,
     indent: &str,
+    depth: usize,
+    serialize: bool,
 ) {
-    let element_ty = schema
+    // A nullable element ([[nullability]]'s `oneOf: [T, null]` wrapper) declares
+    // no `type` of its own; the element kind lives on its non-null branch. Reading
+    // the wrapper would leave the matcher unguarded — and `null >= 0` is `true` in
+    // JS, so an unguarded numeric matcher would count `null` as a match
+    // (`contains.md` Interactions → [[nullability]]: a `null` element never
+    // satisfies a scalar matcher).
+    let element_schema = schema
         .items
-        .as_ref()
+        .as_deref()
+        .map(|item| nullable_non_null_schema(item).unwrap_or(item));
+    let element_ty = element_schema
         .and_then(|item| item.ty.as_ref())
         .and_then(Value::as_str);
+    let suffix = ts_depth_suffix(depth);
+    let element = format!("element{suffix}");
+    let index = format!("index{suffix}");
     if let Some(min) = schema.min_items {
         output.push_str(indent);
         output.push_str(&format!("if ({array_expr}.length < {min}) {{\n"));
@@ -882,23 +1044,51 @@ fn render_ts_array_checks(
         output.push_str(indent);
         output.push_str("}\n");
     }
+    if schema.unique_items.is_none_or(|unique| !unique) && schema.contains.is_none() {
+        return;
+    }
+    // Both value-comparing keywords run over the wire value. On the parse side
+    // `array_expr` already holds raw wire elements; on the serialize side a
+    // materialized element is mapped through its canonical wire form first.
+    let mut values_expr = array_expr.to_string();
+    let mut indent = indent.to_string();
+    let mut wrapped = false;
+    if serialize && let Some(items) = schema.items.as_deref() {
+        let wire = serialize_expr(items, &element);
+        if wire != element {
+            let wire_items = format!("wireItems{suffix}");
+            output.push_str(&indent);
+            output.push_str("{\n");
+            let inner = format!("{indent}  ");
+            output.push_str(&inner);
+            output.push_str(&format!(
+                "const {wire_items} = {array_expr}.map(({element}) => {wire});\n"
+            ));
+            values_expr = wire_items;
+            indent = inner;
+            wrapped = true;
+        }
+    }
+    let indent = indent.as_str();
     if schema.unique_items == Some(true) {
         output.push_str(indent);
         output.push_str("{\n");
         output.push_str(indent);
         output.push_str("  const seen = new Map<unknown, number>();\n");
         output.push_str(indent);
-        output.push_str(&format!("  {array_expr}.forEach((element, index) => {{\n"));
+        output.push_str(&format!(
+            "  {values_expr}.forEach(({element}, {index}) => {{\n"
+        ));
         output.push_str(indent);
-        output.push_str("    if (seen.has(element)) {\n");
+        output.push_str(&format!("    if (seen.has({element})) {{\n"));
         output.push_str(indent);
         output.push_str(&format!(
-            "      violations.push({{ path: {path_expr}, reason: `duplicate items: element at index ${{index}} equals index ${{seen.get(element)}}` }});\n"
+            "      violations.push({{ path: {path_expr}, reason: `duplicate items: element at index ${{{index}}} equals index ${{seen.get({element})}}` }});\n"
         ));
         output.push_str(indent);
         output.push_str("    } else {\n");
         output.push_str(indent);
-        output.push_str("      seen.set(element, index);\n");
+        output.push_str(&format!("      seen.set({element}, {index});\n"));
         output.push_str(indent);
         output.push_str("    }\n");
         output.push_str(indent);
@@ -907,22 +1097,22 @@ fn render_ts_array_checks(
         output.push_str("}\n");
     }
     if let Some(matcher) = &schema.contains {
-        let condition = ts_matcher_condition(matcher, "element", element_ty);
+        let condition = ts_matcher_condition(matcher, &element, element_ty);
         let effective_min = schema.min_contains.unwrap_or(1);
         let inner = format!("{indent}  ");
         output.push_str(indent);
         output.push_str("{\n");
         output.push_str(&inner);
         output.push_str(&format!(
-            "const matchCount = {array_expr}.filter((element) => {condition}).length;\n"
+            "const matchCount{suffix} = {values_expr}.filter(({element}) => {condition}).length;\n"
         ));
         if effective_min > 0 {
             output.push_str(&inner);
-            output.push_str(&format!("if (matchCount < {effective_min}) {{\n"));
+            output.push_str(&format!("if (matchCount{suffix} < {effective_min}) {{\n"));
             output.push_str(&inner);
             if schema.min_contains.is_some() {
                 output.push_str(&format!(
-                    "  violations.push({{ path: {path_expr}, reason: `too few matching items: at least {effective_min}, got ${{matchCount}}` }});\n"
+                    "  violations.push({{ path: {path_expr}, reason: `too few matching items: at least {effective_min}, got ${{matchCount{suffix}}}` }});\n"
                 ));
             } else {
                 output.push_str(&format!(
@@ -934,16 +1124,31 @@ fn render_ts_array_checks(
         }
         if let Some(max) = schema.max_contains {
             output.push_str(&inner);
-            output.push_str(&format!("if (matchCount > {max}) {{\n"));
+            output.push_str(&format!("if (matchCount{suffix} > {max}) {{\n"));
             output.push_str(&inner);
             output.push_str(&format!(
-                "  violations.push({{ path: {path_expr}, reason: `too many matching items: at most {max}, got ${{matchCount}}` }});\n"
+                "  violations.push({{ path: {path_expr}, reason: `too many matching items: at most {max}, got ${{matchCount{suffix}}}` }});\n"
             ));
             output.push_str(&inner);
             output.push_str("}\n");
         }
         output.push_str(indent);
         output.push_str("}\n");
+    }
+    if wrapped {
+        output.push_str(&indent[2..]);
+        output.push_str("}\n");
+    }
+}
+
+/// The per-nesting-level suffix for generated loop variables. Level 0 keeps the
+/// unsuffixed names; every deeper level suffixes its own, so an inner loop never
+/// shadows the enclosing one (`items.md` §"Nested arrays").
+fn ts_depth_suffix(depth: usize) -> String {
+    if depth == 0 {
+        String::new()
+    } else {
+        depth.to_string()
     }
 }
 
@@ -979,10 +1184,9 @@ fn field_needs_serialize_check(schema: &Schema) -> bool {
     }
     match schema.ty.as_ref().and_then(Value::as_str) {
         Some("string") => schema.has_string_constraints(),
-        // `number` always carries the wire-wide finiteness predicate, even when
-        // the schema declares no numeric bound.
-        Some("number") => true,
-        Some("integer") => schema.has_numeric_constraints(),
+        // `number` always carries the wire-wide finiteness predicate, and
+        // `integer` the ±(2^53−1) cap, even when the schema declares no bound.
+        Some("number") | Some("integer") => true,
         Some("array") => {
             schema.has_array_constraints()
                 || schema
@@ -1093,7 +1297,7 @@ fn render_ts_schema_closed_check(
 }
 
 fn has_materialized_wire_constraints(schema: &Schema, include_format: bool) -> bool {
-    schema.min_length.is_some()
+    schema.effective_min_length().is_some()
         || schema.max_length.is_some()
         || schema.pattern.is_some()
         || include_format && schema.format.is_some()
@@ -1217,23 +1421,19 @@ fn render_ts_field_checks_at_depth(
             render_ts_string_checks(output, value_expr, path_expr, schema, indent);
         }
         Some("number") => {
-            render_ts_numeric_checks(output, value_expr, path_expr, schema, indent);
+            render_ts_numeric_checks(output, value_expr, path_expr, schema, indent, false);
         }
-        Some("integer") if schema.has_numeric_constraints() => {
-            render_ts_numeric_checks(output, value_expr, path_expr, schema, indent);
+        Some("integer") => {
+            render_ts_numeric_checks(output, value_expr, path_expr, schema, indent, true);
         }
         Some("array") => {
             if schema.has_array_constraints() {
-                render_ts_array_checks(output, value_expr, path_expr, schema, indent);
+                render_ts_array_checks(output, value_expr, path_expr, schema, indent, depth, true);
             }
             if let Some(items) = schema.items.as_deref()
                 && field_needs_serialize_check(items)
             {
-                let suffix = if depth == 0 {
-                    String::new()
-                } else {
-                    depth.to_string()
-                };
+                let suffix = ts_depth_suffix(depth);
                 let element = format!("element{suffix}");
                 let index = format!("index{suffix}");
                 output.push_str(indent);
@@ -1440,6 +1640,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
             self.json_models.iter().any(|m| model_uses_temporal(m)),
         );
         set_content_encoding_context(self.json_models.iter().any(model_uses_content_encoding));
+        set_code_point_length_context(self.json_models.iter().any(model_uses_code_point_length));
         render_external_models(json_models.as_slice(), &self.runtime_import_module)
     }
 
@@ -1452,6 +1653,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
             self.json_models.iter().any(|m| model_uses_temporal(m)),
         );
         set_content_encoding_context(self.json_models.iter().any(model_uses_content_encoding));
+        set_code_point_length_context(self.json_models.iter().any(model_uses_code_point_length));
 
         Ok(BTreeMap::from([(
             PathBuf::from("definitions.ts"),
@@ -1565,6 +1767,10 @@ fn render_json_runtime_module() -> String {
     render_validator_core(&mut output);
     output.push('\n');
     render_collect_helper(&mut output);
+    if USES_CODE_POINT_LENGTH.with(Cell::get) {
+        output.push('\n');
+        render_code_point_length_helper(&mut output);
+    }
     if uses_temporal {
         output.push('\n');
         render_ts_temporal_helpers(&mut output, repr);
@@ -1574,6 +1780,53 @@ fn render_json_runtime_module() -> String {
         render_ts_content_encoding_helpers(&mut output);
     }
     output
+}
+
+/// True when any string position in the model asserts a code-point count — a
+/// `minLength`/`maxLength` bound or a `format` with a length cap — anywhere the
+/// emitters reach, including key subschemas and `contains` matchers.
+fn schema_uses_code_point_length(schema: &Schema) -> bool {
+    let direct = schema.max_length.is_some()
+        || schema.effective_min_length().is_some()
+        || schema
+            .format
+            .as_deref()
+            .and_then(crate::json_schema::format::check_for)
+            .is_some_and(|check| check.max_code_points.is_some());
+    direct
+        || schema
+            .properties
+            .iter()
+            .flat_map(|entries| entries.values())
+            .any(schema_uses_code_point_length)
+        || schema
+            .items
+            .as_deref()
+            .is_some_and(schema_uses_code_point_length)
+        || schema
+            .contains
+            .as_deref()
+            .is_some_and(schema_uses_code_point_length)
+        || schema
+            .property_names
+            .as_deref()
+            .is_some_and(schema_uses_code_point_length)
+        || schema
+            .one_of
+            .iter()
+            .flatten()
+            .any(schema_uses_code_point_length)
+        || schema
+            .additional_properties
+            .as_ref()
+            .and_then(Value::as_object)
+            .and_then(|value| serde_json::from_value::<Schema>(Value::Object(value.clone())).ok())
+            .as_ref()
+            .is_some_and(schema_uses_code_point_length)
+}
+
+fn model_uses_code_point_length(model: &PlannedJsonType) -> bool {
+    decode_schema(model).is_ok_and(|schema| schema_uses_code_point_length(&schema))
 }
 
 fn schema_uses_content_encoding(schema: &Schema) -> bool {
@@ -1711,6 +1964,26 @@ export function bytesToBase64Url(bytes: Uint8Array): string {
 }
 "####;
 
+/// `Temporal.ZonedDateTime` caps at nanoseconds and its ISO parser **throws**
+/// past nine fractional digits. Go and Java truncate at nine, Python at six, and
+/// TypeScript's `string` repr keeps the wire verbatim (it has no capacity to
+/// lose), so `temporal` truncates rather than rejecting: a uniform reject would
+/// split the accept set, which the bounded-loss P1 exception (b) does not cover.
+/// Mirrors Java's `truncateFraction`. See `specs/json-schema/features/format.md`.
+const TS_TEMPORAL_FRACTION_TRUNCATION: &str = r####"function truncateTemporalFraction(value: string): string {
+  const dot = value.indexOf('.');
+  if (dot < 0) {
+    return value;
+  }
+  let end = dot + 1;
+  while (end < value.length && value[end] >= '0' && value[end] <= '9') {
+    end++;
+  }
+  return end - dot - 1 <= 9 ? value : value.slice(0, dot + 10) + value.slice(end);
+}
+
+"####;
+
 fn schema_uses_temporal(schema: &Schema) -> bool {
     temporal_kind_direct(schema).is_some()
         || schema
@@ -1760,6 +2033,9 @@ fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
         TemporalKind::Duration.pattern()
     ));
     output.push_str(TS_TEMPORAL_COMMON);
+    if repr == TsDateTimeTypes::Temporal {
+        output.push_str(TS_TEMPORAL_FRACTION_TRUNCATION);
+    }
 
     let dt_type = ts_temporal_type(TemporalKind::DateTime, repr);
     let date_type = ts_temporal_type(TemporalKind::Date, repr);
@@ -1780,9 +2056,20 @@ fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
             output.push_str("  return new Date(value.toUpperCase());\n");
         }
         TsDateTimeTypes::Temporal => {
-            output.push_str("  const canon = canonicalizeTemporalDateTime(value);\n");
+            output.push_str(
+                "  const canon = truncateTemporalFraction(canonicalizeTemporalDateTime(value));\n",
+            );
             output.push_str("  const zone = canon.endsWith('Z') ? 'UTC' : canon.slice(-6);\n");
-            output.push_str("  return Temporal.ZonedDateTime.from(`${canon}[${zone}]`);\n");
+            // The pinned regex plus `validTemporalCalendar` already admit only
+            // values `Temporal` accepts, but a constructor that throws must never
+            // escape the converter as a bare `RangeError` (P11): every rejection
+            // is a `Violation` in the aggregated `ValidationError`.
+            output.push_str("  try {\n");
+            output.push_str("    return Temporal.ZonedDateTime.from(`${canon}[${zone}]`);\n");
+            output.push_str("  } catch {\n");
+            output.push_str("    violations.push({ path, reason: `must be a valid date-time, got ${JSON.stringify(value)}` });\n");
+            output.push_str("    return undefined;\n");
+            output.push_str("  }\n");
         }
     }
     output.push_str("}\n\n");
@@ -1795,7 +2082,12 @@ fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
     output.push_str("    violations.push({ path, reason: `must be a valid date, got ${JSON.stringify(value)}` });\n    return undefined;\n  }\n");
     match repr {
         TsDateTimeTypes::Temporal => {
-            output.push_str("  return Temporal.PlainDate.from(value);\n");
+            output.push_str("  try {\n");
+            output.push_str("    return Temporal.PlainDate.from(value);\n");
+            output.push_str("  } catch {\n");
+            output.push_str("    violations.push({ path, reason: `must be a valid date, got ${JSON.stringify(value)}` });\n");
+            output.push_str("    return undefined;\n");
+            output.push_str("  }\n");
         }
         _ => output.push_str("  return value;\n"),
     }
@@ -2005,6 +2297,18 @@ fn render_validator_core(output: &mut String) {
     output.push_str("}\n");
 }
 
+/// True when a property's wire string is materialized into a native in-memory
+/// value (a temporal `format` or a `contentEncoding`), directly or through a
+/// nullability wrapper. Such a node's `const`/`enum` is compared against the
+/// re-encoded wire string, not against a module-level literal.
+fn is_materialized_property(property: &Schema) -> bool {
+    temporal_kind_direct(property).is_some()
+        || content_encoding_direct(property).is_some()
+        || nullable_non_null_schema(property).is_some_and(|non_null| {
+            temporal_kind_direct(non_null).is_some() || content_encoding_direct(non_null).is_some()
+        })
+}
+
 fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) -> Result<()> {
     #[derive(Debug)]
     struct Constant {
@@ -2031,7 +2335,12 @@ fn render_default_constants(output: &mut String, models: &[&PlannedJsonType]) ->
                     typescript_default_literal(property, default)?,
                 ));
             }
-            if let Some(const_value) = &property.const_value {
+            // A materialized node inlines its literal at the comparison site
+            // (`render_property_parser`), so declaring the constant would leave an
+            // unreferenced binding occupying a P15 identifier slot.
+            if let Some(const_value) = &property.const_value
+                && !is_materialized_property(property)
+            {
                 const_fields.push((
                     model.model_name.clone(),
                     member_ident,
@@ -2181,15 +2490,43 @@ fn ts_branch_discriminator_tags(object: &Schema) -> BTreeMap<String, Value> {
     tags
 }
 
-fn find_ref_model<'a>(
-    reference: &str,
-    models: &'a [&PlannedJsonType],
-) -> Option<&'a PlannedJsonType> {
+/// Resolves a `$ref` branch to its target's decoded schema. A `$ref` is resolved
+/// against the **whole input closure**, not just the current module's model list:
+/// a cross-file branch is declared in another leaf, and dropping it silently
+/// collapses a sum type to its first local branch (`ref.md` §"Type-name
+/// derivation"). The local list is searched first so a module-local override
+/// wins; the tree registry (populated once per generation from every leaf) backs
+/// it up.
+fn find_ref_schema(reference: &str, models: &[&PlannedJsonType]) -> Option<Schema> {
     let target = reference_model_name(reference);
-    models
+    if let Some(model) = models
         .iter()
         .copied()
         .find(|model| model.model_name == target || model.full_name == target)
+    {
+        return decode_schema(model).ok();
+    }
+    let full_name = reference_full_name(reference);
+    TREE_JSON_MODELS.with(|registry| {
+        let registry = registry.borrow();
+        registry
+            .get(&full_name)
+            .or_else(|| {
+                registry
+                    .values()
+                    .find(|model| model.model_name == target || model.full_name == target)
+            })
+            .and_then(|model| decode_schema(model).ok())
+    })
+}
+
+/// The `$defs`-qualified full name a `$ref` names, before the per-language name
+/// manifest recases it.
+fn reference_full_name(reference: &str) -> String {
+    reference
+        .rsplit_once("#/$defs/")
+        .map(|(_, name)| name.to_string())
+        .unwrap_or_else(|| reference.to_string())
 }
 
 /// The TypeScript type a **scalar** branch contributes to the union: the branch's
@@ -2213,9 +2550,7 @@ fn classify_ts_union(schema: &Schema, models: &[&PlannedJsonType]) -> Option<TsU
     let mut object_schemas: Vec<Schema> = Vec::new();
     for branch in branches {
         let resolved = if let Some(reference) = &branch.reference {
-            find_ref_model(reference, models)
-                .and_then(|model| decode_schema(model).ok())
-                .unwrap_or_else(|| branch.clone())
+            find_ref_schema(reference, models).unwrap_or_else(|| branch.clone())
         } else {
             branch.clone()
         };
@@ -2920,8 +3255,26 @@ fn render_model_parser_body(
         "    throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
     ));
     output.push_str("  }\n");
+    // An optional member is assigned after the literal is built, which a
+    // `readonly` modifier (emitted for every `const` member) forbids — TS2540.
+    // The staging binding therefore drops the modifier; the declared return type
+    // puts it back, so callers still see an immutable `const` member.
+    let readonly_optional = schema
+        .properties
+        .iter()
+        .flatten()
+        .any(|(json_name, property)| {
+            property.const_value.is_some() && !required.contains(json_name)
+        });
     output.push_str("  const out: ");
-    output.push_str(&model.model_name);
+    if readonly_optional {
+        output.push_str(&format!(
+            "{{ -readonly [K in keyof {0}]: {0}[K] }}",
+            model.model_name
+        ));
+    } else {
+        output.push_str(&model.model_name);
+    }
     output.push_str(" = { ");
     let mut required_out = parsed_fields
         .iter()
@@ -3196,11 +3549,7 @@ fn render_property_value_parser(
 ) -> Result<()> {
     let raw_expr = format!("raw.{json_name}");
     let path_expr = typescript_string_literal(json_name);
-    let materialized = temporal_kind_direct(property).is_some()
-        || content_encoding_direct(property).is_some()
-        || nullable_non_null_schema(property).is_some_and(|non_null| {
-            temporal_kind_direct(non_null).is_some() || content_encoding_direct(non_null).is_some()
-        });
+    let materialized = is_materialized_property(property);
     if !materialized && let Some(const_value) = &property.const_value {
         let const_name = const_const_name(
             &model.model_name,
@@ -3483,7 +3832,14 @@ fn render_value_parser_at_depth(
             output.push_str(" = ");
             output.push_str(raw_expr);
             output.push_str(";\n");
-            render_ts_numeric_checks(output, raw_expr, path_expr, schema, &format!("{indent}  "));
+            render_ts_numeric_checks(
+                output,
+                raw_expr,
+                path_expr,
+                schema,
+                &format!("{indent}  "),
+                false,
+            );
             output.push_str(indent);
             output.push_str("}\n");
         }
@@ -3516,6 +3872,7 @@ fn render_value_parser_at_depth(
                     path_expr,
                     schema,
                     &format!("{indent}  "),
+                    false,
                 );
             }
             output.push_str(indent);
@@ -3736,11 +4093,7 @@ fn render_array_parser(
     depth: usize,
 ) {
     // Level 0 keeps the unsuffixed names; every nested level suffixes its own.
-    let suffix = if depth == 0 {
-        String::new()
-    } else {
-        depth.to_string()
-    };
+    let suffix = ts_depth_suffix(depth);
     let element = format!("element{suffix}");
     let index = format!("index{suffix}");
     let item = format!("item{suffix}");
@@ -3812,7 +4165,15 @@ fn render_array_parser(
     // minItems failure or make two distinct raw elements look like duplicate
     // conversion placeholders.
     if schema.has_array_constraints() {
-        render_ts_array_checks(output, raw_expr, path_expr, schema, &format!("{indent}  "));
+        render_ts_array_checks(
+            output,
+            raw_expr,
+            path_expr,
+            schema,
+            &format!("{indent}  "),
+            depth,
+            false,
+        );
     }
     output.push_str(indent);
     output.push_str("}\n");
@@ -3820,6 +4181,14 @@ fn render_array_parser(
 
 fn render_closed_object_unknown_key_check(output: &mut String, fields: &[(String, String)]) {
     output.push_str("  for (const key of Object.keys(raw)) {\n");
+    if fields.is_empty() {
+        // A closed object with no declared properties rejects every member;
+        // joining zero `key !== "…"` terms would emit `if () {`, which does not
+        // parse (`additionalProperties.md` "Closed empty object" row).
+        output.push_str("    violations.push({ path: key, reason: 'unknown field' });\n");
+        output.push_str("  }\n\n");
+        return;
+    }
     output.push_str("    if (");
     output.push_str(
         &fields
@@ -3892,6 +4261,33 @@ fn render_open_object_collection(
     output.push_str("    }\n");
     output.push_str("  }\n\n");
     Ok(())
+}
+
+/// Emits the shared surrogate-aware code-point scan. `limit` bounds the walk:
+/// the scan stops as soon as the running count exceeds it and returns
+/// `limit + 1`, so a length assertion never traverses (or allocates) more of an
+/// adversarially long string than the bound requires. Called with no `limit` it
+/// returns the exact count. See `specs/json-schema/features/maxLength.md`.
+fn render_code_point_length_helper(output: &mut String) {
+    output.push_str(
+        "export function codePointLength(value: string, limit = Number.POSITIVE_INFINITY): number {\n",
+    );
+    output.push_str("  let count = 0;\n");
+    output.push_str("  for (let index = 0; index < value.length; index += 1) {\n");
+    output.push_str("    const unit = value.charCodeAt(index);\n");
+    output.push_str("    if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < value.length) {\n");
+    output.push_str("      const low = value.charCodeAt(index + 1);\n");
+    output.push_str("      if (low >= 0xdc00 && low <= 0xdfff) {\n");
+    output.push_str("        index += 1;\n");
+    output.push_str("      }\n");
+    output.push_str("    }\n");
+    output.push_str("    count += 1;\n");
+    output.push_str("    if (count > limit) {\n");
+    output.push_str("      return count;\n");
+    output.push_str("    }\n");
+    output.push_str("  }\n");
+    output.push_str("  return count;\n");
+    output.push_str("}\n");
 }
 
 fn render_collect_helper(output: &mut String) {

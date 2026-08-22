@@ -147,6 +147,18 @@ function formatTemporalDuration(total: number): string {
   return out;
 }
 
+function truncateTemporalFraction(value: string): string {
+  const dot = value.indexOf(".");
+  if (dot < 0) {
+    return value;
+  }
+  let end = dot + 1;
+  while (end < value.length && value[end] >= "0" && value[end] <= "9") {
+    end++;
+  }
+  return end - dot - 1 <= 9 ? value : value.slice(0, dot + 10) + value.slice(end);
+}
+
 export function parseTemporalDateTime(
   value: string,
   path: string,
@@ -159,9 +171,17 @@ export function parseTemporalDateTime(
     });
     return undefined;
   }
-  const canon = canonicalizeTemporalDateTime(value);
+  const canon = truncateTemporalFraction(canonicalizeTemporalDateTime(value));
   const zone = canon.endsWith("Z") ? "UTC" : canon.slice(-6);
-  return Temporal.ZonedDateTime.from(`${canon}[${zone}]`);
+  try {
+    return Temporal.ZonedDateTime.from(`${canon}[${zone}]`);
+  } catch {
+    violations.push({
+      path,
+      reason: `must be a valid date-time, got ${JSON.stringify(value)}`,
+    });
+    return undefined;
+  }
 }
 
 export function parseTemporalDate(
@@ -176,7 +196,15 @@ export function parseTemporalDate(
     });
     return undefined;
   }
-  return Temporal.PlainDate.from(value);
+  try {
+    return Temporal.PlainDate.from(value);
+  } catch {
+    violations.push({
+      path,
+      reason: `must be a valid date, got ${JSON.stringify(value)}`,
+    });
+    return undefined;
+  }
 }
 
 export function parseTemporalTime(

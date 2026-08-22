@@ -1,0 +1,75 @@
+# Union token selection and discriminated dispatch.
+#
+# `discriminated` is tagged by a NON-string `const`, which is what separates a
+# dispatcher that compares JSON *values* from one that compares the tag's raw
+# text or gates on "is this token a string". `scalarUnion` covers the five token
+# shapes a typeless branch set has to tell apart.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: UnionCases
+description: Discriminated and token-selected unions.
+type: object
+additionalProperties: false
+required: [discriminated, scalarUnion]
+properties:
+  discriminated:
+    description: A tagged union whose discriminator is an integer, not a string.
+    oneOf:
+      - $ref: "#/$defs/Alpha"
+      - $ref: "#/$defs/Beta"
+  scalarUnion:
+    description: Selection across string / integer / array / object tokens.
+    oneOf:
+      - type: string
+      - type: integer
+      - type: array
+        items:
+          type: string
+      - type: object
+        additionalProperties:
+          type: string
+  flagUnion:
+    description: A tagged union whose discriminator is a boolean.
+    oneOf:
+      - $ref: "#/$defs/Enabled"
+      - $ref: "#/$defs/Disabled"
+$defs:
+  Alpha:
+    type: object
+    additionalProperties: false
+    required: [kind, alphaValue]
+    properties:
+      kind:
+        type: integer
+        const: 1
+      alphaValue:
+        type: string
+  Beta:
+    type: object
+    additionalProperties: false
+    required: [kind, betaValue]
+    properties:
+      kind:
+        type: integer
+        const: 2
+      betaValue:
+        type: integer
+  Enabled:
+    type: object
+    additionalProperties: false
+    required: [on, since]
+    properties:
+      on:
+        type: boolean
+        const: true
+      since:
+        type: integer
+  Disabled:
+    type: object
+    additionalProperties: false
+    required: [on, reason]
+    properties:
+      on:
+        type: boolean
+        const: false
+      reason:
+        type: string

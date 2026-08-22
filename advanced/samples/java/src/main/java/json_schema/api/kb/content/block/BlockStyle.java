@@ -73,6 +73,9 @@ public final class BlockStyle {
         public void serialize(BlockStyle value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
             if (value.indent != null) {
+                if (value.indent < -SpecNumbers.INTEGER_CAP || value.indent > SpecNumbers.INTEGER_CAP) {
+                    violations.add(new Violation("indent", "exceeds \u00b1(2^53-1) integer cap"));
+                }
                 if (value.indent < 0L) {
                     violations.add(new Violation("indent", "must be >= 0, got " + value.indent));
                 }
@@ -94,7 +97,7 @@ public final class BlockStyle {
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<BlockStyle> {
         @Override
         public BlockStyle deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

@@ -29,39 +29,38 @@ public interface Note {
     static @Nullable Note fromNode(JsonNode node, String path, List<Violation> violations, DeserializationContext context) {
         if (node.isObject()) {
             JsonNode disc = node.get("kind");
-            if (disc == null || !disc.isTextual()) {
+            if (disc == null || disc.isNull() || !disc.isValueNode()) {
                 violations.add(new Violation(path, "discriminator \"kind\" is required"));
                 return null;
             }
-            switch (disc.textValue()) {
-                case "text":
-                    try {
-                        return context.readTreeAsValue(node, TextNote.class);
-                    } catch (ValidationException nested) {
-                        for (Violation violation : nested.getViolations()) {
-                            violations.add(violation.withPathPrefix(path));
-                        }
-                        return null;
-                    } catch (IOException nested) {
-                        violations.add(new Violation(path, nested.getMessage()));
-                        return null;
+            if (disc.isTextual() && "text".equals(disc.textValue())) {
+                try {
+                    return context.readTreeAsValue(node, TextNote.class);
+                } catch (ValidationException nested) {
+                    for (Violation violation : nested.getViolations()) {
+                        violations.add(violation.withPathPrefix(path));
                     }
-                case "link":
-                    try {
-                        return context.readTreeAsValue(node, LinkNote.class);
-                    } catch (ValidationException nested) {
-                        for (Violation violation : nested.getViolations()) {
-                            violations.add(violation.withPathPrefix(path));
-                        }
-                        return null;
-                    } catch (IOException nested) {
-                        violations.add(new Violation(path, nested.getMessage()));
-                        return null;
-                    }
-                default:
-                    violations.add(new Violation(path, "unknown discriminator kind " + disc.textValue() + ": expected one of [text, link]"));
                     return null;
+                } catch (IOException nested) {
+                    violations.add(new Violation(path, nested.getMessage()));
+                    return null;
+                }
             }
+            if (disc.isTextual() && "link".equals(disc.textValue())) {
+                try {
+                    return context.readTreeAsValue(node, LinkNote.class);
+                } catch (ValidationException nested) {
+                    for (Violation violation : nested.getViolations()) {
+                        violations.add(violation.withPathPrefix(path));
+                    }
+                    return null;
+                } catch (IOException nested) {
+                    violations.add(new Violation(path, nested.getMessage()));
+                    return null;
+                }
+            }
+            violations.add(new Violation(path, "unknown discriminator kind " + disc.asText() + ": expected one of [text, link]"));
+            return null;
         }
         violations.add(new Violation(path, "expected one of: TextNote, LinkNote"));
         return null;

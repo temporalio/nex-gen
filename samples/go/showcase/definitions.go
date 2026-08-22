@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
@@ -82,16 +81,18 @@ func mergeNested(errs *[]Violation, path string, err error) {
 
 const integerCap = 1<<53 - 1
 
-func isJSONMultiple(value float64, divisor string) bool {
-	v, ok := new(big.Rat).SetString(strconv.FormatFloat(value, 'g', -1, 64))
-	if !ok {
+// jsonScalarEquals reports whether the JSON scalar in raw equals the schema
+// literal want (itself JSON text) by value. A number's lexical spelling is
+// not part of its identity, so 1, 1.0 and 1e0 all equal a const of 1.
+func jsonScalarEquals(raw json.RawMessage, want string) bool {
+	var got, expected any
+	if err := json.Unmarshal(raw, &got); err != nil {
 		return false
 	}
-	d, ok := new(big.Rat).SetString(divisor)
-	if !ok || d.Sign() == 0 {
+	if err := json.Unmarshal([]byte(want), &expected); err != nil {
 		return false
 	}
-	return new(big.Rat).Quo(v, d).IsInt()
+	return got == expected
 }
 
 var (
@@ -177,6 +178,20 @@ func isNull(raw json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
+// isJSONNumberToken reports whether the wire token is a JSON *number*.
+// json.Number is a string type, so encoding/json decodes the quoted token
+// "7" into it without complaint; the token kind has to be read off the wire
+// bytes before the spec-number path sees it. A JSON number starts with a
+// minus sign or a digit and nothing else does.
+func isJSONNumberToken(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return false
+	}
+	first := trimmed[0]
+	return first == '-' || (first >= '0' && first <= '9')
+}
+
 func parseStringField(raw *json.RawMessage, path string, required, nullable bool, errs *[]Violation) (string, bool) {
 	if raw == nil {
 		if required {
@@ -211,6 +226,10 @@ func parseIntegerField(raw *json.RawMessage, path string, required, nullable boo
 		}
 		return 0, false
 	}
+	if !isJSONNumberToken(*raw) {
+		*errs = append(*errs, Violation{path, "expected integer"})
+		return 0, false
+	}
 	dec := json.NewDecoder(bytes.NewReader(*raw))
 	dec.UseNumber()
 	var n json.Number
@@ -237,6 +256,10 @@ func parseNumberField(raw *json.RawMessage, path string, required, nullable bool
 		if !nullable {
 			*errs = append(*errs, Violation{path, "explicit null not allowed"})
 		}
+		return 0, false
+	}
+	if !isJSONNumberToken(*raw) {
+		*errs = append(*errs, Violation{path, "expected number"})
 		return 0, false
 	}
 	dec := json.NewDecoder(bytes.NewReader(*raw))

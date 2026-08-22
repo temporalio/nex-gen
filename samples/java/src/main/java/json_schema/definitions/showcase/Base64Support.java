@@ -10,8 +10,8 @@ import org.jspecify.annotations.Nullable;
 public final class Base64Support {
     private Base64Support() {}
 
-    private static final Pattern BASE64 = Pattern.compile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$");
-    private static final Pattern BASE64URL = Pattern.compile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$");
+    private static final Pattern BASE64 = Pattern.compile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?\\z");
+    private static final Pattern BASE64URL = Pattern.compile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?\\z");
 
     public static byte @Nullable [] parseBase64(String value, String path, List<Violation> violations) {
         if (!BASE64.matcher(value).matches()) {
@@ -45,5 +45,50 @@ public final class Base64Support {
 
     public static String formatBase64Url(byte[] value) {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
+    }
+
+    // A `byte[]` has no value equality in Java, so a `List<byte[]>` member
+    // cannot use `List.equals` / `List.hashCode` / `List.toString` (they compare
+    // and print element identities). These three give it the value semantics the
+    // rest of the model has.
+
+    public static boolean listEquals(@Nullable List<byte[]> left, @Nullable List<byte[]> right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null || left.size() != right.size()) {
+            return false;
+        }
+        for (int index = 0; index < left.size(); index++) {
+            if (!java.util.Arrays.equals(left.get(index), right.get(index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static int listHashCode(@Nullable List<byte[]> values) {
+        if (values == null) {
+            return 0;
+        }
+        int result = 1;
+        for (byte[] value : values) {
+            result = 31 * result + java.util.Arrays.hashCode(value);
+        }
+        return result;
+    }
+
+    public static String listToString(@Nullable List<byte[]> values) {
+        if (values == null) {
+            return "null";
+        }
+        StringBuilder out = new StringBuilder("[");
+        for (int index = 0; index < values.size(); index++) {
+            if (index > 0) {
+                out.append(", ");
+            }
+            out.append(java.util.Arrays.toString(values.get(index)));
+        }
+        return out.append("]").toString();
     }
 }

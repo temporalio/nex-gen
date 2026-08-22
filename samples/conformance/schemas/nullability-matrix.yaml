@@ -1,0 +1,60 @@
+# The optional x nullable matrix over a NON-string inner type, with a constraint
+# on the non-null branch of every nullable member.
+#
+# Both axes are deliberate. The nullability `oneOf` wrapper carries no `type` and
+# no keywords, so a target that reads the wrapper instead of its non-null branch
+# either mistypes the field (a `*string` assigned into a `*int64`) or silently
+# drops the branch's constraints — neither of which a nullable *string* would
+# reveal. See specs/json-schema/features/nullability.md.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: NullabilityMatrix
+description: Every optional/nullable combination over non-string inner types.
+type: object
+additionalProperties: false
+required: [requiredPlain, requiredNullable]
+properties:
+  requiredPlain:
+    description: Required, not nullable. Absent and null are both violations.
+    type: integer
+    minimum: 1
+  optionalPlain:
+    description: Optional, not nullable. Absent is fine; explicit null is a violation.
+    type: integer
+    minimum: 1
+  requiredNullable:
+    description: Required and nullable. Absent is a violation; explicit null is the value.
+    oneOf:
+      - type: integer
+        minimum: 1
+      - type: "null"
+  optionalNullable:
+    description: Optional and nullable — the one member allowed to collapse null to absent.
+    oneOf:
+      - type: integer
+        minimum: 1
+      - type: "null"
+  nullableNumber:
+    description: A nullable `number` whose non-null branch carries an upper bound.
+    oneOf:
+      - type: number
+        maximum: 10
+      - type: "null"
+  nullableFlag:
+    description: A nullable `boolean` — no constraint is expressible, only the type.
+    oneOf:
+      - type: boolean
+      - type: "null"
+  nullableList:
+    description: A nullable array whose non-null branch bounds its length.
+    oneOf:
+      - type: array
+        minItems: 1
+        items:
+          type: integer
+      - type: "null"
+  nullableChoice:
+    description: A nullable closed value set — the wrapper hides the `enum` too.
+    oneOf:
+      - type: string
+        enum: [alpha, beta]
+      - type: "null"

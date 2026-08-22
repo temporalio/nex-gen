@@ -32,10 +32,6 @@ public final class Page {
     private final String pageId;
     private final String title;
     private final PageMeta meta;
-    /**
-     * Ordered content blocks. Cross-file `$ref` to block.json (same directory); the
-     * array is the terminating edge of the cycle.
-     */
     private final @Nullable List<Block> blocks;
 
     public Page(String pageId, String title, PageMeta meta, @Nullable List<Block> blocks) {
@@ -57,6 +53,10 @@ public final class Page {
         return meta;
     }
 
+    /**
+     * Ordered content blocks. Cross-file `$ref` to block.json (same directory); the
+     * array is the terminating edge of the cycle.
+     */
     public @Nullable List<Block> getBlocks() {
         return blocks;
     }
@@ -94,6 +94,7 @@ public final class Page {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Page> {
         @Override
         public void serialize(Page value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            List<Violation> violations = new ArrayList<>();
             gen.writeStartObject();
             if (value.pageId != null) {
                 gen.writeStringField("pageId", value.pageId);
@@ -103,20 +104,46 @@ public final class Page {
             }
             if (value.meta != null) {
                 gen.writeFieldName("meta");
-                serializers.defaultSerializeValue(value.meta, gen);
+                try {
+                    serializers.defaultSerializeValue(value.meta, gen);
+                } catch (ValidationException nested0) {
+                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                        violations.add(nestedViolation0.withPathPrefix("meta"));
+                    }
+                    throw new ValidationException(violations);
+                }
             }
             if (value.blocks != null) {
                 gen.writeFieldName("blocks");
-                serializers.defaultSerializeValue(value.blocks, gen);
+                gen.writeStartArray();
+                for (int nestedIndex0 = 0; nestedIndex0 < value.blocks.size(); nestedIndex0++) {
+                    Block nestedElement0 = value.blocks.get(nestedIndex0);
+                    if (nestedElement0 == null) {
+                        gen.writeNull();
+                    } else {
+                        try {
+                            serializers.defaultSerializeValue(nestedElement0, gen);
+                        } catch (ValidationException nested1) {
+                            for (Violation nestedViolation1 : nested1.getViolations()) {
+                                violations.add(nestedViolation1.withPathPrefix("blocks" + "[" + nestedIndex0 + "]"));
+                            }
+                            throw new ValidationException(violations);
+                        }
+                    }
+                }
+                gen.writeEndArray();
             }
             gen.writeEndObject();
+            if (!violations.isEmpty()) {
+                throw new ValidationException(violations);
+            }
         }
     }
 
     public static final class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<Page> {
         @Override
         public Page deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = parser.readValueAsTree();
+            JsonNode node = SpecNumbers.readExactTree(parser);
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));

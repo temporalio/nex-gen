@@ -219,6 +219,14 @@ a **named** definition; when it is **anonymous** (inline on a property),
 nest the synthesized type inside its enclosing model where the language
 allows it, so it leaves the package/module namespace.
 
+> **`$defs`-named scalar closed values are unimplemented.** A `$defs` entry
+> must currently be `type: object`, a `oneOf` union, or a bare `$ref`, so
+> `$defs: {Color: {type: string, enum: [red, green, blue]}}` is a load
+> reject in all four languages. Every "named definition" branch below —
+> the `$defs`-name reuse, the P15 row for a `$defs`-named type, and
+> `x-<lang>-const-name` on a `$defs` node — describes the intended design
+> and is unreachable until scalar `$defs` entries are admitted.
+
 | Target | Synthesized identifier(s) | Placement / scope |
 |---|---|---|
 | Go | defined type `UserEventKind` **+** value const `UserEventKindUser` | **flat package** (Go has no nested types); P15 backstop |
@@ -297,7 +305,9 @@ the member name. The [[properties]] `x-<lang>-name` override moves the
 synthesized **type** (which *is* derived from the member) but leaves the
 value constant untouched — in **Java** the constant is purely the encoded
 value with no member-derived component, and a **`$defs`**-named const has
-no declaring member at all. So the escape hatch for the value-constant
+no declaring member at all (the motivating case, though a scalar `$defs`
+entry does not load yet — see *Naming and collisions*). So the escape hatch
+for the value-constant
 axis is a separate override, **`x-<lang>-const-name`** (`x-go-const-name`
 / `x-java-const-name`), placed on the **const schema** — the node carrying
 `const`, whether inline on a property or a named `$defs` definition. Like

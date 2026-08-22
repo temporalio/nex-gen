@@ -101,6 +101,9 @@ public interface ShowcaseSegmentsItem {
         }
 
         void validate(String path, List<Violation> violations) {
+            if (value < -SpecNumbers.INTEGER_CAP || value > SpecNumbers.INTEGER_CAP) {
+                violations.add(new Violation(path, "exceeds \u00b1(2^53-1) integer cap"));
+            }
             if (value < 0L) {
                 violations.add(new Violation(path, "must be >= 0, got " + value));
             }

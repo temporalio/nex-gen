@@ -246,8 +246,12 @@ the recursion-pointer rule above applies to cyclic edges. Imports follow
   type's converter delegates to the target's (PRINCIPLES TS §4).
 - **Go / Java** — same package; no import.
 
-**Bare-`$ref`-root alias.** A file root that is exactly `{"$ref":
-<target>}` emits an alias to the target where the language supports it:
+**Bare-`$ref`-root alias.** *(Status: unimplemented — a bare-`$ref` root
+is currently loaded as "not a model": nothing is emitted for it in any
+language, and a `$ref` from another file to that root fails to resolve.
+The rules below are the intended design.)* A file root that is exactly
+`{"$ref": <target>}` emits an alias to the target where the language
+supports it:
 
 | Language | Emission |
 |---|---|
@@ -289,7 +293,7 @@ helper is emitted — the named-type machinery already in place
 | Self-ref via array, required | `{value:{...}, children:{type:array, items:{$ref:"#"}}}` (tree) |
 | Mutual cross-file cycle | `a.json#/X` ↔ `b.json#/Y` with a terminating edge → hoisted to `_recursive` (Py) |
 | Dead `$defs` | a `$defs` entry never referenced → still emitted/exported |
-| Bare-`$ref` root | file root `{"$ref":"#/$defs/Main"}` → alias (Go/TS/Py), `Main` (Java) |
+| Bare-`$ref` root (**unimplemented**) | file root `{"$ref":"#/$defs/Main"}` → alias (Go/TS/Py), `Main` (Java) |
 | `$ref` with siblings | `{"$ref":"#/$defs/X", "minProperties":1}` → implicit `allOf`, merged ([[allOf]]) |
 
 ### Rejected at load time (negative)

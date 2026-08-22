@@ -597,14 +597,43 @@ fn java_json_emits_runtime_support_for_nested_materialized_values() {
     assert!(rendered.contains_key(&PathBuf::from("Base64Support.java")));
     let temporal = &rendered[&PathBuf::from("TemporalSupport.java")];
     assert!(temporal.contains("if (year < 1) {"), "{temporal}");
+    // Every pinned regex baked into a runtime support class carries Java's
+    // strict end-of-input anchor, exactly as the value-level `pattern`/`format`
+    // path does. `java.util.regex`'s `$` matches *before* a final line
+    // terminator, so a bare `$` here would make the oracle's accept set depend
+    // on whether the use site calls `matches()` or `find()`.
+    let base64 = &rendered[&PathBuf::from("Base64Support.java")];
+    for support in [temporal, base64] {
+        let pinned = support
+            .lines()
+            .filter(|line| line.contains("private static final Pattern"))
+            .collect::<Vec<_>>();
+        assert!(!pinned.is_empty(), "{support}");
+        for line in pinned {
+            assert!(line.contains("\\\\z\");"), "missing \\z anchor: {line}");
+            assert!(!line.contains("$\");"), "bare $ anchor: {line}");
+        }
+    }
+    // The serialize-side representability predicate exists for **every**
+    // materialized kind, not just the calendar year floor (`09#3`).
+    for expected in [
+        "public static void checkDateTime(OffsetDateTime value, String path, List<Violation> violations) {",
+        "public static void checkDate(LocalDate value, String path, List<Violation> violations) {",
+        "public static void checkTime(String value, String path, List<Violation> violations) {",
+        "public static void checkDuration(Duration value, String path, List<Violation> violations) {",
+        "\"a duration cannot be negative\"",
+        "\"a duration cannot carry a fraction of a second\"",
+        "is not a whole number of minutes",
+        "year must be <= 9999",
+    ] {
+        assert!(temporal.contains(expected), "{expected}\n{temporal}");
+    }
     let root = &rendered[&PathBuf::from("Nested.java")];
     for expected in [
-        "for (int calendarIndex0 = 0; calendarIndex0 < value.dates.size(); calendarIndex0++) {",
-        "for (int calendarIndex1 = 0; calendarIndex1 < calendarValue0.size(); calendarIndex1++) {",
-        "if (calendarValue1.getYear() < 1) {",
-        "new Violation(\"dates\" + \"[\" + calendarIndex0 + \"]\" + \"[\" + calendarIndex1 + \"]\", \"must be a valid date, got \" + calendarValue1 + \": year must be >= 0001\")",
-        "if (calendarValue0.getYear() < 1) {",
-        "new Violation(\"timestamps\" + \"[\" + calendarIndex0 + \"]\", \"must be a valid date-time, got \" + calendarValue0 + \": year must be >= 0001\")",
+        "for (int temporalIndex0 = 0; temporalIndex0 < value.dates.size(); temporalIndex0++) {",
+        "for (int temporalIndex1 = 0; temporalIndex1 < temporalValue0.size(); temporalIndex1++) {",
+        "TemporalSupport.checkDate(temporalValue1, \"dates\" + \"[\" + temporalIndex0 + \"]\" + \"[\" + temporalIndex1 + \"]\", violations);",
+        "TemporalSupport.checkDateTime(temporalValue0, \"timestamps\" + \"[\" + temporalIndex0 + \"]\", violations);",
     ] {
         assert!(root.contains(expected), "{expected}\n{root}");
     }
@@ -1001,6 +1030,817 @@ services:
     assert!(
         service.contains("import com.example.pkg.a.page.Page;"),
         "{service}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A nullable property is authored as `oneOf: [T, null]`; the wrapper carries no
+/// `type` and no keywords, so every read of the member's shape has to go through
+/// the non-null branch. Before this, Java silently accepted payloads TypeScript
+/// and Python rejected (`13#2`, `07#1`, `11#1`, `06#4`).
+const JAVA_NULLABLE_SHAPE_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  nullName:
+    oneOf:
+      - { type: string, minLength: 3, pattern: "^[a-z]+$" }
+      - { type: "null" }
+  nullEnum:
+    oneOf:
+      - { type: string, enum: [a, b] }
+      - { type: "null" }
+  nullEmail:
+    oneOf:
+      - { type: string, format: email }
+      - { type: "null" }
+  nullInt:
+    oneOf:
+      - { type: integer, minimum: 1, maximum: 10 }
+      - { type: "null" }
+  nullTags:
+    oneOf:
+      - type: array
+        items: { type: string }
+        minItems: 2
+        contains: { type: string, minLength: 2 }
+      - { type: "null" }
+"##;
+
+#[test]
+fn java_json_nullable_property_keeps_the_branch_constraints() {
+    let temp_dir = unique_output_path("java-json-nullable-shape");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("nullable_shape.yaml");
+    fs::write(&input_path, JAVA_NULLABLE_SHAPE_SCHEMA).unwrap();
+    let output_path = temp_dir.join("nullable_shape");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("nullable_shape".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let model = &rendered[&PathBuf::from("NullableShape.java")];
+    for expected in [
+        // A nullable `enum` still becomes a closed value class.
+        "public static final class NullEnum {",
+        "public static final NullEnum NULL_ENUM_A = new NullEnum(\"a\");",
+        "private final @Nullable NullEnum nullEnum;",
+        // …and every constraint reaches both directions.
+        "NULL_NAME_PATTERN = java.util.regex.Pattern.compile(\"^[a-z]+\\\\z\")",
+        "NULL_EMAIL_FORMAT = java.util.regex.Pattern.compile(",
+        "must have length >= 3",
+        "must be a valid email",
+        "must be >= 1",
+        "must be <= 10",
+        "must have at least 2 items",
+        "no element matches the required schema",
+        // The nullable array's element type comes from the branch, not the wrapper.
+        "private final @Nullable List<String> nullTags;",
+    ] {
+        assert!(model.contains(expected), "{expected}\n{model}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// The serialize side is the mirror of the parse side (P12) for every check the
+/// in-memory value can still violate: the integer cap (`13#3`), `contains`
+/// (`06#gap-8`), `uniqueItems` over materialized values compared on their
+/// canonical wire string (`05#2`, `05#3`, decision D10), and every temporal's
+/// representability (`09#3`). `byte[]` members also need value equality
+/// (`10#5`).
+const JAVA_SERIALIZE_GUARD_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  count: { type: integer }
+  bumps:
+    type: array
+    items: { type: integer }
+    contains: { type: number, minimum: 1.5 }
+  stamps:
+    type: array
+    items: { type: string, format: date-time }
+    uniqueItems: true
+  blobs:
+    type: array
+    items: { type: string, contentEncoding: base64 }
+    uniqueItems: true
+  ratios:
+    type: array
+    items: { type: number }
+    uniqueItems: true
+  payload: { type: string, contentEncoding: base64 }
+  slot: { type: string, format: time }
+  window: { type: string, format: duration }
+"##;
+
+#[test]
+fn java_json_serialize_side_guards_match_the_parse_side() {
+    let temp_dir = unique_output_path("java-json-serialize-guards");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("guards.yaml");
+    fs::write(&input_path, JAVA_SERIALIZE_GUARD_SCHEMA).unwrap();
+    let output_path = temp_dir.join("guards");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("guards".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let model = &rendered[&PathBuf::from("Guards.java")];
+    let serializer = model.split("class Serializer").nth(1).unwrap();
+    let serializer = serializer.split("class Deserializer").next().unwrap();
+    for expected in [
+        // 13#3 — the +/-(2^53-1) cap exists on the way out too.
+        "if (value.count < -SpecNumbers.INTEGER_CAP || value.count > SpecNumbers.INTEGER_CAP)",
+        "exceeds \\u00b1(2^53-1) integer cap",
+        // 06#gap-8 — `contains` is asserted before emit, and 06#2: a fractional
+        // bound over `integer` elements is NOT truncated to `1L`.
+        "element >= 1.5",
+        "no element matches the required schema",
+        // 05#3 / D10 — materialized elements compare on the canonical wire string.
+        "Object element = (value.stamps.get(index) == null ? null : TemporalSupport.formatDateTime(value.stamps.get(index)));",
+        "Object element = (value.blobs.get(index) == null ? null : Base64Support.formatBase64(value.blobs.get(index)));",
+        // 05#2 — `-0.0` and `0.0` are one value on serialize, as on parse.
+        "Object element = SpecNumbers.numberKey(value.ratios.get(index));",
+        // 09#3 — every temporal has a representability predicate, not just dates.
+        "TemporalSupport.checkTime(value.slot, \"slot\", violations);",
+        "TemporalSupport.checkDuration(value.window, \"window\", violations);",
+    ] {
+        assert!(serializer.contains(expected), "{expected}\n{serializer}");
+    }
+    // 10#5 — `byte[]` has no value equality of its own.
+    for expected in [
+        "java.util.Arrays.equals(this.payload, that.payload)",
+        "Base64Support.listEquals(this.blobs, that.blobs)",
+        "java.util.Arrays.hashCode(payload)",
+        "java.util.Arrays.toString(payload)",
+    ] {
+        assert!(model.contains(expected), "{expected}\n{model}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A tagged union's discriminant is any scalar the loader admits, not only a
+/// string, and it selects a branch by JSON **value** equality — so `1.0` picks
+/// the `const: 1` branch (`01#3`). An integer `const` written `1.0` is `1L`,
+/// never `0L` (`11#2`).
+const JAVA_SCALAR_DISCRIMINANT_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  shape: { $ref: "#/$defs/Shape" }
+  score: { type: integer, const: 1.0 }
+$defs:
+  Shape:
+    oneOf:
+      - $ref: "#/$defs/Circle"
+      - $ref: "#/$defs/Square"
+  Circle:
+    type: object
+    required: [kind, r]
+    properties:
+      kind: { type: integer, const: 1 }
+      r: { type: number }
+  Square:
+    type: object
+    required: [kind, side]
+    properties:
+      kind: { type: integer, const: 2 }
+      side: { type: number }
+"##;
+
+#[test]
+fn java_json_dispatches_a_non_string_discriminant_by_value() {
+    let temp_dir = unique_output_path("java-json-scalar-discriminant");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("tagged.yaml");
+    fs::write(&input_path, JAVA_SCALAR_DISCRIMINANT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("tagged");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("tagged".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let union = &rendered[&PathBuf::from("Shape.java")];
+    for expected in [
+        "if (disc == null || disc.isNull() || !disc.isValueNode()) {",
+        "if (disc.isNumber() && disc.doubleValue() == 1.0) {",
+        "if (disc.isNumber() && disc.doubleValue() == 2.0) {",
+        "unknown discriminator kind \" + disc.asText() + \"",
+    ] {
+        assert!(union.contains(expected), "{expected}\n{union}");
+    }
+    assert!(!union.contains("switch (disc.textValue())"), "{union}");
+
+    let model = &rendered[&PathBuf::from("Tagged.java")];
+    assert!(
+        model.contains("public static final Score SCORE = new Score(1L);"),
+        "{model}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A nested model reports its failures with paths rooted at **its** members;
+/// they have to be re-pathed under the owning member and merged into the
+/// parent's list, in both directions (`03#8`, P11).
+const JAVA_NESTED_PATH_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  address: { $ref: "#/$defs/Addr" }
+  addresses:
+    type: array
+    items: { $ref: "#/$defs/Addr" }
+  label: { type: string, minLength: 4 }
+$defs:
+  Addr:
+    type: object
+    properties:
+      zip: { type: string, minLength: 5 }
+"##;
+
+#[test]
+fn java_json_repaths_nested_violations_on_serialize() {
+    let temp_dir = unique_output_path("java-json-nested-path");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("nested_path.yaml");
+    fs::write(&input_path, JAVA_NESTED_PATH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("nested_path");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("nested_path".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let model = &rendered[&PathBuf::from("NestedPath.java")];
+    let serializer = model.split("class Serializer").nth(1).unwrap();
+    let serializer = serializer.split("class Deserializer").next().unwrap();
+    for expected in [
+        "} catch (ValidationException nested0) {",
+        "violations.add(nestedViolation0.withPathPrefix(\"address\"));",
+        "violations.add(nestedViolation1.withPathPrefix(\"addresses\" + \"[\" + nestedIndex0 + \"]\"));",
+        // The throw moved past the write so a nested failure joins the parent's
+        // own violations rather than escaping alone.
+        "throw new ValidationException(violations);",
+    ] {
+        assert!(serializer.contains(expected), "{expected}\n{serializer}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A `pattern`/`format` inside a `contains` matcher runs once per element in
+/// both directions, so it is compiled once at class init like every other
+/// pinned regex (`08#7`, `09#11`).
+const JAVA_CONTAINS_REGEX_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  names:
+    type: array
+    items: { type: string }
+    contains: { type: string, pattern: "^a" }
+  emails:
+    type: array
+    items: { type: string }
+    contains: { type: string, format: email }
+"##;
+
+#[test]
+fn java_json_compiles_contains_matcher_regexes_once() {
+    let temp_dir = unique_output_path("java-json-contains-regex");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("contains_regex.yaml");
+    fs::write(&input_path, JAVA_CONTAINS_REGEX_SCHEMA).unwrap();
+    let output_path = temp_dir.join("contains_regex");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("contains_regex".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let model = &rendered[&PathBuf::from("ContainsRegex.java")];
+    assert!(
+        model.contains(
+            "private static final java.util.regex.Pattern NAMES_CONTAINS_PATTERN = java.util.regex.Pattern.compile(\"^a\");"
+        ),
+        "{model}"
+    );
+    assert!(
+        model.contains("private static final java.util.regex.Pattern EMAILS_CONTAINS_FORMAT ="),
+        "{model}"
+    );
+    assert!(
+        model.contains("NAMES_CONTAINS_PATTERN.matcher(element).find()"),
+        "{model}"
+    );
+    assert!(
+        model.contains("EMAILS_CONTAINS_FORMAT.matcher(rawElement.textValue()).find()"),
+        "{model}"
+    );
+    // No inline compile survives in the matcher loops.
+    let matcher_loops = model.matches("java.util.regex.Pattern.compile").count();
+    assert_eq!(matcher_loops, 2, "{model}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Authored prose lands on the **public getter**, where `javadoc` can see it —
+/// never on the private field, and the generated `@deprecated` tag is a trailer
+/// of that same block rather than an orphan comment (`12#4`).
+const JAVA_MEMBER_DOC_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  legacy:
+    type: string
+    title: Legacy id
+    description: Use `id` instead.
+    deprecated: true
+  plain:
+    type: string
+    description: A plain member.
+"##;
+
+#[test]
+fn java_json_member_javadoc_lands_on_the_getter() {
+    let temp_dir = unique_output_path("java-json-member-doc");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("member_doc.yaml");
+    fs::write(&input_path, JAVA_MEMBER_DOC_SCHEMA).unwrap();
+    let output_path = temp_dir.join("member_doc");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("member_doc".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let model = &rendered[&PathBuf::from("MemberDoc.java")];
+    // One block, prose then tag, then the annotation, then the getter.
+    assert!(
+        model.contains(
+            "     * Legacy id\n     *\n     * Use `id` instead.\n     *\n     * @deprecated This field is deprecated.\n     */\n    @Deprecated\n    public @Nullable String getLegacy() {"
+        ),
+        "{model}"
+    );
+    assert!(
+        model.contains("     * A plain member.\n     */\n    public @Nullable String getPlain() {"),
+        "{model}"
+    );
+    // Nothing is attached to the private field any more.
+    assert!(
+        model.contains("    private final @Nullable String legacy;\n    private final @Nullable String plain;\n"),
+        "{model}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A typed-map branch of a typeless `oneOf` is an object model like any other
+/// member, so it must carry the union interface. Without the clause the
+/// dispatcher's `readTreeAsValue(node, <Branch>.class)` pins `T` to the branch
+/// while the return position bounds it by the interface — an unsatisfiable
+/// inference constraint, so the package does not compile
+/// (`new:java-union-typed-map-branch`).
+const JAVA_UNION_TYPED_MAP_BRANCH_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+required: [scalarUnion]
+properties:
+  scalarUnion:
+    oneOf:
+      - { type: string }
+      - { type: integer }
+      - type: array
+        items: { type: string }
+      - type: object
+        additionalProperties: { type: string }
+"##;
+
+#[test]
+fn java_json_typed_map_union_branch_implements_the_interface() {
+    let temp_dir = unique_output_path("java-json-union-typed-map");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("union_map.yaml");
+    fs::write(&input_path, JAVA_UNION_TYPED_MAP_BRANCH_SCHEMA).unwrap();
+    let output_path = temp_dir.join("union_map");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("union_map".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let branch = &rendered[&PathBuf::from("UnionMapScalarUnionObject.java")];
+    assert!(
+        branch.contains(
+            "public final class UnionMapScalarUnionObject implements UnionMap.ScalarUnion {"
+        ),
+        "{branch}"
+    );
+    // The dispatcher reads the branch through the class literal, which only
+    // type-checks because of the clause above.
+    let model = &rendered[&PathBuf::from("UnionMap.java")];
+    assert!(
+        model.contains("return context.readTreeAsValue(node, UnionMapScalarUnionObject.class);"),
+        "{model}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// `items: {oneOf: [T, null]}` is the **element-level** spelling of nullability.
+/// The wrapper carries no `type` and no keywords, so reading `schema.items`
+/// directly drops the non-null branch's constraints, exactly as the field
+/// planner used to at the property level (`13#2`).
+const JAVA_NULLABLE_ELEMENT_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  slots:
+    type: array
+    items:
+      oneOf:
+        - { type: string, minLength: 2 }
+        - { type: "null" }
+  counts:
+    type: array
+    items:
+      oneOf:
+        - { type: integer, minimum: 5 }
+        - { type: "null" }
+  grid:
+    type: array
+    items:
+      type: array
+      items:
+        oneOf:
+          - { type: string, minLength: 2 }
+          - { type: "null" }
+  lookup:
+    type: object
+    additionalProperties:
+      type: array
+      items:
+        oneOf:
+          - { type: string, minLength: 2 }
+          - { type: "null" }
+"##;
+
+#[test]
+fn java_json_nullable_element_keeps_the_branch_constraints() {
+    let temp_dir = unique_output_path("java-json-nullable-element");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("nullable_element.yaml");
+    fs::write(&input_path, JAVA_NULLABLE_ELEMENT_SCHEMA).unwrap();
+    let output_path = temp_dir.join("nullable_element");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("nullable_element".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let model = &rendered[&PathBuf::from("NullableElement.java")];
+    let serializer = model.split("class Serializer").nth(1).unwrap();
+    let (serializer, deserializer) = {
+        let mut parts = serializer.split("class Deserializer");
+        (
+            parts.next().unwrap().to_string(),
+            parts.next().unwrap().to_string(),
+        )
+    };
+    // Serialize side (P12) — every depth.
+    for expected in [
+        "\"slots\" + \"[\" + validationIndex0 + \"]\", \"must have length >= 2",
+        "\"counts\" + \"[\" + validationIndex0 + \"]\", \"must be >= 5",
+        "\"grid\" + \"[\" + validationIndex0 + \"]\" + \"[\" + validationIndex1 + \"]\", \"must have length >= 2",
+    ] {
+        assert!(serializer.contains(expected), "{expected}\n{serializer}");
+    }
+    // Parse side — the same constraints, keyed by the element path.
+    for expected in ["must have length >= 2", "must be >= 5"] {
+        assert!(
+            deserializer.contains(expected),
+            "{expected}\n{deserializer}"
+        );
+    }
+    // A typed-map member whose value is an array of nullable elements.
+    let map = &rendered[&PathBuf::from("NullableElementLookup.java")];
+    assert!(map.contains("must have length >= 2"), "{map}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A materialized value inside a collection must be written by the generator,
+/// not handed to Jackson: a stock `ObjectMapper` throws
+/// `InvalidDefinitionException` on `java.time.*` without the jsr310 module, and
+/// writes `byte[]` in its own base64 variant rather than the canonical form the
+/// parser accepts. P3/P4 require the generated code to work with the stock
+/// converter and no user wiring.
+const JAVA_MATERIALIZED_COLLECTION_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  stamps:
+    type: array
+    items: { type: string, format: date-time }
+  urls:
+    type: array
+    items: { type: string, contentEncoding: base64url }
+  days:
+    type: array
+    items:
+      type: array
+      items: { type: string, format: date }
+  byKey:
+    type: object
+    additionalProperties:
+      type: array
+      items: { type: string, format: duration }
+"##;
+
+#[test]
+fn java_json_writes_materialized_collection_elements_itself() {
+    let temp_dir = unique_output_path("java-json-materialized-collection");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("materialized.yaml");
+    fs::write(&input_path, JAVA_MATERIALIZED_COLLECTION_SCHEMA).unwrap();
+    let output_path = temp_dir.join("materialized");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("materialized".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let model = &rendered[&PathBuf::from("Materialized.java")];
+    for expected in [
+        "gen.writeString(TemporalSupport.formatDateTime(wireElement0));",
+        "gen.writeString(Base64Support.formatBase64Url(wireElement0));",
+        // A nested array recurses, one loop per level.
+        "gen.writeString(TemporalSupport.formatDate(wireElement1));",
+        // A null element is a JSON null, not a formatter call.
+        "gen.writeNull();",
+    ] {
+        assert!(model.contains(expected), "{expected}\n{model}");
+    }
+    // Nothing materialized reaches Jackson's defaults any more.
+    for leaked in [
+        "serializers.defaultSerializeValue(value.stamps, gen);",
+        "serializers.defaultSerializeValue(value.urls, gen);",
+        "serializers.defaultSerializeValue(value.days, gen);",
+    ] {
+        assert!(!model.contains(leaked), "{leaked}\n{model}");
+    }
+    // The typed-map member is written the same way.
+    let map = &rendered[&PathBuf::from("MaterializedByKey.java")];
+    assert!(
+        map.contains("gen.writeString(TemporalSupport.formatDuration(wireElement0));"),
+        "{map}"
+    );
+    assert!(
+        !map.contains("serializers.defaultSerializeValue(entry.getValue(), gen);"),
+        "{map}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// `x-java-enum-names` is keyed by the member's canonical **wire spelling**, so
+/// it has to reach a numeric or boolean member too. While the lookup gated on
+/// `Value::String`, those members silently ignored their override — and this is
+/// the only escape hatch P15 offers for a value-constant collision, which P15
+/// requires to reach the name it is offered for (`11#11`). The key derivation
+/// matches the loader's `enum_names_lookup_key` and Go's copy of it.
+const JAVA_ENUM_NAME_OVERRIDE_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  tier:
+    type: integer
+    enum: [1, 2]
+    x-java-enum-names: { "1": TIER_BRONZE, "2": TIER_SILVER }
+  toggle:
+    type: boolean
+    enum: [true, false]
+    x-java-enum-names: { "true": TOGGLE_ON, "false": TOGGLE_OFF }
+  scale:
+    type: number
+    enum: [1.5, 2.5]
+    x-java-enum-names: { "1.5": SCALE_HALF, "2.5": SCALE_TWO_HALF }
+  mode:
+    type: string
+    enum: [fast, slow]
+    x-java-enum-names: { fast: MODE_FAST }
+"##;
+
+#[test]
+fn java_json_enum_name_override_reaches_non_string_members() {
+    let temp_dir = unique_output_path("java-json-enum-names");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("enum_names.yaml");
+    fs::write(&input_path, JAVA_ENUM_NAME_OVERRIDE_SCHEMA).unwrap();
+    let output_path = temp_dir.join("enum_names");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("enum_names".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let model = &rendered[&PathBuf::from("EnumNames.java")];
+    for expected in [
+        // integer members
+        "public static final Tier TIER_BRONZE = new Tier(1L);",
+        "public static final Tier TIER_SILVER = new Tier(2L);",
+        // boolean members
+        "public static final Toggle TOGGLE_ON = new Toggle(true);",
+        "public static final Toggle TOGGLE_OFF = new Toggle(false);",
+        // number members, including a fractional wire spelling as the map key
+        "public static final Scale SCALE_HALF = new Scale(1.5);",
+        "public static final Scale SCALE_TWO_HALF = new Scale(2.5);",
+        // a string member still works, and an un-overridden member keeps the
+        // member-derived name (decision D3).
+        "public static final Mode MODE_FAST = new Mode(\"fast\");",
+        "public static final Mode MODE_SLOW = new Mode(\"slow\");",
+    ] {
+        assert!(model.contains(expected), "{expected}\n{model}");
+    }
+    // The names the lookup used to fall back to are gone.
+    for derived in ["Tier TIER_1 ", "Toggle TOGGLE_TRUE ", "Scale SCALE_1_5 "] {
+        assert!(!model.contains(derived), "{derived}\n{model}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// The P15 collision pass keys `x-java-enum-names` the same way the emitter
+/// does, so two numeric members renamed onto one identifier are rejected at
+/// load rather than emitted as duplicate constants.
+#[test]
+fn java_json_rejects_colliding_numeric_enum_name_overrides() {
+    let temp_dir = unique_output_path("java-json-enum-names-collision");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("collide.yaml");
+    fs::write(
+        &input_path,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  tier:
+    type: integer
+    enum: [1, 2]
+    x-java-enum-names: { "1": SAME, "2": SAME }
+"##,
+    )
+    .unwrap();
+
+    let error = generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("collide"),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("collide".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("both map to `SAME`"), "{error}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// The pinned temporal grammar admits a fractional second of any width, and
+/// every target keeps what its own type can hold rather than rejecting: Go, Java
+/// and TypeScript at nanoseconds, Python at microseconds. That is P1's exception
+/// (b) — loss only at the target type's genuine capacity limit — and it is what
+/// `samples/python/tests/test_temporal.py` already pins. `java.time`'s ISO
+/// parser throws past nine digits, so `TemporalSupport` truncates first
+/// (`new:java-rejects-12-digit-fraction`).
+#[test]
+fn java_json_truncates_an_over_long_fractional_second() {
+    let temp_dir = unique_output_path("java-json-fractional-second");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("fracsec.yaml");
+    fs::write(
+        &input_path,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  ts: { type: string, format: date-time }
+  tod: { type: string, format: time }
+"##,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("fracsec");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("fracsec".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let support = &rendered[&PathBuf::from("TemporalSupport.java")];
+    // The grammar still admits any width — the cap is not in the regex.
+    assert!(
+        support.contains("(\\\\.[0-9]+)?"),
+        "the pinned fraction must stay unbounded\n{support}"
+    );
+    // Both parsers that can see a fraction truncate before handing it to
+    // `java.time`; `parseDate` has no fraction to truncate.
+    for expected in [
+        "private static String truncateFraction(String value) {",
+        "return OffsetDateTime.parse(truncateFraction(value).toUpperCase());",
+        "String upper = truncateFraction(value).toUpperCase();",
+    ] {
+        assert!(support.contains(expected), "{expected}\n{support}");
+    }
+    assert!(
+        !support.contains("LocalDate.parse(truncateFraction("),
+        "a date carries no fraction\n{support}"
     );
     fs::remove_dir_all(temp_dir).unwrap();
 }

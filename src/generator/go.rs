@@ -10,7 +10,7 @@ use crate::generator::render_request_plan;
 use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
-    PlannedFamily, PlannedProtoType, PlannedProtoTypeInfo, PlannedResource,
+    PlannedFamily, PlannedJsonType, PlannedProtoType, PlannedProtoTypeInfo, PlannedResource,
     PlannedResourceMethodBindingSpec as PlannedResourceMethodBinding,
     PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedType,
 };
@@ -626,7 +626,38 @@ pub(crate) fn generate(
     options: &GoOptions,
     mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
-    ApiPlanner::new(api_plan, options, mode)?.generate(support_fragments)
+    generate_in_tree(api_plan, support_fragments, options, mode, &[])
+}
+
+/// Generates one input file, given every JSON model the whole generate closure
+/// declares.
+///
+/// Go flattens the closure into one flat package, so a `$ref` into another file
+/// is a within-package reference — but resolving what that reference *is* (an
+/// object branch of a union, a named union) needs the target's schema, which
+/// reachability pruning has removed from this leaf's own plan. `tree_models`
+/// carries it. It is only ever read; every model is still emitted exactly once,
+/// by the file that declares it.
+fn generate_in_tree(
+    api_plan: &PlannedSpec,
+    support_fragments: &[SupportFragmentSpec],
+    options: &GoOptions,
+    mode: GenerationMode,
+    tree_models: &[PlannedJsonType],
+) -> Result<GeneratedFiles> {
+    ApiPlanner::new(api_plan, options, mode, tree_models)?.generate(support_fragments)
+}
+
+/// Every JSON model declared anywhere in the generate closure.
+fn collect_tree_json_models(leaves: &[&ApiSpecLeaf<PlannedFamily>]) -> Vec<PlannedJsonType> {
+    leaves
+        .iter()
+        .flat_map(|leaf| leaf.spec.external_types())
+        .filter_map(|(_, binding)| match &binding.external_type {
+            ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 pub(crate) fn generate_tree(
@@ -690,6 +721,8 @@ fn generate_branch_tree(
     // shared `definitions.go` runtime file below.
     let package_name = GoPackageContext::new(&leaves[0].spec, options)?.package_name;
 
+    let tree_models = collect_tree_json_models(&leaves);
+
     let mut files = BTreeMap::new();
     let mut warnings = Vec::new();
 
@@ -698,7 +731,7 @@ fn generate_branch_tree(
         // references to sibling files are unqualified within the one package.
         let mut leaf_spec = leaf.spec.clone();
         leaf_spec.module_path = root.clone();
-        let generated = generate(&leaf_spec, &[], options, mode)?;
+        let generated = generate_in_tree(&leaf_spec, &[], options, mode, &tree_models)?;
         warnings.extend(generated.warnings);
 
         // `generate` names the single JSON member file `<package>.go`; re-key it
@@ -819,15 +852,54 @@ enum GoExternalModels {
     Proto(proto::ModelBackend),
 }
 
+/// True when a planned type is (or wraps) a JSON-Schema model.
+fn is_json_planned_type(kind: &PlannedType) -> bool {
+    match kind {
+        TypeSpec::External(ExternalTypeSpec::Json(_)) => true,
+        TypeSpec::Option(inner) | TypeSpec::List(inner) => is_json_planned_type(inner),
+        _ => false,
+    }
+}
+
+/// True when this plan's generated surface is JSON-Schema-shaped.
+///
+/// A service module that declares no models of its own — every operation type is
+/// a `$ref` into another file — owns no external declaration after reachability
+/// pruning (Go flattens the tree into one package, so the foreign declaration is
+/// emitted by its own module and dropped here). Reading only `spec.types` there
+/// said "no JSON models" and selected the WIT/proto backend, which emits
+/// `workflow.Context` operation functions instead of the `var <Service>` binding.
+/// The operations' own type expressions survive pruning, so ask them too.
+fn plan_uses_json_models(api_plan: &PlannedSpec) -> bool {
+    api_plan
+        .external_types()
+        .any(|(_, binding)| matches!(binding.external_type, ExternalTypeSpec::Json(_)))
+        || api_plan
+            .services
+            .iter()
+            .flat_map(|service| &service.operations)
+            .any(|operation| {
+                [operation.input_type(), operation.output_type()]
+                    .into_iter()
+                    .flatten()
+                    .any(is_json_planned_type)
+            })
+}
+
 impl GoExternalModels {
     fn new(api_plan: &PlannedSpec, package: GoPackageContext, mode: GenerationMode) -> Self {
-        if api_plan
-            .external_types()
-            .any(|(_, binding)| matches!(binding.external_type, ExternalTypeSpec::Json(_)))
-        {
+        if plan_uses_json_models(api_plan) {
             Self::Json(json::ModelBackend::new(mode == GenerationMode::NativeApi))
         } else {
             Self::Proto(proto::ModelBackend::new(package))
+        }
+    }
+
+    /// Hands the JSON backend every model the closure declares, so a cross-file
+    /// `$ref` resolves to its target's schema (see [`generate_in_tree`]).
+    fn adopt_tree_models(&mut self, tree_models: &[PlannedJsonType]) {
+        if let Self::Json(backend) = self {
+            backend.adopt_tree_models(tree_models);
         }
     }
 
@@ -947,7 +1019,12 @@ struct ApiPlanner<'a> {
 }
 
 impl<'a> ApiPlanner<'a> {
-    fn new(api_plan: &'a PlannedSpec, options: &GoOptions, mode: GenerationMode) -> Result<Self> {
+    fn new(
+        api_plan: &'a PlannedSpec,
+        options: &GoOptions,
+        mode: GenerationMode,
+        tree_models: &[PlannedJsonType],
+    ) -> Result<Self> {
         let package = GoPackageContext::new(api_plan, options)?;
         let mut imports = BTreeSet::new();
 
@@ -960,6 +1037,7 @@ impl<'a> ApiPlanner<'a> {
         imports.retain(|import_path| !package.is_self_import(import_path));
 
         let mut external_models = GoExternalModels::new(api_plan, package.clone(), mode);
+        external_models.adopt_tree_models(tree_models);
         external_models.prepare(api_plan)?;
 
         Ok(Self {

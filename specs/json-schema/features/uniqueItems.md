@@ -138,6 +138,7 @@ wire, so the check is the identical all-distinct walk in both directions.
 | No-op false | `{type:"array", items:{type:string}, uniqueItems:false}` |
 | No-op false over composite (nothing asserted) | `{type:"array", items:{type:object, …}, uniqueItems:false}` |
 | Combined with count bounds | `{type:"array", items:{type:string}, minItems:1, maxItems:10, uniqueItems:true}` |
+| Nullable scalar element | `{type:"array", items:{oneOf:[{type:string},{type:"null"}]}, uniqueItems:true}` — `null` is one value; two `null`s are a duplicate |
 
 ### Rejected at load time (negative)
 

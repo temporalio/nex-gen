@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.OffsetTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -15,10 +16,10 @@ import org.jspecify.annotations.Nullable;
 public final class TemporalSupport {
     private TemporalSupport() {}
 
-    private static final Pattern DATE_TIME = Pattern.compile("^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$");
-    private static final Pattern DATE = Pattern.compile("^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$");
-    private static final Pattern TIME = Pattern.compile("^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?$");
-    private static final Pattern DURATION = Pattern.compile("^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)$");
+    private static final Pattern DATE_TIME = Pattern.compile("^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])\\z");
+    private static final Pattern DATE = Pattern.compile("^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])\\z");
+    private static final Pattern TIME = Pattern.compile("^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?\\z");
+    private static final Pattern DURATION = Pattern.compile("^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)\\z");
     private static final long MAX_DURATION_SECONDS = Long.MAX_VALUE / 1_000_000_000L;
 
     private static int daysInMonth(int year, int month) {
@@ -73,13 +74,40 @@ public final class TemporalSupport {
         return String.format("%s%02d:%02d", sign, abs / 3600, (abs % 3600) / 60);
     }
 
+    /**
+     * Truncates a fractional-seconds run to nanosecond resolution.
+     *
+     * The pinned grammar admits a fraction of any width and every target keeps
+     * what its own type can hold, dropping the rest: Go, TypeScript and Java at
+     * nanoseconds, Python at microseconds. That is P1's exception (b) — loss
+     * only at the target type's genuine capacity limit — and it is what
+     * `samples/python/tests/test_temporal.py` already pins. `java.time` stops at
+     * nanoseconds and its ISO parser *throws* past nine digits, so the extra
+     * digits are dropped here; rejecting instead would split the accept set,
+     * which exception (b) does not cover.
+     */
+    private static String truncateFraction(String value) {
+        int dot = value.indexOf('.');
+        if (dot < 0) {
+            return value;
+        }
+        int end = dot + 1;
+        while (end < value.length() && value.charAt(end) >= '0' && value.charAt(end) <= '9') {
+            end++;
+        }
+        if (end - dot - 1 <= 9) {
+            return value;
+        }
+        return value.substring(0, dot + 10) + value.substring(end);
+    }
+
     public static @Nullable OffsetDateTime parseDateTime(String value, String path, List<Violation> violations) {
         if (!DATE_TIME.matcher(value).matches() || !validCalendar(value)) {
             violations.add(new Violation(path, "must be a valid date-time, got \"" + value + "\""));
             return null;
         }
         try {
-            return OffsetDateTime.parse(value.toUpperCase());
+            return OffsetDateTime.parse(truncateFraction(value).toUpperCase());
         } catch (DateTimeParseException e) {
             violations.add(new Violation(path, "must be a valid date-time, got \"" + value + "\""));
             return null;
@@ -116,7 +144,7 @@ public final class TemporalSupport {
             violations.add(new Violation(path, "must be a valid time, got \"" + value + "\""));
             return null;
         }
-        String upper = value.toUpperCase();
+        String upper = truncateFraction(value).toUpperCase();
         try {
             OffsetTime t = OffsetTime.parse(upper);
             return String.format("%02d:%02d:%02d", t.getHour(), t.getMinute(), t.getSecond())
@@ -155,6 +183,64 @@ public final class TemporalSupport {
             return null;
         }
         return Duration.ofSeconds(total);
+    }
+
+    // ---- Serialize-side representability (P12) -------------------------
+    // A POJO is constructed unchecked, so a value the pinned wire grammar
+    // cannot spell reaches the Serializer. Each check below is the exact
+    // counterpart of the matching `parse*` above: without it the emitted wire
+    // is a string this module's own parser rejects.
+
+    private static void checkOffset(String name, Object value, ZoneOffset offset, String path, List<Violation> violations) {
+        if (offset.getTotalSeconds() % 60 != 0) {
+            violations.add(new Violation(path, "must be a valid " + name + ", got " + value
+                    + ": the UTC offset " + offset + " is not a whole number of minutes"));
+        }
+    }
+
+    private static void checkYear(String name, Object value, int year, String path, List<Violation> violations) {
+        if (year < 1) {
+            violations.add(new Violation(path, "must be a valid " + name + ", got " + value + ": year must be >= 0001"));
+        } else if (year > 9999) {
+            violations.add(new Violation(path, "must be a valid " + name + ", got " + value + ": year must be <= 9999"));
+        }
+    }
+
+    public static void checkDateTime(OffsetDateTime value, String path, List<Violation> violations) {
+        checkYear("date-time", value, value.getYear(), path, violations);
+        checkOffset("date-time", value, value.getOffset(), path, violations);
+    }
+
+    public static void checkDate(LocalDate value, String path, List<Violation> violations) {
+        checkYear("date", value, value.getYear(), path, violations);
+    }
+
+    // `time` materializes as the canonical wire string; a hand-constructed POJO
+    // can still hold anything, so the pinned grammar is re-asserted.
+    public static void checkTime(String value, String path, List<Violation> violations) {
+        if (!TIME.matcher(value).matches()) {
+            violations.add(new Violation(path, "must be a valid time, got \"" + value + "\""));
+            return;
+        }
+        try {
+            checkOffset("time", value, OffsetTime.parse(value.toUpperCase()).getOffset(), path, violations);
+        } catch (DateTimeParseException e) {
+            // Offset-less; the grammar allows it and there is no offset to hold.
+        }
+    }
+
+    public static void checkDuration(Duration value, String path, List<Violation> violations) {
+        String reason;
+        if (value.isNegative()) {
+            reason = "a duration cannot be negative";
+        } else if (value.getNano() != 0) {
+            reason = "a duration cannot carry a fraction of a second";
+        } else if (value.getSeconds() > MAX_DURATION_SECONDS) {
+            reason = "a duration cannot exceed " + MAX_DURATION_SECONDS + " seconds";
+        } else {
+            return;
+        }
+        violations.add(new Violation(path, "must be a valid duration, got " + value + ": " + reason));
     }
 
     public static String formatDuration(Duration value) {

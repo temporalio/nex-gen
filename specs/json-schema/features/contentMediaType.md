@@ -62,6 +62,13 @@ Loader behavior:
   the media type belongs on the transport / payload envelope, not the
   model. (Future direction: carry it as **Temporal payload metadata** —
   see Open questions.)
+- The diagnostic must say that the **schema is rejected** and name that
+  remedy. It must not describe the keyword as ignored, tolerated, or
+  "carried verbatim": nothing is carried, no code is generated, and a
+  message implying otherwise sends the author looking for a value that
+  does not exist. "Validate the media type in application code" is also
+  the wrong advice — the media type belongs to the envelope, not to
+  application-level validation of the string.
 - The reject holds **regardless of [[contentEncoding]]**: a base64 blob
   labeled with a media type (`{contentEncoding:"base64",
   contentMediaType:"image/png"}` — the canonical "embedded binary file"

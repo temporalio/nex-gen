@@ -63,10 +63,17 @@ class _PageMetaTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "PageMeta") -> typing.Any:
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         out["author"] = value.author
         if value.word_count is not None:
+            if abs(value.word_count) > 9007199254740991:
+                violations.append(
+                    Violation(path="wordCount", reason="exceeds ±(2^53-1) integer cap")
+                )
             out["wordCount"] = value.word_count
+        if violations:
+            raise ValidationError(violations)
         return out
 
 

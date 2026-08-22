@@ -209,14 +209,14 @@ def _check_contains(
 
 
 _TEMPORAL_DATE_TIME_RE = re.compile(
-    r"^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$"
+    r"^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])\Z"
 )
-_TEMPORAL_DATE_RE = re.compile(r"^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$")
+_TEMPORAL_DATE_RE = re.compile(r"^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])\Z")
 _TEMPORAL_TIME_RE = re.compile(
-    r"^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?$"
+    r"^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?\Z"
 )
 _TEMPORAL_DURATION_RE = re.compile(
-    r"^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)$"
+    r"^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)\Z"
 )
 _TEMPORAL_MAX_DURATION_SECONDS = ((1 << 63) - 1) // 1_000_000_000
 # A duration component with more digits than the cap itself is over the cap
@@ -491,9 +491,13 @@ def _format_duration(value: datetime.timedelta) -> str:
 
 
 _BASE64_RE = re.compile(
-    "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\\Z", re.ASCII
+    "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?\\Z",
+    re.ASCII,
 )
-_BASE64URL_RE = re.compile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?\\Z", re.ASCII)
+_BASE64URL_RE = re.compile(
+    "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?\\Z",
+    re.ASCII,
+)
 
 
 def _parse_base64(value: str, path: str, violations: list[Violation]) -> bytes | None:

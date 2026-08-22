@@ -64,6 +64,10 @@ Loader behavior:
   as contradictory (never sent to the client *and* managed by the
   authority — no direction the value legitimately appears in).
 
+As in [[readOnly]], the four rejects carry four different remedies and must
+be distinguishable: `writeOnly: false` is told to delete a dead annotation,
+never to split the type by direction.
+
 ## Type mapping
 
 None — rejected before any type is emitted.

@@ -170,6 +170,7 @@ directions.
 | Match-count bounds ([[minContains]] / [[maxContains]]) | `{type:"array", items:{type:integer}, contains:{minimum:5}, minContains:2, maxContains:4}` |
 | Combined with count/uniqueness assertions | `{type:"array", items:{type:string}, minItems:1, uniqueItems:true, contains:{const:"admin"}}` |
 | Array member of a struct | `{type:"object", properties:{roles:{type:array, items:{type:string}, contains:{const:"admin"}}}}` |
+| Nullable scalar element | `{type:"array", items:{oneOf:[{type:string},{type:"null"}]}, contains:{const:"admin"}}` — a `null` element never matches the scalar matcher |
 
 ### Rejected at load time (negative)
 

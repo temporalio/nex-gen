@@ -149,6 +149,7 @@ referenced target's. Per keyword:
 | `const` + `enum` | the `const` must be a member of the `enum`; result is the `const` | the `const` is not in the `enum` |
 | `format` | identical → dedupe | two **different** `format`s (no single value is two formats) |
 | `title` / `description` / `default` | **last-wins**: identical values dedupe; when they differ the **last** branch's value survives (metadata, no validation effect); the `$ref`-sibling rewrite makes the use-site value override the target's. A lone value is kept. | never — a differing metadata value is an override, not a conflict |
+| [[deprecated]] | **OR**: the merged node is deprecated if **any** branch marks it so. Not last-wins — deprecation is a warning that must not be silenced by a later branch omitting it (or writing `deprecated: false`, which is inert). | never |
 
 ### Numeric bounds ([[minimum]] / [[maximum]] / exclusives / [[multipleOf]])
 
@@ -253,8 +254,10 @@ object is closed to the union; if all are open, it stays open (**P13**).
   combinator → reject.
 - Fold per *Merge algorithm*. Reject the unmergeable pairs: disjoint
   `type`, disagreeing `const`, empty `enum` intersection, `const` violating
-  a sibling constraint, differing `format`/`default`, distinct
-  `pattern`/`contains`.
+  a sibling constraint, differing `format`, distinct
+  `pattern`/`contains`. A differing `title`/`description`/`default` is
+  **not** an unmergeable pair — it is a last-wins override (see *Type and
+  value sets*).
 - Hand the merged schema to the ordinary loader; **all** satisfiability /
   shape / collision checks (empty interval, `min* > max*`, integer-range
   emptiness, synthesized-name **P15** collision) are the owning specs'
@@ -328,6 +331,7 @@ loader. Reason strings come from the owning constraint families
 | Nested `allOf` flattened | `{allOf:[{allOf:[{minimum:1}]},{maximum:9}]}` |
 | Identity branch dropped | `{allOf:[{type:string,minLength:3},true]}` |
 | Differing metadata annotation (last-wins) | `{allOf:[{default:1},{default:2}]}` → `2`; likewise `title`/`description` take the last branch's value (use-site sibling overrides a `$ref` target) |
+| `deprecated` OR-merged | `{allOf:[{deprecated:true},{deprecated:false}]}` → deprecated; `{allOf:[{deprecated:true},{minimum:0}]}` → deprecated |
 
 ### Rejected at load time (negative)
 
