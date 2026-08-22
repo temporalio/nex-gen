@@ -91,7 +91,7 @@ final class JsonSchemaShowcaseRoundTripTest {
     void showcaseFixturesRoundTrip() throws IOException {
         Showcase minimal = roundTrip("showcase-minimal.json", Showcase.class);
         assertEquals("showcase", minimal.getKind().getValue());
-        assertEquals("showcase", Showcase.Kind.KIND.getValue());
+        assertEquals("showcase", Showcase.Kind.SHOWCASE.getValue());
         // Closed value-set fields (const on integer/boolean, enum on string/
         // integer/number) round-trip to their in-memory value-class constants.
         assertEquals(1L, minimal.getRevision().getValue());
@@ -1311,8 +1311,8 @@ final class JsonSchemaShowcaseRoundTripTest {
         // a wrong value cannot be constructed (private constructor), so these
         // fields are always the valid constants here.
         return new Showcase(
-                Showcase.Kind.KIND, Showcase.Revision.REVISION_JAVA, Showcase.Enabled.ENABLED,
-                Showcase.Status.ACTIVE_JAVA, Showcase.Tier.TIER_1, Showcase.Scale.SCALE_1_5,
+                Showcase.Kind.SHOWCASE, Showcase.Revision.REVISION_JAVA, Showcase.Enabled.TRUE,
+                Showcase.Status.ACTIVE_JAVA, Showcase.Tier.V_1, Showcase.Scale.V_1_5,
                 "w", 1L, true,
                 null, code, sku, null, requestId, null, null, null, null,
                 null, null, null, null, null, null, null, null, "tools",

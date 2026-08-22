@@ -90,7 +90,7 @@ final class JsonSchemaRoundTripTest {
         assertNull(minimal.getReplyToId());
         assertNull(minimal.getPriority());
         assertEquals(0L, minimal.getPriorityOrDefault());
-        assertEquals("text", Message.Kind.KIND.getValue());
+        assertEquals("text", Message.Kind.TEXT.getValue());
 
         // message-full carries replyToId: null (optional+nullable), which Java
         // collapses on the way out, so only deserialization is checked.

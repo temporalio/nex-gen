@@ -3454,7 +3454,7 @@ fn encode_value_identifier(value: &Value) -> Option<String> {
         }
         Value::Bool(flag) => Some(if *flag { "True" } else { "False" }.to_string()),
         Value::Number(number) => {
-            let decimal = number.to_string();
+            let decimal = crate::json_schema::scalar::value_token_decimal(number);
             let token = decimal.replace('-', "Neg").replace('.', "_");
             if token.is_empty() { None } else { Some(token) }
         }
@@ -7308,16 +7308,32 @@ struct Namespace {
 }
 
 impl Namespace {
+    /// For a scope whose names are member-derived, so `x-<lang>-name` is the
+    /// remedy the diagnostic should name.
     fn insert(&mut self, language: Language, ident: String, origin: String) -> Result<()> {
+        let remedy = lang_name_keyword(language).unwrap_or("x-<lang>-name");
+        self.insert_with_remedy(language, ident, origin, remedy)
+    }
+
+    /// Same, for a scope the member-name override cannot reach. A **value
+    /// constant** is named from the value, not the member, so `x-<lang>-name`
+    /// would not move it and offering it is the lying fix-it P15 forbids; the
+    /// remedy is `x-<lang>-const-name` / `x-<lang>-enum-names`.
+    fn insert_with_remedy(
+        &mut self,
+        language: Language,
+        ident: String,
+        origin: String,
+        remedy: &str,
+    ) -> Result<()> {
         if let Some(previous) = self.entries.get(&ident)
             && previous != &origin
         {
             return Err(Error::InvalidJsonSchema {
                 path: PathBuf::from("<json-schema>"),
                 reason: format!(
-                    "identifier collision in {} output: {previous} and {origin} both map to `{ident}`; disambiguate with an `{}` override (P15 — the generator never auto-mangles)",
+                    "identifier collision in {} output: {previous} and {origin} both map to `{ident}`; disambiguate with an `{remedy}` override (P15 — the generator never auto-mangles)",
                     language.as_str(),
-                    lang_name_keyword(language).unwrap_or("x-<lang>-name"),
                 ),
             });
         }
@@ -7781,13 +7797,21 @@ fn collect_java_nested_scope(model_full_name: &str, schema: &Schema) -> Result<(
             class.clone(),
             format!("`{model_full_name}.{json_name}` closed-value class"),
         )?;
+        // The constant scope is named from the *values*, so its remedy is the
+        // value-constant override, not `x-java-name` (which moves the class).
+        let remedy = if values.len() == 1 {
+            lang_const_name_keyword(language).unwrap_or("x-<lang>-const-name")
+        } else {
+            lang_enum_names_keyword(language).unwrap_or("x-<lang>-enum-names")
+        };
         let mut constants = Namespace::default();
         for value in &values {
-            let const_ident = java_value_constant_name(property, &member, &values, value);
-            constants.insert(
+            let const_ident = java_value_constant_name(property, value);
+            constants.insert_with_remedy(
                 language,
                 const_ident,
                 format!("`{model_full_name}.{json_name}` value constant for {value}"),
+                remedy,
             )?;
         }
     }
@@ -7821,29 +7845,30 @@ fn java_upper_first(name: &str) -> String {
 }
 
 /// Mirrors the Java emitter's `java_const_name` / `java_closed_token`: the
-/// verbatim override when one is authored, else the member's `SHOUTY_SNAKE`
-/// form — alone for a single-valued `const`, suffixed with the value token for
-/// an `enum` member.
-fn java_value_constant_name(
-    property: &Schema,
-    member: &str,
-    values: &[Value],
-    value: &Value,
-) -> String {
+/// verbatim override when one is authored, else the value's own `SHOUTY_SNAKE`
+/// token with no member-derived component, `V_`-guarded when it cannot lead with
+/// an ASCII letter. Keep the two in step — this pass decides which schemas load,
+/// so a drift either rejects a schema the emitter would have emitted fine or
+/// lets two identical constants through to a Java compile error.
+fn java_value_constant_name(property: &Schema, value: &Value) -> String {
     if let Some(name) = value_constant_override(Language::Java, property, value) {
         return name.to_string();
-    }
-    let member_upper = member.to_shouty_snake_case();
-    if values.len() == 1 {
-        return member_upper;
     }
     let token = match value {
         Value::String(text) => text.to_shouty_snake_case(),
         Value::Bool(flag) => if *flag { "TRUE" } else { "FALSE" }.to_string(),
-        Value::Number(number) => number.to_string().replace('-', "NEG_").replace('.', "_"),
+        Value::Number(number) => crate::json_schema::scalar::value_token_decimal(number)
+            .replace('-', "NEG_")
+            .replace('.', "_"),
         _ => String::new(),
     };
-    format!("{member_upper}_{token}")
+    let needs_guard =
+        matches!(value, Value::Number(_)) || !token.starts_with(|c: char| c.is_ascii_alphabetic());
+    if needs_guard {
+        format!("V_{token}")
+    } else {
+        token
+    }
 }
 
 /// The Go emitter's union-field suffix: the union's sealed interface is
@@ -13411,8 +13436,12 @@ properties:
         // Go names both constants verbatim, so Go loads.
         parse_for(Language::Go, input).expect("the Go overrides separate both constants");
         let error = reject_for(Language::Java, input);
+        // The constant is named from the value alone, so both fold to `USER`,
+        // and the fix-it names the override that can actually separate them.
         assert!(
-            error.contains("collision") && error.contains("ROLE_USER"),
+            error.contains("collision")
+                && error.contains("`USER`")
+                && error.contains("x-java-enum-names"),
             "{error}"
         );
     }

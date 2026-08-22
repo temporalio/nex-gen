@@ -117,6 +117,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+- JSON Schema (Java): a `const`/`enum` value constant is now named after the
+  **value** rather than the declaring member — `Circle.Kind.CIRCLE` instead of
+  `Circle.Kind.KIND`, `Status.PENDING` instead of `Status.STATUS_PENDING`, and
+  `Tier.V_1` instead of `Tier.TIER_1` (numeric tokens take the `V_` guard, since
+  a Java constant is class-scoped and has no type prefix to supply a leading
+  letter). The value class already carries the member in its own name, and a
+  single-valued `const` previously dropped the value from the constant
+  altogether. The change is also what makes P15's escape hatches match their
+  fix-its: a member-derived constant moved under `x-java-name` as well as
+  `x-java-const-name`, so a value-constant collision had two remedies while the
+  diagnostic named one — which now points at `x-java-const-name` /
+  `x-java-enum-names` for the constant scope. Go is unaffected (it already named
+  constants `{Type}{Value}`), as are constants given an explicit
+  `x-java-const-name` / `x-java-enum-names` override.
+- JSON Schema (Go, Java): a numeric value constant's name now derives from the
+  value rather than its authored spelling, so `const: 1`, `const: 1.0` and
+  `const: 1e0` all name one constant (`Score1` / `V_1`) instead of `Score1_0` /
+  `V_1_0` for the fractional spellings. P1 makes those one mathematical number,
+  so re-spelling a `const` is a no-op on the wire and must not rename a public
+  constant (P13).
+
 - JSON Schema: the `pattern` portability gate now verifies that a pattern is
   portable across all four target regex engines, not merely that Rust's `regex`
   can compile it. Patterns that previously loaded and then failed — or silently

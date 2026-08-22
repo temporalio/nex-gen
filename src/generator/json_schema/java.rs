@@ -3082,7 +3082,6 @@ fn render_object_class(
                 output,
                 class,
                 wire,
-                &field.java_name,
                 &field.closed_values,
                 &field.closed_overrides,
             );
@@ -5573,7 +5572,6 @@ fn render_closed_value_class(
     output: &mut String,
     class: &str,
     wire: &JavaType,
-    field_java_name: &str,
     values: &[Value],
     overrides: &ClosedNameOverrides,
 ) {
@@ -5584,7 +5582,7 @@ fn render_closed_value_class(
     for value in values {
         output.push_str(&format!(
             "        public static final {class} {} = new {class}({});\n",
-            java_const_name(overrides, field_java_name, values, value),
+            java_const_name(overrides, value),
             java_closed_literal(wire, value),
         ));
     }
@@ -5595,7 +5593,7 @@ fn render_closed_value_class(
         "        private {class}({const_type} value) {{\n            this.value = value;\n        }}\n\n"
     ));
 
-    render_closed_value_creator(output, class, wire, field_java_name, values, overrides);
+    render_closed_value_creator(output, class, wire, values, overrides);
 
     output.push_str(&format!(
         "        @JsonValue\n        public {const_type} getValue() {{\n            return value;\n        }}\n\n"
@@ -5614,7 +5612,6 @@ fn render_closed_value_creator(
     output: &mut String,
     class: &str,
     wire: &JavaType,
-    field_java_name: &str,
     values: &[Value],
     overrides: &ClosedNameOverrides,
 ) {
@@ -5641,7 +5638,7 @@ fn render_closed_value_creator(
         );
     }
     for member in values {
-        let name = java_const_name(overrides, field_java_name, values, member);
+        let name = java_const_name(overrides, member);
         let test = if is_string {
             format!("{}.equals(value)", java_closed_literal(wire, member))
         } else {
@@ -5721,12 +5718,7 @@ fn default_expr(field: &FieldPlan, value: &Value) -> Option<String> {
         (JavaType::String, Value::String(text)) => Some(java_string_literal(text)),
         (JavaType::ClosedValue { class, .. }, _) => Some(format!(
             "{class}.{}",
-            java_const_name(
-                &field.closed_overrides,
-                &field.java_name,
-                &field.closed_values,
-                value,
-            )
+            java_const_name(&field.closed_overrides, value)
         )),
         (JavaType::Temporal(kind), Value::String(text)) => {
             // `java.time`'s `parse` is case-sensitive on the `T`/`Z`/`PT`
@@ -5797,29 +5789,42 @@ fn java_closed_token(value: &Value) -> String {
     match value {
         Value::String(text) => shouty(text),
         Value::Bool(flag) => if *flag { "TRUE" } else { "FALSE" }.to_string(),
-        Value::Number(number) => number.to_string().replace('-', "NEG_").replace('.', "_"),
+        Value::Number(number) => crate::json_schema::scalar::value_token_decimal(number)
+            .replace('-', "NEG_")
+            .replace('.', "_"),
         _ => String::new(),
     }
 }
 
-/// The class-scoped constant name for a closed value. A single-value `const`
-/// uses the field name (`KIND`); an `enum` member appends the value token
-/// (`STATUS_ACTIVE`, `TIER_1`, `SCALE_1_5`), the field name supplying the
-/// leading letter so no `V_` digit-guard prefix is needed.
-fn java_const_name(
-    overrides: &ClosedNameOverrides,
-    field_java_name: &str,
-    values: &[Value],
-    value: &Value,
-) -> String {
+/// The class-scoped constant name for a closed value: purely the value's
+/// encoded token, with **no member-derived component** (`Kind.SHOWCASE`,
+/// `Status.ACTIVE`, `Tier.V_1`). The value class already carries the member in
+/// its own name, so re-stating it would only stutter — but the reason the
+/// constant may not be member-derived is behavioral, not cosmetic. P15 gives the
+/// two axes separate escape hatches: `x-java-name` moves the synthesized *type*
+/// and `x-java-const-name` the *value constant*. A member-derived constant would
+/// move under `x-java-name` too, so a constant collision would have two remedies
+/// while the fix-it names one — and a `const` whose value token is empty (`"-"`)
+/// would silently acquire a legal name from its member instead of hitting the
+/// load reject the loader raises for it.
+///
+/// Java constants are class-scoped with no type prefix, so unlike Go there is no
+/// `{Type}` to supply a leading letter: a token that does not begin with an ASCII
+/// letter takes the `V_` guard. That is every numeric — including the ones whose
+/// token happens to lead with the `NEG_` sign word, which the guard applies to by
+/// *kind* rather than by first character so `-3` and a string `"neg3"` stay
+/// distinct (`V_NEG_3` vs `NEG3`).
+fn java_const_name(overrides: &ClosedNameOverrides, value: &Value) -> String {
     if let Some(name) = overrides.get(value) {
         return name.to_string();
     }
-    let field_upper = shouty(field_java_name);
-    if values.len() == 1 {
-        field_upper
+    let token = java_closed_token(value);
+    let needs_guard =
+        matches!(value, Value::Number(_)) || !token.starts_with(|c: char| c.is_ascii_alphabetic());
+    if needs_guard {
+        format!("V_{token}")
     } else {
-        format!("{field_upper}_{}", java_closed_token(value))
+        token
     }
 }
 
@@ -5890,7 +5895,7 @@ fn render_java_closed_parse(
             } else {
                 format!("{temp} == {literal}")
             };
-            let name = java_const_name(overrides, field_java_name, values, value);
+            let name = java_const_name(overrides, value);
             o.push_str(&format!("{ind}{keyword} ({test}) {{\n"));
             o.push_str(&format!("{ind}    {target} = {class}.{name};\n"));
         }

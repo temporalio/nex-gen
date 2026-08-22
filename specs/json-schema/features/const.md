@@ -273,7 +273,12 @@ Rules:
 - **Numbers** encode from the shortest round-trippable decimal; the `.`
   becomes `_` and is **kept** (so `3_14` stays distinct from `314`). A
   magnitude that canonicalizes to exponent form encodes `e` as `E` and its
-  exponent sign via `Neg` (`1e-7` → `Ratio1ENeg7`).
+  exponent sign via `Neg` (`1e-7` → `Ratio1ENeg7`). The decimal comes from the
+  **value**, not the authored spelling: P1 makes `1`, `1.0` and `1e0` one
+  number, so an integral value collapses to its integer form and all three
+  spellings name one constant (`Score1` / `V_1`). Re-spelling a `const` is a
+  no-op on the wire and must not rename a constant out from under callers
+  (P13).
 - **Java leading-letter guarantee.** Java constants are class-scoped with
   no type prefix, and Stage 3 rejects an identifier beginning with a
   digit. A token that does not start with an ASCII letter (every numeric,

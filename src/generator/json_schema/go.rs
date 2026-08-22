@@ -6058,7 +6058,9 @@ fn go_value_suffix(value: &Value) -> String {
     match value {
         Value::String(text) => text.to_upper_camel_case(),
         Value::Bool(flag) => if *flag { "True" } else { "False" }.to_string(),
-        Value::Number(number) => number.to_string().replace('-', "Neg").replace('.', "_"),
+        Value::Number(number) => crate::json_schema::scalar::value_token_decimal(number)
+            .replace('-', "Neg")
+            .replace('.', "_"),
         _ => String::new(),
     }
 }

@@ -1092,7 +1092,7 @@ fn java_json_nullable_property_keeps_the_branch_constraints() {
     for expected in [
         // A nullable `enum` still becomes a closed value class.
         "public static final class NullEnum {",
-        "public static final NullEnum NULL_ENUM_A = new NullEnum(\"a\");",
+        "public static final NullEnum A = new NullEnum(\"a\");",
         "private final @Nullable NullEnum nullEnum;",
         // …and every constraint reaches both directions.
         "NULL_NAME_PATTERN = java.util.regex.Pattern.compile(\"^[a-z]+\\\\z\")",
@@ -1261,7 +1261,7 @@ fn java_json_dispatches_a_non_string_discriminant_by_value() {
 
     let model = &rendered[&PathBuf::from("Tagged.java")];
     assert!(
-        model.contains("public static final Score SCORE = new Score(1L);"),
+        model.contains("public static final Score V_1 = new Score(1L);"),
         "{model}"
     );
     fs::remove_dir_all(temp_dir).unwrap();
@@ -1733,18 +1733,154 @@ fn java_json_enum_name_override_reaches_non_string_members() {
         // number members, including a fractional wire spelling as the map key
         "public static final Scale SCALE_HALF = new Scale(1.5);",
         "public static final Scale SCALE_TWO_HALF = new Scale(2.5);",
-        // a string member still works, and an un-overridden member keeps the
-        // member-derived name (decision D3).
+        // a string member still works, and an un-overridden member falls back to
+        // the value-derived name (D3): the value token, never the member's.
         "public static final Mode MODE_FAST = new Mode(\"fast\");",
-        "public static final Mode MODE_SLOW = new Mode(\"slow\");",
+        "public static final Mode SLOW = new Mode(\"slow\");",
     ] {
         assert!(model.contains(expected), "{expected}\n{model}");
     }
-    // The names the lookup used to fall back to are gone.
-    for derived in ["Tier TIER_1 ", "Toggle TOGGLE_TRUE ", "Scale SCALE_1_5 "] {
+    // The value-derived names the lookup falls back to when no override is
+    // authored — `V_`-guarded for the numerics, bare for the boolean. Their
+    // absence is what proves each override actually reached its member.
+    for derived in ["Tier V_1 ", "Toggle TRUE ", "Scale V_1_5 "] {
         assert!(!model.contains(derived), "{derived}\n{model}");
     }
     fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// D3: a Java value constant is named from the **value**, never the member.
+///
+/// The member-derived spelling (`Kind.KIND`, `Tier.TIER_1`) dropped the value
+/// from a single-valued `const` entirely and, worse, made the constant move
+/// under `x-java-name` — so a value-constant collision had two remedies while
+/// the P15 fix-it named one, and `const: "-"` (whose value token is empty)
+/// quietly borrowed a legal name from its member instead of hitting the load
+/// reject. Naming from the value alone costs the `V_` guard, which Go does not
+/// need because its `{Type}` prefix always supplies a leading letter.
+#[test]
+fn java_json_names_value_constants_from_the_value() {
+    let temp_dir = unique_output_path("java-json-const-naming");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("naming.yaml");
+    fs::write(
+        &input_path,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  kind:
+    type: string
+    const: showcase
+  enabled:
+    type: boolean
+    const: true
+  tier:
+    type: integer
+    enum: [1, -2]
+  scale:
+    type: number
+    enum: [1.5, -2.25]
+  status:
+    type: string
+    enum: [active, "multi-word_ish"]
+"##,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("naming");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("naming".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let model = &read_java_files(&output_path)[&PathBuf::from("Naming.java")];
+    for expected in [
+        // A single-valued `const` names the value, not the member — the member
+        // is already the value class's own name, so `Kind.KIND` said nothing.
+        "public static final Kind SHOWCASE = new Kind(\"showcase\");",
+        "public static final Enabled TRUE = new Enabled(true);",
+        // Numerics take the `V_` guard by kind, so the `NEG_` sign word does not
+        // let `-2` pass as letter-leading and collide with a string `"neg2"`.
+        "public static final Tier V_1 = new Tier(1L);",
+        "public static final Tier V_NEG_2 = new Tier(-2L);",
+        "public static final Scale V_1_5 = new Scale(1.5);",
+        "public static final Scale V_NEG_2_25 = new Scale(-2.25);",
+        // Strings word-split on any non-alphanumeric ASCII, then UPPER_SNAKE.
+        "public static final Status ACTIVE = new Status(\"active\");",
+        "public static final Status MULTI_WORD_ISH = new Status(\"multi-word_ish\");",
+    ] {
+        assert!(model.contains(expected), "{expected}\n{model}");
+    }
+    // No constant carries its member's name.
+    for member_derived in [
+        "Kind KIND ",
+        "Enabled ENABLED ",
+        "Tier TIER_",
+        "Scale SCALE_",
+    ] {
+        assert!(!model.contains(member_derived), "{member_derived}\n{model}");
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// P1 makes `1`, `1.0` and `1e0` one number, so all three must name one
+/// constant: re-spelling a `const` is a no-op on the wire and must not rename a
+/// public constant out from under callers (P13). The token used to come from
+/// `serde_json::Number`'s own spelling, so `const: 1.0` on a `type: integer`
+/// emitted `V_1_0` in Java and `Score1_0` in Go while `const: 1` emitted `V_1` /
+/// `Score1`.
+#[test]
+fn java_json_numeric_constant_names_are_spelling_stable() {
+    let render = |spelling: &str| {
+        let temp_dir = unique_output_path("java-json-const-spelling");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let input_path = temp_dir.join("spelling.yaml");
+        fs::write(
+            &input_path,
+            format!(
+                r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  score:
+    type: integer
+    const: {spelling}
+"##
+            ),
+        )
+        .unwrap();
+        let output_path = temp_dir.join("spelling");
+        generate_to_file(&GenerateRequest {
+            language: nexgen::language::Language::Java,
+            input_paths: vec![input_path],
+            support_paths: Vec::new(),
+            descriptor_paths: Vec::new(),
+            output_path: output_path.clone(),
+            format: false,
+            generate_native_api: false,
+            java_package_name: Some("spelling".to_string()),
+            ts_date_time_types: Default::default(),
+        })
+        .unwrap();
+        let model = read_java_files(&output_path)[&PathBuf::from("Spelling.java")].clone();
+        fs::remove_dir_all(temp_dir).unwrap();
+        model
+    };
+
+    for spelling in ["1", "1.0", "1e0"] {
+        let model = render(spelling);
+        assert!(
+            model.contains("public static final Score V_1 = new Score(1L);"),
+            "`const: {spelling}` must name the constant `V_1`\n{model}"
+        );
+    }
 }
 
 /// The P15 collision pass keys `x-java-enum-names` the same way the emitter

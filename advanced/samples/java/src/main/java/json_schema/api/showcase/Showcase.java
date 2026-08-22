@@ -876,7 +876,7 @@ public final class Showcase {
     }
 
     public static final class Kind {
-        public static final Kind KIND = new Kind("showcase");
+        public static final Kind SHOWCASE = new Kind("showcase");
 
         private final String value;
 
@@ -890,7 +890,7 @@ public final class Showcase {
                 return null;
             }
             if ("showcase".equals(value)) {
-                return KIND;
+                return SHOWCASE;
             }
             throw new IllegalArgumentException("must equal \"showcase\", got \"" + value + "\"");
         }
@@ -969,7 +969,7 @@ public final class Showcase {
     }
 
     public static final class Enabled {
-        public static final Enabled ENABLED = new Enabled(true);
+        public static final Enabled TRUE = new Enabled(true);
 
         private final boolean value;
 
@@ -980,7 +980,7 @@ public final class Showcase {
         @JsonCreator
         public static Enabled fromBoolean(boolean value) {
             if (value == true) {
-                return ENABLED;
+                return TRUE;
             }
             throw new IllegalArgumentException("must equal true, got " + value);
         }
@@ -1015,8 +1015,8 @@ public final class Showcase {
 
     public static final class Status {
         public static final Status ACTIVE_JAVA = new Status("active");
-        public static final Status STATUS_INACTIVE = new Status("inactive");
-        public static final Status STATUS_PENDING = new Status("pending");
+        public static final Status INACTIVE = new Status("inactive");
+        public static final Status PENDING = new Status("pending");
 
         private final String value;
 
@@ -1033,10 +1033,10 @@ public final class Showcase {
                 return ACTIVE_JAVA;
             }
             if ("inactive".equals(value)) {
-                return STATUS_INACTIVE;
+                return INACTIVE;
             }
             if ("pending".equals(value)) {
-                return STATUS_PENDING;
+                return PENDING;
             }
             throw new IllegalArgumentException("must be one of [\"active\", \"inactive\", \"pending\"], got \"" + value + "\"");
         }
@@ -1070,9 +1070,9 @@ public final class Showcase {
     }
 
     public static final class Tier {
-        public static final Tier TIER_1 = new Tier(1L);
-        public static final Tier TIER_2 = new Tier(2L);
-        public static final Tier TIER_3 = new Tier(3L);
+        public static final Tier V_1 = new Tier(1L);
+        public static final Tier V_2 = new Tier(2L);
+        public static final Tier V_3 = new Tier(3L);
 
         private final long value;
 
@@ -1083,13 +1083,13 @@ public final class Showcase {
         @JsonCreator
         public static Tier fromLong(long value) {
             if (value == 1L) {
-                return TIER_1;
+                return V_1;
             }
             if (value == 2L) {
-                return TIER_2;
+                return V_2;
             }
             if (value == 3L) {
-                return TIER_3;
+                return V_3;
             }
             throw new IllegalArgumentException("must be one of [1, 2, 3], got " + value);
         }
@@ -1123,8 +1123,8 @@ public final class Showcase {
     }
 
     public static final class Scale {
-        public static final Scale SCALE_1_5 = new Scale(1.5);
-        public static final Scale SCALE_2_5 = new Scale(2.5);
+        public static final Scale V_1_5 = new Scale(1.5);
+        public static final Scale V_2_5 = new Scale(2.5);
 
         private final double value;
 
@@ -1135,10 +1135,10 @@ public final class Showcase {
         @JsonCreator
         public static Scale fromDouble(double value) {
             if (value == 1.5) {
-                return SCALE_1_5;
+                return V_1_5;
             }
             if (value == 2.5) {
-                return SCALE_2_5;
+                return V_2_5;
             }
             throw new IllegalArgumentException("must be one of [1.5, 2.5], got " + value);
         }
@@ -1172,8 +1172,8 @@ public final class Showcase {
     }
 
     public static final class NullableMode {
-        public static final NullableMode NULLABLE_MODE_AUTO = new NullableMode("auto");
-        public static final NullableMode NULLABLE_MODE_MANUAL = new NullableMode("manual");
+        public static final NullableMode AUTO = new NullableMode("auto");
+        public static final NullableMode MANUAL = new NullableMode("manual");
 
         private final String value;
 
@@ -1187,10 +1187,10 @@ public final class Showcase {
                 return null;
             }
             if ("auto".equals(value)) {
-                return NULLABLE_MODE_AUTO;
+                return AUTO;
             }
             if ("manual".equals(value)) {
-                return NULLABLE_MODE_MANUAL;
+                return MANUAL;
             }
             throw new IllegalArgumentException("must be one of [\"auto\", \"manual\"], got \"" + value + "\"");
         }
@@ -3201,7 +3201,7 @@ public final class Showcase {
                     } else {
                         String kindValue = field.textValue();
                         if ("showcase".equals(kindValue)) {
-                            kind = Kind.KIND;
+                            kind = Kind.SHOWCASE;
                         } else {
                             violations.add(new Violation("kind", "must equal \"showcase\""));
                         }
@@ -3239,7 +3239,7 @@ public final class Showcase {
                     } else {
                         boolean enabledValue = field.booleanValue();
                         if (enabledValue == true) {
-                            enabled = Enabled.ENABLED;
+                            enabled = Enabled.TRUE;
                         } else {
                             violations.add(new Violation("enabled", "must equal true"));
                         }
@@ -3261,9 +3261,9 @@ public final class Showcase {
                         if ("active".equals(statusValue)) {
                             status = Status.ACTIVE_JAVA;
                         } else if ("inactive".equals(statusValue)) {
-                            status = Status.STATUS_INACTIVE;
+                            status = Status.INACTIVE;
                         } else if ("pending".equals(statusValue)) {
-                            status = Status.STATUS_PENDING;
+                            status = Status.PENDING;
                         } else {
                             violations.add(new Violation("status", "must be one of [\"active\", \"inactive\", \"pending\"], got " + statusValue));
                         }
@@ -3281,11 +3281,11 @@ public final class Showcase {
                     Long tierValue = SpecNumbers.specLong(field, "tier", violations);
                     if (tierValue != null) {
                         if (tierValue == 1L) {
-                            tier = Tier.TIER_1;
+                            tier = Tier.V_1;
                         } else if (tierValue == 2L) {
-                            tier = Tier.TIER_2;
+                            tier = Tier.V_2;
                         } else if (tierValue == 3L) {
-                            tier = Tier.TIER_3;
+                            tier = Tier.V_3;
                         } else {
                             violations.add(new Violation("tier", "must be one of [1, 2, 3], got " + tierValue));
                         }
@@ -3303,9 +3303,9 @@ public final class Showcase {
                     Double scaleValue = SpecNumbers.specDouble(field, "scale", violations);
                     if (scaleValue != null) {
                         if (scaleValue == 1.5) {
-                            scale = Scale.SCALE_1_5;
+                            scale = Scale.V_1_5;
                         } else if (scaleValue == 2.5) {
-                            scale = Scale.SCALE_2_5;
+                            scale = Scale.V_2_5;
                         } else {
                             violations.add(new Violation("scale", "must be one of [1.5, 2.5], got " + scaleValue));
                         }
@@ -4631,9 +4631,9 @@ public final class Showcase {
                     } else {
                         String nullableModeValue = field.textValue();
                         if ("auto".equals(nullableModeValue)) {
-                            nullableMode = NullableMode.NULLABLE_MODE_AUTO;
+                            nullableMode = NullableMode.AUTO;
                         } else if ("manual".equals(nullableModeValue)) {
-                            nullableMode = NullableMode.NULLABLE_MODE_MANUAL;
+                            nullableMode = NullableMode.MANUAL;
                         } else {
                             violations.add(new Violation("nullableMode", "must be one of [\"auto\", \"manual\"], got " + nullableModeValue));
                         }
