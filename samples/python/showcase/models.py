@@ -13,6 +13,7 @@ import temporalio.converter
 from ._definitions import (
     ValidationError,
     Violation,
+    _binary64,
     _check_contains,
     _check_unique_items,
     _collect,
@@ -469,7 +470,7 @@ class _CircleTransferTypeConverter(
             ):
                 violations.append(Violation(path="radius", reason="expected number"))
             else:
-                radius_value = radius_value_raw
+                radius_value = _binary64(radius_value_raw)
                 if not (
                     -1.7976931348623157e308
                     <= radius_value_raw
@@ -507,7 +508,7 @@ class _CircleTransferTypeConverter(
                     path="radius", reason=f"must be a finite number, got {value.radius}"
                 )
             )
-        out["radius"] = value.radius
+        out["radius"] = _binary64(value.radius)
         for key, entry in value.additional_properties.items():
             if key in _CIRCLE_DECLARED:
                 violations.append(
@@ -966,7 +967,7 @@ class _MetricsTransferTypeConverter(
             ):
                 violations.append(Violation(path=key, reason="expected number"))
             else:
-                member = member_raw
+                member = _binary64(member_raw)
                 if not (
                     -1.7976931348623157e308 <= member_raw <= 1.7976931348623157e308
                 ):
@@ -990,7 +991,7 @@ class _MetricsTransferTypeConverter(
                 violations.append(
                     Violation(path=key, reason=f"must be a finite number, got {entry}")
                 )
-            out[key] = entry
+            out[key] = _binary64(entry)
         if violations:
             raise ValidationError(violations)
         return out
@@ -1780,7 +1781,7 @@ class _ShowcaseTransferTypeConverter(
                 ):
                     violations.append(Violation(path="ratio", reason="expected number"))
                 else:
-                    ratio_value = ratio_value_raw
+                    ratio_value = _binary64(ratio_value_raw)
                     if not (
                         -1.7976931348623157e308
                         <= ratio_value_raw
@@ -1822,7 +1823,7 @@ class _ShowcaseTransferTypeConverter(
                 ):
                     violations.append(Violation(path="score", reason="expected number"))
                 else:
-                    score_value = score_value_raw
+                    score_value = _binary64(score_value_raw)
                     if not (
                         -1.7976931348623157e308
                         <= score_value_raw
@@ -2287,7 +2288,7 @@ class _ShowcaseTransferTypeConverter(
                                         )
                                     )
                                 else:
-                                    number_grid_value_item_item = (
+                                    number_grid_value_item_item = _binary64(
                                         number_grid_value_item_element
                                     )
                                     if not (
@@ -2881,7 +2882,7 @@ class _ShowcaseTransferTypeConverter(
                         Violation(path="nullableRatio", reason="expected number")
                     )
                 else:
-                    nullable_ratio_value = nullable_ratio_value_raw
+                    nullable_ratio_value = _binary64(nullable_ratio_value_raw)
                     if not (
                         -1.7976931348623157e308
                         <= nullable_ratio_value_raw
@@ -3030,7 +3031,7 @@ class _ShowcaseTransferTypeConverter(
                                 )
                             )
                         else:
-                            integral_measurements_value_item = (
+                            integral_measurements_value_item = _binary64(
                                 integral_measurements_value_element
                             )
                             if not (
@@ -3085,7 +3086,7 @@ class _ShowcaseTransferTypeConverter(
                         Violation(path="byFive", reason="expected number")
                     )
                 else:
-                    by_five_value = by_five_value_raw
+                    by_five_value = _binary64(by_five_value_raw)
                     if not (
                         -1.7976931348623157e308
                         <= by_five_value_raw
@@ -3352,7 +3353,7 @@ class _ShowcaseTransferTypeConverter(
                     reason=f"must be one of [1.5, 2.5], got {_quote(value.scale)}",
                 )
             )
-        out["scale"] = value.scale
+        out["scale"] = _binary64(value.scale)
         if len(value.name) < 1:
             violations.append(
                 Violation(
@@ -3537,7 +3538,7 @@ class _ShowcaseTransferTypeConverter(
                             reason=f"must be a multiple of 5, got {value.ratio}",
                         )
                     )
-            out["ratio"] = value.ratio
+            out["ratio"] = _binary64(value.ratio)
         if value.score is not None:
             if not (-1.7976931348623157e308 <= value.score <= 1.7976931348623157e308):
                 violations.append(
@@ -3546,7 +3547,7 @@ class _ShowcaseTransferTypeConverter(
                         reason=f"must be a finite number, got {value.score}",
                     )
                 )
-            out["score"] = value.score
+            out["score"] = _binary64(value.score)
         if value.step is not None:
             if abs(value.step) > 9007199254740991:
                 violations.append(
@@ -3767,7 +3768,10 @@ class _ShowcaseTransferTypeConverter(
                                 reason=f"must be a finite number, got {item_element_8}",
                             )
                         )
-            out["numberGrid"] = value.number_grid
+            out["numberGrid"] = [
+                [_binary64(element1) for element1 in element]
+                for element in value.number_grid
+            ]
         if value.links is not None:
             for item_index_4, item_element_4 in enumerate(value.links):
                 if _PATTERN_BECE32B4DA20247D.search(item_element_4) is None:
@@ -4053,7 +4057,7 @@ class _ShowcaseTransferTypeConverter(
                             reason=f"must be a multiple of 2, got {value.nullable_ratio}",
                         )
                     )
-            out["nullableRatio"] = value.nullable_ratio
+            out["nullableRatio"] = _binary64(value.nullable_ratio)
         if value.nullable_flag is not None:
             out["nullableFlag"] = value.nullable_flag
         if value.nullable_tags is not None:
@@ -4100,7 +4104,9 @@ class _ShowcaseTransferTypeConverter(
                             reason=f"must be a finite number, got {item_element_4}",
                         )
                     )
-            out["integralMeasurements"] = value.integral_measurements
+            out["integralMeasurements"] = [
+                _binary64(element) for element in value.integral_measurements
+            ]
         if value.by_five is not None:
             if not (-1.7976931348623157e308 <= value.by_five <= 1.7976931348623157e308):
                 violations.append(
@@ -4117,7 +4123,7 @@ class _ShowcaseTransferTypeConverter(
                             reason=f"must be a multiple of 5, got {value.by_five}",
                         )
                     )
-            out["byFive"] = value.by_five
+            out["byFive"] = _binary64(value.by_five)
         if value.wildcard is not None:
             if _PATTERN_F7DE686CF7F23810.search(value.wildcard) is None:
                 violations.append(
@@ -5180,7 +5186,7 @@ class _ShowcaseLocationGeoTransferTypeConverter(
                 ):
                     violations.append(Violation(path="lat", reason="expected number"))
                 else:
-                    lat_value = lat_value_raw
+                    lat_value = _binary64(lat_value_raw)
                     if not (
                         -1.7976931348623157e308
                         <= lat_value_raw
@@ -5207,7 +5213,7 @@ class _ShowcaseLocationGeoTransferTypeConverter(
                 ):
                     violations.append(Violation(path="lon", reason="expected number"))
                 else:
-                    lon_value = lon_value_raw
+                    lon_value = _binary64(lon_value_raw)
                     if not (
                         -1.7976931348623157e308
                         <= lon_value_raw
@@ -5243,7 +5249,7 @@ class _ShowcaseLocationGeoTransferTypeConverter(
                         path="lat", reason=f"must be a finite number, got {value.lat}"
                     )
                 )
-            out["lat"] = value.lat
+            out["lat"] = _binary64(value.lat)
         if value.lon is not None:
             if not (-1.7976931348623157e308 <= value.lon <= 1.7976931348623157e308):
                 violations.append(
@@ -5251,7 +5257,7 @@ class _ShowcaseLocationGeoTransferTypeConverter(
                         path="lon", reason=f"must be a finite number, got {value.lon}"
                     )
                 )
-            out["lon"] = value.lon
+            out["lon"] = _binary64(value.lon)
         for key, entry in value.additional_properties.items():
             if key in _SHOWCASE_LOCATION_GEO_DECLARED:
                 violations.append(
@@ -5489,7 +5495,7 @@ class _SquareTransferTypeConverter(
             ):
                 violations.append(Violation(path="side", reason="expected number"))
             else:
-                side_value = side_value_raw
+                side_value = _binary64(side_value_raw)
                 if not (
                     -1.7976931348623157e308 <= side_value_raw <= 1.7976931348623157e308
                 ):
@@ -5525,7 +5531,7 @@ class _SquareTransferTypeConverter(
                     path="side", reason=f"must be a finite number, got {value.side}"
                 )
             )
-        out["side"] = value.side
+        out["side"] = _binary64(value.side)
         for key, entry in value.additional_properties.items():
             if key in _SQUARE_DECLARED:
                 violations.append(
@@ -6329,7 +6335,7 @@ def _showcase_measurements_from_transfer_type(
                     Violation(path=items_item_path, reason="expected number")
                 )
             else:
-                items_item = items_element
+                items_item = _binary64(items_element)
                 if not (
                     -1.7976931348623157e308 <= items_element <= 1.7976931348623157e308
                 ):

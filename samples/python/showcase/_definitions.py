@@ -15,6 +15,7 @@ import temporalio.converter
 __all__ = [
     "ValidationError",
     "Violation",
+    "_binary64",
     "_check_contains",
     "_check_date_time",
     "_check_duration",
@@ -121,6 +122,19 @@ def _parse_spec_integer(
         violations.append(Violation(path=path, reason="expected integer"))
         return None
     return out
+
+
+def _binary64(value: float) -> float:
+    """Narrows a `number` value to the binary64 domain shared by every target."""
+
+    try:
+        return float(value)
+    except OverflowError:
+        # Past the binary64 range there is nothing to narrow to. The caller's
+        # finiteness check has already recorded that violation and will raise, so
+        # hand the value back rather than throwing out of turn and losing the
+        # other violations collected alongside it.
+        return value
 
 
 def _json_values_equal(left: typing.Any, right: typing.Any) -> bool:

@@ -784,6 +784,7 @@ pub(in crate::generator) fn render_external_models(
 const JSON_RUNTIME_SYMBOLS: &[&str] = &[
     "ValidationError",
     "Violation",
+    "_binary64",
     "_check_contains",
     "_check_date_time",
     "_check_duration",
@@ -875,6 +876,7 @@ fn render_json_runtime_module() -> String {
     for name in [
         "ValidationError",
         "Violation",
+        "_binary64",
         "_check_contains",
         "_check_date_time",
         "_check_duration",
@@ -908,6 +910,8 @@ fn render_json_runtime_module() -> String {
     render_transfer_type_convertible_helper(&mut output);
     output.push_str("\n\n");
     render_spec_int_helper(&mut output);
+    output.push_str("\n\n");
+    render_binary64_helper(&mut output);
     output.push_str("\n\n");
     render_unique_items_helper(&mut output);
     output.push_str("\n\n");
@@ -4433,7 +4437,10 @@ fn render_value_parser(
                     "not isinstance({raw_expr}, bool) and isinstance({raw_expr}, (int, float))"
                 ),
                 "expected number",
-                raw_expr,
+                // Narrowed on the way in, so the member holds the binary64 its
+                // annotation promises and a wire integer past 2^53 reads back
+                // the same value it does in every other target (P1).
+                &format!("_binary64({raw_expr})"),
                 target,
                 path_expr,
                 indent,
@@ -4580,7 +4587,7 @@ fn render_py_isinstance_parser(
     output: &mut String,
     guard: &str,
     reason: &str,
-    raw_expr: &str,
+    store_expr: &str,
     target: &str,
     path_expr: &str,
     indent: &str,
@@ -4595,7 +4602,7 @@ fn render_py_isinstance_parser(
     output.push_str(indent);
     output.push_str("else:\n");
     output.push_str(indent);
-    output.push_str(&format!("    {target} = {raw_expr}\n"));
+    output.push_str(&format!("    {target} = {store_expr}\n"));
 }
 
 /// Declares a local for a value that has not been parsed yet. The placeholder is
@@ -4969,6 +4976,14 @@ fn serialize_expr(schema: &Schema, value_expr: &str, depth: usize) -> String {
             return format!("[{mapped} for {element} in {value_expr}]");
         }
     }
+    // Narrow on the way out too: a model built in Python (rather than parsed)
+    // can hold an unbounded `int` in a `number` member, which would leave this
+    // target the only one emitting an integer past 2^53 exactly. The array form
+    // above is what carries the narrowing into elements, and the `oneOf` form
+    // above it past a `None`.
+    if schema.ty.as_ref().and_then(Value::as_str) == Some("number") {
+        return format!("_binary64({value_expr})");
+    }
     value_expr.to_string()
 }
 
@@ -5004,6 +5019,32 @@ def _parse_spec_integer(
         violations.append(Violation(path=path, reason="expected integer"))
         return None
     return out
+"#;
+
+/// Emits the `type: number` narrowing helper.
+///
+/// Python is the one target whose `int` is unbounded, so a wire integer past
+/// 2^53 kept its exact value in a `number` field while Go, TypeScript and Java
+/// rounded it into their `float64`/`number`/`double` — the same payload reading
+/// back as a *different* number in Python, which is the round-trip agreement P1
+/// makes mandatory. Narrowing in both directions puts all four targets in the
+/// one binary64 domain `type.md` specifies, and also stops an `int` being stored
+/// in a `float`-annotated member.
+fn render_binary64_helper(output: &mut String) {
+    output.push_str(BINARY64_HELPER_BODY);
+}
+
+const BINARY64_HELPER_BODY: &str = r#"def _binary64(value: float) -> float:
+    """Narrows a `number` value to the binary64 domain shared by every target."""
+
+    try:
+        return float(value)
+    except OverflowError:
+        # Past the binary64 range there is nothing to narrow to. The caller's
+        # finiteness check has already recorded that violation and will raise, so
+        # hand the value back rather than throwing out of turn and losing the
+        # other violations collected alongside it.
+        return value
 "#;
 
 fn typed_map_value_schema(schema: &Schema) -> Result<Option<Schema>> {

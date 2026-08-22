@@ -131,6 +131,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `x-java-enum-names` for the constant scope. Go is unaffected (it already named
   constants `{Type}{Value}`), as are constants given an explicit
   `x-java-const-name` / `x-java-enum-names` override.
+- JSON Schema (Python): a `type: number` value is now narrowed to binary64 in
+  both directions instead of being stored exactly as it arrived. Python is the
+  one target whose `int` is unbounded, so a `number` past 2^53 kept its exact
+  value there while Go, TypeScript and Java rounded it into their
+  `float64`/`number`/`double` — the same payload reading back as a *different*
+  number. A `number` member now always holds the `float` its annotation
+  promises, and the re-emitted lexeme follows (`5` → `5.0`), which is the same
+  JSON value: a number's spelling is not part of JSON identity. `type: integer`
+  members are unaffected and stay a plain `int`.
+
 - JSON Schema (Go, Java): a numeric value constant's name now derives from the
   value rather than its authored spelling, so `const: 1`, `const: 1.0` and
   `const: 1e0` all name one constant (`Score1` / `V_1`) instead of `Score1_0` /

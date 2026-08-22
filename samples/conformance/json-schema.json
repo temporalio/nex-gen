@@ -59,7 +59,7 @@
     },
     {
       "id": "mathematical-number-equality",
-      "intent": "JSON number spelling is not identity-bearing: -0.0, 5e0, 1e3, the double extremes and a subnormal survive a round trip by mathematical value in every target.",
+      "intent": "JSON number spelling is not identity-bearing: -0.0, 5e0, 1e3, the double extremes and a subnormal survive a round trip by mathematical value in every target, and a `number` past 2**53 narrows to the same binary64 in all four.",
       "schema": "samples/schemas/showcase.nexusrpc.yaml",
       "model": "Showcase",
       "expected_load": {
@@ -68,6 +68,10 @@
       "accepted_wire_values": [
         {
           "fixture": "samples/wire/json_schema/showcase/showcase-number-values.json"
+        },
+        {
+          "wire_json": "{\"kind\": \"showcase\", \"revision\": 1, \"enabled\": true, \"status\": \"active\", \"tier\": 1, \"scale\": 1.5, \"name\": \"Past the safe-integer range\", \"count\": 1, \"active\": true, \"category\": \"tools\", \"score\": 9007199254740993}",
+          "expected_wire": "{\"kind\": \"showcase\", \"revision\": 1, \"enabled\": true, \"status\": \"active\", \"tier\": 1, \"scale\": 1.5, \"name\": \"Past the safe-integer range\", \"count\": 1, \"active\": true, \"category\": \"tools\", \"score\": 9007199254740992}"
         }
       ],
       "parse_failures": [],

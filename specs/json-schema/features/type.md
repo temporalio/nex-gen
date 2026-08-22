@@ -168,9 +168,18 @@ Strategy per language:
   raises as one `ValidationError` (**PRINCIPLES Python §2**). Because `bool`
   is a subclass of `int`, an integer or number check **must exclude `bool`
   explicitly** — otherwise `True` classifies as `1`. A classified `number` is
-  stored **exactly as it arrived**, never coerced: an integral `5` stays an
-  `int` in a `float`-annotated member. This is idiomatic and preserves its
-  value; P1 does not require the re-emitted numeric lexeme to match. Integer fields
+  **narrowed to binary64** in both directions, through the generated runtime's
+  `_binary64(value)`: an integral `5` is stored as `5.0`, the `float` its member
+  is annotated. Python is the one target whose `int` is unbounded, so keeping the
+  wire `int` let a `number` past 2^53 hold its exact value here while Go,
+  TypeScript and Java rounded it into their `float64`/`number`/`double` — the
+  same payload reading back as a *different* number, which P1 forbids (the
+  binary64 domain is shared by all four targets, not a Python-side choice). The
+  re-emitted lexeme changes with it (`5` → `5.0`), which P1 does not constrain —
+  a number's spelling is not part of JSON identity. `_binary64` returns its
+  argument unchanged on `OverflowError` rather than raising: a magnitude past the
+  binary64 range has nothing to narrow to, and the finiteness check has already
+  recorded that violation and will raise it with the others (P11). Integer fields
   stay a plain `int` and run through the generated runtime's
   `_parse_spec_integer(value, path, violations)`: it rejects `bool`, accepts
   an `int`, accepts a `float` with zero fractional part (`1.0`, `1e2`), and

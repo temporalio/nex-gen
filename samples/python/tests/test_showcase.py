@@ -561,6 +561,20 @@ def test_number_roundtrip_preserves_mathematical_values() -> None:
     assert numbers[0] == 0.0
     assert math.isfinite(numbers[3]) and math.isfinite(numbers[4])
 
+    # A `number` is narrowed to binary64 on the way in, so Python lands on the
+    # same value the other three targets do. Python's `int` is the only unbounded
+    # one, so without the narrowing this field held 9007199254740993 exactly
+    # while Go, TypeScript and Java rounded it -- one payload reading back as two
+    # different numbers, which is the round-trip agreement P1 requires. The
+    # conformance manifest pins the four-target half of this
+    # (`mathematical-number-equality`).
+    past_the_safe_range = parse({**BASE, "score": 9007199254740993})
+    assert isinstance(past_the_safe_range.score, float)
+    assert past_the_safe_range.score == 9007199254740992.0
+    assert encode_bytes(past_the_safe_range) == canonical_json_bytes(
+        {**BASE, "score": 9007199254740992.0}
+    )
+
 
 def test_object_constraints_roundtrip_and_reject() -> None:
     attributes = typing.cast(
@@ -898,11 +912,18 @@ def test_union_array_branch_types_every_element() -> None:
         ("measurements[1]", "expected number"),
     ]
 
-    # Valid elements still decode, and re-emit with their wire form intact.
+    # Valid elements still decode, and re-emit as the same mathematical numbers.
+    # A `number` element is narrowed to binary64 on the way in, so the integral
+    # `2` reads back as `2.0` -- one JSON value under P1 ("a number's lexical
+    # spelling" is not part of JSON identity), and the same `double` Go,
+    # TypeScript and Java hold. Without the narrowing Python was the only target
+    # keeping an unbounded `int` here, so an element past 2 ** 53 round-tripped
+    # to a different number than everywhere else.
     values = parse({**BASE, "measurements": [1.5, 2, 3.75]})
     assert values.measurements == [1.5, 2, 3.75]
+    assert all(isinstance(m, float) for m in values.measurements)
     assert encode_bytes(values) == canonical_json_bytes(
-        {**BASE, "measurements": [1.5, 2, 3.75]}
+        {**BASE, "measurements": [1.5, 2.0, 3.75]}
     )
 
 
