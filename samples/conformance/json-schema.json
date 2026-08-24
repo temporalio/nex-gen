@@ -595,7 +595,7 @@
       "expected_divergence": {
         "findings": ["13#4"],
         "status": "structural",
-        "note": "4503599627370496.5 is rejected by Go and Java, which see the decimal text, and accepted by Python and TypeScript, which see the already-rounded double. TypeScript cannot recover the literal (D8), so the agreed accept set is bounded by it; narrowing Python alone would move the divergence rather than remove it.",
+        "note": "4503599627370496.5 is rejected by Go and Java, which see the decimal text, and accepted by Python and TypeScript, which see the already-rounded double. The same structural divergence applies to any non-integral decimal token that rounds to an integral binary64 value within the safe-integer cap; [2^52, 2^53) merely makes the effect systematic. TypeScript cannot recover the literal (D8), and narrowing Python alone would move the divergence rather than remove it.",
         "matches": ["parse_failures[5]"]
       },
       "schemas": ["samples/conformance/schemas/integer-semantics.yaml"]

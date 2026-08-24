@@ -155,10 +155,12 @@ Strategy per language:
   → rejected), so no text pre-scan and no `lossless-json` (P4) is needed
   to enforce the cap.
   It is **not** a complete fractional-part check. A post-parse predicate
-  cannot see a fractional digit that the parse already dropped: for a
-  literal in `[2^52, 2^53)` the double spacing is `1`, so
+  cannot see a fractional digit that the parse already dropped. The effect is
+  systematic for literals in `[2^52, 2^53)`, where the double spacing is `1`, so
   `JSON.parse("9007199254740991.1") === 9007199254740991` and
-  `Number.isSafeInteger` reports `true`. See the fractional-band note
+  `Number.isSafeInteger` reports `true`. It can also occur at smaller
+  magnitudes when a sufficiently fine fractional part rounds away (for example,
+  `JSON.parse("1.00000000000000001") === 1`). See the parse-boundary note
   under the large-integer fixtures below for which targets share this
   limitation.
 - **Python**: models are inert dataclasses (**PRINCIPLES Python §1**), so
@@ -311,22 +313,25 @@ For each accepted `type`, fuzz over:
   `9007199254740993` (`2^53+1`, which TS silently rounds to `2^53` —
   must still reject), and `18014398509481985` (`2^54+1`). Same
   accept/reject set in all four languages.
-- **Fractional literals in the `[2^52, 2^53)` band.** The normative rule
+- **Fractional literals rounded to integral binary64 values.** The normative rule
   is the one stated at the top of this spec: `integer` matches a JSON
   number whose **written** fractional part is zero, so
-  `4503599627370496.5` and `9007199254740991.1` reject. Enforcing it
-  requires reading the literal's decimal text, which only two targets
+  `1.00000000000000001`, `4503599627370496.5`, and
+  `9007199254740991.1` reject. Enforcing it requires reading the literal's
+  decimal text, which only two targets
   can: Go's helper takes a `json.Number` (the verbatim token) and Java's
   takes a `JsonNode` it converts with `decimalValue()`. TypeScript and
   Python are handed a value the platform parser already produced — the
-  double nearest the literal — and in this band that double *is* an
-  integer, so `Number.isSafeInteger` / `float.is_integer()` report a
-  whole number and the field is accepted. This is a **documented,
-  bounded limitation of the two parse-boundary targets**, not a licence
-  to loosen Go and Java: the band is `[2^52, 2^53)` (double spacing ≥ 1
-  with the cap still admitting the value), and no smaller magnitude is
-  affected because the fractional digit survives the parse there. It has
-  the same root cause as the untyped-extras precision note in
+  double nearest the literal — and when that double is an integer within
+  the safe-integer cap, `Number.isSafeInteger` / `float.is_integer()` report
+  a whole number and the field is accepted. The divergence therefore applies
+  to **any non-integral decimal token that rounds to an integral binary64 value
+  within the cap**. The `[2^52, 2^53)` band makes the effect systematic because
+  every binary64 value there is integral, but sufficiently fine fractional
+  parts can round away at smaller magnitudes too. This is a **documented
+  limitation of the two parse-boundary targets**, not a licence to loosen Go
+  and Java. This limitation has the same root cause as the untyped-extras
+  precision note in
   [[additionalProperties]] — the byte boundary sits outside the
   converter (PRINCIPLES TypeScript §4, Python §3).
 
