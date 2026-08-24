@@ -74,81 +74,20 @@ jobs:
             8.0.x
             9.0.x
 
-      - name: Install Python dependencies (samples)
-        working-directory: samples/python
-        run: uv sync --locked
+      - name: Validate Rust
+        run: ./scripts/validate.sh rust
 
-      - name: Install Python dependencies (advanced)
-        working-directory: advanced/samples/python
-        run: uv sync --locked
+      - name: Validate Python samples
+        run: ./scripts/validate.sh python
 
-      - name: Install TypeScript dependencies (samples)
-        working-directory: samples/typescript
-        run: npm ci
+      - name: Validate TypeScript samples
+        run: ./scripts/validate.sh typescript
 
-      - name: Install TypeScript dependencies (advanced)
-        working-directory: advanced/samples/typescript
-        run: npm ci
+      - name: Validate Go samples
+        run: ./scripts/validate.sh go
 
-      - name: Check Rust formatting
-        run: cargo fmt --check
+      - name: Validate Java samples
+        run: ./scripts/validate.sh java
 
-      - name: Run Rust tests
-        run: cargo test --features advanced
-
-      - name: Check Python formatting (samples)
-        working-directory: samples/python
-        run: uv run ruff format --check .
-
-      - name: Check Python formatting (advanced)
-        working-directory: advanced/samples/python
-        run: uv run ruff format --check .
-
-      - name: Check TypeScript formatting (samples)
-        working-directory: samples/typescript
-        run: npm exec -- prettier --check .
-
-      - name: Check TypeScript formatting (advanced)
-        working-directory: advanced/samples/typescript
-        run: npm exec -- prettier --check .
-
-      - name: Check Go formatting
-        run: |
-          unformatted="$(gofmt -l samples/go advanced/samples/go)"
-          if [ -n "$unformatted" ]; then
-            echo "gofmt required for:" >&2
-            echo "$unformatted" >&2
-            exit 1
-          fi
-
-      - name: Run Go tests (samples)
-        working-directory: samples/go
-        run: go test ./...
-
-      - name: Run Go tests (advanced)
-        working-directory: advanced/samples/go
-        run: go test ./...
-
-      - name: Run Python tests (samples)
-        working-directory: samples/python
-        run: uv run pytest
-
-      - name: Run Python tests (advanced)
-        working-directory: advanced/samples/python
-        run: uv run pytest
-
-      - name: Run Java tests (samples)
-        working-directory: samples/java
-        run: ./gradlew build --no-daemon
-
-      - name: Run Java tests (advanced)
-        working-directory: advanced/samples/java
-        run: ./gradlew build --no-daemon
-
-      - name: Run .NET tests (samples)
-        working-directory: samples/dotnet
-        run: dotnet test tests/ --nologo
-
-      - name: Run .NET tests (advanced)
-        working-directory: advanced/samples/dotnet
-        run: dotnet test tests/ --nologo
+      - name: Validate .NET samples
+        run: ./scripts/validate.sh dotnet

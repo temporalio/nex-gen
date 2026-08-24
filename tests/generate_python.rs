@@ -887,33 +887,6 @@ fn cli_generates_python_support_file_from_parameter() {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
-#[test]
-fn python_example_suite_type_checks_and_runs() {
-    let root = project_root();
-
-    // The advanced project holds the WIT + proto-wire suites and the snapshot-only
-    // native-api outputs; the samples project holds the JSON-Schema definitions and
-    // their round-trip tests. Both must type-check and pass.
-    for example_dir in [python_root(&root), samples_python_root(&root)] {
-        let typecheck_status = Command::new("uv")
-            .current_dir(&example_dir)
-            .args(["run", "basedpyright"])
-            .status()
-            .unwrap();
-        assert!(
-            typecheck_status.success(),
-            "basedpyright failed in {example_dir:?}"
-        );
-
-        let pytest_status = Command::new("uv")
-            .current_dir(&example_dir)
-            .args(["run", "pytest"])
-            .status()
-            .unwrap();
-        assert!(pytest_status.success(), "pytest failed in {example_dir:?}");
-    }
-}
-
 /// The generated JSON-Schema runtime must also *run* on the declared floor,
 /// `requires-python = ">=3.10"` — not merely parse as 3.10 syntax.
 ///

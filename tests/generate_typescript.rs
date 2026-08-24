@@ -768,34 +768,6 @@ fn typescript_rejects_support_namespace() {
 }
 
 #[test]
-fn typescript_example_suite_typechecks_and_tests() {
-    let root = project_root();
-    // The advanced project holds the WIT examples + snapshot-only native-api
-    // output; the samples project holds the JSON-Schema definitions + their
-    // runtime tests. Typecheck and test both so neither tier loses coverage.
-    for example_dir in [samples_typescript_root(&root), typescript_root(&root)] {
-        ensure_typescript_dependencies(&example_dir);
-
-        let typecheck_status = Command::new("npm")
-            .current_dir(&example_dir)
-            .args(["run", "typecheck"])
-            .status()
-            .unwrap();
-        assert!(
-            typecheck_status.success(),
-            "typecheck failed in {example_dir:?}"
-        );
-
-        let test_status = Command::new("npm")
-            .current_dir(&example_dir)
-            .args(["run", "test"])
-            .status()
-            .unwrap();
-        assert!(test_status.success(), "tests failed in {example_dir:?}");
-    }
-}
-
-#[test]
 fn typescript_renders_required_fields_and_custom_message_types() {
     let root = project_root();
     let rendered = generate_typescript_to_string(

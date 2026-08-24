@@ -17,21 +17,95 @@ run_in() {
   (cd "$dir" && "$@")
 }
 
-for tier in samples advanced/samples; do
-  run_in "$tier/python" uv sync --locked
-  run_in "$tier/typescript" npm ci
-done
+require_gradle_java() {
+  if ! command -v java >/dev/null 2>&1; then
+    echo "Java 17 or later is required to launch the sample Gradle builds." >&2
+    echo "CI and the Gradle toolchains use Java 21; set JAVA_HOME and PATH accordingly." >&2
+    exit 1
+  fi
 
-run cargo fmt --check
-# The `advanced` feature exposes the WIT/proto CLI surface the integration tests
-# exercise; enable it so the full suite runs.
-run cargo test --features advanced
+  local java_version java_major
+  java_version="$(java -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')"
+  java_major="${java_version%%.*}"
+  if [[ ! "$java_major" =~ ^[0-9]+$ ]] || ((java_major < 17)); then
+    echo "Java 17 or later is required to launch the sample Gradle builds; found ${java_version:-unknown}." >&2
+    echo "CI and the Gradle toolchains use Java 21; set JAVA_HOME and PATH accordingly." >&2
+    exit 1
+  fi
+}
 
-for tier in samples advanced/samples; do
-  run_in "$tier/python" uv run ruff check .
-  run_in "$tier/python" uv run ruff format --check .
-  run_in "$tier/typescript" npm exec -- prettier --check .
-  run_in "$tier/go" bash -c 'unformatted="$(gofmt -l .)"; if [ -n "$unformatted" ]; then echo "gofmt required for:" >&2; echo "$unformatted" >&2; exit 1; fi'
-  run_in "$tier/go" go test ./...
-  run_in "$tier/dotnet" dotnet test tests/ --nologo
-done
+validate_rust() {
+  run cargo fmt --check
+  # The `advanced` feature exposes the WIT/proto CLI surface the integration tests
+  # exercise; enable it so the full suite runs.
+  run cargo test --features advanced
+}
+
+validate_python() {
+  for tier in samples advanced/samples; do
+    run_in "$tier/python" uv sync --locked
+    run_in "$tier/python" uv run ruff check .
+    run_in "$tier/python" uv run ruff format --check .
+    run_in "$tier/python" uv run basedpyright
+    run_in "$tier/python" uv run pytest
+  done
+}
+
+validate_typescript() {
+  for tier in samples advanced/samples; do
+    run_in "$tier/typescript" npm ci
+    run_in "$tier/typescript" npm exec -- prettier --check .
+    run_in "$tier/typescript" npm run typecheck
+    run_in "$tier/typescript" npm run test
+  done
+}
+
+validate_go() {
+  for tier in samples advanced/samples; do
+    run_in "$tier/go" bash -c 'unformatted="$(gofmt -l .)"; if [ -n "$unformatted" ]; then echo "gofmt required for:" >&2; echo "$unformatted" >&2; exit 1; fi'
+    run_in "$tier/go" go test ./...
+  done
+}
+
+validate_java() {
+  require_gradle_java
+  for tier in samples advanced/samples; do
+    run_in "$tier/java" ./gradlew build --no-daemon
+  done
+}
+
+validate_dotnet() {
+  for tier in samples advanced/samples; do
+    run_in "$tier/dotnet" dotnet test tests/ --nologo
+  done
+}
+
+usage() {
+  echo "Usage: $0 [rust|python|typescript|go|java|dotnet]" >&2
+}
+
+if (( $# > 1 )); then
+  usage
+  exit 2
+fi
+
+case "${1:-all}" in
+  all)
+    validate_rust
+    validate_python
+    validate_typescript
+    validate_go
+    validate_java
+    validate_dotnet
+    ;;
+  rust) validate_rust ;;
+  python) validate_python ;;
+  typescript) validate_typescript ;;
+  go) validate_go ;;
+  java) validate_java ;;
+  dotnet) validate_dotnet ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
