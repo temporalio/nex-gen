@@ -1924,6 +1924,7 @@ test("mixed extras, matchers, and wire-string constraints run both ways", () => 
     )
     .unwrap();
     let sample_root = samples_typescript_root(&project_root());
+    ensure_typescript_dependencies(&sample_root);
     let runtime_relative = runtime_test.strip_prefix(&sample_root).unwrap();
     let runtime_config = temp_dir.join("vitest.config.ts");
     fs::write(
@@ -2219,6 +2220,7 @@ test("contains, propertyNames, arrays, and typed-extra counts aggregate both way
     )
     .unwrap();
     let sample_root = samples_typescript_root(&project_root());
+    ensure_typescript_dependencies(&sample_root);
     let runtime_relative = runtime_test.strip_prefix(&sample_root).unwrap();
     let runtime_config = temp_dir.join("vitest.config.ts");
     fs::write(

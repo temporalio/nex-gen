@@ -86,6 +86,25 @@ fn generate(language: nexgen::language::Language, java_package_name: Option<&str
     output_path
 }
 
+/// Installs the sample's npm dependencies when the checkout has not run
+/// `npm ci` yet; CI validates Rust before it touches the TypeScript samples.
+fn ensure_typescript_dependencies(sample_dir: &Path) {
+    if sample_dir.join("node_modules").exists() {
+        return;
+    }
+
+    let install_status = Command::new("npm")
+        .current_dir(sample_dir)
+        .args(["install", "--no-fund", "--no-audit"])
+        .status()
+        .unwrap();
+    assert!(
+        install_status.success(),
+        "npm install failed in {}",
+        sample_dir.display()
+    );
+}
+
 fn read_files(root: &Path, extension: &str) -> BTreeMap<PathBuf, String> {
     fn visit(root: &Path, dir: &Path, extension: &str, files: &mut BTreeMap<PathBuf, String>) {
         let mut entries = fs::read_dir(dir)
@@ -189,6 +208,7 @@ fn typescript_hostile_documentation_is_wrapped_escaped_and_typechecks() {
 
     let root = project_root();
     let typescript_root = root.join("samples/typescript");
+    ensure_typescript_dependencies(&typescript_root);
     #[cfg(unix)]
     std::os::unix::fs::symlink(
         typescript_root.join("node_modules"),
@@ -198,6 +218,9 @@ fn typescript_hostile_documentation_is_wrapped_escaped_and_typechecks() {
     let mut command = Command::new("npm");
     command.current_dir(&typescript_root).args([
         "exec",
+        // Fail instead of fetching a same-named package from the registry when
+        // the local compiler is missing.
+        "--no",
         "--",
         "tsc",
         "--ignoreConfig",
