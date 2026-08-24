@@ -284,15 +284,20 @@ fn leaf_export_names(
     model_hoists: &PythonModelHoists,
     mode: GenerationMode,
 ) -> BTreeSet<String> {
-    let variant_companion_names = PythonExternalModels::variant_companion_names(plan);
+    let external_model_plan = PythonExternalModels::build_plan(plan);
     let mut model_names = plan
         .enums()
         .map(|(_, enumeration)| enumeration.name.clone())
         .chain(plan.flags().map(|(_, flag_set)| flag_set.name.clone()))
         .chain(plan.variants().flat_map(|(full_name, variant)| {
             let mut names = vec![variant.name.clone()];
-            if let Some(companion_names) = variant_companion_names.get(full_name) {
-                names.extend(companion_names.iter().cloned());
+            if let Some(variant_plan) = external_model_plan.variant(full_name) {
+                names.extend(
+                    variant_plan
+                        .cases
+                        .iter()
+                        .map(|case| case.generated_name.name.clone()),
+                );
             }
             names
         }))
@@ -306,7 +311,10 @@ fn leaf_export_names(
             Some(json_type.model_name.clone())
         }))
         .collect::<BTreeSet<_>>();
-    model_names.extend(planned_module_export_model_names(plan));
+    model_names.extend(planned_module_export_model_names(
+        plan,
+        &external_model_plan,
+    ));
 
     match mode {
         GenerationMode::DefinitionsOnly => {
@@ -353,8 +361,10 @@ fn leaf_export_names(
     }
 }
 
-fn planned_module_export_model_names(plan: &PlannedSpec) -> BTreeSet<String> {
-    let variant_companion_names = PythonExternalModels::variant_companion_names(plan);
+fn planned_module_export_model_names(
+    plan: &PlannedSpec,
+    external_model_plan: &PythonExternalModelPlan,
+) -> BTreeSet<String> {
     let mut names = plan
         .types
         .values()
@@ -374,16 +384,17 @@ fn planned_module_export_model_names(plan: &PlannedSpec) -> BTreeSet<String> {
         let TypeDeclSpec::Variant(variant) = &entry.declaration else {
             return None;
         };
-        variant_companion_names
-            .contains_key(&variant.full_name)
+        external_model_plan
+            .variant(&variant.full_name)
+            .is_some()
             .then_some(variant)
     }) {
         names.extend(
-            variant_companion_names
-                .get(&variant.full_name)
+            external_model_plan
+                .variant(&variant.full_name)
                 .into_iter()
-                .flatten()
-                .cloned(),
+                .flat_map(|variant| &variant.cases)
+                .map(|case| case.generated_name.name.clone()),
         );
     }
     names
@@ -416,13 +427,14 @@ struct ApiPlanner<'a> {
 
 #[derive(Debug, Default)]
 struct PythonExternalModels {
+    plan: PythonExternalModelPlan,
     proto: python_proto::ModelBackend,
     json: python_json::ModelBackend,
 }
 
 impl PythonExternalModels {
-    fn variant_companion_names(api_plan: &PlannedSpec) -> BTreeMap<String, Vec<String>> {
-        python_proto::variant_companion_names(api_plan)
+    fn build_plan(api_plan: &PlannedSpec) -> PythonExternalModelPlan {
+        python_proto::external_model_plan(api_plan)
     }
 
     fn new(api_plan: &PlannedSpec) -> Result<Self> {
@@ -433,6 +445,7 @@ impl PythonExternalModels {
 
     fn new_with_hoists(api_plan: &PlannedSpec, hoists: &PythonModelHoists) -> Result<Self> {
         let mut this = Self::default();
+        this.plan = Self::build_plan(api_plan);
         this.proto.prepare(api_plan)?;
         this.json.prepare_with_hoists(api_plan, hoists)?;
         Ok(this)
@@ -526,10 +539,13 @@ impl PythonExternalModels {
         model: &RenderedModel,
         planned_model: &RecordSpec<PlannedFamily>,
     ) -> Result<Option<RenderedRecordWireBlock>> {
-        self.proto
-            .render_record_wire_block(api_plan, model, planned_model, &|value_type| {
-                resolve_python_value_type(api_plan, self, value_type)
-            })
+        self.proto.render_record_wire_block(
+            api_plan,
+            &self.plan,
+            model,
+            planned_model,
+            &|value_type| resolve_python_value_type(api_plan, self, value_type),
+        )
     }
 
     fn render_variant_block(
@@ -537,11 +553,8 @@ impl PythonExternalModels {
         full_name: &str,
         variant: &RenderedVariant,
     ) -> Option<RenderedVariantBlock> {
-        self.proto.render_variant_block(full_name, variant)
-    }
-
-    fn generated_names(&self, api_plan: &PlannedSpec) -> Vec<PythonGeneratedName> {
-        self.proto.generated_names(api_plan)
+        let variant_plan = self.plan.variant(full_name)?;
+        Some(self.proto.render_variant_block(variant, variant_plan))
     }
 }
 
@@ -550,6 +563,7 @@ impl ExternalModelBackend for PythonExternalModels {
     type WireConversion = WireValueConversion;
 
     fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+        self.plan = Self::build_plan(api_plan);
         self.proto.prepare(api_plan)?;
         self.json.prepare(api_plan)
     }
@@ -613,7 +627,7 @@ impl<'a> ApiPlanner<'a> {
         } else {
             PythonExternalModels::new(api_plan)?
         };
-        validate_python_generated_names(api_plan, &external_models.generated_names(api_plan))?;
+        validate_python_generated_names(api_plan, external_models.plan.generated_names())?;
         Ok(Self {
             api_plan,
             inline_model_rebuilds,
@@ -758,7 +772,7 @@ impl<'a> ApiPlanner<'a> {
             BTreeSet::new()
         };
         package_model_names.extend(
-            planned_module_export_model_names(self.api_plan)
+            planned_module_export_model_names(self.api_plan, &self.external_models.plan)
                 .intersection(&rendered_model_names)
                 .cloned(),
         );
@@ -2738,6 +2752,57 @@ pub(in crate::generator) struct RenderedVariantBlock {
 pub(in crate::generator) struct PythonGeneratedName {
     pub(in crate::generator) name: String,
     pub(in crate::generator) generated_by: String,
+}
+
+#[derive(Debug, Default)]
+pub(in crate::generator) struct PythonExternalModelPlan {
+    variants: BTreeMap<String, PythonExternalVariantPlan>,
+}
+
+#[derive(Debug)]
+pub(in crate::generator) struct PythonExternalVariantPlan {
+    pub(in crate::generator) cases: Vec<PythonExternalVariantCasePlan>,
+}
+
+#[derive(Debug)]
+pub(in crate::generator) struct PythonExternalVariantCasePlan {
+    pub(in crate::generator) case_name: String,
+    pub(in crate::generator) generated_name: PythonGeneratedName,
+}
+
+impl PythonExternalModelPlan {
+    pub(in crate::generator) fn insert_variant(
+        &mut self,
+        full_name: String,
+        variant: PythonExternalVariantPlan,
+    ) {
+        assert!(
+            self.variants.insert(full_name.clone(), variant).is_none(),
+            "Python external model plan already contains variant `{full_name}`"
+        );
+    }
+
+    pub(in crate::generator) fn variant(
+        &self,
+        full_name: &str,
+    ) -> Option<&PythonExternalVariantPlan> {
+        self.variants.get(full_name)
+    }
+
+    fn generated_names(&self) -> impl Iterator<Item = &PythonGeneratedName> {
+        self.variants
+            .values()
+            .flat_map(|variant| variant.cases.iter().map(|case| &case.generated_name))
+    }
+}
+
+impl PythonExternalVariantPlan {
+    pub(in crate::generator) fn case(
+        &self,
+        case_name: &str,
+    ) -> Option<&PythonExternalVariantCasePlan> {
+        self.cases.iter().find(|case| case.case_name == case_name)
+    }
 }
 
 impl RenderedVariant {
@@ -7648,9 +7713,9 @@ fn python_ident(name: &str) -> String {
     }
 }
 
-fn validate_python_generated_names(
+fn validate_python_generated_names<'a>(
     api_plan: &PlannedSpec,
-    generated_names: &[PythonGeneratedName],
+    generated_names: impl IntoIterator<Item = &'a PythonGeneratedName>,
 ) -> Result<()> {
     let mut declarations = BTreeMap::<String, String>::new();
     for entry in api_plan.types.values() {
